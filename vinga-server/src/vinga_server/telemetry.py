@@ -1067,6 +1067,13 @@ class _SessionTrace:
     what lets a turn span carry the providers that turn actually ran on
     without the exporter needing a fact no event gave it.
 
+    `transcribed` is whether the open turn's ASR stage has already
+    ended. A turn has exactly one, and the events that end one can
+    arrive twice: a barge-in the gate REJECTS emits its own
+    `provider_failed` at the ASR stage while the turn being spoken over
+    is still the open one, and that failure is the gate's vocabulary
+    about a candidate rather than a second transcription of this turn.
+
     `playback` is the one stage span held here rather than constructed
     whole, because it is the one interval the pipeline does not measure:
     the two deliveries that bound it are two events, and what is kept
@@ -1077,6 +1084,7 @@ class _SessionTrace:
     span: Any
     turn: Any | None = None
     playback: Any | None = None
+    transcribed: bool = False
     identity: dict[str, Any] = field(default_factory=dict)
     providers: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
     agent: str | None = None
@@ -1474,6 +1482,9 @@ class Telemetry:
         # reply's very last statement, and an interval with no last
         # frame is one this exporter declines to invent an end for.
         trace.playback = None
+        # A new turn has not been transcribed yet, whatever the last one
+        # did.
+        trace.transcribed = False
         trace.turn = self._tracer.start_span(
             TURN_SPAN,
             # An empty context, which is what gives the turn a trace id
@@ -1571,7 +1582,16 @@ class Telemetry:
         which is the whole of the issue's motivating gap.
         """
         trace = self._sessions.get(session)
-        if trace is None or trace.turn is None:
+        if trace is None or trace.turn is None or trace.transcribed:
+            # A turn has ONE ASR stage, and the second event that could
+            # end one is not a second transcription of it. The shape
+            # this refuses is the gate's: a barge-in candidate whose
+            # confirmation fails emits `provider_failed` at the ASR
+            # stage while the turn being spoken over is still open, and
+            # the plan is explicit that a rejected candidate's failure
+            # stays gate vocabulary on the turn it interrupted. So the
+            # first ASR outcome builds the stage span and every later
+            # one folds as the span event it is.
             self._span_event(session, emission)
             return
         payload = emission.payload
@@ -1601,6 +1621,7 @@ class Telemetry:
             # nothing failed when the answer stopped being wanted.
             span.set_status(self._failed)
         span.end(end_time=end)
+        trace.transcribed = True
 
     def _provider_failed(self, session: str, emission: Emission) -> None:
         """A provider failure, which is an ASR outcome or a span event.
