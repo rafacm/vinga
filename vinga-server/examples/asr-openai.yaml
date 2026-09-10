@@ -52,6 +52,19 @@ api_key_env: OPENAI_API_KEY
 # prompt, a real short answer survives that retry, and an echo that
 # persists or comes back empty is discarded. A prompt that cannot be
 # acted on is still the real protection.
+#
+# Keep it short as well as plain, and pin `language` below beside it.
+# The API conditions the model on this string as if it were the
+# transcript preceding the clip, so words carrying a language's flavour
+# are evidence about which language is being spoken; place names are the
+# easy way to do that by accident. With `language` unset the model is
+# detecting rather than told, and a field session had short clips
+# detected as the hint's language and answered in it. What that reaches
+# an operator as is the agent replying in a language nobody configured,
+# with nothing in the log tying it to this field. Pinning `language`
+# takes the question away from detection outright; trimming the hint
+# back to the bare words whose spelling needs protecting is what fixed
+# it in that session.
 # prompt: vinga, Stockholm
 
 # Spoken language (ISO 639-1). SET THIS for any deployment that is not
@@ -61,9 +74,11 @@ api_key_env: OPENAI_API_KEY
 # unpinned, Swedish came back as English-shaped nonsense ("Vad heter
 # Sveriges huvudstad?" as "Hat hetas verigezogistad."), and pinning
 # fixed it outright. `prompt` above does not compensate; it fixes
-# vocabulary, not language. The gpt-4o models still treat this as a hint
-# and will answer in the language they hear, so a wrong value is fairly
-# harmless and an empty one is what costs you.
+# vocabulary, not language, and a hint carrying a language's flavour can
+# pull an unpinned detection toward that language instead, which is the
+# other half of why this is worth setting. The gpt-4o models still treat
+# this as a hint and will answer in the language they hear, so a wrong
+# value is fairly harmless and an empty one is what costs you.
 language: sv
 
 # 0.0 to 1.0. Raise it only to loosen a decode that is stuck; the

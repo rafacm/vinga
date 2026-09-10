@@ -209,6 +209,19 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The `openai` ASR example warns that the transcriber hint can bias
+  language detection** (#452). `prompt` is documented as vocabulary
+  protection and as an echo hazard; what it did not say is that the API
+  conditions the model on that string as if it were the transcript
+  preceding the clip, so words carrying a language's flavour, place
+  names most easily, are evidence about which language is being spoken.
+  With `language` unset the model is detecting rather than told, and a
+  field session had short clips detected as the hint's language and
+  answered in it, which reaches an operator as the agent replying in a
+  language nobody configured with nothing in the log tying it to this
+  field. The `language` note is amended to match: the hint does not
+  merely fail to help, it can pull an unpinned detection the wrong way.
+
 - **`session_open` and the capture manifest read one provider
   derivation.** What a session opened against is derived once from the
   bound generation, per bound agent and per pipeline stage, as the
