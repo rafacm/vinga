@@ -141,12 +141,37 @@ the most likely way to conclude the event is missing when it is not.
 The first draft of this plan asserted the second and third of these as one
 thing and got it wrong, which is recorded in the review round.
 
-### The span attributes are a separate milestone
+### The span attributes are a separate milestone, and they must suppress the
+### stage's open-time context
 
 The OpenTelemetry exporter's stage tables (`ASR_ATTRIBUTES`, `TTS_ATTRIBUTES`)
 are a settled correspondence to the GenAI conventions, and extending them is a
 different review lens from extending the catalog. It gets its own milestone so
 each sits alone in review.
+
+It also cannot be a table edit alone. Both stage-span folds merge
+`self._context(trace, payload)` before the event's own attributes, and
+`_context` supplies all four open-time `vinga.provider.<stage>.*` entries, which
+say what the session OPENED against. Mapping the event's `provider` onto the
+same `.name` key would overwrite the name and leave open-time `type`, `host` and
+`model` sitting beside call-time data: a hybrid provider that never existed.
+
+`_context`'s own docstring states the rule and the mechanism. One attribute name
+may have one source, and `states` names the stage a span answers for itself,
+whose context entries are therefore left out. The LLM round span already passes
+`states=LLM_STAGE` for exactly this reason.
+
+So M2 passes `states` for the stage its span answers for, **conditionally**: the
+open-time context for that stage is suppressed only when the event actually
+names an entry. An event whose quartet is four absences, which is what a
+provider the registry never built produces, contributes nothing, and suppressing
+the context there would delete what the session opened against rather than
+correct it.
+
+This also covers `provider_failed` at the ASR stage, which shares the ASR span.
+It is a collision M2 would introduce rather than a live bug: `ASR_ATTRIBUTES`
+does not map the quartet today, so no `provider_failed` quartet reaches an ASR
+span at present, and it will once the table gains the four keys.
 
 ## Module layout
 
@@ -216,8 +241,33 @@ Reusing the assets that exist rather than restating them.
   is sanitized by construction; the pin is what says so.
 - The sentence non-change is asserted directly: `record.msg` and `record.args`
   for both events, before and after, are the same values.
+
+**Presence is not attribution, and the pins above only prove presence.** The
+baseline's `CARRIED` table checks that a driver produced the declared keys, not
+what is in them, so every pin listed so far would still pass with `provider` and
+`type` swapped, with the wrong provider object handed to a builder, or with a
+TTS event labelled from ASR identity. So the milestone additionally requires:
+
+- **Distinct values per position.** The ASR and TTS entries under test are given
+  four identity values distinguishable from each other and across stages, and
+  each event's four fields are asserted by value. A swap fails, and so does a
+  cross-stage mislabel.
+- **Absence cases separately.** `host` absent for an engine running in this
+  process and `model` absent for a type with none to name are each pinned on
+  their own, distinct from the all-four-absent atomicity case.
+- **At least one assertion driven through the real runtime path** rather than by
+  invoking a builder directly, so the wiring at the emit site is what is under
+  test and not the builder's signature.
+- **The reused-transcription race** from review finding 1: suspend the
+  confirmation, run a handover on the reply in flight, then assert `heard`'s
+  quartet names the provider that transcribed rather than the one now bound.
+  Deterministic, on the gate the confirmation already awaits.
+
 - M2: the span attribute pins in `tests/unit/test_telemetry_spans.py`, extended
-  for the four keys on the ASR and TTS spans.
+  for the four keys on the ASR and TTS spans, and one pin that deliberately
+  makes session-open identity differ from call-time identity and asserts no
+  hybrid provider appears on the span. One more for an ASR outcome carrying no
+  quartet, asserting the open-time context survives there.
 
 ## Risks
 
@@ -262,7 +312,9 @@ Reusing the assets that exist rather than restating them.
   so the emit sites stop knowing that a provider becomes four values; adds no
   seam and no module.
 - [ ] **M2: the spans.** `ASR_ATTRIBUTES` and `TTS_ATTRIBUTES` gain the four
-  keys under the settled correspondence: `type` as `gen_ai.provider.name`,
+  keys, and both stage folds pass `states` conditionally so a span never mixes
+  call-time identity with the stage's open-time context, under the settled
+  correspondence: `type` as `gen_ai.provider.name`,
   `model` as `gen_ai.request.model`, `host` as `server.address`, and the
   configured entry name as `vinga.provider.asr.name` and `vinga.provider.tts.name`,
   which is the spelling `_provider_attributes` already uses for what a session
