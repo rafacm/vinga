@@ -894,7 +894,7 @@ options for llm type openai_compatible:
   model: str  (required)
     The model to ask for, in the endpoint's own vocabulary (qwen3:8b on
     Ollama, an OpenAI model id on api.openai.com).
-  max_tokens: int  (default: 1024)
+  max_tokens: int | null  (default: null)
     The cap on one reply's length, in tokens.
 
 options for asr type faster_whisper:

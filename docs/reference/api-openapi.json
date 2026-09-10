@@ -8498,10 +8498,17 @@
             "type": "string"
           },
           "max_tokens": {
-            "default": 1024,
-            "description": "The cap on one reply's length, in tokens. Spoken replies are short, so this bounds a runaway rather than a conversation.",
-            "title": "Max Tokens",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The cap on one reply's length, in tokens. Left out, no cap is sent and the endpoint's own default applies. An endpoint of the current OpenAI family refuses this field and takes max_completion_tokens instead, which is written here like any other passthrough key.",
+            "title": "Max Tokens"
           }
         },
         "propertyNames": {

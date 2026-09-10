@@ -327,32 +327,22 @@ def recorded(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
 # So these ask the question at the wire.
 
 
-async def test_the_cap_on_a_reply_is_the_one_the_kit_names() -> None:
-    """The model states the default as a number because it may not
-    import the kit (the kit speaks httpx, and the declaration is on
-    three paths that load no client library). This is the side that may
-    import both, so this is where the two are held together."""
-    built = await build_entry(
-        "llm",
-        "local",
-        provider_config(
-            type="openai_compatible", base_url="http://localhost:11434/v1", model="qwen3:8b"
-        ),
-    )
-    assert isinstance(built, OpenAiCompatibleLlm)
-    assert built._max_tokens == DEFAULT_MAX_TOKENS
-
-
-async def test_a_silent_entry_still_sends_a_cap_of_its_own(
+async def test_a_silent_entry_sends_no_cap_at_all(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """What an entry that never mentions a cap puts on the wire.
+    """What an entry that never mentions a cap puts on the wire, which
+    is nothing, so the endpoint's own default applies.
 
     At the body rather than at the object, because the claim is about
-    the request the endpoint receives: an entry naming only an endpoint
-    and a model composes `max_tokens` all the same, from a default this
-    repository chose, and an endpoint that refuses the field refuses the
-    conversation with it.
+    the request the endpoint receives. It used to compose `max_tokens`
+    from a number this repository chose for every server it had never
+    seen, and OpenAI's current model family answers that field with a
+    400 naming `max_completion_tokens` instead: a conversation lost to
+    a cap nobody asked for (#444).
+
+    The kit's `DEFAULT_MAX_TOKENS` is not this type's any more. It is
+    `anthropic`'s alone, whose API requires the field, and the case
+    below is what still holds that one to it.
     """
     sent: dict[str, object] = recorded(monkeypatch)
 
@@ -365,8 +355,13 @@ async def test_a_silent_entry_still_sends_a_cap_of_its_own(
     )
 
     assert isinstance(built, OpenAiCompatibleLlm)
+    assert built._max_tokens is None
     assert await spoken(built) == []
-    assert sent["max_tokens"] == DEFAULT_MAX_TOKENS
+    assert "max_tokens" not in sent
+    # And nothing else went missing with it: the fields this type does
+    # compose for every request are still there.
+    assert sent["model"] == "qwen3:8b"
+    assert sent["stream"] is True
 
 
 # The configured cap, which until #277 could not be configured at all
@@ -431,6 +426,40 @@ async def test_a_configured_cap_reaches_the_openai_compatible_request(
     assert built._max_tokens == CONFIGURED_MAX_TOKENS
     assert await spoken(built) == []
     assert sent["max_tokens"] == CONFIGURED_MAX_TOKENS
+
+
+async def test_the_cap_a_current_openai_model_asks_for_instead_travels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other spelling of the same cap, and the whole of what the
+    escape hatch had to be able to carry.
+
+    OpenAI's current models refuse `max_tokens` and take
+    `max_completion_tokens`. Nothing in this repository declares that
+    name, so it reaches the endpoint only by travelling: written on the
+    entry, kept as an extra, and put into the request body at the top
+    level. Asserted at the wire and beside the absence of the field it
+    replaces, because an entry carrying both would be refused by the
+    endpoint exactly as the entry carrying neither used to be.
+    """
+    sent: dict[str, object] = recorded(monkeypatch)
+
+    built = await build_entry(
+        "llm",
+        "openai",
+        provider_config(
+            type="openai_compatible",
+            base_url="https://api.openai.com/v1",
+            model="gpt-5.6-terra",
+            egress=True,
+            max_completion_tokens=CONFIGURED_MAX_TOKENS,
+        ),
+    )
+
+    assert isinstance(built, OpenAiCompatibleLlm)
+    assert await spoken(built) == []
+    assert sent["max_completion_tokens"] == CONFIGURED_MAX_TOKENS
+    assert "max_tokens" not in sent
 
 
 async def test_an_option_this_repository_never_heard_of_reaches_the_endpoint() -> None:

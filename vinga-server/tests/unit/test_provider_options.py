@@ -555,12 +555,19 @@ def test_the_voice_settings_door_is_shut_and_the_vad_one_is_not() -> None:
 def test_the_openai_compatible_defaults_are_the_ones_the_builder_had() -> None:
     """What a fragment that names an endpoint and a model gets. Read by
     the builder rather than by the endpoint, so a change here changes
-    what every existing deployment is sending."""
+    what every existing deployment is sending.
+
+    The cap's default is no cap, and the absence is the fact: it used to
+    be 1024, composed into every request for every server this type can
+    reach, and OpenAI's current family answers that field with a 400
+    (#444). What an unset field then means at the wire is pinned in
+    `test_providers_llm.py`, which is where a request body can be read.
+    """
     options = openai_compatible()
 
     assert options.base_url == "http://localhost:11434/v1"
     assert options.model == "qwen3:8b"
-    assert options.max_tokens == 1024
+    assert options.max_tokens is None
     assert options.model_extra == {}
 
 
