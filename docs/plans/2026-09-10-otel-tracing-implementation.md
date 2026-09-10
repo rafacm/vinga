@@ -553,3 +553,73 @@ issues in 5 source files. `uv run pytest tests/unit -q -n auto --dist
 loadfile`: 6023 passed, 19 skipped. `uv run pytest tests/integration
 -q`: 262 passed. The five generated-document drift checks all diff
 clean against the committed copies.
+
+### Delta re-review
+
+External review of the fixes above, terra, three findings, all of them
+introduced BY those fixes rather than surviving them; everything else
+was confirmed to hold. Verdict not mergeable.
+
+1. **P1: overlapping lifespans raced the logging restore.** The
+   quieting was snapshotted and restored per exporter, which is correct
+   for one at a time and wrong the moment two overlap, and two overlap
+   routinely once a wedged exporter's release outlives the bounded wait.
+   In order: A wedges and its wait expires; B is built and quietens an
+   already-quiet namespace, so B's snapshot records SILENCE; A's
+   abandoned release finishes and restores the ORIGINAL configuration,
+   un-silencing the SDK while B is still exporting, so B's next failure
+   logs its credentialed endpoint; then B's release restores A's quiet
+   snapshot and the namespace stays silent for the rest of the process
+   with nothing holding it. Fixed as prescribed: one process-wide,
+   locked, reference-counted lease, snapshot taken at the first
+   acquisition and put back after the last release, with a lease given
+   back twice counted once. The regression drives that exact sequence.
+
+   Two things came with it. `_release` became the public `release`,
+   because a caller holding an exporter it no longer wants and nothing
+   to wait for needs the blocking form and `shutdown` is that same work
+   off the loop and bounded. And the telemetry suites drain their leases
+   after every case and assert the count is zero: thirty cases that
+   built an exporter and released none used to be invisible, and under
+   a counted lease they are a namespace silenced for the rest of the
+   run, which is a leak a server would have too.
+
+2. **P1: `Shape.CONTEXT` bypassed the catalog's own validation.**
+   `providers` is the one payload field whose content becomes part of an
+   attribute NAME, and the fold walked the mapping itself, checking only
+   that a stage was a string and an entry a dict. A payload handed to
+   `EventTap.emit` could therefore choose the key, and an arbitrary
+   stage with a credential in `name` reached a span as
+   `vinga.provider.<whatever was sent>.name`, which defeats both
+   promises this context makes: bounded cardinality, and sanitized by
+   construction. Fixed as prescribed by validating through
+   `ProviderEntries` before anything is retained, which is the type that
+   makes those promises: agent names as identifiers, stages from the
+   pipeline's own set, entries with their required pair and no fifth
+   key, values as identifiers. A hostile payload with an arbitrary
+   stage, a fifth key and the sentinel in three places produces no
+   provider attributes at all.
+
+3. **P3: a release thread that would not start left nothing owning the
+   exporter.** The finished event was recorded before `Thread.start()`,
+   so a creation that raised meant every later shutdown waited its whole
+   bound on an event nobody would set, and the lease was held for the
+   life of the process. Fixed with a defined ending rather than a best
+   effort: the lease goes back, the wait ends, and one plain sentence
+   says the work was left to the process's exit. The provider is
+   deliberately NOT shut down inline, because that call blocks for as
+   long as the collector takes and this runs on the event loop; what is
+   lost is the SDK's own daemon thread, which dies with the process.
+
+All three regressions were mutation-checked: reverting each fix
+reproduces the reported failure (a credentialed endpoint in a
+traceback, `vinga.provider.../../etc/passwd.name`, and a shutdown that
+waits its whole bound).
+
+### Verification after the delta round
+
+`uv run ruff check .`: all checks passed. `uv run mypy`: success, no
+issues in 5 source files. `uv run pytest tests/unit -q -n auto --dist
+loadfile`: 6027 passed, 19 skipped. `uv run pytest tests/integration
+-q`: 262 passed. The five generated-document drift checks all diff
+clean against the committed copies.
