@@ -20,6 +20,12 @@ takes is a number this file can name.
 Dropped spans are the accepted cost, and they are asserted too: an
 implementation that kept every span by growing without bound would pass
 the latency half of this and fail a deployment overnight.
+
+The third case at the foot of this file is the same claim about the
+other hostile shape, and it leaves the real transport in place: an
+endpoint that swallows packets, reached through the standard
+environment variables with the standard timeouts, so what is certified
+is the path a deployment runs rather than a stand-in for it.
 """
 
 import asyncio
@@ -313,3 +319,73 @@ def until_quiet_is_restored(seconds: float = 10.0) -> bool:
             return True
         time.sleep(0.02)
     return False
+
+
+# --- the other hostile collector: one that is not there at all --------
+
+# An address in TEST-NET-1 (RFC 5737), reserved for documentation and
+# routed nowhere. A connection to it does not refuse, which is the whole
+# point: it hangs until something times it out, which is what a
+# collector behind a dropped firewall rule looks like from inside this
+# process.
+BLACKHOLE = "http://192.0.2.1:4318"
+
+# The SDK's own timeout variables, in seconds, set to the shortest value
+# that is still a timeout. Set through the STANDARD variables rather
+# than through an argument, because that is the whole of what an
+# operator has: this module never reads them, and the exporter's
+# constructor does.
+EXPORT_TIMEOUT_S = "1"
+
+
+async def test_a_collector_that_is_not_there_costs_no_reply_anything(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The second hostile shape, with the real transport in place.
+
+    The wedged collector above replaces the exporter object, so what it
+    certifies is the queue. This one leaves the real OTLP exporter alone
+    and gives it an address that swallows packets, so what it certifies
+    is the whole path a deployment actually runs: a socket that will not
+    connect, a retry the SDK owns, and a background thread doing all of
+    it while replies go out.
+
+    The bound is fixed and named, against providers whose timings this
+    lane chose, exactly as it is for the wedged case: a reply that had
+    waited on a connection to a black hole would take the export timeout
+    and blow through it by an order of magnitude.
+    """
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", BLACKHOLE)
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TIMEOUT", EXPORT_TIMEOUT_S)
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_TIMEOUT", EXPORT_TIMEOUT_S)
+    telemetry = build_telemetry(
+        TelemetryConfig(enabled=True),
+        queue_size=QUEUE,
+        batch_size=1,
+        schedule_delay_ms=1,
+    )
+    assert telemetry is not None
+    session = talking(telemetry)
+
+    slowest = 0.0
+    try:
+        for _ in range(TURNS):
+            began = time.monotonic()
+            start_reply(session, UTTERANCE)
+            await wait_for_reply(session)
+            slowest = max(slowest, time.monotonic() - began)
+
+        assert slowest < REPLY_BOUND_S, (
+            f"a reply took {slowest:.2f} s against an endpoint nothing answers"
+        )
+    finally:
+        # Bounded like every other teardown here: what a timeout costs is
+        # spans nobody was ever going to receive. Then waited out off
+        # the loop, because the bound stops the LIFESPAN waiting and not
+        # the work: the SDK's silence is a process-wide lease given back
+        # when the release genuinely ends, and this lane asserts the
+        # count is zero at the end of every case. `release` after
+        # `shutdown` is the second door on one exactly-once completion,
+        # so what this waits on is the worker already running.
+        await telemetry.shutdown()
+        await asyncio.to_thread(telemetry.release)
