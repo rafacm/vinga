@@ -1606,7 +1606,34 @@ class PipelineRuntime:
             # capture show the trailing echo of one reply does not
             # re-poison a freshly cleared detector the way ten seconds of
             # it does, so there is nothing here worth waiting out.
-            self._turntaking.forget_reply_audio()
+            #
+            # Contained, for the reason the two lines below it are:
+            # everything after this point is the device's closing `tts
+            # stop`, which in auto mode is what re-arms its listening,
+            # and a detector that would not forget a reply must not be
+            # able to cost a session its next turn. The failure would be
+            # a stranger's, too: `forget_audio` reaches the VAD
+            # library's own reset.
+            forgetting: BaseException | None = None
+            try:
+                self._turntaking.forget_reply_audio()
+            except Exception as exc:  # noqa: BLE001 - never costs the closing stop
+                # Bound to an ordinary local before the suite ends, the
+                # rule `conversations/store.py: _prune` states: `except
+                # ... as` unbinds its own name at the end of its block.
+                forgetting = exc
+            # Said out here rather than in the arm, the discipline
+            # `_gate_barge_in` follows: inside the arm that exception is
+            # the active one, so a logging call that itself failed would
+            # escape with the library's message and the chain behind it
+            # attached as `__context__`, past the line that took care to
+            # write down a class name and nothing else (#183).
+            if forgetting is not None:
+                logger.warning(
+                    "session %s: the endpointer would not forget the reply: %s",
+                    self.session_id,
+                    type(forgetting).__name__,
+                )
             # The other end the idle timeout counts from. In the finally,
             # so a reply that failed or was cancelled still resets the
             # clock: the user is owed the full silence before being hung

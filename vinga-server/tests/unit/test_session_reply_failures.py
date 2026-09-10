@@ -812,3 +812,75 @@ async def test_a_barge_in_while_the_mask_settles_cancels_rather_than_wedging(
     # barge-in on the record and a turn of its own, rather than a cancel
     # still waiting on the reply it was cancelling.
     only(caplog, "barge_in")
+
+
+# --- a failure in the reply's own tail --------------------------------
+#
+# The tail is a different hazard from the body above it. Everything the
+# body raises is caught by the arm that reports; everything the tail
+# raises is past that arm, in the `finally`, in front of the device's
+# closing `tts stop`. A device in auto mode waits on that stop before it
+# listens again, so a line in the tail that can raise is a line that can
+# strand a session, and the reply task would carry the whole chain out
+# to asyncio's unhandled-task reporting on its way.
+
+
+class WillNotForget:
+    """An endpointer whose `forget_audio` fails the way a library's
+    failure looks: the sentinel in its own message and another copy in
+    the failure behind it.
+
+    `SileroEndpointer.forget_audio` is one line into `pysilero-vad`'s
+    own reset, so what escapes it is a stranger's exception carrying a
+    stranger's text."""
+
+    def feed(self, pcm: bytes) -> bool:
+        return False
+
+    def reset(self) -> None:
+        return None
+
+    def forget_audio(self) -> None:
+        raise a_bug_carrying_a_secret()
+
+    def speech_start(self) -> int | None:
+        return None
+
+    def speech_ms(self) -> float:
+        return 0.0
+
+
+async def test_an_endpointer_that_will_not_forget_still_closes_the_turn(
+    caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The reply ends whatever the detector does with it.
+
+    The failure is contained where it happens, reported as a class name
+    and nothing else, and the reply walks on through turn recording to
+    the closing `tts stop` that re-arms the device. Nothing of the
+    library's message or the chain behind it is written down: not in
+    either log format, not in the structured half of any record, which
+    is what an event payload is, and not on stdout or stderr, which is
+    where `logging`'s own fallback dumps a raw record when a handler
+    breaks under it.
+    """
+    socket = OrderedSocket()
+    session = session_for(base_config(), POET_MAC, websocket=cast(Any, socket))
+    turn_taking(session).endpointer = cast(Any, WillNotForget())
+
+    with caplog.at_level("INFO"):
+        # Raises what happened inside the reply, so a failure escaping
+        # the tail fails here rather than being reported as an absence.
+        await drive_reply(session, UTTERANCE)
+
+    assert "would not forget the reply: RuntimeError" in caplog.text
+    assert socket.closing_stop(), "the device never got the stop that re-arms it"
+    # Nothing of the failure beyond its class, anywhere it could be kept.
+    written = caplog.text + "".join(
+        str(record.__dict__) + rendered(record) for record in caplog.records
+    )
+    assert SENTINEL not in written
+    assert all(record.exc_info is None for record in caplog.records)
+    streams = capsys.readouterr()
+    assert SENTINEL not in streams.out + streams.err
+    assert "Traceback" not in streams.out + streams.err
