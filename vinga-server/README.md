@@ -1156,8 +1156,9 @@ state can quote a value somebody wrote into the wrong field, so a
 reload's answer never carries one. Where is answered by
 `vinga-server config check`, which reads the store the way a boot reads
 it and prints the sentence a server started on it would refuse with,
-naming the entry and the rule and no value. It runs on the server host
-and serves nothing;
+naming the entry and the rule and no value. It runs on the server host,
+serves nothing and writes no configuration, though it is not read-only:
+a boot's read migrates the store, and this is a boot's read.
 [`../docs/reference/cli.md`](../docs/reference/cli.md) is where it is
 documented.
 
