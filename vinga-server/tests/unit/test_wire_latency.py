@@ -259,6 +259,29 @@ def test_two_turns_a_fraction_of_a_second_apart_stay_two_turns(tmp_path: Path) -
     ]
 
 
+def test_a_long_answer_filling_the_recording_is_still_found(tmp_path: Path) -> None:
+    """A reply occupying most of the capture. Read from the whole
+    channel, its own level is the twentieth percentile and the threshold
+    lands above it, so the recording of one long answer reports no reply
+    audio at all. The floor comes from the stretch before the user
+    spoke instead, which nothing can be playing in."""
+    captures = write_capture(
+        tmp_path / "captures",
+        "session-a",
+        mic=[(200, 400)],
+        # 2500 ms of the 3000 ms recording.
+        reply=[(500, 3000)],
+        events=[*speech(200, 400), heard(460, 0.2)],
+        total_ms=3000,
+    )
+    done = run(str(captures))
+    assert done.returncode == 0
+    assert turn_lines(done.stdout) == [
+        "turn 1: speech ended at 0.4 s, reply audio began at 0.5 s, "
+        "wire response latency 0.1 s"
+    ]
+
+
 def test_a_turn_with_no_reply_audio_says_so_rather_than_guessing(tmp_path: Path) -> None:
     captures = write_capture(
         tmp_path / "captures",
