@@ -1476,8 +1476,9 @@ class Telemetry:
     # it, which is what lets a trace be assembled from a tap that
     # watches nothing: the pipeline already measured every interval
     # below, and the exporter's arithmetic is one subtraction against
-    # the one offset. A stage whose turn is not open falls through to
-    # the span-event fold, so nothing is ever silently dropped.
+    # the session clock's one offset. A stage whose turn is not open
+    # falls through to the span-event fold, so nothing is ever
+    # silently dropped.
 
     def _asr_span(self, session: str, emission: Emission) -> None:
         """One transcription, however it ended.
