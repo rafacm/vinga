@@ -39,9 +39,11 @@ from tests.support.telemetry import (
     SESSION,
     Clock,
     abandon_transcription,
+    assemble_prompt,
     capture_emitter,
     capture_started,
     close_session,
+    drop_frames,
     exporting,
     finish_reply,
     finished,
@@ -666,6 +668,68 @@ def test_a_payload_field_the_catalog_never_declared_is_not_exported(
     assert "authorization" not in turn.events[0].attributes
     assert planted not in str(dict(turn.events[0].attributes))
     assert planted not in every_format(caplog)
+
+
+def test_a_mapping_field_survives_as_deterministic_json() -> None:
+    """The two payload fields OTel could not take, and what they become.
+
+    An OTel attribute is a scalar or a sequence of scalars, so a mapping
+    handed to `add_event` was discarded by the SDK with a warning this
+    module had already silenced: `prompt_assembled` arrived on a span
+    with no `sources` at all, and `frames_dropped` arrived with nothing
+    but its second. Both are bounded, server-owned mappings of names to
+    numbers, so one JSON string under the field's own name is an honest
+    representation rather than a place for prose to hide.
+
+    Asserted exactly, string for string: sorted keys and no spaces, so
+    the same mapping is the same attribute in every process and a
+    backend can group by it.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+
+    open_session(events)
+    clock.tick(0.1)
+    assemble_prompt(events, {"persona": 210, "fragment:house-rules": 84})
+    clock.tick(0.1)
+    drop_frames(events, {"not_listening": 3, "barge_in_off": 1}, second=3)
+    close_session(events)
+
+    session = named(finished(telemetry, memory), "session")
+    assembled, dropped = session.events
+
+    assert assembled.name == "prompt_assembled"
+    assert assembled.attributes["sources"] == (
+        '{"fragment:house-rules":84,"persona":210}'
+    )
+    assert assembled.attributes["characters"] == 294
+    assert dropped.name == "frames_dropped"
+    assert dropped.attributes["reasons"] == '{"barge_in_off":1,"not_listening":3}'
+    assert dropped.attributes["second"] == 3
+
+
+def test_the_json_of_a_mapping_does_not_depend_on_insertion_order() -> None:
+    """Deterministic means the same string, not merely a string.
+
+    A mapping's iteration order is whatever built it, and two servers
+    that counted the same drops in a different order would otherwise
+    export two attributes a backend cannot group.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+
+    open_session(events)
+    drop_frames(events, {"not_listening": 3, "barge_in_off": 1})
+    clock.tick(0.1)
+    drop_frames(events, {"barge_in_off": 1, "not_listening": 3})
+    close_session(events)
+
+    session = named(finished(telemetry, memory), "session")
+    first, second = (event.attributes["reasons"] for event in session.events)
+
+    assert first == second
 
 
 def test_every_payload_kind_has_a_shape_decided_for_it() -> None:

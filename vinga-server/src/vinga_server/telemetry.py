@@ -272,12 +272,20 @@ SHAPES: dict[Kind, Shape] = {
     Kind.COUNT: Shape.SCALAR,
     Kind.IDENTIFIER_LIST: Shape.SEQUENCE,
     Kind.ID_LIST: Shape.SEQUENCE,
-    # The three mappings, each explicitly not an attribute yet. Dropping
-    # them here is what the SDK was doing silently; saying so is the
-    # difference, and what each becomes instead is the next two
-    # findings' business.
-    Kind.SOURCES: Shape.DROPPED,
-    Kind.DROP_COUNTS: Shape.DROPPED,
+    # The two mappings a span event carries, as deterministic JSON.
+    # OTel's attribute types are scalars and sequences of scalars, so a
+    # mapping handed to `add_event` is discarded by the SDK with a
+    # warning this module has already silenced: `prompt_assembled` lost
+    # which fragments built the prompt and how long each was, and
+    # `frames_dropped` lost the whole of what it says. Both are
+    # bounded, server-owned mappings of names to numbers, which is why
+    # one string is an honest representation of them rather than a
+    # place for prose to hide.
+    Kind.SOURCES: Shape.JSON,
+    Kind.DROP_COUNTS: Shape.JSON,
+    # And the one that is not an attribute at all: what a session opened
+    # against is span CONTEXT, attached per agent to the spans it
+    # applies to rather than dumped onto one of them as a blob.
     Kind.PROVIDER_ENTRIES: Shape.DROPPED,
 }
 
