@@ -28,11 +28,9 @@ from vinga_server.events.catalog import (
     CaptureStarted,
     FramesDropped,
     Handover,
-    Heard,
     NothingHeard,
     PromptAssembled,
     ReplyFinished,
-    SentenceSynthesized,
     SessionClosed,
     SessionIdle,
     SessionOpen,
@@ -42,7 +40,6 @@ from vinga_server.events.catalog import (
     TurnStarted,
 )
 from vinga_server.events.values import (
-    ABSENT,
     AgentNames,
     AlsoBoundTo,
     ClientId,
@@ -54,7 +51,6 @@ from vinga_server.events.values import (
     DroppedFrames,
     Flag,
     Identifier,
-    LanguageTag,
     PromptSources,
     ProviderEntries,
     Real,
@@ -94,6 +90,48 @@ PROVIDERS: dict[str, dict[str, dict[str, str]]] = {
         "vad": {"name": "floor", "type": "silero"},
     },
 }
+
+
+@dataclass
+class Identity:
+    """A provider's identity as the events read it, which is four names
+    off a built entry and nothing else.
+
+    A stand-in rather than the real `ProviderIdentity` because the
+    events' own assembly reads it by attribute (`_entry_of`), and what
+    these cases are about is which of the four reaches which span
+    attribute.
+    """
+
+    name: str = "openai-main"
+    type: str = "openai"
+    host: str | None = "api.openai.com"
+    model: str | None = "gpt-4o-mini"
+
+
+@dataclass
+class FakeProvider:
+    """One provider object, as far as `events/assembly.py` looks."""
+
+    identity: Identity | None = None
+
+
+def entry_of(agent: str, stage: str) -> Identity:
+    """The identity of the entry this agent OPENED against at a stage.
+
+    Derived from the entries above rather than spelled a second time,
+    because a call that ran on what the session opened against is the
+    ordinary turn, and a stand-in that drifted from those entries would
+    make every case about the difference between the two lie in the
+    wrong direction.
+    """
+    entry = PROVIDERS[agent][stage]
+    return Identity(
+        name=entry["name"],
+        type=entry["type"],
+        host=entry.get("host"),
+        model=entry.get("model"),
+    )
 
 
 class Clock:
@@ -306,16 +344,32 @@ def hear(
     duration_s: float = 0.9,
     asr_ms: int | None = 300,
     language: str | None = "en",
+    identity: Identity | None = None,
+    unbuilt: bool = False,
+    agent: str = AGENT,
 ) -> float:
-    """The ASR outcome that answered."""
+    """The ASR outcome that answered, built through the events' own
+    assembly so the quartet's absence rules are the real ones.
+
+    The ear defaults to the one this agent opened against, which is what
+    an ordinary turn runs on. A case about the difference between what a
+    session opened against and what a call actually ran on passes its
+    own `identity`; `unbuilt` is the ear the registry never stamped,
+    which the catalog answers with four absences rather than with a half
+    quartet.
+    """
+    provider = FakeProvider(
+        identity=None if unbuilt else (identity or entry_of(agent, "asr"))
+    )
     return events.emit(
-        lambda: Heard(
-            agent=Identifier(AGENT),
-            conversation=ConversationId(CONVERSATION),
-            duration_s=Real(duration_s),
-            asr_ms=Whole(asr_ms) if asr_ms is not None else ABSENT,
-            language=LanguageTag(language) if language is not None else ABSENT,
-            language_confidence=Real(0.98) if language is not None else ABSENT,
+        lambda: assembly.heard(
+            agent,
+            CONVERSATION,
+            provider,
+            duration_s,
+            asr_ms,
+            language,
+            0.98 if language is not None else None,
         )
     )
 
@@ -345,30 +399,6 @@ def hear_nothing(
             asr_ms=Whole(asr_ms),
         )
     )
-
-
-@dataclass
-class Identity:
-    """A provider's identity as the events read it, which is four names
-    off a built entry and nothing else.
-
-    A stand-in rather than the real `ProviderIdentity` because the
-    events' own assembly reads it by attribute (`_entry_of`), and what
-    these cases are about is which of the four reaches which span
-    attribute.
-    """
-
-    name: str = "openai-main"
-    type: str = "openai"
-    host: str | None = "api.openai.com"
-    model: str | None = "gpt-4o-mini"
-
-
-@dataclass
-class FakeProvider:
-    """One provider object, as far as `events/assembly.py` looks."""
-
-    identity: Identity | None = None
 
 
 def round_done(
@@ -421,9 +451,11 @@ def provider_failed(
     stage: str = "asr",
     duration_ms: int = 1500,
     failure: BaseException | None = None,
+    identity: Identity | None = None,
 ) -> float:
-    """A provider call that failed, at whichever stage."""
-    provider = FakeProvider(identity=Identity())
+    """A provider call that failed, at whichever stage, naming whichever
+    entry it ran on."""
+    provider = FakeProvider(identity=identity or Identity())
     raised = TimeoutError() if failure is None else failure
     return events.emit(
         lambda: assembly.provider_failure(
@@ -438,17 +470,21 @@ def synthesize(
     stream_ms: int = 900,
     first_chunk_ms: int | None = 120,
     agent: str = AGENT,
+    identity: Identity | None = None,
+    unbuilt: bool = False,
 ) -> float:
-    """One sentence's synthesis stream ending."""
+    """One sentence's synthesis stream ending, built through the events'
+    own assembly for the same reason `hear` is.
+
+    The voice defaults to the one this agent opened against, and the two
+    overrides mean what they mean there.
+    """
+    provider = FakeProvider(
+        identity=None if unbuilt else (identity or entry_of(agent, "tts"))
+    )
     return events.emit(
-        lambda: SentenceSynthesized(
-            agent=Identifier(agent),
-            conversation=ConversationId(CONVERSATION),
-            index=Count(index),
-            stream_ms=Whole(stream_ms),
-            first_chunk_ms=(
-                Whole(first_chunk_ms) if first_chunk_ms is not None else ABSENT
-            ),
+        lambda: assembly.sentence_synthesized(
+            agent, CONVERSATION, provider, index, first_chunk_ms, stream_ms
         )
     )
 
