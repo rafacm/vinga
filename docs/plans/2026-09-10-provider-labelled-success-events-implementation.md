@@ -131,3 +131,110 @@ atomicity rule with the three that already carry the quartet.
   in `CARRIED` describes one driver's own run, so `drive_heard` planting
   a model on the ASR entry does not disturb the `heard` records other
   drivers emit on their way to their own decisions.
+
+## M2: the spans
+
+PR TBD.
+
+### What landed
+
+`telemetry.py`: `ASR_ATTRIBUTES` and `TTS_ATTRIBUTES` gain the four
+provider keys under the correspondence `LLM_ATTRIBUTES` already ships,
+and the two stage folds stop letting the retained context speak for the
+stage their event answers for. The entry-name attribute has one home,
+`_entry_name(stage)`, which the three tables now request their entry
+name through and which the fold asks its question against, so the
+spelling the session context builds and the spelling a table wants
+cannot drift apart. `_speaks_for(stage, spoken)` is that question: it
+answers the stage where the event's own attributes carried its entry
+name and nothing where they did not, and its answer goes straight into
+`_context`'s existing `states` argument. `TTS_STAGE` joins `ASR_STAGE`
+and `LLM_STAGE`.
+
+Tests. `tests/unit/test_telemetry_spans.py` gains five cases: the quartet
+pinned key by key on the ASR span and on the TTS span, including the
+absent `server.address` for an engine running in this process; the
+failed transcription naming the ear that failed, which is the outcome
+that shares the ASR span; the hybrid guard, which runs a turn on an ear
+and a voice differing from the session's own in all four names and
+asserts that each stage span carries one provider whole and still
+carries every other stage's open-time entries; and the two ways an ASR
+outcome names no ear, an empty transcript and a provider the registry
+never built, each keeping what the session opened against.
+`test_every_stage_span_carries_the_session_context` now states the whole
+rule rather than two sample facts: for every stage a span does not
+answer for, every fact of that stage's open-time entry is on the span,
+and for the stage it does answer for, the entry name is the only
+`vinga.provider.<stage>.*` attribute there.
+
+`tests/support/telemetry.py`: `hear` and `synthesize` build through
+`assembly.heard` and `assembly.sentence_synthesized` the way `round_done`
+already built through `assembly.llm_rounded`, so the quartet's absence
+rules on a span are the real ones. Both default to the entry the agent
+opened against, derived by `entry_of` from the fixture's own entries
+rather than spelled a second time, and both take an `identity` for a
+call that ran on something else and an `unbuilt` for a provider the
+registry never stamped. `provider_failed` takes the same `identity`.
+
+`CHANGELOG.md` has a dated `### Added` entry.
+
+### Deviations
+
+- **The round span's suppression stays unconditional.** The plan's
+  milestone line says both stage folds pass `states` conditionally, and
+  both is what landed: `_llm_span` still passes `states=LLM_STAGE`
+  outright. The asymmetry is real and is recorded below rather than
+  quietly fixed, because changing it is a behaviour change to a merged
+  span the plan did not ask for and it falsifies an existing pin.
+
+- **One clause of the observability map was edited after all.** The
+  plan says no maintained page is falsified and the exported-traces row
+  is deliberately not touched. The row's own list of what a turn holds
+  attached "under the OpenTelemetry GenAI attribute names" to the
+  generation round alone, which after this milestone reads as though
+  only rounds wear them, so the clause now covers the three spans a
+  provider ran. Nothing about the surface's contract moved: the row
+  still says the vocabulary is derived from the structured events and
+  the attribute names are this module's choice, which is what finding 6
+  turns on.
+
+- **No other deviation.** The four spellings, the conditional
+  suppression, the `provider_failed` case that shares the ASR span, the
+  two required pins and the rest of the documentation footprint (no
+  generated reference to regenerate, no new maintained page) are as the
+  plan states them.
+
+### Discoveries
+
+- **The hybrid pin was verified to discriminate, in both directions.**
+  With both folds reverted to `self._context(trace, payload)`, which is
+  the table edit alone that review finding 3 warned about,
+  `test_no_stage_span_mixes_a_call_s_identity_with_the_session_s_own`
+  fails, and so do `test_a_failed_transcription_names_the_ear_that_failed`
+  and `test_every_stage_span_carries_the_session_context`; the two
+  no-ear cases pass, which is right, since the context is what they
+  assert and it is present either way. With the suppression made
+  unconditional instead, `test_an_asr_outcome_that_names_no_ear_keeps_the_session_s_own`
+  is the one case that fails. So each half of the rule has a pin that
+  fails for its own reason.
+
+- **The round span answers for its stage whether or not it named one.**
+  `_llm_span` passes `states=LLM_STAGE` unconditionally, so an
+  `llm_round` whose quartet is four absences leaves its span with no LLM
+  identity at all, which is exactly what the conditional exists to
+  prevent on the other two stages. It has no production consequence: a
+  registry-built provider always carries an identity, and four absences
+  are reachable only from a test double. It is a follow-up rather than a
+  rider here, and `test_a_provider_with_no_identity_carries_no_gen_ai_keys`
+  is the pin that would have to be amended with it, since the open-time
+  context would then supply `vinga.provider.llm.name`.
+
+- **A stage span carries `gen_ai.*` keys now, which the module's own
+  prose used to deny.** The comment above `SESSION_ATTRIBUTES` says the
+  settled correspondence sits on the round span and that nothing on
+  "these two spans" is a GenAI fact; it is about the session and turn
+  spans and stays true, and the two stage tables carry the reason they
+  now speak that vocabulary beside them. An ear and a voice are
+  `gen_ai` providers in the conventions' sense as much as a generator
+  is, which is what makes one question answerable with one key set at
+  all three stages.
