@@ -9,6 +9,21 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **`vinga-server config check`**, the supported way to learn where a
+  refused apply is refusing (#443). An `apply` or a `diff` that the
+  stored configuration will not satisfy answers that it was refused and
+  deliberately not where, because a sentence composed over stored state
+  can quote a value somebody wrote into the wrong field. A boot refuses
+  on the same state and names the location and the rule without the
+  value, and until now reading that sentence meant starting a throwaway
+  second server against the same store. `check` runs the boot's own
+  read, `load_boot_config`, and prints exactly what it says: the file
+  half, the database, the stored credentials and the whole snapshot's
+  rules, then stop. Nothing is served, built or written. A store that
+  composes says so in one line on stderr and exits 0; one that does not
+  prints the boot's refusal and exits 1. It is a server-host command
+  like `ota-url`, so a client-only installation is told which half is
+  missing.
 - **The record gains four named aggregate views** (#439, milestone 1).
   `metrics_stage_latency_daily` gives p50, p95 and max per UTC day,
   starting agent and pipeline stage, with the count they were computed

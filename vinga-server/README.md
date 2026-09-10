@@ -1150,6 +1150,17 @@ to configure one is what `mcp-server status` answers. The answer's own
 field names are the API's and do not move: `POST
 /api/runtime/config/reload` is the same document it was.
 
+**An apply that is refused** says that the stored configuration was
+refused and deliberately not where: a sentence composed over stored
+state can quote a value somebody wrote into the wrong field, so a
+reload's answer never carries one. Where is answered by
+`vinga-server config check`, which reads the store the way a boot reads
+it and prints the sentence a server started on it would refuse with,
+naming the entry and the rule and no value. It runs on the server host
+and serves nothing;
+[`../docs/reference/cli.md`](../docs/reference/cli.md) is where it is
+documented.
+
 `config import` is the other half of the pair rather than a shortcut
 past it: it writes a whole deployment to the store in one transaction
 and stops there, and this is the command that installs what it wrote.
