@@ -111,10 +111,14 @@ def test_every_driver_names_a_path_of_its_own() -> None:
     event of its own (#427). The #385 pair shares its emit site with the
     two above it, which is what the identity numbering under one method
     is for: what a driver names is a path through a site rather than a
-    line of source."""
+    line of source, and ninety-nine since the catalog learned to speak
+    the turn's own lifecycle (#66): a turn starting, a reply finishing
+    with its latched outcome, an utterance transcribed to nothing, a
+    sentence's synthesis stream ending, a reply's last frame going out,
+    and the per-second dropped-frame aggregate the emitter now owns."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 93
+    assert len(set(claimed)) == len(claimed) == 99
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -366,6 +370,7 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                 "device",
                 "event",
                 "protocol",
+                "providers",
                 "revision",
                 "session",
             ),
@@ -379,6 +384,12 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     ),
     "vinga_server.device.session:DeviceSession.send_audio #1": (
         ("SpeakingStarted", ("agent", "conversation", "device", "event", "session")),
+    ),
+    "vinga_server.device.session:DeviceSession._finished_speaking #1": (
+        (
+            "SpeakingFinished",
+            ("agent", "conversation", "device", "event", "frames", "session"),
+        ),
     ),
     "vinga_server.runtime.pipeline:PipelineRuntime._watchdog_stream #1": (
         (
@@ -494,11 +505,79 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
     ),
+    "vinga_server.runtime.pipeline:PipelineRuntime.start_reply #1": (
+        (
+            "TurnStarted",
+            (
+                "agent",
+                "barge_in",
+                "conversation",
+                "device",
+                "event",
+                "session",
+                "speech_ms",
+            ),
+        ),
+    ),
     "vinga_server.runtime.pipeline:PipelineRuntime._reply #1": (
-        ("Heard", ("agent", "conversation", "device", "duration_s", "event", "session")),
+        (
+            "Heard",
+            (
+                "agent",
+                "asr_ms",
+                "conversation",
+                "device",
+                "duration_s",
+                "event",
+                "session",
+            ),
+        ),
     ),
     "vinga_server.runtime.pipeline:PipelineRuntime._reply #2": (
         ("Replied", ("agent", "conversation", "device", "event", "sentences", "session")),
+    ),
+    "vinga_server.runtime.pipeline:PipelineRuntime._reply #3": (
+        (
+            "ReplyFinished",
+            (
+                "agent",
+                "conversation",
+                "device",
+                "event",
+                "outcome",
+                "sentences_spoken",
+                "session",
+            ),
+        ),
+    ),
+    "vinga_server.runtime.pipeline:PipelineRuntime._reply #4": (
+        (
+            "NothingHeard",
+            (
+                "agent",
+                "asr_ms",
+                "conversation",
+                "device",
+                "duration_s",
+                "event",
+                "session",
+            ),
+        ),
+    ),
+    "vinga_server.runtime.pipeline:PipelineRuntime._sentence_synthesized #1": (
+        (
+            "SentenceSynthesized",
+            (
+                "agent",
+                "conversation",
+                "device",
+                "event",
+                "first_chunk_ms",
+                "index",
+                "session",
+                "stream_ms",
+            ),
+        ),
     ),
     "vinga_server.runtime.pipeline:PipelineRuntime._speak_reply #1": (
         ("AgentSaid", ("agent", "conversation", "device", "event", "sentences", "session")),
@@ -894,6 +973,13 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     ),
     "vinga_server.memory.store:MemoryStore._cleaned #1": (
         ("MemoryCleanupFailed", ("error", "event")),
+    ),
+    # Two, because the driver rolls one second over into the next and
+    # then flushes what the second was still holding, which is exactly
+    # the pair of occasions this aggregate leaves the emitter on.
+    "vinga_server.events:SessionEvents.flush_dropped #1": (
+        ("FramesDropped", ("device", "event", "reasons", "second", "session")),
+        ("FramesDropped", ("device", "event", "reasons", "second", "session")),
     ),
     "vinga_server.ws:conversation #1": (
         ("AuthRejected", ("device", "event", "reason")),

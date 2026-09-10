@@ -178,12 +178,14 @@ from vinga_server.conversations.records import Acknowledgement, ToolInvocation, 
 from vinga_server.conversations.store import ConversationStore
 from vinga_server.device.bindings import BoundNames, DeviceBindings
 from vinga_server.device.session import DeviceSession
+from vinga_server.events import SessionEvents
 from vinga_server.events.catalog import CHANNELS
 from vinga_server.filler import FallbackClip, build_agent_fillers
 from vinga_server.logs import _STANDARD_ATTRIBUTES
 from vinga_server.memory.store import NOTHING_PURGED, MemoryScope
 from vinga_server.ota import ACTIVATE_SEGMENT, OTA_PATH
 from vinga_server.providers import AsrResult, Usage, build_entry
+from vinga_server.providers.mock import MockAsr
 from vinga_server.providers.openai_asr import OpenAiAsr
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
 from vinga_server.tools.mcp import McpServers
@@ -1131,10 +1133,76 @@ async def drive_nothing_sayable(_: Path) -> None:
     await drive_reply(session, UTTERANCE)
 
 
+async def drive_turn_started(_: Path) -> None:
+    """A reply started the way the floor starts one, which is the only
+    way `turn_started` is said at all: the event is defined by the call
+    rather than by a path into it."""
+    session = speaking_session({"poet": ScriptedLlm(["Two words."])})
+    start_reply(session, UTTERANCE, speech_ms=600)
+    await reply_in_flight(session)
+
+
+async def drive_reply_finished(_: Path) -> None:
+    """One reply, run to its end, which is the only thing this record
+    needs: what it carries is the latch, and an unlatched reply is
+    `completed`. The outcomes a canceller latches have decision sites of
+    their own and their own suite; here one reply is one record, which
+    is what the shape table can pin."""
+    await drive_reply(speaking_session({"poet": ScriptedLlm(["Two words."])}), UTTERANCE)
+
+
+async def drive_nothing_heard(_: Path) -> None:
+    """An ear that answers, and answers with nothing.
+
+    Whitespace rather than an empty utterance, so the record carries a
+    real duration and a real ASR latency: what this event exists for is
+    the utterance that was heard and transcribed to nothing, which is
+    not the same fact as no audio at all.
+    """
+    session = session_for(
+        base_config(),
+        POET_MAC,
+        {"poet": ScriptedLlm(["Two words."])},
+        stages={"asr": cast(Any, MockAsr(text="   "))},
+    )
+    session.websocket = cast(Any, RecordingSocket())
+    await drive_reply(session, UTTERANCE)
+
+
+async def drive_sentence_synthesized(_: Path) -> None:
+    """One sentence spoken, so one synthesis stream ends."""
+    await drive_reply(speaking_session({"poet": ScriptedLlm(["Two words."])}), UTTERANCE)
+
+
+def drive_speaking_finished(directory: Path) -> None:
+    hold_a_conversation(apart(config_with_agent(), directory))
+
+
+def drive_frames_dropped(_: Path) -> None:
+    """A second's worth of discarded mic frames, rolled over.
+
+    Driven on the emitter itself rather than through a socket, and the
+    reason is the clock: the aggregate is per second of the session, so
+    a driver over the wire would have to spend a real second to see one
+    roll over. The emitter takes its clock as a dependency for exactly
+    this, and the reasons handed to it are the edge's own words.
+    """
+    ticks = iter([0.0, 0.1, 0.2, 1.4, 1.5, 1.6])
+    emitter = SessionEvents("frames-dropped", clock=lambda: next(ticks))
+    emitter.opened_at = 0.0
+    emitter.dropped("not_listening")
+    emitter.dropped("barge_in_off")
+    emitter.dropped("not_listening")
+    # Into the next second, which is what flushes the first.
+    emitter.dropped("undecodable")
+    emitter.flush_dropped()
+
+
 EDGE = "vinga_server.device.session"
 PIPELINE = "vinga_server.runtime.pipeline"
 TURNTAKING = "vinga_server.runtime.turntaking"
 FILLER = "vinga_server.runtime.filler_runner"
+EMITTER = "vinga_server.events"
 
 SESSION_DRIVERS: tuple[Driver, ...] = (
     Driver((EDGE, "DeviceSession._idle_expired", 1), drive_session_idle, "session_idle"),
@@ -1145,6 +1213,11 @@ SESSION_DRIVERS: tuple[Driver, ...] = (
     Driver((EDGE, "DeviceSession.run", 5), drive_session_limit, "session_limit"),
     Driver((EDGE, "DeviceSession.run", 6), drive_session_closed, "session_closed"),
     Driver((EDGE, "DeviceSession.send_audio", 1), drive_speaking_started, "speaking_started"),
+    Driver(
+        (EDGE, "DeviceSession._finished_speaking", 1),
+        drive_speaking_finished,
+        "speaking_finished",
+    ),
     Driver((PIPELINE, "PipelineRuntime._watchdog_stream", 1), drive_llm_retry, "llm_retry"),
     Driver((PIPELINE, "PipelineRuntime._llm_round_done", 1), drive_llm_round, "llm_round"),
     Driver(
@@ -1157,8 +1230,16 @@ SESSION_DRIVERS: tuple[Driver, ...] = (
         drive_prompt_assembled,
         "prompt_assembled",
     ),
+    Driver((PIPELINE, "PipelineRuntime.start_reply", 1), drive_turn_started, "turn_started"),
     Driver((PIPELINE, "PipelineRuntime._reply", 1), drive_heard, "heard"),
     Driver((PIPELINE, "PipelineRuntime._reply", 2), drive_replied, "replied"),
+    Driver((PIPELINE, "PipelineRuntime._reply", 3), drive_reply_finished, "reply_finished"),
+    Driver((PIPELINE, "PipelineRuntime._reply", 4), drive_nothing_heard, "nothing_heard"),
+    Driver(
+        (PIPELINE, "PipelineRuntime._sentence_synthesized", 1),
+        drive_sentence_synthesized,
+        "sentence_synthesized",
+    ),
     Driver((PIPELINE, "PipelineRuntime._speak_reply", 1), drive_agent_said, "agent_said"),
     Driver((PIPELINE, "PipelineRuntime._move_to", 1), drive_handover, "handover"),
     Driver(
@@ -1222,6 +1303,7 @@ SESSION_DRIVERS: tuple[Driver, ...] = (
         drive_nothing_sayable,
         "reply_fallback",
     ),
+    Driver((EMITTER, "SessionEvents.flush_dropped", 1), drive_frames_dropped, "frames_dropped"),
 )
 
 
