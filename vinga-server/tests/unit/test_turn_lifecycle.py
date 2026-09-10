@@ -555,6 +555,67 @@ async def test_a_cancellation_inside_the_filler_settle_reports_once() -> None:
     assert outcomes(tap) == ["failed"]
 
 
+# --- the window that is never opened -----------------------------------
+
+
+async def test_a_reply_that_never_spoke_emits_neither_half_of_the_pair() -> None:
+    """The other half of the balanced-pair claim, and the one that
+    guards a line nothing else does.
+
+    `speaking_started` and `speaking_finished` bound the interval the
+    pacer paced. A reply that put no frame on the wire opened no
+    interval, so it must emit neither, and `_finished_speaking`'s early
+    return on a pacer reporting no delivery is the whole of what makes
+    that true.
+
+    That line is load-bearing and was, until this test, entirely
+    unpinned: removing it leaves every other assertion in this suite
+    green while `speaking_finished` starts firing with `frames` zero on
+    replies that never spoke, unbalancing the pair in the opposite
+    direction and giving everything derived from it a phantom
+    zero-length interval. It is also the line a reader is most likely
+    to reach for, since #455 named it as the prime suspect for an
+    absence that turned out to be a deployment running code without the
+    event in it at all.
+
+    Three ways a reply reaches its `finally` having said nothing, driven
+    in one still-open session because the claim is about every one of
+    them rather than about a lucky one: transcribed to nothing, an ear
+    that cannot be reached, and a voice that cannot be reached. The
+    third is the one that matters most, because it is the only one that
+    gets as far as asking for audio.
+    """
+    ears = ScriptedEars("   ", ConnectionRefusedError("no route"), "Say something.")
+    session = talking(
+        stages={
+            "asr": cast(Any, ears),
+            "tts": cast(Any, Unreachable("tts", ConnectionRefusedError("no route"))),
+        }
+    )
+    tap = watching(session)
+
+    for _ in range(3):
+        start_reply(session, UTTERANCE)
+        await wait_for_reply(session)
+
+    assert outcomes(tap) == ["nothing_heard", "failed", "failed"], (
+        "the three turns did not end the three ways this test is about"
+    )
+    # The third turn was heard, so it really did reach the voice rather
+    # than stopping short of it, which is what makes its silence a
+    # statement about the pacer and not about the ear.
+    assert len(tap.of("heard")) == 1
+    assert [one.payload["stage"] for one in tap.of("provider_failed")] == ["asr", "tts"]
+
+    assert tap.of("speaking_started") == [], (
+        "an interval was opened for a reply that put no frame on the wire"
+    )
+    assert tap.of("speaking_finished") == [], (
+        "an interval was closed that was never opened; the early return in "
+        "_finished_speaking is what keeps the pair balanced here"
+    )
+
+
 # --- the lookahead, against the window it overlaps ---------------------
 
 
