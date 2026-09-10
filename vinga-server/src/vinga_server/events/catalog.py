@@ -2156,19 +2156,6 @@ class BargeInUnderFloor(Variant):
 
 
 @dataclass(frozen=True)
-class BargeInInRefractory(Variant):
-    """The onset transient a device's echo cancellation let through."""
-
-    CHANNEL: ClassVar[str] = SESSION_CHANNEL
-    LEVEL: ClassVar[int] = logging.INFO
-    TEMPLATE: ClassVar[str] = "session %s: barge-in suppressed inside the refractory window"
-    ARGS: ClassVar[tuple[str, ...]] = ("session",)
-
-    reason: Suppression = value(fixed=Suppression.REFRACTORY)
-    speech_ms: Whole = value()
-
-
-@dataclass(frozen=True)
 class BargeInWithoutTranscript(Variant):
     """A pause that asked ASR and got nothing back."""
 
@@ -2553,7 +2540,7 @@ BARGE_IN = declare("barge_in", note="Speech cuts a reply short.", variants=(Barg
 BARGE_IN_SUPPRESSED = declare(
     "barge_in_suppressed",
     note="An interruption is dropped and the reply lives.",
-    variants=(BargeInUnderFloor, BargeInInRefractory, BargeInWithoutTranscript),
+    variants=(BargeInUnderFloor, BargeInWithoutTranscript),
 )
 
 BARGE_IN_MERGED = declare(
@@ -4061,7 +4048,6 @@ __all__ = [
     "BINDINGS_CHANNEL",
     "BannerOrigin",
     "BargeIn",
-    "BargeInInRefractory",
     "BargeInMerged",
     "BargeInUnderFloor",
     "BargeInWithoutTranscript",

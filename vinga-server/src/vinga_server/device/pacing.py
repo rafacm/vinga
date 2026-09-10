@@ -67,8 +67,7 @@ class ReplyPacer:
         # reads it must fire once per reply, not once per handover.
         self._speaking_started = False
         # When this reply's first frame reached the device, for the
-        # barge-in refractory gate and the barge_in event's
-        # speaking_ms.
+        # filler's stand-down and the barge_in event's speaking_ms.
         self._speaking_started_at: float | None = None
         # Whether this reply has told the device it is speaking. The
         # `tts start` it stands for is sent once per reply, and never
@@ -146,8 +145,8 @@ class ReplyPacer:
 
     def speaking_started_at(self) -> float | None:
         """When this reply's first frame reached the device, or None
-        before one did. Read by the barge-in refractory gate and by the
-        filler, both of which are asking how long the user has been
+        before one did. Read by the filler and by the barge_in event's
+        speaking_ms, both of which are asking how long the user has been
         hearing this reply, which is what makes the delivery and not the
         decision to deliver the instant they want."""
         return self._speaking_started_at

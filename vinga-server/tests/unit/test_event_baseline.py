@@ -117,10 +117,13 @@ def test_every_driver_names_a_path_of_its_own() -> None:
     sentence's synthesis stream ending, a reply's last frame going out,
     and the per-second dropped-frame aggregate the emitter now owns, and
     one hundred once the review round found that a reply cut short
-    inside its own ASR said nothing about the ASR at all."""
+    inside its own ASR said nothing about the ASR at all. Ninety-nine
+    again since the barge-in ladder stopped dropping an interruption for
+    arriving at the playback onset (#80), which took the refractory
+    window's own path out of the gate with it."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 100
+    assert len(set(claimed)) == len(claimed) == 99
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -703,12 +706,9 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
         ("BargeInMerged", ("device", "event", "session", "speech_ms")),
     ),
     "vinga_server.runtime.turntaking:TurnTaking._gate_barge_in #3": (
-        ("BargeInInRefractory", ("device", "event", "reason", "session", "speech_ms")),
-    ),
-    "vinga_server.runtime.turntaking:TurnTaking._gate_barge_in #4": (
         ("BargeInWithoutTranscript", ("device", "event", "reason", "session", "speech_ms")),
     ),
-    "vinga_server.runtime.turntaking:TurnTaking._gate_barge_in #5": (
+    "vinga_server.runtime.turntaking:TurnTaking._gate_barge_in #4": (
         ("BargeIn", ("device", "event", "session", "speaking_ms", "speech_ms")),
     ),
     "vinga_server.runtime.filler_runner:FillerRunner._fire #1": (

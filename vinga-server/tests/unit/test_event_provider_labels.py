@@ -285,7 +285,7 @@ async def test_a_reused_transcription_names_the_ear_that_ran_it(
     """
     poet_ears = IdentifiedAsr(EARS, text="stop and listen", hold_from=2)
     tutor_ears = IdentifiedAsr(OTHER_EARS)
-    config = base_config(server={"barge_in_refractory_ms": 0})
+    config = base_config()
     session, socket = two_eared(config, poet_ears, tutor_ears)
 
     with caplog.at_level("DEBUG"):

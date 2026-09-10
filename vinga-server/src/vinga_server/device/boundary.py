@@ -237,7 +237,7 @@ class DeviceOutput(Protocol):
 
     def speaking_started_at(self) -> float | None:
         """The `speaking_started` stamp for this reply; None before it.
-        Read by the refractory gate and by the filler."""
+        Read by the filler and by the barge-in event's speaking_ms."""
 
     def user_turn_ended(self) -> None:
         """The runtime decided the utterance ended. The edge applies its

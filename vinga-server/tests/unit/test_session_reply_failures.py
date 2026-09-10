@@ -721,7 +721,6 @@ def masked_and_failing() -> Config:
     fails, on a voice whose clips are long enough to still be pacing
     while something else happens."""
     return Config(
-        server={"barge_in_refractory_ms": 0},
         providers={
             "llm": {"mock": {"type": "mock"}},
             "asr": {"mock": {"type": "mock", "text": "hello"}},

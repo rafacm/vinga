@@ -3,9 +3,11 @@
 `TurnTaking` reaches the orchestrator through four of its methods and
 the device through `DeviceOutput`, so both can be scripted and the gate
 ladder driven straight onto each of its rungs: the speech floor, the
-mid-transcription merge, the playback-onset refractory window, a
-confirmation that heard nothing, and a confirmation that heard
-something. No session, no socket, no provider.
+mid-transcription merge, a confirmation that heard nothing, and a
+confirmation that heard something. No session, no socket, no provider.
+One test stands where a rung was taken out, holding speech at the
+playback onset to the confirmation arm the refractory window used to
+drop it before (#80).
 
 The second half is the arithmetic in front of the gates, which nothing
 used to exercise directly at all: the tail cap that bounds a
@@ -209,32 +211,53 @@ async def test_a_barge_in_inside_the_replys_own_asr_merges_the_two_halves(
     ] == [(head + tail, None, None, None)]
 
 
-async def test_the_playback_onset_transient_is_swallowed_by_the_refractory_window(
+async def test_speech_at_the_playback_onset_is_confirmed_and_not_dropped(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    reply = FakeReply()
-    taking, device = turn_taking(reply, ServerConfig(barge_in_refractory_ms=100_000))
+    """The rung that is no longer there (#80).
+
+    A refractory window used to sit here and drop an interruption that
+    endpointed within a second of the reply's first delivered frame, on
+    the theory that what the microphone heard that early was the
+    playback onset through the device's echo cancellation. The floor
+    above is checked first, so nothing reaches this point without half
+    a second of classified speech, and the room has heard at most about
+    240 ms of the reply by then; in the field every suppression the
+    window ever made was a user finishing their own sentence. So an
+    utterance arriving at the onset takes the same confirmation arm as
+    any other, and a transcript cancels the reply.
+
+    The interruption is fed immediately after the first frame, which is
+    the instant the window used to be measured from, so reinstating the
+    gate at any positive setting fails this test.
+    """
+    reply = FakeReply(HEARD)
+    taking, device = turn_taking(reply)
+    interruption = b"\x03\x04" * 800
 
     with caplog.at_level("INFO"):
         await replying_about(taking, reply, b"\x01\x02" * 800)
-        # The reply is speaking, which is what starts the window.
+        # The reply has just begun speaking, which is what used to start
+        # the window.
         await device.send_audio(PlayableAudio([b"frame"]))
-        await taking.feed(b"\x03\x04" * 800)
+        await taking.feed(interruption)
         await taking.finish_utterance(endpointed=True)
 
-    suppressed = only(caplog, "barge_in_suppressed")
-    assert suppressed.reason == "refractory"
-    assert suppressed.speech_ms == 600
-    assert reply.cancels == []
-    assert reply.confirmed == []
-    assert len(reply.started) == 1
+    assert events(caplog, "barge_in_suppressed") == []
+    assert only(caplog, "barge_in").speech_ms == 600
+    # It was heard before it was acted on: the frames paused, ASR ran on
+    # the interruption itself, and the transcript is what cancelled.
+    assert reply.confirmed == [interruption]
+    assert reply.cancels == [ReplyOutcome.BARGED_IN]
+    assert [one.transcript for one in reply.started] == [HEARD]
+    assert device.paused is False
 
 
 async def test_a_confirmation_that_heard_nothing_resumes_the_reply_it_paused(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     reply = FakeReply(NOTHING)
-    taking, device = turn_taking(reply, ServerConfig(barge_in_refractory_ms=0))
+    taking, device = turn_taking(reply)
     interruption = b"\x03\x04" * 800
 
     with caplog.at_level("INFO"):
@@ -259,7 +282,7 @@ async def test_a_confirmed_barge_in_cancels_and_hands_its_transcript_on(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     reply = FakeReply(HEARD)
-    taking, device = turn_taking(reply, ServerConfig(barge_in_refractory_ms=0), speech_ms=700.0)
+    taking, device = turn_taking(reply, speech_ms=700.0)
     interruption = b"\x03\x04" * 800
 
     with caplog.at_level("INFO"):
@@ -294,7 +317,7 @@ async def test_a_confirmation_that_could_not_be_run_leaves_the_reply_alone(
     next test's claim."""
     reply = FakeReply()
     reply.confirmation_fails = TimeoutError()
-    taking, device = turn_taking(reply, ServerConfig(barge_in_refractory_ms=0))
+    taking, device = turn_taking(reply)
 
     with caplog.at_level("INFO"):
         await replying_about(taking, reply, b"\x01\x02" * 800)
@@ -323,7 +346,7 @@ async def test_a_failed_confirmation_names_its_class_and_not_what_it_said(
     failure = TimeoutError(f"transcribe timed out, key {SENTINEL}")
     failure.__cause__ = ConnectionError(f"401 from the endpoint, key {SENTINEL}")
     reply.confirmation_fails = failure
-    taking, device = turn_taking(reply, ServerConfig(barge_in_refractory_ms=0))
+    taking, device = turn_taking(reply)
 
     with caplog.at_level("INFO"):
         await replying_about(taking, reply, b"\x01\x02" * 800)
@@ -353,9 +376,7 @@ async def test_a_failure_during_the_cleanup_carries_nothing_of_the_first(
     failure = TimeoutError(f"transcribe timed out, key {SENTINEL}")
     failure.__cause__ = ConnectionError(f"401 from the endpoint, key {SENTINEL}")
     reply.confirmation_fails = failure
-    taking, _ = turn_taking(
-        reply, ServerConfig(barge_in_refractory_ms=0), device=UnresumableDevice()
-    )
+    taking, _ = turn_taking(reply, device=UnresumableDevice())
 
     with caplog.at_level("INFO"):
         await replying_about(taking, reply, b"\x01\x02" * 800)

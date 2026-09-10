@@ -336,9 +336,7 @@ async def _speaking(config: Any, ears: Any) -> Any:
     return session
 
 
-CUT_IN = config_with_agent(
-    llm_reply="Answering {text}.", server={"barge_in_refractory_ms": 0}
-)
+CUT_IN = config_with_agent(llm_reply="Answering {text}.")
 
 
 async def test_a_confirmed_barge_in_is_stamped_with_the_utterance_it_answers() -> None:

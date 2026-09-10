@@ -22,7 +22,6 @@ from vinga_server.events import ServerEvents, SessionEvents, assembly
 from vinga_server.events.catalog import (
     CAPTURE_CHANNEL,
     BargeIn,
-    BargeInInRefractory,
     BargeInUnderFloor,
     BargeInWithoutTranscript,
     CaptureStarted,
@@ -524,17 +523,16 @@ def barge_in(events: SessionEvents, speech_ms: int = 700) -> float:
 
 
 def suppress_barge_in(events: SessionEvents, which: str = "floor") -> float:
-    """One of the three suppression variants, each with the fixed reason
-    its own decision site chose.
+    """One of the suppression variants, each with the fixed reason its
+    own decision site chose.
 
-    Three variants rather than one with a reason argument, because that
-    is what the catalog declares: the closed reason set lives at the
-    decision sites, and a span event is named after the variant that was
-    emitted.
+    A variant per reason rather than one with a reason argument, because
+    that is what the catalog declares: the closed reason set lives at
+    the decision sites, and a span event is named after the variant that
+    was emitted.
     """
     built = {
         "floor": lambda: BargeInUnderFloor(speech_ms=Whole(120), floor_ms=Real(200.0)),
-        "refractory": lambda: BargeInInRefractory(speech_ms=Whole(300)),
         "no_transcript": lambda: BargeInWithoutTranscript(speech_ms=Whole(400)),
     }[which]
     return events.emit(built)
