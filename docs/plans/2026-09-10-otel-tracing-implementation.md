@@ -402,6 +402,15 @@ variable, in endpoint userinfo, in `OTEL_SERVICE_NAME` and in an event
 payload, and hunts it in exported span data, in both log formats and in
 stderr, including during an export against an endpoint nothing answers.
 
+**Correction.** The sentence above said "and in an event payload" before
+the PR review round, and it was not true: three of the four sentinels
+were planted and the fourth was not. It is recorded here as a
+correction rather than quietly rewritten, because a verification note
+claiming a test that does not exist is worse than one that admits a
+gap: the next reader would have taken the payload surface as covered.
+What made it false is also what made it matter, and both are the review
+round's finding 3 below.
+
 `tests/unit/test_telemetry_lifecycle.py` runs the whole composition
 twice in one process, refuses a boot after the exporter was built, and
 pins that a stopped exporter takes no more emissions.
