@@ -25,6 +25,51 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   transcript or a provider the registry never built, keeps the entries
   the session opened against.
 
+### Changed
+
+- **An interruption arriving at the playback onset is transcribed
+  rather than dropped** (#80). The barge-in gate ladder had one rung
+  that dropped an utterance on acoustics alone: anything the endpointer
+  ended within `barge_in_refractory_ms` of the reply's first delivered
+  frame was discarded as the onset transient a device's echo
+  cancellation lets through. It could not have been that. The speech
+  floor is checked first, so nothing reached the rung without at least
+  500 ms of classified speech; the primary board's playback trails the
+  server by roughly 760 ms, measured by correlating the mic envelope
+  against the speaker envelope over three replies; and the window was
+  counted from the frame the server delivered, so its default second
+  was at most about 240 ms of sound in the room. Every suppression the
+  rung ever made in the field was a user finishing their own sentence,
+  four in 48 h of household use and five in a later commissioning
+  window, and what it cost each time was the rest of that sentence. The
+  utterance now falls through to the confirmation arm every other
+  interruption takes: the outgoing frames pause, ASR transcribes, and
+  only a non-empty transcript cancels the reply, so a wrong pause costs
+  one ASR latency where a wrong drop cost a sentence. The barge-in ADR
+  carries a dated amendment saying which of its gates went and why.
+- **The endpointer's trailing-silence bound is documented as the
+  per-agent setting it already was** (#80). `trailing_silence_ms` keeps
+  its 700 ms default, which is right for question-and-answer speech and
+  wrong for dictation, and the fix for the dictation case needs no new
+  surface: the bound is an option on a VAD provider entry, an agent
+  binds the entry it wants, and a handover builds a fresh endpointer
+  from the incoming agent's. The silero example fragment, the server
+  README's listening and memory sections, and the glossary now say so.
+
+### Removed
+
+- **`server.barge_in_refractory_ms`** (#80), which had exactly one
+  reader and lost it with the gate above. A configuration still setting
+  it is refused at boot with the ordinary unknown-key error rather than
+  being ignored. The capture and session-record manifest drops
+  `refractory_ms` rather than writing it null, so a recording states
+  the gates its own server had and `server.revision` beside it says
+  which era it came from.
+- **The `refractory` reason on `barge_in_suppressed`** (#80), with the
+  `BargeInInRefractory` variant behind it, since no path can produce it
+  any more. `docs/reference/events.md` and the barge-in decision
+  diagram are regenerated without it.
+
 ### Fixed
 
 - **The first answer after a reply is heard.** A realtime device
