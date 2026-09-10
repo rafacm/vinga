@@ -356,7 +356,7 @@ No new package, no new config, no API change.
   landed while budgets, users and cost stay future; CHANGELOG.
 - [x] **[M2: wire response latency from a
   capture](2026-09-10-metrics-views-implementation.md#m2-wire-response-latency-from-a-capture).**
-  (PR TBD.)
+  (PR #448.)
   `scripts/wire_latency.py` under the decided shape (a), with the
   fixed requirements from the script section (house style, refusal
   boundary, specified speech-end algorithm, the exclusion stated
