@@ -19,15 +19,32 @@ own would be describing a formatter this command must never grow.
 
 **It says nothing a value could be read out of.** The refusals name an
 entry, a slot and a rule; they never name what is stored there, and
-neither does the success line. Each case plants credential-shaped
-sentinels in the fields that could carry one (a prompt, an MCP server's
-URL, a stored secret's plaintext, the path of the file half, the
-database password) and asserts absence on the surfaces the refusal
-suites use: stdout, stderr, every log record rendered whole, and the
-exception chain a walker would find. The database password is the one
-that is not stored state, and it is here because an unreachable
-instance is a failure mode this command has and the reload answer does
-not.
+neither does the success line. Credential-shaped sentinels are planted
+in the fields that could carry one (a prompt, an MCP server's URL, a
+stored secret's plaintext, the path of the file half, the database
+password), and absence is asserted on the surfaces the refusal suites
+use: stdout, stderr, every log record rendered whole, and the exception
+chain a walker would find. The database password is the one that is not
+stored state, and it is here because an unreachable instance is a
+failure mode this command has and the reload answer does not.
+
+The last claim is per boundary rather than global, and the suite is
+shaped that way rather than claiming it once: five failure families
+(the file half will not parse, the snapshot will not compose, a stored
+credential will not open, a stored row will not read, the database
+cannot be reached) are each a different module's `except` replacing a
+different exception, so each is driven and each asserts the chain and
+the log for itself. A migration that fails has no case of its own
+because it has no boundary of its own: `db.open_url` catches everything
+`upgrade_to_head` raises and answers with the fixed sentence the
+unreachable case asserts.
+
+What this file does NOT claim is anything about a stored IDENTITY. That
+those are spoken in full, stripped of what a URL of one hides and
+escaped where a control character survives, is #382's settled decision
+and lives with the rest of the identity-display claims in
+`test_config_url_credential_display.py`, which drives this command
+against planted names of all four kinds.
 """
 
 import logging
@@ -35,6 +52,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from sqlalchemy import insert
 
 from tests.support.config_cli import chain, logged
 from vinga_server import logs
@@ -47,7 +65,7 @@ from vinga_server.config.secrets import (
     load_keys,
 )
 from vinga_server.config.store import ConfigStore
-from vinga_server.db import open_database
+from vinga_server.db import open_database, schema
 
 # One per field a stored value or an invocation could carry, so a leak
 # says which field it came out of. None is a real credential and each is
@@ -339,22 +357,142 @@ def test_an_unreachable_database_repeats_nothing_of_the_connection(
     absent(printed.out, printed.err, logged(caplog))
 
 
-def test_the_refusal_carries_no_exception_chain(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The fourth surface, read where a walker would find it.
+def _unparseable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """A file half that will not parse, holding a sentinel where a
+    parser would point. What PyYAML raises carries the buffer it stopped
+    in, which is the whole document."""
+    named = tmp_path / "config.yaml"
+    named.write_text(f"server:\n  port: [8003\n  token: {CONFIG_PATH_SENTINEL}\n", encoding="utf-8")
+    return str(named)
 
-    `cli.main` prints the refusal and returns, so the exception is not
-    reachable through it. The command function is driven directly, which
-    is what holds the raise itself to carrying no driver error behind
-    it: a psycopg exception on `__context__` holds the connection string
-    it failed on, password and all.
+
+def _will_not_compose(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """A store carrying a sentinel in every plaintext field, refused by
+    the rule about a runnable deployment."""
+    seeded(
+        lambda store: (
+            pipeline(store),
+            store.set_mcp_server(
+                "weather",
+                {
+                    "transport": "streamable_http",
+                    "url": f"https://api.example/mcp?key={URL_SENTINEL}",
+                },
+            ),
+            store.set_agent("sam", {"prompt": f"You are Sam. {PROMPT_SENTINEL}"}),
+        )
+    )
+    return ""
+
+
+def _a_key_that_will_not_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """A stored credential written under one key and read under another,
+    which is the failure whose plaintext is closest to the sentence."""
+    seeded(
+        lambda store: (
+            pipeline(store),
+            store.set_mcp_server(
+                "weather", {"transport": "streamable_http", "url": "https://api.example/mcp"}
+            ),
+            store.set_secret(SLOT, STORED_SENTINEL),
+            store.set_agent("sam", {"prompt": f"You are Sam. {PROMPT_SENTINEL}"}),
+            store.set_default_agent("sam"),
+        )
+    )
+    monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
+    return ""
+
+
+def _a_row_that_will_not_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Storage rather than composition: a row put in place by something
+    that never passed through a write, holding a body no model parses.
+
+    The same door a failed migration leaves by, which is why there is no
+    separate case for one: `db.open_url` catches everything
+    `upgrade_to_head` raises and answers with the fixed sentence the
+    unreachable case below asserts, so a migration failure is that case
+    with a different cause behind the same boundary.
     """
+    engine = open_database(load_file_config(None).server.database)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                insert(schema.agents).values(name="sam", body=f'{{"llm": {PROMPT_SENTINEL!r}}}')
+            )
+    finally:
+        engine.dispose()
+    return ""
+
+
+def _nothing_to_connect_to(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """An instance nothing can reach, with the password in the
+    connection string the driver's own error carries."""
     monkeypatch.setenv("VINGA_DB_PORT", "1")
     monkeypatch.setenv("VINGA_DB_PASSWORD", PASSWORD_SENTINEL)
+    return ""
 
-    with pytest.raises(ConfigError) as refused:
-        cli._check(cli.Invocation())
 
-    assert PASSWORD_SENTINEL not in chain(refused.value)
+@pytest.mark.parametrize(
+    ("arrange", "marker"),
+    [
+        pytest.param(_unparseable, "invalid YAML in the config file", id="file-parsing"),
+        pytest.param(
+            _will_not_compose, "invalid config in the domain schema", id="composition"
+        ),
+        pytest.param(
+            _a_key_that_will_not_open,
+            "the stored secret cannot be decrypted",
+            id="secret-verification",
+        ),
+        pytest.param(
+            _a_row_that_will_not_read,
+            "the row cannot be read as configuration",
+            id="storage",
+        ),
+        pytest.param(
+            _nothing_to_connect_to, "cannot open the vinga database", id="the-database"
+        ),
+    ],
+)
+def test_no_refusal_carries_a_sentinel_on_any_surface(
+    arrange: Callable[[Path, pytest.MonkeyPatch], str],
+    marker: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Every way this command can refuse, against the surface no caller
+    of `cli.main` can reach.
+
+    The command function is driven directly rather than through the
+    boundary, which is the point: `main` prints the refusal and returns,
+    so the exception is gone by the time a test could look at it, and
+    what has to be held is the raise itself. A psycopg error on
+    `__context__` holds the connection string it failed on, password and
+    all, and a PyYAML error's `problem_mark.buffer` holds the whole
+    document it stopped in; neither is displayed and both are one
+    `__context__` hop from anything walking the chain.
+
+    Parameterized over the failure families rather than over one of
+    them, because the containment is per boundary and not global: each
+    of these is a different module's `except` and a different exception
+    being replaced. A suite that drove one and claimed all five would be
+    the docstring the review round asked to be narrowed.
+
+    An underscore reach-in, for the reason `test_missing_server_half`
+    makes the same one: the exception chain is not on this module's
+    interface, and it is what the claim is about.
+    """
+    path = arrange(tmp_path, monkeypatch)
+
+    with caplog.at_level(0), pytest.raises(ConfigError) as refused:
+        cli._check(cli.Invocation(config=path or None))
+
+    # The marker is what keeps the parameterization honest: five cases
+    # that all fell into one boundary would satisfy the absence claim
+    # while proving it about one `except` five times.
+    assert marker in str(refused.value)
+    absent(chain(refused.value), logged(caplog))
 
 
 # The floor under the libraries that narrate somebody else's bytes
