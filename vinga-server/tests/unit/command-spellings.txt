@@ -1383,13 +1383,13 @@ vinga-server/src/vinga_server/config/cli.py:8333  respell  vinga agent rename
 vinga-server/src/vinga_server/config/cli.py:8752  respell  vinga provider
 vinga-server/src/vinga_server/config/cli.py:8752  respell  vinga device pending
 vinga-server/src/vinga_server/config/docgen.py:206  respell  config schema
-vinga-server/src/vinga_server/config/docgen.py:616  respell  config schema
+vinga-server/src/vinga_server/config/docgen.py:638  respell  config schema
 vinga-server/src/vinga_server/config/entities.py:207  respell  vinga apply
 vinga-server/src/vinga_server/config/loader.py:84  respell  vinga simulator run
 vinga-server/src/vinga_server/config/models.py:91  respell  vinga provider secret set
-vinga-server/src/vinga_server/config/models.py:2669  respell  vinga memory
-vinga-server/src/vinga_server/config/models.py:2699  respell  vinga mcp-server status
-vinga-server/src/vinga_server/config/models.py:3322  respell  config schema
+vinga-server/src/vinga_server/config/models.py:2693  respell  vinga memory
+vinga-server/src/vinga_server/config/models.py:2723  respell  vinga mcp-server status
+vinga-server/src/vinga_server/config/models.py:3346  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config reference
 vinga-server/src/vinga_server/config/responses.py:978  respell  vinga ota-url
@@ -1397,9 +1397,9 @@ vinga-server/src/vinga_server/config/responses.py:1420  respell  vinga session l
 vinga-server/src/vinga_server/config/responses.py:1421  respell  vinga session show
 vinga-server/src/vinga_server/config/responses.py:1650  respell  vinga conversation show
 vinga-server/src/vinga_server/config/secrets.py:9  respell  vinga-server config provider secret set
-vinga-server/src/vinga_server/config/store.py:255  respell  vinga simulator check-in
-vinga-server/src/vinga_server/config/store.py:267  respell  vinga-server config device show
-vinga-server/src/vinga_server/config/store.py:299  respell  vinga-server config agent delete
+vinga-server/src/vinga_server/config/store.py:256  respell  vinga simulator check-in
+vinga-server/src/vinga_server/config/store.py:268  respell  vinga-server config device show
+vinga-server/src/vinga_server/config/store.py:300  respell  vinga-server config agent delete
 vinga-server/src/vinga_server/config/views.py:41  respell  config show
 vinga-server/src/vinga_server/config/views.py:159  respell  config show
 vinga-server/src/vinga_server/conversations/api.py:131  respell  vinga session show
@@ -1617,10 +1617,10 @@ vinga-server/tests/unit/test_config_cli_summary.py:229  respell  vinga apply
 vinga-server/tests/unit/test_config_cli_summary.py:230  respell  vinga mcp-server secret set
 vinga-server/tests/unit/test_config_cli_summary.py:231  respell  vinga provider secret set
 vinga-server/tests/unit/test_config_cli_summary.py:653  respell  vinga provider secret set
-vinga-server/tests/unit/test_config_docgen.py:274  respell  vinga-server config reference
-vinga-server/tests/unit/test_config_docgen.py:444  respell  vinga apply
-vinga-server/tests/unit/test_config_docgen.py:655  respell  vinga-server config cli-reference
-vinga-server/tests/unit/test_config_docgen.py:689  respell  vinga-server config cli-reference
+vinga-server/tests/unit/test_config_docgen.py:300  respell  vinga-server config reference
+vinga-server/tests/unit/test_config_docgen.py:470  respell  vinga apply
+vinga-server/tests/unit/test_config_docgen.py:681  respell  vinga-server config cli-reference
+vinga-server/tests/unit/test_config_docgen.py:715  respell  vinga-server config cli-reference
 vinga-server/tests/unit/test_config_examples.py:51  respell  vinga provider set llm claude
 vinga-server/tests/unit/test_config_round_trip.py:533  respell  config export
 vinga-server/tests/unit/test_config_round_trip.py:534  respell  config import
