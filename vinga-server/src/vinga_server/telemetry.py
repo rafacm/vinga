@@ -449,9 +449,66 @@ SHAPES: dict[Kind, Shape] = {
 }
 
 
-def _approved() -> dict[str, dict[str, Shape]]:
-    """Which fields each event may put on a span, and what each becomes,
-    read off the catalog's own declarations.
+@dataclass(frozen=True)
+class _Rule:
+    """What one declared field may become on a span, and what it must BE
+    to become it.
+
+    Two halves, because the shape alone was not a gate. `shape` is the
+    OTel form the value takes; `admits` is the catalog's own value type
+    or types, and a value is exported only if one of them accepts it.
+    That second half is the whole of the difference from a check on
+    Python builtins: `session_idle.idle_s` is declared `Real`, and a
+    payload carrying a credential-shaped STRING there is a `str`, which
+    every builtin check passes and `Real` refuses. The same for a
+    mapping whose keys are not the server's own drop reasons.
+
+    A field several variants of one event declare can have several
+    declared types, and any of them accepting is enough: a payload of
+    that event is a payload of one of its variants.
+    """
+
+    shape: Shape
+    admits: tuple[type, ...]
+    nullable: bool
+
+    def accepts(self, held: Any) -> bool:
+        """Whether the catalog's own declaration would have built this
+        value.
+
+        Asked by CONSTRUCTING it, which is the only honest way: the
+        constraint lives in the value type's `__post_init__` and in an
+        enumeration's membership, and a copy of either here would be the
+        second home the events package exists to refuse. Anything the
+        construction raises is a refusal, since a type that will not
+        take the value is a type that does not admit it.
+
+        Two accommodations, both about the difference between a value
+        and the form it RIDES a payload in, and neither about what the
+        type admits:
+
+        - a nullable field's null is the payload saying the fact is not
+          known, which is a shape the declaration allows and which
+          exports as nothing anyway;
+        - a sequence rides as a list and its type takes a tuple, so the
+          list is offered as the tuple it is the carried form of. The
+          element checks still run, which is the half that matters.
+        """
+        if held is None:
+            return self.nullable
+        for declared in self.admits:
+            for form in (held, tuple(held)) if isinstance(held, list) else (held,):
+                try:
+                    declared(form)  # type: ignore[call-arg]
+                except Exception:  # noqa: BLE001 - anything raised is a refusal
+                    continue
+                return True
+        return False
+
+
+def _approved() -> dict[str, dict[str, _Rule]]:
+    """Which fields each event may put on a span, what each becomes, and
+    what each has to be, read off the catalog's own declarations.
 
     Derived rather than written out beside the catalog, because a second
     list of a hundred events' fields is the pending bug the design guide
@@ -460,16 +517,26 @@ def _approved() -> dict[str, dict[str, Shape]]:
 
     An event's variants are merged: several variants of one event
     declare overlapping fields, and what a payload of that event may
-    carry is the union.
+    carry is the union, both of the shapes and of the types.
     """
-    approved: dict[str, dict[str, Shape]] = {}
+    approved: dict[str, dict[str, _Rule]] = {}
     for name, declaration in catalog().items():
-        fields: dict[str, Shape] = {}
+        fields: dict[str, _Rule] = {}
         for variant in declaration.variants:
             for declared in carried_values(variant):
                 kind = kind_of(declared)
-                if kind is not None:
-                    fields[declared.name] = SHAPES[kind]
+                if kind is None:
+                    continue
+                held = fields.get(declared.name)
+                admits = (*(held.admits if held else ()), declared.type)
+                fields[declared.name] = _Rule(
+                    shape=SHAPES[kind],
+                    admits=admits,
+                    # Nullable where ANY variant declares it so: what a
+                    # payload of this event may carry is the union of
+                    # what its variants may.
+                    nullable=declared.nullable or bool(held and held.nullable),
+                )
         approved[name] = fields
     return approved
 
@@ -477,16 +544,22 @@ def _approved() -> dict[str, dict[str, Shape]]:
 APPROVED = _approved()
 
 
-def _as_attribute(held: Any, shape: Shape) -> Any | None:
-    """One payload value as the attribute its shape says it is, or
+def _as_attribute(held: Any, rule: _Rule) -> Any | None:
+    """One payload value as the attribute its rule says it is, or
     nothing.
 
     Nothing rather than a coerced guess wherever the value is not what
-    its declared kind promised: the payload is built by the catalog and
-    cannot ordinarily disagree with it, and a fold that repaired the
-    disagreement would be deciding what to export on a path nobody
-    reviewed.
+    its declaration promised, and the declaration is asked rather than
+    guessed at: a payload built by the catalog cannot disagree with it,
+    and a payload that DOES disagree is one this module did not build.
+    That is the case worth spending a construction on, because the field
+    a hostile emitter would choose is a declared one: a string where a
+    duration belongs passes every check on Python builtins and exports
+    whatever it holds.
     """
+    if not rule.accepts(held):
+        return None
+    shape = rule.shape
     if shape is Shape.SCALAR:
         return held if isinstance(held, str | int | float | bool) else None
     if shape is Shape.SEQUENCE:
@@ -988,7 +1061,7 @@ def _epoch_ns(at: float, offset: float) -> int:
     return int((at + offset) * 1_000_000_000)
 
 
-def _shapes(payload: dict[str, Any]) -> dict[str, Shape]:
+def _rules(payload: dict[str, Any]) -> dict[str, _Rule]:
     """What this payload's event is allowed to export, by field.
 
     Empty for an event the catalog does not declare, which is what makes
@@ -1013,10 +1086,13 @@ def _attributes(payload: dict[str, Any], table: dict[str, str]) -> dict[str, Any
     out of a payload by the catalog, and an attribute saying `None`
     would be a claim the event did not make.
     """
-    shapes = _shapes(payload)
+    rules = _rules(payload)
     attributes: dict[str, Any] = {}
     for key, name in table.items():
-        held = _as_attribute(payload.get(key), shapes.get(key, Shape.DROPPED))
+        rule = rules.get(key)
+        if rule is None:
+            continue
+        held = _as_attribute(payload.get(key), rule)
         if held is not None:
             attributes[name] = held
     return attributes
@@ -1383,7 +1459,14 @@ class Telemetry:
         session = payload.get(SESSION_FIELD)
         if not isinstance(session, str):
             return
-        if not isinstance(name, str):
+        if not isinstance(name, str) or name not in APPROVED:
+            # A name the catalog does not declare is not folded at all,
+            # and the check is HERE rather than at the export: a span
+            # event is named after the event, so an undeclared name is
+            # itself exported content, and whatever put it in the
+            # payload is not this repository's catalog. The default
+            # fold below is a default over the DECLARED events, not
+            # over any string that arrives.
             return
         # The table where a span has to be built, and a span event on
         # whichever span is open everywhere else. The default is what
@@ -1762,7 +1845,11 @@ class Telemetry:
         if trace is None:
             return
         name = emission.payload.get(EVENT_FIELD)
-        if not isinstance(name, str):
+        if not isinstance(name, str) or name not in APPROVED:
+            # Again here, and not only at the fold's door: this is
+            # reached from the server channel too, and the span event's
+            # NAME is the one piece of exported content no attribute
+            # table stands in front of.
             return
         span = trace.turn if trace.turn is not None else trace.span
         span.add_event(
@@ -1810,10 +1897,10 @@ def _event_attributes(payload: dict[str, Any]) -> dict[str, Any]:
     added to, and the event name because it IS the span event's name.
     """
     attributes: dict[str, Any] = {}
-    for key, shape in _shapes(payload).items():
+    for key, rule in _rules(payload).items():
         if key in _IDENTITIES:
             continue
-        held = _as_attribute(payload.get(key), shape)
+        held = _as_attribute(payload.get(key), rule)
         if held is not None:
             attributes[key] = held
     return attributes
