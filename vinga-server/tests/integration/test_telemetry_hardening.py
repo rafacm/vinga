@@ -21,15 +21,21 @@ Dropped spans are the accepted cost, and they are asserted too: an
 implementation that kept every span by growing without bound would pass
 the latency half of this and fail a deployment overnight.
 
-The third case at the foot of this file is the same claim about the
-other hostile shape, and it leaves the real transport in place: an
-endpoint that swallows packets, reached through the standard
-environment variables with the standard timeouts, so what is certified
-is the path a deployment runs rather than a stand-in for it.
+The case at the foot of this file is the same claim about the other
+hostile shape, and it leaves the real transport in place: a real
+endpoint that accepts the connection, takes the whole request and
+answers nothing, reached through the standard environment variables. An
+address that refuses costs an exporter nothing whatever it does, and an
+unroutable one is only slow if the network treats it as one, which is a
+property of the machine and not of this server; this one is held open on
+purpose, and the case asserts the request was still outstanding when the
+replies had finished.
 """
 
 import asyncio
+import contextlib
 import logging
+import socket
 import threading
 import time
 from collections.abc import Iterator
@@ -321,43 +327,110 @@ def until_quiet_is_restored(seconds: float = 10.0) -> bool:
     return False
 
 
-# --- the other hostile collector: one that is not there at all --------
-
-# An address in TEST-NET-1 (RFC 5737), reserved for documentation and
-# routed nowhere. A connection to it does not refuse, which is the whole
-# point: it hangs until something times it out, which is what a
-# collector behind a dropped firewall rule looks like from inside this
-# process.
-BLACKHOLE = "http://192.0.2.1:4318"
-
-# The SDK's own timeout variables, in seconds, set to the shortest value
-# that is still a timeout. Set through the STANDARD variables rather
-# than through an argument, because that is the whole of what an
-# operator has: this module never reads them, and the exporter's
-# constructor does.
-EXPORT_TIMEOUT_S = "1"
+# --- the other hostile collector: one that answers nothing ------------
 
 
-async def test_a_collector_that_is_not_there_costs_no_reply_anything(
+class Withholding:
+    """A real listening endpoint that accepts the connection, reads the
+    request and then says nothing at all until it is released.
+
+    The shape a reachable-but-silent collector has, and the one worth
+    building: an address that REFUSES costs an exporter nothing whatever
+    it does, and an unroutable address is only slow if the network
+    treats it as one, which is a property of the machine running the
+    test rather than of this server. This is neither. It answers the
+    TCP handshake, takes the whole request, and holds it, so what the
+    exporter is doing while the replies below run is waiting on a
+    response that is never coming.
+
+    It counts what it is holding, so the case can assert the request was
+    entered AND still outstanding rather than merely slow.
+    """
+
+    def __init__(self) -> None:
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.outstanding = 0
+        self._lock = threading.Lock()
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._socket.bind(("127.0.0.1", 0))
+        self._socket.listen(8)
+        self._held: list[socket.socket] = []
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    @property
+    def endpoint(self) -> str:
+        host, port = self._socket.getsockname()[:2]
+        return f"http://{host}:{port}"
+
+    def _serve(self) -> None:
+        while not self.release.is_set():
+            try:
+                connection, _ = self._socket.accept()
+            except OSError:
+                return
+            self._held.append(connection)
+            threading.Thread(target=self._hold, args=(connection,), daemon=True).start()
+
+    def _hold(self, connection: socket.socket) -> None:
+        """Read what was sent and answer nothing until released."""
+        try:
+            connection.settimeout(5.0)
+            connection.recv(65536)
+        except OSError:
+            return
+        with self._lock:
+            self.outstanding += 1
+        self.entered.set()
+        # Held until the case is over. Nothing is written back, which is
+        # the whole point: the exporter's request stays in flight.
+        self.release.wait(60.0)
+        with self._lock:
+            self.outstanding -= 1
+        with contextlib.suppress(OSError):
+            connection.close()
+
+    def close(self) -> None:
+        self.release.set()
+        with contextlib.suppress(OSError):
+            self._socket.close()
+        for connection in self._held:
+            with contextlib.suppress(OSError):
+                connection.close()
+        self._thread.join(timeout=5.0)
+
+
+# Long enough that the SDK does not time the held request out and retry
+# inside this case: what is being measured is a reply's latency while an
+# export is outstanding, and an export that gave up would end the state
+# the case is about.
+HELD_TIMEOUT_S = "60"
+
+
+async def test_a_collector_that_answers_nothing_costs_no_reply_anything(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The second hostile shape, with the real transport in place.
 
-    The wedged collector above replaces the exporter object, so what it
-    certifies is the queue. This one leaves the real OTLP exporter alone
-    and gives it an address that swallows packets, so what it certifies
-    is the whole path a deployment actually runs: a socket that will not
-    connect, a retry the SDK owns, and a background thread doing all of
-    it while replies go out.
+    The wedged case above replaces the exporter object, so what it
+    certifies is the queue between the reply and the transport. This one
+    leaves the real OTLP exporter alone and gives it a real endpoint
+    that accepts and never answers, so what it certifies is the whole
+    path a deployment runs: a socket, an HTTP request, a response that
+    never comes, and a background thread doing all of it while replies
+    go out.
 
-    The bound is fixed and named, against providers whose timings this
-    lane chose, exactly as it is for the wedged case: a reply that had
-    waited on a connection to a black hole would take the export timeout
-    and blow through it by an order of magnitude.
+    Three assertions, and the first two are what make the third worth
+    anything: the request was entered, it was STILL outstanding when the
+    replies had finished, and every one of those replies was inside the
+    fixed bound this lane's scripted providers make nameable.
     """
-    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", BLACKHOLE)
-    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TIMEOUT", EXPORT_TIMEOUT_S)
-    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_TIMEOUT", EXPORT_TIMEOUT_S)
+    collector = Withholding()
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.endpoint)
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TIMEOUT", HELD_TIMEOUT_S)
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_TIMEOUT", HELD_TIMEOUT_S)
     telemetry = build_telemetry(
         TelemetryConfig(enabled=True),
         queue_size=QUEUE,
@@ -369,23 +442,30 @@ async def test_a_collector_that_is_not_there_costs_no_reply_anything(
 
     slowest = 0.0
     try:
+        # One turn first, because a span reaches the transport when it
+        # ENDS: until a reply has finished there is nothing to export
+        # and nothing for the collector to hold.
+        start_reply(session, UTTERANCE)
+        await wait_for_reply(session)
+        assert collector.entered.wait(15.0), "the exporter never reached the collector"
+
         for _ in range(TURNS):
             began = time.monotonic()
             start_reply(session, UTTERANCE)
             await wait_for_reply(session)
             slowest = max(slowest, time.monotonic() - began)
 
+        assert collector.outstanding >= 1, (
+            "the export was not still outstanding, so this measured a healthy path"
+        )
         assert slowest < REPLY_BOUND_S, (
-            f"a reply took {slowest:.2f} s against an endpoint nothing answers"
+            f"a reply took {slowest:.2f} s with an export outstanding"
         )
     finally:
-        # Bounded like every other teardown here: what a timeout costs is
-        # spans nobody was ever going to receive. Then waited out off
-        # the loop, because the bound stops the LIFESPAN waiting and not
-        # the work: the SDK's silence is a process-wide lease given back
-        # when the release genuinely ends, and this lane asserts the
-        # count is zero at the end of every case. `release` after
-        # `shutdown` is the second door on one exactly-once completion,
-        # so what this waits on is the worker already running.
+        # Released first, so the exporter's own thread can finish rather
+        # than being joined against a request nothing will answer, and
+        # then waited out: the SDK's silence is a process-wide lease and
+        # this lane asserts the count is zero at the end of every case.
+        collector.close()
         await telemetry.shutdown()
         await asyncio.to_thread(telemetry.release)
