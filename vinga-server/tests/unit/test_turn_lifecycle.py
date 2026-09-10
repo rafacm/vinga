@@ -42,6 +42,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from tests.support.configs import POET_MAC, base_config, config_with_agent
 from tests.support.providers import (
+    GatedAsr,
     ScriptedEndpointer,
     ScriptedLlm,
     StallingLlm,
@@ -103,6 +104,24 @@ def watching(session: Any) -> Watching:
 
 def outcomes(tap: Watching) -> list[str]:
     return [str(one.payload["outcome"]) for one in tap.of("reply_finished")]
+
+
+# What a turn is made of, as far as the sequence assertions below are
+# concerned: the pair that bounds it, the four ways its ASR stage can
+# end, and the one gate decision that happens between two turns. Named
+# once, because a sequence assertion is only as exact as the filter in
+# front of it.
+_LIFECYCLE = frozenset(
+    {
+        "turn_started",
+        "heard",
+        "nothing_heard",
+        "transcription_abandoned",
+        "provider_failed",
+        "reply_finished",
+        "barge_in_merged",
+    }
+)
 
 
 class ScriptedEars:
@@ -259,16 +278,13 @@ async def test_consecutive_silent_and_failed_turns_each_get_their_own_pair() -> 
     start_reply(session, UTTERANCE)
     await wait_for_reply(session)
 
-    lifecycle = [
-        name
-        for name in tap.names()
-        if name in {"turn_started", "nothing_heard", "reply_finished", "session_closed"}
-    ]
+    lifecycle = [name for name in tap.names() if name in _LIFECYCLE]
     assert lifecycle == [
         "turn_started",
         "nothing_heard",
         "reply_finished",
         "turn_started",
+        "provider_failed",
         "reply_finished",
     ]
     assert outcomes(tap) == ["nothing_heard", "failed"]
@@ -382,6 +398,53 @@ async def test_a_rejected_barge_in_candidate_starts_no_turn(
     assert tap.of("reply_finished") == [], what
     assert reply_in_flight(session) is before, what
     await session.runtime.drain(5.0)
+
+
+async def test_a_mid_asr_merge_leaves_both_turns_with_an_asr_outcome() -> None:
+    """The shape the review round found, driven end to end.
+
+    A barge-in landing while the reply is still inside its own
+    transcription is the one path that cancels an ASR call rather than
+    letting it answer: the head of the user's sentence is reconstituted
+    in front of the continuation and one reply answers the whole thing.
+    The cancelled call is not a provider failure, and `_watching`
+    catches `Exception`, so nothing used to say anything about that
+    turn's ASR stage at all: it opened with `turn_started` and closed
+    with `reply_finished` and the stage between them was invisible.
+
+    Both turns are asserted whole, in order, because what is being
+    claimed is a sequence rather than the presence of one record.
+    """
+    ears = GatedAsr()
+    session, _socket = realtime_session(config_with_agent(), cast(Any, ears))
+    tap = watching(session)
+    turn_taking(session).endpointer = ScriptedEndpointer(speech_ms=600)
+    plant_utterance(session, speech_pcm(320))
+    await end_utterance(session)
+    # Inside `transcribe`, which is what the merge needs: the gate reads
+    # the held audio as the head of the sentence still being spoken.
+    await asyncio.sleep(0.05)
+    plant_utterance(session, speech_pcm(480))
+    await end_utterance(session)
+    ears.release.set()
+    await session.runtime.drain(5.0)
+
+    lifecycle = [name for name in tap.names() if name in _LIFECYCLE]
+    assert lifecycle == [
+        "turn_started",
+        "barge_in_merged",
+        "transcription_abandoned",
+        "reply_finished",
+        "turn_started",
+        "heard",
+        "reply_finished",
+    ]
+    assert outcomes(tap) == ["barged_in", "completed"]
+    # And what the abandoned call cost, which is a bound on what it
+    # would have cost rather than a latency it ever reported.
+    (abandoned,) = tap.of("transcription_abandoned")
+    assert abandoned.payload["asr_ms"] >= 0
+    assert abandoned.payload["duration_s"] > 0
 
 
 # --- nothing in the reply's tail can suppress the record ---------------

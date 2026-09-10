@@ -2436,7 +2436,8 @@ This index is the other half: what exists, and when it fires.
 | `turn_started` | a reply attempt begins, stamped with the instant the user stopped speaking; `barge_in` says whether answering it interrupted a reply in flight |
 | `reply_finished` | a reply ends, however it ended: exactly one per `turn_started`, with an outcome latched where the end was decided |
 | `heard` | an utterance is transcribed. No transcript: what was said is the conversation store's |
-| `nothing_heard` | an utterance is transcribed to nothing at all, which is the ASR outcome beside `heard` and `provider_failed`; no text field, by type |
+| `nothing_heard` | an utterance is transcribed to nothing at all, which is one of the four ways an utterance's ASR stage ends, beside `heard`, `provider_failed` and `transcription_abandoned`; no text field, by type |
+| `transcription_abandoned` | a transcription was given up on before it answered, because the reply it belonged to was cancelled with the call still running; deliberately not `provider_failed`, since nothing failed |
 | `sentence_synthesized` | one sentence of a reply has finished streaming out of the voice: the provider's latency to its first chunk, and the stream's whole lifetime, which includes playback backpressure. At DEBUG |
 | `replied` | a reply finishes |
 | `agent_said` | one agent's part of a reply |

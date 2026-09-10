@@ -115,10 +115,12 @@ def test_every_driver_names_a_path_of_its_own() -> None:
     the turn's own lifecycle (#66): a turn starting, a reply finishing
     with its latched outcome, an utterance transcribed to nothing, a
     sentence's synthesis stream ending, a reply's last frame going out,
-    and the per-second dropped-frame aggregate the emitter now owns."""
+    and the per-second dropped-frame aggregate the emitter now owns, and
+    one hundred once the review round found that a reply cut short
+    inside its own ASR said nothing about the ASR at all."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 99
+    assert len(set(claimed)) == len(claimed) == 100
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -553,6 +555,20 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     "vinga_server.runtime.pipeline:PipelineRuntime._reply #4": (
         (
             "NothingHeard",
+            (
+                "agent",
+                "asr_ms",
+                "conversation",
+                "device",
+                "duration_s",
+                "event",
+                "session",
+            ),
+        ),
+    ),
+    "vinga_server.runtime.pipeline:PipelineRuntime._reply #5": (
+        (
+            "TranscriptionAbandoned",
             (
                 "agent",
                 "asr_ms",

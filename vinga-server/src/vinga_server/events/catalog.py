@@ -1378,6 +1378,48 @@ class NothingHeard(Variant):
 
 
 @dataclass(frozen=True)
+class TranscriptionAbandoned(Variant):
+    """A transcription was given up on before it answered.
+
+    The fourth way an utterance's ASR stage can end, and the only one
+    that is not about the engine: the reply was cancelled with the call
+    still running, which is what a mid-ASR merge does by construction
+    and what a manual stop, a device abort or a closing session can do
+    by timing. Its own event rather than `provider_failed`, because
+    nothing failed: the answer was no longer wanted.
+
+    Without it a turn cut short inside its own ASR ends with no ASR
+    outcome at all, which is the one shape the `turn_started` pair was
+    supposed to make impossible.
+    """
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "session %s: transcription of %.2f s abandoned after %d ms"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "duration_s", "asr_ms")
+
+    agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
+    duration_s: Real = value(note="How long the utterance nobody transcribed was.")
+    asr_ms: Whole = value(
+        note=(
+            "How long the call had been running when it was given up on, "
+            "which is a bound on what it would have cost rather than what "
+            "it did."
+        )
+    )
+
+
+@dataclass(frozen=True)
 class SentenceSynthesized(Variant):
     """One sentence of a reply has finished streaming out of the voice.
 
@@ -2355,11 +2397,24 @@ HEARD = declare(
 NOTHING_HEARD = declare(
     "nothing_heard",
     note=(
-        "An utterance is transcribed to nothing at all, which is the "
-        "ASR outcome beside `heard` and `provider_failed`. No text "
+        "An utterance is transcribed to nothing at all, which is one of "
+        "the four ways an utterance's ASR stage ends, beside `heard`, "
+        "`provider_failed` and `transcription_abandoned`. No text "
         "field, by type."
     ),
     variants=(NothingHeard,),
+)
+
+TRANSCRIPTION_ABANDONED = declare(
+    "transcription_abandoned",
+    note=(
+        "A transcription was given up on before it answered, because "
+        "the reply it belonged to was cancelled with the call still "
+        "running. The one ASR outcome that is not about the engine, and "
+        "deliberately not `provider_failed`: nothing failed, the answer "
+        "was no longer wanted."
+    ),
+    variants=(TranscriptionAbandoned,),
 )
 
 SENTENCE_SYNTHESIZED = declare(

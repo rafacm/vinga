@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 72 events in 101 variants. What
+This document is that surface written down: 73 events in 102 variants. What
 was said in a conversation is in the conversation store instead, keyed by the
 same `session` ([its reference](conversations-schema.md)).
 
@@ -220,6 +220,7 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `reply_finished` | `vinga_server.session` | INFO | 1 |
 | `heard` | `vinga_server.session` | INFO | 1 |
 | `nothing_heard` | `vinga_server.session` | INFO | 1 |
+| `transcription_abandoned` | `vinga_server.session` | INFO | 1 |
 | `sentence_synthesized` | `vinga_server.session` | DEBUG | 1 |
 | `replied` | `vinga_server.session` | INFO | 1 |
 | `agent_said` | `vinga_server.session` | INFO | 1 |
@@ -727,8 +728,9 @@ session %s: heard %.2f s of speech
 
 ### `nothing_heard`
 
-An utterance is transcribed to nothing at all, which is the ASR outcome beside
-`heard` and `provider_failed`. No text field, by type.
+An utterance is transcribed to nothing at all, which is one of the four ways
+an utterance's ASR stage ends, beside `heard`, `provider_failed` and
+`transcription_abandoned`. No text field, by type.
 
 #### Variant 1: `vinga_server.session` at INFO
 
@@ -750,6 +752,35 @@ session %s: nothing transcribed from %.2f s of speech
 | `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `duration_s` | `FLOAT` | yes | no |  | How long the utterance that produced nothing was. |
 | `asr_ms` | `INT` | no | no |  | What the transcription that answered nothing cost. |
+
+### `transcription_abandoned`
+
+A transcription was given up on before it answered, because the reply it
+belonged to was cancelled with the call still running. The one ASR outcome
+that is not about the engine, and deliberately not `provider_failed`: nothing
+failed, the answer was no longer wanted.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: transcription of %.2f s abandoned after %d ms
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `duration_s` (`FLOAT`) | no |  |  |
+| 3 | `asr_ms` (`INT`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
+| `duration_s` | `FLOAT` | yes | no |  | How long the utterance nobody transcribed was. |
+| `asr_ms` | `INT` | yes | no |  | How long the call had been running when it was given up on, which is a bound on what it would have cost rather than what it did. |
 
 ### `sentence_synthesized`
 
