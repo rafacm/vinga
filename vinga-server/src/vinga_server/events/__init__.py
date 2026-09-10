@@ -554,6 +554,17 @@ class SessionEvents:
         still events."""
         self._taps.append(tap)
 
+    def taps(self) -> tuple[EventTap, ...]:
+        """Which consumers this session is feeding right now, in
+        attachment order.
+
+        Kept for the reason the hub keeps its emitters: "what is
+        consuming this" is otherwise a question only the code that did
+        the attaching can answer, and the claim a telemetry-less server
+        makes is exactly that this answers empty.
+        """
+        return tuple(self._taps)
+
     def detach(self, tap: EventTap) -> None:
         """Remove a consumer, leaving the events flowing. Detaching one
         that is not attached is not an error: a caller unwinding does
@@ -845,6 +856,12 @@ def detach_server_tap(tap: EventTap) -> None:
     error, for the reason `SessionEvents.detach` gives."""
     with contextlib.suppress(ValueError):
         _hub.taps.remove(tap)
+
+
+def server_taps() -> tuple[EventTap, ...]:
+    """Every consumer of server-scoped events, in attachment order. The
+    hub's half of `SessionEvents.taps`, and the same question."""
+    return tuple(_hub.taps)
 
 
 def server_emitters() -> tuple[ServerEvents, ...]:
