@@ -491,10 +491,18 @@ refusal and exits 1, which is what a deployment script reads.
 
 It is a server-host command, like `ota-url` and for the same reason: the
 file half it reads is the one that names the database, and the database
-is what it opens. Nothing is served, nothing is built and nothing is
-written; the store is read, and a store behind on migrations is migrated
-exactly as a boot would migrate it, because the answer being asked for
-is what a boot would meet.
+is what it opens. Nothing is served and nothing is built: no
+application, no provider engine, no MCP connection, no port.
+
+**It is not read-only**, and that is worth knowing before running it
+against a deployment. It writes no domain configuration, so no entry,
+binding or stored credential changes; but a boot's read begins by
+migrating the store, and this is a boot's read, so a database behind on
+migrations is brought to the current schema exactly as starting a server
+would bring it. That is the point rather than a side effect: a check
+that read an unmigrated store would be answering about a store no server
+will ever see. On a deployment mid-upgrade, running it is the same act
+as starting the new image.
 
 ## When the server will not start
 
