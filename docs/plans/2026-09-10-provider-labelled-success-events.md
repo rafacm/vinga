@@ -313,7 +313,7 @@ TTS event labelled from ASR identity. So the milestone additionally requires:
   so the emit sites stop knowing that a provider becomes four values; adds no
   seam and no module.
 - [x] **[M2: the spans](2026-09-10-provider-labelled-success-events-implementation.md#m2-the-spans)**
-  (PR TBD). `ASR_ATTRIBUTES` and `TTS_ATTRIBUTES` gain the four
+  (PR [#460](https://github.com/rafacm/vinga/pull/460)). `ASR_ATTRIBUTES` and `TTS_ATTRIBUTES` gain the four
   keys, and both stage folds pass `states` conditionally so a span never mixes
   call-time identity with the stage's open-time context, under the settled
   correspondence: `type` as `gen_ai.provider.name`,

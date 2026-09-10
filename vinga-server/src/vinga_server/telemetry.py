@@ -384,21 +384,34 @@ def _provider_attributes(
         for fact in PROVIDER_FACTS:
             held = entry.get(fact)
             if isinstance(held, str):
-                attributes[f"{PROVIDER_PREFIX}.{stage}.{fact}"] = held
+                attributes[_provider_attribute(stage, fact)] = held
     return attributes
+
+
+def _provider_attribute(stage: str, fact: str) -> str:
+    """The attribute one of a stage's provider facts is spelled under.
+
+    The only place this shape is written. Both readers go through it:
+    the retained context above, which says what the session OPENED
+    against, and `_entry_name` below, which a stage span's own table
+    uses to say what the call that actually ran used. An earlier draft
+    had the context build the name itself and `_entry_name` spell it a
+    second time, which made the single-source claim false where it
+    mattered, since changing one would have left the other emitting the
+    old spelling.
+    """
+    return f"{PROVIDER_PREFIX}.{stage}.{fact}"
 
 
 def _entry_name(stage: str) -> str:
     """The attribute one stage's configured entry name is spelled under.
 
-    One home for the spelling, because it is read from two sources: the
-    retained context above says what the session OPENED against, and a
-    stage span's own table below says what the call that ran actually
-    used. A second spelling would have been a second home for one fact,
-    and a backend filtering on it would have had to know which of the
-    two it was looking at.
+    Read from two sources: the retained context says what the session
+    OPENED against, and a stage span's own table says what the call that
+    ran actually used. One fact keeps one attribute name across both, so
+    a backend filtering on it never has to know which it is looking at.
     """
-    return f"{PROVIDER_PREFIX}.{stage}.name"
+    return _provider_attribute(stage, "name")
 
 
 def _speaks_for(stage: str, spoken: dict[str, Any]) -> str | None:

@@ -134,7 +134,7 @@ atomicity rule with the three that already carry the quartet.
 
 ## M2: the spans
 
-PR TBD.
+PR [#460](https://github.com/rafacm/vinga/pull/460).
 
 ### What landed
 
