@@ -1469,7 +1469,7 @@ class SessionSummary(BaseModel):
         )
     )
     duration_s: float | None = Field(
-        description="How long it lasted, in seconds. A measured number: null under metrics-off."
+        description="How long it lasted, in seconds. A measured number: null under telemetry-off."
     )
     close_reason: CloseReason | str | None = Field(
         description=(
@@ -1530,7 +1530,7 @@ class SessionDetail(BaseModel):
     started_at: str = Field(description="When the session opened, as an ISO-8601 instant in UTC.")
     closed_at: str | None = Field(description="When it closed, in the same form, or null.")
     duration_s: float | None = Field(
-        description="How long it lasted, in seconds. Null under metrics-off."
+        description="How long it lasted, in seconds. Null under telemetry-off."
     )
     close_reason: CloseReason | str | None = Field(
         description=(
@@ -1549,9 +1549,9 @@ class SessionDetail(BaseModel):
             "credentials."
         )
     )
-    metrics: bool = Field(
+    telemetry: bool = Field(
         description=(
-            "Whether metrics storage was on for this session, so a null number is "
+            "Whether telemetry storage was on for this session, so a null number is "
             "distinguishable from a number that was never stored."
         )
     )
@@ -1572,7 +1572,7 @@ class SessionDetail(BaseModel):
     events: int = Field(
         description=(
             "How many events rows it holds: the decision track, `session_open` through "
-            "`session_closed`. Zero under metrics-off, where no events row lands. They "
+            "`session_closed`. Zero under telemetry-off, where no events row lands. They "
             "are deliberately not served over REST; the database is that surface."
         )
     )
@@ -1609,7 +1609,7 @@ class Erasure(BaseModel):
     events: int = Field(
         description=(
             "How many events rows those sessions held. Zero for a session recorded "
-            "under metrics-off, which wrote none."
+            "under telemetry-off, which wrote none."
         )
     )
     conversations: int = Field(
@@ -1717,7 +1717,7 @@ class ToolInvocation(BaseModel):
     duration_ms: int | None = Field(
         description=(
             "How long the call took, in milliseconds. Null where nothing ran, as for a "
-            "refused or a successful handover, and null under metrics-off."
+            "refused or a successful handover, and null under telemetry-off."
         )
     )
 
@@ -1751,13 +1751,13 @@ class TurnLeg(BaseModel):
     input_tokens: int | None = Field(
         description=(
             "Input tokens this agent spent on the turn. Null when the provider "
-            "reported no usage, and under metrics-off."
+            "reported no usage, and under telemetry-off."
         )
     )
     output_tokens: int | None = Field(
         description=(
             "Output tokens this agent spent on the turn. Null when the provider "
-            "reported no usage, and under metrics-off."
+            "reported no usage, and under telemetry-off."
         )
     )
 
@@ -1800,7 +1800,7 @@ class SessionTurn(BaseModel):
         description="What was said to the device, as transcribed. Null under text-off."
     )
     heard_duration_s: float | None = Field(
-        description="How long the utterance lasted, in seconds. Null under metrics-off."
+        description="How long the utterance lasted, in seconds. Null under telemetry-off."
     )
     language: str | None = Field(
         description=(
@@ -1809,7 +1809,7 @@ class SessionTurn(BaseModel):
         )
     )
     language_confidence: float | None = Field(
-        description="How sure the recognizer was of that language. Null under metrics-off."
+        description="How sure the recognizer was of that language. Null under telemetry-off."
     )
     reply: str | None = Field(
         description=(
@@ -1827,40 +1827,40 @@ class SessionTurn(BaseModel):
     asr_ms: int | None = Field(
         description=(
             "Transcription elapsed, in milliseconds. Null where none was measured this "
-            "turn, and under metrics-off."
+            "turn, and under telemetry-off."
         )
     )
     first_token_ms: int | None = Field(
-        description="Request to the reply's first token, in milliseconds. Null under metrics-off."
+        description="Request to the reply's first token, in milliseconds. Null under telemetry-off."
     )
     llm_ms: int | None = Field(
         description=(
             "The reply's LLM round durations summed, in milliseconds. Null under "
-            "metrics-off."
+            "telemetry-off."
         )
     )
     tts_first_audio_ms: int | None = Field(
         description=(
             "The reply's first synthesis request to its first audio bytes, in "
             "milliseconds, measured at the provider boundary and deliberately not at "
-            "the device. Null when the reply spoke nothing, and under metrics-off."
+            "the device. Null when the reply spoke nothing, and under telemetry-off."
         )
     )
     rounds: int | None = Field(
-        description="How many LLM rounds the reply took. Null under metrics-off."
+        description="How many LLM rounds the reply took. Null under telemetry-off."
     )
     input_tokens: int | None = Field(
         description=(
             "Input tokens summed across the turn's rounds; OTel's "
             "`gen_ai.usage.input_tokens`. Null when the provider reported no usage, "
-            "and under metrics-off."
+            "and under telemetry-off."
         )
     )
     output_tokens: int | None = Field(
         description=(
             "Output tokens summed across the turn's rounds; OTel's "
             "`gen_ai.usage.output_tokens`. Null when the provider reported no usage, "
-            "and under metrics-off."
+            "and under telemetry-off."
         )
     )
     tool_calls: int = Field(
@@ -1943,7 +1943,7 @@ class ConversationSummary(BaseModel):
     incomplete: bool = Field(
         description=(
             "Whether a write this thread needed was lost. Product state rather than "
-            "telemetry, and deliberately outside the metrics switch that zeroes "
+            "telemetry, and deliberately outside the telemetry switch that zeroes "
             "`dropped` on a session: a thread with a hole in it is a thread with a "
             "hole in it however the switches are set."
         )

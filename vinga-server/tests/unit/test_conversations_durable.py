@@ -17,7 +17,7 @@ Three properties, and each is provable only here:
   same marker are in the database when it does.
 - **A dropped batch leaves a mark on the thread rather than only in a
   counter.** `conversations.incomplete` is product state, outside the
-  metrics switch, latched in memory until a transaction lands it, set
+  telemetry switch, latched in memory until a transaction lands it, set
   from the first byte of a row that materializes after the loss, and
   true by the time the next turn of that thread is acknowledged.
 
@@ -424,19 +424,19 @@ def test_the_mark_is_true_the_moment_the_next_turn_is_acknowledged(stores) -> No
     assert engine.begins == 3
 
 
-@pytest.mark.parametrize("metrics", [True, False])
-def test_the_flag_is_written_whatever_the_metrics_switch_says(
-    stores, metrics: bool
+@pytest.mark.parametrize("telemetry", [True, False])
+def test_the_flag_is_written_whatever_the_telemetry_switch_says(
+    stores, telemetry: bool
 ) -> None:
     """Product state rather than telemetry, and the difference is
-    exactly this: `sessions.dropped` is zeroed under metrics-off and a
+    exactly this: `sessions.dropped` is zeroed under telemetry-off and a
     thread with a hole in it is true either way. A deployment that
     stores no measurements still has to be told its record has gaps
     before it resumes from one."""
     store, _ = recording(
         stores,
         lambda count: RuntimeError("no") if count == 2 else None,
-        metrics=metrics,
+        telemetry=telemetry,
     )
 
     store.record_turn("alpha", a_turn())
@@ -448,7 +448,7 @@ def test_the_flag_is_written_whatever_the_metrics_switch_says(
     (thread,) = rows("conversations")
     assert thread["incomplete"] is True
     (session,) = rows("sessions")
-    assert session["dropped"] == (1 if metrics else 0)
+    assert session["dropped"] == (1 if telemetry else 0)
 
 
 def test_a_lost_first_turn_leaves_no_thread_and_no_flag(stores) -> None:

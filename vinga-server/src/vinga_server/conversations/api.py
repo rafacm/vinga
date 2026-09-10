@@ -570,6 +570,9 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         session that may still be running.
         """
         row = _session(reader, session)
+        # The stored column kept its original name when the switch
+        # became `telemetry` (#437); the API speaks the switch's name.
+        row["telemetry"] = row.pop("metrics")
         return row | {
             "turns": _count(reader, turns, session),
             "events": _count(reader, events, session),

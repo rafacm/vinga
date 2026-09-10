@@ -59,7 +59,7 @@ arbitrary:
 
 Storage policy lives here rather than in the pipeline: the runtime hands
 over the full record and the writer nulls the content columns when text
-storage is off and the numeric columns when metrics storage is off,
+storage is off and the numeric columns when telemetry storage is off,
 skipping the events rows entirely in the second case. Nothing that
 leaves this module carries row content, SQL or exception text: the
 failure reports are built in the `except` arm out of the exception's
@@ -789,7 +789,7 @@ class ConversationStore:
     def __init__(
         self,
         settings: DatabaseConfig,
-        metrics: bool = True,
+        telemetry: bool = True,
         text: bool = True,
         retention_days: int = RETENTION_DAYS_DEFAULT,
         queue: "queuing.SimpleQueue[Any] | None" = None,
@@ -799,7 +799,7 @@ class ConversationStore:
         purge_memory: "Callable[[Any, Sequence[str]], Any] | None" = None,
     ) -> None:
         self.settings = settings
-        self.metrics = metrics
+        self.telemetry = telemetry
         self.text = text
         self.retention_days = retention_days
         # How this writer's retention takes the memory of the threads it
@@ -1142,9 +1142,9 @@ class ConversationStore:
         """Whether an events row would land. One rule, consulted twice:
         the writer applies it, because storage policy belongs with
         storage, and the producer consults the same method so that a
-        deployment with metrics off pays no queue for records that were
-        never going to be written and reports no drops of them."""
-        return self.metrics
+        deployment with telemetry off pays no queue for records that
+        were never going to be written and reports no drops of them."""
+        return self.telemetry
 
     def _offset(self, session_id: str, at: float) -> int:
         """An event's milliseconds from session open, the capture's
@@ -1439,7 +1439,7 @@ class ConversationStore:
         """The lossy half, in a transaction of its own. Answers how many
         records it lost, which is none unless the transaction failed.
 
-        No events rows at all under metrics-off, rather than rows with
+        No events rows at all under telemetry-off, rather than rows with
         their payload emptied: the events table is the structured
         telemetry the switch turns off. A failure here drops and counts
         exactly what it dropped, and never touches a turn. The count is
@@ -1696,8 +1696,8 @@ class ConversationStore:
         pruned on `started_at` like any other."""
         durable = [*batch.turns, *batch.milestones]
         self._lost[session_id] = self._lost.get(session_id, 0) + len(durable)
-        # Product state, and deliberately not under the metrics switch:
-        # `sessions.dropped` above is zeroed under metrics-off and a
+        # Product state, and deliberately not under the telemetry switch:
+        # `sessions.dropped` above is zeroed under telemetry-off and a
         # thread with a hole in it is true either way.
         self._incomplete.update(item.record.conversation for item in durable)
         events.emit(lambda: WriteFailed(failure=ClassName.of(exc)))
@@ -1728,7 +1728,9 @@ class ConversationStore:
             "server_version": server.get("version"),
             "revision": server.get("revision"),
             "providers": manifest.get("providers"),
-            "metrics": self.metrics,
+            # The column keeps its original name; the switch in front of
+            # it is `telemetry` everywhere an operator meets it (#437).
+            "metrics": self.telemetry,
             "text": self.text,
             "dropped": 0,
         }
@@ -1737,9 +1739,9 @@ class ConversationStore:
         lost = closing.dropped + self._lost.get(closing.session, 0)
         return {
             "closed_at": self._stamp(),
-            "duration_s": closing.duration_s if self.metrics else None,
+            "duration_s": closing.duration_s if self.telemetry else None,
             "close_reason": closing.reason,
-            "dropped": lost if self.metrics else 0,
+            "dropped": lost if self.telemetry else 0,
         }
 
     def _turn_row(
@@ -1764,24 +1766,24 @@ class ConversationStore:
             "t_ms": item.t_ms,
             "agent": agent,
             "heard": record.heard if self.text else None,
-            "heard_duration_s": record.heard_duration_s if self.metrics else None,
+            "heard_duration_s": record.heard_duration_s if self.telemetry else None,
             "language": record.language,
             "language_confidence": (
-                record.language_confidence if self.metrics else None
+                record.language_confidence if self.telemetry else None
             ),
             "reply": record.reply if self.text else None,
             "legs": (
                 [self._leg(leg, moved) for leg in record.legs] if record.legs else None
             ),
-            "asr_ms": record.asr_ms if self.metrics else None,
-            "first_token_ms": record.first_token_ms if self.metrics else None,
-            "llm_ms": record.llm_ms if self.metrics else None,
+            "asr_ms": record.asr_ms if self.telemetry else None,
+            "first_token_ms": record.first_token_ms if self.telemetry else None,
+            "llm_ms": record.llm_ms if self.telemetry else None,
             "tts_first_audio_ms": (
-                record.tts_first_audio_ms if self.metrics else None
+                record.tts_first_audio_ms if self.telemetry else None
             ),
-            "rounds": record.rounds if self.metrics else None,
-            "input_tokens": record.input_tokens if self.metrics else None,
-            "output_tokens": record.output_tokens if self.metrics else None,
+            "rounds": record.rounds if self.telemetry else None,
+            "input_tokens": record.input_tokens if self.telemetry else None,
+            "output_tokens": record.output_tokens if self.telemetry else None,
             "tool_calls": len(record.tools),
         }
 
@@ -1798,8 +1800,8 @@ class ConversationStore:
         return {
             "agent": moved.get(leg.agent, leg.agent),
             "text": leg.text if self.text else None,
-            "input_tokens": leg.input_tokens if self.metrics else None,
-            "output_tokens": leg.output_tokens if self.metrics else None,
+            "input_tokens": leg.input_tokens if self.telemetry else None,
+            "output_tokens": leg.output_tokens if self.telemetry else None,
         }
 
     def _tool_row(
@@ -1822,7 +1824,7 @@ class ConversationStore:
             "arguments": call.arguments if self.text and not call.malformed else None,
             "result": call.result if self.text else None,
             "is_error": call.is_error,
-            "duration_ms": call.duration_ms if self.metrics else None,
+            "duration_ms": call.duration_ms if self.telemetry else None,
         }
 
     def _event_row(self, record: Event) -> dict[str, Any]:

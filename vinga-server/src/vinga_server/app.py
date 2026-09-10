@@ -336,7 +336,7 @@ async def _build_composition(
         if conversations_section is None or not conversations_section.enabled
         else ConversationStore(
             database,
-            metrics=conversations_section.metrics,
+            telemetry=conversations_section.telemetry,
             text=conversations_section.text,
             retention_days=conversations_section.retention_days,
             # How retention takes the memory of the threads it prunes,

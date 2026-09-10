@@ -479,10 +479,10 @@ async def test_a_turn_is_visible_before_its_events_are(tmp_path: Path) -> None:
 # The switches, on the file
 
 
-@pytest.mark.parametrize("metrics", [True, False])
+@pytest.mark.parametrize("telemetry", [True, False])
 @pytest.mark.parametrize("text_storage", [True, False])
 def test_the_switch_combinations_decide_what_a_row_keeps(
-    tmp_path: Path, metrics: bool, text_storage: bool
+    tmp_path: Path, telemetry: bool, text_storage: bool
 ) -> None:
     # The sentinel is planted as the agent's prompt and spoken back by
     # the mock, so what carries it into the record is conversation text
@@ -495,7 +495,7 @@ def test_the_switch_combinations_decide_what_a_row_keeps(
         asr_text="hello",
         llm={"type": "mock", "reply": "You said {system}."},
         prompt=SENTINEL,
-        metrics=metrics,
+        telemetry=telemetry,
         text=text_storage,
     )
     with TestClient(create_app(config)) as client:
@@ -510,7 +510,7 @@ def test_the_switch_combinations_decide_what_a_row_keeps(
     # The spine lands in every enabled configuration: retention, purging
     # and every read key on it.
     assert session["session"] and session["started_at"] and session["closed_at"]
-    assert (session["metrics"], session["text"]) == (int(metrics), int(text_storage))
+    assert (session["metrics"], session["text"]) == (int(telemetry), int(text_storage))
     # The structural half of a turn survives both switches, being neither
     # a measured number nor conversation text.
     assert turn["agent"] == "assistant"
@@ -518,10 +518,10 @@ def test_the_switch_combinations_decide_what_a_row_keeps(
 
     assert (turn["heard"] is not None) is text_storage
     assert (turn["reply"] is not None) is text_storage
-    assert (turn["rounds"] is not None) is metrics
-    assert (turn["llm_ms"] is not None) is metrics
-    assert (session["duration_s"] is not None) is metrics
-    assert bool(events) is metrics
+    assert (turn["rounds"] is not None) is telemetry
+    assert (turn["llm_ms"] is not None) is telemetry
+    assert (session["duration_s"] is not None) is telemetry
+    assert bool(events) is telemetry
 
     # The switch on the file rather than in the query planner: what was
     # said reaches no byte of the database when text storage is off.
