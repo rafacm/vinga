@@ -806,11 +806,11 @@ def test_a_stage_event_with_no_turn_open_lands_on_the_session() -> None:
 
 
 def test_each_barge_in_suppression_is_its_own_span_event_with_its_reason() -> None:
-    """The acceptance criterion, met three to one.
+    """The acceptance criterion, met one span-event name per variant.
 
-    The catalog holds three suppression variants, each with the fixed
-    reason its own decision site chose, and the fold names a span event
-    after the variant that was emitted rather than flattening the three
+    The catalog holds one suppression variant per reason, each with the
+    fixed reason its own decision site chose, and the fold names a span
+    event after the variant that was emitted rather than flattening them
     into one name with a reason argument. So the closed reason set stays
     exactly as the decision sites wrote it, and it arrives on the turn
     that was being spoken over.
@@ -819,7 +819,7 @@ def test_each_barge_in_suppression_is_its_own_span_event_with_its_reason() -> No
     telemetry, memory = exporting()
     events = a_turn(clock, telemetry)
 
-    for which in ("floor", "refractory", "no_transcript"):
+    for which in ("floor", "no_transcript"):
         clock.tick(0.2)
         suppress_barge_in(events, which)
     finish_reply(events)
@@ -829,11 +829,9 @@ def test_each_barge_in_suppression_is_its_own_span_event_with_its_reason() -> No
     assert [event.name for event in turn.events] == [
         "barge_in_suppressed",
         "barge_in_suppressed",
-        "barge_in_suppressed",
     ]
     assert [event.attributes["reason"] for event in turn.events] == [
         "min_speech",
-        "refractory",
         "no_transcript",
     ]
     assert turn.events[0].attributes["speech_ms"] == 120
@@ -1091,9 +1089,7 @@ class FailingConfirmation:
         raise ConnectionRefusedError("no route")
 
 
-CUT_IN = config_with_agent(
-    llm_reply="Answering {text}.", server={"barge_in_refractory_ms": 0}
-)
+CUT_IN = config_with_agent(llm_reply="Answering {text}.")
 
 
 async def test_a_rejected_confirmation_leaves_the_turn_with_one_asr_span() -> None:

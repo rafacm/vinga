@@ -2,8 +2,7 @@
 
 An utterance the endpointer ends while a reply is in flight may cancel
 that reply only on evidence of user speech: enough classified speech,
-outside the playback-onset refractory window, and confirmed by a
-transcript when nothing faster decides it. A reply still inside ASR is
+and a transcript confirming it when nothing faster decides it. A reply still inside ASR is
 holding the head of the user's own sentence, so there the barge-in
 merges instead of destroying it. A manual `listen stop` mid-reply is a
 deliberate act and keeps the unconditional cancel.
@@ -100,19 +99,18 @@ def test_a_short_blip_does_not_interrupt_the_reply(
     assert events(caplog, "barge_in") == []
 
 
-def test_the_refractory_window_swallows_the_playback_onset(
+def test_speech_at_the_playback_onset_is_confirmed_and_answered(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    # Gate 3: right after the reply starts speaking, what the mic hears
-    # is as likely the onset transient through the device's echo
-    # cancellation as the user, so even sustained speech is dropped.
-    # The window is raised far past the test's timing so landing inside
-    # it is certain.
-    config = config_with_agent(
-        asr_text="{ms}",
-        llm_reply=SLOW_REPLY,
-        server={"barge_in_refractory_ms": 100_000},
-    )
+    # The rung that is no longer there (#80). A refractory window used
+    # to drop an interruption arriving this soon after the reply's first
+    # frame as the playback onset leaking through the device's echo
+    # cancellation. It cannot be: the floor above is checked first, so
+    # this utterance carries half a second of classified speech, and the
+    # room has heard a fraction of the reply by now. It takes the
+    # confirmation arm like any other interruption, and the transcript
+    # cancels the reply.
+    config = config_with_agent(asr_text="{ms}", llm_reply=SLOW_REPLY)
     with caplog.at_level("INFO"):
         with TestClient(create_app(config)) as client:
             with connect(client) as websocket:
@@ -123,29 +121,33 @@ def test_the_refractory_window_swallows_the_playback_onset(
                 )
                 send_pcm(websocket, speech_pcm(600), encoder)
                 endpoint_silence(websocket, encoder)
-                opening, _ = collect_until(websocket, is_reply_start)
-                # Long enough to pass the minimum-speech floor.
+                collect_until(websocket, is_reply_start)
+                # Long enough to pass the minimum-speech floor, and sent
+                # as soon as the reply has started speaking.
                 send_pcm(websocket, speech_pcm(600), encoder)
                 endpoint_silence(websocket, encoder)
-                rest, _ = collect_reply(websocket)
+                collect_reply(websocket)  # the cut reply's tts stop
+                answer, _ = collect_until(websocket, is_transcript)
 
-    assert sentences(opening + rest) == [SLOW_REPLY]
-    suppressed = only(caplog, "barge_in_suppressed")
-    assert suppressed.reason == "refractory"
-    assert 540 <= suppressed.speech_ms <= 660
-    assert events(caplog, "barge_in") == []
+    # The interruption became the turn: what the device was told it
+    # heard is the interruption's own length, not the first utterance's.
+    assert_endpointed_speech(answer, 600)
+    barged = only(caplog, "barge_in")
+    assert 540 <= barged.speech_ms <= 660
+    assert barged.speaking_ms >= 0
+    assert events(caplog, "barge_in_suppressed") == []
 
 
 def test_a_manual_stop_mid_reply_still_cancels_unconditionally(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     # The gates read acoustic evidence; a user holding the button and
-    # speaking is not acoustics. With every gate raised sky-high, a
-    # manual listen stop still cuts the reply and gets answered.
+    # speaking is not acoustics. With the speech floor raised sky-high,
+    # a manual listen stop still cuts the reply and gets answered.
     config = config_with_agent(
         asr_text="{ms}",
         llm_reply=LONG_REPLY,
-        server={"barge_in_min_speech_ms": 100_000, "barge_in_refractory_ms": 100_000},
+        server={"barge_in_min_speech_ms": 100_000},
     )
     with caplog.at_level("INFO"):
         with TestClient(create_app(config)) as client:
@@ -228,7 +230,7 @@ async def test_an_unconfirmed_barge_in_pauses_and_resumes_the_reply(
     # reply resumes with its pacing clock shifted by the pause, so the
     # stream picks up where it stopped instead of bursting.
     held = "Hold the thought while this sentence finishes playing out loud."
-    config = config_with_agent(server={"barge_in_refractory_ms": 0})
+    config = config_with_agent()
     asr = ConfirmingAsr(AsrResult(text=""))
     script = ScriptedLlm([held, "A second answer nobody should need."])
     session, socket = realtime_session(config, asr, ScriptedVad(600), {"assistant": script})
@@ -307,8 +309,7 @@ async def test_a_failed_confirmation_is_reported_as_the_provider_failure_it_is(
             raise TimeoutError
 
     config = config_with_agent(
-        llm_reply="Hold the thought while this sentence finishes playing out loud.",
-        server={"barge_in_refractory_ms": 0},
+        llm_reply="Hold the thought while this sentence finishes playing out loud."
     )
     session, socket = realtime_session(
         config, FailingConfirmation(AsrResult(text="")), ScriptedVad(600)
@@ -342,7 +343,7 @@ async def test_a_confirmed_barge_in_reuses_the_transcript_and_the_lock(
     # fires once for the interruption with its language fields, and the
     # language lock takes effect. What was actually heard is the history
     # at the end: the events carry no transcript (#120).
-    config = config_with_agent(server={"barge_in_refractory_ms": 0})
+    config = config_with_agent()
     asr = ConfirmingAsr(
         AsrResult(
             text="stop and listen",

@@ -380,12 +380,9 @@ def test_realtime_barge_in_cancels_the_reply_in_flight() -> None:
     # the server is talking cuts the reply off and is answered, with no
     # abort and no listen message anywhere. Only the mic said so. The
     # interruption is 600 ms of speech, past the default minimum-speech
-    # floor, and the refractory window is off so the cut can land right
-    # after playback starts; the mock ASR then transcribes something,
-    # which is what confirms the cancel.
-    config = config_with_agent(
-        asr_text="{ms}", llm_reply=LONG_REPLY, server={"barge_in_refractory_ms": 0}
-    )
+    # floor, so the cut can land right after playback starts; the mock
+    # ASR then transcribes something, which is what confirms the cancel.
+    config = config_with_agent(asr_text="{ms}", llm_reply=LONG_REPLY)
     with TestClient(create_app(config)) as client:
         with connect(client) as websocket:
             shake_hands(websocket)

@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 73 events in 102 variants. What
+This document is that surface written down: 73 events in 101 variants. What
 was said in a conversation is in the conversation store instead, keyed by the
 same `session` ([its reference](conversations-schema.md)).
 
@@ -235,7 +235,7 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `tool_arguments_coerced` | `vinga_server.session` | INFO | 1 |
 | `sentence_withheld` | `vinga_server.session` | INFO | 3 |
 | `barge_in` | `vinga_server.session` | INFO | 1 |
-| `barge_in_suppressed` | `vinga_server.session` | INFO | 3 |
+| `barge_in_suppressed` | `vinga_server.session` | INFO | 2 |
 | `barge_in_merged` | `vinga_server.session` | INFO | 1 |
 | `filler_skipped` | `vinga_server.session` | INFO | 2 |
 | `filler_played` | `vinga_server.session` | INFO | 1 |
@@ -1355,24 +1355,6 @@ session %s: barge-in suppressed, %d ms of speech is under the %.0f ms floor
 | `speech_ms` | `INT` | yes | no |  |  |
 
 #### Variant 2: `vinga_server.session` at INFO
-
-```text
-session %s: barge-in suppressed inside the refractory window
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `reason` | `TOKEN` | yes | no | one of: `refractory` |  |
-| `speech_ms` | `INT` | yes | no |  |  |
-
-#### Variant 3: `vinga_server.session` at INFO
 
 ```text
 session %s: barge-in suppressed, nothing transcribed

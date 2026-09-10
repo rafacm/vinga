@@ -1230,7 +1230,6 @@ class Suppression(StrEnum):
     """Which barge-in gate dropped an interruption."""
 
     MIN_SPEECH = "min_speech"
-    REFRACTORY = "refractory"
     NO_TRANSCRIPT = "no_transcript"
 
 

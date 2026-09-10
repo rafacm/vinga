@@ -1254,7 +1254,7 @@ class DeviceSession:
 
     def speaking_started_at(self) -> float | None:
         """When this reply's first frame was stamped, or None before it.
-        Read by the barge-in refractory gate and by the filler."""
+        Read by the filler and by the barge-in event's speaking_ms."""
         return self._pacer.speaking_started_at()
 
     def user_turn_ended(self) -> None:

@@ -925,23 +925,9 @@ async def drive_barge_in_merged(_: Path) -> None:
     await reply_in_flight(session)
 
 
-async def drive_barge_in_in_the_refractory_window(_: Path) -> None:
-    config = config_with_agent(
-        llm_reply="Hold the thought while this sentence finishes playing out loud.",
-        server={"barge_in_refractory_ms": 100_000},
-    )
-    asr = ConfirmingAsr(AsrResult(text="stop"))
-    asr.release.set()
-    session = await speaking_reply(config, asr)
-    plant_utterance(session, speech_pcm(600))
-    await end_utterance(session)
-    await reply_in_flight(session)
-
-
 async def drive_barge_in_without_a_transcript(_: Path) -> None:
     config = config_with_agent(
-        llm_reply="Hold the thought while this sentence finishes playing out loud.",
-        server={"barge_in_refractory_ms": 0},
+        llm_reply="Hold the thought while this sentence finishes playing out loud."
     )
     asr = ConfirmingAsr(AsrResult(text=""))
     asr.release.set()
@@ -954,9 +940,7 @@ async def drive_barge_in_without_a_transcript(_: Path) -> None:
 async def drive_barge_in_confirmed(_: Path) -> None:
     """The gate's own cancel, which unlike the manual one fires while
     the reply is speaking and therefore carries speaking_ms."""
-    config = config_with_agent(
-        llm_reply="Answering {text}.", server={"barge_in_refractory_ms": 0}
-    )
+    config = config_with_agent(llm_reply="Answering {text}.")
     asr = ConfirmingAsr(AsrResult(text="stop and listen"))
     asr.release.set()
     session = await speaking_reply(config, asr)
@@ -1322,15 +1306,10 @@ SESSION_DRIVERS: tuple[Driver, ...] = (
     Driver((TURNTAKING, "TurnTaking._gate_barge_in", 2), drive_barge_in_merged, "barge_in_merged"),
     Driver(
         (TURNTAKING, "TurnTaking._gate_barge_in", 3),
-        drive_barge_in_in_the_refractory_window,
-        "barge_in_suppressed",
-    ),
-    Driver(
-        (TURNTAKING, "TurnTaking._gate_barge_in", 4),
         drive_barge_in_without_a_transcript,
         "barge_in_suppressed",
     ),
-    Driver((TURNTAKING, "TurnTaking._gate_barge_in", 5), drive_barge_in_confirmed, "barge_in"),
+    Driver((TURNTAKING, "TurnTaking._gate_barge_in", 4), drive_barge_in_confirmed, "barge_in"),
     Driver((FILLER, "FillerRunner._fire", 1), drive_filler_skipped_for_speech, "filler_skipped"),
     Driver(
         (FILLER, "FillerRunner._fire", 2),

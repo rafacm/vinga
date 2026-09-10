@@ -36,7 +36,6 @@ from vinga_server.device.boundary import PIPELINE_SAMPLE_RATE, DeviceOutput
 from vinga_server.events import SessionEvents, logger
 from vinga_server.events.catalog import (
     BargeIn,
-    BargeInInRefractory,
     BargeInMerged,
     BargeInUnderFloor,
     BargeInWithoutTranscript,
@@ -347,12 +346,31 @@ class TurnTaking:
         In order: too little classified speech is a noise blip and is
         dropped; a reply still inside ASR was transcribing the head of
         the user's own sentence, so it is cancelled and its audio
-        prepended, one reply answering the whole sentence; right after
-        playback starts, the onset transient the device's echo
-        cancellation lets through is dropped; anything else pauses the
-        outgoing frames and asks ASR, and only a non-empty transcript
-        cancels. An empty one resumes the paced stream where it
-        stopped, so a wrong pause costs one ASR latency, not a reply."""
+        prepended, one reply answering the whole sentence; anything else
+        pauses the outgoing frames and asks ASR, and only a non-empty
+        transcript cancels. An empty one resumes the paced stream where
+        it stopped, so a wrong pause costs one ASR latency, not a reply.
+
+        Nothing is dropped for arriving early in the playback, and that
+        absence is deliberate (#80). A refractory window used to sit
+        between the merge and the confirmation, dropping an interruption
+        that endpointed within `barge_in_refractory_ms` of the reply's
+        first delivered frame as the onset transient a device's echo
+        cancellation lets through. Three facts say echo cannot reach
+        this far: the speech floor above is checked first, so anything
+        arriving here already carries at least half a second of
+        classified speech; the primary board's playback trails the
+        server by roughly 760 ms (the mic envelope correlates with the
+        speaker envelope at r = 0.60 to 0.74 at that lag across three
+        replies, and not at all at lag 0); and the window was measured
+        from the first frame this server delivered, so a second of it
+        was at most about 240 ms of sound in the room. Echo has no way
+        to supply 500 ms of speech out of 240 ms of playback, and the
+        field agreed: four suppressions in 48 h, every one of them a
+        user finishing their own sentence. What the gate cost was the
+        rest of that sentence, discarded unheard; what the fall-through
+        costs is one ASR call in the same 48 h, which is the ladder's
+        own tradeoff and no longer has an exception."""
         server = self._server
         if speech_ms < server.barge_in_min_speech_ms:
             self._events.emit(
@@ -367,16 +385,6 @@ class TurnTaking:
             self._events.emit(lambda: BargeInMerged(speech_ms=Whole(speech_ms)))
             await self._reply.cancel_reply(ReplyOutcome.BARGED_IN)
             return head + pcm, None, None, None
-        loop = asyncio.get_running_loop()
-        if (
-            self._output.speaking_started_at() is not None
-            and (loop.time() - self._output.speaking_started_at()) * 1000
-            < server.barge_in_refractory_ms
-        ):
-            self._events.emit(
-                lambda: BargeInInRefractory(speech_ms=Whole(speech_ms))
-            )
-            return None
         self._pause_output()
         failed: str | None = None
         # On the session's clock, which is the one the events are
