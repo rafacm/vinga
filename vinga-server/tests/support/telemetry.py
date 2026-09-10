@@ -58,6 +58,30 @@ SESSION = "0123456789abcdef0123456789abcdef"
 CONVERSATION = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
 DEVICE = "aa:bb:cc:dd:ee:ff"
 AGENT = "household"
+OTHER_AGENT = "helper"
+
+# What two bound agents opened against, in the shape
+# `session_open.providers` carries: agent, then pipeline stage, then the
+# four sanitized names off the built provider. Non-empty and
+# multi-agent, because an empty one would make every assertion about
+# provider context vacuous and a single-agent one could not tell a
+# handover from a constant.
+PROVIDERS: dict[str, dict[str, dict[str, str]]] = {
+    AGENT: {
+        "llm": {"name": "claude", "type": "anthropic", "host": "api.anthropic.com",
+                "model": "claude-sonnet-4-5"},
+        "asr": {"name": "ears", "type": "faster_whisper", "model": "small"},
+        "tts": {"name": "voice", "type": "piper", "model": "en_GB-alba-medium"},
+        "vad": {"name": "floor", "type": "silero"},
+    },
+    OTHER_AGENT: {
+        "llm": {"name": "local", "type": "openai_compatible",
+                "host": "127.0.0.1", "model": "qwen3"},
+        "asr": {"name": "ears", "type": "faster_whisper", "model": "small"},
+        "tts": {"name": "voice", "type": "piper", "model": "en_GB-alba-medium"},
+        "vad": {"name": "floor", "type": "silero"},
+    },
+}
 
 
 class Clock:
@@ -139,7 +163,15 @@ def session_events(clock: Clock, telemetry: Telemetry) -> SessionEvents:
     return events
 
 
-def open_session(events: SessionEvents) -> float:
+def open_session(
+    events: SessionEvents, providers: dict[str, Any] | None = None
+) -> float:
+    """The session's own open. `providers` is what it says the
+    conversation opened against, defaulting to the two-agent world
+    above: an empty one is a session nothing can be asserted about, and
+    the suites that are not about provider context ignore what they get.
+    """
+    entries = PROVIDERS if providers is None else providers
     events.device = DEVICE
     events.agent = AGENT
     events.conversation = CONVERSATION
@@ -148,8 +180,8 @@ def open_session(events: SessionEvents) -> float:
             client=ClientId("a-device-uuid"),
             agent=Identifier(AGENT),
             conversation=ConversationId(CONVERSATION),
-            agents=AgentNames((AGENT,)),
-            providers=ProviderEntries({}),
+            agents=AgentNames(tuple(entries) or (AGENT,)),
+            providers=ProviderEntries(entries),
             protocol=Whole(1),
             revision=Identifier("abc1234"),
             mac=DeviceId(DEVICE),
@@ -243,7 +275,7 @@ def go_idle(events: SessionEvents) -> float:
     return events.emit(lambda: SessionIdle(idle_s=Real(120.0), duration_s=Real(200.0)))
 
 
-def hand_over(events: SessionEvents, to: str = "helper") -> float:
+def hand_over(events: SessionEvents, to: str = OTHER_AGENT) -> float:
     return events.emit(
         lambda: Handover(
             from_agent=Identifier(AGENT),

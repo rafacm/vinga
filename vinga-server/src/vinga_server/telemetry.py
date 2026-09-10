@@ -70,7 +70,11 @@ from vinga_server.config.models import TelemetryConfig
 from vinga_server.egress import EgressRefusal, check_feature
 from vinga_server.events import Emission, EventTap
 from vinga_server.events.catalog import carried_values, catalog, kind_of
-from vinga_server.events.values import Kind
+from vinga_server.events.values import (
+    PROVIDER_ENTRY_OPTIONAL,
+    PROVIDER_ENTRY_REQUIRED,
+    Kind,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +175,10 @@ TURN_STARTED = "turn_started"
 REPLY_FINISHED = "reply_finished"
 CAPTURE_STARTED = "capture_started"
 
+# Not a lifecycle event, and the only span event that changes what the
+# spans after it carry: it moves which agent a turn is stamped from.
+HANDOVER = "handover"
+
 # What a span is called in a backend's list. Deliberately short: the
 # service name is beside them, and a backend groups by these.
 SESSION_SPAN = "session"
@@ -222,6 +230,54 @@ TURN_FINISHED_ATTRIBUTES = {
     "sentences_spoken": "vinga.turn.sentences_spoken",
 }
 
+# What a session opened against, as span attributes.
+#
+# `session_open.providers` is a mapping of agent to stage to the four
+# sanitized names off the built provider, and the issue asks for the
+# resolved provider entries as session-level context on the spans. It
+# arrives as one nested mapping and lands as one flat attribute per
+# stage and per fact, because that is what a backend can filter on: a
+# JSON blob would be present and unqueryable, which is the same as
+# absent for the question this exists to answer.
+#
+# The applicable agent's entries, not every agent's. A session opens
+# talking to one agent and a handover changes which, so the session span
+# carries the agent it opened with and each turn span carries the agent
+# that turn was spoken by. The entries themselves are retained whole, so
+# a handover switches which of them is read rather than needing entries
+# the exporter was never given.
+PROVIDER_PREFIX = "vinga.provider"
+
+# The four names an entry may carry, which is the whole of what
+# `ProviderEntries` admits: nothing off a provider configuration can
+# reach a span through here, which is what makes this sanitized by
+# construction.
+PROVIDER_FACTS = (*PROVIDER_ENTRY_REQUIRED, *PROVIDER_ENTRY_OPTIONAL)
+
+
+def _provider_attributes(
+    providers: dict[str, Any], agent: str | None
+) -> dict[str, Any]:
+    """One agent's resolved providers, flattened into span attributes.
+
+    Empty for a session whose `session_open` carried none, for an agent
+    the entries do not describe, and for anything in them that is not
+    the shape the value type promised: a fold that repaired a
+    disagreement here would be inventing provider context.
+    """
+    entries = providers.get(agent or "")
+    if not isinstance(entries, dict):
+        return {}
+    attributes: dict[str, Any] = {}
+    for stage, entry in entries.items():
+        if not isinstance(stage, str) or not isinstance(entry, dict):
+            continue
+        for fact in PROVIDER_FACTS:
+            held = entry.get(fact)
+            if isinstance(held, str):
+                attributes[f"{PROVIDER_PREFIX}.{stage}.{fact}"] = held
+    return attributes
+
 # --- what a payload field may become on a span ------------------------
 #
 # The fold used to copy a payload wholesale, taking every key but the
@@ -256,6 +312,12 @@ class Shape(Enum):
     # OTel attribute types have no mapping, and the alternative to a
     # deterministic string is the SDK dropping the field.
     JSON = "json"
+    # Not an attribute, and not discarded either: retained as context
+    # this module carries onto the spans it applies to. One field is
+    # this today, `session_open.providers`, which becomes the per-stage
+    # provider attributes on the session span and on every turn span the
+    # agent it describes is talking through.
+    CONTEXT = "context"
     # Not an attribute at all.
     DROPPED = "dropped"
 
@@ -283,10 +345,10 @@ SHAPES: dict[Kind, Shape] = {
     # place for prose to hide.
     Kind.SOURCES: Shape.JSON,
     Kind.DROP_COUNTS: Shape.JSON,
-    # And the one that is not an attribute at all: what a session opened
-    # against is span CONTEXT, attached per agent to the spans it
+    # And the one that is context rather than an attribute: what a
+    # session opened against is attached per agent to the spans it
     # applies to rather than dumped onto one of them as a blob.
-    Kind.PROVIDER_ENTRIES: Shape.DROPPED,
+    Kind.PROVIDER_ENTRIES: Shape.CONTEXT,
 }
 
 
@@ -686,11 +748,20 @@ def _attributes(payload: dict[str, Any], table: dict[str, str]) -> dict[str, Any
 
 @dataclass
 class _SessionTrace:
-    """One device session's place in the trace: its root span, and the
-    turn span that is open inside it, if one is."""
+    """One device session's place in the trace, and the context its
+    spans are stamped from.
+
+    `providers` is what `session_open` said this conversation opened
+    against, for every agent the device is bound to, and `agent` is the
+    one talking right now, which `handover` moves. Between them they are
+    what lets a turn span carry the providers that turn actually ran on
+    without the exporter needing a fact no event gave it.
+    """
 
     span: Any
     turn: Any | None = None
+    providers: dict[str, Any] = field(default_factory=dict)
+    agent: str | None = None
 
 
 class Telemetry:
@@ -909,13 +980,27 @@ class Telemetry:
     def _open_session(self, session: str, emission: Emission) -> None:
         if session in self._sessions:
             return
+        payload = emission.payload
+        # What this conversation opened against, kept whole: every agent
+        # the device is bound to, so a handover switches which of them a
+        # span is stamped from rather than needing entries this exporter
+        # was never given.
+        providers = payload.get("providers")
+        held = providers if isinstance(providers, dict) else {}
+        agent = payload.get("agent")
+        talking = agent if isinstance(agent, str) else None
         span = self._tracer.start_span(
             SESSION_SPAN,
             context=self._root(),
-            attributes=_attributes(emission.payload, SESSION_ATTRIBUTES),
+            attributes={
+                **_attributes(payload, SESSION_ATTRIBUTES),
+                **_provider_attributes(held, talking),
+            },
             start_time=self._at(emission),
         )
-        self._sessions[session] = _SessionTrace(span=span)
+        self._sessions[session] = _SessionTrace(
+            span=span, providers=held, agent=talking
+        )
         for held in self._pending.pop(session, []):
             self._span_event(session, held)
 
@@ -948,7 +1033,12 @@ class Telemetry:
             # hiding inside one enormous trace.
             context=self._root(),
             links=[self._link(trace.span.get_span_context())],
-            attributes=_attributes(emission.payload, TURN_ATTRIBUTES),
+            attributes={
+                **_attributes(emission.payload, TURN_ATTRIBUTES),
+                # The agent this turn is actually being spoken by, which
+                # a handover may have changed since the session opened.
+                **_provider_attributes(trace.providers, trace.agent),
+            },
             # The stamp the emission carries, which for `turn_started`
             # is the instant the user stopped speaking rather than the
             # instant the event was said.
@@ -984,6 +1074,15 @@ class Telemetry:
             attributes=_event_attributes(emission.payload),
             timestamp=self._at(emission),
         )
+        if name == HANDOVER:
+            # The one span event that changes what later spans say about
+            # themselves. Read from the event rather than tracked
+            # anywhere else: which agent is talking is a fact the
+            # catalog states, and a second copy of it here would be the
+            # side channel the one-vocabulary rule exists to refuse.
+            moved = emission.payload.get("to_agent")
+            if isinstance(moved, str):
+                trace.agent = moved
 
     def _at(self, emission: Emission) -> int:
         return _epoch_ns(emission.at, self._offset)
