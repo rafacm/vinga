@@ -76,7 +76,6 @@ from vinga_server.events.catalog import (
     AgentSaid,
     ConversationResumed,
     Handover,
-    Heard,
     MilestoneRecorded,
     NothingHeard,
     PromptAssembled,
@@ -95,7 +94,6 @@ from vinga_server.events.values import (
     Flag,
     Fragment,
     Identifier,
-    LanguageTag,
     PromptSources,
     Real,
     ReplyOutcome,
@@ -106,7 +104,6 @@ from vinga_server.generation import Generation, Generations
 from vinga_server.memory.store import MemoryStore
 from vinga_server.providers import (
     AgentProviders,
-    AsrResult,
     LlmEvent,
     StreamStarted,
     TextDelta,
@@ -122,7 +119,7 @@ from vinga_server.runtime import prompt, resumption
 from vinga_server.runtime.filler_runner import FillerRunner
 from vinga_server.runtime.speech import _Synthesis, speak_after, withhold_tool_shaped
 from vinga_server.runtime.turns import BUILTIN, MCP, UNKNOWN, TurnUnderway, tool_source
-from vinga_server.runtime.turntaking import TurnTaking, Utterance
+from vinga_server.runtime.turntaking import Confirmation, TurnTaking, Utterance
 from vinga_server.text import SentenceSplitter
 from vinga_server.tools import builtin, names
 from vinga_server.tools.arguments import with_lossless_coercions
@@ -552,7 +549,9 @@ class PipelineRuntime:
       through those methods, so the field itself keeps one owner.
     - `_providers` and `_know_how`: written by `_activate_agent` alone,
       at connect and at a handover, and read by every leg of the reply
-      that follows, `confirm_transcript` included.
+      that follows, `confirm_transcript` included. That one reads it
+      before an await a handover can land in, and answers with the ear
+      it read, for the reason `Confirmation` gives.
     - `_asr_language`: written where the reply's own ASR answers, read
       by that call and by the confirmation the gate ladder asks for, so
       the session's language lock survives an interruption.
@@ -1348,6 +1347,12 @@ class PipelineRuntime:
         pcm = utterance.pcm
         result = utterance.transcript
         asr_ms = utterance.asr_ms
+        # The ear that produced the transcription this turn is
+        # answering: the one carried over where a confirmed barge-in
+        # already ran it, and this turn's own where the arm below does.
+        # Never read at the emit, which is after every await a handover
+        # could have landed in.
+        asr_provider = utterance.asr_provider
         spoken: list[str] = []
         self._output.reply_started()
         heard_s = round(len(pcm) / 2 / PIPELINE_SAMPLE_RATE, 2)
@@ -1403,6 +1408,7 @@ class PipelineRuntime:
                         )
                         raise
                     asr_ms = round((self._events.now() - started) * 1000)
+                    asr_provider = providers.asr
                     # Only where this turn ran one. A reply handed a
                     # transcription reuses a confirmed barge-in's, measured
                     # at a different call site as part of a different
@@ -1424,7 +1430,11 @@ class PipelineRuntime:
                     # rather than null, which are different answers: an
                     # engine that detected nothing leaves no key rather than
                     # a key holding nothing.
-                    confidence = result.language_confidence
+                    confidence = (
+                        None
+                        if result.language_confidence is None
+                        else round(result.language_confidence, 2)
+                    )
                     # What was heard, never the words: the utterance is
                     # content and the conversation store is where content
                     # lives (#120, the content-and-telemetry ADR). What the
@@ -1433,19 +1443,14 @@ class PipelineRuntime:
                     # engine heard it in; the sentence renders exactly that,
                     # so the two halves of this record say the same thing.
                     heard_at = self._events.emit(
-                        lambda: Heard(
-                            agent=Identifier(self._agent),
-                            conversation=ConversationId(self._conversation),
-                            duration_s=Real(heard_s),
-                            asr_ms=ABSENT if asr_ms is None else Whole(asr_ms),
-                            language=(
-                                ABSENT
-                                if result.language is None
-                                else LanguageTag(result.language)
-                            ),
-                            language_confidence=(
-                                ABSENT if confidence is None else Real(round(confidence, 2))
-                            ),
+                        lambda: assembly.heard(
+                            self._agent,
+                            self._conversation,
+                            asr_provider,
+                            heard_s,
+                            asr_ms,
+                            result.language,
+                            confidence,
                         )
                     )
                     # The emission's own reading rather than a second one
@@ -1458,7 +1463,7 @@ class PipelineRuntime:
                         transcript,
                         heard_s,
                         result.language,
-                        None if confidence is None else round(confidence, 2),
+                        confidence,
                     )
                     # And only now the device, which is a socket and can
                     # meet a peer that has gone away. The order used to
@@ -2990,7 +2995,7 @@ class PipelineRuntime:
         if self._outcome is None:
             self._outcome = outcome
 
-    async def confirm_transcript(self, pcm: bytes) -> AsrResult:
+    async def confirm_transcript(self, pcm: bytes) -> Confirmation:
         """Transcribe an interruption, so that the gates in front of a
         barge-in can ask what was actually said.
 
@@ -2999,11 +3004,24 @@ class PipelineRuntime:
         session's language lock stay here: the ladder needs an answer,
         not the machinery that produces one. Failures propagate, and the
         ladder's own catch decides what an unanswerable confirmation
-        means."""
+        means.
+
+        The answer names the ear that gave it, because this is the last
+        place that knows. `_providers` is rebound by `_activate_agent`,
+        and the reply this confirmation is deciding about can hand the
+        conversation over while the call is awaited, so a reply reusing
+        the result and reading the binding then would label somebody
+        else's transcription. The ear is held before the await for that
+        reason, and it crosses as `object`, which is what the assembly
+        that turns it into four names takes."""
         assert self._providers is not None
-        async with self._watching("asr", self._providers.asr):
-            return await self._providers.asr.transcribe(
-                pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
+        ears = self._providers.asr
+        async with self._watching("asr", ears):
+            return Confirmation(
+                result=await ears.transcribe(
+                    pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
+                ),
+                provider=ears,
             )
 
 

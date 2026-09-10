@@ -610,6 +610,22 @@ def turn_taking(session: DeviceSession) -> Any:
     return session.runtime._turntaking
 
 
+def hand_over_to(session: DeviceSession, agent: str) -> None:
+    """Rebind this session to another agent's providers and prompt, the
+    way a `switch_agent` mid-reply does.
+
+    The activation is the production one; what is white-box is the
+    reach, and it is deliberate. A handover happens in production at a
+    boundary of the reply loop, reached from a tool call a model asked
+    for, and a suite about what a call started BEFORE one is labelled
+    with has to land the rebinding at a chosen instant: while a
+    confirmation is suspended inside its ASR. There is no way to aim the
+    production path at that instant, and a rebinding that lands
+    somewhere near it proves nothing.
+    """
+    session.runtime._activate_agent(agent)
+
+
 def plant_utterance(session: DeviceSession, pcm: bytes) -> None:
     """The audio a device would have streamed, put where the floor keeps
     it, so the instant the gates read is the instant the test chose.
@@ -678,6 +694,7 @@ def start_reply(
     speech_ms: int = 0,
     barge_in: bool = False,
     asr_ms: int | None = None,
+    asr_provider: Any = None,
 ) -> None:
     """A reply in flight, registered the way an utterance registers one,
     so that everything asking whether this session is replying (the idle
@@ -687,7 +704,10 @@ def start_reply(
     driving a reply name it in one place. `result` is a transcription
     that already exists, which is what a confirmed barge-in hands it,
     and `asr_ms` is what running it cost, which the gate measures beside
-    it. The utterance's end is read here rather than passed, because
+    it; `asr_provider` is the ear that ran it, which the gate carries
+    over for the same reason it carries the latency, since a handover
+    can rebind the session's providers while a confirmation is awaited.
+    The utterance's end is read here rather than passed, because
     what a suite starting a reply by hand is standing in for is an
     utterance that has just this moment closed. Whether the reply has
     finished is `replying()`; waiting for it out is `wait_for_reply`
@@ -700,6 +720,7 @@ def start_reply(
             barge_in=barge_in,
             transcript=result,
             asr_ms=asr_ms,
+            asr_provider=asr_provider,
         )
     )
 

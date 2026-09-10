@@ -59,6 +59,30 @@ UTTERANCE_TAIL_BYTES = UTTERANCE_TAIL_S * PIPELINE_SAMPLE_RATE * 2
 
 
 @dataclass(frozen=True)
+class Confirmation:
+    """What a confirmation transcription answered, and the ear that
+    answered it.
+
+    Two fields rather than a bare result, because the two are only true
+    together. The call is awaited while the reply it is deciding about
+    is still running, and that reply can hand the conversation over,
+    which rebinds the session's providers; so which ear ran this
+    transcription is knowable at the call and nowhere after it. The turn
+    that goes on to reuse the result already reports what the call cost,
+    and a record whose latency and whose provider described two
+    different calls would say less than one that named neither.
+
+    `provider` is typed `object` for the reason the seam itself exists:
+    the ladder needs an answer rather than the machinery that produces
+    one, and `object` is exactly what `events/assembly.py` takes, so
+    nothing about a provider's own types reaches this module.
+    """
+
+    result: AsrResult
+    provider: object
+
+
+@dataclass(frozen=True)
 class Utterance:
     """What the floor hands the orchestrator to answer.
 
@@ -78,11 +102,14 @@ class Utterance:
     earlier one across the gate is what lets `turn_started` be stamped
     with the utterance rather than with the decision about it.
 
-    `transcript` and `asr_ms` travel together and are set together: a
-    confirmed barge-in already transcribed this audio to decide the
-    cancel, so the reply reuses the result rather than running ASR
-    twice, and the latency of the run that produced it belongs to the
-    turn that is answering it.
+    `transcript`, `asr_ms` and `asr_provider` travel together and are
+    set together: a confirmed barge-in already transcribed this audio to
+    decide the cancel, so the reply reuses the result rather than
+    running ASR twice, and the latency of the run that produced it and
+    the ear that ran it both belong to the turn that is answering it.
+    The ear rides along rather than being looked up at the far end for
+    the reason `Confirmation` gives: a handover can rebind the session's
+    providers while a confirmation is in flight.
     """
 
     pcm: bytes
@@ -91,6 +118,7 @@ class Utterance:
     barge_in: bool
     transcript: AsrResult | None = None
     asr_ms: int | None = None
+    asr_provider: object | None = None
 
 
 class TurnTaking:
@@ -230,6 +258,7 @@ class TurnTaking:
         self._output.user_turn_ended()
         result: AsrResult | None = None
         asr_ms: int | None = None
+        asr_provider: object | None = None
         # Whether answering this utterance means interrupting a reply,
         # which is true of every shape that reaches `start_reply` with
         # one in flight: a confirmed barge-in, a mid-ASR merge, and a
@@ -246,7 +275,7 @@ class TurnTaking:
                 gated = await self._gate_barge_in(pcm, speech_ms)
                 if gated is None:
                     return
-                pcm, result, asr_ms = gated
+                pcm, result, asr_ms, asr_provider = gated
             else:
                 self._events.emit(
                     lambda: BargeIn(
@@ -268,25 +297,29 @@ class TurnTaking:
                 barge_in=interrupting,
                 transcript=result,
                 asr_ms=asr_ms,
+                asr_provider=asr_provider,
             )
         )
 
     async def _gate_barge_in(
         self, pcm: bytes, speech_ms: int
-    ) -> tuple[bytes, AsrResult | None, int | None] | None:
+    ) -> tuple[bytes, AsrResult | None, int | None, object | None] | None:
         """Decide what an endpointed utterance may do to the reply in
         flight: None to drop it and let the reply live, or the PCM to
-        answer (with its transcription and what that transcription cost,
-        when confirming it already ran ASR). The gates exist because a
-        reply is only cancelled on evidence of user speech; acoustics
-        alone can at most pause it (see the ADR of that name).
+        answer (with its transcription, what that transcription cost and
+        the ear that ran it, when confirming it already ran ASR). The
+        gates exist because a reply is only cancelled on evidence of
+        user speech; acoustics alone can at most pause it (see the ADR
+        of that name).
 
         The confirmation's latency is measured here, at the site that
         runs it, and handed over with the result it belongs to. The turn
         that goes on to answer this audio did not transcribe it and has
         no way to time what it is reusing, so a `heard` carrying nothing
         would be the one interruption an operator cannot see the ASR
-        cost of.
+        cost of. The ear travels the same way and for a sharper reason:
+        the reply in flight can hand the conversation over while this
+        call is awaited, so the far end cannot read it at all.
 
         In order: too little classified speech is a noise blip and is
         dropped; a reply still inside ASR was transcribing the head of
@@ -310,7 +343,7 @@ class TurnTaking:
             head = self._reply_pcm
             self._events.emit(lambda: BargeInMerged(speech_ms=Whole(speech_ms)))
             await self._reply.cancel_reply(ReplyOutcome.BARGED_IN)
-            return head + pcm, None, None
+            return head + pcm, None, None, None
         loop = asyncio.get_running_loop()
         if (
             self._output.speaking_started_at() is not None
@@ -328,10 +361,12 @@ class TurnTaking:
         # comparable.
         started = self._events.now()
         measured: int | None = None
+        ran_it: object | None = None
         try:
             # In the receive path on purpose: incoming frames buffer in
             # the socket for the duration, so ordering is unaffected.
-            result = await self._reply.confirm_transcript(pcm)
+            confirmation = await self._reply.confirm_transcript(pcm)
+            result, ran_it = confirmation.result, confirmation.provider
             measured = round((self._events.now() - started) * 1000)
         except Exception as exc:
             # The class name, and nothing else: no `exc_info`, no
@@ -375,7 +410,7 @@ class TurnTaking:
         # clearing by hand shifts a pacing clock the next agent leg
         # restarts from scratch anyway.
         self._resume_output()
-        return pcm, result, measured
+        return pcm, result, measured, ran_it
 
     def _speaking_ms(self) -> Whole | Absent:
         """The barge_in event's speaking_ms: milliseconds from

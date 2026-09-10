@@ -27,7 +27,7 @@ from vinga_server.device.boundary import PIPELINE_SAMPLE_RATE, DeviceOutput, Pla
 from vinga_server.events import SessionEvents
 from vinga_server.events.values import ReplyOutcome
 from vinga_server.providers import AsrResult
-from vinga_server.runtime.turntaking import TurnTaking, Utterance
+from vinga_server.runtime.turntaking import Confirmation, TurnTaking, Utterance
 
 SESSION = "turn-taking"
 
@@ -39,6 +39,17 @@ NOTHING = AsrResult(text="   ")
 # message and again in the failure behind it, because a rendered
 # traceback prints the whole chain and not just the exception caught.
 SENTINEL = "sk-live-3f0a91c4-never-a-real-credential"
+
+
+class Ears:
+    """The provider object a confirmation ran on, as far as the floor is
+    concerned.
+
+    It has no methods because nothing here calls one: the ladder is
+    handed provenance to carry and never machinery to use, which is what
+    `Confirmation.provider` being typed `object` says. Identity is the
+    whole of what a test asserts about it.
+    """
 
 
 class FakeReply:
@@ -54,6 +65,10 @@ class FakeReply:
 
     def __init__(self, confirmation: AsrResult = HEARD) -> None:
         self._confirmation = confirmation
+        # The ear that answered it, which the real orchestrator reads
+        # before the await a handover could land in and hands back with
+        # the result.
+        self.ears = Ears()
         self.confirmation_fails: BaseException | None = None
         self.started: list[Utterance] = []
         self.confirmed: list[bytes] = []
@@ -72,11 +87,11 @@ class FakeReply:
         self.cancels.append(outcome)
         self.started.clear()
 
-    async def confirm_transcript(self, pcm: bytes) -> AsrResult:
+    async def confirm_transcript(self, pcm: bytes) -> Confirmation:
         self.confirmed.append(pcm)
         if self.confirmation_fails is not None:
             raise self.confirmation_fails
-        return self._confirmation
+        return Confirmation(result=self._confirmation, provider=self.ears)
 
 
 class UnresumableDevice(FakeDevice):
@@ -187,7 +202,11 @@ async def test_a_barge_in_inside_the_replys_own_asr_merges_the_two_halves(
     # One reply answering the whole sentence, and no confirmation: the
     # merge is decided on the marker alone.
     assert reply.confirmed == []
-    assert [(one.pcm, one.transcript) for one in reply.started] == [(head + tail, None)]
+    # Nothing was transcribed, so nothing is carried over: no result, no
+    # latency and no ear to attribute either to.
+    assert [
+        (one.pcm, one.transcript, one.asr_ms, one.asr_provider) for one in reply.started
+    ] == [(head + tail, None, None, None)]
 
 
 async def test_the_playback_onset_transient_is_swallowed_by_the_refractory_window(
@@ -258,7 +277,12 @@ async def test_a_confirmed_barge_in_cancels_and_hands_its_transcript_on(
     # The confirmation is the new reply's ASR too, which is what keeps
     # one interruption at one transcription.
     assert reply.confirmed == [interruption]
-    assert [(one.pcm, one.transcript) for one in reply.started] == [(interruption, HEARD)]
+    # And the ear that ran it travels with the result, because the reply
+    # that reuses the transcription cannot look it up: a handover can
+    # rebind the session's providers while the call is awaited.
+    assert [(one.pcm, one.transcript, one.asr_provider) for one in reply.started] == [
+        (interruption, HEARD, reply.ears)
+    ]
     assert device.paused is False
 
 
