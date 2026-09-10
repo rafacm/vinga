@@ -11,7 +11,10 @@ exception type, and the provider half defaulted an undeclared type to
 egress, so a type that forgot to declare merely looked declared enough
 to boot. A guarantee spread over two implementations and a default is
 one nobody can read in a sitting, so both live here (#136), and neither
-caller decides anything: they translate.
+caller decides anything: they translate. The third shape arrived with
+the OTLP exporter (#66), which is neither a provider class nor an
+operator-declared entry, and it landed here for the same reason rather
+than as a rule of its own beside the thing it governs.
 
 Translation is all they do because the exception type is each surface's
 own contract. This module raises `EgressRefusal` carrying the finished
@@ -109,6 +112,38 @@ def _marking(label: str, config: ProviderConfig, provider: object) -> bool | Non
             f"is none of true, false or null; correct the declaration on the class"
         )
     return marking
+
+
+def check_feature(label: str, egress: bool, local_only: bool) -> None:
+    """Enforce server.local_only for one feature that is not a provider
+    and not an MCP entry (#66).
+
+    The third shape the guarantee comes in, and the reason it is here
+    rather than where its one caller is: enforcement used to exist twice
+    and diverged, which is what put both of the others in this module,
+    and a telemetry exporter deciding for itself what `local_only` means
+    would be the third copy starting the same way.
+
+    The declaration is the argument, because that is the whole of what
+    varies. A provider's marking is read off its class and an MCP
+    entry's off the operator's configuration; a feature like the OTLP
+    exporter has neither, because whether it reaches the network is a
+    property of what it IS rather than of how it was configured. It
+    declares `True` at the call site and this decides what follows.
+
+    Called before the feature is built, which is the caller's half of
+    the contract and the only way the sentence can honestly say nothing
+    was constructed. The sentence names both keys and no value: which
+    switch is on and which key turns it off, and nothing about the
+    endpoint the operator wrote, which is exactly the string a refusal
+    about egress must not carry.
+    """
+    if not (local_only and egress):
+        return
+    raise EgressRefusal(
+        f"{label}: server.local_only is on, and this sends session data off this "
+        f"host; switch server.local_only off, or switch {label} off"
+    )
 
 
 def check_mcp_server(label: str, entry: McpServerConfig) -> None:
