@@ -24,38 +24,88 @@ served.
 
 ## The two design questions the issue delegates, decided
 
-### Addressing: `metrics` is its own noun, and the name is a citation
+### Addressing: the noun is `metric`, and the name is a citation
 
-The noun is `metrics`, not `stats`. This is settled by the repository rather
-than by preference: the changelog entry for #437, which renamed the storage
+The surface is called metrics, not stats. This is settled by the repository
+rather than by preference: the changelog for #437, which renamed the storage
 switch to `telemetry`, says the rename happened because "it is a storage privacy
 switch, `metrics` is reserved for the future aggregation surface". This is that
-surface. The views are `metrics_*_daily` and the generated reference is
-`metrics-views.md`, so `metrics` already has one meaning here and this uses it.
+surface.
 
-**Plural, and it addresses no entry**, which puts it with `conversations` and
-`events` under the CLI guide's rule: singular when a noun addresses one entry,
-plural when it is a collection you only ever ask about as a whole. A day's
-aggregate is not an entity with an identity.
+**The CLI noun is singular, `metric`**, because `show` addresses one of them.
+The guide's rule is singular when a noun addresses one entry, plural when it is
+a collection you only ever ask about as a whole, and a named view is an entry:
+`metric show stage-latency` addresses one the way `session show <id>` does. The
+first draft of this plan claimed the noun addressed nothing and then gave it an
+identity positional, which is the review round's first finding.
 
-**The grammar is `vinga metrics list` and `vinga metrics show <view>`.** The
-guide forbids a noun in the verb slot ("a noun in the verb slot reads as a
-possessive and hides what the command does"), so `vinga metrics latency` is
-excluded however natural it reads, and #223's `agent preview` is the precedent
-for taking that rule seriously rather than granting the first exception asked
-for. `list` and `show` are core-set verbs, and the view name is a leading
-positional, which is identity addressing in the guide's sense.
+**The grammar is `vinga metric list` and `vinga metric show <view>`.** The guide
+forbids a noun in the verb slot ("a noun in the verb slot reads as a possessive
+and hides what the command does"), so `vinga metric latency` is excluded however
+natural it reads, and #223's `agent preview` is the precedent for not granting
+that exception to the first command that asks for it. `list` and `show` are
+core-set verbs.
 
-The view names drop the prefix and suffix they all share: `stage-latency`,
-`tokens`, `event-rates`, `sessions`. Kebab-case per the guide, and the help says
-which view each is, so the two are visibly the same thing.
+On the API: `/metrics` and `/metrics/{view}`. Plural collection, member under
+it, which is exactly the shape `/sessions` and `/sessions/{session}` already
+have beside a singular CLI noun, so the two surfaces agree rather than diverge.
 
-On the API: `/metrics` and `/metrics/{view}`, beside `/sessions` and
-`/conversations`. Worth one note for a future reader: `/metrics` is
-conventionally a Prometheus scrape path, and this is not that. It sits under the
-API's bearer token rather than on an unauthenticated scrape port, so the
-collision is in spelling only, and a scrape endpoint, if one is ever wanted,
-does not belong under `/api` anyway.
+One note for a future reader: `/metrics` is conventionally a Prometheus scrape
+path and this is not that. It sits under the API's bearer token rather than on
+an unauthenticated scrape port, so the collision is in spelling only, and a
+scrape endpoint does not belong under `/api` anyway.
+
+### The view aliases, and the closed mapping behind them
+
+Four aliases, each dropping the prefix and suffix all the views share:
+`stage-latency`, `tokens`, `event-rates`, `sessions`. Kebab-case per the guide.
+
+`{view}` is request-controlled selection of a database relation, and a relation
+name cannot be a bound parameter, so **the alias resolves through a closed
+mapping derived from the view registry** and the caller's bytes never reach SQL.
+Deriving it from the registry rather than writing it beside it is what stops the
+set of servable views drifting from the set of declared ones. An unknown alias
+gets a fixed refusal that quotes nothing back, which is the rule
+`conversations/api.py` already states for this surface.
+
+### The request contract
+
+Stated exactly, because "bounded windowing" was a promise standing in for a
+design.
+
+**Query parameters on `GET /metrics/{view}`**, following the conventions the
+adjacent listings already use (string-typed, validated with a fixed sentence
+that quotes nothing):
+
+| parameter | accepts | default | bound |
+| --- | --- | --- | --- |
+| `since` | a UTC date, `YYYY-MM-DD`, inclusive | 30 days before `until` | must not precede `until` |
+| `until` | a UTC date, `YYYY-MM-DD`, inclusive | the current UTC day | none |
+| `group` | `all` or `device` | `all` | closed set |
+| `device` | one MAC, normalised as `/sessions` normalises it | absent, meaning every device | only with `group=device` |
+
+The horizon is capped at **366 days**, one leap year, and a window wider than
+that is refused rather than clamped, so a caller never receives less than it
+asked for while being told it received what it asked for.
+
+**Boundaries are inclusive at both ends and UTC**, matching the views, whose
+reference already establishes that a day is a UTC day and says why.
+
+**Ordering is `day` descending, then `device` ascending with nulls last**, which
+is total, so a page is reproducible.
+
+**An empty window is an ordinary empty list**, never a refusal and never a 404.
+A window with no rows and a deployment that never recorded are the same answer,
+for the reason `conversations/api.py` gives about empty shapes.
+
+**`GET /metrics` lists the views** rather than serving data: each alias with its
+`question`, its `denominator`, its `telemetry_off` sentence and its columns,
+derived from the registry so the listing cannot drift from what `show` serves.
+
+**Response models live in `config/responses.py`**, beside the conversation
+shapes, and are imported by both `conversations/api.py` and `config/cli.py`.
+That is what lets the CLI validate a response without importing FastAPI,
+SQLAlchemy or the store, which is why those shapes live there today.
 
 ### The trend horizon: no snapshots in this issue, and the design recorded so it is not re-derived
 
@@ -109,13 +159,28 @@ Cardinality is small: three board models, three units each.
 
 ## Behaviour under the storage switches, which the issue makes an acceptance criterion
 
-A deployment with `server.conversations.enabled` off has no `record` schema to
-read. That answers honestly rather than failing: the surface reports that the
-conversation store is not enabled, in the CLI's fixed-refusal style and as a
-documented API status, and never a 500 and never an empty result that reads like
-"nothing happened". Telemetry off is the same shape one level down: the views
-still exist and their rows report coverage, which is what the views' own
-reference already says a measured count means.
+**Conversations off keeps serving.** Boot migrates the `record` schema whether or
+not recording is on, and every read opens its own connection through
+`db.read_engine` rather than borrowing the writer's, so the reads work with
+recording off, where there is no `ConversationStore` at all. Switching recording
+off stops new rows; it does not hide the ones already written.
+
+**A deployment that never recorded gets an ordinary empty result**, not a
+refusal and not a 404. This is a deliberate contract stated in
+`conversations/api.py` under #283: the distinction a 404 drew was between a file
+that existed and one that did not, there is no file, and an empty list is the
+honest answer to a question about empty tables. The first draft of this plan
+proposed a refusal here, which would have reversed that.
+
+**No switch state is added to `ApiRuntime`** and no current configuration is
+inferred from stored rows. If a response ever needs to state a live switch
+value, that is a composition-root change with its own design, and this surface
+does not need it.
+
+**Telemetry off is per view rather than uniform**, and the surface must not
+flatten it: the latency view produces no row at all, while the event-rate view
+keeps its denominators and loses its numerators. Each view's own `telemetry_off`
+sentence is what the surface reports, which is why it is declared per view.
 
 ## Module layout
 
