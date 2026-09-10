@@ -241,6 +241,70 @@ def test_a_failed_transcription_is_the_one_asr_span_marked_failed() -> None:
     assert asr.end_time - asr.start_time == 1500 * MS
 
 
+def test_a_transcription_names_the_ear_that_ran_it() -> None:
+    """The quartet on the ASR span, key by key.
+
+    The same correspondence the round span carries, because an ear is a
+    `gen_ai` provider like a generator is: the type is the provider
+    name, the model is the request model, and only the configured
+    entry's name stays vinga's own word. That is what makes "ASR latency
+    by provider" one question with one answer at all three stages.
+
+    The default ear runs in this process and reaches no host, which the
+    catalog answers with an absence rather than with a placeholder, so
+    the span carries no `server.address` at all.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.3)
+    hear(events, duration_s=0.9, asr_ms=300)
+    finish_reply(events)
+    close_session(events)
+
+    carried = named(finished(telemetry, memory), ASR_SPAN).attributes
+    assert carried["vinga.provider.asr.name"] == "ears"
+    assert carried["gen_ai.provider.name"] == "faster_whisper"
+    assert carried["gen_ai.request.model"] == "small"
+    assert "server.address" not in carried
+    # And nothing else wearing a foreign prefix, for the same reason the
+    # round span is pinned that way: a key a backend reads by name is a
+    # key this repository has to have chosen deliberately.
+    assert {key for key in carried if not key.startswith("vinga.")} == {
+        "gen_ai.provider.name",
+        "gen_ai.request.model",
+    }
+
+
+def test_a_failed_transcription_names_the_ear_that_failed() -> None:
+    """The outcome that is a failure carries the quartet too, off the
+    same fields every other provider failure carries.
+
+    It shares the ASR span, so it is the one ASR outcome whose quartet
+    this milestone did not have to add: a provider failure has named the
+    entry it was reaching for since it was declared, and the ASR span
+    had nowhere to put it until this table gained the four keys.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(1.5)
+    provider_failed(events, stage="asr", duration_ms=1500, identity=STANDBY_EAR)
+    finish_reply(events, outcome=ReplyOutcome.FAILED, sentences=0)
+    close_session(events)
+
+    carried = named(finished(telemetry, memory), ASR_SPAN).attributes
+    assert carried["vinga.provider.asr.name"] == "ears-standby"
+    assert carried["gen_ai.provider.name"] == "openai_asr"
+    assert carried["gen_ai.request.model"] == "whisper-1"
+    assert carried["server.address"] == "api.openai.com"
+    # The ear that failed, whole: nothing of the one the session opened
+    # against is left standing beside it.
+    assert opened_against(carried, "asr") == ["vinga.provider.asr.name"]
+
+
 def test_an_abandoned_transcription_is_an_asr_span_and_not_a_failure() -> None:
     """The fourth end, from M1's review round: the answer stopped being
     wanted. It bounds a real interval (how long the call had run) and
@@ -522,6 +586,35 @@ def test_a_stream_that_produced_no_audio_carries_no_first_chunk() -> None:
 
     tts = named(finished(telemetry, memory), TTS_SPAN)
     assert "vinga.tts.first_chunk_ms" not in tts.attributes
+
+
+def test_a_stream_names_the_voice_that_produced_it() -> None:
+    """The quartet on the TTS span, key by key, off the same
+    correspondence.
+
+    What makes a voice comparable across a fleet is its latency beside
+    its identity: a span carrying only the first is exactly the "TTS
+    latency by provider" question this issue was filed about, left
+    unanswerable.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.9)
+    synthesize(events, index=0, stream_ms=900, first_chunk_ms=120)
+    finish_reply(events)
+    close_session(events)
+
+    carried = named(finished(telemetry, memory), TTS_SPAN).attributes
+    assert carried["vinga.provider.tts.name"] == "voice"
+    assert carried["gen_ai.provider.name"] == "piper"
+    assert carried["gen_ai.request.model"] == "en_GB-alba-medium"
+    assert "server.address" not in carried
+    assert {key for key in carried if not key.startswith("vinga.")} == {
+        "gen_ai.provider.name",
+        "gen_ai.request.model",
+    }
 
 
 # --- playback, the one interval with two ends -------------------------
@@ -888,6 +981,94 @@ def test_the_round_speaks_for_its_own_stage_and_the_context_for_the_rest() -> No
     # And the context still speaks for the stages the round says
     # nothing about.
     assert llm.attributes["vinga.provider.asr.name"] == "ears"
+
+
+def test_no_stage_span_mixes_a_call_s_identity_with_the_session_s_own() -> None:
+    """The shape this milestone exists to refuse, on both success-side
+    stage spans at once.
+
+    The session opened against one ear and one voice; the turn ran on
+    two others, differing in all four names. What each stage span has to
+    carry is one of those two providers whole, never a hybrid: an
+    open-time type beside a call-time model would describe a provider
+    that never existed anywhere, and it is the shape a table edit alone
+    would have produced, since the context is merged before the event's
+    own attributes and only the name would have been overwritten.
+
+    Asserted as an emptiness rather than key by key, so a fifth
+    open-time fact would fail here too.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.3)
+    hear(events, identity=STANDBY_EAR)
+    clock.tick(0.9)
+    synthesize(events, stream_ms=900, identity=STANDBY_VOICE)
+    finish_reply(events)
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    asr = named(spans, ASR_SPAN).attributes
+    tts = named(spans, TTS_SPAN).attributes
+
+    # The ear that ran, whole, and nothing of the one the session opened
+    # against: not its type (`faster_whisper`) and not its model
+    # (`small`), which are the two the name's overwrite would have left.
+    assert asr["vinga.provider.asr.name"] == "ears-standby"
+    assert asr["gen_ai.provider.name"] == "openai_asr"
+    assert asr["gen_ai.request.model"] == "whisper-1"
+    assert asr["server.address"] == "api.openai.com"
+    assert opened_against(asr, "asr") == ["vinga.provider.asr.name"]
+
+    # The voice that produced the audio, the same way.
+    assert tts["vinga.provider.tts.name"] == "voice-standby"
+    assert tts["gen_ai.provider.name"] == "elevenlabs"
+    assert tts["gen_ai.request.model"] == "eleven_turbo_v2"
+    assert tts["server.address"] == "api.elevenlabs.io"
+    assert opened_against(tts, "tts") == ["vinga.provider.tts.name"]
+
+    # And each span still carries what the session opened against for
+    # the stages it says nothing about, which is what a suppression that
+    # was not conditional on the stage would have taken with it.
+    assert asr["vinga.provider.tts.name"] == "voice"
+    assert asr["vinga.provider.llm.model"] == "claude-sonnet-4-5"
+    assert tts["vinga.provider.asr.type"] == "faster_whisper"
+    assert tts["vinga.provider.vad.name"] == "floor"
+
+
+def test_an_asr_outcome_that_names_no_ear_keeps_the_session_s_own() -> None:
+    """The other half of the rule, which is why the suppression is
+    conditional at all.
+
+    Two ways an ASR outcome names no ear: a variant that does not
+    declare the quartet, and one that declares it and carries four
+    absences, which is what a provider the registry never built
+    produces. Neither says anything about the stage, so what the session
+    opened against is the best answer there is and deleting it would
+    leave the span with no ASR identity at all.
+    """
+    for outcome in (
+        lambda events: hear_nothing(events),
+        lambda events: hear(events, unbuilt=True),
+    ):
+        clock = Clock()
+        telemetry, memory = exporting()
+        events = a_turn(clock, telemetry)
+
+        clock.tick(0.3)
+        outcome(events)
+        finish_reply(events)
+        close_session(events)
+
+        carried = named(finished(telemetry, memory), ASR_SPAN).attributes
+        assert carried["vinga.provider.asr.name"] == "ears"
+        assert carried["vinga.provider.asr.type"] == "faster_whisper"
+        assert carried["vinga.provider.asr.model"] == "small"
+        # And nothing claiming to be the call's own identity, which is
+        # the claim the outcome declined to make.
+        assert {key for key in carried if not key.startswith("vinga.")} == set()
 
 
 # --- the gate's rejection, driven through the real runtime ------------
