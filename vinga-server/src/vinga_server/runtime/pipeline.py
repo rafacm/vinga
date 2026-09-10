@@ -81,7 +81,6 @@ from vinga_server.events.catalog import (
     PromptAssembled,
     Replied,
     ReplyFinished,
-    SentenceSynthesized,
     TranscriptionAbandoned,
     TurnStarted,
     Variant,
@@ -2833,13 +2832,17 @@ class PipelineRuntime:
             lambda exc, elapsed: self._provider_failed("tts", tts, exc, elapsed),
             lambda elapsed_ms: self._turn.first_audio(index, elapsed_ms),
             lambda first_chunk_ms, stream_ms: self._sentence_synthesized(
-                index, first_chunk_ms, stream_ms
+                index, tts, first_chunk_ms, stream_ms
             ),
             lambda synthesis: self._speak_and_record(synthesis, resampler, leg, spoken),
         )
 
     def _sentence_synthesized(
-        self, index: int, first_chunk_ms: int | None, stream_ms: int
+        self,
+        index: int,
+        tts: TtsProvider,
+        first_chunk_ms: int | None,
+        stream_ms: int,
     ) -> None:
         """One `sentence_synthesized` event, for a stream that has just
         ended.
@@ -2850,16 +2853,19 @@ class PipelineRuntime:
         which for a paced consumer includes the playback it was feeding.
         Anything that averaged the two, or called the second synthesis
         time, would be reporting the speaker's clock as the provider's.
+
+        The voice is the one the caller synthesized through, which is
+        also the one it reports a failure against, so both halves of the
+        TTS stage name the same entry.
         """
         self._events.emit(
-            lambda: SentenceSynthesized(
-                agent=Identifier(self._agent),
-                conversation=ConversationId(self._conversation),
-                index=Count(index),
-                stream_ms=Whole(stream_ms),
-                first_chunk_ms=(
-                    ABSENT if first_chunk_ms is None else Whole(first_chunk_ms)
-                ),
+            lambda: assembly.sentence_synthesized(
+                self._agent,
+                self._conversation,
+                tts,
+                index,
+                first_chunk_ms,
+                stream_ms,
             )
         )
 
