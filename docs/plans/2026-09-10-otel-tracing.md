@@ -543,7 +543,7 @@ new:
   today's server.
 - [x] **[M3: the full span map, the proof and the
   image](2026-09-10-otel-tracing-implementation.md#m3-the-full-span-map-the-proof-and-the-image)**
-  (PR TBD). ASR spans
+  (PR #451). ASR spans
   from the four outcomes, LLM round spans with the settled gen_ai
   mapping, per-sentence TTS spans, the paced-playback span bounded
   by `speaking_started` and `speaking_finished`, the
