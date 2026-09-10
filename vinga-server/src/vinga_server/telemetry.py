@@ -207,9 +207,12 @@ TRANSCRIPTION_ABANDONED = "transcription_abandoned"
 # built from a failure would claim an interval nobody measured.
 ASR_STAGE = "asr"
 
-# And the stage a round span answers for itself, which is why the
-# retained context leaves that stage out of what it stamps there.
+# And the three stages a stage span can answer for ITSELF, which is why
+# the retained context leaves one of them out of what it stamps there.
+# The ASR one is above, because a `provider_failed` has to name it to be
+# an ASR outcome at all; these two are only ever spoken here.
 LLM_STAGE = "llm"
+TTS_STAGE = "tts"
 
 LLM_ROUND = "llm_round"
 SENTENCE_SYNTHESIZED = "sentence_synthesized"
@@ -383,6 +386,40 @@ def _provider_attributes(
             if isinstance(held, str):
                 attributes[f"{PROVIDER_PREFIX}.{stage}.{fact}"] = held
     return attributes
+
+
+def _entry_name(stage: str) -> str:
+    """The attribute one stage's configured entry name is spelled under.
+
+    One home for the spelling, because it is read from two sources: the
+    retained context above says what the session OPENED against, and a
+    stage span's own table below says what the call that ran actually
+    used. A second spelling would have been a second home for one fact,
+    and a backend filtering on it would have had to know which of the
+    two it was looking at.
+    """
+    return f"{PROVIDER_PREFIX}.{stage}.name"
+
+
+def _speaks_for(stage: str, spoken: dict[str, Any]) -> str | None:
+    """The stage this span answers for ITSELF, or nothing.
+
+    Which is what decides whether the retained context still speaks for
+    that stage on this span, and it is decided by what the event
+    actually said rather than by which fold is running. An event that
+    named an entry states the whole of its stage, so the open-time
+    entries for it are left out and one attribute name keeps one source;
+    an event whose quartet is four absences, which is what a provider
+    the registry never built produces, states nothing, and suppressing
+    the context there would delete what the session opened against
+    rather than correct it.
+
+    The name is what is asked for, because it is the fact a stage's
+    identity is atomic around: the catalog gives four values or four
+    absences, so a span carrying the entry name carries the type, the
+    host and the model that belong with it.
+    """
+    return stage if _entry_name(stage) in spoken else None
 
 # --- what a payload field may become on a span ------------------------
 #
@@ -604,6 +641,14 @@ def _as_attribute(held: Any, rule: _Rule) -> Any | None:
 # that structural: `ClassName` is built from the exception itself and
 # there is no value in that vocabulary a message could be constructed
 # as. Nothing else of a provider's failure reaches a span.
+#
+# The provider quartet is the settled correspondence, spelled exactly as
+# the round span below spells it: an ear is a `gen_ai` provider like a
+# generator is, so "ASR latency by provider" is the same question with
+# the same keys at all three stages. Two of the four ASR outcomes carry
+# it (`heard` and a failure at this stage); the two that do not
+# contribute nothing here, and the span keeps what the session opened
+# against instead.
 ASR_ATTRIBUTES = {
     "agent": "vinga.agent",
     "conversation": "vinga.conversation.id",
@@ -611,6 +656,10 @@ ASR_ATTRIBUTES = {
     "language": "vinga.asr.language",
     "language_confidence": "vinga.asr.language_confidence",
     "error": "vinga.asr.error",
+    "type": "gen_ai.provider.name",
+    "model": "gen_ai.request.model",
+    "host": "server.address",
+    "provider": _entry_name(ASR_STAGE),
 }
 
 # Which of the four ended, as the event's own name. The set is closed by
@@ -658,7 +707,7 @@ LLM_ATTRIBUTES = {
     "host": "server.address",
     "input_tokens": "gen_ai.usage.input_tokens",
     "output_tokens": "gen_ai.usage.output_tokens",
-    "provider": f"{PROVIDER_PREFIX}.llm.name",
+    "provider": _entry_name(LLM_STAGE),
     "agent": "vinga.agent",
     "conversation": "vinga.conversation.id",
     "round": "vinga.llm.round",
@@ -670,11 +719,20 @@ LLM_ATTRIBUTES = {
 # attribute is the number the extent cannot state, the provider's
 # latency to its first audio chunk, measured producer-side before
 # backpressure can bite.
+#
+# And the quartet, off the same correspondence the other two stages use:
+# what makes a voice comparable across a fleet is the pair of its
+# latency and its identity, and a span that carried only the first is
+# the "TTS latency by provider" question left unanswerable.
 TTS_ATTRIBUTES = {
     "index": "vinga.tts.index",
     "first_chunk_ms": "vinga.tts.first_chunk_ms",
     "agent": "vinga.agent",
     "conversation": "vinga.conversation.id",
+    "type": "gen_ai.provider.name",
+    "model": "gen_ai.request.model",
+    "host": "server.address",
+    "provider": _entry_name(TTS_STAGE),
 }
 
 # The paced-playback span, bounded by two real deliveries: the first
@@ -1644,12 +1702,18 @@ class Telemetry:
         agent the session opened with.
 
         `states` names a stage this span answers for ITSELF, whose
-        context entries are therefore left out. The round span is the
-        one that does: `llm_round` carries the entry that actually
-        answered, which after a mid-session change is not the entry the
-        session opened against, and one attribute name may have one
-        source. So the round speaks for the LLM stage and the retained
-        context speaks for the rest.
+        context entries are therefore left out. All three provider
+        stages can: `llm_round`, `heard` and `sentence_synthesized` each
+        carry the entry that actually ran, which after a mid-session
+        change is not the entry the session opened against, and one
+        attribute name may have one source. So the span speaks for its
+        own stage and the retained context speaks for the rest.
+
+        WHETHER a span states its own stage is the caller's question,
+        and `_speaks_for` is where the two success-side stage folds ask
+        it: an event that named no entry states nothing, so that fold
+        passes nothing here and what the session opened against survives
+        on the span.
         """
         agent = payload.get("agent")
         talking = agent if isinstance(agent, str) else trace.agent
@@ -1689,9 +1753,14 @@ class Telemetry:
         payload = emission.payload
         outcome = payload.get(EVENT_FIELD)
         end = self._at(emission)
+        # The event's own attributes decide whether the retained context
+        # still speaks for the ASR stage here: an outcome that named the
+        # ear it ran on states that stage whole, and one that named none
+        # leaves what the session opened against standing.
+        spoken = _attributes(payload, ASR_ATTRIBUTES)
         attributes = {
-            **self._context(trace, payload),
-            **_attributes(payload, ASR_ATTRIBUTES),
+            **self._context(trace, payload, states=_speaks_for(ASR_STAGE, spoken)),
+            **spoken,
         }
         # The one attribute on any span here that is not a payload
         # field: which of the four ends this was, which is the event's
@@ -1788,12 +1857,16 @@ class Telemetry:
             return
         payload = emission.payload
         end = self._at(emission)
+        # As on the ASR span: the stream that named the voice it ran on
+        # states the TTS stage itself, and the retained context goes on
+        # speaking for every stage this event says nothing about.
+        spoken = _attributes(payload, TTS_ATTRIBUTES)
         span = self._tracer.start_span(
             TTS_SPAN,
             context=self._within(trace.turn),
             attributes={
-                **self._context(trace, payload),
-                **_attributes(payload, TTS_ATTRIBUTES),
+                **self._context(trace, payload, states=_speaks_for(TTS_STAGE, spoken)),
+                **spoken,
             },
             start_time=_before(end, payload.get("stream_ms")),
         )
