@@ -89,6 +89,7 @@ from vinga_server.events.catalog import (
     SessionIdle,
     SessionLimit,
     SessionOpen,
+    SpeakingFinished,
     SpeakingStarted,
 )
 from vinga_server.events.live import LiveEvents
@@ -99,6 +100,7 @@ from vinga_server.events.values import (
     ClientId,
     CloseReason,
     ConversationId,
+    Count,
     DeviceId,
     Identifier,
     Real,
@@ -1112,10 +1114,43 @@ class DeviceSession:
         device.
 
         The activity mark comes first, so a device that has already gone
-        away still resets the idle clock on its way out."""
+        away still resets the idle clock on its way out.
+
+        `speaking_finished` goes out here, before either send, and that
+        ordering is the whole of what makes the interval truthful: both
+        sends can be cancelled or can meet a device that has gone away,
+        and a reply cut short still put frames on the wire that
+        `speaking_started` opened an interval for. Only where at least
+        one frame was delivered: a reply that never spoke has no
+        interval to close, which is why the count decides rather than
+        the fact of reaching this line."""
         self._watchdog.mark()
+        self._finished_speaking()
         await self.begin_speaking()
         await self._send_text(messages.tts_message(self.session_id, "stop"))
+
+    def _finished_speaking(self) -> None:
+        """Close the paced-playback interval `speaking_started` opened.
+
+        Stamped with the last delivery rather than with now, so what the
+        pair bounds is first frame out to last frame out: everything
+        between this line and that frame is the reply's tail, which the
+        pacer never paced. Emitted here rather than by the pacer for the
+        reason `speaking_started` is: the attribution is to whichever
+        agent was speaking, which has never been a fact about the audio
+        clock.
+        """
+        delivered = self._pacer.delivered()
+        if delivered.at is None:
+            return
+        self._events.emit(
+            lambda: SpeakingFinished(
+                agent=Identifier(self._agent),
+                conversation=ConversationId(self._conversation),
+                frames=Count(delivered.frames),
+            ),
+            at=delivered.at,
+        )
 
     def device_tools(self) -> Sequence[ToolDef]:
         """The device's own tools, once discovery has finished. Empty
