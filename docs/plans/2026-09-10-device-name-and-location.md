@@ -190,8 +190,16 @@ are already in `config/models.py`.
 
 ## Documentation footprint
 
-- `docs/reference/domain-config.md` and the JSON Schema are generated and change
-  only through their generators; CI diffs the committed copies.
+- The generated artifacts that move are `docs/reference/domain-config.md`,
+  `docs/reference/cli.md` and `docs/reference/api-openapi.json`, each through
+  its own generator, with CI diffing the committed copies. There is no
+  standalone JSON Schema under `docs/reference/`; the plan's first draft named
+  one that does not exist.
+- `docs/reference/events.md` and `docs/reference/conversations-schema.md` do
+  NOT move for M1 to M4, which is a consequence of the no-leak decision above:
+  no event gains a field and no stored column changes in those milestones.
+  M5 does move `conversations-schema.md`, being a `record` column.
+  `docs/architecture/observability-surfaces.md` stays accurate throughout.
 - `docs/reference/cli.md` is generated; the new verbs land through the generator.
 - `config.example.yaml` moves in the same change as the schema, per AGENTS.md.
 - `vinga-server/examples/` gains or updates the device example.
@@ -223,10 +231,19 @@ are already in `config/models.py`.
   parse, normalize to the same record, and survive an import, diff and apply
   round trip with the `id` preserved across a name change, which is the property
   the MAC key exists to protect.
-- **No-leak**: a device name is operator-authored free text that reaches the
-  prompt, logs and CLI output. Plant a credential-shaped value and a value with
-  control characters; assert the log and event surfaces carry neither, using
-  `bounded_descriptor`'s existing rule where a descriptor is rendered.
+- **No-leak, and the two fields are two trust classes.** `name` is
+  operator-authored; `location` is conversation-derived, because the agent
+  writes it from something a person said out loud. The plan's first draft
+  treated them as one class, which is what review finding 5 caught.
+  `location` therefore reaches no structured event, no capture manifest and no
+  span, ever: the observability map's structured-events row is metadata only,
+  and a spoken string on a dated event row would sit on the telemetry surface
+  with telemetry retention and no per-conversation erasure, unrewritten by any
+  later correction. The tests assert absence rather than sanitization: drive a
+  session and a tool call with a credential-shaped name and a
+  credential-shaped location, and assert neither appears in any event payload,
+  either log format, the capture manifest, a refusal sentence or an exception
+  chain, covering the tool-failure and rejected-value paths.
 - **The tool**: writes through the repository, refuses what the repository
   refuses, and addresses only the current device, pinned by attempting to write
   while two devices exist.
@@ -241,6 +258,15 @@ are already in `config/models.py`.
   by the backfill itself. The risk that remains is an operator who has already
   hand-written a colliding name, which cannot happen because no name column
   exists before this migration.
+- **A writer from the previous image would violate the new constraints.**
+  After the migration, an older still-running process keeps upserting only
+  `mac` and `agents` through `_device_row` and would fail the new `NOT NULL`
+  columns. The answer is a decision this repository has already taken rather
+  than schema staging: the one-replica topology ADR (#316) means a rolling
+  two-version overlap is not a supported deployment shape. The upgrade is
+  stop-then-migrate, said plainly, and the migration test covers an old-shape
+  write attempted after the upgrade and asserts it is refused rather than
+  silently accepted.
 - **The prompt gains operator-authored free text.** It is already true of agent
   prompts and fragments, so the surface is not new, but the device name reaches
   the prompt without an operator necessarily thinking of it as prompt text. The
