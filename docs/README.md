@@ -162,6 +162,10 @@ it cannot come to describe a server this repository does not build.
   declarations.
 - [**reference/conversations-schema.md**](reference/conversations-schema.md):
   the conversation store's tables, generated from the metadata.
+- [**reference/metrics-views.md**](reference/metrics-views.md): the named
+  aggregate views over that store, one section per view with its
+  question, its columns, its denominator and what telemetry-off does to
+  it, generated from the view declarations.
 - [**concepts.md**](concepts.md): the domain model from the user's
   point of view: device, agent, binding, conversation, session, and
   the decided semantics that connect them (wake word, switching,

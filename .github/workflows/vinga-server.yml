@@ -425,9 +425,14 @@ jobs:
       - name: Unit tests
         run: uv run pytest tests/unit -v --durations=25 -n auto --dist loadfile
 
-  # The shorter lane: the integration tests, the five generated-document
-  # drift checks, and the wheel migration. The checks ride here because
-  # they cost seconds and this lane finishes well before the other one.
+  # The shorter lane: the integration tests, the generated-document drift
+  # checks, and the wheel migration. The checks ride here because they
+  # cost seconds and this lane finishes well before the other one.
+  #
+  # The count used to be written into this sentence and was already one
+  # document behind when the metrics views page was added, which is why
+  # it is not written here any more: the steps below are the list, and a
+  # number beside them is a second place to keep it.
   integration:
     runs-on: ubuntu-latest
 
@@ -539,6 +544,20 @@ jobs:
           uv run vinga-server conversations schema > "$RUNNER_TEMP/conversations-schema.md"
           if ! diff -u ../docs/reference/conversations-schema.md "$RUNNER_TEMP/conversations-schema.md"; then
             echo "::error::docs/reference/conversations-schema.md is stale; regenerate it with: uv run vinga-server conversations schema > ../docs/reference/conversations-schema.md"
+            exit 1
+          fi
+
+      # And the metrics views reference, generated from the view
+      # declarations under the same rule as the schema page beside it.
+      # This one is the only place the denominator and the telemetry-off
+      # behavior of each named aggregate are written down, so a copy
+      # that can drift from the declarations would tell an analyst what
+      # a number means and be wrong about it.
+      - name: Check the committed metrics views reference is current
+        run: |
+          uv run vinga-server conversations views > "$RUNNER_TEMP/metrics-views.md"
+          if ! diff -u ../docs/reference/metrics-views.md "$RUNNER_TEMP/metrics-views.md"; then
+            echo "::error::docs/reference/metrics-views.md is stale; regenerate it with: uv run vinga-server conversations views > ../docs/reference/metrics-views.md"
             exit 1
           fi
 

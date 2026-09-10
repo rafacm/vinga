@@ -1,11 +1,16 @@
 """The `vinga-server conversations` commands.
 
-Two things are worth pinning. That `schema` really opens nothing: it is
-run against a database directory that cannot exist, so a command that
-touched the file would fail there rather than print. And that no refusal
-repeats what was typed, which is the same rule the config group speaks
-and the reason both parsers turn argparse's own usage errors into
+Two things are worth pinning. That neither `schema` nor `views` opens
+anything: both are run against a database that cannot be reached, so a
+command that touched it would fail there rather than print. And that no
+refusal repeats what was typed, which is the same rule the config group
+speaks and the reason both parsers turn argparse's own usage errors into
 ConfigErrors.
+
+The group had one command until the metrics views arrived, and the pins
+that said so moved with them rather than being loosened: what the
+refusal names and what the help offers are still asserted exactly, at
+two words instead of one.
 """
 
 import logging
@@ -50,6 +55,35 @@ def test_the_schema_command_prints_the_reference_and_opens_nothing(
     assert "### `sessions`" in printed
 
 
+def test_the_views_command_prints_the_reference_and_opens_nothing(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The second document, under the same rule as the first: rendered
+    from declarations, so it needs no instance."""
+    assert run("views") == 0
+
+    printed = capsys.readouterr().out
+    assert printed.startswith("# Metrics views reference")
+    assert "### `metrics_stage_latency_daily`" in printed
+
+
+def test_the_two_commands_render_two_different_documents(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A verb wired to the wrong renderer would pass every case above
+    that only reads its own output. This one types both and requires
+    that they differ, which is the whole reason the second verb exists.
+    """
+    assert run("schema") == 0
+    schema = capsys.readouterr().out
+    assert run("views") == 0
+    views = capsys.readouterr().out
+
+    assert schema != views
+    assert "### `sessions`" in schema
+    assert "### `sessions`" not in views
+
+
 def test_the_purge_command_is_gone(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -66,14 +100,14 @@ def test_the_purge_command_is_gone(
 
     captured = capsys.readouterr()
     assert captured.err == (
-        "that is not a command; expected one of: schema; "
+        "that is not a command; expected one of: schema, views; "
         "run with --help for the grammar\n"
     )
     assert captured.out == ""
     assert SENTINEL not in captured.err
 
 
-def test_the_group_help_offers_schema_and_nothing_else(
+def test_the_group_help_offers_the_two_documents_and_nothing_else(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The other half of the same fact: what the group tells an operator
@@ -84,7 +118,7 @@ def test_the_group_help_offers_schema_and_nothing_else(
 
     assert left.value.code == 0
     printed = capsys.readouterr().out
-    assert "{schema}" in printed
+    assert "{schema,views}" in printed
     assert "purge" not in printed
     assert "--session" not in printed
     assert "--device" not in printed
@@ -118,8 +152,9 @@ def test_a_mistake_in_the_grammar_leaves_by_the_same_door(
     assert SENTINEL not in rendered
     assert "Traceback" not in captured.err
     # And the refusal for a word that is not a command still says which
-    # word is.
+    # words are.
     assert "schema" in captured.err
+    assert "views" in captured.err
 
 
 def test_the_command_word_dispatches_to_this_group(

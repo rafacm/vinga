@@ -1,10 +1,13 @@
-"""The `vinga-server conversations` command group: schema.
+"""The `vinga-server conversations` command group: schema and views.
 
-One command, and it needs no running server because it opens nothing at
-all: `schema` prints the generated reference off the table declarations.
-Nothing in this group reaches the conversation store's file, which is
-the property that keeps the group whole once the store is a database
-somewhere else (#281).
+Two commands, and neither needs a running server because neither opens
+anything at all: `schema` prints the generated reference off the table
+declarations, and `views` prints the one off the view declarations. Both
+are documentation generation from what is declared in this package, and
+neither is a read of stored data: querying the views live is the API and
+CLI surface #440 owns. Nothing in this group reaches the conversation
+store's file, which is the property that keeps the group whole once the
+store is a database somewhere else (#281).
 
 Every failure leaves as a `ConfigError` printed to stderr with exit code
 1, naming the kind of failure without quoting the value that caused it,
@@ -22,7 +25,7 @@ from vinga_server.conversations import docgen
 # The command words, in one place: the parser builds them and the
 # refusal for a word that is not one of them names them, so the two
 # cannot come to disagree.
-COMMANDS = ("schema",)
+COMMANDS = ("schema", "views")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -83,9 +86,9 @@ def _parser() -> argparse.ArgumentParser:
     parser = _Parser(
         prog="vinga-server conversations",
         description=(
-            "Read what the conversation store's tables are. The command works "
-            "without a running server because it opens nothing: the reference is "
-            "rendered from the declarations, not from a file."
+            "Read what the conversation store's tables and views are. The commands "
+            "work without a running server because they open nothing: each "
+            "reference is rendered from the declarations, not from a file."
         ),
     )
     commands = parser.add_subparsers(dest="command", required=True)
@@ -100,11 +103,26 @@ def _parser() -> argparse.ArgumentParser:
     )
     schema.set_defaults(run=_schema)
 
+    views = commands.add_parser(
+        COMMANDS[1],
+        help="print the metrics views reference",
+        description=(
+            "Print the generated metrics views reference to stdout: what each named "
+            "aggregate over the record answers, column by column. The committed copy "
+            "is docs/reference/metrics-views.md, and CI diffs the two."
+        ),
+    )
+    views.set_defaults(run=_views)
+
     return parser
 
 
 def _schema(_args: argparse.Namespace) -> None:
     print(docgen.reference(), end="")
+
+
+def _views(_args: argparse.Namespace) -> None:
+    print(docgen.views_reference(), end="")
 
 
 __all__ = ["main"]

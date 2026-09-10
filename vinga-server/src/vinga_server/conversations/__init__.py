@@ -19,6 +19,10 @@ The pieces, in the order they are met:
 
 - `schema.py`: the tables, every column carrying the comment the
   reference is rendered from.
+- `views.py`: the named aggregate views over those tables, each
+  declared once as its question, its per-column contract and its SQL,
+  and read from there by the docgen and by the tests that prove the
+  migrated database matches it.
 - `records.py`: `TurnRecord` and `ToolInvocation`, what the pipeline
   hands over per completed turn, the recorder seam it hands them
   through, and the `Acknowledgement` a durable write answers.
@@ -31,9 +35,11 @@ The pieces, in the order they are met:
 - `api.py`: the two namespaces on the gated `/api`, `/sessions` and
   `/conversations`, registered by `config/api.py` so a route cannot be
   served without being in the committed contract.
-- `docgen.py`: the reference renderer behind
-  `docs/reference/conversations-schema.md`.
-- `cli.py`: `vinga-server conversations schema`.
+- `docgen.py`: the two reference renderers, behind
+  `docs/reference/conversations-schema.md` and
+  `docs/reference/metrics-views.md`.
+- `cli.py`: `vinga-server conversations schema` and
+  `vinga-server conversations views`.
 
 Off unless a deployment asks for it. `server.conversations.enabled` is
 what builds any of this: absent or off, no writer is started, no row is
