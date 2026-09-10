@@ -486,7 +486,7 @@ faithful; resolutions appended per amendment.
 ### Delta re-review
 
 External review: codex CLI 0.154.0, model gpt-5.6-terra, read-only
-sandbox, 2026-09-10, runtime 7m20s, reviewing commit fb9844fa.
+sandbox, 2026-09-10, runtime 2m39s, reviewing commit fb9844fa.
 Verdict as received: **ready after amendments**; four P2, no P1.
 Findings condensed but faithful. The delta also confirmed the
 source checks: `started_at` is UTC ISO text so the timestamptz
