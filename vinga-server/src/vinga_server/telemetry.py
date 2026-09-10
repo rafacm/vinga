@@ -54,12 +54,14 @@ repository follows.
 """
 
 import asyncio
+import json
 import logging
 import os
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
 
 from vinga_server.build_info import revision
@@ -67,6 +69,8 @@ from vinga_server.config import ConfigError
 from vinga_server.config.models import TelemetryConfig
 from vinga_server.egress import EgressRefusal, check_feature
 from vinga_server.events import Emission, EventTap
+from vinga_server.events.catalog import carried_values, catalog, kind_of
+from vinga_server.events.values import Kind
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +182,10 @@ SESSION_FIELD = "session"
 DEVICE_FIELD = "device"
 EVENT_FIELD = "event"
 
+# The three a span event never repeats: two are on the span it is being
+# added to, and the third is its own name.
+_IDENTITIES = frozenset({EVENT_FIELD, SESSION_FIELD, DEVICE_FIELD})
+
 # Which payload fields become attributes on which span, and under what
 # name. Written out rather than derived from the payload, so an event
 # that gains a field does not silently gain an attribute: what a span
@@ -213,6 +221,119 @@ TURN_FINISHED_ATTRIBUTES = {
     "outcome": "vinga.turn.outcome",
     "sentences_spoken": "vinga.turn.sentences_spoken",
 }
+
+# --- what a payload field may become on a span ------------------------
+#
+# The fold used to copy a payload wholesale, taking every key but the
+# three identities. That is a permissive rule in the one place this
+# module cannot afford one: what reaches a backend would be whatever a
+# payload happened to hold, so a field nothing here approved would be
+# exported by default, and the OTel API accepts only scalars and
+# sequences, so a field of any other shape was dropped by the SDK
+# without a word (`prompt_assembled.sources` and `frames_dropped.reasons`
+# are both mappings, and both went missing exactly that way).
+#
+# So the rule is explicit and it is closed at both ends. Every payload
+# field the catalog declares has a KIND, `SHAPES` says what each kind
+# becomes on a span, and the fold iterates the APPROVED table rather
+# than the payload: a key the catalog does not declare for that event
+# cannot be exported, whatever put it there.
+
+
+class Shape(Enum):
+    """What one declared payload field becomes on a span.
+
+    A closed set with a row per `Kind`, checked as such by a test, so a
+    kind added to the catalog fails this module rather than silently
+    picking a default.
+    """
+
+    # A string, number or flag, exported under its own name as it is.
+    SCALAR = "scalar"
+    # A list of names, exported as a sequence of strings.
+    SEQUENCE = "sequence"
+    # A mapping, exported as one JSON string under its own name: the
+    # OTel attribute types have no mapping, and the alternative to a
+    # deterministic string is the SDK dropping the field.
+    JSON = "json"
+    # Not an attribute at all.
+    DROPPED = "dropped"
+
+
+SHAPES: dict[Kind, Shape] = {
+    Kind.IDENTIFIER: Shape.SCALAR,
+    Kind.TOKEN: Shape.SCALAR,
+    Kind.CLASS_NAME: Shape.SCALAR,
+    Kind.ID: Shape.SCALAR,
+    Kind.DESCRIPTOR: Shape.SCALAR,
+    Kind.INT: Shape.SCALAR,
+    Kind.FLOAT: Shape.SCALAR,
+    Kind.BOOL: Shape.SCALAR,
+    Kind.COUNT: Shape.SCALAR,
+    Kind.IDENTIFIER_LIST: Shape.SEQUENCE,
+    Kind.ID_LIST: Shape.SEQUENCE,
+    # The three mappings, each explicitly not an attribute yet. Dropping
+    # them here is what the SDK was doing silently; saying so is the
+    # difference, and what each becomes instead is the next two
+    # findings' business.
+    Kind.SOURCES: Shape.DROPPED,
+    Kind.DROP_COUNTS: Shape.DROPPED,
+    Kind.PROVIDER_ENTRIES: Shape.DROPPED,
+}
+
+
+def _approved() -> dict[str, dict[str, Shape]]:
+    """Which fields each event may put on a span, and what each becomes,
+    read off the catalog's own declarations.
+
+    Derived rather than written out beside the catalog, because a second
+    list of a hundred events' fields is the pending bug the design guide
+    names. What is written out is the rule (`SHAPES` above), which is
+    fourteen rows and closed.
+
+    An event's variants are merged: several variants of one event
+    declare overlapping fields, and what a payload of that event may
+    carry is the union.
+    """
+    approved: dict[str, dict[str, Shape]] = {}
+    for name, declaration in catalog().items():
+        fields: dict[str, Shape] = {}
+        for variant in declaration.variants:
+            for declared in carried_values(variant):
+                kind = kind_of(declared)
+                if kind is not None:
+                    fields[declared.name] = SHAPES[kind]
+        approved[name] = fields
+    return approved
+
+
+APPROVED = _approved()
+
+
+def _as_attribute(held: Any, shape: Shape) -> Any | None:
+    """One payload value as the attribute its shape says it is, or
+    nothing.
+
+    Nothing rather than a coerced guess wherever the value is not what
+    its declared kind promised: the payload is built by the catalog and
+    cannot ordinarily disagree with it, and a fold that repaired the
+    disagreement would be deciding what to export on a path nobody
+    reviewed.
+    """
+    if shape is Shape.SCALAR:
+        return held if isinstance(held, str | int | float | bool) else None
+    if shape is Shape.SEQUENCE:
+        if not isinstance(held, list | tuple):
+            return None
+        return tuple(one for one in held if isinstance(one, str))
+    if shape is Shape.JSON:
+        if not isinstance(held, dict):
+            return None
+        # Sorted and separator-fixed, so the same mapping is the same
+        # string in every process and a backend can group by it.
+        return json.dumps(held, sort_keys=True, separators=(",", ":"))
+    return None
+
 
 # How many sessions may have a `capture_started` waiting for their
 # `session_open`. The capture's event is a server-channel one and beats
@@ -521,22 +642,38 @@ def _epoch_ns(at: float, offset: float) -> int:
     return int((at + offset) * 1_000_000_000)
 
 
-def _attributes(
-    payload: dict[str, Any], table: dict[str, str]
-) -> dict[str, Any]:
-    """The attributes one payload contributes, by the table's rules.
+def _shapes(payload: dict[str, Any]) -> dict[str, Shape]:
+    """What this payload's event is allowed to export, by field.
 
-    A field the payload does not carry contributes nothing rather than a
-    null: an `Absent` value is left out of a payload by the catalog, and
-    an attribute that said `None` would be a claim the event did not
-    make. Values arrive as the plain builtins `carried()` produced, all
-    of which OTel accepts.
+    Empty for an event the catalog does not declare, which is what makes
+    the fold below closed: nothing is exported for a payload whose event
+    name is not one of the catalog's own.
     """
-    return {
-        name: payload[key]
-        for key, name in table.items()
-        if payload.get(key) is not None
-    }
+    name = payload.get(EVENT_FIELD)
+    if not isinstance(name, str):
+        return {}
+    return APPROVED.get(name, {})
+
+
+def _attributes(payload: dict[str, Any], table: dict[str, str]) -> dict[str, Any]:
+    """The span attributes one payload contributes, under the vinga
+    names the table gives them.
+
+    Through the same shape rule the span events go through, so there is
+    one answer in this module to "what may a payload field become on a
+    span" rather than one per surface. A field the payload does not
+    carry, or one whose value is not what its declared kind promised,
+    contributes nothing rather than a null: an `Absent` value is left
+    out of a payload by the catalog, and an attribute saying `None`
+    would be a claim the event did not make.
+    """
+    shapes = _shapes(payload)
+    attributes: dict[str, Any] = {}
+    for key, name in table.items():
+        held = _as_attribute(payload.get(key), shapes.get(key, Shape.DROPPED))
+        if held is not None:
+            attributes[name] = held
+    return attributes
 
 
 @dataclass
@@ -845,18 +982,24 @@ class Telemetry:
 
 
 def _event_attributes(payload: dict[str, Any]) -> dict[str, Any]:
-    """One span event's attributes: the event's own fields, keeping the
-    names the catalog gave them.
+    """One span event's attributes: the fields the catalog declares for
+    this event, keeping the names it gave them.
 
-    The identities the emitter contributes are left out, because they
-    are already on the span this is being added to, and the event name
-    is left out because it IS the span event's name.
+    The iteration is over the APPROVED table and not over the payload,
+    which is the whole of the difference from what this used to do: a
+    key the catalog does not declare for this event is not exported,
+    whatever put it in the dict. The identities the emitter contributes
+    are left out because they are already on the span this is being
+    added to, and the event name because it IS the span event's name.
     """
-    return {
-        key: held
-        for key, held in payload.items()
-        if key not in (EVENT_FIELD, SESSION_FIELD, DEVICE_FIELD) and held is not None
-    }
+    attributes: dict[str, Any] = {}
+    for key, shape in _shapes(payload).items():
+        if key in _IDENTITIES:
+            continue
+        held = _as_attribute(payload.get(key), shape)
+        if held is not None:
+            attributes[key] = held
+    return attributes
 
 
 @dataclass

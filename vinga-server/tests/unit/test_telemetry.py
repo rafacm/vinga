@@ -55,14 +55,16 @@ from tests.support.telemetry import (
 from vinga_server.config import ConfigError
 from vinga_server.config.models import TelemetryConfig
 from vinga_server.egress import EgressRefusal, check_feature
-from vinga_server.events import attach_server_tap, detach_server_tap
+from vinga_server.events import Emission, attach_server_tap, detach_server_tap
 from vinga_server.events.values import CloseReason, ReplyOutcome
 from vinga_server.telemetry import (
+    APPROVED,
     NEEDS_THE_OTEL_EXTRA,
     OTEL_NAMESPACE,
     OTLP_PROTOCOL_ENV,
     OTLP_TRACES_PROTOCOL_ENV,
     SERVICE,
+    SHAPES,
     SUPPORTED_PROTOCOL,
     TELEMETRY_KEY,
     UNSUPPORTED_PROTOCOL,
@@ -607,6 +609,91 @@ async def test_a_failed_export_leaks_nothing(
     assert planted not in every_format(caplog)
     assert planted not in captured.err
     assert planted not in captured.out
+
+
+def test_a_payload_field_the_catalog_never_declared_is_not_exported(
+    planted: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The fourth sentinel the plan asked for, and the one the first
+    round of this milestone did not actually plant.
+
+    The fold used to copy a payload wholesale, taking every key but the
+    three identities, so what reached a backend was whatever the dict
+    happened to hold. It iterates the approved table now, so a key the
+    catalog does not declare for this event cannot be exported whatever
+    put it there.
+
+    Planted through the tap's own interface rather than through the
+    emitter, deliberately: the emitter builds payloads from the catalog
+    and cannot produce this, which is exactly why the question is what
+    the CONSUMER does when handed one. `EventTap.emit(Emission)` is the
+    contract this module publishes, and this is that contract being
+    exercised with a payload it did not build.
+    """
+    caplog.set_level(logging.DEBUG)
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+    tap = telemetry.session_tap()
+
+    open_session(events)
+    start_turn(events)
+    tap.emit(
+        Emission(
+            payload={
+                "event": "session_idle",
+                "session": SESSION,
+                "idle_s": 120.0,
+                # Nothing declares this, and it holds what an exporter
+                # must never put on a span.
+                "authorization": planted,
+            },
+            at=clock.tick(0.1),
+            level=logging.INFO,
+            message="session %s idle",
+            args=(SESSION,),
+        )
+    )
+    finish_reply(events)
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    turn = named(spans, "turn")
+    assert [event.name for event in turn.events] == ["session_idle"]
+    # The declared field arrived, so the fold did run and this is not
+    # passing by exporting nothing at all.
+    assert turn.events[0].attributes["idle_s"] == pytest.approx(120.0)
+    assert "authorization" not in turn.events[0].attributes
+    assert planted not in str(dict(turn.events[0].attributes))
+    assert planted not in every_format(caplog)
+
+
+def test_every_payload_kind_has_a_shape_decided_for_it() -> None:
+    """The closed set at the decision site.
+
+    What a payload field becomes on a span is decided by its catalog
+    `Kind`, and a kind with no row would fall to whatever the lookup
+    defaulted to, which is the permissive rule this replaced. So the
+    table is held to the enumeration exactly, in both directions: a new
+    kind fails here until somebody decides what it exports as, and a row
+    for a kind that no longer exists fails here too.
+    """
+    from vinga_server.events.values import Kind
+
+    assert set(SHAPES) == set(Kind)
+
+
+def test_the_approved_table_covers_the_whole_catalog() -> None:
+    """And the table derived from it, held to the catalog the same way,
+    so an event added without a shape is a failure here rather than an
+    event that exports nothing."""
+    from vinga_server.events.catalog import catalog
+
+    assert set(APPROVED) == set(catalog())
+    assert APPROVED["session_idle"]["idle_s"] is not None
+    # An event this module has never heard of exports nothing at all,
+    # which is what makes the fold closed rather than defaulting.
+    assert APPROVED.get("an_event_nobody_declared") is None
 
 
 def test_the_sdk_namespace_is_quieted_and_restored() -> None:
