@@ -107,15 +107,16 @@ SAMPLE_BYTES = 2
 FRAME_MS = 20
 FRAME_SAMPLES = RATE * FRAME_MS // 1000
 
-# What counts as sound. A channel's own floor plus a margin, so a noisy
-# room and a digitally silent simulator capture are both read on their
-# own terms, but never below an absolute level: digital silence and the
-# dither a codec leaves behind sit far under anything a voice reaches,
-# and a floor derived from a capture that is mostly silence would
-# otherwise promote that dither to speech.
+# What counts as sound. The floor of a region the capture says is
+# quiet, plus a margin, so a noisy room and a digitally silent
+# simulator capture are both read on their own terms; never below an
+# absolute level, because digital silence and codec dither sit far
+# under any voice; and never within a rise of the loudest frame the
+# channel carries. `threshold_of` states each of the three.
 FLOOR_PERCENTILE = 0.2
 FLOOR_MARGIN_DB = 12.0
 ACTIVE_FLOOR_DBFS = -60.0
+RISE_MARGIN_DB = 6.0
 
 # How far back from the endpointer's decision the speech energy may
 # sit. Beyond this the fall belongs to some earlier utterance.
@@ -260,16 +261,37 @@ def envelopes(path: Path, number: int) -> tuple[list[float], list[float]]:
     return mic, reply
 
 
-def threshold_of(levels: list[float]) -> float:
-    """What counts as sound in this channel: its own floor plus a
-    margin, never under the absolute floor."""
-    if not levels:
-        return ACTIVE_FLOOR_DBFS
-    ordered = sorted(levels)
-    floor = ordered[min(len(ordered) - 1, int(len(ordered) * FLOOR_PERCENTILE))]
-    if not math.isfinite(floor):
-        return ACTIVE_FLOOR_DBFS
-    return max(floor + FLOOR_MARGIN_DB, ACTIVE_FLOOR_DBFS)
+def threshold_of(levels: list[float], quiet_frames: int) -> float:
+    """What counts as sound in this channel.
+
+    The floor is read from a region the capture itself says is quiet:
+    everything before the endpointer first counted speech, since neither
+    the user nor this session's reply to them can be in it. Reading it
+    from the whole channel instead was a real defect, found in review: a
+    long single reply occupies most of the recording, its own level then
+    sits at the twentieth percentile, and a threshold twelve dB above
+    that is above the reply, so a capture with one long answer in it
+    reported no reply audio at all.
+
+    Two guards. Never under the absolute floor, because digital silence
+    and the dither a codec leaves behind sit far under any voice and a
+    floor derived from them would promote dither to speech. And never
+    within `RISE_MARGIN_DB` of the channel's loudest frame, so a quiet
+    region that was not quiet after all (a capture that starts mid-reply)
+    cannot raise the threshold above everything the channel carries.
+    """
+    region = levels[:quiet_frames] if quiet_frames > 0 else []
+    usable = [level for level in region if math.isfinite(level)]
+    if usable:
+        ordered = sorted(usable)
+        floor = ordered[min(len(ordered) - 1, int(len(ordered) * FLOOR_PERCENTILE))]
+        threshold = max(floor + FLOOR_MARGIN_DB, ACTIVE_FLOOR_DBFS)
+    else:
+        threshold = ACTIVE_FLOOR_DBFS
+    loudest = max((level for level in levels if math.isfinite(level)), default=-math.inf)
+    if math.isfinite(loudest) and threshold > loudest - RISE_MARGIN_DB:
+        threshold = max(loudest - RISE_MARGIN_DB, ACTIVE_FLOOR_DBFS)
+    return threshold
 
 
 def read_track(path: Path, number: int) -> Track:
@@ -457,12 +479,15 @@ def _first_between(times: list[float], low: float, high: float) -> float | None:
 def turns_of(mic: list[float], reply: list[float], track: Track) -> list[Turn]:
     """One report per utterance the endpointer heard, paired with the
     reply onset that follows it and bounded by the next utterance."""
-    mic_threshold = threshold_of(mic)
-    reply_threshold = threshold_of(reply)
     audio_end_ms = max(len(mic), len(reply)) * FRAME_MS
     found = utterances(
         track.vad, [at for at, _ in track.heard] + list(track.nothing_heard)
     )
+    # Everything before the first utterance began: the one stretch of
+    # this recording that neither the user nor an answer to them is in.
+    quiet_frames = int(found[0].start_ms // FRAME_MS) if found else 0
+    mic_threshold = threshold_of(mic, quiet_frames)
+    reply_threshold = threshold_of(reply, quiet_frames)
     reports: list[Turn] = []
     for number, utterance in enumerate(found, 1):
         after = found[number].start_ms if number < len(found) else audio_end_ms
