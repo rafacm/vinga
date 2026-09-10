@@ -1089,7 +1089,7 @@ class ProviderEntries(EventValue):
                 "a ProviderEntries entry carries only name, type, host and model"
             )
         for held in entry.values():
-            Identifier(held)  # type: ignore[arg-type]
+            Identifier(held)
 
     def carried(self) -> dict[str, dict[str, dict[str, str]]]:
         return {
