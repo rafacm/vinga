@@ -23,6 +23,7 @@ the latency half of this and fail a deployment overnight.
 """
 
 import asyncio
+import logging
 import threading
 import time
 from typing import Any, cast
@@ -30,6 +31,7 @@ from typing import Any, cast
 import pytest
 
 from tests.support.configs import POET_MAC, base_config
+from tests.support.events import every_format
 from tests.support.providers import ScriptedLlm
 from tests.support.sessions import (
     events_of,
@@ -194,3 +196,110 @@ async def test_the_shutdown_of_a_wedged_exporter_is_bounded() -> None:
     took = time.monotonic() - began
 
     assert took < SHUTDOWN_TIMEOUT_S * 2, f"the shutdown waited {took:.1f} s"
+
+
+class Late:
+    """A collector that fails AFTER the shutdown gave up on it, with a
+    credential in what it says.
+
+    The shape the timeout actually leaves behind: an export in flight
+    against an endpoint that will not answer, which eventually raises
+    with the URL it could not reach in the message. A real one carries
+    the operator's endpoint; this one carries a sentinel so the hunt
+    below has something to look for.
+    """
+
+    def __init__(self, sentinel: str) -> None:
+        self.sentinel = sentinel
+        # Set by the TEST, to release the export once the public
+        # shutdown has already given up on it.
+        self.release = threading.Event()
+        self.failed = threading.Event()
+        # Set by the SDK, and last: a batch processor joins its worker
+        # before it closes its exporter, so this is the one observable
+        # that says everything the SDK was going to do about the failure
+        # (including logging it) has been done. A hunt that raced this
+        # would pass whether the suppression held or not.
+        self.closed = threading.Event()
+
+    def export(self, spans: Any) -> Any:
+        self.release.wait(30.0)
+        try:
+            raise ConnectionError(f"POST https://user:{self.sentinel}@collector/v1/traces")
+        finally:
+            self.failed.set()
+
+    def shutdown(self) -> None:
+        self.closed.set()
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return True
+
+
+async def test_a_failure_after_the_timeout_reaches_no_surface(
+    caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The half a bounded shutdown used to give away.
+
+    The wait is bounded and the quieting is not, and the difference is
+    the point: an export the timeout abandoned is still going to fail,
+    and it fails by logging the endpoint it could not reach. Restoring
+    the SDK's logging when the WAIT ended would have put that endpoint,
+    userinfo and all, into the retained log a second later, on a path
+    nothing was watching any more.
+
+    So the sequence here is the one that used to be masked: the exporter
+    is released only AFTER `shutdown()` has returned, it fails with a
+    credential in its message, and the hunt runs once that failure has
+    genuinely happened.
+    """
+    caplog.set_level(logging.DEBUG)
+    collector = Late("sk-live-LATE-EXPORT-SENTINEL")
+    telemetry = build_telemetry(
+        TelemetryConfig(enabled=True),
+        exporter=collector,
+        queue_size=QUEUE,
+        batch_size=1,
+        schedule_delay_ms=1,
+        # Short, because what this case is about is everything that
+        # happens after the bound expires.
+        shutdown_timeout_s=0.2,
+    )
+    assert telemetry is not None
+    session = talking(telemetry)
+    start_reply(session, UTTERANCE)
+    await wait_for_reply(session)
+
+    await telemetry.shutdown()
+
+    # The public shutdown is over and the export has not failed yet,
+    # which is the state the abandoned work lives in.
+    assert not collector.failed.is_set()
+    collector.release.set()
+    assert collector.failed.wait(10.0), "the abandoned export never failed"
+    assert collector.closed.wait(10.0), "the SDK never finished releasing the exporter"
+    # And the namespace comes back once the work is genuinely over,
+    # which is the other half: suppressed for longer than the wait, not
+    # for ever.
+    assert until_quiet_is_restored(), "the SDK namespace was never given back"
+
+    captured = capsys.readouterr()
+    assert collector.sentinel not in every_format(caplog)
+    assert collector.sentinel not in captured.err
+    assert collector.sentinel not in captured.out
+
+
+def until_quiet_is_restored(seconds: float = 10.0) -> bool:
+    """Wait for the release thread to put the SDK namespace back.
+
+    The worker restores from its own `finally`, so this is the one
+    observable that says it finished; polling rather than sleeping,
+    because a fixed sleep is a flake waiting for a loaded runner.
+    """
+    namespace = logging.getLogger("opentelemetry")
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if namespace.level <= logging.CRITICAL:
+            return True
+        time.sleep(0.02)
+    return False

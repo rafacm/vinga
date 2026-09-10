@@ -56,6 +56,32 @@ def both_formats(caplog: pytest.LogCaptureFixture) -> str:
     )
 
 
+def every_format(caplog: pytest.LogCaptureFixture) -> str:
+    """The same rendering, over every record a run produced, whoever
+    logged it.
+
+    `both_formats` above is scoped to this server's channels on purpose,
+    and that scope is exactly wrong for one kind of claim: that a
+    LIBRARY this server silenced wrote nothing. The OTel exporter's
+    failure logging carries the endpoint it could not reach, userinfo
+    and all, and `telemetry.py` takes that namespace off this process's
+    handlers to keep it out of the retained log. A hunt that filtered to
+    `vinga_server.*` could not see the record it is claiming does not
+    exist, and would pass whether the suppression worked or not.
+
+    So this one filters nothing. Use it where the subject is a foreign
+    logger; use `both_formats` where the subject is what this server
+    chose to say.
+    """
+    human = logging.Formatter(TEXT_FORMAT)
+    machine = JsonFormatter()
+    return "\n".join(
+        f"{record.name}\n{record.getMessage()}\n{record.args!r}\n{record.exc_info!r}\n"
+        f"{human.format(record)}\n{machine.format(record)}"
+        for record in caplog.records
+    )
+
+
 def fields_of(record: logging.LogRecord) -> dict[str, object]:
     """The structured half of a record: exactly the attributes the JSON
     formatter writes as top-level keys, read through `logs.py`'s own
