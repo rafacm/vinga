@@ -32,6 +32,7 @@ from vinga_server.generation import Generations
 from vinga_server.memory.store import MemoryStore
 from vinga_server.onboarding import PendingDevices
 from vinga_server.registry import SessionRegistry
+from vinga_server.telemetry import Telemetry
 from vinga_server.tools.mcp import McpServers
 
 
@@ -93,4 +94,11 @@ class Composition:
     # a session with it, the shutdown closes it), and the third is the
     # API runtime beside it.
     live: LiveEvents
+    # The OTLP exporter, when a deployment asked for one (#66). Optional
+    # in the same sense every field above it is: None is a deployment
+    # that did not ask, and it is the default. It rides the composition
+    # because two of its reaches are here, the device edge asking it for
+    # a per-session tap and the lifespan closing it, exactly as `live`
+    # does.
+    telemetry: Telemetry | None
     api: ApiRuntime

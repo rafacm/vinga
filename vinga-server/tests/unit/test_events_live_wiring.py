@@ -111,12 +111,12 @@ async def test_detaching_stops_the_stream_from_hearing_this_session() -> None:
     session = session_watched_by(hub, LoopingSocket())
     assert hub in attached_taps(session)
 
-    session.detach_live()
+    session.detach_observers()
 
     assert hub not in attached_taps(session)
     # And twice is not an error, which is what lets the `finally` run
     # after the branch has already detached.
-    session.detach_live()
+    session.detach_observers()
     assert hub not in attached_taps(session)
 
 
@@ -157,13 +157,13 @@ async def test_a_session_rejected_at_capacity_gives_the_hub_back(
     off on that branch. Both halves are asserted: the operator sees the
     rejection, and nothing is left holding the session afterwards."""
     detached: list[DeviceSession] = []
-    real = DeviceSession.detach_live
+    real = DeviceSession.detach_observers
 
     def spy(self: DeviceSession) -> None:
         detached.append(self)
         real(self)
 
-    monkeypatch.setattr(DeviceSession, "detach_live", spy)
+    monkeypatch.setattr(DeviceSession, "detach_observers", spy)
     monkeypatch.setattr(SessionRegistry, "admit", lambda self, session: "full")
 
     with entered_app(config_with_agent()) as (app, client):

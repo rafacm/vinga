@@ -56,6 +56,7 @@ from vinga_server.providers import ProviderError, build_world
 from vinga_server.registry import SessionRegistry
 from vinga_server.runtime import prompt
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
+from vinga_server.telemetry import build_telemetry
 from vinga_server.tools.mcp import McpConfigError, McpServers
 
 events = ServerEvents(__name__)
@@ -253,6 +254,27 @@ async def _build_composition(
     live = LiveEvents()
     attach_server_tap(live)
     stack.callback(detach_server_tap, live)
+    # And the optional exporter (#66), built before every resource a
+    # boot can open. A deployment that asked for tracing it cannot have
+    # learns that before it learns anything else, and nothing has been
+    # acquired yet for the refusal to unwind.
+    #
+    # Three registrations, and their order is the teardown's. The stack
+    # unwinds last in first out, so registering the shutdown first and
+    # the stop last gives exactly the order this has to run in: stop
+    # accepting emissions from sessions still talking, then detach the
+    # server tap, then flush and let the SDK's thread go under a bounded
+    # timeout. A session's own close path does none of this: the tap it
+    # holds comes off with the session, and the exporter outlives it.
+    telemetry = build_telemetry(
+        config.server.telemetry, local_only=config.server.local_only
+    )
+    if telemetry is not None:
+        stack.push_async_callback(telemetry.shutdown)
+        telemetry_tap = telemetry.server_tap()
+        attach_server_tap(telemetry_tap)
+        stack.callback(detach_server_tap, telemetry_tap)
+        stack.callback(telemetry.stop_accepting)
     # Auth is resolved first and fails the boot when it is enabled with no
     # secret in the environment, so a deployment that forgot one never
     # comes up serving every device that connects. `create_app` already
@@ -612,6 +634,7 @@ async def _build_composition(
         device_facts=device_facts,
         capture=capture,
         live=live,
+        telemetry=telemetry,
         api=api_runtime,
     )
     # Connected last, and closed first on the way out so stdio child
