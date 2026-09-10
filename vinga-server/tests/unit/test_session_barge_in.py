@@ -2,9 +2,9 @@
 
 An utterance the endpointer ends while a reply is in flight may cancel
 that reply only on evidence of user speech: enough classified speech,
-and a transcript confirming it when nothing faster decides it. A reply still inside ASR is
-holding the head of the user's own sentence, so there the barge-in
-merges instead of destroying it. A manual `listen stop` mid-reply is a
+and a transcript confirming it when nothing faster decides it. A reply
+still inside ASR is holding the head of the user's own sentence, so
+there the barge-in merges instead of destroying it. A manual `listen stop` mid-reply is a
 deliberate act and keeps the unconditional cancel.
 
 The websocket tests drive the gates the way the firmware would; the
