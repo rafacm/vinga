@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-09-11
+
+### Fixed
+
+- **The first answer after a reply is heard.** A realtime device
+  streams its microphone through the whole of a reply, so everything
+  the endpointer was fed for those seconds was the assistant talking,
+  and nothing reset it when the reply ended (#456). Silero is
+  recurrent: it scores a window against what it heard before it, and a
+  detector sitting in ten seconds of its own voice scored a clear
+  answer at 0.266 against a threshold of 0.5. Replaying the same
+  captured audio and varying only where the detector was last reset
+  flips that to 0.856, so the answer was audible, arrived intact, was
+  fed to the endpointer, and was missed anyway; the user says so out
+  loud in the capture, twice. The endpointer's reset is now two calls
+  rather than one: `reset` starts a fresh utterance the way it always
+  did, and `forget_audio` clears only what the implementation carries
+  between windows. The end of a reply asks for the second, so the
+  assistant's own playback stops colouring the answer to the question
+  it just asked. Deliberately not the first: a user already
+  mid-sentence when a reply ends keeps their buffered audio, their
+  speech-start offset and their trailing-silence progress, which a full
+  reset would have thrown away. The reset is unconditional, because
+  what it costs mid-speech is about one 32 ms window against a
+  trailing-silence budget of about twenty-two, and a branch on "is an
+  utterance open" would buy nothing for that.
+- **An `openai_compatible` entry can reach OpenAI's current models
+  again.** Two behaviors met and left the type unable to talk to the
+  `gpt-5.6-*` family, which refuses `max_tokens` and answers 400 naming
+  `max_completion_tokens` instead (#444). The type composed
+  `max_tokens` into every request from a default of its own, so an
+  entry that never mentioned a cap still carried one, and every
+  conversation ended in a provider failure a second in. It sends no cap
+  now unless the entry writes one, and the endpoint's own default
+  applies. Writing the field the endpoint does ask for was refused
+  as well: the inline-secret guard matches the fragment `token`
+  anywhere in a key, so `max_completion_tokens: 1024` was answered as a
+  pasted credential and advised into an `_env` key nothing reads. The
+  guard now asks what the key holds, not only what it is called. A
+  number and a bool are not shapes a credential takes, so they pass; a
+  string, a mapping, a list and a null are refused exactly as before,
+  with the same value-free sentence, and so is any key not spelled the
+  way a request parameter is spelled, whatever it holds, because a key
+  can be the pasted credential itself. `max_tokens` keeps its
+  exact-name exemption, which is what still withdraws it as a secret
+  slot. A cap the guard admits is now shown rather than masked on every
+  read, so an export of one carries the number instead of eight
+  asterisks. `anthropic` is untouched: its API requires the field, and
+  its builder's 1024 stands.
+
+- **The frame-cadence pin tolerates one sub-cadence gap.** The unit
+  test guarding reply pacing failed once on a loaded CI runner when
+  event-loop descheduling made one frame land late while the next kept
+  its absolute slot, reading as a single short interval with no stall
+  anywhere (#432). The assertion now allows one such gap; the defect
+  it exists for, a stall followed by a catch-up burst, still fails
+  because the pacer's absolute schedule makes a real stall produce
+  several consecutive short intervals, proven by mutation.
+
 ## 2026-09-10
 
 ### Added
@@ -187,62 +246,6 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   off, and the session's close flushes the partial second before
   `session_closed`.
 
-### Fixed
-
-- **The first answer after a reply is heard.** A realtime device
-  streams its microphone through the whole of a reply, so everything
-  the endpointer was fed for those seconds was the assistant talking,
-  and nothing reset it when the reply ended (#456). Silero is
-  recurrent: it scores a window against what it heard before it, and a
-  detector sitting in ten seconds of its own voice scored a clear
-  answer at 0.266 against a threshold of 0.5. Replaying the same
-  captured audio and varying only where the detector was last reset
-  flips that to 0.856, so the answer was audible, arrived intact, was
-  fed to the endpointer, and was missed anyway; the user says so out
-  loud in the capture, twice. The endpointer's reset is now two calls
-  rather than one: `reset` starts a fresh utterance the way it always
-  did, and `forget_audio` clears only what the implementation carries
-  between windows. The end of a reply asks for the second, so the
-  assistant's own playback stops colouring the answer to the question
-  it just asked. Deliberately not the first: a user already
-  mid-sentence when a reply ends keeps their buffered audio, their
-  speech-start offset and their trailing-silence progress, which a full
-  reset would have thrown away. The reset is unconditional, because
-  what it costs mid-speech is about one 32 ms window against a
-  trailing-silence budget of about twenty-two, and a branch on "is an
-  utterance open" would buy nothing for that.
-- **An `openai_compatible` entry can reach OpenAI's current models
-  again.** Two behaviors met and left the type unable to talk to the
-  `gpt-5.6-*` family, which refuses `max_tokens` and answers 400 naming
-  `max_completion_tokens` instead (#444). The type composed
-  `max_tokens` into every request from a default of its own, so an
-  entry that never mentioned a cap still carried one, and every
-  conversation ended in a provider failure a second in. It sends no cap
-  now unless the entry writes one, and the endpoint's own default
-  applies. Writing the field the endpoint does ask for was refused
-  as well: the inline-secret guard matches the fragment `token`
-  anywhere in a key, so `max_completion_tokens: 1024` was answered as a
-  pasted credential and advised into an `_env` key nothing reads. The
-  guard now asks what the key holds, not only what it is called. A
-  number and a bool are not shapes a credential takes, so they pass; a
-  string, a mapping, a list and a null are refused exactly as before,
-  with the same value-free sentence, and so is any key not spelled the
-  way a request parameter is spelled, whatever it holds, because a key
-  can be the pasted credential itself. `max_tokens` keeps its
-  exact-name exemption, which is what still withdraws it as a secret
-  slot. A cap the guard admits is now shown rather than masked on every
-  read, so an export of one carries the number instead of eight
-  asterisks. `anthropic` is untouched: its API requires the field, and
-  its builder's 1024 stands.
-
-- **The frame-cadence pin tolerates one sub-cadence gap.** The unit
-  test guarding reply pacing failed once on a loaded CI runner when
-  event-loop descheduling made one frame land late while the next kept
-  its absolute slot, reading as a single short interval with no stall
-  anywhere (#432). The assertion now allows one such gap; the defect
-  it exists for, a stall followed by a catch-up burst, still fails
-  because the pacer's absolute schedule makes a real stall produce
-  several consecutive short intervals, proven by mutation.
 
 ### Changed
 
