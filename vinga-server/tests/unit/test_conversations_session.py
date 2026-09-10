@@ -579,11 +579,18 @@ def test_a_credential_in_a_provider_url_reaches_no_record(
     (manifest_file,) = (tmp_path / "captures").glob("*.json")
     manifest = json.loads(manifest_file.read_text())
 
-    # What the record is for survives: the entry, its type and the exact
-    # model string, and the address without what was in front of it.
-    assert row["providers"]["llm"]["base_url"] == "https://host/v1"
-    assert row["providers"]["llm"]["model"] == "a-model"
-    assert manifest["providers"]["llm"]["base_url"] == "https://host/v1"
+    # What the record is for survives: the entry, its type, the exact
+    # model string, and the host, keyed by the agent that was speaking
+    # through it. Since #66 the record is the derivation both it and
+    # `session_open` read, which is four names off the built provider's
+    # identity rather than a serialized entry, so the URL a credential
+    # could hide in is not in it at all: the address is the hostname the
+    # build stamped.
+    entry = row["providers"]["assistant"]["llm"]
+    assert (entry["name"], entry["type"]) == ("vendor", "openai_compatible")
+    assert entry["host"] == "host"
+    assert entry["model"] == "a-model"
+    assert manifest["providers"]["assistant"]["llm"] == entry
     # And the credential reaches nothing that outlives the session.
     assert not _stored_anywhere(SENTINEL)
     assert SENTINEL not in manifest_file.read_text()

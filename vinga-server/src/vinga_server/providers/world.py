@@ -60,7 +60,7 @@ from vinga_server.config.secrets import SecretStore, provider_identity
 from vinga_server.egress import EgressRefusal, check_provider
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import ProviderReachesLoopback
-from vinga_server.events.values import Identifier, LoopbackHost
+from vinga_server.events.values import Identifier, LoopbackHost, ProviderEntries
 from vinga_server.providers.base import (
     AsrProvider,
     LlmProvider,
@@ -109,6 +109,61 @@ class ProviderWorld:
 
     agents: Mapping[str, AgentProviders] = field(default_factory=dict)
     instances: Mapping[str, Provider] = field(default_factory=dict)
+
+    def resolved(self, agents: Iterable[str]) -> ProviderEntries:
+        """What these agents are actually speaking through, sanitized.
+
+        The one derivation of that fact, and both surfaces that state it
+        read it from here: `session_open` carries it onto the event
+        surface, and the capture manifest and the store's session row
+        carry it onto the surfaces that outlive the conversation. Two
+        serializations of one thing is how a manifest and a record come
+        to disagree about which voice answered.
+
+        Sanitized by construction rather than by masking. What it takes
+        is the identity the build stamped, which is four names this
+        server and its operator chose; a configured option cannot reach
+        it at all, so neither can a credential one was holding. That is
+        the opposite of the entry-shaped record it replaces, which was
+        built key by key and had to remember to mask.
+
+        An agent this world never built is left out rather than named
+        with nothing, and a provider the registry never stamped
+        (a fixture's, a test's) is left out for the same reason: an
+        entry that cannot say which entry it is says nothing.
+        """
+        return ProviderEntries(
+            {
+                agent: found
+                for agent in agents
+                if agent in self.agents
+                for found in [_entry_names(self.agents[agent])]
+                if found
+            }
+        )
+
+
+def _entry_names(providers: AgentProviders) -> dict[str, dict[str, str]]:
+    """One agent's four engines, as the names a record may keep.
+
+    `name` and `type` are what the entry is; `host` and `model` are
+    present exactly where the built provider has one, which is the same
+    absence rule the provider-bearing events keep: an engine running in
+    this process reaches no host, and a type with nothing to name runs
+    no model.
+    """
+    entries: dict[str, dict[str, str]] = {}
+    for stage in PROVIDER_STAGES:
+        identity = getattr(getattr(providers, stage), "identity", None)
+        if identity is None:
+            continue
+        entry = {"name": identity.name, "type": identity.type}
+        if identity.host is not None:
+            entry["host"] = identity.host
+        if identity.model is not None:
+            entry["model"] = identity.model
+        entries[stage] = entry
+    return entries
 
 
 @dataclass

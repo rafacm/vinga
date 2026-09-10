@@ -231,9 +231,13 @@ def test_the_manifest_says_what_the_capture_was_made_against(tmp_path: Path) -> 
     assert manifest["device"]["mac"] == DEVICE_MAC.lower()
     assert manifest["device"]["client"] == DEVICE_UUID
     assert manifest["agent"] == "assistant"
-    # Provider entries verbatim, so an exact model string survives.
-    assert manifest["providers"]["tts"]["type"] == "mock"
-    assert manifest["providers"]["asr"]["name"] == "mock"
+    # The resolved entries, per bound agent and per stage, from the one
+    # derivation `session_open` also carries (#66). Four names and never
+    # a configured option, which is what makes it sanitized by
+    # construction; the exact model string is among the four, which is
+    # what a capture outliving its code needs.
+    assert manifest["providers"]["assistant"]["tts"]["type"] == "mock"
+    assert manifest["providers"]["assistant"]["asr"]["name"] == "mock"
     assert manifest["capture"]["complete"] is True
     assert manifest["capture"]["sample_rate"] == CAPTURE_RATE
     assert manifest["audio"]["frame_duration_ms"] == FRAME_MS

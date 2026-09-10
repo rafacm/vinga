@@ -230,7 +230,7 @@ def test_a_real_conversation_reads_back_over_the_same_server(
 
     assert detail["client"] == DEVICE_UUID
     assert detail["agents"] == ["assistant"]
-    assert detail["providers"]["llm"]["type"] == "mock"
+    assert detail["providers"]["assistant"]["llm"]["type"] == "mock"
     assert (detail["telemetry"], detail["text"]) == (True, True)
     assert detail["dropped"] == 0
     # The decision track is counted here and served nowhere: the
