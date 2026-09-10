@@ -1015,6 +1015,15 @@ afterwards and green on the rerun), and `pytest tests/integration -q`
 include `metrics-views.md` from #439, all diff clean, and
 `check_doc_links.py` checked 219 files with 0 failures.
 
+Re-run again after the PR review round below: `ruff check .` all checks
+passed, `mypy` success with no issues in 5 source files, `pytest
+tests/unit -q -n auto --dist loadfile` 6103 passed and 19 skipped (with
+the census regenerated afterwards), `pytest
+tests/integration/test_telemetry_export.py
+tests/integration/test_telemetry_hardening.py
+tests/integration/test_startup_failure.py -q` 16 passed, the six drift
+checks clean and `check_doc_links.py` 219 files with 0 failures.
+
 The first integration run on the rebased tree was 278 passed and ONE
 failed, and it is recorded rather than dropped because it is the whole
 value of re-running a lane after a rebase: the decoded case still asked
@@ -1022,3 +1031,82 @@ a span for `vinga.provider`, this milestone's first spelling of the
 round's configured entry, which M2's review chain had meanwhile made the
 prefix of the retained provider context. Nothing textual conflicted
 there, which is exactly why a clean replay is not a verification.
+
+### PR review round
+
+External review of PR #451, sol, three P1 and three P2, verdict
+mergeable after fixes. Each is recorded with what the fix did, because
+three of them changed what reaches a span and one of them corrects a
+claim this document made.
+
+1. **P1: stage spans carried no session context.** The plan asks for
+   session-level context on every span and OTel inherits nothing: a
+   child carries its parent's id and none of its parent's attributes, so
+   an ASR, round, stream or playback span spelling only its own stage's
+   fields could not be found by a backend filtering on a device or a
+   session. Fixed with one derivation the four stage spans read: the
+   session's identity retained at the open through the same
+   declared-value gate as everything else, and the resolved providers of
+   whichever agent the event says ran the stage. The agent and the
+   conversation come from each event's own payload, which moves
+   correctly across a handover. The round span answers for the LLM stage
+   itself and the context leaves that stage out there, because
+   `llm_round` names the entry that actually answered and one attribute
+   name may have one source. The build revision is not a per-span
+   attribute and is not missing: it rides the resource as
+   `service.version`. Pinned for all four stage types in the unit lane
+   and off the decoded wire in the integration lane.
+
+2. **P1: a rejected barge-in gave its turn a second ASR span.** The gate
+   emits `provider_failed` at the ASR stage for a candidate it turns
+   away, while the turn being spoken over is still the open one, so a
+   fold that built a stage span from every ASR-ending event gave that
+   turn two transcriptions and the second one measured somebody else's
+   speech. Fixed as prescribed: the turn tracks whether its ASR stage
+   has ended, the first outcome builds the span and every later one
+   folds as the span event the gate's vocabulary is. The test drives it
+   through the real runtime, with a confirmation that fails.
+
+3. **P1: the declared-shape gate still exported rejected content**, two
+   ways. The event NAME reached a span unchecked, because a span event
+   is named after its event and the fold dispatched any string through
+   its default; a name outside the catalog is now folded nowhere,
+   checked at the fold's door and again where the span event is made.
+   And a declared field's VALUE was checked against Python builtins
+   only, so a credential-shaped string in `session_idle.idle_s` (a
+   declared `Real`) exported under an honest-looking name. The rule now
+   carries the catalog's own value types and a value is exported only if
+   constructing one would have accepted it, which keeps the constraint
+   where it lives. Two carried forms are accommodated, a nullable
+   field's null and a sequence riding as a list, and that the
+   accommodation is enough is checked against the baseline corpus, which
+   drives every declared path: a field the gate rejected there would be
+   a field a deployment lost in silence. The three hostile cases drive
+   the fold rather than reading the table, and the assertion that
+   claimed an unknown event exports nothing without exercising the fold
+   is one of them now.
+
+4. **P2: the protocol refusal named the variable that does not
+   decide.** `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` takes precedence, so a
+   deployment with a bad value there and a good one in the general
+   variable was refused by a sentence naming the general one, and
+   following it would have changed nothing. The sentence names both and
+   says which decides, still value-free; the field, the example config,
+   the generated reference and the changelog follow, and the
+   traces-specific refusal has its own test.
+
+5. **P2: the blackholed endpoint proved nothing if the address refuses
+   fast.** Whether TEST-NET-1 swallows packets is a property of the
+   machine. Replaced with a real endpoint in the test process that
+   accepts the connection, reads the whole request and answers nothing
+   until released, and with assertions that say so: the request was
+   entered, it was still outstanding when the twelve scripted replies
+   had finished, and every reply was inside the fixed bound.
+
+6. **P2: the record claimed the PR's own CI run proves the images.** The
+   `image` job is guarded by `github.event_name != 'pull_request'` and
+   is skipped on every run the PR triggers. The record now names a
+   `workflow_dispatch` run against the branch as the verification that
+   builds both variants and executes both import checks, says it is the
+   coordinator's to make, and says the image half stays unverified until
+   its link is on the PR.
