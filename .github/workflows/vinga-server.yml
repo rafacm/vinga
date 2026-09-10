@@ -1144,9 +1144,13 @@ jobs:
       # A wheel with no aarch64 variant is a thing a user should never be
       # the first to find out about, so both architectures are asked to
       # import the extras before anything is published.
+      # The otel extra is imported by its SUBTREE and not by the
+      # top-level name: `opentelemetry` is a namespace package every
+      # distribution in that ecosystem installs, so importing it would
+      # pass with none of the ones this image needs.
       - name: Check the extras import (amd64)
         if: matrix.variant == 'default'
-        run: docker run --rm --entrypoint python vinga-server:ci-amd64 -c "import faster_whisper, piper"
+        run: docker run --rm --entrypoint python vinga-server:ci-amd64 -c "import faster_whisper, piper, opentelemetry.sdk, opentelemetry.exporter.otlp.proto.http"
 
       # The quick start, run against the image this job just built. The
       # unit lane already holds the compose file to resolving, which is
@@ -1206,6 +1210,14 @@ jobs:
           # pysilero-vad is a core dependency, not an extra, and runs on
           # every audio frame whichever ASR is configured.
           docker run --rm --entrypoint python vinga-server:ci-amd64 -c "import pysilero_vad"
+          # And the one extra the slim variant DOES carry, asserted here
+          # rather than left to the Dockerfile: this is the deployment
+          # most likely to switch tracing on, and an image that had lost
+          # the extra would say so only as a refused boot in somebody's
+          # cluster. By the subtree, since `opentelemetry` is a
+          # namespace package.
+          docker run --rm --entrypoint python vinga-server:ci-amd64 \
+            -c "import opentelemetry.sdk, opentelemetry.exporter.otlp.proto.http"
 
       - name: Build the arm64 image
         uses: docker/build-push-action@v7
@@ -1228,7 +1240,7 @@ jobs:
 
       - name: Check the extras import (arm64, under QEMU)
         if: matrix.variant == 'default'
-        run: docker run --rm --platform linux/arm64 --entrypoint python vinga-server:ci-arm64 -c "import faster_whisper, piper"
+        run: docker run --rm --platform linux/arm64 --entrypoint python vinga-server:ci-arm64 -c "import faster_whisper, piper, opentelemetry.sdk, opentelemetry.exporter.otlp.proto.http"
 
       # What the slim variant exists for, and what it must refuse. Both
       # against the amd64 image, since this is about which packages are
