@@ -417,6 +417,91 @@ def test_an_event_inside_a_turn_lands_on_the_turn_span() -> None:
     assert named(spans, "session").events == ()
 
 
+def test_the_session_span_carries_what_the_session_opened_against() -> None:
+    """The resolved provider entries, which the issue asks for as
+    session-level context and which no span carried at all.
+
+    Flattened per stage rather than dumped as a blob: a backend filters
+    on attributes, and a JSON string of a nested mapping would be
+    present and unqueryable, which for this question is the same as
+    absent. The four sanitized names off each built provider are the
+    whole of what an entry may hold, so nothing off a provider
+    configuration can reach a span this way.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+
+    open_session(events)
+    close_session(events)
+
+    span = named(finished(telemetry, memory), "session")
+    assert span.attributes["vinga.provider.llm.name"] == "claude"
+    assert span.attributes["vinga.provider.llm.type"] == "anthropic"
+    assert span.attributes["vinga.provider.llm.host"] == "api.anthropic.com"
+    assert span.attributes["vinga.provider.llm.model"] == "claude-sonnet-4-5"
+    assert span.attributes["vinga.provider.vad.type"] == "silero"
+    # An engine running in this process names no host, and absence is
+    # the answer the catalog gives rather than a null.
+    assert "vinga.provider.vad.host" not in span.attributes
+    # And the other bound agent's entries are not on this span: what a
+    # span says is what it was talking through.
+    assert "openai_compatible" not in str(dict(span.attributes))
+
+
+def test_a_turn_after_a_handover_carries_the_new_agents_providers() -> None:
+    """The context follows the agent, which is the whole reason
+    `session_open` carries every bound agent's entries.
+
+    Two turns, a handover between them, and each turn stamped with the
+    providers the agent speaking it actually ran on. An exporter that
+    kept only the opening agent's entries would put the first agent's
+    model on the second agent's turn, which is worse than saying
+    nothing.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+
+    open_session(events)
+    clock.tick(1.0)
+    start_turn(events)
+    clock.tick(1.0)
+    finish_reply(events)
+    clock.tick(0.5)
+    hand_over(events)
+    clock.tick(0.5)
+    start_turn(events)
+    clock.tick(1.0)
+    finish_reply(events)
+    close_session(events)
+
+    turns = [span for span in finished(telemetry, memory) if span.name == "turn"]
+    before, after = sorted(turns, key=lambda span: span.start_time)
+
+    assert before.attributes["vinga.provider.llm.name"] == "claude"
+    assert before.attributes["vinga.provider.llm.model"] == "claude-sonnet-4-5"
+    assert after.attributes["vinga.provider.llm.name"] == "local"
+    assert after.attributes["vinga.provider.llm.model"] == "qwen3"
+    assert after.attributes["vinga.provider.llm.host"] == "127.0.0.1"
+
+
+def test_a_session_that_opened_against_nothing_says_nothing() -> None:
+    """The degenerate case, which has to be silence rather than an
+    empty attribute: a session whose open carried no entries is a
+    session this exporter knows nothing about, and inventing a null
+    would be a claim the event did not make."""
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+
+    open_session(events, providers={})
+    close_session(events)
+
+    span = named(finished(telemetry, memory), "session")
+    assert not [name for name in span.attributes if name.startswith("vinga.provider.")]
+
+
 def test_a_variant_the_span_map_does_not_name_folds_onto_the_turn() -> None:
     """The fold is a default and not a list, and this is what says so.
 
