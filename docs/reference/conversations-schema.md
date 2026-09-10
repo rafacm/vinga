@@ -266,7 +266,7 @@ carries the per-leg counts, and the per-round, per-model truth is the
 | `close_reason` | `TEXT` | yes | What ended the session, one of: limit, idle, drain, client, error. The first cause to fire wins. Null until the session closes. |
 | `server_version` | `TEXT` | yes | The server version that recorded this session. |
 | `revision` | `TEXT` | yes | The build revision that recorded this session. |
-| `providers` | `JSON` | yes | The resolved provider entry per pipeline stage, the same structure the capture manifest carries. Holds environment variable names, never credentials. |
+| `providers` | `JSON` | yes | The resolved provider entries this session opened against, by agent and then by pipeline stage: each one the entry's name, its type, and the host and model where the type has them. The same structure the capture manifest carries. Four names off the built provider and nothing else off its configuration, so no option and no credential can be in it. |
 | `metrics` | `BOOLEAN` | no | Whether telemetry storage was on for this session, so a null number is distinguishable from a number that was never stored. |
 | `text` | `BOOLEAN` | no | Whether text storage was on for this session, so a null utterance is distinguishable from an utterance that was never stored. |
 | `dropped` | `INTEGER` | no | Records this session lost: events refused at the in-flight bound, and anything a failed transaction rolled back. Written at close, so the store records its own incompleteness the way the capture manifest records `complete`. Zero under telemetry-off. |

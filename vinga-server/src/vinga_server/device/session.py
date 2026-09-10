@@ -67,7 +67,6 @@ from vinga_server.config.models import (
     bounded_descriptor,
     normalize_mac,
 )
-from vinga_server.config.views import provider_record
 from vinga_server.conversations import ConversationStore, SessionSink
 from vinga_server.device import watchdog
 from vinga_server.device.bindings import DeviceBindings
@@ -497,6 +496,11 @@ class DeviceSession:
                     agent=Identifier(self._agent),
                     conversation=ConversationId(self._conversation),
                     agents=AgentNames(tuple(self._agents)),
+                    # The same derivation the manifest above reads, so
+                    # the event surface and the surfaces that outlive
+                    # the conversation cannot come to disagree about
+                    # which engines answered it.
+                    providers=generation.providers.resolved(self._agents),
                     protocol=Whole(self.protocol_version),
                     # The widest payoff for one field: the JSON logs
                     # already ship to a collector, so every session from
@@ -842,36 +846,31 @@ class DeviceSession:
             },
         }
 
-    def _provider_manifest(self) -> dict[str, Any]:
+    def _provider_manifest(self) -> dict[str, dict[str, dict[str, str]]]:
         """The resolved provider entries, as a record may keep them.
 
-        Through `provider_record` rather than a model dump: what lands
-        here is written into a capture's manifest and into a
-        conversation's session row, both of which outlive the session,
-        so it is built key by key with the secret-shaped values masked
-        and any credential a URL carries taken out. The write path
-        refuses such a URL, and this is the half of that rule that does
-        not depend on every row having passed through it.
+        The world's own derivation, which is also what `session_open`
+        carries: one home for "what is this conversation speaking
+        through", read by the two surfaces that state it. It used to be
+        this method's own serialization of the current agent's
+        configured entries, which meant a manifest and an event could
+        come to disagree, and meant every field of a `ProviderConfig`
+        had to be masked on its way past.
+
+        Every agent the device is bound to rather than only the one
+        talking, because a handover moves which of them is answering and
+        a record made at the open cannot know which that will be.
+
+        The world this session bound rather than the one being served
+        now. What a manifest records is what served this conversation,
+        and a reload can have replaced the entries since: the engines
+        this session is speaking through are its own generation's, so
+        the entries it names have to be too, or the record would name
+        a voice the conversation never used (#191).
         """
-        if self._agent is None or self._generation is None:
+        if self._generation is None:
             return {}
-        described: dict[str, Any] = {}
-        # The world this session bound rather than the one being served
-        # now. What a manifest records is what served this conversation,
-        # and a reload can have replaced the entries since: the engines
-        # this session is speaking through are its own generation's, so
-        # the entries it names have to be too, or the record would name
-        # a voice the conversation never used (#191).
-        config = self._generation.config
-        for stage in ("llm", "asr", "tts", "vad"):
-            name, _ = config.provider_for_agent(self._agent, stage)
-            if name is None:
-                continue
-            entry = getattr(config.providers, stage).get(name)
-            if entry is None:
-                continue
-            described[stage] = {"name": name, **provider_record(entry)}
-        return described
+        return self._generation.providers.resolved(self._agents).carried()
 
     def _idle_deferred(self) -> bool:
         """Whether the idle countdown does not apply to this session

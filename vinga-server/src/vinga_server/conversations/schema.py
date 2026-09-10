@@ -215,9 +215,12 @@ sessions = Table(
         JSON_OR_NULL,
         nullable=True,
         comment=(
-            "The resolved provider entry per pipeline stage, the same structure "
-            "the capture manifest carries. Holds environment variable names, "
-            "never credentials."
+            "The resolved provider entries this session opened against, by agent "
+            "and then by pipeline stage: each one the entry's name, its type, and "
+            "the host and model where the type has them. The same structure the "
+            "capture manifest carries. Four names off the built provider and "
+            "nothing else off its configuration, so no option and no credential "
+            "can be in it."
         ),
     ),
     Column(
