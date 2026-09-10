@@ -40,7 +40,7 @@ them the same way would let a quiet day read as a healthy one.
 two-turn day's p95 is mostly arithmetic between two numbers. The count they
 were computed over is the column beside them; read it first.
 
-## Two limits worth knowing before quoting a number
+## Three limits worth knowing before quoting a number
 
 **Retention makes historical event rates a floor.** Turns survive with their
 conversation, by its last activity, while events are deleted by their own
@@ -51,11 +51,24 @@ retention window is a floor, not a measurement, and zero cannot be told from
 pruned. No windowing cleverness is attempted in the SQL: the honest sentence
 is the design.
 
+**A missing measurement has more than one cause, and these views cannot tell
+them apart.** A null token count means telemetry storage was off OR the
+provider reported no usage; a stage absent from the latency view means the
+switch was off OR that stage was never measured on that turn. The store writes
+both causes identically, so what a measured count reports is coverage and
+never its reason: a gap between `turns` and `input_measured_turns` says those
+tokens were not recorded, and nothing about why. Read a measured count as a
+denominator, never as a diagnosis.
+
 **`sessions.metrics` is the telemetry switch**, under the name the switch had
 before it was renamed. Column names are a compatibility surface and the rename
 was not a schema change, so the column keeps the old spelling deliberately.
-`metrics_sessions_daily.telemetry_sessions` counts it, and is what tells a day
-with the switch off from a day with nothing to measure.
+`metrics_sessions_daily.telemetry_sessions` counts it, and it is session-level
+context for the day a session opened rather than a discriminator for the limit
+above: a turn is dated by the day it was spoken, which need not be the day its
+session opened, the column is not broken down by agent, and it knows nothing
+about the second cause. A day where it sits below `sessions` had sessions that
+stored no measured number at all, and that is the whole of what it says.
 
 ## The views
 
@@ -79,9 +92,12 @@ all turns, and it is `measured_turns` beside the percentiles rather than a
 number a reader has to go and find.
 
 **Telemetry-off.** A turn stored under telemetry-off has every stage column
-null, so it contributes no row here at all. It still counts as a turn in
-`metrics_sessions_daily` and in the event view's denominator, which is what
-makes `measured_turns` worth reading beside a percentile.
+null, so it contributes no row here at all. A turn that simply did not measure
+a stage (a reply that spoke nothing has no `tts_first_audio_ms`) is absent
+from that stage in exactly the same way, and this view cannot tell the two
+apart. Either way the turn still counts in `metrics_sessions_daily` and in the
+event view's denominator, which is what makes `measured_turns` worth reading
+beside a percentile.
 
 ### `metrics_tokens_daily`
 
@@ -92,9 +108,9 @@ What did each agent consume, by UTC day?
 | `day` | `date` | no | none | The UTC day the turn was spoken on. | The turn's session `started_at` converted to UTC, plus the turn's `t_ms`, cast to `date`. |
 | `agent` | `text` | yes | none | The agent the attribution row belongs to: the leg's own `agent` where the turn had legs, and `turns.agent` where it did not. | Grouped. A leg whose `agent` is null groups as a null row rather than vanishing, so usage nobody can attribute is still visible. |
 | `turns` | `bigint` | no | turns | How many physical turns own at least one attribution row in this group. A turn split across two agents counts once in each of their rows and is never double counted inside one. | `count(DISTINCT turns.id)` over the group's attribution rows. |
-| `input_measured_turns` | `bigint` | no | attribution rows | How many attribution rows in this group carried an input count. | `count()` over the attribution rows whose input field is not null. |
-| `output_measured_turns` | `bigint` | no | attribution rows | How many attribution rows in this group carried an output count. | `count()` over the attribution rows whose output field is not null. |
-| `input_tokens` | `bigint` | yes | tokens | Input tokens consumed by this agent on this day, OTel's `gen_ai.usage.input_tokens`. | `sum()` over the non-null input fields. Null when the group measured none, which is what `input_measured_turns` of zero says in a number. |
+| `input_measured_turns` | `bigint` | no | attribution rows | How many attribution rows in this group carried an input count. The rest carried none, either because telemetry storage was off or because the provider reported no usage, and the two are stored identically. | `count()` over the attribution rows whose input field is not null. |
+| `output_measured_turns` | `bigint` | no | attribution rows | How many attribution rows in this group carried an output count. As above, the rest are unrecorded rather than zero, and for either of the same two reasons. | `count()` over the attribution rows whose output field is not null. |
+| `input_tokens` | `bigint` | yes | tokens | Input tokens consumed by this agent on this day, OTel's `gen_ai.usage.input_tokens`. | `sum()` over the non-null input fields. Null when the group measured none, which is what `input_measured_turns` of zero says in a number. Null is not zero consumption: it is consumption nobody recorded. |
 | `output_tokens` | `bigint` | yes | tokens | Output tokens produced for this agent on this day, OTel's `gen_ai.usage.output_tokens`. | `sum()` over the non-null output fields. Null when the group measured none. |
 
 **Denominator.** The unit is the attribution row, not the turn: a turn with
@@ -106,9 +122,14 @@ separately because the store writes the two sums independently.
 
 **Telemetry-off.** Under telemetry-off both token fields are null, so the
 attribution row still lands and still counts in `turns` while adding nothing
-to either measured count and nothing to either sum. A day whose `turns` far
-exceeds its measured counts is a day the switch was off, not a day the
-provider went quiet.
+to either measured count and nothing to either sum. A turn whose provider
+reported no usage is null in exactly the same way, and this view cannot tell
+the two apart: a gap between `turns` and a measured count says the tokens were
+not recorded, and never why. `metrics_sessions_daily.telemetry_sessions` is
+session-level context for the same day and not a discriminator here, because
+it counts sessions by the day they opened while these rows count turns by the
+day they were spoken, and it says nothing about which agent a turn was
+attributed to.
 
 ### `metrics_event_rates_daily`
 
@@ -135,7 +156,11 @@ an event on a day with no session start and no turn still gets a row.
 while its session and its turns still count. It therefore raises both
 denominators and neither numerator, which is a property of the data this view
 reports rather than hides: read it beside
-`metrics_sessions_daily.telemetry_sessions`.
+`metrics_sessions_daily.telemetry_sessions`, which counts the same switch on
+the same session spine. That is context and not a correction: both
+denominators here are counted on the day a turn was spoken or a session
+opened, and neither can say which of the day's sessions a missing event
+belonged to.
 
 ### `metrics_sessions_daily`
 
@@ -145,7 +170,7 @@ What baseline sits under the numbers in every other view?
 | --- | --- | --- | --- | --- | --- |
 | `day` | `date` | no | none | The UTC day. | `coalesce()` across the session and turn streams' days. |
 | `sessions` | `bigint` | no | sessions | How many sessions opened on this day. | `count(*)` over sessions by their `started_at` day, coalesced to zero on a day that only has turns. |
-| `telemetry_sessions` | `bigint` | no | sessions | How many of them had telemetry storage on, so a null number elsewhere can be told from a number nobody stored. | `count(*) FILTER (WHERE sessions.metrics)`, coalesced to zero. |
+| `telemetry_sessions` | `bigint` | no | sessions | How many of them had telemetry storage on. A day where this is below `sessions` had sessions that stored no measured number at all; it does not follow that a null number elsewhere came from one of them. | `count(*) FILTER (WHERE sessions.metrics)`, coalesced to zero. |
 | `turns` | `bigint` | no | turns | How many turns were spoken on this day. | `count(*)` over turns by their UTC day, coalesced to zero. |
 
 **Denominator.** There is no ratio here: these are the counts the other views
@@ -156,4 +181,9 @@ day and its later turns on the next.
 **Telemetry-off.** `telemetry_sessions` counts `sessions.metrics`, which is
 the telemetry switch and keeps the name it had before the switch was renamed.
 Subtract it from `sessions` to get the sessions that could not have
-contributed a measured number or an event to any other view.
+contributed a measured number or an event to any other view. That is
+session-level context for the day a session opened, and no more: it cannot say
+why a particular turn measured nothing, because a turn is dated by the day it
+was spoken rather than the day its session opened, and because a null
+measurement elsewhere has a second cause (a provider that reported no usage, a
+stage that was never reached) that this column knows nothing about.

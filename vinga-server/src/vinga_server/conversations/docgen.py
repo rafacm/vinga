@@ -469,7 +469,7 @@ def views_reference() -> str:
             "count they were computed over is the column beside them; read it first."
         ),
         "",
-        "## Two limits worth knowing before quoting a number",
+        "## Three limits worth knowing before quoting a number",
         "",
         *_paragraph(
             "**Retention makes historical event rates a floor.** Turns survive with "
@@ -483,12 +483,27 @@ def views_reference() -> str:
         ),
         "",
         *_paragraph(
+            "**A missing measurement has more than one cause, and these views cannot "
+            "tell them apart.** A null token count means telemetry storage was off "
+            "OR the provider reported no usage; a stage absent from the latency view "
+            "means the switch was off OR that stage was never measured on that turn. "
+            "The store writes both causes identically, so what a measured count "
+            "reports is coverage and never its reason: a gap between `turns` and "
+            "`input_measured_turns` says those tokens were not recorded, and nothing "
+            "about why. Read a measured count as a denominator, never as a diagnosis."
+        ),
+        "",
+        *_paragraph(
             "**`sessions.metrics` is the telemetry switch**, under the name the switch "
             "had before it was renamed. Column names are a compatibility surface and "
             "the rename was not a schema change, so the column keeps the old spelling "
             "deliberately. `metrics_sessions_daily.telemetry_sessions` counts it, and "
-            "is what tells a day with the switch off from a day with nothing to "
-            "measure."
+            "it is session-level context for the day a session opened rather than a "
+            "discriminator for the limit above: a turn is dated by the day it was "
+            "spoken, which need not be the day its session opened, the column is not "
+            "broken down by agent, and it knows nothing about the second cause. A day "
+            "where it sits below `sessions` had sessions that stored no measured "
+            "number at all, and that is the whole of what it says."
         ),
         "",
         "## The views",

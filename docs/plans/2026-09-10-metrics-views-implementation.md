@@ -137,3 +137,27 @@ No column name, type or predicate departs from the frozen contracts.
   `percentile_disc` would give 200 and 400. The integration case
   asserts the interpolated pair, so a later change of aggregate is a
   red test rather than a quietly different number.
+
+### PR review round
+
+External review of PR #447: one P2, no P1, mergeable after it. Adopted.
+
+- **P2: the telemetry-coverage prose over-claimed.** It said a gap
+  between `turns` and a measured token count meant telemetry was off
+  rather than that the provider reported no usage, and offered
+  `telemetry_sessions` as the way to tell. `schema.py` documents a null
+  token count for both causes, this milestone's own seeded case plants
+  a metrics-on turn with no usage beside a metrics-off turn and they
+  are the same row here, and `telemetry_sessions` could not
+  discriminate anyway: it counts sessions by the day they opened while
+  token rows count turns by the day they were spoken, and it carries no
+  agent. Fixed by stating the ambiguity instead: the declaration
+  matrix and the per-view sentences now say a missing measurement means
+  telemetry-off or absent provider usage, indistinguishably, and the
+  shared reference gained a third limit saying a measured count is a
+  denominator and never a diagnosis. `telemetry_sessions` is described
+  as same-day session-level context throughout. The page was
+  regenerated through the generator, the docgen drift test carries a
+  new pin on the corrected sentences with the two retired claims
+  asserted absent, and the seeded case's docstring says what the pair
+  of rows is evidence of.
