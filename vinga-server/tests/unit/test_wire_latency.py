@@ -101,10 +101,19 @@ def write_capture(
     return directory
 
 
-def speech(start_ms: int, end_ms: int, listening: bool = True) -> list[dict]:
+def speech(
+    start_ms: int, end_ms: int, listening: bool = True, resets: bool = True
+) -> list[dict]:
     """The endpointer counting speech through an utterance, then saying
     it has stopped: `speech_ms` back to zero while still listening,
-    which is the fall this script pairs the energy with."""
+    which is the fall this script pairs the energy with.
+
+    `resets=False` is the other shape the live producer emits, and the
+    commoner one: the endpointer that ends an utterance is reset in the
+    same breath, so where the user speaks again straight away the next
+    sample is already counting the new speech and no zero is ever
+    written.
+    """
     track = [
         {
             "event": "vad",
@@ -115,15 +124,16 @@ def speech(start_ms: int, end_ms: int, listening: bool = True) -> list[dict]:
         }
         for at in range(start_ms, end_ms, FRAME_MS)
     ]
-    track.append(
-        {
-            "event": "vad",
-            "t_ms": float(end_ms + FRAME_MS),
-            "speech_ms": 0.0,
-            "listening": listening,
-            "replying": False,
-        }
-    )
+    if resets:
+        track.append(
+            {
+                "event": "vad",
+                "t_ms": float(end_ms + FRAME_MS),
+                "speech_ms": 0.0,
+                "listening": listening,
+                "replying": False,
+            }
+        )
     return track
 
 
@@ -218,6 +228,35 @@ def test_two_turns_each_pair_with_their_own_reply(tmp_path: Path) -> None:
         "wire response latency 0.4 s",
     ]
     assert "capture 1: 2 turn(s), 2 measured" in done.stdout
+
+
+def test_two_turns_a_fraction_of_a_second_apart_stay_two_turns(tmp_path: Path) -> None:
+    """The shape the live producer actually emits: the endpointer is
+    reset the moment it ends an utterance, so the user answering a short
+    reply straight away gives two positive samples 200 ms apart with no
+    zero between them. What says they are two utterances is the
+    transcript that landed in the gap."""
+    captures = write_capture(
+        tmp_path / "captures",
+        "session-a",
+        mic=[(200, 1000), (1200, 1800)],
+        reply=[(1100, 1180), (2000, 2600)],
+        events=[
+            *speech(200, 1000, resets=False),
+            heard(1060, 0.8),
+            *speech(1200, 1800, resets=False),
+            heard(1860, 0.6),
+        ],
+        total_ms=3000,
+    )
+    done = run(str(captures))
+    assert done.returncode == 0
+    assert turn_lines(done.stdout) == [
+        "turn 1: speech ended at 1.0 s, reply audio began at 1.1 s, "
+        "wire response latency 0.1 s",
+        "turn 2: speech ended at 1.8 s, reply audio began at 2.0 s, "
+        "wire response latency 0.2 s",
+    ]
 
 
 def test_a_turn_with_no_reply_audio_says_so_rather_than_guessing(tmp_path: Path) -> None:
