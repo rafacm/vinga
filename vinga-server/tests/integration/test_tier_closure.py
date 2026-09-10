@@ -1,7 +1,7 @@
 """What the default install carries, and what it must not.
 
 The whole of this milestone's claim, proven in an environment rather
-than asserted about one. Three doors lead into this package and each is
+than asserted about one. Five doors lead into this package and each is
 exercised here:
 
 - the **client** door, which is `uvx --from git+...` on a laptop: the
@@ -17,6 +17,14 @@ exercised here:
   rather than refuse it. That is the other half of the gate the client
   door proves closed, and it is the only place `simulator run` is driven
   from an installed tier;
+- the **telemetry** door, which is a deployment that wants traces: the
+  same project with `[otel]`, which must be exactly the client closure
+  plus what the two OpenTelemetry distributions drag in, and must carry
+  none of the server. Its other half is the plain `[serve]`
+  environment, which deliberately does NOT get the extra: that is the
+  one place in this repository where the packages are genuinely absent,
+  so it is where a server asked for telemetry is asked for the real
+  missing-extra refusal rather than a faked one;
 - the **contributor** door, which is `cd vinga-server && uv sync`: the
   project with its default groups, which must yield a runnable server
   with no new flags. It is the one door a mistake in is invisible to
@@ -73,7 +81,7 @@ from packaging.markers import Marker
 
 from tests.support.commands import BUILD_SECONDS, ran
 from tests.support.config_cli import registered
-from tests.support.tiers import SERVE_MODULES, SIM_MODULES, declared
+from tests.support.tiers import OTEL_MODULES, SERVE_MODULES, SIM_MODULES, Tiers, declared
 from vinga_server.config import cli
 
 PROJECT = Path(__file__).resolve().parents[2]
@@ -101,7 +109,7 @@ NOWHERE_PORT = "1"
 
 
 @pytest.fixture(scope="module")
-def tiers() -> tuple[set[str], set[str], set[str]]:
+def tiers() -> Tiers:
     """The three tiers' DIRECT dependencies, read off `pyproject.toml`.
 
     The independent oracle, kept beside the lock closure below rather
@@ -279,6 +287,18 @@ def sim_env(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return _synced(tmp_path_factory.mktemp("sim") / "venv", "--extra", "sim")
 
 
+@pytest.fixture(scope="module")
+def otel_env(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The telemetry door: the same project with `[otel]` and nothing
+    else, isolated the way `[sim]` is.
+
+    On its own rather than laid over `[serve]`, and the isolation is the
+    point: what this environment answers is what the extra ITSELF
+    installs, so a distribution that arrived through the server half
+    could not be mistaken for one the extra declares."""
+    return _synced(tmp_path_factory.mktemp("otel") / "venv", "--extra", "otel")
+
+
 def _installed(python: Path) -> set[str]:
     """Every distribution the environment holds, as it reports itself."""
     finished = ran(
@@ -384,18 +404,17 @@ def test_a_distribution_nobody_declared_would_turn_this_lane_red(
 
 
 def test_the_client_install_carries_every_client_dependency(
-    client_env: Path, tiers: tuple[set[str], set[str], set[str]]
+    client_env: Path, tiers: Tiers
 ) -> None:
     """The independent oracle: the six names written by hand in
     `pyproject.toml`, checked against the environment without going
     through the lock at all."""
-    client, _, _ = tiers
-    assert len(client) == 6, client
-    assert client <= _installed(client_env)
+    assert len(tiers.client) == 6, tiers.client
+    assert tiers.client <= _installed(client_env)
 
 
 def test_the_client_install_carries_no_serve_distribution(
-    client_env: Path, tiers: tuple[set[str], set[str], set[str]]
+    client_env: Path, tiers: Tiers
 ) -> None:
     """And the eleven, by name. Implied by the exact comparison above
     and kept anyway: this is the sentence the milestone claims, and a
@@ -405,13 +424,12 @@ def test_the_client_install_carries_no_serve_distribution(
     Eleven since #283, which added the Postgres driver: `serve` carries
     the plain `psycopg`, so a bare install carrying it would be the
     server half arriving through the client door."""
-    _, serve, _ = tiers
-    assert len(serve) == 11, serve
-    assert serve & _installed(client_env) == set()
+    assert len(tiers.serve) == 11, tiers.serve
+    assert tiers.serve & _installed(client_env) == set()
 
 
 def test_the_client_install_carries_no_websocket_client(
-    client_env: Path, tiers: tuple[set[str], set[str], set[str]]
+    client_env: Path, tiers: Tiers
 ) -> None:
     """The negative half the `sim` extra needs, in both the forms the
     serve tier gets it in: absent as a distribution and absent to the
@@ -422,24 +440,41 @@ def test_the_client_install_carries_no_websocket_client(
     directly, through `uvicorn[standard]`, so a tiering mistake here
     would show up as an importable module rather than as a declared one.
     """
-    _, _, sim = tiers
-    assert len(sim) == 1, sim
-    assert set(SIM_MODULES) == sim, "the import-name map has drifted from the tier"
-    assert sim & _installed(client_env) == set()
+    assert len(tiers.sim) == 1, tiers.sim
+    assert set(SIM_MODULES) == tiers.sim, "the import-name map has drifted from the tier"
+    assert tiers.sim & _installed(client_env) == set()
 
     for module in sorted(SIM_MODULES.values()):
         finished = _ran(client_env, "python", "-c", f"import {module}")
         assert finished.returncode != 0, f"{module} is importable from the client install"
 
 
+def test_the_client_install_carries_no_telemetry_sdk(
+    client_env: Path, tiers: Tiers
+) -> None:
+    """The same pair of questions for the fourth tier.
+
+    The import half is not the distribution half said twice, and here it
+    is the half that matters: `opentelemetry` is a namespace package, so
+    the check has to reach the subtree each distribution contributes
+    rather than the shared root, which is what `OTEL_MODULES` writes out.
+    """
+    assert len(tiers.otel) == 2, tiers.otel
+    assert set(OTEL_MODULES) == tiers.otel, "the import-name map has drifted from the tier"
+    assert tiers.otel & _installed(client_env) == set()
+
+    for module in sorted(OTEL_MODULES.values()):
+        finished = _ran(client_env, "python", "-c", f"import {module}")
+        assert finished.returncode != 0, f"{module} is importable from the client install"
+
+
 def test_the_serve_modules_are_not_importable_from_the_client_install(
-    client_env: Path, tiers: tuple[set[str], set[str], set[str]]
+    client_env: Path, tiers: Tiers
 ) -> None:
     """And the same question asked of the interpreter, because a
     distribution can be absent from the metadata while its module is
     importable through something else that vendored it."""
-    _, serve, _ = tiers
-    assert set(SERVE_MODULES) == serve, "the import-name map has drifted from the tier"
+    assert set(SERVE_MODULES) == tiers.serve, "the import-name map has drifted from the tier"
 
     for module in sorted(SERVE_MODULES.values()):
         finished = _ran(client_env, "python", "-c", f"import {module}")
@@ -587,10 +622,9 @@ def test_the_gated_pair_is_what_the_table_says_it_is() -> None:
 
 
 def test_the_serve_install_carries_both_tiers(
-    serve_env: Path, tiers: tuple[set[str], set[str], set[str]]
+    serve_env: Path, tiers: Tiers
 ) -> None:
-    client, serve, _ = tiers
-    assert client | serve <= _installed(serve_env)
+    assert tiers.client | tiers.serve <= _installed(serve_env)
 
 
 def test_the_conversations_group_answers_from_the_serve_install(serve_env: Path) -> None:
@@ -654,7 +688,7 @@ def test_the_client_install_cannot_be_asked_to_serve(client_env: Path) -> None:
 
 
 def test_the_sim_install_is_exactly_the_client_closure_plus_one(
-    sim_env: Path, locked: dict[str, dict[str, object]], tiers: tuple[set[str], set[str], set[str]]
+    sim_env: Path, locked: dict[str, dict[str, object]], tiers: Tiers
 ) -> None:
     """Exactly, both ways, and against two oracles rather than one.
 
@@ -666,10 +700,9 @@ def test_the_sim_install_is_exactly_the_client_closure_plus_one(
     """
     environment = _marker_environment(sim_env)
     expected = _tier_closure(locked, environment, "sim")
-    _, _, sim = tiers
 
     assert _installed(sim_env) == expected
-    assert expected == _tier_closure(locked, environment) | sim
+    assert expected == _tier_closure(locked, environment) | tiers.sim
 
 
 def test_a_distribution_nobody_declared_would_turn_the_sim_lane_red(
@@ -686,14 +719,13 @@ def test_a_distribution_nobody_declared_would_turn_the_sim_lane_red(
 
 
 def test_the_sim_install_carries_no_serve_distribution(
-    sim_env: Path, tiers: tuple[set[str], set[str], set[str]]
+    sim_env: Path, tiers: Tiers
 ) -> None:
     """The extra is not a way into the server half. Implied by the exact
     comparison above and kept anyway, because it is the sentence the
     tiering claims: trying vinga without hardware must not mean
     installing a server."""
-    _, serve, _ = tiers
-    assert serve & _installed(sim_env) == set()
+    assert tiers.serve & _installed(sim_env) == set()
 
     for module in sorted(SERVE_MODULES.values()):
         finished = _ran(sim_env, "python", "-c", f"import {module}")
@@ -758,6 +790,99 @@ def test_the_packaged_utterance_arrives_in_an_installed_tier(sim_env: Path) -> N
     assert (rate, duration) == (16000, 60)
 
 
+# The telemetry tier
+#
+# The fourth door, and the only one whose interesting half is the
+# environment that does NOT have it: `[serve]` above is where the
+# OpenTelemetry packages are genuinely missing, so it is where the
+# missing-extra refusal is asked for rather than faked.
+
+
+def test_the_otel_install_is_exactly_the_locked_otel_closure(
+    otel_env: Path, locked: dict[str, dict[str, object]]
+) -> None:
+    """Exactly, both ways, like every other tier.
+
+    The extra declares two distributions and they drag in five more (the
+    API, the semantic conventions, the proto definitions, the common
+    encoder and an HTTP client), which is precisely why a subset check
+    would say nothing here: what this tier costs is the closure, not the
+    two names.
+    """
+    expected = _tier_closure(locked, _marker_environment(otel_env), "otel")
+
+    assert _installed(otel_env) == expected
+
+
+def test_a_distribution_nobody_declared_would_turn_the_otel_lane_red(
+    otel_env: Path, locked: dict[str, dict[str, object]]
+) -> None:
+    """The bite, because a comparison is only worth what it rejects."""
+    expected = _tier_closure(locked, _marker_environment(otel_env), "otel")
+    installed = _installed(otel_env)
+
+    assert installed != expected | {"a-transitive-distribution-nobody-declared"}
+    assert installed != expected - {"opentelemetry-sdk"}
+    assert installed == expected
+
+
+def test_the_otel_install_carries_no_serve_distribution(
+    otel_env: Path, tiers: Tiers
+) -> None:
+    """Tracing is not a way into the server half. A deployment that runs
+    the published image already has both; the extra on its own must stay
+    an extra."""
+    assert tiers.serve & _installed(otel_env) == set()
+
+    for module in sorted(SERVE_MODULES.values()):
+        finished = _ran(otel_env, "python", "-c", f"import {module}")
+        assert finished.returncode != 0, f"{module} is importable from the otel install"
+
+
+def test_the_otel_modules_import_from_the_otel_install(otel_env: Path) -> None:
+    """And the positive half, asked of the interpreter rather than of
+    the metadata: the two subtrees the exporter actually imports."""
+    for module in sorted(OTEL_MODULES.values()):
+        finished = _ran(otel_env, "python", "-c", f"import {module}")
+        assert finished.returncode == 0, (module, finished.stderr)
+
+
+def test_telemetry_refuses_from_the_serve_install_without_the_extra(
+    serve_env: Path,
+) -> None:
+    """The genuine missing-extra refusal, in the one environment where
+    the packages are genuinely missing.
+
+    Everything else about this refusal is pinned by a unit test that
+    fakes the import failure, which is the `test_providers.py` precedent
+    and what puts the sentence in every lane. This is the other half: an
+    install that never had OpenTelemetry, asked for telemetry, answering
+    the sentence rather than an ImportError traceback out of somebody
+    else's package.
+
+    The database is pointed at a port nothing listens on, as every other
+    boot in this file is, and the refusal still has to be the telemetry
+    one: the exporter is built ahead of every resource a boot can open,
+    so a deployment that asked for tracing it cannot have learns that
+    before it learns anything else.
+    """
+    from vinga_server.telemetry import NEEDS_THE_OTEL_EXTRA
+
+    finished = _ran(
+        serve_env,
+        "vinga-server",
+        environment={
+            "VINGA_DB_PORT": NOWHERE_PORT,
+            "VINGA_SERVER__TELEMETRY__ENABLED": "true",
+        },
+    )
+
+    assert finished.returncode == 1, finished.stdout + finished.stderr
+    assert finished.stderr.strip() == NEEDS_THE_OTEL_EXTRA, finished.stderr
+    assert "Traceback" not in finished.stderr
+    assert "ModuleNotFoundError" not in finished.stderr
+
+
 # The contributor door
 
 
@@ -785,7 +910,7 @@ def synced(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
 
 
 def test_a_plain_sync_still_yields_a_runnable_server(
-    synced: Path, tiers: tuple[set[str], set[str], set[str]]
+    synced: Path, tiers: Tiers
 ) -> None:
     """The contributor door, which is the one this milestone could have
     broken silently.
@@ -801,8 +926,7 @@ def test_a_plain_sync_still_yields_a_runnable_server(
     empty store SERVES, and a lane that reads an exit code from a server
     that is running waits until something kills it.
     """
-    _, serve, sim = tiers
-    assert serve | sim <= _installed(synced), (
+    assert tiers.serve | tiers.sim | tiers.otel <= _installed(synced), (
         "a plain `uv sync` stopped carrying a shipped extra, which no other lane names"
     )
 
@@ -830,6 +954,7 @@ def test_the_sync_command_in_agents_md_is_the_one_that_is_proven() -> None:
     assert "[serve]" not in commands
     assert "[sim]" not in commands
     assert "[serve,sim]" not in commands
+    assert "[serve,sim,otel]" not in commands
 
 
 if __name__ == "__main__":  # pragma: no cover - a hand run of one lane

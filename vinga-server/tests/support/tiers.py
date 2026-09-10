@@ -23,10 +23,19 @@ returning two sets while `pyproject.toml` declared three would have let
 an extra missing from the wheel's own metadata pass every lane, which is
 exactly the gap the wheel's metadata check was added to close for
 `serve`.
+
+`otel` is the fourth (#66), and it arrived the way `sim` did: a row
+here, an import map, an isolated environment in the closure lane, and
+the wheel's own metadata held to the declaration. What it answers is
+`declared().otel`, because the three tiers used to be a positional
+triple that every consumer unpacked with two underscores in it, and a
+fourth would have renumbered every one of those reads while the
+compiler said nothing. A named field cannot be read as the wrong tier.
 """
 
 import tomllib
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parents[2]
@@ -68,6 +77,38 @@ SIM_MODULES = {
     "websockets": "websockets",
 }
 
+# And the same map for the `otel` extra's two distributions.
+#
+# The names on the right are not top-level modules, and that is the one
+# way this map differs from the two above: `opentelemetry` is a
+# namespace package that every distribution in the ecosystem
+# contributes a subtree to, so importing it says nothing about which of
+# them is installed. What tells the SDK from the exporter is the
+# subtree, so the subtree is what a negative check imports and what is
+# written here.
+OTEL_MODULES = {
+    "opentelemetry-sdk": "opentelemetry.sdk",
+    "opentelemetry-exporter-otlp-proto-http": "opentelemetry.exporter.otlp.proto.http",
+}
+
+
+@dataclass(frozen=True)
+class Tiers:
+    """The four doors into this package, each as the set of
+    distributions its declaration names directly.
+
+    A named field per tier rather than a positional tuple, which is
+    what this was until the fourth arrived: a consumer read
+    `client, _, _ = tiers`, so adding a tier meant editing every one of
+    those reads to add an underscore, and forgetting one is a lane
+    comparing the wrong tier while every check still passes.
+    """
+
+    client: set[str]
+    serve: set[str]
+    sim: set[str]
+    otel: set[str]
+
 
 def requirement_names(entries: Sequence[str]) -> set[str]:
     """The distribution names out of a list of requirement strings,
@@ -81,24 +122,27 @@ def requirement_names(entries: Sequence[str]) -> set[str]:
     return names
 
 
-def declared() -> tuple[set[str], set[str], set[str]]:
-    """The three tiers' DIRECT dependencies, read off `pyproject.toml`.
+def declared() -> Tiers:
+    """The four tiers' DIRECT dependencies, read off `pyproject.toml`.
 
     The independent oracle both lanes keep beside whatever they compute:
-    six names, ten and one, written by hand in the declaration under
-    test, so a closure or a metadata block is checked against something
-    that came from somewhere else. Either alone would be a graph agreeing
-    with itself.
+    six names, eleven, one and two, written by hand in the declaration
+    under test, so a closure or a metadata block is checked against
+    something that came from somewhere else. Either alone would be a
+    graph agreeing with itself.
 
-    Three rather than two since #248. The two `faster-whisper` and
-    `piper` extras are deliberately not among them: they are provider
-    options a deployment chooses, installed into an image that already
-    has the server half, and no lane holds an environment to either. The
-    three here are the three DOORS into this package, and each has a lane
-    that syncs it.
+    Three rather than two since #248, and four since #66. The two
+    `faster-whisper` and `piper` extras are deliberately not among them:
+    they are provider options a deployment chooses, installed into an
+    image that already has the server half, and no lane holds an
+    environment to either. The four here are the four DOORS into this
+    package, and each has a lane that syncs it.
     """
     project = tomllib.loads((PROJECT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
-    client = requirement_names(project["dependencies"])
-    serve = requirement_names(project["optional-dependencies"]["serve"])
-    sim = requirement_names(project["optional-dependencies"]["sim"])
-    return client, serve, sim
+    extras = project["optional-dependencies"]
+    return Tiers(
+        client=requirement_names(project["dependencies"]),
+        serve=requirement_names(extras["serve"]),
+        sim=requirement_names(extras["sim"]),
+        otel=requirement_names(extras["otel"]),
+    )
