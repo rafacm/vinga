@@ -288,9 +288,12 @@ special cases:
   no other agent's, and it can only pick up one it has just offered.
 - **Cost.** "How much has this conversation cost so far" wants cost to
   be a property of the thread. It is **decided direction** (recorded on
-  this page, 2026-08-21; no owning issue or decision record yet):
-  issue #190 explicitly leaves budgets and per-conversation accounting
-  out of its scope, so nothing owns this yet.
+  this page, 2026-08-21): issue #190 explicitly leaves budgets and
+  per-conversation accounting out of its scope. The aggregation layer
+  such a number would be read from is owned now (#439, with its read
+  surface #440), and the cost direction is recorded on #440: usage is
+  counted in tokens, and currency is at most an optional price map
+  over it. The accounting itself still awaits users.
 
 The decided semantics, each with its owner:
 
@@ -541,9 +544,10 @@ separate, explicitly user-level capability.
 
 The cost question ("how much has this conversation cost") and the
 recording rule for meta turns are both stated in
-[Conversation and session](#conversation-and-session) above, and both
-are unowned there for the same reason: issue #190 leaves budgets,
-per-conversation accounting and cross-agent threads out of its scope.
+[Conversation and session](#conversation-and-session) above: issue
+#190 left budgets, per-conversation accounting and cross-agent
+threads out of its scope. The cost question's aggregation substrate
+is owned now (#439/#440); the recording rule is still unowned.
 
 ## The help agent
 
@@ -592,5 +596,7 @@ devices, come in a later stage: when they arrive, conversations, memory
 and the shared profile all gain a user in their key, and voiceprint
 recognition decides which user is speaking on a shared device. That is
 **decided direction** (recorded on this page, 2026-08-21; no owning
-issue or decision record yet). It is stated here so the later refactor
+issue or decision record yet, though the usage aggregation budgets
+will read is owned by #439 and #440). It is stated here so the later
+refactor
 has a name rather than being a surprise.

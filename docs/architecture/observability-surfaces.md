@@ -83,7 +83,8 @@ as the questions a placement has to answer.
   columns behind it. Nothing on this page repeats a field name or a
   column name, so none of them can go stale here.
 - Still open, each with its owner: exporters over
-  the same tap and vocabulary (#66/#67), the audit
+  the same tap and vocabulary (#66/#67), the need-5 aggregation layer
+  (#439, with its read surface #440), the audit
   surface (no issue yet), and the household-consent question #120 named
   and did not close.
 
