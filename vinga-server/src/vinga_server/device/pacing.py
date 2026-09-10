@@ -19,8 +19,25 @@ event. What the session hands over instead is one closure per packet,
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 from vinga_server.audio.opus import OpusEncoder
+
+
+@dataclass(frozen=True)
+class Delivered:
+    """What one reply actually put on the wire, snapshotted.
+
+    Two numbers that are one fact and have to be read together: a count
+    of zero has no last frame to have a stamp, and a caller comparing
+    them separately is a caller that can act on half an answer. `at` is
+    a reading of the loop clock, which is the clock the events are
+    stamped with, so an event about the last frame can be stamped with
+    the moment it went rather than with the moment somebody asked.
+    """
+
+    frames: int
+    at: float | None
 
 
 class ReplyPacer:
@@ -56,6 +73,13 @@ class ReplyPacer:
         # `tts start` it stands for is sent once per reply, and never
         # before there is something to say.
         self._tts_started = False
+        # How many frames of this reply the device has actually been
+        # sent, and when the last of them went. Per reply and not per
+        # leg, unlike `_pace_count` beside them: what they are read for
+        # is the interval one reply's audio occupied, and a handover is
+        # a new run of frames inside the same one.
+        self._delivered = 0
+        self._delivered_at: float | None = None
         # The frame pacer waits on this before each send. The
         # transcript-confirmation gate clears it to hold playback while
         # ASR decides whether anything was said; resuming shifts the
@@ -85,6 +109,20 @@ class ReplyPacer:
         self._speaking_started = False
         self._speaking_started_at = None
         self._tts_started = False
+        self._delivered = 0
+        self._delivered_at = None
+
+    def delivered(self) -> "Delivered":
+        """How much of this reply reached the device, and when the last
+        of it did.
+
+        Answered rather than announced, for the reason `first_frame`
+        gives: what the end of a reply's audio occasions is an event
+        attributed to whichever agent was speaking, and neither the
+        event nor the agent is a term of this module. Nothing here is
+        reset by it, so asking twice answers twice.
+        """
+        return Delivered(self._delivered, self._delivered_at)
 
     def restart(self) -> None:
         """A new agent leg: the pacing clock starts again at its first
@@ -181,3 +219,8 @@ class ReplyPacer:
         await self._pace_resume.wait()
         await deliver(packet)
         self._pace_count += 1
+        # Counted after the delivery returned, for the reason above and
+        # with one more of its own: a frame the device never received is
+        # not a frame of the interval anything here describes.
+        self._delivered += 1
+        self._delivered_at = loop.time()
