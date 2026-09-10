@@ -38,6 +38,7 @@ from tests.support.sessions import (
     drive_reply,
     events_of,
     session_for,
+    start_reply,
     talking_thread,
     with_device,
 )
@@ -46,6 +47,7 @@ from vinga_server.config import Config
 from vinga_server.conversations.records import Acknowledgement
 from vinga_server.device.boundary import DeviceGone
 from vinga_server.device.session import DeviceSession
+from vinga_server.events.values import ReplyOutcome
 from vinga_server.providers import TtsProvider
 from vinga_server.runtime import pipeline as pipeline_module
 from vinga_server.runtime import resumption as resumption_module
@@ -469,9 +471,9 @@ async def test_a_barge_in_mid_recap_stores_nothing_and_the_next_resume_re_offers
     session, _ = consenting(voice, store, kept)
     thread = talking_thread(session)
 
-    session.runtime.start_reply(UTTERANCE)
+    start_reply(session, UTTERANCE)
     await asyncio.wait_for(voice.speaking.wait(), timeout=5.0)
-    await session.runtime.cancel_reply()
+    await session.runtime.cancel_reply(ReplyOutcome.BARGED_IN)
     voice.release.set()
 
     # The recap was being spoken and was never finished, so it was

@@ -54,6 +54,7 @@ from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import schema
 from vinga_server.conversations.records import TurnRecord
 from vinga_server.conversations.store import ConversationStore
+from vinga_server.events.values import ReplyOutcome
 from vinga_server.memory.store import MemoryScope, MemoryStore
 from vinga_server.providers import (
     AsrProvider,
@@ -608,7 +609,7 @@ async def test_a_cancelled_reply_records_what_its_finally_saw() -> None:
 
     start_reply(session, UTTERANCE)
     await asyncio.wait_for(llm.hanging.wait(), 5)
-    await session.runtime.cancel_reply()
+    await session.runtime.cancel_reply(ReplyOutcome.BARGED_IN)
 
     record = only_record(spy)
     assert record.reply == "First sentence."
@@ -646,7 +647,7 @@ async def test_a_call_cancelled_while_it_ran_is_recorded_unexecuted() -> None:
 
     start_reply(session, UTTERANCE)
     await asyncio.wait_for(memory.running.wait(), 5)
-    await session.runtime.cancel_reply()
+    await session.runtime.cancel_reply(ReplyOutcome.BARGED_IN)
 
     (invocation,) = only_record(spy).tools
     assert (invocation.position, invocation.source) == (0, "builtin")

@@ -102,6 +102,7 @@ class _Synthesis:
         tts: TtsProvider,
         report_failure: Callable[[BaseException, float], None],
         report_first_audio: Callable[[int], None],
+        report_stream: Callable[[int | None, int], None],
     ) -> None:
         self.sentence = sentence
         self._buffer: asyncio.Queue[bytes | None] = asyncio.Queue()
@@ -116,21 +117,28 @@ class _Synthesis:
         self._failure: BaseException | None = None
         self._report_failure = report_failure
         self._report_first_audio = report_first_audio
+        self._report_stream = report_stream
         self._task = asyncio.create_task(self._drain(tts))
 
     async def _drain(self, tts: TtsProvider) -> None:
         started = asyncio.get_running_loop().time()
-        first = True
+        first_chunk_ms: int | None = None
+        cancelled = False
         try:
             async for chunk in tts.synthesize(self.sentence):
-                if first:
-                    first = False
-                    self._report_first_audio(
-                        round((asyncio.get_running_loop().time() - started) * 1000)
+                if first_chunk_ms is None:
+                    first_chunk_ms = round(
+                        (asyncio.get_running_loop().time() - started) * 1000
                     )
+                    self._report_first_audio(first_chunk_ms)
                 await self._room.acquire()
                 self._buffer.put_nowait(chunk)
         except asyncio.CancelledError:
+            # A sentence nobody will hear has no stream lifetime worth
+            # reporting: what would be measured is how far into it the
+            # barge-in landed, which is a fact about the interruption
+            # rather than about the voice.
+            cancelled = True
             raise
         except Exception as exc:  # noqa: BLE001 - re-raised in chunks()
             self._failure = exc
@@ -141,6 +149,17 @@ class _Synthesis:
             # the call actually failed at.
             self._report_failure(exc, asyncio.get_running_loop().time() - started)
         finally:
+            if not cancelled:
+                # The stream is over, one way or the other. Both numbers
+                # go together because only together are they honest: the
+                # first is the provider's own latency, taken before a
+                # paced consumer could hold anything back, and the
+                # second is the whole life of the stream, which a paced
+                # consumer is part of.
+                self._report_stream(
+                    first_chunk_ms,
+                    round((asyncio.get_running_loop().time() - started) * 1000),
+                )
             self._buffer.put_nowait(None)
 
     async def chunks(self) -> AsyncIterator[bytes]:
@@ -171,6 +190,7 @@ async def speak_after(
     tts: TtsProvider,
     report_failure: Callable[[BaseException, float], None],
     report_first_audio: Callable[[int], None],
+    report_stream: Callable[[int | None, int], None],
     speak: Callable[[_Synthesis], Awaitable[None]],
 ) -> asyncio.Task[None]:
     """Start `sentence` synthesizing, wait for the sentence already being
@@ -188,7 +208,9 @@ async def speak_after(
     model's thinking time in front of the first word of every reply and
     make a one-sentence reply wait for the stream to end.
     """
-    started = _Synthesis(sentence, tts, report_failure, report_first_audio)
+    started = _Synthesis(
+        sentence, tts, report_failure, report_first_audio, report_stream
+    )
     try:
         if speaking is not None:
             await speaking
