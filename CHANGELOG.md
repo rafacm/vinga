@@ -189,6 +189,28 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Fixed
 
+- **The first answer after a reply is heard.** A realtime device
+  streams its microphone through the whole of a reply, so everything
+  the endpointer was fed for those seconds was the assistant talking,
+  and nothing reset it when the reply ended (#456). Silero is
+  recurrent: it scores a window against what it heard before it, and a
+  detector sitting in ten seconds of its own voice scored a clear
+  answer at 0.266 against a threshold of 0.5. Replaying the same
+  captured audio and varying only where the detector was last reset
+  flips that to 0.856, so the answer was audible, arrived intact, was
+  fed to the endpointer, and was missed anyway; the user says so out
+  loud in the capture, twice. The endpointer's reset is now two calls
+  rather than one: `reset` starts a fresh utterance the way it always
+  did, and `forget_audio` clears only what the implementation carries
+  between windows. The end of a reply asks for the second, so the
+  assistant's own playback stops colouring the answer to the question
+  it just asked. Deliberately not the first: a user already
+  mid-sentence when a reply ends keeps their buffered audio, their
+  speech-start offset and their trailing-silence progress, which a full
+  reset would have thrown away. The reset is unconditional, because
+  what it costs mid-speech is about one 32 ms window against a
+  trailing-silence budget of about twenty-two, and a branch on "is an
+  utterance open" would buy nothing for that.
 - **An `openai_compatible` entry can reach OpenAI's current models
   again.** Two behaviors met and left the type unable to talk to the
   `gpt-5.6-*` family, which refuses `max_tokens` and answers 400 naming
