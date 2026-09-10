@@ -22,6 +22,7 @@ The span map itself is `test_telemetry.py`'s, and the saturated
 collector is `tests/integration/test_telemetry_hardening.py`'s.
 """
 
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -36,6 +37,7 @@ from tests.support.telemetry import (
     exporting,
     finished,
     open_session,
+    released,
     session_events,
 )
 from vinga_server.app import StartupFailed, create_app
@@ -43,9 +45,19 @@ from vinga_server.config import Config
 from vinga_server.config.loader import DatabaseBusyError
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.events import server_taps
-from vinga_server.telemetry import Telemetry
+from vinga_server.telemetry import _QUIETING, Telemetry
 
 pytestmark = pytest.mark.asyncio(loop_scope="function")
+
+
+@pytest.fixture(autouse=True)
+def _no_lease_outlives_its_case() -> Iterator[None]:
+    """The SDK's silence is one process-wide lease, so an exporter this
+    file built and did not release would hold it for the rest of the
+    run. `test_telemetry.py` says the same thing at more length."""
+    yield
+    released()
+    assert _QUIETING.held() == 0, "a case left an exporter holding the SDK's silence"
 
 
 def tracing_config() -> Config:

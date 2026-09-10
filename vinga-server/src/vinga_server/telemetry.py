@@ -483,7 +483,7 @@ def build_telemetry(
 
     _check_protocol()
 
-    quieted = _quiet_sdk_loggers()
+    quieted = _QUIETING.take()
     provider = _construct(
         sdk,
         exporter=exporter,
@@ -497,7 +497,7 @@ def build_telemetry(
         # back: what leaves here is one sentence with no chain, and
         # `ConfigError` is inside `BOOT_FAILURES`, which the library's
         # own `ValueError` was not.
-        quieted.restore()
+        quieted.release()
         raise ConfigError(CANNOT_BUILD_EXPORTER)
     return Telemetry(
         provider=provider, quieted=quieted, shutdown_timeout_s=shutdown_timeout_s
@@ -661,44 +661,121 @@ def _check_protocol() -> None:
 
 
 @dataclass
-class _Quieted:
-    """What the SDK's namespace looked like before an exporter existed,
-    so it can be put back exactly."""
+class _Lease:
+    """One exporter's claim on the SDK's silence.
 
-    level: int
-    propagate: bool
-    restored: bool = False
-
-    def restore(self) -> None:
-        if self.restored:
-            return
-        self.restored = True
-        namespace = logging.getLogger(OTEL_NAMESPACE)
-        namespace.setLevel(self.level)
-        namespace.propagate = self.propagate
-
-
-def _quiet_sdk_loggers() -> _Quieted:
-    """Take the SDK's whole namespace off this server's handlers, and
-    answer what it was.
-
-    Before the exporter is constructed, which is the ordering that
-    matters: construction itself can log, and what it logs about is the
-    endpoint it was given.
-
-    Two mechanisms, because one of them alone has a hole. Propagation
-    off at the namespace root means no record from any `opentelemetry.*`
-    logger reaches a handler of ours, whichever module logged it. The
-    level above CRITICAL means a child that has not set its own level
-    does not build the record at all. An operator who wants the SDK's
-    diagnostics can attach a handler to `opentelemetry` itself, which is
-    a deliberate act rather than the default.
+    Handed out by `_QUIETING` below and given back exactly once, from
+    whichever thread ends up owning the release. It holds no logging
+    state of its own: what the namespace looked like is the process's
+    fact, not this exporter's, which is the whole of what this type
+    exists to stop being confused about.
     """
-    namespace = logging.getLogger(OTEL_NAMESPACE)
-    was = _Quieted(level=namespace.level, propagate=namespace.propagate)
-    namespace.setLevel(logging.CRITICAL + 1)
-    namespace.propagate = False
-    return was
+
+    quieting: "_Quieting"
+    released: bool = False
+
+    def release(self) -> None:
+        self.quieting.give_back(self)
+
+
+class _Quieting:
+    """The SDK's namespace, quieted for as long as ANY exporter holds a
+    lease on it.
+
+    Process-wide and reference counted, because the logging
+    configuration is process-wide and exporters overlap. Each one used
+    to snapshot and restore the namespace for itself, which is correct
+    for one at a time and wrong the moment two exist, and two exist
+    routinely: a wedged exporter's release outlives the bounded wait, so
+    a redeploy that builds the next one while the last is still
+    finishing had two live claims on one global.
+
+    What that cost is worth spelling out, because it is not a tidiness
+    argument. Exporter A wedges and its wait times out. B is built and
+    quietens an already-quiet namespace, so B's snapshot records
+    SILENCE. A's abandoned release finally finishes and restores the
+    ORIGINAL configuration, un-silencing the SDK while B is still
+    exporting, so B's next failure logs its credentialed endpoint into
+    the retained log. Then B's own release restores A's snapshot, which
+    was the quiet one, and the namespace is silenced for the rest of the
+    process with nothing holding it.
+
+    So the snapshot is taken once, at the first acquisition, and put
+    back once, after the last release, under one lock. A release for a
+    lease already given back is a no-op, which is what lets the build's
+    failure path and the release worker both call it without either
+    having to know whether the other did.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._held = 0
+        # The process's own logging state, or None when nothing holds a
+        # lease. It is deliberately not on the lease: a second snapshot
+        # taken while the namespace is already quiet is a recording of
+        # this module's own doing, and restoring it is what leaves a
+        # server permanently silent.
+        self._was: tuple[int, bool] | None = None
+
+    def take(self) -> _Lease:
+        """Take the SDK's whole namespace off this server's handlers,
+        and answer the claim to give back.
+
+        Before the exporter is constructed, which is the ordering that
+        matters: construction itself can log, and what it logs about is
+        the endpoint it was given.
+
+        Two mechanisms, because one of them alone has a hole.
+        Propagation off at the namespace root means no record from any
+        `opentelemetry.*` logger reaches a handler of ours, whichever
+        module logged it. The level above CRITICAL means a child that
+        has not set its own level does not build the record at all. An
+        operator who wants the SDK's diagnostics can attach a handler to
+        `opentelemetry` itself, which is a deliberate act rather than
+        the default.
+        """
+        with self._lock:
+            if self._held == 0:
+                namespace = logging.getLogger(OTEL_NAMESPACE)
+                self._was = (namespace.level, namespace.propagate)
+                namespace.setLevel(logging.CRITICAL + 1)
+                namespace.propagate = False
+            self._held += 1
+            return _Lease(quieting=self)
+
+    def give_back(self, lease: _Lease) -> None:
+        """Drop one claim, and put the namespace back if it was the
+        last.
+
+        The whole of it under the lock, the idempotence check included,
+        so a lease released from the build's failure path and from a
+        release worker at the same moment is counted once.
+        """
+        with self._lock:
+            if lease.released:
+                return
+            lease.released = True
+            self._held -= 1
+            if self._held > 0 or self._was is None:
+                return
+            level, propagate = self._was
+            self._was = None
+            namespace = logging.getLogger(OTEL_NAMESPACE)
+            namespace.setLevel(level)
+            namespace.propagate = propagate
+
+    def held(self) -> int:
+        """How many exporters are keeping the SDK quiet right now.
+
+        Public because "is anything still holding this" is otherwise a
+        question only a leak answers, and because the overlapping-
+        lifespan case is one a test has to be able to describe.
+        """
+        with self._lock:
+            return self._held
+
+
+_QUIETING = _Quieting()
 
 
 def _epoch_ns(at: float, offset: float) -> int:
@@ -775,7 +852,7 @@ class Telemetry:
     def __init__(
         self,
         provider: Any,
-        quieted: _Quieted,
+        quieted: _Lease,
         shutdown_timeout_s: float = SHUTDOWN_TIMEOUT_S,
     ) -> None:
         # The two API names a span needs, bound once here rather than
@@ -885,7 +962,7 @@ class Telemetry:
             if self._finished is None:
                 self._finished = threading.Event()
                 threading.Thread(
-                    target=self._release,
+                    target=self.release,
                     name="vinga-telemetry-shutdown",
                     daemon=True,
                 ).start()
@@ -903,14 +980,21 @@ class Telemetry:
                 self._shutdown_timeout_s,
             )
 
-    def _release(self) -> None:
-        """Shut the provider down and put the SDK's logging back, in
+    def release(self) -> None:
+        """Shut the provider down and give the SDK's logging back, in
         that order, however it ended.
 
-        Runs on the abandoned side of the timeout as often as not, which
-        is why the restore is here rather than in the caller: everything
-        the SDK is going to say about a collector it cannot reach, it
-        says between these two lines.
+        BLOCKS for as long as the collector takes, which is why no path
+        that serves a device calls it: `shutdown` above is this same
+        work off the loop and under a bound, which is what a lifespan
+        wants. A caller that is holding an exporter it no longer wants
+        and has nothing to wait for calls this.
+
+        The restore is here rather than in whoever asked, and that is
+        the whole of finding 2's fix: this runs on the abandoned side of
+        a timeout as often as not, and everything the SDK is going to
+        say about a collector it cannot reach, it says between these two
+        lines.
         """
         try:
             self._provider.shutdown()
@@ -919,7 +1003,7 @@ class Telemetry:
             # what a failing export was holding is the endpoint.
             pass
         finally:
-            self._quieted.restore()
+            self._quieted.release()
             if self._finished is not None:
                 self._finished.set()
 
