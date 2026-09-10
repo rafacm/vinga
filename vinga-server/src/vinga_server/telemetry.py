@@ -988,40 +988,38 @@ class Telemetry:
         to read.
         """
         self._accepting = False
-        with self._closing:
-            if self._finished is None:
-                finished = self._finished = threading.Event()
-                try:
-                    threading.Thread(
-                        target=self.release,
-                        name="vinga-telemetry-shutdown",
-                        daemon=True,
-                    ).start()
-                except Exception:  # noqa: BLE001 - a teardown never raises at the operator
-                    # A process that cannot start a thread has larger
-                    # problems than its spans, and this method's job is
-                    # to leave none of them here. What must not survive
-                    # is an exporter nothing owns: the record was
-                    # written before the start, so a later `shutdown`
-                    # would wait on an event nobody was ever going to
-                    # set, and the SDK's silence would be held for the
-                    # life of the process by a release that never ran.
-                    #
-                    # So the claim goes back and the wait is ended, and
-                    # the provider is deliberately NOT shut down here:
-                    # that call blocks for as long as the collector
-                    # takes, and doing it inline would put a stalled
-                    # collector on the event loop, which is the one
-                    # thing this whole design refuses. What is lost is
-                    # the SDK's own thread, which is a daemon and dies
-                    # with the process.
-                    self._quieted.release()
-                    finished.set()
-                    logger.warning(
-                        "the telemetry exporter could not be released on a thread "
-                        "of its own and was left to the process's exit"
-                    )
-            finished = self._finished
+        finished, mine = self._claim()
+        if mine:
+            try:
+                threading.Thread(
+                    target=self._complete,
+                    name="vinga-telemetry-shutdown",
+                    daemon=True,
+                ).start()
+            except Exception:  # noqa: BLE001 - a teardown never raises at the operator
+                # A process that cannot start a thread has larger
+                # problems than its spans, and this method's job is to
+                # leave none of them here. What must not survive is an
+                # exporter nothing owns: the claim was taken before the
+                # start, so a later caller would wait on a completion
+                # nobody was ever going to reach, and the SDK's silence
+                # would be held for the life of the process.
+                #
+                # So this is a completion too, and the same one every
+                # other caller is waiting on: the claim goes back and
+                # the event is set. The provider is deliberately NOT
+                # shut down here, because that call blocks for as long
+                # as the collector takes and doing it inline would put a
+                # stalled collector on the event loop, which is the one
+                # thing this whole design refuses. What is lost is the
+                # SDK's own thread, which is a daemon and dies with the
+                # process.
+                self._quieted.release()
+                finished.set()
+                logger.warning(
+                    "the telemetry exporter could not be released on a thread "
+                    "of its own and was left to the process's exit"
+                )
         # Off the loop for the wait itself, and with the bound passed to
         # `wait` rather than wrapped in `wait_for`, so the pool thread is
         # released at the deadline instead of being pinned to an export
@@ -1045,11 +1043,50 @@ class Telemetry:
         wants. A caller that is holding an exporter it no longer wants
         and has nothing to wait for calls this.
 
-        The restore is here rather than in whoever asked, and that is
-        the whole of finding 2's fix: this runs on the abandoned side of
-        a timeout as often as not, and everything the SDK is going to
-        say about a collector it cannot reach, it says between these two
-        lines.
+        Exactly once per exporter, whoever asks and however many ask.
+        This and `shutdown`'s worker are the same operation with two
+        doors, and running it twice was a leak rather than a waste: the
+        SDK's own processor early-returns from a second shutdown, so the
+        second caller finished instantly and gave the logging lease back
+        while the first was still inside the export, which un-silences
+        the endpoint-bearing failures the first one is about to log. So
+        the first caller through claims it and the rest wait on the
+        completion, and a caller that arrives after it is over returns
+        at once.
+
+        The wait is unbounded, which is this method's whole contract:
+        a caller that cannot afford to wait wants `shutdown` above.
+        """
+        finished, mine = self._claim()
+        if mine:
+            self._complete()
+            return
+        finished.wait()
+
+    def _claim(self) -> tuple[threading.Event, bool]:
+        """The one completion this exporter has, and whether the caller
+        just became the one that owes it.
+
+        Under the lock, so exactly one of any number of concurrent
+        callers is told it owns the release and every other is handed
+        the same event to wait on.
+        """
+        with self._closing:
+            if self._finished is None:
+                self._finished = threading.Event()
+                return self._finished, True
+            return self._finished, False
+
+    def _complete(self) -> None:
+        """Shut the provider down and give the SDK's logging back, in
+        that order, and then let everyone waiting go.
+
+        Run by the caller that claimed it and by nobody else. The
+        restore is here rather than in whoever asked, and that is the
+        whole of the delta round's finding 2: this runs on the abandoned
+        side of a timeout as often as not, and everything the SDK is
+        going to say about a collector it cannot reach, it says between
+        these two lines.
         """
         try:
             self._provider.shutdown()

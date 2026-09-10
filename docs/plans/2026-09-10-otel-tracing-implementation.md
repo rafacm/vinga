@@ -623,3 +623,51 @@ issues in 5 source files. `uv run pytest tests/unit -q -n auto --dist
 loadfile`: 6027 passed, 19 skipped. `uv run pytest tests/integration
 -q`: 262 passed. The five generated-document drift checks all diff
 clean against the committed copies.
+
+### Confirmation round
+
+External review of the delta fixes, terra, one finding. Verdict not
+mergeable as is.
+
+1. **P1: the public `release` was not once-only.** Making `_release`
+   public gave the same operation two doors, and neither knew about the
+   other: a direct `release()` and `shutdown()`'s worker could both be
+   inside `provider.shutdown()` at once. That is a leak rather than a
+   waste, and the reason is the SDK's own guard: a batch processor
+   early-returns from a second shutdown, so the second caller finished
+   instantly and gave the logging lease back while the first was still
+   exporting, un-silencing exactly the endpoint-bearing failures the
+   first one was about to log. The lease lock protected the count and
+   nothing owned the release.
+
+   *Resolution.* Adopted as prescribed. Shutting the provider down and
+   giving the lease back is one completion, claimed under the lock by
+   the first caller through, and every later caller (either door, any
+   mix) waits on it rather than starting another; one that arrives
+   after it is over returns at once. The thread-start-failure path
+   keeps its semantics and is stated as what it always was, a
+   completion: it returns the claim and ends the wait without touching
+   the provider, because that call blocks for as long as the collector
+   takes and this runs on the event loop.
+
+   The review also noted that the suites' own teardown called
+   `release()` on exporters already released and asserted nothing about
+   it. That shape is now what the regression's last two lines are
+   about, so the fixture is exercising a stated contract rather than an
+   accident.
+
+   The regression drives both doors at once against an exporter whose
+   shutdown the test holds open, and asserts the lease is still held
+   while the second caller has already returned, that the provider was
+   shut down exactly once, and that a caller arriving afterwards does
+   none of it again. Ungating `release` makes the lease assertion fail
+   with the count already back to zero, which is the finding.
+
+### Verification after the confirmation round
+
+`uv run ruff check .`: all checks passed. `uv run mypy`: success, no
+issues in 5 source files. `uv run pytest tests/unit -q -n auto --dist
+loadfile`: 6028 passed, 19 skipped. `uv run pytest
+tests/integration/test_telemetry_hardening.py -q`: 3 passed. The five
+generated-document drift checks all diff clean against the committed
+copies.
