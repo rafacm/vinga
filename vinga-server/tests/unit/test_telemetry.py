@@ -28,6 +28,7 @@ lane's business.
 
 import logging
 import sys
+import time
 from collections.abc import Iterator
 
 import pytest
@@ -1012,3 +1013,77 @@ def test_a_lease_given_back_twice_is_counted_once() -> None:
 
     second.release()
     assert _QUIETING.held() == 0
+
+
+# --- two clocks --------------------------------------------------------
+
+# How far apart the two clocks can actually be. uvloop's loop clock is
+# libuv's and shares no origin with `time.monotonic`; on one developer
+# machine they read thirty-six hours apart, which is the number below,
+# rounded to something a failure message can be read against.
+A_UVLOOP_SHAPED_GAP_S = 131_249.0
+
+# How close a span's epoch has to land to the instant it was emitted.
+# Generous: what this is separating is "now" from "a day and a half from
+# now", not one millisecond from the next.
+NEAR_ENOUGH_S = 60.0
+
+
+def test_a_session_clock_of_its_own_still_lands_the_span_on_now(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The two-clock pin, and the bug it was written for.
+
+    A session event is stamped with the SESSION LOOP's clock, which
+    under uvloop is libuv's and shares no origin with `time.monotonic`.
+    An exporter that converted session stamps through a
+    `time.monotonic` offset therefore put every span tens of hours from
+    when it happened: a collector accepts them, stores them, and no
+    search window a person types ever contains them, which is exactly
+    what the Jaeger walkthrough found and what no structural assertion
+    could have.
+
+    So the offset is read from the session's own clock, at the first
+    session emission, which is a reading taken on the loop that stamps
+    them.
+    """
+    clock = Clock()
+    clock.at += A_UVLOOP_SHAPED_GAP_S
+    monkeypatch.setattr("vinga_server.telemetry.session_clock", clock)
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+
+    open_session(events)
+    close_session(events)
+
+    span = named(finished(telemetry, memory), "session")
+    assert abs(span.end_time / 1e9 - time.time()) < NEAR_ENOUGH_S
+
+
+def test_a_server_event_keeps_the_server_clock_it_was_stamped_with(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other half: `capture_started` is a server event, stamped with
+    `time.monotonic` because server events fire where no loop is
+    running. It reaches the session's timeline through the offset for
+    ITS clock, so the two land beside each other rather than a loop's
+    origin apart."""
+    clock = Clock()
+    clock.at += A_UVLOOP_SHAPED_GAP_S
+    monkeypatch.setattr("vinga_server.telemetry.session_clock", clock)
+    telemetry, memory = exporting()
+    server = capture_emitter()
+    tap = telemetry.server_tap()
+    attach_server_tap(tap)
+    try:
+        capture_started(server)
+        events = session_events(clock, telemetry)
+        open_session(events)
+        close_session(events)
+    finally:
+        detach_server_tap(tap)
+
+    session = named(finished(telemetry, memory), "session")
+    held = session.events[0]
+    assert held.name == "capture_started"
+    assert abs(held.timestamp / 1e9 - time.time()) < NEAR_ENOUGH_S

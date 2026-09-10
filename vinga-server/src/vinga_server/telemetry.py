@@ -68,7 +68,7 @@ from vinga_server.build_info import revision
 from vinga_server.config import ConfigError
 from vinga_server.config.models import TelemetryConfig
 from vinga_server.egress import EgressRefusal, check_feature
-from vinga_server.events import Emission, EventTap
+from vinga_server.events import Emission, EventTap, session_clock
 from vinga_server.events.catalog import carried_values, catalog, kind_of
 from vinga_server.events.values import (
     PROVIDER_ENTRY_OPTIONAL,
@@ -1087,15 +1087,41 @@ class Telemetry:
         # logging under the first one.
         self._closing = threading.Lock()
         self._finished: threading.Event | None = None
-        # Both clocks, read back to back, once. Every stamp this
-        # exporter ever converts goes through this one number.
+        # One offset per CLOCK, because the events package has two and
+        # says so: a session event is stamped with the session loop's
+        # clock, since the capture's audio tracks are aligned by it, and
+        # a server event with `time.monotonic`, since server events fire
+        # where no loop is running. Under uvloop, which is what uvicorn
+        # runs when it is installed, the loop's clock is libuv's and
+        # shares no origin at all with `time.monotonic`: the two read
+        # tens of hours apart on the same machine, so one offset for
+        # both would put every session span that far from when it
+        # happened. A collector accepts those spans and no search window
+        # ever contains them, which is what this cost before the Jaeger
+        # walkthrough found it.
+        #
+        # The server clock's offset is read here, because `time.monotonic`
+        # reads the same on any thread and at any time.
         wall = time.time()
-        monotonic = time.monotonic()
-        self._offset = wall - monotonic
+        self._server_offset = wall - time.monotonic()
+        # The session clock's is read at the FIRST session emission
+        # instead, which is a reading taken on the session loop, by the
+        # loop, whatever loop that turns out to be. Reading it here
+        # would be reading it wherever this object happened to be built,
+        # and an exporter built outside the loop would then be wrong in
+        # exactly the way above and just as quietly. Still one number
+        # for the process once it exists, which is what keeps the
+        # arithmetic between two spans of one trace exact.
+        self._offset: float | None = None
         self._sessions: dict[str, _SessionTrace] = {}
         # `capture_started` that arrived before its session opened, by
         # session id, oldest first and bounded.
-        self._pending: dict[str, list[Emission]] = {}
+        # Held as (epoch, emission) pairs rather than as emissions: a
+        # server event is stamped on the server clock, so the conversion
+        # belongs where the clock is known, which is the fold that
+        # received it and not the session span that eventually claims
+        # it.
+        self._pending: dict[str, list[tuple[int, Emission]]] = {}
         # Whether emissions are still accepted. Flipped by the lifespan
         # before it detaches anything, so a session still talking while
         # the server tears down cannot open a span nothing will close.
@@ -1336,11 +1362,12 @@ class Telemetry:
         session = payload.get(SESSION_FIELD)
         if not isinstance(session, str):
             return
+        at = _epoch_ns(emission.at, self._server_offset)
         if session in self._sessions:
-            self._span_event(session, emission)
+            self._span_event(session, emission, at)
             return
         held = self._pending.setdefault(session, [])
-        held.append(emission)
+        held.append((at, emission))
         while len(self._pending) > PENDING_CAPTURES:
             # Oldest first: a held event whose session never opened is a
             # session that was refused after its capture started, and
@@ -1370,8 +1397,8 @@ class Telemetry:
         self._sessions[session] = _SessionTrace(
             span=span, providers=held, agent=talking
         )
-        for held in self._pending.pop(session, []):
-            self._span_event(session, held)
+        for at, waiting in self._pending.pop(session, []):
+            self._span_event(session, waiting, at)
 
     def _close_session(self, session: str, emission: Emission) -> None:
         trace = self._sessions.pop(session, None)
@@ -1606,7 +1633,9 @@ class Telemetry:
         span.set_attributes(_attributes(emission.payload, PLAYBACK_ATTRIBUTES))
         span.end(end_time=self._at(emission))
 
-    def _span_event(self, session: str, emission: Emission) -> None:
+    def _span_event(
+        self, session: str, emission: Emission, at: int | None = None
+    ) -> None:
         """One event that opens and closes nothing, on whichever span is
         open.
 
@@ -1625,7 +1654,11 @@ class Telemetry:
         span.add_event(
             name,
             attributes=_event_attributes(emission.payload),
-            timestamp=self._at(emission),
+            # The caller's epoch where it had one, which is how an event
+            # stamped on the server's clock reaches the session's
+            # timeline: the conversion happened where the clock was
+            # known.
+            timestamp=self._at(emission) if at is None else at,
         )
         if name == HANDOVER:
             # The one span event that changes what later spans say about
@@ -1638,6 +1671,16 @@ class Telemetry:
                 trace.agent = moved
 
     def _at(self, emission: Emission) -> int:
+        """One session emission's stamp as the epoch nanoseconds a span
+        wants, through the session clock's one offset.
+
+        Resolved here, at the first session emission, and never again.
+        Reading it here means reading it ON the session loop, by the
+        loop, which is the only place the loop's own clock can be
+        compared with the wall clock at all.
+        """
+        if self._offset is None:
+            self._offset = time.time() - session_clock()
         return _epoch_ns(emission.at, self._offset)
 
 
