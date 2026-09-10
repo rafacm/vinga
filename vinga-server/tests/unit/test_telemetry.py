@@ -38,6 +38,7 @@ from tests.support.telemetry import (
     DEVICE,
     SESSION,
     Clock,
+    abandon_transcription,
     capture_emitter,
     capture_started,
     close_session,
@@ -409,6 +410,36 @@ def test_an_event_inside_a_turn_lands_on_the_turn_span() -> None:
 
     spans = finished(telemetry, memory)
     assert [event.name for event in named(spans, "turn").events] == ["handover"]
+    assert named(spans, "session").events == ()
+
+
+def test_a_variant_the_span_map_does_not_name_folds_onto_the_turn() -> None:
+    """The fold is a default and not a list, and this is what says so.
+
+    `transcription_abandoned` arrived after this module was written (the
+    fourth way an ASR stage ends, from PR #442's review round) and lands
+    inside a turn. Nothing here enumerates ASR outcomes, so it needs no
+    row: it folds as an ordinary span event onto the turn being
+    abandoned, carrying the fields the catalog gave it. An
+    implementation that had listed the events it knew would have dropped
+    this one silently, which is exactly the failure this pins.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+
+    open_session(events)
+    start_turn(events)
+    clock.tick(0.2)
+    abandon_transcription(events)
+    clock.tick(0.1)
+    finish_reply(events, outcome=ReplyOutcome.BARGED_IN, sentences=0)
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    turn = named(spans, "turn")
+    assert [event.name for event in turn.events] == ["transcription_abandoned"]
+    assert turn.events[0].attributes["asr_ms"] == 140
     assert named(spans, "session").events == ()
 
 

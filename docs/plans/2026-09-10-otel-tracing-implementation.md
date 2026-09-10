@@ -408,11 +408,33 @@ pins that a stopped exporter takes no more emissions.
 `tests/integration/test_telemetry_hardening.py` is the saturation case
 and the bounded shutdown against a wedged collector.
 
+### Rebasing onto M1's review round
+
+M1 merged with four review fixes on top of the branch point this
+milestone was cut from, and two of them touch what the fold reads.
+
+`transcription_abandoned` is the fourth way an ASR stage ends and lands
+INSIDE a turn, which is exactly the case an exporter that enumerated the
+events it knew would have dropped in silence. Nothing here enumerates
+them: the span map names four lifecycle events and one server-channel
+one, and everything else folds as a span event onto whichever span is
+open. So the new variant needed no row, and it now has a pin saying so,
+which is the more useful thing to own: `test_telemetry.py` drives it
+into an open turn and asserts it arrives on the turn trace with its
+fields and not on the session span.
+
+`speaking_started` moved to the first delivery's stamp and
+`ReplyPacer.first_frame` was deleted. Neither reaches this milestone:
+the span map does not name `speaking_started` at all (the paced-playback
+span it bounds is M3's), and nothing written here touched the pacer. The
+grep is recorded because the deletion is the kind a rebase silently
+undoes.
+
 ### Verification
 
 `uv run ruff check .`: all checks passed. `uv run mypy`: success, no
 issues in 5 source files. `uv run pytest tests/unit -q -n auto --dist
-loadfile`: 6011 passed, 19 skipped. `uv run pytest tests/integration
+loadfile`: 6015 passed, 19 skipped. `uv run pytest tests/integration
 -q`: 255 passed. The five generated-document drift checks (`events
 reference`, `conversations schema`, `config reference`, `config
 reference server`, `config openapi`) all diff clean against the
