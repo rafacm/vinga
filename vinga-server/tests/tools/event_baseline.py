@@ -1169,6 +1169,27 @@ async def drive_nothing_heard(_: Path) -> None:
     await drive_reply(session, UTTERANCE)
 
 
+async def drive_transcription_abandoned(_: Path) -> None:
+    """A reply cut short with its own transcription still running.
+
+    The mid-ASR merge, driven the way `drive_barge_in_merged` drives it:
+    the ear is held open, a second utterance arrives while the first is
+    still inside `transcribe`, and the gate cancels the reply to
+    reconstitute the sentence in front of the continuation. The
+    cancelled call is the one this record is about.
+    """
+    asr = GatedAsr()
+    session, _socket = realtime_session(config_with_agent(), asr)
+    turn_taking(session).endpointer = ScriptedEndpointer(speech_ms=600)
+    plant_utterance(session, speech_pcm(320))
+    await end_utterance(session)
+    await asyncio.sleep(0.05)
+    plant_utterance(session, speech_pcm(480))
+    await end_utterance(session)
+    asr.release.set()
+    await reply_in_flight(session)
+
+
 async def drive_sentence_synthesized(_: Path) -> None:
     """One sentence spoken, so one synthesis stream ends."""
     await drive_reply(speaking_session({"poet": ScriptedLlm(["Two words."])}), UTTERANCE)
@@ -1235,6 +1256,11 @@ SESSION_DRIVERS: tuple[Driver, ...] = (
     Driver((PIPELINE, "PipelineRuntime._reply", 2), drive_replied, "replied"),
     Driver((PIPELINE, "PipelineRuntime._reply", 3), drive_reply_finished, "reply_finished"),
     Driver((PIPELINE, "PipelineRuntime._reply", 4), drive_nothing_heard, "nothing_heard"),
+    Driver(
+        (PIPELINE, "PipelineRuntime._reply", 5),
+        drive_transcription_abandoned,
+        "transcription_abandoned",
+    ),
     Driver(
         (PIPELINE, "PipelineRuntime._sentence_synthesized", 1),
         drive_sentence_synthesized,

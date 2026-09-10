@@ -83,6 +83,7 @@ from vinga_server.events.catalog import (
     Replied,
     ReplyFinished,
     SentenceSynthesized,
+    TranscriptionAbandoned,
     TurnStarted,
     Variant,
 )
@@ -1368,10 +1369,39 @@ class PipelineRuntime:
                     # read through the same thing that stamps the offsets it
                     # sits beside.
                     started = self._events.now()
-                    async with self._watching("asr", providers.asr):
-                        result = await providers.asr.transcribe(
-                            pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
+                    try:
+                        async with self._watching("asr", providers.asr):
+                            result = await providers.asr.transcribe(
+                                pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
+                            )
+                    except asyncio.CancelledError:
+                        # The reply was cut short with the transcription
+                        # still running, which is what a mid-ASR merge
+                        # does by construction: the utterance is being
+                        # reconstituted in front of the continuation and
+                        # this call's answer is no longer wanted.
+                        #
+                        # Said here rather than left to the arm below,
+                        # and said as its own event rather than as a
+                        # provider failure. `_watching` catches
+                        # `Exception` and a cancellation is not one, so
+                        # nothing else on this path ever reports the ASR
+                        # stage at all, and a turn whose only records
+                        # were `turn_started` and `reply_finished` is
+                        # exactly the shape the pair exists to make
+                        # impossible. Nothing failed, so nothing says a
+                        # provider did.
+                        self._events.emit(
+                            lambda: TranscriptionAbandoned(
+                                agent=Identifier(self._agent),
+                                conversation=ConversationId(self._conversation),
+                                duration_s=Real(heard_s),
+                                asr_ms=Whole(
+                                    round((self._events.now() - started) * 1000)
+                                ),
+                            )
                         )
+                        raise
                     asr_ms = round((self._events.now() - started) * 1000)
                     # Only where this turn ran one. A reply handed a
                     # transcription reuses a confirmed barge-in's, measured
