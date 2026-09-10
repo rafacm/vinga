@@ -479,9 +479,67 @@ def test_malformed_content_is_refused_without_republishing_it(tmp_path: Path) ->
     assert manifest.returncode == 1
     assert "malformed manifest" in manifest.stderr
 
-    for stream in (done.stdout, done.stderr, bad_bytes.stderr, manifest.stderr):
-        assert SENTINEL not in stream
-        assert "Traceback" not in stream
+    for done_run in (done, bad_bytes, manifest):
+        for stream in (done_run.stdout, done_run.stderr):
+            assert SENTINEL not in stream
+            assert "Traceback" not in stream
+
+
+def test_a_number_the_parser_refuses_is_still_a_fixed_sentence(tmp_path: Path) -> None:
+    """An integer past the interpreter's digit limit is refused by
+    `json.loads` as a plain `ValueError`, not as the `JSONDecodeError`
+    a reader expects, and its message quotes the digits it choked on."""
+    captures = one_turn(tmp_path)
+    track = (captures / "session-a.jsonl").read_text(encoding="utf-8")
+    oversized = "9" * 20000
+
+    (captures / "session-a.jsonl").write_text(
+        track + '{"event": "vad", "t_ms": ' + oversized + "}\n", encoding="utf-8"
+    )
+    in_track = run(str(captures))
+    assert in_track.returncode == 1
+    assert "malformed decision track" in in_track.stderr
+
+    (captures / "session-a.jsonl").write_text(track, encoding="utf-8")
+    (captures / "session-a.json").write_text(
+        '{"capture": {"complete": ' + oversized + "}}", encoding="utf-8"
+    )
+    in_manifest = run(str(captures))
+    assert in_manifest.returncode == 1
+    assert "malformed manifest" in in_manifest.stderr
+
+    for done in (in_track, in_manifest):
+        for stream in (done.stdout, done.stderr):
+            assert oversized[:64] not in stream
+            assert "Traceback" not in stream
+
+
+def test_nesting_past_the_recursion_limit_is_still_a_fixed_sentence(
+    tmp_path: Path,
+) -> None:
+    """Deep nesting exhausts the parser's stack and raises
+    `RecursionError`, which is not a `ValueError` at all and which an
+    unguarded run answers with a traceback thousands of frames long."""
+    captures = one_turn(tmp_path)
+    track = (captures / "session-a.jsonl").read_text(encoding="utf-8")
+    deep = "[" * 200000 + SENTINEL + "]" * 200000
+
+    (captures / "session-a.jsonl").write_text(track + deep + "\n", encoding="utf-8")
+    in_track = run(str(captures))
+    assert in_track.returncode == 1
+    assert "malformed decision track" in in_track.stderr
+
+    (captures / "session-a.jsonl").write_text(track, encoding="utf-8")
+    (captures / "session-a.json").write_text(deep, encoding="utf-8")
+    in_manifest = run(str(captures))
+    assert in_manifest.returncode == 1
+    assert "malformed manifest" in in_manifest.stderr
+
+    for done in (in_track, in_manifest):
+        for stream in (done.stdout, done.stderr):
+            assert SENTINEL not in stream
+            assert "Traceback" not in stream
+            assert "RecursionError" not in stream
 
 
 def test_the_decision_tracks_own_fields_are_never_echoed(tmp_path: Path) -> None:

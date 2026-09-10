@@ -72,7 +72,10 @@ literals above. Every failure leaves through one door, `Refusal`, whose
 message is a fixed sentence assembled from literals and a capture
 number this module generated itself; refusals are raised after their
 `except` arm rather than inside it, so no handled exception rides out
-on `__context__`.
+on `__context__`. Under all of them sits a last door, a bare `except`
+around one capture's whole analysis, because the alternative to it is
+a traceback whose locals are the file being analysed. It says the
+capture number and nothing else.
 
 Cost: the envelope is computed in Python arithmetic rather than numpy,
 which is a few seconds for a long capture and no dependency at all.
@@ -297,7 +300,13 @@ def read_track(path: Path, number: int) -> Track:
             continue
         try:
             record = json.loads(line)
-        except json.JSONDecodeError:
+        except (ValueError, RecursionError):
+            # Every way the parser can refuse, not only the one it
+            # documents. `JSONDecodeError` is what a syntax error
+            # raises, but an integer past the interpreter's digit limit
+            # raises a plain `ValueError` and nesting past the
+            # recursion limit raises `RecursionError`, and both of
+            # those carry the offending document in their message.
             problem = f"capture {number} has a malformed decision track"
             break
         if not isinstance(record, dict):
@@ -344,7 +353,9 @@ def read_manifest(path: Path, number: int) -> dict:
         raise Refusal(problem)
     try:
         manifest = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        # The same three parser failures as the track above, for the
+        # same reason: a fixed sentence rather than the decoder's.
         problem = f"capture {number} has a malformed manifest"
     if problem is not None:
         raise Refusal(problem)
@@ -570,6 +581,16 @@ def main(argv: list[str] | None = None) -> int:
             refusal = str(exc)
         except (OSError, UnicodeError):
             refusal = f"capture {number} could not be read"
+        except Exception:  # noqa: BLE001 - the last door, see below
+            # Nothing should reach here, and that is exactly why it
+            # exists. A capture is a file this script was handed, its
+            # parsers are given arbitrary bytes, and the alternative to
+            # a last door is a traceback printing the repr of the
+            # locals, which are that file's content. So the classes
+            # above name what is expected and this one refuses whatever
+            # was not, saying only the capture number this module
+            # generated itself.
+            refusal = f"capture {number} could not be analysed"
         if refusal is not None:
             print(refusal, file=sys.stderr)
             failures += 1
