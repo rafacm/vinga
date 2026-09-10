@@ -177,6 +177,15 @@ checks (`events reference`, `conversations schema`, `config reference`,
 `config reference server`, `config openapi`) all diff clean against the
 committed copies.
 
+Re-run after the review round below: `ruff check .` all checks passed,
+`mypy` no issues in five source files, `pytest tests/unit -q` 5985
+passed and 19 skipped, `pytest tests/integration -q` 245 passed, and the
+five drift checks clean again. A first attempt at both lanes failed with
+mass connection errors while a sibling worktree drove the same Postgres;
+the runs above are the reruns, and the failing one is recorded here
+rather than dropped because a lane that goes red for the instance rather
+than for the change should say so.
+
 ### PR review round
 
 External review of PR #442, sol, four findings, verdict mergeable after
