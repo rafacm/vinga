@@ -954,8 +954,8 @@ docs/plans/2026-09-06-cli-answer-style.md:266  historical  vinga diff
 docs/plans/2026-09-10-otel-tracing-implementation.md:176  historical  config reference
 docs/plans/2026-09-10-otel-tracing-implementation.md:177  historical  config reference server
 docs/plans/2026-09-10-otel-tracing-implementation.md:177  historical  config openapi
-docs/plans/2026-09-10-otel-tracing-implementation.md:439  historical  config reference
-docs/plans/2026-09-10-otel-tracing-implementation.md:440  historical  config openapi
+docs/plans/2026-09-10-otel-tracing-implementation.md:448  historical  config reference
+docs/plans/2026-09-10-otel-tracing-implementation.md:449  historical  config openapi
 docs/reference/api-openapi.json:5  generated  vinga schema provider
 docs/reference/api-openapi.json:6678  generated  vinga ota-url
 docs/reference/api-openapi.json:7645  generated  vinga provider secret set

@@ -448,3 +448,108 @@ loadfile`: 6015 passed, 19 skipped. `uv run pytest tests/integration
 reference`, `conversations schema`, `config reference`, `config
 reference server`, `config openapi`) all diff clean against the
 committed copies.
+
+### PR review round
+
+External review of PR #446, sol, three P1 and two P2, verdict not
+mergeable. Each is recorded with what the fix did, because three of
+them changed what reaches a span and one of them corrects a claim this
+document made.
+
+1. **P1: a malformed `OTEL_EXPORTER_OTLP_*` value escaped as a raw SDK
+   traceback.** The SDK parses several members of that family eagerly
+   inside the exporter's constructor and quotes what it was handed, so
+   `OTEL_EXPORTER_OTLP_TIMEOUT=sk-live-...` raised a `ValueError`
+   carrying the value; the build restored logging and re-raised it
+   unchanged, and `ValueError` is outside `BOOT_FAILURES`, so an
+   operator got uvicorn's traceback with a credential in it and exit
+   code 3. Fixed as prescribed: every failure of that construction is
+   contained, the exception is never bound, anything half-built is shut
+   down rather than abandoned with a thread running, and one fixed
+   value-free `ConfigError` is raised outside the handler. Two lanes,
+   because the family has two halves: the whole boot for the member
+   that refuses, and the build alone for all five malformed members in
+   a process of its own with logging wide open, since three of the five
+   are ACCEPTED by the SDK and one of those logs the value it could not
+   parse while accepting it.
+
+2. **P1: a timed-out shutdown restored the SDK's logging while the
+   abandoned export could still fail.** The wait was bounded and the
+   restore was tied to the wait, so an export the timeout left in
+   flight failed a moment later and logged the endpoint it could not
+   reach, userinfo and all, into a log nothing was watching. Fixed as
+   prescribed: the wait is bounded and the quieting is not. A release
+   worker owns the provider's shutdown and restores from its own
+   `finally`; the public `shutdown` only stops the lifespan waiting. It
+   is a daemon thread rather than `asyncio.to_thread`, because the
+   default executor's threads are joined by an `atexit` hook and
+   abandoned work on one of them would hold the process open exactly as
+   long as the collector felt like holding it. The test that covered
+   this released the blocking exporter immediately after `shutdown()`
+   returned, which masked the whole window; it now fails AFTER the
+   timeout with a credential in the message and waits on the SDK's own
+   last act rather than on anything that races it. Reverting the
+   restore to the wait makes it fail with the sentinel in a traceback,
+   which is the mutation that says it bites.
+
+3. **P1: the event-payload sentinel was never planted, and this
+   document said it was.** The fold copied a payload wholesale, taking
+   every key but the three identities, so what reached a backend was
+   whatever the dict held. Fixed as prescribed with an explicit safe
+   mapping: the fold iterates an APPROVED table derived from the
+   catalog's own declarations, so a key the catalog does not declare
+   for that event is not exported whatever put it there, and what each
+   declared field becomes is decided by its `Kind` through a table with
+   a row per member, held to the enumeration in both directions. The
+   sentinel is planted through `EventTap.emit` with a payload the
+   emitter could not have built, which is the point: the question is
+   what the CONSUMER does when handed one.
+
+   *The correction.* The Tests note above claimed the battery planted a
+   value "in an event payload". It did not; three of the four sentinels
+   were planted and that one was not. The note now carries the
+   correction inline rather than being quietly rewritten, because a
+   verification claim about a test that does not exist is worse than an
+   admitted gap: the next reader would have taken the payload surface
+   as covered and looked elsewhere.
+
+4. **P2: two mapping fields were being dropped by the SDK in silence.**
+   OTel attributes are scalars and sequences of scalars, so
+   `prompt_assembled.sources` and `frames_dropped.reasons` arrived on a
+   span as nothing at all, with the SDK's warning about it already
+   silenced by this module. Fixed as prescribed: both are bounded,
+   server-owned mappings of names to numbers, and their kind now maps
+   to deterministic JSON (sorted keys, no spaces) under the field's own
+   name. The exact strings are asserted, and a third case builds the
+   same mapping in the other insertion order and insists the attribute
+   is identical.
+
+5. **P2: the resolved provider entries were on no span.** M1 deepened
+   `session_open` to carry them for every bound agent and nothing read
+   them: the attribute tables omitted the field, `handover` updated no
+   active-agent state, and the fixtures opened against an empty
+   mapping, so the gap was invisible from both ends. Fixed as
+   prescribed: the entries are retained whole at the open, `handover`
+   moves which agent is active, the session span is stamped with the
+   agent it opened with and each turn span with the agent that turn is
+   spoken by. Flattened per stage rather than dumped as a blob, because
+   a backend filters on attributes and a JSON blob would be present and
+   unqueryable, which for this question is the same as absent. The
+   shared fixtures open against two agents on different models, so the
+   before-and-after-handover assertions can tell a handover from a
+   constant.
+
+The three fixes that touch the fold share one mapping, which is what
+finding 5's note asked for: `SHAPES` decides what a payload kind
+becomes, `APPROVED` decides which fields an event may contribute, and
+both the span-attribute tables and the span-event fold read them, so
+this module has one answer to "what may a payload field become on a
+span" rather than one per surface.
+
+### Verification after the review round
+
+`uv run ruff check .`: all checks passed. `uv run mypy`: success, no
+issues in 5 source files. `uv run pytest tests/unit -q -n auto --dist
+loadfile`: 6023 passed, 19 skipped. `uv run pytest tests/integration
+-q`: 262 passed. The five generated-document drift checks all diff
+clean against the committed copies.
