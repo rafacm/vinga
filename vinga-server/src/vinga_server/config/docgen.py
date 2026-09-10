@@ -579,12 +579,34 @@ def type_name(annotation: object) -> str:
 
 
 def default(info: FieldInfo) -> str:
-    """What a field holds when a fragment omits it."""
+    """What a field holds when a fragment omits it.
+
+    A None default under a type that does not admit null is not a value
+    a fragment could write, it is the only way pydantic has to spell
+    "nothing was written" for a field that is optional without being
+    nullable. Printing `null` there would advertise a value the type
+    itself refuses, which is the reading a client generated from the
+    reference would act on (#444), so it is printed as what it is.
+    """
     if info.default_factory is not None:
         return _value(info.default_factory())  # type: ignore[call-arg]
     if info.default is PydanticUndefined:
         return "required"
+    if info.default is None and not admits_null(info.annotation):
+        return "unset"
     return _value(info.default)
+
+
+def admits_null(annotation: object) -> bool:
+    """Whether null is one of the values a field's type accepts, asked
+    of the annotation rather than of the rendered name so a nested
+    `null` inside a generic cannot answer for the field itself."""
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        return admits_null(get_args(annotation)[0])
+    if origin in (Union, UnionType):
+        return any(admits_null(argument) for argument in get_args(annotation))
+    return annotation is NoneType
 
 
 def _value(value: object) -> str:

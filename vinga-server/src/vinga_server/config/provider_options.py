@@ -72,7 +72,6 @@ from pydantic import (
     StrictStr,
     ValidationError,
     WithJsonSchema,
-    field_validator,
     model_validator,
 )
 from pydantic.json_schema import JsonSchemaValue
@@ -687,6 +686,15 @@ class OpenaiCompatibleOptions(BaseModel):
         description and a code generator sees the keyword.
         """
         schema = handler(core_schema)
+        # A field that is optional without being nullable has no default
+        # VALUE, and pydantic has nowhere but the default slot to keep
+        # "nothing was written" in, so what it derives is an integer
+        # field defaulting to null: a schema whose own default its type
+        # forbids, and an invitation to a generated client to send it.
+        # Taken back out here rather than papered over at the reader:
+        # not required and no default is exactly what the field is, and
+        # the description says what omitting it does (#444).
+        schema.get("properties", {}).get("max_tokens", {}).pop("default", None)
         refused = list(cls.refused_passthrough())
         schema["propertyNames"] = {"not": {"enum": refused}}
         schema["description"] = (
@@ -740,7 +748,24 @@ class OpenaiCompatibleOptions(BaseModel):
     # for all of them, and an operator who wants a cap writes the one
     # their endpoint spells, this field or `max_completion_tokens`
     # through the door beside it.
-    max_tokens: StrictInt | None = Field(
+    # Optional and not nullable, which are two different things and the
+    # reason the annotation is the bare `StrictInt` while the field
+    # holds None when nothing was written. Absent is a state of the
+    # fragment; null is a value, and this type has no blank spelling of
+    # an absent option (`base_url` and `model` refuse a blank as loudly
+    # as a missing key). A nullable annotation published `int | null`
+    # with a null default in all three generated references, so a client
+    # generated from the schema could legitimately send the one value
+    # the model then answers 422 to. `StrictInt` refuses null itself,
+    # and `__get_pydantic_json_schema__` above takes the null default
+    # back out of what is published, so what a document promises and
+    # what the model accepts are the same thing again.
+    #
+    # None is therefore this module's private spelling of "nothing was
+    # written" rather than a value an operator can produce, and the one
+    # reader of it is the builder, which leaves the field out of the
+    # request when it is None.
+    max_tokens: StrictInt = Field(
         default=None,
         description=(
             "The cap on one reply's length, in tokens. Left out, no cap is sent and "
@@ -749,25 +774,6 @@ class OpenaiCompatibleOptions(BaseModel):
             "which is written here like any other passthrough key."
         ),
     )
-
-    @field_validator("max_tokens", mode="before")
-    @classmethod
-    def _absence_has_one_spelling(cls, value: object) -> object:
-        """`max_tokens: null` is refused rather than read as absence.
-
-        A validator runs on what was written and not on a default, so
-        this is reached only when the key IS there. That is the whole
-        point: this type has no blank spelling of an absent option
-        (`base_url` and `model` refuse a blank as loudly as a missing
-        key), and a field gaining a nullable type must not quietly grow
-        one. Leaving the key out is how a cap is omitted.
-        """
-        if value is None:
-            raise ValueError(
-                "must be a whole number of tokens; leave the key out to send no cap "
-                "and let the endpoint's own default apply"
-            )
-        return value
 
 
 class OptionsRefused(Exception):
