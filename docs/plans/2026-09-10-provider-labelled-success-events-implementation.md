@@ -8,7 +8,7 @@ questions, and what was discovered on the way.
 
 ## M1: the vocabulary
 
-PR TBD.
+PR [#457](https://github.com/rafacm/vinga/pull/457).
 
 ### What landed
 
