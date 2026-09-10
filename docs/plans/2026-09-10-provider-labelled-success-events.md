@@ -228,3 +228,124 @@ Reusing the assets that exist rather than restating them.
   opened against, so one fact keeps one attribute name wherever it is read from.
   Span pins extended; changelog. Design footprint: deepens `telemetry.py`'s
   existing tables; adds no module and no seam.
+
+## Plan review round
+
+External review of commit `9e1443b4`, backend codex (codex-cli 0.154.0),
+model `gpt-5.6-sol`, 2026-09-10. Findings as received, condensed but faithful,
+each with its resolution.
+
+### 1 (P1): a reused ASR result can be labelled with the wrong provider
+
+`confirm_transcript` starts an ASR call and awaits it
+(`pipeline.py:2993-3007`), while the reply in flight can independently run a
+handover that rebinds `self._providers` (`_activate_agent`, which
+`pipeline.py:548-560` names as that field's only writer). `Utterance` carries
+the result and its latency but not the provider that produced them
+(`turntaking.py:61-93`, `231-270`). So the reply that reuses the transcription
+would label it with whichever provider is current after the race, not the one
+that ran.
+
+The plan should say that the confirmation snapshots its provider and returns
+that provenance with the result, that `Utterance` carries result, latency and
+provider atomically, and that the reused `heard` builder is given the captured
+provider. Add a deterministic test suspending the confirmation while the old
+reply hands over, asserting `heard`'s quartet describes the provider that
+actually transcribed.
+
+*Resolution*: accepted whole, and it is the finding that changes the shape of
+M1. `confirm_transcript` stops returning a bare `AsrResult` and returns a frozen
+`Confirmation(result, provider)`; `provider` is typed `object`, which is exactly
+what `assembly._entry_fields` takes, so nothing about a provider's own types
+reaches `turntaking` and the seam's existing rule ("the ladder needs an answer,
+not the machinery that produces one") is kept rather than widened.
+`_gate_barge_in` carries the provider alongside the result and the latency it
+already carries, and `Utterance` gains `asr_provider` as a fourth field set with
+`transcript` and `asr_ms`, which its own docstring already says travel together
+and are set together. The race test is added to the milestone's tests, driving a
+handover while the confirmation is suspended.
+
+### 2 (P2): the claimed null `asr_ms` contradicts the landed contract
+
+The plan says `asr_ms` is null for a reused barge-in transcription. It is not:
+the confirmation's latency is measured at the site that runs it and handed over
+on the `Utterance` (`turntaking.py:81-93`, `274-289`), `_reply` reads it
+(`pipeline.py:1334-1350`, `1435-1449`), a regression test requires a real value
+(`test_turn_lifecycle.py:344-369`), and the generated reference documents it
+(`events.md:725`).
+
+*Resolution*: accepted. The plan confused `Turn.asr_ms`, which IS null for a
+reused transcription and says "not measured this turn", with `heard.asr_ms`,
+which is deliberately less strict and reports what the transcription being
+answered cost whoever ran it. The asymmetry the plan claimed does not exist, and
+removing it makes finding 1 tighter rather than looser: `heard.asr_ms` already
+reports the confirmation call, so `heard`'s provider quartet must report that
+same call's provider or the two halves of one record would describe two
+different calls.
+
+### 3 (P2): M2 would mix call-time identity with stale open-time context
+
+Both stage-span folds merge `self._context(trace, payload)` before the event's
+own attributes (`telemetry.py:1688-1700`, `1788-1800`), and `_context` supplies
+all four open-time `vinga.provider.<stage>.*` entries. Mapping the event's
+`provider` onto the same `.name` key overwrites the name only, leaving open-time
+`type`, `host` and `model` beside call-time data. The LLM span already avoids
+this with `states=LLM_STAGE`.
+
+*Resolution*: accepted. `_context`'s own docstring states the governing rule,
+that one attribute name may have one source, so this is the codebase's rule
+being applied rather than a new one. M2 passes `states` for the stage the span
+answers for, and does so conditionally: the open-time context for that stage is
+suppressed only when the event actually names an entry, because an event whose
+quartet is four absences contributes nothing and suppressing the context would
+lose what the session opened against rather than correct it. This also covers
+the existing ASR `provider_failed` case, which is a collision M2 would
+introduce rather than a live bug: `ASR_ATTRIBUTES` does not map the quartet
+today, so no `provider_failed` quartet reaches an ASR span at present. The test
+deliberately makes session-open identity differ from call-time identity and
+asserts no hybrid appears, and covers an outcome with no quartet.
+
+### 4 (P2): the live API does not carry DEBUG events unqualified
+
+The live stream defaults to INFO independently of the logger and rejects lower
+levels (`events/live.py:83-89`, `131-140`), and the API uses that default when
+`level` is absent (`config/api.py:1967-1971`, `2122-2129`). `vinga events tail`
+is a client of that stream, not a log reader.
+
+*Resolution*: accepted, and the plan's operational note was wrong in the one
+place it mattered, since it was written to stop an operator building the
+dashboard from getting this wrong. Corrected to three surfaces with three
+answers: the store, the capture and any OTel exporter receive DEBUG emissions
+regardless of any threshold, because `_dispatch` offers every emission to every
+non-log tap before the log tap sees it and `record_event` gates on the telemetry
+switch, the session being open and the in-flight bound but never on level; the
+JSON log needs a DEBUG server log level; and the live API and the CLI tail in
+front of it need an explicit DEBUG filter.
+
+### 5 (P2): the proposed tests prove presence, not attribution
+
+The baseline's `CARRIED` table checks keys and not values
+(`test_event_baseline.py:306-336`, `524-595`), the atomicity pin exercises only
+a provider with no identity, and the no-leak sentinel exercises options that
+should not be read. All would pass with `provider` and `type` swapped, with the
+wrong provider object passed, or with TTS labelled from ASR identity.
+
+*Resolution*: accepted. The tests section now requires per-event value
+assertions built on four distinct identity values so a swap or a cross-stage
+mislabel fails, absence cases for `host` and `model` separately from the
+all-four-absent case, and at least one assertion driven through the real runtime
+path rather than by invoking a builder directly. The reused-transcription race
+from finding 1 is one of these.
+
+### 6 (P3): there is no generated telemetry reference
+
+`events_docgen.py` generates the event vocabulary and its field names, not span
+attribute mappings, and the maintained observability map says telemetry uses
+attribute names chosen by `telemetry.py`
+(`observability-surfaces.md:38`).
+
+*Resolution*: accepted; the claim is deleted. The mapping is owned by
+`telemetry.py`'s tables and the span pins beside them, which is what the
+observability map already says, and that row stays accurate because M2 adds
+attribute names under the prefix it already describes rather than a new class of
+value. No new maintained page is created for a table that has an owner.
