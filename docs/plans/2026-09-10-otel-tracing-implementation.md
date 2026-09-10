@@ -996,3 +996,20 @@ executed by the `image` job in CI, which needs a builder this worktree
 does not have. What was changed there is three lines of build arguments
 and three import invocations, and the first CI run on the PR is what
 proves them.
+
+Re-run whole after the rebase onto M2's merged review chain, which is
+the run that governs: `ruff check .` all checks passed, `mypy` success
+with no issues in 5 source files, `pytest tests/unit -q -n auto --dist
+loadfile` 6094 passed and 19 skipped (with the census regenerated
+afterwards and green on the rerun), and `pytest tests/integration -q`
+279 passed in 397 s. The six generated-document drift checks, which now
+include `metrics-views.md` from #439, all diff clean, and
+`check_doc_links.py` checked 219 files with 0 failures.
+
+The first integration run on the rebased tree was 278 passed and ONE
+failed, and it is recorded rather than dropped because it is the whole
+value of re-running a lane after a rebase: the decoded case still asked
+a span for `vinga.provider`, this milestone's first spelling of the
+round's configured entry, which M2's review chain had meanwhile made the
+prefix of the retained provider context. Nothing textual conflicted
+there, which is exactly why a clean replay is not a verification.
