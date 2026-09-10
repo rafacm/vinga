@@ -84,6 +84,11 @@ NEEDS_THE_OTEL_EXTRA = (
     f"install it with: uv sync --extra {OTEL_EXTRA}"
 )
 
+# The environment family the SDK reads its transport out of, as a
+# prefix, because what a refusal may name is the family and never a
+# member's value.
+OTLP_ENV_PREFIX = "OTEL_EXPORTER_OTLP_"
+
 # The transport the extra declares, spelled as the SDK spells it.
 OTLP_PROTOCOL_ENV = "OTEL_EXPORTER_OTLP_PROTOCOL"
 OTLP_TRACES_PROTOCOL_ENV = "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL"
@@ -92,6 +97,30 @@ SUPPORTED_PROTOCOL = "http/protobuf"
 UNSUPPORTED_PROTOCOL = (
     f"{TELEMETRY_KEY} is on, and this server exports over {SUPPORTED_PROTOCOL} "
     f"only; set {OTLP_PROTOCOL_ENV} to {SUPPORTED_PROTOCOL} or leave it unset"
+)
+
+# And what an exporter that would not build at all is refused with.
+#
+# The whole `OTEL_EXPORTER_OTLP_*` family is operator-written text this
+# module deliberately never reads, and the SDK parses several members of
+# it eagerly: a timeout that is not a number and a compression that is
+# not one of three words both raise, and each library exception quotes
+# what it was handed. A `ValueError` out of a constructor is also
+# outside `BOOT_FAILURES`, so it reached an operator as uvicorn's
+# traceback rather than as a sentence.
+#
+# So every failure of that construction is contained and answered with
+# this, which names the family and the file to look in and repeats
+# nothing: those variables are where the collector's credentials live,
+# and a refusal that echoed one would put it in the retained log of the
+# deployment it belongs to.
+CANNOT_BUILD_EXPORTER = (
+    f"{TELEMETRY_KEY} is on, and no exporter could be built from the "
+    f"{OTLP_ENV_PREFIX}* environment. Nothing of what those variables hold is "
+    f"repeated here, because they carry the collector's credentials: check "
+    f"that {OTLP_ENV_PREFIX}TIMEOUT is a number of seconds, that "
+    f"{OTLP_ENV_PREFIX}COMPRESSION is one of gzip, deflate or none, and that "
+    f"{OTLP_ENV_PREFIX}ENDPOINT is a URL"
 )
 
 # The SDK's own namespace, quieted for as long as an exporter exists.
@@ -224,6 +253,13 @@ def build_telemetry(
        names the section, the extra and the command.
     3. **The protocol.** Read before construction and compared against
        the one value the extra can serve.
+    4. **The rest of that environment.** The SDK parses several members
+       of `OTEL_EXPORTER_OTLP_*` inside its constructor and quotes what
+       it was handed when one will not parse, so every failure of the
+       construction is contained and answered with one fixed sentence
+       naming the family. Without it a mistyped timeout reached the
+       operator as a library traceback with the value in it, and as an
+       exception type outside `BOOT_FAILURES`.
 
     `exporter`, `queue_size`, `batch_size` and `schedule_delay_ms` are
     the test seam and nothing else: a lane drives the fold through the
@@ -253,6 +289,48 @@ def build_telemetry(
     _check_protocol()
 
     quieted = _quiet_sdk_loggers()
+    provider = _construct(
+        sdk,
+        exporter=exporter,
+        queue_size=queue_size,
+        batch_size=batch_size,
+        schedule_delay_ms=schedule_delay_ms,
+    )
+    if provider is None:
+        # Outside the handler that caught it, like the two refusals
+        # above, and after the logging this build changed has been put
+        # back: what leaves here is one sentence with no chain, and
+        # `ConfigError` is inside `BOOT_FAILURES`, which the library's
+        # own `ValueError` was not.
+        quieted.restore()
+        raise ConfigError(CANNOT_BUILD_EXPORTER)
+    return Telemetry(provider=provider, quieted=quieted)
+
+
+def _construct(
+    sdk: "_Sdk",
+    *,
+    exporter: Any | None,
+    queue_size: int,
+    batch_size: int,
+    schedule_delay_ms: int,
+) -> Any | None:
+    """The tracer provider this exporter owns, or nothing where the
+    environment it was built from would not parse.
+
+    Nothing rather than a raise, so the caller's sentence is raised
+    outside this function's `except` and chains no library exception.
+    Nothing about what was raised leaves here either, its class name
+    included: the values these constructors parse are the collector's
+    credentials, and `ValueError: could not convert string to float:
+    'sk-live-...'` is exactly the shape of message this is containing.
+
+    What got as far as existing is closed on the way out. A provider
+    with a batch processor already added owns a thread, so a half-built
+    one abandoned to the garbage collector would be a boot that refused
+    and left an exporter running.
+    """
+    provider = None
     try:
         built = exporter if exporter is not None else _otlp_exporter()
         provider = sdk.provider(
@@ -269,14 +347,28 @@ def build_telemetry(
                 export_timeout_millis=EXPORT_TIMEOUT_MS,
             )
         )
-    except Exception:
-        # A construction that got part way through leaves the process's
-        # logging as it found it. What was raised here is a bug rather
-        # than a refusal and propagates as itself, but the namespace
-        # this quieted is not this module's to keep on the way past.
-        quieted.restore()
-        raise
-    return Telemetry(provider=provider, quieted=quieted)
+    except Exception:  # noqa: BLE001 - a refusal never carries a library's words
+        # Deliberately unbound, for the reason the events package gives
+        # where it does the same: what is never looked at cannot leak by
+        # accident later.
+        _discard(provider)
+        return None
+    return provider
+
+
+def _discard(provider: Any | None) -> None:
+    """Let go of a provider a failed build got part way through.
+
+    Under its own guard, because this runs on a path that is already
+    handling a failure and a second one here would replace a sentence
+    with a traceback.
+    """
+    if provider is None:
+        return
+    try:
+        provider.shutdown()
+    except Exception:  # noqa: BLE001 - the refusal is what matters here
+        pass
 
 
 def _egress_refusal(local_only: bool) -> str | None:
