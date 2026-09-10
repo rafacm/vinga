@@ -28,6 +28,7 @@ from vinga_server.capture import (
     SessionCapture,
     interleave,
 )
+from vinga_server.events import SessionEvents
 
 
 def read_channels(path: Path) -> tuple[list[int], list[int]]:
@@ -140,15 +141,33 @@ def test_the_endpointers_opinion_is_sampled_not_just_its_decisions(tmp_path: Pat
 
 
 def test_dropped_frames_are_counted_per_second_with_their_reason(tmp_path: Path) -> None:
-    # Per second rather than per frame: the guards drop whole seconds at
-    # a time, and what explains a misfire is the rate.
-    opened = time.monotonic()
+    """Per second rather than per frame: the guards drop whole seconds at
+    a time, and what explains a misfire is the rate.
+
+    Driven through the emitter, because that is where the counting
+    happens since #66: the capture used to keep a counter of its own and
+    write its own record, and what reaches the track now is the typed
+    `frames_dropped` emission every other tap is offered. The record the
+    track keeps is the same fact in the same fields, with the base an
+    ordinary emission carries in front of them.
+    """
+    opened = 0.0
+    now = [0.0]
     capture = store(tmp_path).open("s1", opened, MANIFEST)
     assert capture is not None
-    for i in range(10):
-        capture.dropped("barge_in_off", opened + 0.1 * i)
-    for i in range(3):
-        capture.dropped("not_listening", opened + 1.1 + 0.1 * i)
+    emitter = SessionEvents("s1", clock=lambda: now[0])
+    emitter.opened_at = opened
+    emitter.attach_capture(capture)
+    for index in range(10):
+        now[0] = 0.1 * index
+        emitter.dropped("barge_in_off")
+    for index in range(3):
+        now[0] = 1.1 + 0.1 * index
+        emitter.dropped("not_listening")
+    # The session's close path is what flushes the second a session ends
+    # inside, while the capture is still attached.
+    now[0] = 1.5
+    emitter.flush_dropped()
     capture.close()
 
     dropped = [
@@ -158,7 +177,12 @@ def test_dropped_frames_are_counted_per_second_with_their_reason(tmp_path: Path)
     ]
     assert dropped[0]["second"] == 0
     assert dropped[0]["reasons"] == {"barge_in_off": 10}
+    assert dropped[-1]["second"] == 1
     assert dropped[-1]["reasons"] == {"not_listening": 3}
+    # The base every emission carries, which is what the track gained by
+    # reading one declaration instead of writing its own record.
+    assert dropped[0]["session"] == "s1"
+    assert dropped[0]["device"] is None
 
 
 def test_the_manifest_exists_before_the_session_ends(tmp_path: Path) -> None:
@@ -345,15 +369,18 @@ def test_events_stop_at_the_limit_too(tmp_path: Path) -> None:
 
 
 def test_every_offset_indexes_into_the_audio_even_at_the_limit(tmp_path: Path) -> None:
-    # A review finding, and the general form of the previous one: the
-    # aggregate that close() flushes was stamped with the clock, which
-    # can be past the limit the audio was clamped to. Derived from a
-    # clamped frame index now, so the guarantee holds for every record
-    # by construction rather than by each caller remembering.
+    # A review finding, and the general form of the previous one: a
+    # record stamped with the clock can land past the limit the audio
+    # was clamped to. Derived from a clamped frame index now, so the
+    # guarantee holds for every record by construction rather than by
+    # each caller remembering. It used to be driven with a dropped-frame
+    # aggregate, which the capture no longer counts (#66); what it is
+    # about was never the aggregate but the clamping, so any two records
+    # either side of the limit drive it.
     opened = time.monotonic()
     capture = store(tmp_path, max_session_s=0.05).open("s1", opened, MANIFEST)
     assert capture is not None
-    capture.dropped("barge_in_off", opened + 0.01)
+    capture.event({"event": "early"}, opened + 0.01)
     capture.event({"event": "late"}, opened + 0.075)
     capture.close()
 
