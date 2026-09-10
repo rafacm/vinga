@@ -31,7 +31,7 @@ import sys
 
 import pytest
 
-from tests.support.events import both_formats
+from tests.support.events import both_formats, every_format
 from tests.support.telemetry import (
     AGENT,
     CONVERSATION,
@@ -604,7 +604,7 @@ async def test_a_failed_export_leaks_nothing(
     await telemetry.shutdown()
 
     captured = capsys.readouterr()
-    assert planted not in both_formats(caplog)
+    assert planted not in every_format(caplog)
     assert planted not in captured.err
     assert planted not in captured.out
 

@@ -56,6 +56,7 @@ repository follows.
 import asyncio
 import logging
 import os
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -229,6 +230,7 @@ def build_telemetry(
     queue_size: int = QUEUE_SIZE,
     batch_size: int = BATCH_SIZE,
     schedule_delay_ms: int = SCHEDULE_DELAY_MS,
+    shutdown_timeout_s: float = SHUTDOWN_TIMEOUT_S,
 ) -> "Telemetry | None":
     """One server's exporter, or nothing at all.
 
@@ -261,12 +263,14 @@ def build_telemetry(
        operator as a library traceback with the value in it, and as an
        exception type outside `BOOT_FAILURES`.
 
-    `exporter`, `queue_size`, `batch_size` and `schedule_delay_ms` are
-    the test seam and nothing else: a lane drives the fold through the
-    SDK's in-memory exporter, or fills a deliberately tiny queue behind
-    a blocking one to prove a saturated exporter costs a reply nothing.
-    A caller that passes none of them gets the real transport reading
-    its own environment.
+    `exporter`, `queue_size`, `batch_size`, `schedule_delay_ms` and
+    `shutdown_timeout_s` are the test seam and nothing else: a lane
+    drives the fold through the SDK's in-memory exporter, or fills a
+    deliberately tiny queue behind a blocking one to prove a saturated
+    exporter costs a reply nothing, or shortens the wait so a case about
+    what happens AFTER the timeout does not take five seconds to reach
+    it. A caller that passes none of them gets the real transport
+    reading its own environment and the real bound.
     """
     if config is None or not config.enabled:
         return None
@@ -304,7 +308,9 @@ def build_telemetry(
         # own `ValueError` was not.
         quieted.restore()
         raise ConfigError(CANNOT_BUILD_EXPORTER)
-    return Telemetry(provider=provider, quieted=quieted)
+    return Telemetry(
+        provider=provider, quieted=quieted, shutdown_timeout_s=shutdown_timeout_s
+    )
 
 
 def _construct(
@@ -550,7 +556,12 @@ class Telemetry:
     it knows is what its callers stop having to.
     """
 
-    def __init__(self, provider: Any, quieted: _Quieted) -> None:
+    def __init__(
+        self,
+        provider: Any,
+        quieted: _Quieted,
+        shutdown_timeout_s: float = SHUTDOWN_TIMEOUT_S,
+    ) -> None:
         # The two API names a span needs, bound once here rather than
         # imported per turn: an empty context, which is what makes a
         # span the root of a trace of its own, and the link that puts
@@ -563,6 +574,15 @@ class Telemetry:
         self._provider = provider
         self._tracer = provider.get_tracer(SERVICE)
         self._quieted = quieted
+        self._shutdown_timeout_s = shutdown_timeout_s
+        # The release runs once, on a thread of its own, and this is
+        # what says whether it has been started and whether it is over.
+        # Guarded because `shutdown` may be called twice (a lifespan
+        # that unwound twice, a test): a second worker would shut a
+        # provider down that is already shutting down and restore the
+        # logging under the first one.
+        self._closing = threading.Lock()
+        self._finished: threading.Event | None = None
         # Both clocks, read back to back, once. Every stamp this
         # exporter ever converts goes through this one number.
         wall = time.time()
@@ -624,25 +644,68 @@ class Telemetry:
         hold a redeploy open. What a timeout costs is spans, which is
         the trade the bounded queue already makes.
 
-        The loggers go back to what they were afterwards, whichever way
-        this ended: the process's logging configuration is not this
-        object's to keep once it has stopped exporting.
+        The wait is bounded and the QUIETING IS NOT. That asymmetry is
+        the whole of this method's design. A shutdown that expired left
+        an export still in flight against the endpoint it could not
+        reach, and that export is going to fail and log the URL it
+        failed against; restoring the SDK's logging when the WAIT ended
+        would put the operator's endpoint, userinfo and all, into the
+        retained log a second or two later, on a path nothing was
+        watching any more. So the worker restores it from its own
+        `finally`, when the work is genuinely over, and the timeout here
+        only stops the lifespan waiting.
+
+        The worker is a daemon thread of this method's own rather than
+        `asyncio.to_thread`. The default executor's threads are joined
+        by an `atexit` hook, so an abandoned export on one of them would
+        hold the process open exactly as long as the collector felt like
+        holding it, which is the thing a bounded shutdown exists to
+        prevent. A daemon thread is dropped at exit instead, which is
+        the honest ending for work whose result is spans nobody is going
+        to read.
         """
         self._accepting = False
-        try:
-            await asyncio.wait_for(
-                asyncio.to_thread(self._provider.shutdown), SHUTDOWN_TIMEOUT_S
-            )
-        except TimeoutError:
+        with self._closing:
+            if self._finished is None:
+                self._finished = threading.Event()
+                threading.Thread(
+                    target=self._release,
+                    name="vinga-telemetry-shutdown",
+                    daemon=True,
+                ).start()
+            finished = self._finished
+        # Off the loop for the wait itself, and with the bound passed to
+        # `wait` rather than wrapped in `wait_for`, so the pool thread is
+        # released at the deadline instead of being pinned to an export
+        # that may never end.
+        if not await asyncio.to_thread(finished.wait, self._shutdown_timeout_s):
             # A plain sentence and nothing about the far side: what
             # could not be reached is the endpoint, which is the one
             # string this module never writes down.
             logger.warning(
                 "the telemetry exporter did not finish within %.0f s and was left behind",
-                SHUTDOWN_TIMEOUT_S,
+                self._shutdown_timeout_s,
             )
+
+    def _release(self) -> None:
+        """Shut the provider down and put the SDK's logging back, in
+        that order, however it ended.
+
+        Runs on the abandoned side of the timeout as often as not, which
+        is why the restore is here rather than in the caller: everything
+        the SDK is going to say about a collector it cannot reach, it
+        says between these two lines.
+        """
+        try:
+            self._provider.shutdown()
+        except Exception:  # noqa: BLE001 - a teardown never raises at the operator
+            # Unbound, for the reason the build's own containment gives:
+            # what a failing export was holding is the endpoint.
+            pass
         finally:
             self._quieted.restore()
+            if self._finished is not None:
+                self._finished.set()
 
     # --- the fold -----------------------------------------------------
 
