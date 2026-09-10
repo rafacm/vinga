@@ -1,5 +1,5 @@
-"""The one name the secret-key heuristic does not reach, and everything
-it still does.
+"""What the secret-key heuristic does not reach, and everything it
+still does.
 
 `max_tokens` contains the fragment `token`, so the inline-secret rule
 refused it on every surface and for every provider type: the `anthropic`
@@ -24,6 +24,21 @@ Containment is asserted rather than sampled, at three depths:
   have moved: an MCP env key, an MCP header and a URL query parameter
   named `max_tokens` are named by somebody else, so nothing there can
   earn an exemption.
+
+The exact name was the first answer and is no longer the general one.
+A second endpoint named a second parameter (`max_completion_tokens`,
+which is what OpenAI's current models take instead of `max_tokens`),
+and a list of names is a list somebody has to add to before an
+operator can write a cap, on the one type whose promise is that a key
+this repository never heard of travels (#444). So the general question
+is asked of the VALUE: a number cannot be a pasted credential, and
+everything else could be. With one thing still asked of the name,
+because a secret-shaped key is two shapes and the value speaks for only
+one of them: a key that is itself the paste is not spelled the way a
+request parameter is, so a key carrying anything but letters, digits
+and underscores stays refused whatever it holds. The last section of
+this file is that rule, at the predicate, on every surface, and against
+the same planted credentials as the rest.
 
 Every refused value is a sentinel, in the `PLANTED_KEYS` style of
 `test_config_api_problems.py`: a refusal is a surface, and a key
@@ -50,6 +65,7 @@ from vinga_server.config.api import build_api
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import (
     DatabaseConfig,
+    could_be_inline_secret,
     is_mcp_secret_key,
     is_secret_option,
     is_url_credential_parameter,
@@ -65,6 +81,12 @@ TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 # The exempted name, written once. Every case below is either this
 # string or deliberately not it.
 EXEMPT = "max_tokens"
+
+# The parameter that says a list of names was the wrong shape: OpenAI's
+# current models refuse `max_tokens` and take this instead, and nothing
+# in this repository declares it, so it reaches an endpoint only by
+# being passed through.
+NUMERIC = "max_completion_tokens"
 
 # The cap a fragment documents, and a value that is not the builders'
 # default, so a case that asserted the option arrived cannot be passing
@@ -554,3 +576,223 @@ def test_a_wider_rule_refusal_leaks_nothing_from_the_command_line(
     for record in caplog.records:
         assert SENTINEL not in logs.JsonFormatter().format(record)
         assert SENTINEL not in text.format(record)
+
+
+# The value half
+#
+# A name says a key might carry a credential; what it holds says whether
+# it could. The rule above answers the first for one name, and this one
+# answers the second for every name there will ever be: a number and a
+# bool are not shapes a pasted credential takes, and everything else is
+# refused exactly as before.
+#
+# Held to the same discipline as every other loosening in this file. The
+# cases that accept name what arrived, so an acceptance cannot pass by
+# dropping the key it is about; the cases that refuse plant the sentinel
+# and assert it absent from every surface a refusal has.
+
+
+VALUE_CASES = [
+    ("an integer", 1024, False),
+    ("a zero", 0, False),
+    ("a float", 0.5, False),
+    ("a bool", True, False),
+    ("a string", SENTINEL, True),
+    ("a blank string", "", True),
+    ("the digits as a string", "1024", True),
+    ("nothing at all", None, True),
+    ("a mapping", {"nested": SENTINEL}, True),
+    ("a list", [SENTINEL], True),
+]
+
+VALUE_IDS = [case[0] for case in VALUE_CASES]
+
+
+@pytest.mark.parametrize(("what", "value", "guarded"), VALUE_CASES, ids=VALUE_IDS)
+def test_only_a_number_takes_a_secret_shaped_key_out_of_the_guard(
+    what: str, value: object, guarded: bool
+) -> None:
+    """The predicate, before any surface asks it.
+
+    A mapping and a list are refused rather than walked into, which is
+    the conservative side of the same decision: a credential nested
+    under a key already named `token` is one the walk would have to be
+    right about twice, and the key it hangs from already said what it
+    is.
+    """
+    assert could_be_inline_secret(NUMERIC, value) is guarded, what
+
+
+@pytest.mark.parametrize("case", REFUSED_KEYS, ids=REFUSED_IDS)
+def test_every_secret_shaped_key_admits_a_number(store: ConfigStore, case: Refused) -> None:
+    """The loosening at its widest, said out loud: this is not a rule
+    about `max_completion_tokens`, it is a rule about numbers, so it is
+    driven over the whole table of names the string half refuses.
+
+    At the repository rather than at the predicate, because a rule that
+    answered correctly while a surface asked a different question is the
+    defect this file exists over.
+    """
+    store.set_provider("llm", "claude", _entry(**{case.key: CONFIGURED}))
+
+    assert store.read_provider("llm", "claude").entry.model_extra[case.key] == CONFIGURED
+
+
+def test_the_numeric_cap_installs_from_a_file(store: ConfigStore) -> None:
+    """The boot surface, which is the door a deployment writes through
+    and the one that never reaches a store: the models refuse on
+    construction, so a fragment that boots is a fragment the guard
+    admitted."""
+    config = load_config_from_data(
+        {
+            "providers": {
+                "llm": {
+                    "openai": {
+                        "type": "openai_compatible",
+                        "base_url": "https://api.openai.com/v1",
+                        "model": "gpt-5.6-terra",
+                        "egress": True,
+                        NUMERIC: CONFIGURED,
+                    }
+                }
+            }
+        }
+    )
+
+    assert config.providers.llm["openai"].options[NUMERIC] == CONFIGURED
+
+
+def test_the_numeric_cap_installs_over_the_api(client: TestClient, store: ConfigStore) -> None:
+    """The API surface, read back through the repository."""
+    assert (
+        client.put("/providers/llm/claude", json=_entry(**{NUMERIC: CONFIGURED})).status_code
+        == 200
+    )
+
+    assert store.read_provider("llm", "claude").entry.model_extra[NUMERIC] == CONFIGURED
+
+
+def test_the_numeric_cap_installs_from_the_command_line(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The CLI surface, and the display beside it: what a read shows
+    under such a key is the number rather than a mask.
+
+    Both halves in one case, because they are one rule. A cap the write
+    path admits and the display hides is a cap an operator cannot read
+    back, and an export of it would carry eight asterisks where a number
+    belongs.
+    """
+    assert (
+        run(
+            "provider", "set", "llm", "claude",
+            "type=anthropic", "model=claude-sonnet-5", f"{NUMERIC}={CONFIGURED}",
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    assert run("provider", "show", "llm", "claude") == 0
+    shown = capsys.readouterr().out
+    assert f"{NUMERIC}: {CONFIGURED}" in shown
+    assert "***" not in shown
+
+
+def test_a_planted_string_beside_a_number_is_still_refused_and_never_echoed(
+    store: ConfigStore, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The neighbour case, which is the one a value rule could get
+    wrong: a number under one secret-shaped key does not buy the entry
+    past the string under the next one.
+
+    The refusal is the unchanged sentence, it names the fragment rather
+    than the key, and the planted credential reaches neither the
+    exception, its chain, its problems nor a terminal.
+    """
+    fragment = _entry(**{NUMERIC: CONFIGURED, "session_token": SENTINEL})
+
+    with pytest.raises(ConfigError) as caught:
+        store.set_provider("llm", "claude", fragment)
+
+    refusal = caught.value
+    assert 'a key containing "token" looks like an inline secret' in str(refusal)
+    assert SENTINEL not in str(refusal)
+    assert SENTINEL not in repr(refusal)
+    assert "session_token" not in str(refusal)
+    assert refusal.__cause__ is None
+    assert refusal.__context__ is None
+    for carried in refusal.problems:
+        assert SENTINEL not in carried.path
+        assert SENTINEL not in carried.message
+
+    streams = capsys.readouterr()
+    assert SENTINEL not in streams.out
+    assert SENTINEL not in streams.err
+
+
+def test_a_planted_string_under_the_numeric_name_is_refused_over_the_api(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The same name the fix is about, holding the thing the fix is not
+    about. `max_completion_tokens` is a cap when it holds a number and a
+    credential-shaped string when it holds one, and the guard reads what
+    is there rather than what the name suggests."""
+    with caplog.at_level(logging.DEBUG):
+        response = client.put("/providers/llm/claude", json=_entry(**{NUMERIC: SENTINEL}))
+
+    assert response.status_code == 422
+    body = response.json()
+    assert 'a key containing "token" looks like an inline secret' in body["detail"]
+    assert SENTINEL not in response.text
+    for error in body["errors"]:
+        assert SENTINEL not in error["path"]
+        assert SENTINEL not in error["message"]
+
+    text = logging.Formatter(logs.TEXT_FORMAT)
+    for record in caplog.records:
+        assert SENTINEL not in logs.JsonFormatter().format(record)
+        assert SENTINEL not in text.format(record)
+
+
+@pytest.mark.parametrize(
+    ("what", "key"),
+    [
+        ("a pasted credential", SENTINEL),
+        ("a key holding a dot and a slash", "max.completion/tokens"),
+        ("a key holding a dash", "max-completion-tokens"),
+    ],
+)
+def test_a_key_that_is_not_a_parameter_name_is_refused_whatever_it_holds(
+    store: ConfigStore, capsys: pytest.CaptureFixture[str], what: str, key: str
+) -> None:
+    """The other condition the value half rests on, and the reason it is
+    not just a rule about numbers.
+
+    A secret-shaped key is two shapes: one NAMING a credential slot,
+    where the value is the paste, and one that IS the paste, since a key
+    is as good a place to put a credential and better at hiding there.
+    Only the first is a request parameter, so only a key spelled the way
+    a parameter is spelled gets to have its value speak for it, and the
+    number under these is not asked about at all.
+    """
+    with pytest.raises(ConfigError) as caught:
+        store.set_provider("llm", "claude", _entry(**{key: CONFIGURED}))
+
+    assert "looks like an inline secret" in str(caught.value)
+    assert SENTINEL not in str(caught.value)
+    assert SENTINEL not in repr(caught.value)
+
+    streams = capsys.readouterr()
+    assert SENTINEL not in streams.out
+    assert SENTINEL not in streams.err
+
+
+def test_the_wider_rule_reads_the_value_the_same_way() -> None:
+    """The MCP and URL readers are untouched by this, and they cannot be
+    reached by it either: both maps are typed `dict[str, str]` and a URL
+    query parameter is a string by construction, so there is no number
+    to admit there. Stated rather than assumed, since the two tuples
+    remain one rule with one exemption between them."""
+    assert is_mcp_secret_key(NUMERIC)
+    assert is_url_credential_parameter(NUMERIC)
+    assert url_credential(f"https://host/v1?{NUMERIC}={SENTINEL}") == "query"
