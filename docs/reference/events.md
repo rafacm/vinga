@@ -9,9 +9,9 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 66 events in 95 variants. What was
-said in a conversation is in the conversation store instead, keyed by the same
-`session` ([its reference](conversations-schema.md)).
+This document is that surface written down: 72 events in 101 variants. What
+was said in a conversation is in the conversation store instead, keyed by the
+same `session` ([its reference](conversations-schema.md)).
 
 A site does not describe an emission; it constructs one. Every variant below
 is a type, its values are types, and its sentence and argument order are
@@ -109,7 +109,9 @@ refuse a lawful deployment's traffic.
 | `COUNT` | A whole number of zero or more, for the fields whose meaning is how many. |
 | `IDENTIFIER_LIST` | A list whose every element is an `IDENTIFIER`. |
 | `ID_LIST` | A list whose every element is an `ID` of the field's declared syntax. |
-| `SOURCES` | The one structured kind: a mapping from prompt provenance to character counts, keyed by the grammar below. |
+| `SOURCES` | A mapping from prompt provenance to character counts, keyed by the grammar below. |
+| `DROP_COUNTS` | A mapping from the reasons a mic frame is discarded to how many frames one second lost to each. Every key is a declared reason and every value a count of one or more. |
+| `PROVIDER_ENTRIES` | A mapping from each bound agent to its pipeline stages, and from a stage to the resolved entry's `name`, `type` and, where the type has them, `host` and `model`. Nothing else off a provider entry reaches it, so no configured option and no credential can. |
 
 A `TOKEN` field's constraint column lists its whole set. A value that is
 empty, or that begins or ends with a space, is printed quoted there, for the
@@ -212,7 +214,13 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `session_idle` | `vinga_server.session` | INFO | 1 |
 | `session_closed` | `vinga_server.session` | INFO | 1 |
 | `speaking_started` | `vinga_server.session` | INFO | 1 |
+| `speaking_finished` | `vinga_server.session` | INFO | 1 |
+| `frames_dropped` | `vinga_server.session` | DEBUG | 1 |
+| `turn_started` | `vinga_server.session` | INFO | 1 |
+| `reply_finished` | `vinga_server.session` | INFO | 1 |
 | `heard` | `vinga_server.session` | INFO | 1 |
+| `nothing_heard` | `vinga_server.session` | INFO | 1 |
+| `sentence_synthesized` | `vinga_server.session` | DEBUG | 1 |
 | `replied` | `vinga_server.session` | INFO | 1 |
 | `agent_said` | `vinga_server.session` | INFO | 1 |
 | `handover` | `vinga_server.session` | INFO | 1 |
@@ -489,6 +497,7 @@ session %s open: device %s (client %s) agent %s%s, protocol v%d, %d Hz %d ms fra
 | `agent` | `IDENTIFIER` | yes | no |  |  |
 | `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `agents` | `IDENTIFIER_LIST` | yes | no |  |  |
+| `providers` | `PROVIDER_ENTRIES` | yes | no | agent, then stage, then `name`, `type`, `host`, `model` | What this conversation opened against, for every agent the device is bound to: the entry, its type, the host it reaches and the model it runs, per pipeline stage. The one derivation the capture manifest reads too. A world applied mid-session does not move it: what a record says is what the conversation opened with. |
 | `protocol` | `INT` | yes | no |  |  |
 | `revision` | `IDENTIFIER` | yes | no |  | Which build this server is, so every session from here on is attributable to one. |
 
@@ -582,6 +591,112 @@ session %s: speaking started
 | `agent` | `IDENTIFIER` | yes | no |  |  |
 | `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 
+### `speaking_finished`
+
+The reply's last audio frame has gone out, which with `speaking_started`
+bounds the interval the frame pacer actually paces. A reply that never spoke
+emits none.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: speaking finished after %d frame(s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `frames` (`COUNT`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
+| `frames` | `COUNT` | yes | no |  | How many frames of this reply the device was actually sent, counted after each delivery returned and kept across a handover: what the interval bounds is one reply's audio, however many agents produced it. |
+
+### `frames_dropped`
+
+One second of mic frames the edge's guards discarded before they could be
+decoded, counted by reason. Counted whether or not this deployment records
+anything, and flushed at the session's close so a partial second is not lost.
+
+#### Variant 1: `vinga_server.session` at DEBUG
+
+```text
+session %s: dropped mic frames in second %d
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `second` (`INT`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `second` | `INT` | yes | no |  | Which second of the session, counted from its open. |
+| `reasons` | `DROP_COUNTS` | yes | no | keyed by `barge_in_off`, `framing_error`, `not_listening`, `not_opus`, `undecodable`, with frame counts for values | How many frames went to each of the edge's own guards. Every key is one of this server's words and every value a count of frames; nothing of a frame itself is on the record. |
+
+### `turn_started`
+
+A reply attempt begins, at every successful `start_reply`. Stamped with the
+instant the user stopped speaking, which the floor preserves across the
+barge-in gate.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: answering %d ms of speech
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `speech_ms` (`INT`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
+| `speech_ms` | `INT` | yes | no |  | How much of what was fed the endpointer classified as speech. |
+| `barge_in` | `BOOL` | yes | no |  | Whether this turn interrupted a reply in flight, which is true for a confirmed barge-in, a mid-ASR merge and a manual stop that cut one short. |
+
+### `reply_finished`
+
+A reply ends, however it ended: exactly one per `turn_started`, with an
+outcome latched where the end was decided rather than inferred from a
+cancellation.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: reply finished (%s) after %d sentence(s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `outcome` (`TOKEN`) | no | one of: `aborted`, `barged_in`, `completed`, `device_gone`, `failed`, `nothing_heard` |  |
+| 3 | `sentences_spoken` (`COUNT`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
+| `outcome` | `TOKEN` | yes | no | one of: `aborted`, `barged_in`, `completed`, `device_gone`, `failed`, `nothing_heard` | Latched at the boundary that ended the reply rather than guessed from a cancellation, which cannot tell a barge-in from a shutdown. First writer wins; an unlatched exit is `completed`. |
+| `sentences_spoken` | `COUNT` | yes | no |  | How many sentences of it the user heard, counted the way `replied` counts them: audio that actually went out. |
+
 ### `heard`
 
 An utterance is transcribed. No transcript: what was said is the conversation
@@ -606,8 +721,64 @@ session %s: heard %.2f s of speech
 | `agent` | `IDENTIFIER` | yes | no |  |  |
 | `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `duration_s` | `FLOAT` | yes | no |  |  |
+| `asr_ms` | `INT` | no | no |  | What the transcription cost, measured where it was run. An interrupting turn carries the latency the barge-in gate measured for its own confirmation, since that is the transcription this turn is answering. |
 | `language` | `ID` | no | no | the `language` syntax | Only engines that detected carry this. |
 | `language_confidence` | `FLOAT` | no | no |  |  |
+
+### `nothing_heard`
+
+An utterance is transcribed to nothing at all, which is the ASR outcome beside
+`heard` and `provider_failed`. No text field, by type.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: nothing transcribed from %.2f s of speech
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `duration_s` (`FLOAT`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
+| `duration_s` | `FLOAT` | yes | no |  | How long the utterance that produced nothing was. |
+| `asr_ms` | `INT` | no | no |  | What the transcription that answered nothing cost. |
+
+### `sentence_synthesized`
+
+One sentence of a reply has finished streaming out of the voice: the
+provider's latency to its first chunk, and the stream's whole lifetime, which
+includes playback backpressure.
+
+#### Variant 1: `vinga_server.session` at DEBUG
+
+```text
+session %s: sentence %d synthesized in %d ms
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `index` (`COUNT`) | no |  |  |
+| 3 | `stream_ms` (`INT`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
+| `index` | `COUNT` | yes | no |  | Which synthesis of this reply this was, counted from zero in the order the requests were made rather than in the order they answered. |
+| `stream_ms` | `INT` | yes | no |  | The whole stream's lifetime, request to last chunk. It INCLUDES playback backpressure: the buffer holds one chunk, so a paced consumer is what decides when the provider is asked for the next one, and pure synthesis time is unobservable for a streaming voice. |
+| `first_chunk_ms` | `INT` | no | no |  | The provider's latency to its first audio chunk, measured producer-side: the first chunk always finds buffer room, so this one number is backpressure-free. Absent where the stream produced no audio at all. |
 
 ### `replied`
 

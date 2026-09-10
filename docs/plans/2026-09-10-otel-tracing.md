@@ -502,7 +502,9 @@ new:
 
 ## Milestones
 
-- [ ] **M1: the catalog speaks the turn lifecycle.** `turn_started`,
+- [x] **[M1: the catalog speaks the turn
+  lifecycle](2026-09-10-otel-tracing-implementation.md#m1-the-catalog-speaks-the-turn-lifecycle)**
+  (PR TBD). `turn_started`,
   `reply_finished` with its latched closed outcome set,
   `heard.asr_ms` including the gate-measured confirmation latency,
   `nothing_heard`, `sentence_synthesized` with its honest streamed
