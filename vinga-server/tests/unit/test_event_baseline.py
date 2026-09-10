@@ -1092,6 +1092,38 @@ def test_every_driven_record_carries_builtins(
     assert unconverted == []
 
 
+def test_every_driven_record_survives_the_exporter_s_own_gate(
+    produced: dict[str, list[logging.LogRecord]],
+) -> None:
+    """And every one of them is exportable, field by field.
+
+    The OTel exporter (#66) re-validates a payload it is handed against
+    the catalog's own value types before putting anything on a span,
+    because a consumer on a tap cannot know that what reached it was
+    built by the catalog. That gate is only safe if it accepts
+    everything the catalog really produces, and this corpus is the only
+    place every declared path is actually driven, which is why the claim
+    is made from here rather than from the telemetry suite.
+
+    A field this rejects is a field a real deployment would lose from
+    its traces in silence. The report names the event and the field,
+    never the value.
+    """
+    from vinga_server.telemetry import APPROVED, Shape
+
+    rejected = [
+        f"{record.event}.{name}"
+        for records in produced.values()
+        for record in records
+        for name, held in payload(record).items()
+        if name in APPROVED.get(getattr(record, "event", ""), {})
+        and APPROVED[record.event][name].shape is not Shape.DROPPED
+        and not APPROVED[record.event][name].accepts(held)
+    ]
+
+    assert rejected == []
+
+
 def test_the_store_says_nothing_else(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:

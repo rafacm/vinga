@@ -933,9 +933,126 @@ def test_the_approved_table_covers_the_whole_catalog() -> None:
 
     assert set(APPROVED) == set(catalog())
     assert APPROVED["session_idle"]["idle_s"] is not None
-    # An event this module has never heard of exports nothing at all,
-    # which is what makes the fold closed rather than defaulting.
     assert APPROVED.get("an_event_nobody_declared") is None
+
+
+# --- what a payload nobody declared cannot do -------------------------
+#
+# Everything below drives the FOLD with a payload the catalog would not
+# have built, which is the only way these claims are worth making: a
+# table read in a test proves what the table says, and what reaches a
+# backend is decided by the code that reads it.
+
+
+def test_an_undeclared_event_name_reaches_no_span(planted: str) -> None:
+    """The name is exported content too.
+
+    A span event is NAMED after its event, so a fold that dispatched any
+    string through its default put whatever that string held onto a
+    span, under no attribute table at all. The catalog decides which
+    names exist, and a payload carrying another one is a payload this
+    repository did not build.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+    open_session(events)
+    clock.tick(1.0)
+    _fold(telemetry, {"event": f"an_event_named_{planted}", "session": SESSION})
+    close_session(events)
+
+    session = named(finished(telemetry, memory), "session")
+    assert session.events == ()
+    assert planted not in str(list(session.attributes.items()))
+
+
+def test_a_declared_scalar_the_catalog_would_refuse_is_not_exported(
+    planted: str,
+) -> None:
+    """The half a check on Python builtins cannot make.
+
+    `session_idle.idle_s` is declared `Real`, and a credential-shaped
+    string in that field is a `str`: every builtin check passes it, and
+    what would reach the backend is the credential under the field's own
+    honest-looking name. The value type is asked instead, by
+    constructing it, which is where the constraint lives.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+    open_session(events)
+    clock.tick(1.0)
+    _fold(
+        telemetry,
+        {
+            "event": "session_idle",
+            "session": SESSION,
+            "idle_s": planted,
+            "duration_s": 200.0,
+        },
+    )
+    close_session(events)
+
+    session = named(finished(telemetry, memory), "session")
+    assert [event.name for event in session.events] == ["session_idle"]
+    carried = session.events[0].attributes
+    assert "idle_s" not in carried
+    # The neighbouring field, which IS what it says it is, still goes:
+    # one bad value is not a reason to drop the record.
+    assert carried["duration_s"] == pytest.approx(200.0)
+    assert planted not in str(list(carried.items()))
+
+
+def test_a_declared_mapping_the_catalog_would_refuse_is_not_exported(
+    planted: str,
+) -> None:
+    """And the same for the shape with the most room in it.
+
+    `frames_dropped.reasons` is declared `DroppedFrames`, whose keys are
+    the edge's own guards and whose values are frame counts. A mapping
+    of somebody else's keys to somebody else's strings is still a
+    mapping, and JSON would have carried it whole.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+    open_session(events)
+    clock.tick(1.0)
+    _fold(
+        telemetry,
+        {
+            "event": "frames_dropped",
+            "session": SESSION,
+            "second": 3,
+            "reasons": {planted: planted},
+        },
+    )
+    close_session(events)
+
+    session = named(finished(telemetry, memory), "session")
+    assert [event.name for event in session.events] == ["frames_dropped"]
+    carried = session.events[0].attributes
+    assert "reasons" not in carried
+    assert carried["second"] == 3
+    assert planted not in str(list(carried.items()))
+
+
+def _fold(telemetry: object, payload: dict[str, object]) -> None:
+    """One payload straight at the session tap, which is what a tap
+    contract cannot stop a caller doing.
+
+    Built by hand and not by the catalog, deliberately: every emission a
+    real `SessionEvents` makes is a typed variant, so the payloads these
+    cases are about cannot be produced through it. What they stand for
+    is anything that reaches this consumer without having been built by
+    the catalog, and the tap is where that would arrive.
+    """
+    from vinga_server.events import Emission
+
+    tap = telemetry.session_tap()  # type: ignore[attr-defined]
+    tap.emit(
+        Emission(payload=dict(payload), at=time.monotonic(), level=20, message="", args=())
+    )
 
 
 def test_the_sdk_namespace_is_quieted_and_restored() -> None:
