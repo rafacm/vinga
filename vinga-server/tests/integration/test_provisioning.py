@@ -10,7 +10,9 @@ asserts its whole contract rather than reading it.
 Four claims, and each of them is a way the role could be wrong:
 
 - `vinga_ro` reads every table of the conversation record, so an
-  analyst asking what was said gets an answer.
+  analyst asking what was said gets an answer, and every named
+  aggregate view over it, so the questions those views exist to answer
+  are answerable by the role they were built for.
 - It inherits `SELECT` on a table created after provisioning ran, so
   the next migration does not silently take the record away from them.
 - It has neither `USAGE` on the domain schema nor any write anywhere,
@@ -58,6 +60,7 @@ from tests.support.commands import COMMAND_SECONDS
 from vinga_server.config.loader import StorageError
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import schema as conversations_schema
+from vinga_server.conversations import views as conversations_views
 from vinga_server.conversations.store import open_conversations
 from vinga_server.db import (
     DEFAULT_PASSWORD,
@@ -348,6 +351,31 @@ def test_the_analyst_role_reads_every_conversation_table(
             _as_analyst(provisioned, f"select * from record.{table.name}")
             == "allowed"
         ), table.name
+
+
+def test_the_analyst_role_reads_every_declared_view(
+    provisioned: str, server_role: str
+) -> None:
+    """The views arrive with a migration and get no grant of their own.
+
+    What reaches them is `ALTER DEFAULT PRIVILEGES ... GRANT SELECT ON
+    TABLES` for the server role, which covers a view that role creates
+    later exactly as it covers a table: Postgres counts a view as a
+    relation of that class. The migration runs as the server role, which
+    is what makes the default privilege apply, so this is asserted
+    rather than assumed.
+
+    Iterated from the declarations as a second list beside `TABLES`, so
+    a fifth view is covered by being declared rather than by somebody
+    remembering to add a line here.
+    """
+    open_conversations(_as_server_role(provisioned, server_role)).dispose()
+
+    for view in conversations_views.VIEWS:
+        assert (
+            _as_analyst(provisioned, f"select * from record.{view.name}")
+            == "allowed"
+        ), view.name
 
 
 def test_the_analyst_role_inherits_a_table_created_after_provisioning(
