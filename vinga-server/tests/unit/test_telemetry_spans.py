@@ -53,8 +53,10 @@ from tests.support.telemetry import (
     CONVERSATION,
     DEVICE,
     OTHER_AGENT,
+    PROVIDERS,
     SESSION,
     Clock,
+    Identity,
     abandon_transcription,
     close_session,
     drop_frames,
@@ -122,6 +124,47 @@ def a_turn(clock: Clock, telemetry) -> object:
     clock.tick(1.0)
     start_turn(events)
     return events
+
+
+# Which stage each span answers for ITSELF, which is the one stage whose
+# open-time entries it does not carry: the event it was built from named
+# the entry that actually ran, and one attribute name may have one
+# source. The paced interval answers for none, no provider having
+# produced it.
+ANSWERS_FOR = {
+    ASR_SPAN: "asr",
+    LLM_SPAN: "llm",
+    TTS_SPAN: "tts",
+    PLAYBACK_SPAN: None,
+}
+
+# An ear and a voice that are NOT what the session opened against, in
+# all four of their names. What they are for is the one span shape this
+# module has to refuse: a call-time model beside an open-time type, a
+# provider that never existed anywhere.
+STANDBY_EAR = Identity(
+    name="ears-standby",
+    type="openai_asr",
+    host="api.openai.com",
+    model="whisper-1",
+)
+STANDBY_VOICE = Identity(
+    name="voice-standby",
+    type="elevenlabs",
+    host="api.elevenlabs.io",
+    model="eleven_turbo_v2",
+)
+
+
+def opened_against(carried: dict, stage: str) -> list[str]:
+    """Every attribute on a span under one stage's provider prefix.
+
+    Which is where what the session opened against lands, so a span that
+    answers for that stage itself has exactly one of them, the entry
+    name its own event said. Anything more is the open-time context
+    still standing beside call-time data.
+    """
+    return [key for key in carried if key.startswith(f"vinga.provider.{stage}.")]
 
 
 # --- ASR: four ends, one stage ----------------------------------------
@@ -728,7 +771,6 @@ def test_the_promoted_dropped_frame_aggregate_lands_where_it_happened() -> None:
 
 # --- the context every stage span carries -----------------------------
 
-
 def test_every_stage_span_carries_the_session_context() -> None:
     """The claim OTel's own model makes necessary.
 
@@ -774,9 +816,21 @@ def test_every_stage_span_carries_the_session_context() -> None:
         assert carried["vinga.conversation.id"] == CONVERSATION, span.name
         # The resolved entries of the agent that ran the stage, per
         # stage and per fact, exactly as the session and turn spans
-        # carry them.
-        assert carried["vinga.provider.asr.type"] == "faster_whisper"
-        assert carried["vinga.provider.tts.name"] == "voice"
+        # carry them, for every stage this span does not answer for
+        # itself. The one it does is its own event's word and is pinned
+        # by the cases below.
+        for stage, entry in PROVIDERS[AGENT].items():
+            if stage == ANSWERS_FOR[span.name]:
+                assert opened_against(carried, stage) == [
+                    f"vinga.provider.{stage}.name"
+                ], span.name
+                continue
+            for fact, held in entry.items():
+                assert carried[f"vinga.provider.{stage}.{fact}"] == held, (
+                    span.name,
+                    stage,
+                    fact,
+                )
         # And the build revision, which is not an attribute and is not
         # missing: it rides the resource every span carries.
         assert span.resource.attributes["service.version"]
