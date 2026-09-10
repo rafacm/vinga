@@ -55,7 +55,8 @@ had spoken it; see prompt echo.
 Interrupting the assistant by talking over its reply.
 Speech that endpoints mid-reply passes a gate ladder (minimum speech,
 transcript confirmation) before it cancels the reply; suppressed
-attempts are logged with the gate that stopped them. The design decision is recorded in
+attempts are logged with the gate that stopped them. The design
+decision is recorded in
 [the barge-in ADR](adr/2026-08-05-replies-cancel-only-on-evidence-of-speech.md).
 
 ### Binding
