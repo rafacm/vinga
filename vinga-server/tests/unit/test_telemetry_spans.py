@@ -36,6 +36,10 @@ import pytest
 
 from tests.support.telemetry import (
     AGENT,
+    CONVERSATION,
+    DEVICE,
+    OTHER_AGENT,
+    SESSION,
     Clock,
     abandon_transcription,
     close_session,
@@ -704,3 +708,113 @@ def test_the_promoted_dropped_frame_aggregate_lands_where_it_happened() -> None:
     # declared shape turns a mapping into, rather than being dropped by
     # the SDK for having no attribute type.
     assert session.events[0].attributes["reasons"] == '{"not_listening":5}'
+
+
+# --- the context every stage span carries -----------------------------
+
+
+def test_every_stage_span_carries_the_session_context() -> None:
+    """The claim OTel's own model makes necessary.
+
+    A child span carries its parent's id and NOTHING of its parent's
+    attributes, so a backend filtering traces by device or by session
+    sees only the spans that spell those out themselves. A stage span
+    with nothing but its stage's fields is a span nobody can find, which
+    is why the session's identity and the resolved providers of the
+    agent that ran the stage are on all four.
+
+    All four in one case deliberately: what is being pinned is that
+    there is ONE derivation rather than four remembered copies.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.3)
+    hear(events)
+    clock.tick(0.8)
+    round_done(events, duration_ms=800)
+    clock.tick(0.4)
+    synthesize(events, stream_ms=400)
+    start_speaking(events)
+    clock.tick(0.5)
+    finish_reply(events, sentences=1)
+    finish_speaking(events, frames=12, at=clock())
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    stages = [span for span in spans if span.parent is not None]
+    assert sorted(span.name for span in stages) == [
+        ASR_SPAN,
+        LLM_SPAN,
+        PLAYBACK_SPAN,
+        TTS_SPAN,
+    ]
+    for span in stages:
+        carried = span.attributes
+        assert carried["vinga.session.id"] == SESSION, span.name
+        assert carried["vinga.device.id"] == DEVICE, span.name
+        assert carried["vinga.agent"] == AGENT, span.name
+        assert carried["vinga.conversation.id"] == CONVERSATION, span.name
+        # The resolved entries of the agent that ran the stage, per
+        # stage and per fact, exactly as the session and turn spans
+        # carry them.
+        assert carried["vinga.provider.asr.type"] == "faster_whisper"
+        assert carried["vinga.provider.tts.name"] == "voice"
+        # And the build revision, which is not an attribute and is not
+        # missing: it rides the resource every span carries.
+        assert span.resource.attributes["service.version"]
+
+
+def test_a_stage_after_a_handover_carries_the_new_agent_s_providers() -> None:
+    """The context follows the agent that actually ran the stage.
+
+    A handover mid-reply changes which providers the rest of the reply
+    runs on, and every stage event says which agent it belongs to. So
+    the sentence spoken after the handover carries the incoming agent's
+    voice rather than the one the session opened with, which is the
+    difference between attributable and merely stamped.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.3)
+    hand_over(events, to=OTHER_AGENT)
+    events.agent = OTHER_AGENT
+    clock.tick(0.6)
+    synthesize(events, stream_ms=600, agent=OTHER_AGENT)
+    finish_reply(events)
+    close_session(events)
+
+    tts = named(finished(telemetry, memory), TTS_SPAN)
+    assert tts.attributes["vinga.agent"] == OTHER_AGENT
+    assert tts.attributes["vinga.provider.llm.name"] == "local"
+    assert tts.attributes["vinga.provider.llm.host"] == "127.0.0.1"
+
+
+def test_the_round_speaks_for_its_own_stage_and_the_context_for_the_rest() -> None:
+    """One attribute name, one source.
+
+    `llm_round` carries the entry that actually answered, which after a
+    mid-session change is not the entry the session opened against, so
+    the round span states the LLM stage itself and the retained context
+    states every other stage. A span that took both would have had two
+    writers for one name and the later one would win in silence.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.8)
+    round_done(events, duration_ms=800)
+    finish_reply(events)
+    close_session(events)
+
+    llm = named(finished(telemetry, memory), LLM_SPAN)
+    # The round's own entry, not the session's opening one.
+    assert llm.attributes["vinga.provider.llm.name"] == "openai-main"
+    assert llm.attributes["gen_ai.request.model"] == "gpt-4o-mini"
+    # And the context still speaks for the stages the round says
+    # nothing about.
+    assert llm.attributes["vinga.provider.asr.name"] == "ears"

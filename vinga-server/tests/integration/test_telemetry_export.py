@@ -285,6 +285,25 @@ async def test_one_turn_arrives_at_a_collector_as_the_trace_it_is(
         for span in spans
     )
 
+    # Every stage span carries the session context off the wire too,
+    # which is the assertion OTel's own model makes necessary: a child
+    # carries its parent's id and none of its parent's attributes, so a
+    # backend filtering by device or by session finds only the spans
+    # that spell it themselves.
+    for span in spans:
+        if span.parent_span_id != turn.span_id:
+            continue
+        carried = attributes(span)
+        assert carried["vinga.session.id"], span.name
+        assert carried["vinga.device.id"] == DEVICE_MAC, span.name
+        assert carried["vinga.agent"] == "assistant", span.name
+        assert carried["vinga.conversation.id"], span.name
+        # The mocks name no host and no model, so what the resolved
+        # entries can say here is the entry and its type; the round
+        # span answers for the LLM stage itself, which is why the
+        # stage asserted for all four is the ASR one.
+        assert carried["vinga.provider.asr.name"] == "mock", span.name
+
     # And the identities every span in the trace is read by, plus what
     # the session opened against: the retained provider context is
     # stamped per stage on the session and on the turn, which is the

@@ -198,6 +198,10 @@ TRANSCRIPTION_ABANDONED = "transcription_abandoned"
 # built from a failure would claim an interval nobody measured.
 ASR_STAGE = "asr"
 
+# And the stage a round span answers for itself, which is why the
+# retained context leaves that stage out of what it stamps there.
+LLM_STAGE = "llm"
+
 LLM_ROUND = "llm_round"
 SENTENCE_SYNTHESIZED = "sentence_synthesized"
 SPEAKING_STARTED = "speaking_started"
@@ -268,6 +272,30 @@ TURN_ATTRIBUTES = {
 TURN_FINISHED_ATTRIBUTES = {
     "outcome": "vinga.turn.outcome",
     "sentences_spoken": "vinga.turn.sentences_spoken",
+}
+
+# The session's own identity, retained at the open and put on every span
+# this exporter makes afterwards.
+#
+# Because OTel does not inherit: a child span carries its parent's id
+# and nothing of its parent's attributes, so a backend filtering on a
+# device or a session sees only the spans that spell it themselves. The
+# issue asks for session-level context on EVERY span, and a stage span
+# with only its own stage's fields is a span nobody can find.
+#
+# Two facts, both fixed for the life of a session, both read off the
+# validated `session_open` payload. The agent and the conversation are
+# NOT here: they move (a handover changes both) and every stage event
+# carries its own, which is the more precise answer and comes through
+# the same declared-value gate as the rest of its payload.
+#
+# The build revision is not here either, and is not missing: it rides
+# the resource as `service.version`, which every span this provider
+# makes carries by construction. A per-span copy would be the same fact
+# twice, and the resource is where a backend looks for it.
+CONTEXT_ATTRIBUTES = {
+    SESSION_FIELD: "vinga.session.id",
+    DEVICE_FIELD: "vinga.device.id",
 }
 
 # What a session opened against, as span attributes.
@@ -495,6 +523,8 @@ def _as_attribute(held: Any, shape: Shape) -> Any | None:
 # there is no value in that vocabulary a message could be constructed
 # as. Nothing else of a provider's failure reaches a span.
 ASR_ATTRIBUTES = {
+    "agent": "vinga.agent",
+    "conversation": "vinga.conversation.id",
     "duration_s": "vinga.asr.duration_s",
     "language": "vinga.asr.language",
     "language_confidence": "vinga.asr.language_confidence",
@@ -548,6 +578,7 @@ LLM_ATTRIBUTES = {
     "output_tokens": "gen_ai.usage.output_tokens",
     "provider": f"{PROVIDER_PREFIX}.llm.name",
     "agent": "vinga.agent",
+    "conversation": "vinga.conversation.id",
     "round": "vinga.llm.round",
     "turns": "vinga.llm.turns",
 }
@@ -561,6 +592,7 @@ TTS_ATTRIBUTES = {
     "index": "vinga.tts.index",
     "first_chunk_ms": "vinga.tts.first_chunk_ms",
     "agent": "vinga.agent",
+    "conversation": "vinga.conversation.id",
 }
 
 # The paced-playback span, bounded by two real deliveries: the first
@@ -569,6 +601,7 @@ TTS_ATTRIBUTES = {
 PLAYBACK_ATTRIBUTES = {
     "frames": "vinga.playback.frames",
     "agent": "vinga.agent",
+    "conversation": "vinga.conversation.id",
 }
 
 # How many sessions may have a `capture_started` waiting for their
@@ -1023,6 +1056,11 @@ class _SessionTrace:
     """One device session's place in the trace, the spans open inside
     it, and the context they are stamped from.
 
+    `identity` is the session's own two fixed facts, kept because OTel
+    inherits nothing: a stage span carries its parent's id and none of
+    its parent's attributes, so what a backend filters on has to be on
+    every span that wants finding.
+
     `providers` is what `session_open` said this conversation opened
     against, for every agent the device is bound to, and `agent` is the
     one talking right now, which `handover` moves. Between them they are
@@ -1039,6 +1077,7 @@ class _SessionTrace:
     span: Any
     turn: Any | None = None
     playback: Any | None = None
+    identity: dict[str, Any] = field(default_factory=dict)
     providers: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
     agent: str | None = None
 
@@ -1395,7 +1434,10 @@ class Telemetry:
             start_time=self._at(emission),
         )
         self._sessions[session] = _SessionTrace(
-            span=span, providers=held, agent=talking
+            span=span,
+            identity=_attributes(payload, CONTEXT_ATTRIBUTES),
+            providers=held,
+            agent=talking,
         )
         for at, waiting in self._pending.pop(session, []):
             self._span_event(session, waiting, at)
@@ -1480,6 +1522,44 @@ class Telemetry:
     # falls through to the span-event fold, so nothing is ever
     # silently dropped.
 
+    def _context(
+        self,
+        trace: _SessionTrace,
+        payload: dict[str, Any],
+        states: str | None = None,
+    ) -> dict[str, Any]:
+        """The session-level context every stage span carries.
+
+        One derivation for all four, because they all want the same
+        thing and a per-stage copy would be four places to forget: the
+        session's own identity as `session_open` stated it, and the
+        resolved providers of whichever agent this event belongs to.
+
+        The event's own agent decides, and the session's current one
+        stands in where the event named none: a stage span belongs to
+        the agent that ran it, and after a handover that is not the
+        agent the session opened with.
+
+        `states` names a stage this span answers for ITSELF, whose
+        context entries are therefore left out. The round span is the
+        one that does: `llm_round` carries the entry that actually
+        answered, which after a mid-session change is not the entry the
+        session opened against, and one attribute name may have one
+        source. So the round speaks for the LLM stage and the retained
+        context speaks for the rest.
+        """
+        agent = payload.get("agent")
+        talking = agent if isinstance(agent, str) else trace.agent
+        entries = _provider_attributes(trace.providers, talking)
+        if states is not None:
+            spoken = f"{PROVIDER_PREFIX}.{states}."
+            entries = {
+                name: held
+                for name, held in entries.items()
+                if not name.startswith(spoken)
+            }
+        return {**trace.identity, **entries}
+
     def _asr_span(self, session: str, emission: Emission) -> None:
         """One transcription, however it ended.
 
@@ -1497,7 +1577,10 @@ class Telemetry:
         payload = emission.payload
         outcome = payload.get(EVENT_FIELD)
         end = self._at(emission)
-        attributes = _attributes(payload, ASR_ATTRIBUTES)
+        attributes = {
+            **self._context(trace, payload),
+            **_attributes(payload, ASR_ATTRIBUTES),
+        }
         # The one attribute on any span here that is not a payload
         # field: which of the four ends this was, which is the event's
         # own NAME rather than anything the event carried. It goes on
@@ -1560,7 +1643,10 @@ class Telemetry:
         span = self._tracer.start_span(
             LLM_SPAN,
             context=self._within(trace.turn),
-            attributes=_attributes(payload, LLM_ATTRIBUTES),
+            attributes={
+                **self._context(trace, payload, states=LLM_STAGE),
+                **_attributes(payload, LLM_ATTRIBUTES),
+            },
             start_time=start,
         )
         first_token = _after(start, payload.get("first_token_ms"))
@@ -1592,7 +1678,10 @@ class Telemetry:
         span = self._tracer.start_span(
             TTS_SPAN,
             context=self._within(trace.turn),
-            attributes=_attributes(payload, TTS_ATTRIBUTES),
+            attributes={
+                **self._context(trace, payload),
+                **_attributes(payload, TTS_ATTRIBUTES),
+            },
             start_time=_before(end, payload.get("stream_ms")),
         )
         span.end(end_time=end)
@@ -1615,7 +1704,10 @@ class Telemetry:
         trace.playback = self._tracer.start_span(
             PLAYBACK_SPAN,
             context=self._within(trace.turn),
-            attributes=_attributes(emission.payload, PLAYBACK_ATTRIBUTES),
+            attributes={
+                **self._context(trace, emission.payload),
+                **_attributes(emission.payload, PLAYBACK_ATTRIBUTES),
+            },
             start_time=self._at(emission),
         )
 
