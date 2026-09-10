@@ -64,6 +64,7 @@ from vinga_server import logs
 from vinga_server.config.api import build_api
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import (
+    MASK,
     DatabaseConfig,
     could_be_inline_secret,
     is_mcp_secret_key,
@@ -785,6 +786,64 @@ def test_a_key_that_is_not_a_parameter_name_is_refused_whatever_it_holds(
     streams = capsys.readouterr()
     assert SENTINEL not in streams.out
     assert SENTINEL not in streams.err
+
+
+# The unchanged-value marker, which is the other door the same rule has
+#
+# A read masks what a secret-shaped key holds, and a resubmission of
+# that read means keep what is stored (#192). The value half moves both
+# ends of that: what the read masks, and therefore what a mask
+# resubmitted may mean. A number is shown in full, so eight asterisks
+# over one were never handed to the caller and cannot be handed back.
+
+
+@pytest.mark.parametrize("nested", [False, True], ids=["flat", "nested"])
+def test_the_mask_is_not_a_keep_marker_over_a_numeric_option(
+    store: ConfigStore, nested: bool
+) -> None:
+    """The round trip the first cut of #444 left open.
+
+    The display shows a numeric cap in full, and the marker walk read
+    the name alone, so `max_completion_tokens: "********"` resubmitted
+    was read as keep-what-is-stored and quietly restored the number.
+    Two doors answering one string two ways: refused as an inline secret
+    at one, accepted as a marker at the other.
+
+    Flat and one key deep, because an option can be a structure and the
+    walk that finds markers goes to the same depth the display does.
+    """
+    def written(value: object) -> dict[str, object]:
+        return _entry(connection={NUMERIC: value}) if nested else _entry(**{NUMERIC: value})
+
+    store.set_provider("llm", "claude", written(CONFIGURED))
+
+    with pytest.raises(ConfigError) as caught:
+        store.set_provider("llm", "claude", written(MASK))
+
+    assert 'a key containing "token" looks like an inline secret' in str(caught.value)
+
+    # And the refused write left the stored cap exactly as it was: the
+    # mask was neither written nor resolved.
+    held = store.read_provider("llm", "claude").entry.model_extra
+    assert (held["connection"][NUMERIC] if nested else held[NUMERIC]) == CONFIGURED
+
+
+def test_the_marker_still_keeps_what_a_read_really_hid(store: ConfigStore) -> None:
+    """The other direction, so the case above is a narrowing rather than
+    a removal.
+
+    `max_tokens_env` is secret-shaped and holds a string, so a read
+    masks it and a resubmitted mask still means keep what is stored.
+    Nothing about the marker moved except the values it can stand for.
+    """
+    store.set_provider("llm", "claude", _entry(max_tokens_env="MY_PROVIDER_MAX_TOKENS"))
+
+    store.set_provider("llm", "claude", _entry(max_tokens_env=MASK))
+
+    assert store.read_provider("llm", "claude").entry.model_extra == {
+        "model": "claude-sonnet-5",
+        "max_tokens_env": "MY_PROVIDER_MAX_TOKENS",
+    }
 
 
 def test_the_wider_rule_reads_the_value_the_same_way() -> None:

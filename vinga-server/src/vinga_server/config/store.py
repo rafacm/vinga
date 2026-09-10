@@ -68,6 +68,7 @@ from vinga_server.config.models import (
     ProvidersConfig,
     check_mcp_entry_names,
     check_references,
+    hides_value,
     holds_control_character,
     is_env_name,
     is_secret_option,
@@ -2863,6 +2864,18 @@ def _keep(
     A mask with nothing stored under it is refused. A PUT that creates
     the entity is that case for every mark in it, since an entity that is
     not there yet holds nothing to keep.
+
+    A mask over something the display would have SHOWN is not a marker
+    either, and it is left exactly where it was written. The marker
+    means "keep what the read would not show me", so it can only mean
+    that where the read hid something: a stored number under a
+    secret-shaped name is displayed in full, so eight asterisks
+    resubmitted under one is not a reader handing back what they were
+    shown, it is a string in a key that refuses strings, and it goes on
+    to meet the inline-secret refusal like any other (#444). The
+    fragment's own path decides it here rather than the walk, because
+    the walk reads the submitted value and this is a question about the
+    stored one.
     """
     kept = dict(fragment)
     missing: list[Sequence[object]] = []
@@ -2870,6 +2883,8 @@ def _keep(
         held = _held(stored, path)
         if held is _NOTHING:
             missing.append(path)
+            continue
+        if not hides_value(descriptor.secret_key, str(path[-1]), held):
             continue
         kept = _substituted(kept, path, held)
     if missing:
@@ -2880,19 +2895,26 @@ def _keep(
 def _masked_paths(
     value: object, secret_key: Callable[[str], bool], segments: tuple[object, ...] = ()
 ) -> Iterator[tuple[object, ...]]:
-    """Every path in a fragment where a secret-shaped key holds the mask
-    exactly.
+    """Every path in a fragment where a key the display would have
+    masked holds the mask exactly.
 
     The same walk the display makes, in the same order and to the same
-    depth: mappings and lists are walked into, and a secret-shaped key is
-    not, because the display displaces whatever such a key holds and so
-    nothing under one was ever shown to resubmit. A mask under a key the
-    predicate does not match is not a marker at all, and meets validation
-    as the string it is.
+    depth: mappings and lists are walked into, and a key whose value the
+    display displaces is not, because nothing under one was ever shown
+    to resubmit. A mask under a key the predicate does not match is not
+    a marker at all, and meets validation as the string it is.
+
+    `hides_value` and not the name predicate alone, which is the same
+    composed question the display asks: a secret-shaped name holding a
+    number is shown in full, so a marker walk reading the name alone
+    would be a walk over a different rule from the display it mirrors.
+    Every path it can yield still holds the mask, which is a string, so
+    this narrowing takes no marker away; what it does is keep the two
+    walks one rule as the value half moves.
     """
     if isinstance(value, Mapping):
         for key, nested in value.items():
-            if secret_key(str(key)):
+            if hides_value(secret_key, str(key), nested):
                 if isinstance(nested, str) and nested == MASK:
                     yield (*segments, key)
                 continue

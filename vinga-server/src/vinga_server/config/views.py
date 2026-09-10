@@ -67,7 +67,7 @@ from vinga_server.config.models import (
     McpServerConfig,
     PromptFragmentConfig,
     ProviderConfig,
-    could_be_inline_secret,
+    hides_value,
     is_secret_option,
     without_url_credential,
 )
@@ -349,16 +349,17 @@ def _masked(name: str, value: object, secret_key: Callable[[str], bool]) -> obje
     fails closed on its own.
 
     Except over a number, which is the same second half the write path
-    reads (`could_be_inline_secret`): what a write may store under a
-    secret-shaped name and what a read shows under one are one rule, so
-    a cap the guard now admits is a cap a display shows rather than
-    eight asterisks over an integer. Nothing is loosened by asking here:
-    the mark a resubmitted read carries is the mask, which is a string,
-    so `store._masked_paths` and this agree on every path it can yield.
+    reads: what a write may store under a secret-shaped name and what a
+    read shows under one are one rule, so a cap the guard now admits is
+    a cap a display shows rather than eight asterisks over an integer.
+    The composed question is `models.hides_value`, asked here and by the
+    three other readers of it, because the marker walk that mirrors this
+    display is one of them and a display and a walk that disagree is how
+    the mask became a keep marker over a value shown in full.
     """
     return (
         mask(value)
-        if secret_key(name) and could_be_inline_secret(name, value)
+        if hides_value(secret_key, name, value)
         else _shown(value, secret_key)
     )
 
@@ -563,7 +564,7 @@ def _recorded_pair(key: object, value: object) -> object:
     """What one option holds as a record shows it, given the key as it
     is stored: the mask where the name admits to being a secret and
     what it holds could be one, and the option's own walk otherwise."""
-    if is_secret_option(str(key)) and could_be_inline_secret(str(key), value):
+    if hides_value(is_secret_option, str(key), value):
         return mask(value)
     return recorded_option(value)
 
