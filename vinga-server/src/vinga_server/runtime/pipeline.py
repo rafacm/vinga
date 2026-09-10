@@ -1594,6 +1594,19 @@ class PipelineRuntime:
             # being cut mid-word by the stop.
             await self._filler.settle()
             self._turntaking.clear_pending()
+            # After the filler settles, because a clip still sounding is
+            # more of this reply's audio, and before the awaits below,
+            # because none of them puts a frame on the wire. Every frame
+            # this reply will ever send has gone by here, so this is
+            # where the endpointer stops carrying the assistant's own
+            # playback into the answer the user is about to give (#456).
+            #
+            # The server's last frame rather than the room's: the device
+            # trails by about 760 ms, but the measurements on the #70
+            # capture show the trailing echo of one reply does not
+            # re-poison a freshly cleared detector the way ten seconds of
+            # it does, so there is nothing here worth waiting out.
+            self._turntaking.forget_reply_audio()
             # The other end the idle timeout counts from. In the finally,
             # so a reply that failed or was cancelled still resets the
             # clock: the user is owed the full silence before being hung
