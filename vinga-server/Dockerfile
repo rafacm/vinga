@@ -21,6 +21,16 @@
 # variants. That name lives here and in the contributor's dev group and
 # nowhere else. An operator runs this image and installs nothing.
 #
+# The `otel` extra is in BOTH variants, which is the one extra that is.
+# The slim variant exists to shed the local engines and boot against
+# external providers, and that is precisely the deployment most likely
+# to want its traces somewhere: an image that carried the exporter only
+# in the heavy variant would refuse at boot for the operator most likely
+# to switch it on. The OpenTelemetry SDK is a few megabytes of pure
+# Python with no system dependencies and Apache-2.0, so neither the
+# weight argument nor the licensing one that keeps the engines apart
+# applies to it.
+#
 # The `sim` extra is deliberately not here, and that is a decision rather
 # than an oversight. It carries the websocket client `vinga simulator
 # run` speaks, which is a thing a person does FROM a workstation TO a
@@ -63,8 +73,8 @@ ENV UV_COMPILE_BYTECODE=1 \
 # operator whose local engines had vanished, which is much too late.
 RUN set -eu; \
     case "$VINGA_VARIANT" in \
-      default) echo "--extra faster-whisper --extra piper" > /tmp/extras ;; \
-      slim) : > /tmp/extras ;; \
+      default) echo "--extra faster-whisper --extra piper --extra otel" > /tmp/extras ;; \
+      slim) echo "--extra otel" > /tmp/extras ;; \
       *) echo "unknown VINGA_VARIANT '$VINGA_VARIANT'; expected default or slim" >&2; \
          exit 1 ;; \
     esac; \

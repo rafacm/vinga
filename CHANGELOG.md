@@ -82,8 +82,8 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   `server.local_only` an enabled exporter is refused before anything is
   imported or constructed, because sending to a collector is egress like
   any other. Enabled without the OpenTelemetry packages installed is
-  refused with the extra to install (`uv sync --extra otel`). An
-  `OTEL_EXPORTER_OTLP_PROTOCOL`
+  refused with the extra to install (`uv sync --extra otel`, which both
+  published images carry). An `OTEL_EXPORTER_OTLP_PROTOCOL`
   naming anything but `http/protobuf` is refused rather than
   half-honored.
 
