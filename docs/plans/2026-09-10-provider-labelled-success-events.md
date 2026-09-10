@@ -302,7 +302,7 @@ TTS event labelled from ASR identity. So the milestone additionally requires:
 ## Milestones
 
 - [x] **[M1: the vocabulary](2026-09-10-provider-labelled-success-events-implementation.md#m1-the-vocabulary)**
-  (PR TBD). `heard` and `sentence_synthesized` gain
+  (PR [#457](https://github.com/rafacm/vinga/pull/457)). `heard` and `sentence_synthesized` gain
   `provider`, `type`, `host` and `model` off `assembly._entry_fields`, built by
   assembly builders beside `llm_rounded` rather than inline at the emit site,
   with both emit sites passing the provider object they already hold. Sentences
