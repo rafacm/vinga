@@ -212,3 +212,208 @@ are already in `config/models.py`.
   conversation is on, with the trust stance written into the tool description.
   Design footprint: deepens `tools/builtin.py`; the tool reaches the repository
   rather than the database, so no second write path exists to disagree.
+
+## Plan review round
+
+External review of commit `9026ba7c`, backend codex (codex-cli 0.154.0), model
+`gpt-5.6-sol`, 2026-09-10. Verdict as received: **not ready**, five P1 and five
+P2. Findings condensed but faithful, each with its resolution. Two were taken to
+the maintainer as scope questions; both are answered below.
+
+### 1 (P1): the stable id is minted but is never made the identity of memory or history
+
+Device memory is keyed by MAC (`memory/scopes.py`, `memory/schema.py`), recorded
+sessions store the MAC (`conversations/schema.py`), and `MemoryContext` receives
+the MAC. So the settled requirement that memory and history survive a board
+replacement is not delivered by a domain-only change. The reviewer asks for
+memory-chain and record-chain migrations translating MAC to uuid, updated
+runtime context and readers, and a test of an actual MAC swap.
+
+*Resolution*: the finding is right that a domain-only change does not deliver
+it, and wrong about what delivering it costs. Probed rather than accepted:
+
+**History is already correct and must not be rewritten.** `rename_agent`'s
+docstring settles this for the exactly analogous case: "`turns.agent`,
+`sessions.agent`, `sessions.agents` and the agent names inside event fields are
+dated rows saying what was true when they were written, and nothing rewrites
+them." A session row's MAC says which board was physically connected at the
+time, which a later swap does not falsify. The settled design's own list is
+"name, location, agent bindings, and any per-device memory", and history is not
+in it. So no record-chain migration, and no change to what a session stores.
+
+**Memory rides along by the pattern that already exists.** `rename_owner`
+already takes a `MemoryScope`, so it is not agent-specific, and
+`config/store.py` already orchestrates the three-schema move in one transaction
+for an agent rename. A device MAC replacement is the same shape with
+`MemoryScope.DEVICE`. That needs no uuid in the memory schema, no cross-chain
+data migration and no re-keying, so the cross-chain ordering hazard the finding
+raises does not arise.
+
+**What it does need is the operation itself**, which the plan had left as "CLI
+writes". Maintainer decision: it lands in this issue as **M4** rather than a
+follow-up, because the stable id's whole justification is surviving a swap, and
+shipping the id with nothing exercising that property ships a justification
+nothing demonstrates. The swap test the finding asks for is M4's, and it is the
+sharper version of the id-preservation test the plan already wanted.
+
+### 2 (P1): the validator-only compatibility claim does not cover import or repository writes
+
+`ConfigStore.apply` decomposes devices through `_change`, `_bound` and
+`_DeviceBinding`, and bind and claim use `_binding`; none passes a device value
+through `DomainConfig` as a record. A legacy list cannot normalize to the same
+record as an object carrying an existing uuid unless staging consults the
+current row, and minting a uuid inside a pydantic validator would break parsing
+determinism and apply idempotence.
+
+*Resolution*: accepted whole, and it is the finding that most changes M1. The
+plan's "import, diff, apply, the JSON Schema and the generated reference all
+inherit it from one place" was true of parsing and false of everything that
+writes. Every device ingress is named explicitly in M1 and changed explicitly:
+`bind`, the pending claim, `apply`/import, the API writes and stored-row
+loading. **Minting moves out of the validator entirely**: the validator
+normalizes shape only, and the uuid is minted in the repository under the domain
+writer lock, where the current row can be consulted, so a stored id always wins
+over an absent one and re-applying the same document is a no-op. That is what
+makes apply idempotent, which a random default in a parser cannot be.
+
+### 3 (P1): M2 cannot deliver metadata through the prompt path described
+
+`_live_binding` selects only `agents`, `DeviceBindings` resolves only names, the
+prompt device block receives only rendered memory, and `_system_prompt` skips
+the whole scope assembly when memory is disabled. So name and location are
+neither in the turn context nor guaranteed to reach an agent with memory off.
+
+*Resolution*: accepted. The plan assumed a metadata path that does not exist and
+assumed the block is always assembled, and both are wrong. M2 gains an explicit
+read from MAC to `{id, name, location}` in the same snapshot the binding is
+resolved from, and the device facts are assembled independently of the memory
+switch, since a device's name is not a remembered thing and an agent with memory
+off still has to know what it is speaking through. The tests named are empty
+device memory, memory disabled, concurrent sessions, and a location changed
+between rounds.
+
+### 4 (P1): the location tool has no implementable composition or concurrency path
+
+Built-ins are offered and dispatched by `tools/source.py`, whose constructor has
+a `MemoryStore` and no domain repository; the app owns no long-lived domain
+write store for conversations; database writes are synchronous while runtime
+database work is moved off the event loop; and the new write must join
+`ORDERED_TOOL_NAMES`, since two location writes in one round are order-sensitive.
+
+*Resolution*: accepted whole. M3's module list named `tools/builtin.py` and
+`tools/names.py` and stopped there, which is the definition of a milestone that
+has not been designed. It now names `tools/source.py`, the runtime factory and
+pipeline wiring, and app lifecycle ownership of a domain write engine with its
+disposal; states that the synchronous write is dispatched off the event loop the
+way other runtime database work is; and adds the tool to `ORDERED_TOOL_NAMES`.
+Tests: two location calls in one round, and contention against another writer.
+
+### 5 (P1): the no-leak design names a sanitizer that does not do what is claimed, and misses where location comes from
+
+`bounded_descriptor` removes non-printables, trims and truncates; it does not
+remove credential-bearing text. More importantly, an agent-set location
+originates from a person, so it is conversation-derived content, and the
+observability contract forbids what a person said from structured events. The
+plan discussed only operator-authored name and said it reaches logs.
+
+*Resolution*: accepted, and the classification is the part that matters. The two
+fields are two trust classes and the plan treated them as one.
+
+Maintainer decision, taken after probing what the contract actually forbids:
+**neither field reaches any structured event or the capture manifest.** Events
+and the manifest keep the MAC, which is a trusted identifier, exactly as today.
+`location` cannot go there because it is conversation text and the
+structured-events row says metadata only. `name` could, since far-side
+descriptors like `board` and `version` already reach `session_open` through
+`bounded_descriptor` with a cap, but it does not: the MAC already identifies the
+device, so putting the name on every session row would give one fact a second
+home and let it go stale after a rename. A reader wanting to display a name
+joins the device record.
+
+So `bounded_descriptor` is out of the plan's no-leak story, because nothing is
+being sanitized onto a retained surface. The tests instead assert absence: drive
+a session and a tool call with a credential-shaped name and a credential-shaped
+location, and assert neither appears in any event payload, either log format,
+the capture manifest, a refusal sentence, or an exception chain, including the
+tool-failure path and the rejected-value path.
+
+### 6 (P2): creation, default-covered devices, clearing location and hardware replacement are unspecified
+
+`bind` and the pending claim create rows from MAC plus agents; a default agent
+admits a MAC with no device row at all; the new schema requires a name; and
+`set_device_location` assumes a writable record exists.
+
+*Resolution*: accepted. M1 states the grammar and behaviour for bind, claim,
+rename, location set and location clear, and M4 for MAC replacement. Decisions:
+a created or claimed record takes the `Device <full mac>` default name rather
+than requiring one at the call site, so no existing flow gains a mandatory
+argument; a nullable location gets an explicit clearing verb and its test; and
+the tool refuses, with a spoken reason, for a default-covered MAC with no row,
+since minting a device record is an operator act and not a conversational one.
+
+### 7 (P2): name uniqueness at the CLI is neither race-safe nor shared by all writers
+
+The API, import, claim and repository callers bypass CLI logic, and letting the
+index catch a conflict yields the generic sanitized database failure rather than
+the promised refusal.
+
+*Resolution*: accepted. The plan put the check in the wrong layer. Folded-name
+uniqueness is enforced **in the repository while holding the domain writer
+lock**, on every creation and rename path, with the database index kept as the
+invariant behind it; the typed conflict is what the API and CLI both render.
+Tests: import conflicts, concurrent renames, creation conflicts, and a
+self-rename that changes nothing.
+
+### 8 (P2): one fold function used by Python and by the SQL index is not implementable as written
+
+Python string operations and a Postgres expression are different
+implementations whose whitespace behaviour can diverge, particularly on Unicode
+whitespace, and the plan's examples cover only ordinary spaces.
+
+*Resolution*: accepted; the plan's "one home" was aspiration rather than design.
+The fold is defined exactly: lowercase by Unicode simple case folding, strip and
+collapse runs of the Unicode whitespace class. Python and SQL get separate,
+declared renderings, and their equivalence is proved against Postgres over a
+shared corpus that includes non-breaking space, tab, newline, ideographic space
+and the Turkish dotted and dotless i. The migration keeps its frozen literal and
+the corpus covers it too, so a divergence is a failing test rather than a silent
+one.
+
+### 9 (P2): the advertised import/diff test cannot observe what it claims
+
+`config_diff` represents devices as `LiveKind(applies=CHECK_IN)` and performs no
+device comparison, so it cannot report a changed record or prove an id survived.
+
+*Resolution*: accepted, and the plan cited the differ as evidence for something
+it cannot produce. Devices stay live-only; the differ contract is not expanded,
+which would drag the generated response schema with it for no consumer. Id
+preservation is tested directly by reading the row before and after the
+repository and API operations, which is the stronger test anyway since it
+observes the id rather than a report about it.
+
+### 10 (P2): the migration ignores writers from the previous running image
+
+After migration, an older still-running process keeps upserting only `mac` and
+`agents` through `_device_row`, violating the new `NOT NULL` constraints.
+
+*Resolution*: accepted as a real gap in the plan, and answered by a decision the
+repository has already taken rather than by staging the schema. The one-replica
+topology ADR (#316) means a rolling two-version overlap is not a supported
+deployment shape, so the answer is to state that and test it rather than to add
+database defaults for a writer that should not exist. The plan says explicitly
+that the upgrade is stop-then-migrate, and the migration test covers an
+old-shape write attempted after the upgrade, asserting it is refused rather than
+silently accepted.
+
+### 11 (P3): the documentation footprint names an artifact that does not exist
+
+`docs/reference/` contains no standalone JSON Schema; the committed API contract
+is `api-openapi.json`, which device routes would stale along with `cli.md` and
+`domain-config.md`.
+
+*Resolution*: accepted; the claim is corrected. The footprint now names
+`domain-config.md`, `cli.md` and `api-openapi.json` as the generated artifacts
+that move. `events.md` and `conversations-schema.md` do NOT move, which is a
+consequence of finding 5's resolution: no event gains a field and no stored
+column changes, so neither reference is stale. `observability-surfaces.md` stays
+accurate for the same reason.
