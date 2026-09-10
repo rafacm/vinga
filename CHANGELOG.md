@@ -91,6 +91,34 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   the span queue is bounded, the export runs on the SDK's own background
   thread, and the shutdown a redeploy waits for is bounded too.
 
+- **Every stage of a turn is a span inside it.** The turn trace now
+  carries what took the time (#66, milestone 3), each span constructed
+  from the events the pipeline already emits and the durations it
+  already measured. The transcription is one span however it ended, and
+  the four ends are told apart rather than flattened: it answered, it
+  answered nothing, the engine failed, or the answer stopped being
+  wanted, with only the failure marked as one. Each generation round is
+  a span carrying the OpenTelemetry GenAI vocabulary, so a backend that
+  has never heard of vinga reads the provider, the model, the host it
+  reached and the tokens it spent under the names those conventions
+  chose, with the first token marked inside the round where it arrived.
+  Each sentence's synthesis stream is a span named for what it is, a
+  stream and not a synthesis, because a paced consumer holds it open;
+  the provider's own latency to its first audio chunk rides beside it as
+  the one number backpressure cannot touch. And the paced interval is
+  bounded by the two frames that bound it, the first out and the last
+  out, with the count of everything delivered.
+
+  Everything else the catalog declares, and everything it declares next,
+  still lands as a span event on whichever span is open: the three
+  barge-in suppressions with the reason each decision site chose, the
+  per-second dropped-frame aggregate, a handover, a retried round, an
+  idle hangup.
+
+  Both published images carry the exporter, the slim one included: it is
+  the variant most likely to be pointed at a collector, and the SDK adds
+  a few megabytes and no system dependencies.
+
 - **The event catalog speaks the turn's own lifecycle.** Six additions
   and two deepenings, so a turn can be read off the events instead of
   inferred from the gaps between them (#66, milestone 1). `turn_started`
