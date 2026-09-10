@@ -275,23 +275,62 @@ are already in `config/models.py`.
 
 ## Milestones
 
-- [ ] **M1: the device record.** Schema, migration `3003`, the fold with one
-  home, the repository reads and writes, the widened
-  `normalize_device_bindings` absorbing the value-shape union, the CLI writes,
-  the generated references and `config.example.yaml`, `docs/concepts.md`, the
-  glossary, changelog. `_live_binding` characterized before and unchanged after.
-  Design footprint: deepens `config/store.py`, whose callers stop knowing a
-  device is columns; adds no module and no seam.
+- [ ] **M1: the device record.** Schema, migration `3003`, the fold in its two
+  proved-equal renderings, the repository reads and writes with minting and the
+  folded-name conflict both under the writer lock, the widened
+  `normalize_device_bindings` absorbing the value-shape union, and every device
+  ingress changed explicitly: `bind`, the pending claim, `apply` and `import`,
+  the API writes, stored-row loading. The CLI grammar for bind, claim, rename,
+  location set and location clear. Generated references and
+  `config.example.yaml`, `docs/concepts.md`, the glossary, changelog.
+  `_live_binding` characterized before and byte-unchanged after. Design
+  footprint: deepens `config/store.py`, whose callers stop knowing a device is
+  columns; adds no module and no seam.
 - [ ] **M2: the agent knows where it is.** Name and location join the existing
-  device block in `runtime/prompt.py`, carried from the turn context the runtime
-  already resolves from the MAC. Design footprint: deepens `runtime/prompt.py`'s
-  device block; no new block and no new seam, since a second heading would make
-  the model choose which to believe.
+  device block in `runtime/prompt.py`, carried by a metadata read added in the
+  same snapshot the binding is resolved from, since none exists today. The
+  device facts are read independently of the memory switch, because
+  `_system_prompt` skips the whole scope assembly when memory is off and an
+  agent with memory off still has to know what it is speaking through. The read
+  rides the per-round path the scope blocks already use, so a location changed
+  mid-conversation is known on the very next reply rather than at the next
+  activation. Tests: empty device memory, memory disabled, concurrent sessions,
+  a location changed between rounds. Design footprint: deepens
+  `runtime/prompt.py`'s device block; no new block, since a second heading would
+  make the model choose which to believe.
 - [ ] **M3: the agent can move the device.** `set_device_location`, writing
   through the same repository path the CLI uses, scoped to the device the
-  conversation is on, with the trust stance written into the tool description.
-  Design footprint: deepens `tools/builtin.py`; the tool reaches the repository
-  rather than the database, so no second write path exists to disagree.
+  conversation is on, with the trust stance in the tool description. Covers
+  `tools/source.py`'s offer and dispatch, the runtime factory and pipeline
+  wiring, and the app lifecycle's ownership and disposal of a domain write
+  engine; the synchronous write is dispatched off the event loop. Joins
+  `ORDERED_TOOL_NAMES`, since two location writes in one round are
+  order-sensitive. Refuses, with a spoken reason, for a default-covered MAC with
+  no device row: minting a record is an operator act, not a conversational one.
+  Tests: two calls in one round, and contention against another writer.
+- [ ] **M4: a board swap keeps the device.** The MAC-replacement operation,
+  rewriting `mac` on an existing record and moving that device's memory in the
+  same transaction, which is the agent-rename pattern with
+  `MemoryScope.DEVICE`: `rename_owner` already takes a scope, so no uuid enters
+  the memory schema and no cross-chain data migration is needed. History is
+  deliberately untouched, because dated rows say what was true when they were
+  written and `rename_agent`'s docstring states that rule for the analogous
+  case. This is the milestone that exercises what the stable id exists for, and
+  its swap test is the sharper version of the id-preservation test.
+  Design footprint: deepens `config/store.py` with a second three-schema
+  operation beside the agent rename; adds no module.
+- [ ] **M5: the analyst can see a name.** A device-name column on
+  `record.sessions` beside `sessions.device`, written at session open, on the
+  conversations chain. Not a locality violation but a necessity:
+  `deploy/postgres-init.sql` grants `vinga_ro` on `record` and explicitly
+  REVOKES it on `domain`, so an analyst or a dashboard can never join to the
+  device record and a name is only ever visible if the `record` side carries
+  its own copy. `session_open` gains the name for the same reason on the log
+  side; `location` gains nothing anywhere. A rename does not rewrite the column,
+  so a per-device series splits at a rename, exactly as `sessions.agent` already
+  behaves. Moves `conversations-schema.md` and `events.md`. Unblocks the
+  per-device dimension decided for #440, which reads this column.
+  Design footprint: deepens the session record; adds no module.
 
 ## Plan review round
 
