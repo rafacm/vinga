@@ -1,6 +1,6 @@
 # The endpointer stops carrying the reply into the user's turn
 
-**Date:** 2026-09-10
+**Date:** 2026-09-11
 
 ## Problem
 
