@@ -170,6 +170,43 @@ def test_the_reference_says_the_metrics_column_kept_an_old_name() -> None:
     assert "column keeps the old spelling deliberately" in flattened
 
 
+def test_the_reference_refuses_to_diagnose_a_missing_measurement() -> None:
+    """The page used to say a gap between `turns` and a measured count
+    was the telemetry switch being off, and offered `telemetry_sessions`
+    as the way to tell. Both were wrong: the schema documents a null
+    token count for two causes, telemetry-off and a provider that
+    reported no usage, and the store writes them identically, so a
+    metrics-on turn with no usage and a metrics-off turn are the same
+    row here. The integration suite seeds exactly that pair.
+
+    So the page states the ambiguity and refuses the diagnosis, and this
+    pins both halves: the two causes named as alternatives, and
+    `telemetry_sessions` described as same-day session-level context
+    rather than as a discriminator.
+    """
+    flattened = flat(docgen.views_reference())
+
+    assert "A missing measurement has more than one cause" in flattened
+    assert (
+        "A null token count means telemetry storage was off OR the provider "
+        "reported no usage" in flattened
+    )
+    assert "coverage and never its reason" in flattened
+    assert "Read a measured count as a denominator, never as a diagnosis" in flattened
+    # And the column that used to be offered as the way to tell.
+    assert (
+        "session-level context for the day a session opened rather than a "
+        "discriminator" in flattened
+    )
+    # The claims the page may no longer make.
+    assert "is a day the switch was off, not a day the provider went quiet" not in (
+        flattened
+    )
+    assert "tells a day with the switch off from a day with nothing to measure" not in (
+        flattened
+    )
+
+
 def test_the_reference_states_the_three_shared_rules() -> None:
     """Day, counting and rates: the three things that are true of all
     four views, said once at the top rather than four times."""

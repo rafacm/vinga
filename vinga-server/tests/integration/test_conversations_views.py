@@ -177,8 +177,11 @@ def test_input_and_output_measurement_are_counted_independently(store) -> None:
     output with no input, a turn that measured neither with the switch
     on, and a turn under telemetry-off.
 
-    The last two look identical in this view, deliberately, and that is
-    what `metrics_sessions_daily.telemetry_sessions` is for.
+    The last two are identical in this view and cannot be told apart:
+    the store writes a provider that reported no usage exactly as it
+    writes a turn under telemetry-off. That is the ambiguity the
+    reference page states rather than papering over, and this pair of
+    rows is the evidence for it.
     """
     with store.begin() as connection:
         plant_session(connection, "tokens-on", "2026-05-03T09:00:00+00:00")

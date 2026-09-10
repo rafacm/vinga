@@ -148,10 +148,13 @@ STAGE_LATENCY = View(
     ),
     telemetry_off=(
         "A turn stored under telemetry-off has every stage column null, so "
-        "it contributes no row here at all. It still counts as a turn in "
-        "`metrics_sessions_daily` and in the event view's denominator, "
-        "which is what makes `measured_turns` worth reading beside a "
-        "percentile."
+        "it contributes no row here at all. A turn that simply did not "
+        "measure a stage (a reply that spoke nothing has no "
+        "`tts_first_audio_ms`) is absent from that stage in exactly the same "
+        "way, and this view cannot tell the two apart. Either way the turn "
+        "still counts in `metrics_sessions_daily` and in the event view's "
+        "denominator, which is what makes `measured_turns` worth reading "
+        "beside a percentile."
     ),
     columns=(
         Column(
@@ -270,9 +273,15 @@ TOKENS = View(
     telemetry_off=(
         "Under telemetry-off both token fields are null, so the attribution "
         "row still lands and still counts in `turns` while adding nothing to "
-        "either measured count and nothing to either sum. A day whose "
-        "`turns` far exceeds its measured counts is a day the switch was "
-        "off, not a day the provider went quiet."
+        "either measured count and nothing to either sum. A turn whose "
+        "provider reported no usage is null in exactly the same way, and "
+        "this view cannot tell the two apart: a gap between `turns` and a "
+        "measured count says the tokens were not recorded, and never why. "
+        "`metrics_sessions_daily.telemetry_sessions` is session-level "
+        "context for the same day and not a discriminator here, because it "
+        "counts sessions by the day they opened while these rows count "
+        "turns by the day they were spoken, and it says nothing about which "
+        "agent a turn was attributed to."
     ),
     columns=(
         Column(
@@ -317,7 +326,12 @@ TOKENS = View(
         Column(
             name="input_measured_turns",
             type="bigint",
-            meaning="How many attribution rows in this group carried an input count.",
+            meaning=(
+                "How many attribution rows in this group carried an input "
+                "count. The rest carried none, either because telemetry "
+                "storage was off or because the provider reported no usage, "
+                "and the two are stored identically."
+            ),
             units="attribution rows",
             nullable=False,
             formula="`count()` over the attribution rows whose input field is not null.",
@@ -325,7 +339,11 @@ TOKENS = View(
         Column(
             name="output_measured_turns",
             type="bigint",
-            meaning="How many attribution rows in this group carried an output count.",
+            meaning=(
+                "How many attribution rows in this group carried an output "
+                "count. As above, the rest are unrecorded rather than zero, "
+                "and for either of the same two reasons."
+            ),
             units="attribution rows",
             nullable=False,
             formula="`count()` over the attribution rows whose output field is not null.",
@@ -342,7 +360,8 @@ TOKENS = View(
             formula=(
                 "`sum()` over the non-null input fields. Null when the group "
                 "measured none, which is what `input_measured_turns` of zero "
-                "says in a number."
+                "says in a number. Null is not zero consumption: it is "
+                "consumption nobody recorded."
             ),
         ),
         Column(
@@ -407,7 +426,11 @@ EVENT_RATES = View(
         "session and its turns still count. It therefore raises both "
         "denominators and neither numerator, which is a property of the "
         "data this view reports rather than hides: read it beside "
-        "`metrics_sessions_daily.telemetry_sessions`."
+        "`metrics_sessions_daily.telemetry_sessions`, which counts the same "
+        "switch on the same session spine. That is context and not a "
+        "correction: both denominators here are counted on the day a turn "
+        "was spoken or a session opened, and neither can say which of the "
+        "day's sessions a missing event belonged to."
     ),
     columns=(
         Column(
@@ -546,7 +569,13 @@ SESSIONS = View(
         "telemetry switch and keeps the name it had before the switch was "
         "renamed. Subtract it from `sessions` to get the sessions that "
         "could not have contributed a measured number or an event to any "
-        "other view."
+        "other view. That is session-level context for the day a session "
+        "opened, and no more: it cannot say why a particular turn measured "
+        "nothing, because a turn is dated by the day it was spoken rather "
+        "than the day its session opened, and because a null measurement "
+        "elsewhere has a second cause (a provider that reported no usage, a "
+        "stage that was never reached) that this column knows nothing "
+        "about."
     ),
     columns=(
         Column(
@@ -572,8 +601,10 @@ SESSIONS = View(
             name="telemetry_sessions",
             type="bigint",
             meaning=(
-                "How many of them had telemetry storage on, so a null number "
-                "elsewhere can be told from a number nobody stored."
+                "How many of them had telemetry storage on. A day where this "
+                "is below `sessions` had sessions that stored no measured "
+                "number at all; it does not follow that a null number "
+                "elsewhere came from one of them."
             ),
             units="sessions",
             nullable=False,
