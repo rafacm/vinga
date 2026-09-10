@@ -118,17 +118,28 @@ that transcribed rather than the one now bound.
 ### `sentence_synthesized` keeps its DEBUG level
 
 It is DEBUG and stays DEBUG. Changing an event's level is #66's decision to
-revisit, not this issue's, and the level does not block the dashboard this issue
-exists for: `_dispatch` offers every emission to every non-log tap before the
-log tap ever sees it, and `ConversationStore.record_event` gates on the
-telemetry switch, the session being open and the in-flight bound, never on
-level. So the store, the capture and `GET /api/runtime/events` carry
-`sentence_synthesized` at any log floor. The log-side asking is
-`vinga events tail --level DEBUG`, which the catalog already documents.
+revisit, not this issue's.
 
-This is worth stating because it is the one thing an operator building the
-dashboard could get wrong, and because it was checked rather than assumed while
-diagnosing #455.
+What that costs an operator building the dashboard is three surfaces with three
+different answers, and the plan states all three because getting this wrong is
+the most likely way to conclude the event is missing when it is not.
+
+- **The store, the capture and any OTel exporter receive it regardless of any
+  threshold.** `_dispatch` offers every emission to every non-log tap before the
+  log tap ever sees it, and `ConversationStore.record_event` gates on the
+  telemetry switch, on the session being open and on the in-flight bound, never
+  on level. A dashboard reading the conversation store therefore sees
+  `sentence_synthesized` at any log level.
+- **The JSON log needs a DEBUG server log level.** The log tap is an ordinary
+  logging call on the session channel, so `server.log_level` decides.
+- **The live API and the CLI in front of it need an explicit DEBUG filter.**
+  `GET /api/runtime/events` is not a log reader; the live stream carries its own
+  default of INFO and drops anything below it, so a reader that names no level
+  is given INFO and up. `vinga events tail --level DEBUG` is the asking, and it
+  is asking the stream rather than the log.
+
+The first draft of this plan asserted the second and third of these as one
+thing and got it wrong, which is recorded in the review round.
 
 ### The span attributes are a separate milestone
 
@@ -176,7 +187,14 @@ milestone adds callers to it, not a layer beside it.
 - `CHANGELOG.md` gets a dated `### Added` entry per milestone.
 
 No hand-maintained page's description of current behavior is falsified by M1.
-M2 likewise: the telemetry surface's own reference is generated.
+
+M2 has no generated reference to regenerate: `events_docgen.py` generates the
+event vocabulary and its field names, not span attribute mappings. The mapping
+is owned by `telemetry.py`'s tables and the span pins beside them, which is
+exactly what `docs/architecture/observability-surfaces.md` already says about
+that surface, so no page is created for a table that has an owner. That row
+stays accurate because M2 adds attribute names under the prefix it already
+describes rather than a new class of value.
 
 ## Tests
 
