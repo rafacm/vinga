@@ -82,6 +82,15 @@ _UNDECLARED_SECRET_KEY_FRAGMENTS = (*_SECRET_KEY_FRAGMENTS, "auth")
 # env or headers key and a URL's query parameter are named by somebody
 # else, so no name there is a declared option a builder reads, and the
 # second condition above can never hold.
+#
+# It stayed at one entry, and #444 is why it will not grow to two. The
+# general case is answered by the value instead
+# (`could_be_inline_secret`), which needs no vendor's vocabulary kept up
+# to date. What is left for a name to answer is the one reader that
+# holds no value to ask about: the secret-slot check, which decides
+# whether `vinga provider secret set <stage> <entry> <name>` addresses a
+# slot at all. That is what this entry still does, and it is why
+# withdrawing `max_tokens` as a slot (#277) did not come back.
 _SECRET_KEY_EXEMPT_NAMES = ("max_tokens",)
 
 # An environment reference in an MCP server's env or headers: the whole
@@ -93,6 +102,14 @@ _ENV_REFERENCE_RE = re.compile(r"^\$([A-Za-z_][A-Za-z0-9_]*)$")
 # variable, and nothing else. The same shape as the reference above
 # without its $, since both name a variable the server looks up.
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# How a request parameter is spelled, which is the shape a key has to
+# have before what it holds is allowed to speak for it
+# (`could_be_inline_secret`). The same characters an environment name
+# takes, and separately spelled because it is a separate question: this
+# one is about a key rather than about a value, and a dialect that one
+# day names a field with a dot in it would move this and not that.
+_PARAMETER_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 PROVIDER_STAGES = ("llm", "asr", "tts", "vad")
 
@@ -1728,6 +1745,53 @@ def is_secret_option(name: str) -> bool:
     return secret_option_fragment(name) is not None
 
 
+def could_be_inline_secret(name: str, value: object) -> bool:
+    """Whether a secret-shaped key and what it holds could be a
+    credential at all, which is the other half of the question the name
+    asks.
+
+    The name is a heuristic over words, and the words are common enough
+    in a request parameter that a key can look like a credential while
+    holding something no credential can be written as. `max_tokens` was
+    the first one found (#277) and got a name of its own; the endpoint
+    that named the second, `max_completion_tokens`, is what says a
+    per-name list was the wrong shape (#444). The `openai_compatible`
+    type exists so that an option this repository never heard of travels
+    rather than being refused, and a rule that has to learn each vendor's
+    vocabulary before a cap can be written refuses the ones nobody has
+    added yet.
+
+    So the value decides, and it decides in the direction that keeps the
+    guard: a number and a bool cannot be pasted-credential shaped, and
+    everything else could be. A string is the case the guard is for. A
+    mapping or a list is refused as well rather than walked into,
+    because a credential nested under a key already named `token` is a
+    credential the walk would have to be right about twice, and None,
+    because a key that holds nothing is not a cap either.
+
+    The name is asked one more thing first, and it is what keeps this
+    from being a wider hole than it looks. A secret-shaped key is two
+    shapes, not one: a key NAMING a credential slot, where the value is
+    the paste, and a key that IS the paste, since a key is as good a
+    place to put one and better at hiding there. The value can only
+    speak for the first. So the guard steps aside only for a key spelled
+    the way a request parameter is spelled, a bare word of letters,
+    digits and underscores; a key carrying anything else is not a
+    parameter name at all and stays refused whatever it holds.
+
+    What it costs is named rather than left implicit: a credential that
+    fits in a number, a numeric PIN or a six-digit code, is now written
+    inline rather than refused. The heuristic never protected those
+    well (`pin` and `code` are not among its words), what protects a
+    credential here is the `_env` reference and the secret store beside
+    it, and what the guard is really for is the pasted string a display
+    would otherwise echo.
+    """
+    if not isinstance(value, (int, float)):
+        return True
+    return _PARAMETER_NAME_RE.match(name) is None
+
+
 # What a value stored under such a name renders as, wherever a read
 # shows one. Beside the predicate that decides which names those are,
 # because the two are one rule: what is masked and what the mask looks
@@ -1940,8 +2004,16 @@ def is_env_name(value: object) -> bool:
 
 
 def check_no_inline_secrets(name: str, value: object, *, declared: bool = False) -> None:
-    """A secret-shaped key holds no value, at any depth inside a
-    provider's options.
+    """A secret-shaped key holds no value a credential could be written
+    as, at any depth inside a provider's options.
+
+    Two halves, and the second is `could_be_inline_secret` below: the
+    name says the key might carry one, the value says whether what it
+    carries could be one. A number under such a key is a request
+    parameter whose name happens to contain one of six words, and
+    refusing it is what stopped `max_completion_tokens` from being
+    writable on the one type whose promise is that an unknown key
+    travels (#444).
 
     Depth is the point. A provider entry passes every option beyond the
     declared ones through to its implementation, so an option can be a
@@ -1994,7 +2066,7 @@ def _check_no_inline_secrets(
             raise FieldProblemsError([FieldProblem(pointer, message)])
         return
     fragment = secret_option_fragment(leaf)
-    if fragment is not None:
+    if fragment is not None and could_be_inline_secret(leaf, value):
         if named:
             message = (
                 f'"{path}" looks like an inline secret, which is not allowed; '
