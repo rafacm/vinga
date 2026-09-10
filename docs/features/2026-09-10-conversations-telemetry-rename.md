@@ -42,7 +42,7 @@ same and only the verb differs.
   response field, and the schema reference says the column kept the
   switch's original name rather than leaving the mismatch to the
   reader.
-- The schema's column comments spelled the old word in fourteen places;
+- The schema's column comments spelled the old word in fifteen places;
   they are committed DDL, so `1004_telemetry_names_the_switch` moves
   them in migrated databases the way `1003_rename_moves_ownership`
   moved the thread ownership comment. It spells the old texts out and
