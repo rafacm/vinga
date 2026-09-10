@@ -366,3 +366,107 @@ new:
   as a surface with its retention answer (the collector's backend
   owns retention; vinga sends and forgets), and its still-open list
   drops #66; CHANGELOG.
+
+## Plan review round
+
+External review: codex CLI 0.154.0, model gpt-5.6-sol, read-only
+sandbox, 2026-09-10, runtime 8m31s, reviewing commit 593e8785.
+Verdict as received: **not ready**; the retrospective lifecycle does
+not cover empty ASR, failed replies, or confirmed barge-ins, and two
+settled issue requirements were removed. Findings condensed but
+faithful; resolutions appended per amendment.
+
+1. **P1: Empty or failed ASR produces no trace at all.** `Heard` is
+   emitted only for a non-empty transcript; empty transcription is a
+   log-only branch and ASR failure emits only `provider_failed`, so
+   the plan misses the issue's motivating Gap C (an ASR span with
+   empty output). The catalog needs a turn-start event for every
+   reply attempt and an ASR outcome covering non-empty, empty and
+   failed; `heard.asr_ms` alone is insufficient.
+
+2. **P1: `replied` is not an unconditional completion marker.** It
+   is guarded by `if spoken:`; empty transcription, early failure
+   and pre-sentence cancellation never emit it, and `session_closed`
+   as a backstop gives false durations across still-open sessions.
+   The reply `finally` needs an unconditional reply-finished event
+   with a closed outcome.
+
+3. **P1: Confirmed barge-in ASR cannot be reconstructed.** The
+   confirmation transcription runs in the gate before `BargeIn` and
+   the reused result deliberately leaves `TurnUnderway.asr_ms`
+   unset, so the interrupting turn has no ASR latency and no
+   utterance-end stamp under the proposed derivation. Measure and
+   catalogue confirmation ASR at its decision site and carry the
+   stamp across the gate.
+
+4. **P1: The TTS narrowing contradicts a settled decision.** The
+   issue requires per-sentence synthesis and playback-pacing spans;
+   the plan's single speaking-window span measures neither, and the
+   seams that distinguish them (`speak_after`, `ReplyPacer.transmit`)
+   already exist. Add catalog events for per-sentence synthesis
+   intervals and a separately bounded pacing interval, tested with
+   lookahead overlapping playback.
+
+5. **P1: Excluding `frames_dropped` contradicts a settled
+   decision.** The capture-side record is already a bounded
+   per-second aggregate, so the high-frequency objection does not
+   apply. Promote the aggregate to a typed catalog variant that both
+   capture and telemetry read; per-frame calls and `vad` stay
+   outside the tap.
+
+6. **P1: Resolved provider context is unavailable at the attachment
+   point.** No catalog event carries the sanitized resolved provider
+   entries (`SessionOpen` does not; the manifest is private to the
+   session edge), so the promised span attributes would need a side
+   channel, violating the one-vocabulary rule. Deepen `SessionOpen`
+   with the sanitized entries and define what handover changes.
+
+7. **P1: No destination for events outside an active turn.**
+   `capture_started` precedes `session_open`, `session_idle` falls
+   between turns, `session_closed` can land with no open turn; the
+   plan defines only turn traces. Define a session-lifecycle trace
+   with turn traces linked rather than parented, and state where
+   pre-turn, between-turn and post-turn events land.
+
+8. **P1: The GenAI mapping omits correspondences the repository
+   already settled.** The conversation-store plan maps `type` to
+   `gen_ai.provider.name` and `host` to `server.address` alongside
+   `model` and usage; the plan kept `type` and `host` vinga-only.
+   Ship the settled mapping; only `provider` (the configured entry
+   name) stays vinga-specific.
+
+9. **P1: The no-leak tests miss the exporter's most dangerous
+   inputs.** Headers, endpoint userinfo, `OTEL_SERVICE_NAME` and
+   automatic resource attributes enter below the catalog, and SDK
+   logs may embed the endpoint. Build a fixed resource from
+   server-owned values, keep endpoint and headers transport-only,
+   install SDK logging protection before construction and restore it
+   at shutdown, and plant sentinels in headers, endpoint userinfo,
+   environment, logs, stderr, exception chains and exported spans
+   during a failed export.
+
+10. **P2: A telemetry `local_only` rule would duplicate the single
+    egress home.** `egress.py` exists because duplicated enforcement
+    diverged. Extend it with a generic declared-egress check the
+    telemetry build invokes before any OTel import or construction,
+    value-free and unchained, with a test that the exporter
+    constructor is never reached under `local_only`.
+
+11. **P2: Tap and tracer lifecycle ownership is incomplete.** The
+    plan names attach and shutdown but not detach, and does not say
+    whether it touches OTel's process-global tracer provider. Attach
+    and register detach in the same breath, order teardown (stop
+    emissions, detach, bounded shutdown), use an owned
+    `TracerProvider`, and test two sequential lifespans and partial
+    startup failure.
+
+12. **P2: The safety tests certify paths they do not exercise, in
+    the wrong milestone.** A blackholed endpoint may fail fast and
+    "indistinguishable" is undefined; hardening is deferred to M3
+    while M1 already exports; the missing-extra test only fakes
+    imports though the tier lane has a real extra-less environment;
+    the supported OTLP protocol set is undefined. Move hardening
+    into the first exporting milestone, add a blocking-exporter
+    saturation test with a fixed per-reply bound, boot the real
+    `[serve]` tier against the genuine refusal, and define the
+    protocol support exactly.
