@@ -16,7 +16,7 @@ which no model here ever carries.
 
 import os
 import re
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from contextvars import ContextVar
 from pathlib import Path
 from types import UnionType
@@ -1790,6 +1790,30 @@ def could_be_inline_secret(name: str, value: object) -> bool:
     if not isinstance(value, (int, float)):
         return True
     return _PARAMETER_NAME_RE.match(name) is None
+
+
+def hides_value(secret_key: Callable[[str], bool], name: str, value: object) -> bool:
+    """Whether a read displaces what one key holds, given the kind's own
+    secret-shaped-name predicate.
+
+    The one home of the composed question, because it has four readers
+    and they have to be the same rule: the display (`views._masked`),
+    the record path beside it, the walk that finds unchanged-value
+    markers in a submitted fragment (`store._masked_paths`), and the
+    resolution of one (`store._keep`). The first version of #444 asked
+    the two halves separately at two of those four, and the two that
+    were left name-only made the mask a keep marker over a value the
+    display had shown in full: `max_completion_tokens: "********"`
+    resubmitted was read as keep-what-is-stored and restored the number,
+    which is the one string this rule refuses being accepted by the door
+    beside the one that refuses it.
+
+    Composed here rather than folded into each descriptor's predicate
+    because the name half differs by kind (a provider option's names are
+    this repository's, an MCP env or header key's are somebody else's)
+    and the value half does not.
+    """
+    return secret_key(name) and could_be_inline_secret(name, value)
 
 
 # What a value stored under such a name renders as, wherever a read
