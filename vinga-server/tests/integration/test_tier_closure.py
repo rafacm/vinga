@@ -860,27 +860,33 @@ def test_telemetry_refuses_from_the_serve_install_without_the_extra(
     the sentence rather than an ImportError traceback out of somebody
     else's package.
 
-    The database is pointed at a port nothing listens on, as every other
-    boot in this file is, and the refusal still has to be the telemetry
-    one: the exporter is built ahead of every resource a boot can open,
-    so a deployment that asked for tracing it cannot have learns that
-    before it learns anything else.
+    The database is this lane's own and reachable, unlike every other
+    boot in this file, and that is deliberate rather than incidental:
+    the domain half is read out of it before the composition is built at
+    all, so a port nothing listens on refuses first and this lane would
+    read the database's sentence instead of the one it is about. With a
+    reachable instance the boot gets as far as the composition, where
+    the exporter is built ahead of every resource, and refuses there
+    without ever binding a port.
     """
     from vinga_server.telemetry import NEEDS_THE_OTEL_EXTRA
 
     finished = _ran(
         serve_env,
         "vinga-server",
-        environment={
-            "VINGA_DB_PORT": NOWHERE_PORT,
-            "VINGA_SERVER__TELEMETRY__ENABLED": "true",
-        },
+        environment={"VINGA_SERVER__TELEMETRY__ENABLED": "true"},
     )
 
     assert finished.returncode == 1, finished.stdout + finished.stderr
-    assert finished.stderr.strip() == NEEDS_THE_OTEL_EXTRA, finished.stderr
+    # The last line and nothing after it. The boot got far enough for
+    # uvicorn to say it was starting, which the refusals earlier in this
+    # file never do, so the sentence is the tail rather than the whole
+    # of stderr; what matters is that it is the last word and that
+    # nothing from underneath it was printed.
+    assert finished.stderr.strip().splitlines()[-1] == NEEDS_THE_OTEL_EXTRA, finished.stderr
     assert "Traceback" not in finished.stderr
     assert "ModuleNotFoundError" not in finished.stderr
+    assert "opentelemetry" not in finished.stderr
 
 
 # The contributor door
