@@ -18,7 +18,7 @@ runtime owns: `device/`, `runtime/` and every server subsystem import
 downward into this module, and it imports none of them. It also stopped
 being a payload factory that call sites logged around and became the thing
 that emits: a site says
-`events.emit(lambda: Heard(agent=..., duration_s=Real(seconds)))`
+`events.emit(lambda: NothingHeard(agent=..., duration_s=Real(seconds)))`
 and the emitter builds the payload, wraps it, and hands it to every
 attached consumer.
 
