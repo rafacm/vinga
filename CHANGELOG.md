@@ -7,6 +7,41 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-09-10
 
+### Added
+
+- **The event catalog speaks the turn's own lifecycle.** Six additions
+  and two deepenings, so a turn can be read off the events instead of
+  inferred from the gaps between them (#66, milestone 1). `turn_started`
+  is emitted at every reply attempt and stamped with the instant the
+  user stopped speaking, which the floor now preserves across the
+  barge-in gate, with `speech_ms` and `barge_in`. `reply_finished` is
+  emitted exactly once per attempt from the reply's `finally`, ahead of
+  any await, carrying `sentences_spoken` and an `outcome` from a closed
+  set (`completed`, `nothing_heard`, `failed`, `barged_in`, `aborted`,
+  `device_gone`) latched at the boundary that ended the reply rather
+  than guessed from a cancellation; `cancel_reply` takes the outcome as
+  an argument, so every canceller names itself. `nothing_heard` makes
+  the empty transcription a first-class event with `duration_s` and
+  `asr_ms` and no text field by type. `sentence_synthesized` reports one
+  synthesis stream per sentence with `first_chunk_ms` (the provider's
+  own latency, measured before backpressure can bite) and `stream_ms`
+  (the whole stream, documented as including playback backpressure).
+  `speaking_finished` closes the interval `speaking_started` opens, at
+  the last frame actually delivered and with how many there were.
+  `heard` gains `asr_ms`, which on an interrupting turn is the latency
+  the barge-in gate measured for the confirmation the turn is reusing.
+  `replied` keeps its present meaning and its present guard.
+
+- **`frames_dropped` is a typed event rather than a capture-only
+  record.** The per-second aggregate of mic frames the edge's guards
+  discard is counted in `SessionEvents` now and emitted through the
+  ordinary seam, so every consumer reads one declaration: the capture's
+  decision track keeps recording it as a tap, and its own aggregate
+  writer is gone. Counting runs whether or not a deployment records
+  anything, where it used to stop at the first line when capture was
+  off, and the session's close flushes the partial second before
+  `session_closed`.
+
 ### Fixed
 
 - **The frame-cadence pin tolerates one sub-cadence gap.** The unit
@@ -19,6 +54,21 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   several consecutive short intervals, proven by mutation.
 
 ### Changed
+
+- **`session_open` and the capture manifest read one provider
+  derivation.** What a session opened against is derived once from the
+  bound generation, per bound agent and per pipeline stage, as the
+  entry's name, its type and, where the type has them, its host and its
+  model (#66). `session_open` carries it; the capture manifest and the
+  conversation store's `sessions.providers` column read the same
+  derivation instead of the manifest's own current-agent serialization
+  of a `ProviderConfig`. Both surfaces therefore gain the other bound
+  agents and the resolved host, and lose the configured options a
+  recorded entry used to carry with its secret-shaped values masked:
+  four names off the built provider is sanitized by construction rather
+  than by remembering to mask. The column comment follows through
+  migration `1005_providers_are_per_agent`; rows written before it keep
+  the shape they were written in.
 
 - **The conversations storage switch is named `telemetry`.**
   `server.conversations.metrics` is now `server.conversations.telemetry`
