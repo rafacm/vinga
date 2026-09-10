@@ -166,7 +166,7 @@ independent of which cloud is on the other end:
 - Mid-sentence thinking pauses fight the endpointer; the trailing
   silence bound decides whose sentence wins.
 - Follow-up timing interacts with reply completion and the barge-in
-  refractory window.
+  gates.
 - Echo behaviour is a property of the device, not the voice: on
   hardware with acoustic echo cancellation the assistant's own voice
   comes back below the ambient floor, whoever is speaking.

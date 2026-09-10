@@ -54,9 +54,8 @@ had spoken it; see prompt echo.
 
 Interrupting the assistant by talking over its reply.
 Speech that endpoints mid-reply passes a gate ladder (minimum speech,
-refractory window, transcript confirmation) before it cancels the
-reply; suppressed attempts are logged with the gate that stopped
-them. The design decision is recorded in
+transcript confirmation) before it cancels the reply; suppressed
+attempts are logged with the gate that stopped them. The design decision is recorded in
 [the barge-in ADR](adr/2026-08-05-replies-cancel-only-on-evidence-of-speech.md).
 
 ### Binding
@@ -200,14 +199,16 @@ session.
 The ordered checks an endpointed utterance passes before it may
 cancel a reply in flight: minimum classified speech (a noise blip
 cancels nothing), a merge when the reply is still inside ASR (that
-reply was transcribing the head of the user's own sentence), the
-refractory period, and transcript confirmation (pause the outgoing
-frames, run ASR, cancel only on a non-empty transcript). Each
-suppressed attempt logs which gate stopped it (`barge_in_suppressed`
-with a reason). In practice: a 32 ms noise blip dies at the speech
-floor and costs nothing, while a real continuation that endpoints
-inside the refractory window dies with it, which is the ladder's
-known cost. The ladder enforces
+reply was transcribing the head of the user's own sentence), and
+transcript confirmation (pause the outgoing frames, run ASR, cancel
+only on a non-empty transcript). Each suppressed attempt logs which
+gate stopped it (`barge_in_suppressed` with a reason). In practice: a
+32 ms noise blip dies at the speech floor and costs nothing, while a
+real continuation reaches the confirmation and cancels the reply it
+was competing with. A refractory period used to sit between the merge
+and the confirmation and dropped those continuations; it was removed
+in 2026-09 once the field showed it caught nothing else. The ladder
+enforces
 [the barge-in ADR](adr/2026-08-05-replies-cancel-only-on-evidence-of-speech.md):
 acoustics alone can at most pause a reply; only evidence of user
 speech cancels it.
@@ -401,9 +402,16 @@ More: [prosody](https://en.wikipedia.org/wiki/Prosody_(linguistics)).
 
 The window right after the assistant starts
 speaking during which barge-in attempts are suppressed, absorbing
-the acoustic aftermath of the user's own previous utterance. One
-rung of the gate ladder; its cost is that a continuation which
-endpoints inside the window is discarded with it.
+the acoustic aftermath of the user's own previous utterance. A
+standard rung of a barge-in gate ladder, and vinga no longer has
+one: measured on the primary board, playback trails the server by
+roughly 760 ms, so a window counted from the server's first
+delivered frame closes while the room has heard a fraction of the
+reply, and nothing reaches that rung without half a second of
+classified speech already behind it. Every suppression it made in
+the field was a user finishing their own sentence, so the rung was
+removed in 2026-09 and an interruption arriving that early takes the
+transcript confirmation like any other.
 
 ### Semantic completeness
 

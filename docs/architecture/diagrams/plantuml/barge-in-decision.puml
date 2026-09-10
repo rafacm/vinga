@@ -77,19 +77,6 @@ partition "The gates, in order" {
   else (no, it is speaking)
   endif
 
-  if (within server.barge_in_refractory_ms of\nthe reply's first audio frame?\n(1000 ms by default)) then (yes)
-    :**Drop it**, keep the reply;<<#F4CCCC>>
-    note right
-      What the microphone hears just after playback
-      starts is as likely the onset transient the
-      board's echo cancellation let through as it is
-      the user.
-      event: barge_in_suppressed, reason = refractory
-    end note
-    stop
-  else (no)
-  endif
-
   :**Pause** the outgoing frame pacing;<<#FFE9C6>>
   note right
     A pause, not a stop. Audio ceases within a frame
@@ -136,7 +123,7 @@ legend right
 |<#F4CCCC> | The utterance is dropped, the reply survives |
 
 Every branch emits a structured event. Those events are what
-the two thresholds get tuned from, and they are the decision
+the speech floor gets tuned from, and they are the decision
 track a session capture writes alongside the stereo WAV, where
 channel 0 is the microphone as received and channel 1 is what
 was paced out to the speaker. Echo leakage is then a

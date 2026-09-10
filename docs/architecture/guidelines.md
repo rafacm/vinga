@@ -232,8 +232,7 @@ capture passes its own synthetic-echo controls
 
 **The owned bucket** is what no framework has: the
 [gate ladder](../glossary.md#gate-ladder) semantics (transcript
-confirmation, merge-mid-ASR, the
-[refractory period](../glossary.md#refractory-period)), the
+confirmation, merge-mid-ASR, the speech floor in front of both), the
 [filler](../glossary.md#conversational-filler) with its
 yield-to-live-speech rule, reason-annotated decision events
 (`barge_in_suppressed` with a reason, `filler_skipped` with a
