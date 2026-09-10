@@ -79,10 +79,15 @@ migration files are frozen history), while the design rule says two
 structures that must agree are one structure with a bug pending.
 Both hold, as follows: a new module,
 `src/vinga_server/conversations/views.py`, is the one home for what
-a view *is*: name, the full output contract (every column with
-type, meaning, units, nullability and formula), the SQL definition,
-the question it answers, its denominator sentence and its
-telemetry-off sentence, as declared data. The migration spells the
+a view *is*: name, the full output contract as a per-column
+declaration matrix (name, type, meaning, units, nullability,
+formula, one entry per column, which is what the docgen renders as
+each view's column table), the SQL definition, the question it
+answers, its denominator sentence and its telemetry-off sentence,
+as declared data. The contract section below freezes names, types
+and the defining formulas; the matrix in `views.py` carries the
+per-column prose the page renders, and a column absent from the
+matrix is a red docgen test, not a blank cell. The migration spells the
 same `CREATE VIEW` statements literally, as frozen history must,
 and an integration test proves agreement: the live definition of
 every declared view (`pg_get_viewdef`, normalized) matches the
@@ -123,27 +128,38 @@ ordered-set aggregates).
 - **`metrics_tokens_daily`**
   `(day date, agent text, turns bigint, input_measured_turns
   bigint, output_measured_turns bigint, input_tokens bigint,
-  output_tokens bigint)`. Attribution: when a turn's `legs` JSON is
-  present, each leg contributes its own `agent` and token counts
-  and the turn-level totals are not counted for that turn (no
-  double counting); when absent, the turn row's `agent` and totals
-  count. `input_measured_turns` and `output_measured_turns` are
-  independent, because the store writes the two usage sums
-  independently and either can be null alone. Question: what did
-  each agent consume. Denominator: the two measured counts, stated
-  separately.
+  output_tokens bigint)`. The attribution row is the unit,
+  defined first: a turn with `legs` present contributes one
+  attribution row per leg (that leg's `agent` and token fields,
+  the turn-level totals not counted for that turn); a turn without
+  `legs` contributes one attribution row from the turn row itself.
+  Then, per (day, agent): `turns` is the count of distinct
+  physical turns owning at least one attribution row in the group;
+  `input_measured_turns` and `output_measured_turns` count
+  attribution rows whose respective token field is non-null,
+  independently, because the store writes the two sums
+  independently; `input_tokens` and `output_tokens` sum the
+  non-null fields. A null leg agent groups as a NULL agent row
+  rather than vanishing. Question: what did each agent consume.
+  Denominator: the two measured counts, stated separately and
+  stated as attribution-row counts.
 - **`metrics_event_rates_daily`**
   `(day date, turns bigint, sessions bigint, provider_failures
   bigint, barge_in_suppressions bigint, provider_failures_per_turn
   double precision, suppressions_per_session double precision)`.
   Numerator predicates, exact: `events.name = 'provider_failed'`
-  for failures; for suppressions, the catalog's suppression event
-  name(s) as `docs/reference/events.md` enumerates the three
-  variants, all reasons counted together, the predicate frozen in
-  `views.py` and proven by the agreement and number tests.
-  Denominators: the day's turns and the day's sessions (by their
-  UTC membership above), joined without multiplication (numerators
-  and denominators aggregate separately and join on day). Rates
+  for failures; `events.name = 'barge_in_suppressed'` with no
+  reason filter for suppressions, since the catalog stores one
+  event name whose three variants differ in `fields.reason`, and
+  all three count. Denominators: the day's turns and the day's
+  sessions (by their UTC membership above). The join shape is
+  frozen: each stream (turns, sessions, failures, suppressions)
+  pre-aggregates to its own daily counts, and the view is a full
+  outer join of those streams over the union of their days, counts
+  coalesced to zero, so a day where events land (dated by
+  `started_at + t_ms`) with no session starting and no turn that
+  day still gets its row, with NULL rates rather than silence; an
+  event-crosses-midnight fixture pins exactly that. Rates
   NULL on zero denominators. The issue's third numerator,
   discarded transcripts, is not derivable from what lands today:
   the prompt-echo discard is a process-wide provider event with no
@@ -466,3 +482,45 @@ faithful; resolutions appended per amendment.
     *Resolution.* Adopted. M1's documentation footprint now names
     the still-open list entry and all three `docs/concepts.md`
     anchors alongside the five-surfaces table rows.
+
+### Delta re-review
+
+External review: codex CLI 0.154.0, model gpt-5.6-terra, read-only
+sandbox, 2026-09-10, runtime 7m20s, reviewing commit fb9844fa.
+Verdict as received: **ready after amendments**; four P2, no P1.
+Findings condensed but faithful. The delta also confirmed the
+source checks: `started_at` is UTC ISO text so the timestamptz
+derivation is appropriate, turns and events both carry
+session-relative `t_ms`, legs have the stated shape, and
+`conversations views` fits the CLI guide.
+
+1. **P2: The suppression predicate was still not exact.** The
+   catalog stores one event name, `barge_in_suppressed`, with the
+   three variants in `fields.reason`.
+
+   *Resolution.* Adopted; the predicate is frozen as
+   `events.name = 'barge_in_suppressed'` with no reason filter.
+
+2. **P2: Token attribution was underspecified for null leg values
+   and the `turns` count.**
+
+   *Resolution.* Adopted. The attribution row is defined as the
+   unit; `turns` counts distinct physical turns; the measured
+   counts are attribution-row counts per non-null field; a null
+   leg agent groups as a NULL agent row.
+
+3. **P2: The event-rate view lacked a day spine and join type,**
+   so an event landing on a day with no sessions or turns could
+   silently vanish.
+
+   *Resolution.* Adopted: pre-aggregated streams, full outer join
+   over the union of days, counts coalesced to zero, NULL rates,
+   and an event-crosses-midnight fixture.
+
+4. **P2: The claimed full contracts lacked per-column meaning,
+   units, nullability and formulas,** which is what let the two
+   ambiguities above survive.
+
+   *Resolution.* Adopted: `views.py` carries a per-column
+   declaration matrix the docgen renders, with a missing entry
+   being a red test.
