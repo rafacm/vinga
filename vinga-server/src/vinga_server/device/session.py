@@ -832,11 +832,13 @@ class DeviceSession:
         session was held against and one made after states no such key,
         and the `server.revision` beside them says which gates each ran.
         A null would claim this session had the gate and left it
-        unbounded. The provider entries are the world's
-        own sanitized derivation (`_provider_manifest` below): four
-        names off each built provider, the exact model string among
-        them, because that string is the only handle on a hosted model
-        whose behaviour changed without a version bump on this side.
+        unbounded.
+
+        The provider entries are the world's own sanitized derivation
+        (`_provider_manifest` below): four names off each built
+        provider, the exact model string among them, because that
+        string is the only handle on a hosted model whose behaviour
+        changed without a version bump on this side.
         Nothing else off a provider's configuration reaches it, so a
         credential has no way in rather than being masked on the way
         past.
