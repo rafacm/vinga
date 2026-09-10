@@ -994,8 +994,17 @@ The image lanes are **not verifiable locally** and were not run: the
 Dockerfile's two variants and the extras-import checks are built and
 executed by the `image` job in CI, which needs a builder this worktree
 does not have. What was changed there is three lines of build arguments
-and three import invocations, and the first CI run on the PR is what
-proves them.
+and three import invocations.
+
+**The pull request's own CI run does not prove them.** The `image` job
+carries `if: github.event_name != 'pull_request'`, so every run
+triggered by the PR skips it, and a record claiming a green PR run as
+the evidence would have been claiming a job that never executed. What
+proves them is a `workflow_dispatch` run of the server workflow against
+this branch, which builds both variants and executes both import checks.
+That run is the coordinator's to make; its link is recorded on the PR
+beside this milestone's verification, and until it is there this
+milestone's image half is unverified and says so.
 
 Re-run whole after the rebase onto M2's merged review chain, which is
 the run that governs: `ruff check .` all checks passed, `mypy` success
