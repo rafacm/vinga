@@ -916,4 +916,20 @@ since the abandoned transcription became a stage span.
 
 ### Verification
 
-Recorded at the foot of this section after the full run.
+`uv run ruff check .`: all checks passed. `uv run mypy`: success, no
+issues in 5 source files. `uv run pytest tests/unit -q -n auto --dist
+loadfile`: 6039 passed, 19 skipped, with the command-spellings census
+regenerated afterwards for the changelog's new lines and green on the
+rerun. `uv run pytest tests/integration -q`: 259 passed in 385 s. The
+five generated-document drift checks (`events reference`, `conversations
+schema`, `config reference`, `config reference server`, `config openapi`,
+plus the generated region of `cli.md`) all diff clean against the
+committed copies, and `scripts/check_doc_links.py` checked 216 files
+with 0 failures.
+
+The image lanes are **not verifiable locally** and were not run: the
+Dockerfile's two variants and the extras-import checks are built and
+executed by the `image` job in CI, which needs a builder this worktree
+does not have. What was changed there is three lines of build arguments
+and three import invocations, and the first CI run on the PR is what
+proves them.
