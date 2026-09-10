@@ -195,7 +195,7 @@ From `vinga-server/`, with the worktree's own Postgres up
   runs: 6187 passed, 19 skipped.
 - `uv run pytest tests/integration -q`: 282 passed.
 
-Three pins, and how each was proven to bite.
+Four pins, and how each was proven to bite.
 
 - **The regression, end to end**
   (`tests/unit/test_endpointer_echo.py`). A reply runs while the room
@@ -205,12 +205,24 @@ Three pins, and how each was proven to bite.
   diagnosed it, and a synthetic tone tells a real model nothing. What
   the double reproduces is the one property that matters, that audio
   already fed decides what the next window is heard as; its accounting
-  underneath is the real `EnergyEndpointer`'s. **Mutation-proved** by
-  deleting the `forget_reply_audio()` line from the pipeline's `finally`
-  (the file copied aside first, restored by copy plus `touch`, never
-  `git checkout`): the pin fails with "the answer was not heard",
-  `speech_ms` 0.0, and its 36 neighbours in `test_turntaking.py`,
-  `test_providers_silero.py` and `test_turn_lifecycle.py` all pass.
+  underneath is the real `EnergyEndpointer`'s.
+
+  The concurrency is real and measured, which the first review round
+  found it was not. The test waits for `speaking_started_at()` before it
+  feeds anything, so the device is being sent this reply when the room
+  starts handing it back; the echo goes in at frame cadence rather than
+  in a burst, because 40 frames of bytes finish in under a millisecond
+  and would land between two of the pacer's frames; and every frame of
+  it asserts the reply is still in flight. Measured on the run: 1 reply
+  frame had gone out when the echo began and 15 when it ended, so 14 of
+  the assistant's frames reached the device while its echo came back.
+
+  **Mutation-proved** by removing the `forget_reply_audio()` call from
+  the pipeline's `finally` (the file copied aside first, restored by
+  copy plus `touch`, never `git checkout`): the pin fails with "the
+  answer was not heard", `speech_ms` 0.0. Across the five files the
+  mutation touches, that pin and the tail pin below are the two that
+  fail and the other 54 tests pass.
 - **The #80 boundary**
   (`tests/unit/test_turntaking.py::test_the_replys_audio_is_forgotten_and_the_user_is_not`).
   A reply ending under a user who is mid-sentence leaves every byte of
