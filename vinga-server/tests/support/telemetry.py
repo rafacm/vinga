@@ -26,6 +26,7 @@ from vinga_server.events.catalog import (
     SessionClosed,
     SessionIdle,
     SessionOpen,
+    TranscriptionAbandoned,
     TurnStarted,
 )
 from vinga_server.events.values import (
@@ -193,6 +194,19 @@ def finish_reply(
             conversation=ConversationId(CONVERSATION),
             outcome=outcome,
             sentences_spoken=Count(sentences),
+        )
+    )
+
+
+def abandon_transcription(events: SessionEvents) -> float:
+    """The fourth way an ASR stage ends, which arrives inside a turn:
+    the reply was cancelled with the transcription still running."""
+    return events.emit(
+        lambda: TranscriptionAbandoned(
+            agent=Identifier(AGENT),
+            conversation=ConversationId(CONVERSATION),
+            duration_s=Real(0.9),
+            asr_ms=Whole(140),
         )
     )
 
