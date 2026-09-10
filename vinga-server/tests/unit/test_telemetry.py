@@ -39,8 +39,8 @@ from tests.support.telemetry import (
     DEVICE,
     SESSION,
     Clock,
-    abandon_transcription,
     assemble_prompt,
+    barge_in,
     capture_emitter,
     capture_started,
     close_session,
@@ -524,13 +524,14 @@ def test_a_session_that_opened_against_nothing_says_nothing() -> None:
 def test_a_variant_the_span_map_does_not_name_folds_onto_the_turn() -> None:
     """The fold is a default and not a list, and this is what says so.
 
-    `transcription_abandoned` arrived after this module was written (the
-    fourth way an ASR stage ends, from PR #442's review round) and lands
-    inside a turn. Nothing here enumerates ASR outcomes, so it needs no
-    row: it folds as an ordinary span event onto the turn being
-    abandoned, carrying the fields the catalog gave it. An
-    implementation that had listed the events it knew would have dropped
-    this one silently, which is exactly the failure this pins.
+    `barge_in` is a variant no row in the span map names and none ever
+    will: it opens and closes nothing, so it belongs on the turn it
+    interrupted with the fields the catalog gave it. An implementation
+    that had enumerated the events it knew would drop every variant the
+    catalog grew after it was written, in silence, and the catalog
+    grows: `transcription_abandoned` arrived after this module was
+    first written and was carried by this same default until M3 gave
+    the ASR stage a span of its own (`test_telemetry_spans.py`).
     """
     clock = Clock()
     telemetry, memory = exporting()
@@ -539,15 +540,15 @@ def test_a_variant_the_span_map_does_not_name_folds_onto_the_turn() -> None:
     open_session(events)
     start_turn(events)
     clock.tick(0.2)
-    abandon_transcription(events)
+    barge_in(events)
     clock.tick(0.1)
     finish_reply(events, outcome=ReplyOutcome.BARGED_IN, sentences=0)
     close_session(events)
 
     spans = finished(telemetry, memory)
     turn = named(spans, "turn")
-    assert [event.name for event in turn.events] == ["transcription_abandoned"]
-    assert turn.events[0].attributes["asr_ms"] == 140
+    assert [event.name for event in turn.events] == ["barge_in"]
+    assert turn.events[0].attributes["speech_ms"] == 700
     assert named(spans, "session").events == ()
 
 

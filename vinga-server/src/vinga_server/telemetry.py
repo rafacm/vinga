@@ -164,11 +164,12 @@ SERVICE = "vinga-server"
 
 # --- the span map -----------------------------------------------------
 #
-# M2 maps four events onto the trace's shape and folds everything else
-# onto whichever span is open. M3 extends this table with the stage
-# spans (ASR, each LLM round, per-sentence TTS, paced playback) and the
-# rest of the fold; the four names below are what a stage span will hang
-# between, so they are declared as names rather than compared inline.
+# Twelve event names have a shape of their own and everything else folds
+# onto whichever span is open. That default is the design rather than a
+# shortcut: an exporter that enumerated the events it knew would drop
+# every variant the catalog grew after it was written, in silence, and
+# the catalog grows. A name appears below only because a SPAN has to be
+# constructed for it, never because the event is interesting.
 
 SESSION_OPEN = "session_open"
 SESSION_CLOSED = "session_closed"
@@ -180,10 +181,48 @@ CAPTURE_STARTED = "capture_started"
 # spans after it carry: it moves which agent a turn is stamped from.
 HANDOVER = "handover"
 
+# The four ways an utterance's ASR stage ends, which is the closed set
+# the catalog declared in M1 and its PR round: it answered, it answered
+# nothing, the engine failed, or the answer stopped being wanted. Each
+# ends one ASR span, and the one that is a failure is the only one whose
+# span says so.
+HEARD = "heard"
+NOTHING_HEARD = "nothing_heard"
+PROVIDER_FAILED = "provider_failed"
+TRANSCRIPTION_ABANDONED = "transcription_abandoned"
+
+# The stage a `provider_failed` has to name to be an ASR outcome. Every
+# other stage's failure folds as an ordinary span event onto the turn,
+# which is where a failed generation or a failed voice belongs: the LLM
+# and TTS spans are built from the events that SUCCEEDED, and a span
+# built from a failure would claim an interval nobody measured.
+ASR_STAGE = "asr"
+
+LLM_ROUND = "llm_round"
+SENTENCE_SYNTHESIZED = "sentence_synthesized"
+SPEAKING_STARTED = "speaking_started"
+SPEAKING_FINISHED = "speaking_finished"
+
 # What a span is called in a backend's list. Deliberately short: the
 # service name is beside them, and a backend groups by these.
+#
+# `tts_stream` rather than `tts` or anything with "synthesis" in it,
+# which is the one name here that had to be argued for. The span's
+# extent is the synthesis stream's whole lifetime, and a paced consumer
+# holds that stream open: the interval INCLUDES playback backpressure,
+# so calling it synthesis would be false in exactly the way the catalog
+# refused to be false when it named `stream_ms`. The provider's own
+# latency, the number that is backpressure-free, is the attribute.
 SESSION_SPAN = "session"
 TURN_SPAN = "turn"
+ASR_SPAN = "asr"
+LLM_SPAN = "llm"
+TTS_SPAN = "tts_stream"
+PLAYBACK_SPAN = "playback"
+
+# The two span events a stage span carries in its middle, named for the
+# instant rather than for the field the instant was derived from.
+FIRST_TOKEN = "first_token"
 
 # The payload keys the emitter itself contributes, which are the two
 # identities every session event carries.
@@ -201,9 +240,9 @@ _IDENTITIES = frozenset({EVENT_FIELD, SESSION_FIELD, DEVICE_FIELD})
 # carries is a decision, and the events reference is where the field it
 # came from is documented.
 #
-# The prefix is vinga's own. M3 adds the settled `gen_ai.*`
-# correspondence beside it on the stage spans, where those attributes
-# have a meaning; nothing on these two spans is a GenAI fact.
+# The prefix is vinga's own. The settled `gen_ai.*` correspondence sits
+# on the LLM round span below, where those attributes have a meaning;
+# nothing on these two spans is a GenAI fact.
 SESSION_ATTRIBUTES = {
     SESSION_FIELD: "vinga.session.id",
     DEVICE_FIELD: "vinga.device.id",
@@ -434,6 +473,103 @@ def _as_attribute(held: Any, shape: Shape) -> Any | None:
         return json.dumps(held, sort_keys=True, separators=(",", ":"))
     return None
 
+
+# --- what each stage span carries -------------------------------------
+#
+# Every one of these tables is read by `_attributes`, which is the same
+# declared-shape gate the span events go through: a name here is a
+# REQUEST to export a declared field under a vinga name, and a field the
+# catalog does not declare for that event contributes nothing however
+# this table spells it. So there is one answer in this module to what a
+# payload field may become on a span, and the stage spans are inside it
+# rather than beside it.
+
+# The ASR span, whose four ends carry four overlapping field sets. One
+# table for all of them, because a field a given outcome does not carry
+# contributes nothing: `language` is only on `heard`, `error` only on the
+# failure, and `duration_s` (how long the user spoke) on three of the
+# four.
+#
+# `error` is the exception's CLASS NAME and the catalog is what makes
+# that structural: `ClassName` is built from the exception itself and
+# there is no value in that vocabulary a message could be constructed
+# as. Nothing else of a provider's failure reaches a span.
+ASR_ATTRIBUTES = {
+    "duration_s": "vinga.asr.duration_s",
+    "language": "vinga.asr.language",
+    "language_confidence": "vinga.asr.language_confidence",
+    "error": "vinga.asr.error",
+}
+
+# Which of the four ended, as the event's own name. The set is closed by
+# the catalog rather than by a second vocabulary here: these are the
+# four variants, spelled the way the events reference spells them.
+ASR_OUTCOME = "vinga.asr.outcome"
+
+# How long each outcome says its transcription ran, which is what the
+# span's start is measured back from. Two different fields for the same
+# question, because the catalog asks it twice: three of the outcomes
+# carry `asr_ms`, and a provider failure carries the call's own
+# `duration_ms` like every other provider failure does.
+ASR_LENGTH = {
+    HEARD: "asr_ms",
+    NOTHING_HEARD: "asr_ms",
+    TRANSCRIPTION_ABANDONED: "asr_ms",
+    PROVIDER_FAILED: "duration_ms",
+}
+
+# The LLM round span, and the settled correspondence table shipped
+# exactly (the conversation-store plan's, adopted by this issue's plan
+# review): four GenAI keys, one `server.address`, and `provider`, the
+# CONFIGURED ENTRY NAME, which is the one fact in the row that is
+# vinga's own word rather than the conventions'. A backend that knows
+# nothing about this project reads the five; an operator who has to find
+# the entry in a configuration file reads the sixth.
+#
+# `round` and `turns` are beside them and vinga's, because neither is a
+# GenAI fact: a round counts this reply's generations, including the one
+# after a handover, and `turns` is the cheap proxy for payload size.
+#
+# The entry name is spelled the way the retained provider context spells
+# it (`vinga.provider.llm.name`) rather than under a name of this
+# table's own. One fact, one attribute name, wherever it is read from:
+# the session and turn spans carry what the session OPENED against, and
+# this carries what the round that answered actually ran on, which is
+# the same question asked of a narrower thing. A second spelling would
+# have been a second home for the same fact, and a backend filtering on
+# it would have had to know which span it was looking at. `llm_round` is
+# emitted only for the LLM stage, so the stage segment is a constant
+# here rather than a field read.
+LLM_ATTRIBUTES = {
+    "type": "gen_ai.provider.name",
+    "model": "gen_ai.request.model",
+    "host": "server.address",
+    "input_tokens": "gen_ai.usage.input_tokens",
+    "output_tokens": "gen_ai.usage.output_tokens",
+    "provider": f"{PROVIDER_PREFIX}.llm.name",
+    "agent": "vinga.agent",
+    "round": "vinga.llm.round",
+    "turns": "vinga.llm.turns",
+}
+
+# The per-sentence TTS span. The stream's lifetime is the span's own
+# extent and is deliberately not repeated as an attribute; what IS an
+# attribute is the number the extent cannot state, the provider's
+# latency to its first audio chunk, measured producer-side before
+# backpressure can bite.
+TTS_ATTRIBUTES = {
+    "index": "vinga.tts.index",
+    "first_chunk_ms": "vinga.tts.first_chunk_ms",
+    "agent": "vinga.agent",
+}
+
+# The paced-playback span, bounded by two real deliveries: the first
+# frame out and the last frame out. Its count comes from the event that
+# closes it.
+PLAYBACK_ATTRIBUTES = {
+    "frames": "vinga.playback.frames",
+    "agent": "vinga.agent",
+}
 
 # How many sessions may have a `capture_started` waiting for their
 # `session_open`. The capture's event is a server-channel one and beats
@@ -853,20 +989,56 @@ def _attributes(payload: dict[str, Any], table: dict[str, str]) -> dict[str, Any
     return attributes
 
 
+def _before(end: int, ms: Any) -> int:
+    """The instant `ms` milliseconds before `end`, or `end` itself where
+    the event carried no number.
+
+    Which is the whole of the retrospective construction: a stage is
+    never watched while it runs, and a span is assembled at the instant
+    it ENDED out of the duration the pipeline already measured. An event
+    that measured nothing gets a span with no extent rather than an
+    invented one: a point in the trace, saying the stage ended here and
+    declining to say when it began.
+    """
+    if isinstance(ms, bool) or not isinstance(ms, int | float):
+        return end
+    return end - int(ms * 1_000_000)
+
+
+def _after(start: int, ms: Any) -> int | None:
+    """The instant `ms` milliseconds after `start`, or nothing.
+
+    Nothing where the event carried no number, which is a real answer
+    rather than a missing one: a round that only asked for a tool timed
+    no spoken token, and a span event at the round's own start would say
+    the first token arrived instantly.
+    """
+    if isinstance(ms, bool) or not isinstance(ms, int | float):
+        return None
+    return start + int(ms * 1_000_000)
+
+
 @dataclass
 class _SessionTrace:
-    """One device session's place in the trace, and the context its
-    spans are stamped from.
+    """One device session's place in the trace, the spans open inside
+    it, and the context they are stamped from.
 
     `providers` is what `session_open` said this conversation opened
     against, for every agent the device is bound to, and `agent` is the
     one talking right now, which `handover` moves. Between them they are
     what lets a turn span carry the providers that turn actually ran on
     without the exporter needing a fact no event gave it.
+
+    `playback` is the one stage span held here rather than constructed
+    whole, because it is the one interval the pipeline does not measure:
+    the two deliveries that bound it are two events, and what is kept
+    between them is the span they bound. Every other stage span is
+    assembled at the instant it ended and never held.
     """
 
     span: Any
     turn: Any | None = None
+    playback: Any | None = None
     providers: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
     agent: str | None = None
 
@@ -890,10 +1062,19 @@ class Telemetry:
         # span the root of a trace of its own, and the link that puts
         # such a root beside the session it belongs to.
         from opentelemetry.context import Context
-        from opentelemetry.trace import Link
+        from opentelemetry.trace import Link, Status, StatusCode, set_span_in_context
 
         self._root = Context
         self._link = Link
+        # What makes a stage span a CHILD of the turn it happened in,
+        # where the turn is itself the root of a trace of its own. A
+        # stage span is not linked the way a turn is: an ASR call is
+        # part of its turn, where a turn is only part of its session.
+        self._within = set_span_in_context
+        # The one status a span here ever sets, and it sets no
+        # description with it: a description is prose, and the only
+        # prose a failure has is the far side's message.
+        self._failed = Status(StatusCode.ERROR)
         self._provider = provider
         self._tracer = provider.get_tracer(SERVICE)
         self._quieted = quieted
@@ -919,6 +1100,25 @@ class Telemetry:
         # before it detaches anything, so a session still talking while
         # the server tears down cannot open a span nothing will close.
         self._accepting = True
+        # The whole span map, as one table read once per emission. A
+        # name is here because a span has to be CONSTRUCTED for it;
+        # everything the catalog declares and everything it will declare
+        # next falls through to the default, which is a span event on
+        # whichever span is open.
+        self._folds: dict[str, Callable[[str, Emission], None]] = {
+            SESSION_OPEN: self._open_session,
+            SESSION_CLOSED: self._close_session,
+            TURN_STARTED: self._open_turn,
+            REPLY_FINISHED: self._close_turn,
+            HEARD: self._asr_span,
+            NOTHING_HEARD: self._asr_span,
+            TRANSCRIPTION_ABANDONED: self._asr_span,
+            PROVIDER_FAILED: self._provider_failed,
+            LLM_ROUND: self._llm_span,
+            SENTENCE_SYNTHESIZED: self._tts_span,
+            SPEAKING_STARTED: self._open_playback,
+            SPEAKING_FINISHED: self._close_playback,
+        }
 
     # --- what the composition and the device edge ask for -------------
 
@@ -1110,19 +1310,13 @@ class Telemetry:
         session = payload.get(SESSION_FIELD)
         if not isinstance(session, str):
             return
-        if name == SESSION_OPEN:
-            self._open_session(session, emission)
-        elif name == SESSION_CLOSED:
-            self._close_session(session, emission)
-        elif name == TURN_STARTED:
-            self._open_turn(session, emission)
-        elif name == REPLY_FINISHED:
-            self._close_turn(session, emission)
-        else:
-            # Everything else is a span event, on the turn being spoken
-            # when one is open and on the session otherwise. This is the
-            # row M3 replaces for the events that become stage spans.
-            self._span_event(session, emission)
+        if not isinstance(name, str):
+            return
+        # The table where a span has to be built, and a span event on
+        # whichever span is open everywhere else. The default is what
+        # keeps this from having to be revisited every time the catalog
+        # grows a variant.
+        self._folds.get(name, self._span_event)(session, emission)
 
     def _server_event(self, emission: Emission) -> None:
         """One server-scoped event, folded where it belongs.
@@ -1191,6 +1385,7 @@ class Telemetry:
             # left unended and never exported, which is the same posture
             # a lost batch queue takes.
             trace.turn = None
+            trace.playback = None
         trace.span.set_attributes(
             _attributes(emission.payload, SESSION_CLOSE_ATTRIBUTES)
         )
@@ -1225,8 +1420,180 @@ class Telemetry:
         if trace is None or trace.turn is None:
             return
         turn, trace.turn = trace.turn, None
+        # A playback span still open when the reply finished is dropped
+        # rather than ended here. `speaking_finished` is emitted before
+        # either cancellable send and whenever a frame was delivered at
+        # all, so reaching this means no last frame was ever seen, and
+        # ending the interval at the reply's own end would put the
+        # reply's tail inside a span the reference calls first frame out
+        # to last frame out. The unended span is never exported, which is
+        # the posture a lost turn already takes.
+        trace.playback = None
         turn.set_attributes(_attributes(emission.payload, TURN_FINISHED_ATTRIBUTES))
         turn.end(end_time=self._at(emission))
+
+    # --- the stage spans ----------------------------------------------
+    #
+    # Each is constructed retrospectively out of the event that ENDED
+    # it, which is what lets a trace be assembled from a tap that
+    # watches nothing: the pipeline already measured every interval
+    # below, and the exporter's arithmetic is one subtraction against
+    # the one offset. A stage whose turn is not open falls through to
+    # the span-event fold, so nothing is ever silently dropped.
+
+    def _asr_span(self, session: str, emission: Emission) -> None:
+        """One transcription, however it ended.
+
+        Four outcomes and one span, because they are four ends of one
+        stage rather than four stages: what differs is the outcome
+        attribute, whether the span is marked failed, and which field
+        says how long the call ran. An empty transcript gets a real span
+        with a real duration and an outcome that says nothing was heard,
+        which is the whole of the issue's motivating gap.
+        """
+        trace = self._sessions.get(session)
+        if trace is None or trace.turn is None:
+            self._span_event(session, emission)
+            return
+        payload = emission.payload
+        outcome = payload.get(EVENT_FIELD)
+        end = self._at(emission)
+        attributes = _attributes(payload, ASR_ATTRIBUTES)
+        # The one attribute on any span here that is not a payload
+        # field: which of the four ends this was, which is the event's
+        # own NAME rather than anything the event carried. It goes on
+        # after the declared-shape gate because there is nothing for
+        # that gate to check, the value being one of four strings this
+        # module names itself.
+        attributes[ASR_OUTCOME] = outcome
+        span = self._tracer.start_span(
+            ASR_SPAN,
+            context=self._within(trace.turn),
+            attributes=attributes,
+            start_time=_before(end, payload.get(ASR_LENGTH.get(str(outcome), ""))),
+        )
+        if outcome == PROVIDER_FAILED:
+            # The only stage span that is ever marked failed, and the
+            # only one of the four ASR outcomes that IS a failure:
+            # nothing failed when a transcript came back empty, and
+            # nothing failed when the answer stopped being wanted.
+            span.set_status(self._failed)
+        span.end(end_time=end)
+
+    def _provider_failed(self, session: str, emission: Emission) -> None:
+        """A provider failure, which is an ASR outcome or a span event.
+
+        The stage is what decides. An ASR failure ends the turn's ASR
+        stage and is one of its four ends; an LLM or TTS failure ends no
+        interval this exporter draws, because the LLM and TTS spans are
+        built from the rounds and the streams that finished, so it folds
+        onto the turn with the fields the catalog gave it.
+        """
+        if emission.payload.get("stage") == ASR_STAGE:
+            self._asr_span(session, emission)
+            return
+        self._span_event(session, emission)
+
+    def _llm_span(self, session: str, emission: Emission) -> None:
+        """One generation, with the settled GenAI vocabulary on it.
+
+        The span carries the correspondence table exactly and nothing
+        else of the provider: what a backend reads is the provider type,
+        the model, the host, and the two token counts, under the keys
+        the conventions chose for them, plus the configured entry's name
+        under vinga's own.
+
+        `first_token_ms` becomes a span event inside the round rather
+        than an attribute beside it, because it is an INSTANT: a backend
+        that draws a span draws it, and the gap between the round's
+        start and that mark is the number a stalled reply is diagnosed
+        by. A round that only asked for a tool timed no spoken token and
+        gets no mark, which is a fact about the round rather than a
+        missing measurement.
+        """
+        trace = self._sessions.get(session)
+        if trace is None or trace.turn is None:
+            self._span_event(session, emission)
+            return
+        payload = emission.payload
+        end = self._at(emission)
+        start = _before(end, payload.get("duration_ms"))
+        span = self._tracer.start_span(
+            LLM_SPAN,
+            context=self._within(trace.turn),
+            attributes=_attributes(payload, LLM_ATTRIBUTES),
+            start_time=start,
+        )
+        first_token = _after(start, payload.get("first_token_ms"))
+        if first_token is not None:
+            span.add_event(FIRST_TOKEN, timestamp=first_token)
+        span.end(end_time=end)
+
+    def _tts_span(self, session: str, emission: Emission) -> None:
+        """One sentence's synthesis stream, named for what it is.
+
+        The extent is `stream_ms`, the stream's whole lifetime, which
+        includes however long the paced consumer held the provider: the
+        buffer holds one chunk, so playback decides when the next one is
+        asked for, and pure synthesis time is unobservable for a
+        streaming voice. That is why the span is not called synthesis
+        and why the duration is not repeated as an attribute under a
+        name that would claim to be one.
+
+        `first_chunk_ms` is the number that IS the provider's: measured
+        producer-side before backpressure can bite, and therefore an
+        attribute a backend can compare across voices.
+        """
+        trace = self._sessions.get(session)
+        if trace is None or trace.turn is None:
+            self._span_event(session, emission)
+            return
+        payload = emission.payload
+        end = self._at(emission)
+        span = self._tracer.start_span(
+            TTS_SPAN,
+            context=self._within(trace.turn),
+            attributes=_attributes(payload, TTS_ATTRIBUTES),
+            start_time=_before(end, payload.get("stream_ms")),
+        )
+        span.end(end_time=end)
+
+    def _open_playback(self, session: str, emission: Emission) -> None:
+        """The paced interval opens at the first frame that reached the
+        device.
+
+        The one stage span with two ends, because it is the one interval
+        the pipeline hands over as two instants rather than as a
+        duration. Both are real deliveries: `speaking_started` is
+        stamped at the first successful delivery and `speaking_finished`
+        at the last, so what this bounds is what the pacer paces and not
+        the reply's whole life.
+        """
+        trace = self._sessions.get(session)
+        if trace is None or trace.turn is None or trace.playback is not None:
+            self._span_event(session, emission)
+            return
+        trace.playback = self._tracer.start_span(
+            PLAYBACK_SPAN,
+            context=self._within(trace.turn),
+            attributes=_attributes(emission.payload, PLAYBACK_ATTRIBUTES),
+            start_time=self._at(emission),
+        )
+
+    def _close_playback(self, session: str, emission: Emission) -> None:
+        """The last frame out, and the count of everything that went.
+
+        The count is the reply's, kept across a handover: what the
+        interval bounds is one reply's audio, however many agents
+        produced it.
+        """
+        trace = self._sessions.get(session)
+        if trace is None or trace.playback is None:
+            self._span_event(session, emission)
+            return
+        span, trace.playback = trace.playback, None
+        span.set_attributes(_attributes(emission.payload, PLAYBACK_ATTRIBUTES))
+        span.end(end_time=self._at(emission))
 
     def _span_event(self, session: str, emission: Emission) -> None:
         """One event that opens and closes nothing, on whichever span is
