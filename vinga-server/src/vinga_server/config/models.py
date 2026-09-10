@@ -794,7 +794,7 @@ class TelemetryConfig(BaseModel):
             "Whether this server exports traces over OTLP. Off by default, so a "
             "section left in a configuration file exports nothing until somebody "
             "says it should. With it on, the OpenTelemetry packages have to be "
-            "installed (the `otel` extra, which both published images carry) and "
+            "installed (the `otel` extra) and "
             "the boot is refused if they are not; the collector's address comes "
             "from `OTEL_EXPORTER_OTLP_ENDPOINT`. A server whose telemetry is off "
             "constructs no exporter, starts no thread and does no per-event work."
