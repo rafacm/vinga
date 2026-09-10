@@ -176,3 +176,54 @@ tests/integration -q`: 245 passed. The five generated-document drift
 checks (`events reference`, `conversations schema`, `config reference`,
 `config reference server`, `config openapi`) all diff clean against the
 committed copies.
+
+### PR review round
+
+External review of PR #442, sol, four findings, verdict mergeable after
+fixes. Each is recorded with what the fix did, because two of them
+changed the catalog and one changed an interval's meaning.
+
+1. **P1: a mid-ASR merge left the interrupted turn with no ASR
+   outcome.** The merge cancels the reply while its `transcribe` call
+   is still running, and `_watching` reports an `Exception` rather than
+   a cancellation, so that turn opened with `turn_started`, closed with
+   `reply_finished` and said nothing about the stage between them.
+   Fixed by declaring the fourth way an ASR stage ends,
+   `transcription_abandoned`, with the utterance's length and how long
+   the call had been running when it was given up on, emitted where the
+   cancellation is caught beside the call. Deliberately not
+   `provider_failed`: nothing failed, the answer was no longer wanted,
+   and a record naming a provider would send an operator looking at a
+   network. The reference, the README index and a hundredth baseline
+   driver move with it, and a real-runtime mid-ASR merge test asserts
+   both turns' sequences whole.
+
+   This narrows the plan's "every `turn_started` is followed by exactly
+   one of the three": there are four, and the fourth is the one that
+   says the stage was cut short.
+
+2. **P1: a disconnect while showing the transcript dropped a completed
+   ASR outcome.** `heard` was emitted after `show_transcript`, which is
+   a socket call, so a transcription that succeeded and a disconnect a
+   millisecond later ended the turn `device_gone` with no ASR outcome at
+   all. Fixed as prescribed: the record is made where the result is
+   classified, ahead of any await, and a disconnect test asserts the
+   turn's sequence is exactly `turn_started`, `heard`, `reply_finished`.
+
+3. **P2: the playback window opened before the first frame reached the
+   device.** `speaking_started` was emitted where a batch was handed to
+   the pacer, so the frame's slot in the cadence, a confirmation's
+   pause and the send itself all fell inside an interval the reference
+   calls first frame out to last frame out, while `speaking_finished`
+   closes it at a real delivery. Fixed as prescribed: `transmit`
+   answers the instant of the first successful delivery and the edge
+   emits the event retrospectively at that stamp; `first_frame` is
+   gone. A test holds the first delivery and proves the event is not
+   stamped early, and the characterization pin that used to assert the
+   old order moves with a note saying which order is now correct and
+   why.
+
+4. **P3: the manifest docstring described the removed serialization.**
+   Updated to the sanitized per-agent derivation: four names off each
+   built provider, nothing to hold an environment variable name and
+   nothing to mask.
