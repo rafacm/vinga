@@ -38,7 +38,7 @@ from vinga_server.providers import (
     build_world,
 )
 from vinga_server.providers.base import TtsProvider, VadProvider
-from vinga_server.providers.mock import MockAsr
+from vinga_server.providers.mock import MockAsr, MockTts
 from vinga_server.runtime.prompt import GuidanceBlock
 from vinga_server.tools.mcp import McpServers
 
@@ -270,6 +270,98 @@ class BrokenStreamingTts(TtsProvider):
     async def synthesize(self, text: str) -> AsyncIterator[bytes]:
         raise RuntimeError("the voice service refused")
         yield b""
+
+
+# --- entries whose identity and configuration a test chooses ----------
+#
+# Both stages, and both in one section, because what they are for is one
+# claim in two halves: an event that names a configured entry has to
+# name THIS entry, and the configuration that entry was built from must
+# not ride along with the name. So each carries a full identity, the
+# four names distinguishable from each other and from the other stage's,
+# and a credential beside them of the kind a real entry authenticates
+# with.
+
+
+# Eight values, no two alike, so a record's every field has exactly one
+# place it could have come from: a swap between two positions of one
+# quartet and a swap between the two stages are both failures rather
+# than coincidences. `OTHER_EARS` is a second entry at the ASR stage,
+# for the suites where two agents have to hear through different ones.
+EARS = ProviderIdentity(
+    stage="asr",
+    name="ears",
+    type="whisperish",
+    host="ears.example.com",
+    model="tiny-en-3",
+)
+VOICE = ProviderIdentity(
+    stage="tts",
+    name="voice",
+    type="speakish",
+    host="voice.example.com",
+    model="baritone-2",
+)
+OTHER_EARS = ProviderIdentity(
+    stage="asr",
+    name="spare-ears",
+    type="listenish",
+    host="spare.example.com",
+    model="large-v9",
+)
+
+
+class IdentifiedAsr(MockAsr):
+    """The mock ears stamped the way the registry stamps a real entry,
+    holding the credential that entry was configured with.
+
+    `hold_from` is the interruption case: from that call onwards a
+    transcription announces that it started and then waits to be
+    released, which is how a test suspends a barge-in confirmation over
+    a handover it drives itself.
+    """
+
+    def __init__(
+        self,
+        identity: ProviderIdentity,
+        text: str = "hello there",
+        secret: str = "",
+        hold_from: int | None = None,
+    ) -> None:
+        super().__init__(text=text)
+        self.identity = identity
+        # The whole configuration on the object, the credential among
+        # it, exactly as a real provider holds the key it authenticates
+        # with. What a record may carry is decided by the four names an
+        # identity holds and never by what the object does.
+        self.api_key = secret
+        self.options = {"api_key": secret, "text": text}
+        self.calls = 0
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self._hold_from = hold_from
+
+    async def transcribe(
+        self, pcm: bytes, sample_rate: int, language_hint: str | None = None
+    ) -> AsrResult:
+        self.calls += 1
+        if self._hold_from is not None and self.calls >= self._hold_from:
+            self.started.set()
+            await self.release.wait()
+        return await super().transcribe(pcm, sample_rate, language_hint)
+
+
+class IdentifiedTts(MockTts):
+    """The mock voice, stamped and configured the way `IdentifiedAsr`
+    is. Trimmed so a sentence is a short stream: what the suites using
+    it assert is which entry the stream is attributed to, not how long
+    it lasted."""
+
+    def __init__(self, identity: ProviderIdentity, secret: str = "") -> None:
+        super().__init__(sample_rate=24000, ms_per_char=1.0, min_ms=60.0)
+        self.identity = identity
+        self.api_key = secret
+        self.options = {"api_key": secret}
 
 
 # --- a stage no request reaches at all --------------------------------

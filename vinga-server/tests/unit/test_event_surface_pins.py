@@ -58,8 +58,16 @@ from tests.support.configs import (
 from tests.support.device_tools import FakeDevice
 from tests.support.events import events, only
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
-from tests.support.providers import ScriptedLlm, Unreachable
+from tests.support.providers import (
+    EARS,
+    VOICE,
+    IdentifiedAsr,
+    IdentifiedTts,
+    ScriptedLlm,
+    Unreachable,
+)
 from tests.support.sessions import (
+    agent_providers,
     call,
     device_session,
     drive_reply,
@@ -469,6 +477,72 @@ async def test_a_failing_provider_the_registry_never_built_says_even_less(
     assert_unnamed_anywhere(caplog, consumer, SENTINEL)
     assert failed.error == "ConnectionRefusedError"  # type: ignore[attr-defined]
     assert not hasattr(failed, "provider")
+
+
+async def test_the_ears_own_credential_reaches_no_record_of_a_transcription(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`heard` names the configured entry that transcribed since #450,
+    and a configured entry is where an operator's credential lives. What
+    the record carries is the four names the build stamped onto the
+    entry's identity; the key the provider authenticates with sits on
+    the same object and reaches nothing.
+
+    Sanitized by construction rather than by care: `_entry_fields` reads
+    four names off a built entry and never serializes a configuration.
+    The pin is what says so, at the consumer as well as at the log."""
+    session, consumer = await a_credentialled_reply(
+        caplog, asr=IdentifiedAsr(EARS, secret=SENTINEL)
+    )
+
+    heard = only(caplog, "heard")
+    assert_unnamed_in(heard, SENTINEL)
+    assert_unnamed_anywhere(caplog, consumer, SENTINEL)
+    # And the entry the record exists to name survives it.
+    assert (heard.provider, heard.type) == ("ears", "whisperish")  # type: ignore[attr-defined]
+    assert (heard.host, heard.model) == ("ears.example.com", "tiny-en-3")  # type: ignore[attr-defined]
+
+
+async def test_the_voices_own_credential_reaches_no_record_of_a_stream(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The same claim at the TTS stage, where `sentence_synthesized`
+    names the voice that produced the audio."""
+    session, consumer = await a_credentialled_reply(
+        caplog, tts=IdentifiedTts(VOICE, secret=SENTINEL)
+    )
+
+    spoken = only(caplog, "sentence_synthesized")
+    assert_unnamed_in(spoken, SENTINEL)
+    assert_unnamed_anywhere(caplog, consumer, SENTINEL)
+    assert (spoken.provider, spoken.type) == ("voice", "speakish")  # type: ignore[attr-defined]
+    assert (spoken.host, spoken.model) == ("voice.example.com", "baritone-2")  # type: ignore[attr-defined]
+
+
+async def a_credentialled_reply(
+    caplog: pytest.LogCaptureFixture, asr: Any = None, tts: Any = None
+) -> tuple[Any, Consumer]:
+    """One whole reply through entries carrying a credential in their
+    configuration, with a consumer attached.
+
+    At DEBUG, because `sentence_synthesized` is a DEBUG event and a run
+    at the default level would hunt through a record that was never
+    written."""
+    config = base_config()
+    stages = {
+        "asr": IdentifiedAsr(EARS) if asr is None else asr,
+        "tts": IdentifiedTts(VOICE) if tts is None else tts,
+    }
+    session = device_session(
+        config,
+        POET_MAC,
+        agent_providers(config, None, cast(Any, stages)),
+        websocket=cast(Any, RecordingSocket()),
+    )
+    consumer = watched(session)
+    with caplog.at_level("DEBUG"):
+        await drive_reply(session, UTTERANCE)
+    return session, consumer
 
 
 async def a_failing_reply(
