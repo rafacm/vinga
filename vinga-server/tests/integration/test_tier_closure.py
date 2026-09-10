@@ -41,10 +41,10 @@ top-level module unimportable.
 
 **Every command is run, not imported.** Importing `cli` from a client
 install proves nothing about a command whose heavy import sits inside
-its own arm, which is exactly what `openapi` and `ota-url` are. So the
-grammar's own inventory is split in two here, the two gated commands
-against everything else, and both sides are invoked as subprocesses of
-the installed binary. The `vinga-server` entry point's own gated
+its own arm, which is exactly what `openapi`, `ota-url` and `check`
+are. So the grammar's own inventory is split in two here, the gated
+commands against everything else, and both sides are invoked as
+subprocesses of the installed binary. The `vinga-server` entry point's own gated
 sibling, the conversations group, is driven here too: it is outside the
 grammar's tree, so nothing about `cli.COMMANDS` would ever reach it.
 M3 widens that to the full registered inventory
@@ -95,11 +95,11 @@ PROJECT = Path(__file__).resolve().parents[2]
 # Written out rather than derived: a distribution's import name is not
 # in its requirement string, and guessing it by replacing hyphens is how
 # a typo becomes a check that always passes.
-# The two commands the grammar keeps and the client half cannot answer.
-# Named here as the expected inventory rather than discovered, because
-# the assertion below is two-way: a third gated command fails this lane
-# from the side it joined.
-GATED = frozenset({("openapi",), ("ota-url",)})
+# The three commands the grammar keeps and the client half cannot
+# answer. Named here as the expected inventory rather than discovered,
+# because the assertion below is two-way: a fourth gated command fails
+# this lane from the side it joined.
+GATED = frozenset({("openapi",), ("ota-url",), ("check",)})
 
 # A port nothing listens on, which is how the serve door below is asked
 # to refuse rather than to serve. The lane's own instance is reachable
@@ -610,7 +610,7 @@ def test_the_doctor_with_no_url_derives_one_from_the_serve_install(serve_env: Pa
     assert finished.stderr.strip(), "the derivation said nothing at all"
 
 
-def test_the_gated_pair_is_what_the_table_says_it_is() -> None:
+def test_the_gated_set_is_what_the_table_says_it_is() -> None:
     """The inventory held closed against the registration table, so a
     command that left the gated set fails from the side it left."""
     assert GATED <= {row.words for row in cli.COMMANDS}
