@@ -106,7 +106,13 @@ import yaml
 from tests.support.commands import BUILD_SECONDS, ran
 from tests.support.config_cli import registered
 from tests.support.deployment import Live, check_in, serving
-from tests.support.tiers import SERVE_MODULES, SIM_MODULES, declared, requirement_names
+from tests.support.tiers import (
+    OTEL_MODULES,
+    SERVE_MODULES,
+    SIM_MODULES,
+    declared,
+    requirement_names,
+)
 from vinga_server.config import cli
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
@@ -423,9 +429,7 @@ def test_the_wheel_asks_for_exactly_the_client_tier(wheel: Path) -> None:
     default install than anything else here would notice, and one the
     declaration has and the wheel does not is a client that cannot run.
     """
-    client, _, _ = declared()
-
-    assert _requires_dist(wheel)[""] == client
+    assert _requires_dist(wheel)[""] == declared().client
 
 
 def test_the_wheel_gates_exactly_the_serve_tier_behind_the_extra(wheel: Path) -> None:
@@ -433,9 +437,7 @@ def test_the_wheel_gates_exactly_the_serve_tier_behind_the_extra(wheel: Path) ->
     escaped its marker would be an unconditional requirement, which the
     case above catches; one that went missing from the extra would be an
     image build that installs a server without a server."""
-    _, serve, _ = declared()
-
-    assert _requires_dist(wheel)["serve"] == serve
+    assert _requires_dist(wheel)["serve"] == declared().serve
 
 
 def test_the_wheel_declares_no_extra_the_project_does_not(wheel: Path) -> None:
@@ -466,7 +468,7 @@ def test_the_serve_half_is_absent_from_the_environment_the_wheel_made(
     metadata while its module is importable through something that
     vendored it, which is exactly what a name check alone would miss.
     """
-    _, serve, _ = declared()
+    serve = declared().serve
     assert set(SERVE_MODULES) == serve, "the import-name map has drifted from the tier"
 
     reported = _ran(
@@ -976,9 +978,7 @@ def test_the_wheel_gates_exactly_the_sim_tier_behind_its_extra(wheel: Path) -> N
     of `vinga-server[sim]` would then quietly be a bare install with a
     command that cannot run.
     """
-    _, _, sim = declared()
-
-    assert _requires_dist(wheel)["sim"] == sim
+    assert _requires_dist(wheel)["sim"] == declared().sim
 
 
 def test_the_websocket_client_is_absent_from_the_bare_wheel_install(
@@ -993,7 +993,7 @@ def test_the_websocket_client_is_absent_from_the_bare_wheel_install(
     would show up as an importable module before it showed up as a
     declared one.
     """
-    _, _, sim = declared()
+    sim = declared().sim
     assert set(SIM_MODULES) == sim, "the import-name map has drifted from the tier"
 
     reported = _ran(
@@ -1010,6 +1010,44 @@ def test_the_websocket_client_is_absent_from_the_bare_wheel_install(
     assert sim & set(json.loads(reported.stdout)) == set()
 
     for module in sorted(SIM_MODULES.values()):
+        finished = _ran(installed, elsewhere, live, "python", "-c", f"import {module}")
+        assert finished.returncode != 0, f"{module} is importable from the wheel install"
+
+
+def test_the_wheel_gates_exactly_the_otel_tier_behind_its_extra(wheel: Path) -> None:
+    """The fourth requirement block, held both ways like the other
+    three.
+
+    The metadata a resolver consults is the wheel's, so an `[otel]`
+    declared in `pyproject.toml` and missing here would make
+    `vinga-server[otel]` a bare install whose telemetry refuses to build
+    for a reason the operator just paid to fix.
+    """
+    assert _requires_dist(wheel)["otel"] == declared().otel
+
+
+def test_the_telemetry_sdk_is_absent_from_the_bare_wheel_install(
+    installed: Path, elsewhere: Path, live: Live
+) -> None:
+    """The negative half of the fourth tier, from the environment the
+    artifact made, as distributions and as importable subtrees."""
+    otel = declared().otel
+    assert set(OTEL_MODULES) == otel, "the import-name map has drifted from the tier"
+
+    reported = _ran(
+        installed,
+        elsewhere,
+        live,
+        "python",
+        "-c",
+        "import json,sys;from importlib.metadata import distributions;"
+        "sys.stdout.write(json.dumps(sorted("
+        "d.metadata['Name'].lower().replace('_','-') for d in distributions())))",
+    )
+    assert reported.returncode == 0, reported.stderr
+    assert otel & set(json.loads(reported.stdout)) == set()
+
+    for module in sorted(OTEL_MODULES.values()):
         finished = _ran(installed, elsewhere, live, "python", "-c", f"import {module}")
         assert finished.returncode != 0, f"{module} is importable from the wheel install"
 
