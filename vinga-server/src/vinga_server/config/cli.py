@@ -1097,10 +1097,12 @@ class Invocation:
 # The commands that reach no API
 #
 # Everything else a command does is a row in the table further down.
-# These four are not acts of the configuration API at all: one is about
+# These five are not acts of the configuration API at all: one is about
 # onboarding a board, which happens before there is anything to
-# configure, and three render the models and the API's own routes
-# without opening a database, reaching a server or needing a key.
+# configure; three render the models and the API's own routes without
+# opening a database, reaching a server or needing a key; and one reads
+# the store the way a boot reads it, which needs the database and the
+# keys and needs no server at all.
 
 
 def _from_an_installed_half[T](answered: Callable[[], T], missing: str) -> T:
@@ -1108,8 +1110,8 @@ def _from_an_installed_half[T](answered: Callable[[], T], missing: str) -> T:
     is not installed.
 
     The gate for every command in this grammar that reaches a module the
-    default install does not carry. There are three: `ota-url` and
-    `openapi` read the server half, and `simulator run` reads the
+    default install does not carry. There are four: `ota-url`, `openapi`
+    and `check` read the server half, and `simulator run` reads the
     websocket client behind the `sim` extra. Everything else is either a
     request, which needs no such module, or a render off the models,
     which are the client half.
@@ -1170,7 +1172,7 @@ def _ota_url(args: Invocation) -> None:
     that server answers on rather than a second opinion about it.
 
     It does need those functions to be installed, which is what makes it
-    one of the two gated commands: it is a server-host command by
+    one of the three gated commands: it is a server-host command by
     nature, since the file half it reads is the one a laptop does not
     have. The laptop-side question it is confused with, whether that URL
     answers, is `vinga-server doctor`'s since #244.
@@ -1187,6 +1189,90 @@ def _ota_url(args: Invocation) -> None:
     sys.stdout.flush()
     print(OTA_URL_GUIDANCE, file=sys.stderr)
     print(f"The URL above is {origin.provenance}.", file=sys.stderr)
+
+
+# What a store that composes is answered with, on stderr, because it is
+# a fact about this run rather than an artifact: `check` produces no
+# document, and its refusal goes to stderr as every refusal of this
+# grammar does, so its two answers leave by the same door and the exit
+# code is what a script reads.
+#
+# It says what was not tried as well as what was, because the boot it
+# stands in for goes further than this: `load_boot_config` stops at the
+# composed snapshot, and building the providers and connecting the MCP
+# servers happen after it, inside a server that is starting.
+COMPOSES = (
+    "the stored configuration composes, which is as far as a boot gets before it "
+    "builds anything: what a provider or an MCP server does when it is started is a "
+    "running server's answer."
+)
+
+CHECK_HELP = (
+    "say whether the stored configuration composes into one a server could boot on, "
+    "naming the entry and the rule behind anything that does not; it reads the store "
+    "the way a boot reads it and serves nothing"
+)
+
+
+def _boot_read(path: str | None) -> None:
+    """The boot's own read of both halves, imported where it is used.
+
+    Deferred for weight rather than for a cycle, the way
+    `_derived_ota_url` is: `config/boot.py` opens the database and
+    migrates it, so naming it pulls in SQLAlchemy and the migration
+    chain, which the configuration client does not have. The import is
+    inside this function so that the gate around it is what a client-only
+    install meets, rather than an ImportError at module scope on every
+    command of the grammar.
+
+    What comes back is discarded on purpose. The answer this command
+    gives is whether the read refused, and the composed configuration
+    itself is a snapshot of the whole domain half: nothing may print it,
+    and holding it would be the one way something could.
+    """
+    from vinga_server.config.boot import load_boot_config
+
+    load_boot_config(path)
+
+
+def _check(args: Invocation) -> None:
+    """Whether a server would get past reading this store, and what it
+    would refuse on.
+
+    The command #443 asked for, and the reason it is this shape. An
+    `apply` that the stored configuration will not satisfy is refused
+    with a sentence that names no location, deliberately: what a reload
+    refuses on is arbitrary stored state, and a sentence composed over
+    it can quote a value that was written into the wrong field. A boot
+    refuses on the same state and names the location and the rule
+    without the value, because it is composing the snapshot rather than
+    answering a request about it. Before this command the only way to
+    read that sentence was to start a second server against the same
+    store and watch it fail.
+
+    So this runs the boot's own read and prints what it says. Not a
+    second composition and not a second formatter: `load_boot_config` is
+    the function `vinga_server.serving.run` calls, its `ConfigError` is
+    the sentence that server would print, and the boundary in `main`
+    prints it and exits 1 exactly as `run` does. A rule that changed on
+    one side could not change on the other, because there is one side.
+
+    What it does NOT do is serve: no application is built, no provider
+    is constructed, no MCP server is connected and no port is opened. It
+    reads the file half, opens and migrates the database, loads the
+    snapshot, verifies every stored secret and composes the two halves,
+    which are the five steps `config/boot.py` documents, and then stops.
+    The migration is part of that read rather than an extra this command
+    performs: what a boot would meet is the answer being asked for, and
+    a check that read an unmigrated store would be answering about a
+    store no server will ever see.
+
+    No value reaches either stream on either path. The success line is
+    fixed, and the refusal is whatever the boot composed, which is the
+    same sentence a server prints in front of an operator's terminal.
+    """
+    _from_an_installed_half(lambda: _boot_read(args.config), NEEDS_THE_SERVER_HALF)
+    print(COMPOSES, file=sys.stderr)
 
 
 def _schema(args: Invocation) -> None:
@@ -1217,7 +1303,7 @@ def _openapi(args: Invocation) -> None:
     opens no database and needs no token: the application is built, its
     document is taken, and nothing of it is served.
 
-    The routes are the server half, so this is the second of the two
+    The routes are the server half, so this is the second of the three
     gated commands. What it renders is committed at
     `docs/reference/api-openapi.json`, which is where a client-only
     installation reads the contract instead."""
@@ -8009,12 +8095,14 @@ def _simulated_board(row: Command) -> Callable[..., None]:
 
 
 def _from_the_file_half(row: Command) -> Callable[..., None]:
-    """The onboarding command, which takes `--config` and nothing else.
+    """The two commands that take `--config` and nothing else.
 
-    It contacts nothing at all, so it has nothing to do with `--api-url`
-    or the bearer token, and offering the flags would say it had. What
-    answers on the URL it prints is `vinga-server doctor`, a command of
-    its own since #244.
+    Neither contacts a server, so neither has anything to do with
+    `--api-url` or the bearer token, and offering the flags would say
+    they had. `ota-url` contacts nothing at all; what answers on the URL
+    it prints is `vinga-server doctor`, a command of its own since #244.
+    `check` reaches the database the file half names, which is what a
+    boot reaches and is still not the API.
     """
 
     def run(context: typer.Context, config: ConfigOption = None) -> None:
@@ -8634,6 +8722,17 @@ COMMANDS: tuple[Command, ...] = (
             "progress meets new tools at its next utterance and new prompt text at "
             "its next activation, while a changed voice reaches the next conversation"
         ),
+    ),
+    # The diagnosis of the one above, and the only command in this
+    # grammar whose subject is the stored configuration and whose answer
+    # comes from no server (#443). An apply that the store will not
+    # satisfy is refused without a location, on purpose; this is where
+    # the location is read, out of the boot's own composition.
+    Command(
+        words=("check",),
+        does=_check,
+        declare=_from_the_file_half,
+        help=CHECK_HELP,
     ),
     Command(
         words=("ota-url",),

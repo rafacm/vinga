@@ -60,7 +60,7 @@ CONFIG_ENV_VAR = "VINGA_CONFIG"
 # Here rather than in `config/cli.py`, which is where it started, for the
 # reason `PROGRAM` sits in `models.py`: two modules read it and only one
 # is below both. `main.py` dispatches the conversations group and
-# `config/cli.py` gates its two commands, and both already import this
+# `config/cli.py` gates its three commands, and both already import this
 # module for `ConfigError` and the config variable above, so the
 # definition costs its readers nothing. `cli` re-exports it, so there is
 # one string and not two.

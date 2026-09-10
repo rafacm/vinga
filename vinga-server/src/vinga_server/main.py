@@ -62,7 +62,7 @@ CONVERSATIONS_GROUP = "vinga_server.conversations.cli"
 
 # What an installation carrying the client half alone is told when it is
 # asked to serve. The conversations group answers
-# `NEEDS_THE_SERVER_HALF` instead, which is the sentence the two gated
+# `NEEDS_THE_SERVER_HALF` instead, which is the sentence the three gated
 # commands of the configuration grammar answer with: serving is one
 # fact and a command that needs the other half is another.
 #
