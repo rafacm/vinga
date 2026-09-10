@@ -9,6 +9,21 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **`heard` and `sentence_synthesized` name the provider entry behind
+  them** (#450, milestone 1). Both success-side stage events gain
+  `provider`, `type`, `host` and `model`, the four names `llm_round`
+  already carries and off the same crossing, so "ASR latency by
+  provider" and "TTS latency by provider" are answerable from the event
+  vocabulary rather than only "TTS failures by provider". No new event
+  and no new sentence: the four names are carried payload, both
+  templates and both argument lists are unchanged, and a consumer
+  reading either record by name is unaffected. The quartet stays atomic,
+  so a provider the registry never built contributes four absences and
+  never an entry name with no type. A reply that reuses a confirmed
+  barge-in's transcription names the ear that actually ran it: the
+  confirmation answers with the provider it was made through, which the
+  barge-in gate carries over on the utterance, because a handover can
+  rebind the session's providers while that call is still in flight.
 - **`vinga-server config check`**, the supported way to learn where a
   refused apply is refusing (#443). An `apply` or a `diff` that the stored
   configuration will not satisfy answers that it was refused and
