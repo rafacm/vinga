@@ -1,16 +1,18 @@
 """What an installation carrying the client half alone is told.
 
 The default installation of this package is the configuration client,
-and the server half is an extra. So five things a person can type are
+and the server half is an extra. So six things a person can type are
 answerable only by an installation that has that half, and each of them
 is answered with a fixed sentence rather than with an ImportError:
-`vinga-server` with nothing after it, which means serve; the two
+`vinga-server` with nothing after it, which means serve; the three
 commands of the configuration grammar that read the server's own
-modules, `openapi` (which builds the API application to describe it) and
-`ota-url` (which derives a URL through the onboarding package);
-`vinga-server conversations`, which renders the store's tables off the
-SQLAlchemy metadata; and `vinga-server doctor` WITH NO URL, which
-derives the URL to diagnose through the same onboarding package.
+modules, `openapi` (which builds the API application to describe it),
+`ota-url` (which derives a URL through the onboarding package) and
+`check` (which reads the store the way a boot reads it, through the boot
+module itself); `vinga-server conversations`, which renders the store's
+tables off the SQLAlchemy metadata; and `vinga-server doctor` WITH NO
+URL, which derives the URL to diagnose through the same onboarding
+package.
 
 That last one is gated at the derivation rather than at the command,
 which is the whole of what makes it right: a laptop diagnosing a remote
@@ -18,8 +20,8 @@ deployment passes the URL, opens a socket and reads an answer, and
 wants nothing of this package's server half. Only the derivation needs
 it. A case below drives both halves of that split.
 
-Two sentences and not five: serving is one fact, and needing the other
-half is the other, which the remaining four share.
+Two sentences and not six: serving is one fact, and needing the other
+half is the other, which the remaining five share.
 
 The sentinels are the point of this file. Every one of these refusals is
 reached with an ImportError in hand, and an ImportError's text is a
@@ -151,15 +153,16 @@ def test_the_serve_refusal_leaks_nothing_it_was_given(
             assert sentinel not in surface, sentinel
 
 
-# The two gated commands
+# The three gated commands
 
 
 @pytest.fixture
 def offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A machine with the device-auth secret and a file half, and no
-    server, no token and no database anywhere. Both gated commands need
-    none of those, which is what makes their refusal about the missing
-    half and nothing else."""
+    server, no token and no database anywhere. Every gated command
+    refuses before it would reach any of those, which is what makes the
+    refusal about the missing half and nothing else: `check` would open
+    the database this file half names, and the gate fires first."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
     monkeypatch.delenv("VINGA_API_SECRET", raising=False)
     monkeypatch.delenv(cli.API_URL_ENV, raising=False)
@@ -170,19 +173,20 @@ def offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _gated(named: Path) -> tuple[tuple[str, list[str]], ...]:
-    """The two, each with the module whose absence gates it and the
+    """The three, each with the module whose absence gates it and the
     command line that reaches it."""
     return (
         ("vinga_server.config.api", ["openapi"]),
         ("vinga_server.onboarding.origin", ["--config", str(named), "ota-url"]),
+        ("vinga_server.config.boot", ["--config", str(named), "check"]),
     )
 
 
-def test_both_gated_commands_answer_the_same_one_sentence(
+def test_every_gated_command_answers_the_same_one_sentence(
     offline: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """One sentence for the pair, because it says one thing: this
-    command needs the server half. Two sentences for one fact would be
+    """One sentence for the three, because it says one thing: this
+    command needs the server half. Three sentences for one fact would be
     the duplication the design guide names."""
     said = []
     for module, argv in _gated(offline):
@@ -193,7 +197,7 @@ def test_both_gated_commands_answer_the_same_one_sentence(
         assert captured.out == ""
         said.append(captured.err.strip())
 
-    assert said == [cli.NEEDS_THE_SERVER_HALF, cli.NEEDS_THE_SERVER_HALF]
+    assert said == [cli.NEEDS_THE_SERVER_HALF] * len(_gated(offline))
 
 
 def test_a_gated_refusal_leaks_nothing_it_was_given(
@@ -202,13 +206,13 @@ def test_a_gated_refusal_leaks_nothing_it_was_given(
     capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Every field this pair can be given, one sentinel each.
+    """Every field these three can be given, one sentinel each.
 
     `openapi` takes nothing at all, so its own surface is the
-    ImportError; `ota-url` takes the path of the file half, which is the
-    file a deployment keeps its secrets beside, and it is named here
-    with a credential-shaped path so that a sentence quoting the path
-    would fail.
+    ImportError; `ota-url` and `check` take the path of the file half,
+    which is the file a deployment keeps its secrets beside, and it is
+    named here with a credential-shaped path so that a sentence quoting
+    the path would fail.
     """
     for module, argv in _gated(offline):
         caplog.clear()
@@ -254,16 +258,16 @@ def test_the_gated_sentence_names_no_value_at_all() -> None:
         assert "%s" not in sentence
 
 
-def test_the_gated_pair_is_exactly_two(offline: Path) -> None:
+def test_the_gated_set_is_exactly_these_three(offline: Path) -> None:
     """The SERVER-HALF inventory, held closed from the production side.
 
-    A third command that grew a server-side import would be a command
+    A fourth command that grew a server-side import would be a command
     the wheel lane runs and finds refusing, which is a failure a long
     way from its cause. Named here instead, beside the reason each is
     gated. The grammar's other gate is an extra rather than this half,
     and it has an inventory of its own at the foot of this file.
     """
-    assert {argv[-1] for _, argv in _gated(offline)} == {"openapi", "ota-url"}
+    assert {argv[-1] for _, argv in _gated(offline)} == {"openapi", "ota-url", "check"}
 
 
 # The conversations group, which is the third site and is not in the
@@ -541,14 +545,14 @@ def test_the_two_gates_are_one_function_with_two_sentences() -> None:
         assert "%s" not in sentence
 
 
-def test_the_gated_commands_of_the_grammar_are_exactly_three() -> None:
+def test_the_gated_commands_of_the_grammar_are_exactly_four() -> None:
     """The inventory across both gates, held closed from the production
     side.
 
-    Two need the server half and one needs the `sim` extra. A fourth
+    Three need the server half and one needs the `sim` extra. A fifth
     would be a command the wheel lane runs and finds refusing, which is
     a failure a long way from its cause.
     """
-    gated = {("openapi",), ("ota-url",), ("simulator", "run")}
+    gated = {("openapi",), ("ota-url",), ("check",), ("simulator", "run")}
 
     assert gated <= {row.words for row in cli.COMMANDS}

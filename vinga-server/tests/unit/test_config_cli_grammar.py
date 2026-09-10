@@ -691,9 +691,10 @@ def test_a_set_help_says_a_credential_is_never_one_of_its_arguments(
 # exclusions bind, and they are exclusions with reasons: the four
 # documentation commands render the models, the routes and the command
 # tree, so they open no database, reach no server and take none of the
-# three, and `ota-url`
-# derives a string from the file half and contacts nothing, so it takes
-# `--config` and nothing that addresses an API.
+# three, and `ota-url` and `check` reach no API at all, so each takes
+# `--config` and nothing that addresses one: `ota-url` derives a string
+# from the file half and contacts nothing, and `check` reads the store
+# the file half names the way a boot reads it.
 #
 # Parameterized over the options the root declares rather than over a
 # list of them, so a third global option inherits the matrix by being
@@ -715,6 +716,7 @@ ROOT_OPTIONS = frozenset(
 # What each command takes of them where it is not all of them.
 LEAF_EXCLUSIONS: dict[tuple[str, ...], frozenset[str]] = {
     ("ota-url",): frozenset({"--config"}),
+    ("check",): frozenset({"--config"}),
     ("schema",): frozenset(),
     ("reference",): frozenset(),
     ("openapi",): frozenset(),

@@ -198,15 +198,15 @@ SCRATCH: dict[str, object] = {
     "agent.yaml": {"prompt": "You are scratch."},
 }
 
-# The three commands the grammar keeps and a BARE install cannot answer.
+# The four commands the grammar keeps and a BARE install cannot answer.
 # Named as the expected inventory rather than discovered, because the
-# completeness assertion below is two-way: a fourth gated command fails
+# completeness assertion below is two-way: a fifth gated command fails
 # this lane from the side it joined.
 #
-# Two of them need the server half and one needs the `sim` extra, and
+# Three of them need the server half and one needs the `sim` extra, and
 # they answer two different sentences, which is why each row carries the
 # sentence it must print rather than the lane holding one constant for
-# all three.
+# all four.
 #
 # `simulator run` carries arguments as well, and that is not decoration:
 # a command line missing a required positional never reaches its own
@@ -217,6 +217,7 @@ SCRATCH: dict[str, object] = {
 GATED: dict[tuple[str, ...], tuple[str, tuple[str, ...]]] = {
     ("openapi",): (cli.NEEDS_THE_SERVER_HALF, ()),
     ("ota-url",): (cli.NEEDS_THE_SERVER_HALF, ()),
+    ("check",): (cli.NEEDS_THE_SERVER_HALF, ()),
     ("simulator", "run"): (cli.NEEDS_THE_SIM_EXTRA, ("http://127.0.0.1:9/x/ABCDEFGH/",)),
 }
 

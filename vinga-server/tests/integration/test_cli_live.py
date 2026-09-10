@@ -13,7 +13,10 @@ Four of the grammar's commands reach nothing at all by design (`schema`,
 `reference`, `openapi`, `ota-url`). They run in this lane too, in the
 same environment as the rest, and what is asserted about them is the
 opposite claim: that an environment naming a running server and a
-database directory leaves them opening neither.
+database directory leaves them opening neither. `check` is the fifth of
+that family and only half of it: it reaches no server either, and it
+does open the database, so what is asserted about it is that it agrees
+with the server already booted on that store.
 
 What that buys, and what nothing in-process can show:
 
@@ -1594,6 +1597,48 @@ def test_the_documents_that_reach_nothing_render_in_the_same_environment(
     assert printed.err.strip()
 
 
+def test_the_check_reads_the_store_the_running_server_booted_on(
+    deployed: Live,
+    module_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`check` against the very store a server is serving from, and then
+    against one that would not let a server start.
+
+    The first half is the claim that matters here and that no unit suite
+    can make: the store this command reads is the store a real uvicorn
+    booted on, in the same environment, and the command agrees with the
+    server that is already up. It is read-only, which is what lets it be
+    pointed at the module's database at all.
+
+    The second half is pointed at this worker's own database instead,
+    which the lane empties after every test, because it writes a state
+    no server may be left booted on. What comes back is the boot's
+    sentence, naming the entry and the rule and quoting no value, which
+    is the whole of #443: `apply` refuses this same state and says
+    nothing about where.
+    """
+    with monkeypatch.context() as pointed:
+        pointed.setenv("VINGA_DB_NAME", module_database)
+        assert run("check") == 0
+    printed = capsys.readouterr()
+    assert printed.out == ""
+    assert printed.err.strip() == cli.COMPOSES
+
+    engine = open_database(DatabaseConfig())
+    try:
+        ConfigStore(engine, load_keys()).set_agent("sam", {"prompt": "You are Sam."})
+    finally:
+        engine.dispose()
+
+    assert run("check") == 1
+    refused = capsys.readouterr()
+    assert refused.out == ""
+    assert "default_agent is required" in refused.err
+    assert "the domain schema of the vinga database" in refused.err
+
+
 def test_the_store_exports_as_a_document_it_imports_back_unchanged(
     deployed: Live, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -2112,6 +2157,7 @@ REFUSALS: tuple[Refusal, ...] = (
         True,
     ),
     Refusal(("apply",), ("apply", "extra"), USAGE, False),
+    Refusal(("check",), ("check", "extra"), USAGE, False),
     Refusal(
         ("ota-url",),
         ("ota-url", "--config", MISSING_CONFIG),
