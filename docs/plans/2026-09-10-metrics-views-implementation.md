@@ -272,3 +272,59 @@ the triplet. It is the repository's first capture-producing test.
   The integration case therefore matches the line's shape rather than
   a figure, and the arithmetic that would catch a regression lives in
   the unit lane.
+
+### PR review round
+
+External review of PR #448: one P1 and three others, mergeable after
+fixes. All four adopted, one commit each.
+
+- **P1: hostile JSON escaped the refusal boundary.** Both decoders
+  caught `json.JSONDecodeError` only, and that is not the whole of what
+  the parser raises: an integer past the interpreter's 4300-digit limit
+  raises a plain `ValueError` and nesting past the recursion limit
+  raises `RecursionError`. Neither was caught anywhere, and both
+  messages quote the document they choked on, so a capture with either
+  in it printed a traceback whose locals are that capture. Fixed as
+  prescribed: both decoders catch all three, and a last door under the
+  whole of one capture's analysis refuses anything still unexpected
+  with the generated capture number alone. Four sentinel cases over
+  both files pin it, checking both streams. Verified against the live
+  parser first, so the cases are load-bearing rather than decorative:
+  `9` times twenty thousand raises `ValueError` and two hundred
+  thousand brackets raise `RecursionError`, neither of them a
+  `JSONDecodeError`.
+
+- **P2: two turns a fraction of a second apart merged into one.** The
+  splitter needed a non-speaking sample or a second of silence, and
+  `turntaking.finish_utterance` emits neither: it reads the endpointer
+  and resets it in the same breath, so the next frame emits a sample
+  already counting the speech after it. A user answering a short reply
+  straight away left two positive samples 200 ms apart with no zero
+  between them, read as one utterance, both turns lost. Fixed by the
+  reviewer's first option: a `heard` or `nothing_heard` between two
+  positive samples ends the run, which the capture's own track carries.
+  The new fixture is the producer's real shape and was confirmed red
+  against the previous script (one turn reported, the first one gone).
+
+- **P2: the threshold could sit above the signal.** The floor was the
+  channel's own twentieth percentile plus twelve dB, which assumes the
+  channel is mostly quiet; a reply filling most of a recording is its
+  own percentile, and the threshold landed above it, so a capture of
+  one long answer reported `no_reply_audio`. Of the two options
+  offered, the known-quiet region was taken rather than a bare absolute
+  floor, because a field capture's floor is the room's and worth
+  measuring: the floor now comes from the frames before the endpointer
+  first counted speech, the one stretch of a recording that neither the
+  user nor an answer to them can be in, and both channels are read
+  against their own floor in it. The absolute floor stays as the lower
+  guard, and a second guard keeps the threshold at least six dB under
+  the loudest frame the channel carries, so a capture that starts
+  mid-reply cannot set a threshold nothing could rise above. The
+  fixture is a reply filling 83% of the recording, also confirmed red
+  against the previous script.
+
+- **P3: refusal cases read one stream.** Several read only the stream
+  they expected the failure on, which cannot see content republished on
+  the other. One helper, `quiet_about`, now reads stdout and stderr
+  together and takes the values that must appear in neither, and every
+  subprocess result in the suite goes through it.
