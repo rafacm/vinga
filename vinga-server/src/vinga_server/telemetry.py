@@ -1385,7 +1385,10 @@ class Telemetry:
             # left unended and never exported, which is the same posture
             # a lost batch queue takes.
             trace.turn = None
-            trace.playback = None
+        # And a playback span with no closing event, for the same reason
+        # a lost turn is dropped: what it is missing is its own end, and
+        # the session's is not a substitute for it.
+        trace.playback = None
         trace.span.set_attributes(
             _attributes(emission.payload, SESSION_CLOSE_ATTRIBUTES)
         )
@@ -1395,6 +1398,13 @@ class Telemetry:
         trace = self._sessions.get(session)
         if trace is None or trace.turn is not None:
             return
+        # A playback span the previous turn left open is dropped here.
+        # It is held past `reply_finished` on purpose (see there), but a
+        # NEXT turn starting means its own event will never arrive: the
+        # only way that happens is a cancellation delivered into the
+        # reply's very last statement, and an interval with no last
+        # frame is one this exporter declines to invent an end for.
+        trace.playback = None
         trace.turn = self._tracer.start_span(
             TURN_SPAN,
             # An empty context, which is what gives the turn a trace id
@@ -1420,15 +1430,16 @@ class Telemetry:
         if trace is None or trace.turn is None:
             return
         turn, trace.turn = trace.turn, None
-        # A playback span still open when the reply finished is dropped
-        # rather than ended here. `speaking_finished` is emitted before
-        # either cancellable send and whenever a frame was delivered at
-        # all, so reaching this means no last frame was ever seen, and
-        # ending the interval at the reply's own end would put the
-        # reply's tail inside a span the reference calls first frame out
-        # to last frame out. The unended span is never exported, which is
-        # the posture a lost turn already takes.
-        trace.playback = None
+        # A playback span still open here is deliberately NOT closed and
+        # not dropped. `reply_finished` is the reply `finally`'s first
+        # statement and `finish_speaking` is its last, so the event that
+        # closes the paced interval is emitted AFTER the event that
+        # closes the turn, while being STAMPED at the last delivery,
+        # which is before both. The span is left open for its own event
+        # to end it, and what it ends up bounding is the interval the
+        # pacer paced rather than the order the two records were made
+        # in. `_open_turn` and `_close_session` drop one that never got
+        # its event, so nothing accumulates.
         turn.set_attributes(_attributes(emission.payload, TURN_FINISHED_ATTRIBUTES))
         turn.end(end_time=self._at(emission))
 

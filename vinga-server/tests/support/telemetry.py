@@ -447,14 +447,22 @@ def start_speaking(events: SessionEvents) -> float:
     )
 
 
-def finish_speaking(events: SessionEvents, frames: int = 42) -> float:
-    """The last frame of the reply reaching the device."""
+def finish_speaking(
+    events: SessionEvents, frames: int = 42, at: float | None = None
+) -> float:
+    """The last frame of the reply reaching the device.
+
+    `at` is the last delivery's own stamp, which is how the edge emits
+    it: the record is made in the reply's `finally`, after the turn has
+    already been closed, and stamped back at the frame it is about.
+    """
     return events.emit(
         lambda: SpeakingFinished(
             agent=Identifier(AGENT),
             conversation=ConversationId(CONVERSATION),
             frames=Count(frames),
-        )
+        ),
+        at=at,
     )
 
 

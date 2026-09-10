@@ -505,13 +505,48 @@ def test_a_reply_that_never_spoke_opens_no_playback_span() -> None:
     assert spans_of(PLAYBACK_SPAN, finished(telemetry, memory)) == []
 
 
-def test_a_playback_still_open_when_the_reply_ends_is_dropped() -> None:
-    """`speaking_finished` is emitted before either cancellable send and
-    whenever a frame went out at all, so an open interval at
-    `reply_finished` means no last frame was ever seen. Ending it at the
-    reply's own end would put the reply's tail inside an interval the
-    reference calls first frame out to last frame out, so the span is
-    dropped instead, which is the posture a lost turn already takes."""
+def test_the_interval_closes_even_though_its_event_arrives_last() -> None:
+    """The order a real reply emits in, which is not the order it
+    reads in.
+
+    `reply_finished` is the reply `finally`'s FIRST statement and
+    `finish_speaking` is its last, so the event that closes the paced
+    interval is said after the event that closes the turn, while being
+    stamped at the last delivery, which is before both. The span is
+    therefore held open past the turn's own end and closed by its own
+    event, and what it bounds is still first frame out to last frame
+    out: inside the turn, in the turn's trace, ending before the turn
+    does.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.5)
+    start_speaking(events)
+    clock.tick(2.0)
+    last_frame = clock()
+    clock.tick(0.2)
+    finish_reply(events, sentences=1)
+    finish_speaking(events, frames=30, at=last_frame)
+
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    playback, turn = named(spans, PLAYBACK_SPAN), named(spans, TURN_SPAN)
+    assert playback.parent.span_id == turn.context.span_id
+    assert playback.attributes["vinga.playback.frames"] == 30
+    assert playback.end_time == int((last_frame + telemetry._offset) * 1e9)
+    assert playback.end_time < turn.end_time
+    assert [event.name for event in turn.events] == []
+
+
+def test_an_interval_whose_last_frame_never_arrives_is_dropped() -> None:
+    """The bound on holding it open. A cancellation delivered into the
+    reply's very last statement is the one way `speaking_finished` never
+    arrives, and an interval with no last frame is one this exporter
+    declines to invent an end for: the next turn drops it, and so does
+    the session's close."""
     clock = Clock()
     telemetry, memory = exporting()
     events = a_turn(clock, telemetry)
@@ -520,11 +555,15 @@ def test_a_playback_still_open_when_the_reply_ends_is_dropped() -> None:
     start_speaking(events)
     clock.tick(0.5)
     finish_reply(events, outcome=ReplyOutcome.DEVICE_GONE, sentences=1)
+    clock.tick(1.0)
+    start_turn(events)
+    clock.tick(1.0)
+    finish_reply(events)
     close_session(events)
 
     spans = finished(telemetry, memory)
     assert spans_of(PLAYBACK_SPAN, spans) == []
-    assert named(spans, TURN_SPAN).attributes["vinga.turn.outcome"] == "device_gone"
+    assert len(spans_of(TURN_SPAN, spans)) == 2
 
 
 # --- the whole turn, in pipeline order --------------------------------
@@ -558,9 +597,12 @@ def test_one_turn_carries_its_four_stages_and_its_stragglers() -> None:
     hand_over(events)
     clock.tick(1.5)
     synthesize(events, index=1, stream_ms=1500)
-    finish_speaking(events, frames=60)
+    last_frame = clock()
     clock.tick(0.1)
+    # The reply's `finally` in its real order: the turn is closed first
+    # and the paced interval's own event is the last thing said.
     finish_reply(events, sentences=2)
+    finish_speaking(events, frames=60, at=last_frame)
     close_session(events)
 
     spans = finished(telemetry, memory)
