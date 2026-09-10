@@ -52,10 +52,13 @@ from vinga_server.events.catalog import (
 from vinga_server.events.values import (
     GRAMMARS,
     IDENTIFIER_DOMAIN,
+    PROVIDER_ENTRY_OPTIONAL,
+    PROVIDER_ENTRY_REQUIRED,
     SOURCE_FORMS,
     SOURCE_KEY_PATTERN,
     SYNTAXES,
     ArgKind,
+    DropReason,
     Kind,
 )
 
@@ -122,8 +125,19 @@ KIND_MEANING: dict[Kind, str] = {
     Kind.IDENTIFIER_LIST: "A list whose every element is an `IDENTIFIER`.",
     Kind.ID_LIST: "A list whose every element is an `ID` of the field's declared syntax.",
     Kind.SOURCES: (
-        "The one structured kind: a mapping from prompt provenance to "
-        "character counts, keyed by the grammar below."
+        "A mapping from prompt provenance to character counts, keyed by the "
+        "grammar below."
+    ),
+    Kind.DROP_COUNTS: (
+        "A mapping from the reasons a mic frame is discarded to how many "
+        "frames one second lost to each. Every key is a declared reason and "
+        "every value a count of one or more."
+    ),
+    Kind.PROVIDER_ENTRIES: (
+        "A mapping from each bound agent to its pipeline stages, and from a "
+        "stage to the resolved entry's `name`, `type` and, where the type has "
+        "them, `host` and `model`. Nothing else off a provider entry reaches "
+        "it, so no configured option and no credential can."
     ),
 }
 
@@ -479,6 +493,13 @@ def _field_constraint(declared: Declared) -> str:
         return "one name, or several joined with `, `"
     if kind is Kind.SOURCES:
         return "keyed by the prompt provenance grammar, with counts for values"
+    if kind is Kind.DROP_COUNTS:
+        reasons = ", ".join(f"`{one}`" for one in sorted(DropReason))
+        return f"keyed by {reasons}, with frame counts for values"
+    if kind is Kind.PROVIDER_ENTRIES:
+        return "agent, then stage, then " + ", ".join(
+            f"`{one}`" for one in PROVIDER_ENTRY_REQUIRED + PROVIDER_ENTRY_OPTIONAL
+        )
     return ""
 
 

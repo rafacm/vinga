@@ -76,6 +76,7 @@ from vinga_server.events.values import (
     Count,
     DeviceId,
     DeviceOrUnidentified,
+    DroppedFrames,
     EchoOutcome,
     EventName,
     EventValue,
@@ -104,12 +105,14 @@ from vinga_server.events.values import (
     OtaRefusal,
     PendingRefusal,
     PromptSources,
+    ProviderEntries,
     ProviderOutcome,
     QuotedProvider,
     QuotedToolName,
     ReachingHost,
     Real,
     Rejection,
+    ReplyOutcome,
     ReportedMac,
     SessionId,
     SessionIds,
@@ -1099,6 +1102,16 @@ class SessionOpen(Variant):
         )
     )
     agents: AgentNames = value()
+    providers: ProviderEntries = value(
+        note=(
+            "What this conversation opened against, for every agent the "
+            "device is bound to: the entry, its type, the host it "
+            "reaches and the model it runs, per pipeline stage. The one "
+            "derivation the capture manifest reads too. A world applied "
+            "mid-session does not move it: what a record says is what "
+            "the conversation opened with."
+        )
+    )
     protocol: Whole = value()
     revision: Identifier = value(
         note=(
@@ -1183,7 +1196,237 @@ class SpeakingStarted(Variant):
     )
 
 
+@dataclass(frozen=True)
+class SpeakingFinished(Variant):
+    """The reply's last audio frame has gone out.
+
+    Emitted by the session edge, where `speaking_started` is emitted and
+    for the same reason: the attribution is to whichever agent is
+    speaking, and who that is has never been a fact about the audio
+    clock. The two together bound the interval the pacer actually paces,
+    first frame out to last frame out, which is neither the reply's
+    whole life nor its tail. A reply that never spoke emits none of
+    this, because there is no interval to bound.
+    """
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: speaking finished after %d frame(s)"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "frames")
+
+    agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
+    frames: Count = value(
+        note=(
+            "How many frames of this reply the device was actually sent, "
+            "counted after each delivery returned and kept across a "
+            "handover: what the interval bounds is one reply's audio, "
+            "however many agents produced it."
+        )
+    )
+
+
+@dataclass(frozen=True)
+class FramesDropped(Variant):
+    """One second of mic frames the session did not use, by reason.
+
+    Aggregated per second rather than said per frame: the guards drop
+    whole seconds of audio at a time, and what explains a misfire is the
+    rate. Counted whether or not this deployment records anything, so a
+    capture-less server sees its drops too.
+    """
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.DEBUG
+    TEMPLATE: ClassVar[str] = "session %s: dropped mic frames in second %d"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "second")
+
+    second: Whole = value(
+        note="Which second of the session, counted from its open."
+    )
+    reasons: DroppedFrames = value(
+        note=(
+            "How many frames went to each of the edge's own guards. "
+            "Every key is one of this server's words and every value a "
+            "count of frames; nothing of a frame itself is on the record."
+        )
+    )
+
+
 # --- runtime/pipeline.py: what happens inside a conversation ----------
+
+
+@dataclass(frozen=True)
+class TurnStarted(Variant):
+    """A reply attempt begins.
+
+    Emitted at every successful `start_reply`, which is the definition
+    rather than a list of paths: the ordinary endpointed utterance, a
+    manual stop (one that interrupts a reply in progress included), a
+    confirmed non-empty barge-in, and the mid-ASR merge all arrive
+    there. A barge-in candidate the gate rejects never does, and emits
+    nothing new: its rejection is already gate vocabulary.
+
+    Stamped with the instant the user stopped speaking, which the floor
+    preserves across the gate, so an interrupting turn is timed from the
+    utterance rather than from the confirmation that took it seriously.
+    """
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: answering %d ms of speech"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "speech_ms")
+
+    agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
+    speech_ms: Whole = value(
+        note="How much of what was fed the endpointer classified as speech."
+    )
+    barge_in: Flag = value(
+        note=(
+            "Whether this turn interrupted a reply in flight, which is "
+            "true for a confirmed barge-in, a mid-ASR merge and a manual "
+            "stop that cut one short."
+        )
+    )
+
+
+@dataclass(frozen=True)
+class ReplyFinished(Variant):
+    """A reply ends, however it ended.
+
+    Exactly one per `turn_started`, emitted as the first statement of
+    the reply's `finally` and before any await, so a cancellation cannot
+    land between the end of the reply and the record of it. `replied`
+    keeps its own meaning beside this one: it says a reply spoke, and
+    this says a reply finished.
+    """
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: reply finished (%s) after %d sentence(s)"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "outcome", "sentences_spoken")
+
+    agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
+    outcome: ReplyOutcome = value(
+        note=(
+            "Latched at the boundary that ended the reply rather than "
+            "guessed from a cancellation, which cannot tell a barge-in "
+            "from a shutdown. First writer wins; an unlatched exit is "
+            "`completed`."
+        )
+    )
+    sentences_spoken: Count = value(
+        note=(
+            "How many sentences of it the user heard, counted the way "
+            "`replied` counts them: audio that actually went out."
+        )
+    )
+
+
+@dataclass(frozen=True)
+class NothingHeard(Variant):
+    """An utterance is transcribed to nothing at all.
+
+    The ASR outcome that used to be a log line inside a started reply.
+    No text field, and the type is what says so: there is no value in
+    this vocabulary an empty transcript's neighbours could be
+    constructed as. A failed transcription is `provider_failed`
+    instead; this is the one that answered.
+    """
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: nothing transcribed from %.2f s of speech"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "duration_s")
+
+    agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
+    duration_s: Real = value(note="How long the utterance that produced nothing was.")
+    asr_ms: Whole | Absent = value(
+        default=ABSENT, note="What the transcription that answered nothing cost."
+    )
+
+
+@dataclass(frozen=True)
+class SentenceSynthesized(Variant):
+    """One sentence of a reply has finished streaming out of the voice.
+
+    Two numbers, because a streamed voice feeding a paced consumer has
+    two and only one of them is synthesis: the provider's own latency to
+    its first audio, measured before backpressure can bite, and the
+    stream's whole lifetime, which includes however long playback held
+    it. Nothing here is called synthesis latency that is not.
+    """
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.DEBUG
+    TEMPLATE: ClassVar[str] = "session %s: sentence %d synthesized in %d ms"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "index", "stream_ms")
+
+    agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
+    index: Count = value(
+        note=(
+            "Which synthesis of this reply this was, counted from zero "
+            "in the order the requests were made rather than in the "
+            "order they answered."
+        )
+    )
+    stream_ms: Whole = value(
+        note=(
+            "The whole stream's lifetime, request to last chunk. It "
+            "INCLUDES playback backpressure: the buffer holds one chunk, "
+            "so a paced consumer is what decides when the provider is "
+            "asked for the next one, and pure synthesis time is "
+            "unobservable for a streaming voice."
+        )
+    )
+    first_chunk_ms: Whole | Absent = value(
+        default=ABSENT,
+        note=(
+            "The provider's latency to its first audio chunk, measured "
+            "producer-side: the first chunk always finds buffer room, so "
+            "this one number is backpressure-free. Absent where the "
+            "stream produced no audio at all."
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -1209,6 +1452,15 @@ class Heard(Variant):
         )
     )
     duration_s: Real = value()
+    asr_ms: Whole | Absent = value(
+        default=ABSENT,
+        note=(
+            "What the transcription cost, measured where it was run. An "
+            "interrupting turn carries the latency the barge-in gate "
+            "measured for its own confirmation, since that is the "
+            "transcription this turn is answering."
+        ),
+    )
     language: LanguageTag | Absent = value(
         default=ABSENT, note="Only engines that detected carry this."
     )
@@ -2049,6 +2301,47 @@ SPEAKING_STARTED = declare(
     variants=(SpeakingStarted,),
 )
 
+SPEAKING_FINISHED = declare(
+    "speaking_finished",
+    note=(
+        "The reply's last audio frame has gone out, which with "
+        "`speaking_started` bounds the interval the frame pacer actually "
+        "paces. A reply that never spoke emits none."
+    ),
+    variants=(SpeakingFinished,),
+)
+
+FRAMES_DROPPED = declare(
+    "frames_dropped",
+    note=(
+        "One second of mic frames the edge's guards discarded before "
+        "they could be decoded, counted by reason. Counted whether or "
+        "not this deployment records anything, and flushed at the "
+        "session's close so a partial second is not lost."
+    ),
+    variants=(FramesDropped,),
+)
+
+TURN_STARTED = declare(
+    "turn_started",
+    note=(
+        "A reply attempt begins, at every successful `start_reply`. "
+        "Stamped with the instant the user stopped speaking, which the "
+        "floor preserves across the barge-in gate."
+    ),
+    variants=(TurnStarted,),
+)
+
+REPLY_FINISHED = declare(
+    "reply_finished",
+    note=(
+        "A reply ends, however it ended: exactly one per `turn_started`, "
+        "with an outcome latched where the end was decided rather than "
+        "inferred from a cancellation."
+    ),
+    variants=(ReplyFinished,),
+)
+
 HEARD = declare(
     "heard",
     note=(
@@ -2057,6 +2350,26 @@ HEARD = declare(
         "is how long the user spoke."
     ),
     variants=(Heard,),
+)
+
+NOTHING_HEARD = declare(
+    "nothing_heard",
+    note=(
+        "An utterance is transcribed to nothing at all, which is the "
+        "ASR outcome beside `heard` and `provider_failed`. No text "
+        "field, by type."
+    ),
+    variants=(NothingHeard,),
+)
+
+SENTENCE_SYNTHESIZED = declare(
+    "sentence_synthesized",
+    note=(
+        "One sentence of a reply has finished streaming out of the "
+        "voice: the provider's latency to its first chunk, and the "
+        "stream's whole lifetime, which includes playback backpressure."
+    ),
+    variants=(SentenceSynthesized,),
 )
 
 REPLIED = declare("replied", note="A reply finishes.", variants=(Replied,))

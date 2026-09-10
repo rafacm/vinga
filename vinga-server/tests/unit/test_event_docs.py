@@ -42,7 +42,15 @@ from vinga_server.events.catalog import (
     rendered_values,
     tokens_of,
 )
-from vinga_server.events.values import GRAMMARS, SYNTAXES, ArgKind, Kind
+from vinga_server.events.values import (
+    GRAMMARS,
+    PROVIDER_ENTRY_OPTIONAL,
+    PROVIDER_ENTRY_REQUIRED,
+    SYNTAXES,
+    ArgKind,
+    DropReason,
+    Kind,
+)
 
 
 def documented() -> dict[str, Declaration]:
@@ -229,6 +237,17 @@ def check_constraint(rendered: str, declared: Any, kind: str, where: str) -> Non
         return
     if kind == "SOURCES":
         assert "provenance" in rendered, where
+        return
+    if kind == "DROP_COUNTS":
+        # The whole closed set, since a value type rather than an
+        # enumeration is what carries it: the cell is where a reader
+        # meets the reasons at all.
+        for reason in sorted(DropReason):
+            assert token(str(reason)) in rendered, f"{where}: reason {reason!r} missing"
+        return
+    if kind == "PROVIDER_ENTRIES":
+        for name in PROVIDER_ENTRY_REQUIRED + PROVIDER_ENTRY_OPTIONAL:
+            assert f"`{name}`" in rendered, f"{where}: entry key {name!r} missing"
         return
     # Nothing further is declared, so the cell claims nothing further.
     assert rendered == "", where

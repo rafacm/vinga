@@ -45,7 +45,12 @@ from enum import Enum, StrEnum
 from functools import cache
 from typing import ClassVar, Final, Literal
 
-from vinga_server.config.models import BOARD_LIMIT, CLIENT_ID_LIMIT, FIRMWARE_LIMIT
+from vinga_server.config.models import (
+    BOARD_LIMIT,
+    CLIENT_ID_LIMIT,
+    FIRMWARE_LIMIT,
+    PROVIDER_STAGES,
+)
 from vinga_server.memory.scopes import MemoryScope
 
 # --- what a value may be ----------------------------------------------
@@ -80,9 +85,16 @@ class Kind(Enum):
     COUNT = "count"
     IDENTIFIER_LIST = "identifier_list"
     ID_LIST = "id_list"
-    # The one structured kind: a mapping from prompt provenance to
-    # character counts.
+    # A mapping from prompt provenance to character counts.
     SOURCES = "sources"
+    # A mapping from the closed set of reasons a mic frame is discarded
+    # to how many frames one second of the session lost to each.
+    DROP_COUNTS = "drop_counts"
+    # What a session opened against: per bound agent, per pipeline
+    # stage, the resolved entry's name, type, host and model. Nothing
+    # else off a provider entry, which is what makes it sanitized by
+    # construction rather than by remembering to mask.
+    PROVIDER_ENTRIES = "provider_entries"
 
 
 class ArgKind(Enum):
@@ -1023,6 +1035,97 @@ class PromptSources(EventValue):
         return dict(self.value)
 
 
+# What one provider entry contributes to `session_open.providers`, and
+# the whole of it: the entry an operator named, the type it is, the host
+# it reaches and the model it runs. Nothing else off a `ProviderConfig`,
+# so a credential-shaped option has no way onto the surface at all,
+# which is what makes this sanitized by construction rather than by
+# masking. `name` and `type` are always there; `host` is missing for an
+# engine that runs in this process and `model` for a type with none to
+# name, absence being the same answer the provider-bearing events give.
+PROVIDER_ENTRY_REQUIRED: Final = ("name", "type")
+PROVIDER_ENTRY_OPTIONAL: Final = ("host", "model")
+
+
+@dataclass(frozen=True)
+class ProviderEntries(EventValue):
+    """What a session opened against, by agent and by pipeline stage.
+
+    Structured for the reason `PromptSources` is: what it carries is
+    names this server or its operator chose, never anything a far side
+    or a credential store put in an entry. Every agent the device is
+    bound to rather than only the one talking, so a handover changes
+    which of these a reader looks at rather than needing entries the
+    record never had.
+    """
+
+    KIND: ClassVar[Kind] = Kind.PROVIDER_ENTRIES
+
+    value: dict[str, dict[str, dict[str, str]]]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.value, dict):
+            raise EventValueError("ProviderEntries is a mapping of agents")
+        for agent, stages in self.value.items():
+            # Through `Identifier` rather than beside it: an agent name
+            # is one, and a copy of its rule here would be the second
+            # structure.
+            Identifier(agent)
+            if not isinstance(stages, dict):
+                raise EventValueError("a ProviderEntries agent holds a mapping of stages")
+            for stage, entry in stages.items():
+                if stage not in PROVIDER_STAGES:
+                    raise EventValueError("a ProviderEntries stage is a pipeline stage")
+                self._entry(entry)
+
+    @staticmethod
+    def _entry(entry: object) -> None:
+        if not isinstance(entry, dict):
+            raise EventValueError("a ProviderEntries entry is a mapping")
+        if not set(PROVIDER_ENTRY_REQUIRED) <= set(entry):
+            raise EventValueError("a ProviderEntries entry names its entry and its type")
+        if not set(entry) <= set(PROVIDER_ENTRY_REQUIRED + PROVIDER_ENTRY_OPTIONAL):
+            raise EventValueError(
+                "a ProviderEntries entry carries only name, type, host and model"
+            )
+        for held in entry.values():
+            Identifier(held)  # type: ignore[arg-type]
+
+    def carried(self) -> dict[str, dict[str, dict[str, str]]]:
+        return {
+            agent: {stage: dict(entry) for stage, entry in stages.items()}
+            for agent, stages in self.value.items()
+        }
+
+
+@dataclass(frozen=True)
+class DroppedFrames(EventValue):
+    """How many mic frames one second of a session lost, by reason.
+
+    Counts against a closed set this server owns, which is what makes a
+    mapping lawful on this surface at all: every key is one of the
+    guards' own words and every value is a number of frames.
+    """
+
+    KIND: ClassVar[Kind] = Kind.DROP_COUNTS
+
+    value: dict[str, int]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.value, dict):
+            raise EventValueError("DroppedFrames is a mapping")
+        if not self.value:
+            raise EventValueError("DroppedFrames counts at least one reason")
+        for key, held in self.value.items():
+            if not isinstance(key, str) or key not in frozenset(DropReason):
+                raise EventValueError("a DroppedFrames key is a declared drop reason")
+            if isinstance(held, bool) or not isinstance(held, int) or held < 1:
+                raise EventValueError("a DroppedFrames value is a frame count of one or more")
+
+    def carried(self) -> dict[str, int]:
+        return dict(self.value)
+
+
 # --- the closed sets, as types ----------------------------------------
 #
 # A token used to be a string a site wrote and a set a registry
@@ -1075,6 +1178,52 @@ class Rejection(StrEnum):
     # sends a reader somewhere else: capacity is a sizing question, and
     # this is a redeploy that will be over in a moment.
     DRAINING = "draining"
+
+
+class ReplyOutcome(StrEnum):
+    """How one reply ended, latched where the end was decided.
+
+    Six answers rather than a success flag, because what an operator
+    does about each is different and because `CancelledError` cannot
+    tell a barge-in from a shutdown. Every one of them is written down
+    at the boundary that initiated it: the canceller names itself, the
+    failure classification names the exception's kind, the
+    empty-transcript branch names the silence, and the reply body names
+    a device that vanished. An unlatched exit is `completed`, which is
+    the only one nothing writes.
+    """
+
+    # Nothing latched anything: the reply ran to its end.
+    COMPLETED = "completed"
+    # ASR answered, and answered with nothing.
+    NOTHING_HEARD = "nothing_heard"
+    # The reply broke. Which provider and which class is
+    # `provider_failed`'s to say.
+    FAILED = "failed"
+    # The user cut in and the interruption was answered instead.
+    BARGED_IN = "barged_in"
+    # The device gave up on the answer, or the session closed under it.
+    ABORTED = "aborted"
+    # The device disappeared mid-reply, which the reply body catches and
+    # returns on: an unlatched exit would read that as a reply that
+    # finished.
+    DEVICE_GONE = "device_gone"
+
+
+class DropReason(StrEnum):
+    """Why a mic frame was discarded before it could be decoded.
+
+    The device edge's own guards, restated here for the reason the
+    module's other closed sets are restated: their decision site is
+    `device/session.py`, which imports this and would close a cycle. The
+    unit tests hold the two equal.
+    """
+
+    NOT_LISTENING = "not_listening"
+    BARGE_IN_OFF = "barge_in_off"
+    FRAMING_ERROR = "framing_error"
+    NOT_OPUS = "not_opus"
+    UNDECODABLE = "undecodable"
 
 
 class Suppression(StrEnum):
@@ -1521,6 +1670,8 @@ __all__ = [
     "ConversationId",
     "Count",
     "Descriptor",
+    "DropReason",
+    "DroppedFrames",
     "DeviceId",
     "DeviceOrUnidentified",
     "EchoOutcome",
@@ -1549,12 +1700,14 @@ __all__ = [
     "OtaRefusal",
     "PendingRefusal",
     "PromptSources",
+    "ProviderEntries",
     "ProviderOutcome",
     "QuotedProvider",
     "QuotedToolName",
     "ReachingHost",
     "Real",
     "Rejection",
+    "ReplyOutcome",
     "ReportedMac",
     "SessionId",
     "SessionIds",
