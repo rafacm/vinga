@@ -1434,6 +1434,12 @@ class SentenceSynthesized(Variant):
     LEVEL: ClassVar[int] = logging.DEBUG
     TEMPLATE: ClassVar[str] = "session %s: sentence %d synthesized in %d ms"
     ARGS: ClassVar[tuple[str, ...]] = ("session", "index", "stream_ms")
+    NOTE: ClassVar[str] = (
+        "`provider` and `type` are atomic: a provider with an identity "
+        "carries both, and one the registry never built carries neither. "
+        "`host` is absent for an engine that runs in this process and "
+        "`model` for a type that has none to name."
+    )
 
     agent: Identifier = value()
     conversation: ConversationId = value(
@@ -1469,6 +1475,16 @@ class SentenceSynthesized(Variant):
             "stream produced no audio at all."
         ),
     )
+    provider: Identifier | Absent = value(default=ABSENT)
+    type: Identifier | Absent = value(default=ABSENT)
+    host: Identifier | Absent = value(default=ABSENT)
+    model: Identifier | Absent = value(
+        default=ABSENT,
+        note=(
+            "Present where the configured entry names one. The GenAI "
+            "conventions' `gen_ai.request.model`."
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -1483,6 +1499,12 @@ class Heard(Variant):
     LEVEL: ClassVar[int] = logging.INFO
     TEMPLATE: ClassVar[str] = "session %s: heard %.2f s of speech"
     ARGS: ClassVar[tuple[str, ...]] = ("session", "duration_s")
+    NOTE: ClassVar[str] = (
+        "`provider` and `type` are atomic: a provider with an identity "
+        "carries both, and one the registry never built carries neither. "
+        "`host` is absent for an engine that runs in this process and "
+        "`model` for a type that has none to name."
+    )
 
     agent: Identifier = value()
     conversation: ConversationId = value(
@@ -1507,6 +1529,16 @@ class Heard(Variant):
         default=ABSENT, note="Only engines that detected carry this."
     )
     language_confidence: Real | Absent = value(default=ABSENT)
+    provider: Identifier | Absent = value(default=ABSENT)
+    type: Identifier | Absent = value(default=ABSENT)
+    host: Identifier | Absent = value(default=ABSENT)
+    model: Identifier | Absent = value(
+        default=ABSENT,
+        note=(
+            "Present where the configured entry names one. The GenAI "
+            "conventions' `gen_ai.request.model`."
+        ),
+    )
 
 
 @dataclass(frozen=True)

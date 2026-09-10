@@ -46,11 +46,13 @@ from typing import cast
 from vinga_server.events.catalog import (
     BuiltinSentenceWithheld,
     BuiltinToolCall,
+    Heard,
     LlmRetry,
     LlmRound,
     McpSentenceWithheld,
     McpToolCall,
     ProviderFailed,
+    SentenceSynthesized,
     ToolArgumentsCoerced,
     UnnamedSentenceWithheld,
     UnnamedToolCall,
@@ -66,6 +68,7 @@ from vinga_server.events.values import (
     Fragment,
     FromEntry,
     Identifier,
+    LanguageTag,
     Nothing,
     ProviderOutcome,
     QuotedProvider,
@@ -81,11 +84,13 @@ from vinga_server.events.values import (
 __all__ = [
     "builtin_sentence_withheld",
     "builtin_tool_called",
+    "heard",
     "llm_retried",
     "llm_rounded",
     "mcp_sentence_withheld",
     "mcp_tool_called",
     "provider_failure",
+    "sentence_synthesized",
     "tool_arguments_coerced",
     "tool_fragment",
     "unnamed_sentence_withheld",
@@ -413,6 +418,81 @@ def llm_rounded(
         input_tokens=Count(input_tokens) if input_tokens is not None else ABSENT,
         output_tokens=Count(output_tokens) if output_tokens is not None else ABSENT,
         first_token_ms=Whole(first_token_ms) if first_token_ms is not None else ABSENT,
+    )
+
+
+# The two success-side stage events. They name the entry that produced
+# the transcript and the entry that produced the audio, off the same
+# quartet `llm_round` names the entry that generated the reply off, so
+# "latency by provider" is one question with one answer at all three
+# stages. Neither sentence renders any of the four: what the words say
+# is unchanged, and the identity is carried payload.
+
+
+def heard(
+    agent: str,
+    conversation: str,
+    provider: object,
+    duration_s: float,
+    asr_ms: int | None,
+    language: str | None,
+    language_confidence: float | None,
+) -> Variant:
+    """The `heard` event for one transcription.
+
+    `provider` is the ear that ran THIS transcription, which the caller
+    has to hold rather than look up: a reply answering a confirmed
+    barge-in reuses a transcription another call produced, and
+    `asr_ms` beside it already reports that same call.
+
+    The language pair arrives as the plain values the engine answered
+    with, or as None where it detected nothing, which is a fact about
+    the engine rather than a zero.
+    """
+    entry, type_, host, model = _entry_fields(provider)
+    return Heard(
+        agent=Identifier(agent),
+        conversation=ConversationId(conversation),
+        duration_s=Real(duration_s),
+        asr_ms=ABSENT if asr_ms is None else Whole(asr_ms),
+        language=ABSENT if language is None else LanguageTag(language),
+        language_confidence=(
+            ABSENT if language_confidence is None else Real(language_confidence)
+        ),
+        provider=entry,
+        type=type_,
+        host=host,
+        model=model,
+    )
+
+
+def sentence_synthesized(
+    agent: str,
+    conversation: str,
+    provider: object,
+    index: int,
+    first_chunk_ms: int | None,
+    stream_ms: int,
+) -> Variant:
+    """The `sentence_synthesized` event for one stream that has ended.
+
+    Both numbers as the producer measured them: the first is the
+    voice's own latency to its first audio and is None where the stream
+    produced none at all, and the second is how long the whole stream
+    lived, which for a paced consumer includes the playback it was
+    feeding.
+    """
+    entry, type_, host, model = _entry_fields(provider)
+    return SentenceSynthesized(
+        agent=Identifier(agent),
+        conversation=ConversationId(conversation),
+        index=Count(index),
+        stream_ms=Whole(stream_ms),
+        first_chunk_ms=ABSENT if first_chunk_ms is None else Whole(first_chunk_ms),
+        provider=entry,
+        type=type_,
+        host=host,
+        model=model,
     )
 
 

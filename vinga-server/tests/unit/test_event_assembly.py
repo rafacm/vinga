@@ -107,11 +107,13 @@ UNREGISTERED = Stamped()
 INTERFACE = [
     "builtin_sentence_withheld",
     "builtin_tool_called",
+    "heard",
     "llm_retried",
     "llm_rounded",
     "mcp_sentence_withheld",
     "mcp_tool_called",
     "provider_failure",
+    "sentence_synthesized",
     "tool_arguments_coerced",
     "tool_fragment",
     "unnamed_sentence_withheld",
@@ -136,7 +138,7 @@ def defined_here(module: ModuleType) -> list[str]:
 
 
 def test_the_module_defines_its_builders_and_nothing_that_makes_an_entry() -> None:
-    """The interface is the ten builders and the fragment. The quartet
+    """The interface is the twelve builders and the fragment. The quartet
     type and the crossing that fills it are private, which is what makes
     the builders the only producers of the four entry values.
 
@@ -180,6 +182,8 @@ def test_no_builder_names_an_entry_without_naming_its_type(provider: Stamped) ->
         assembly.llm_retried("poet", THREAD, "llm", provider, 2, 0.5),
         assembly.llm_rounded("poet", THREAD, "llm", provider, 2, 3, 0.5, 140, 12, 220),
         assembly.provider_failure("poet", THREAD, "llm", provider, ConnectionRefusedError(), 0.5),
+        assembly.heard("poet", THREAD, provider, 1.5, 40, None, None),
+        assembly.sentence_synthesized("poet", THREAD, provider, 0, 90, 400),
     ]
 
     for one in built:
