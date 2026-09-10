@@ -79,18 +79,41 @@ Both sites already hold their provider object.
 A milestone that had to pass a provider down through a call chain would be a
 different and larger change; it does not.
 
-### `heard` names the configured entry even when the transcription was reused
+### A reused transcription carries the provider that actually ran it
 
 A reply that answers a confirmed barge-in reuses that barge-in's transcription
-rather than running ASR again, which is why `asr_ms` is null on those turns:
-"not measured this turn" rather than somebody else's wait.
+rather than running ASR again. Two facts about that path decide this design, and
+the first draft of this plan had both of them wrong.
 
-The provider fields are deliberately NOT null there. `asr_ms` is a measurement
-and belongs to the call that made it; the provider is a fact about which entry
-the ASR stage is bound to for this agent, and the reused transcription came out
-of that same entry, because both call sites read `providers.asr`. So the fields
-are filled on every `heard`, and the asymmetry with `asr_ms` is intended and is
-stated in the field notes.
+`heard.asr_ms` is NOT null on those turns. The confirmation's latency is
+measured at the site that runs it and handed over on the `Utterance`, precisely
+so that the one interruption an operator cannot otherwise see the ASR cost of
+reports a real number. What IS null on those turns is `Turn.asr_ms`, a different
+field answering a stricter question: whether THIS turn ran a transcription.
+
+And the provider cannot be read at the emit site. `confirm_transcript` awaits an
+ASR call while the reply in flight may run a handover, and a handover rebinds
+`self._providers`, so `providers.asr` at the `heard` emit is not necessarily the
+provider that produced the transcript being reported. Since `heard.asr_ms`
+already reports the confirmation call, reading the provider from the current
+binding would put two different calls in the two halves of one record.
+
+So the provenance travels with the result:
+
+- `confirm_transcript` returns a frozen `Confirmation(result, provider)` rather
+  than a bare `AsrResult`. `provider` is typed `object`, which is exactly what
+  `assembly._entry_fields` takes, so nothing about a provider's own types
+  reaches `turntaking` and the seam keeps its stated rule, that the ladder needs
+  an answer rather than the machinery producing one.
+- `_gate_barge_in` carries the provider beside the result and the latency it
+  already carries.
+- `Utterance` gains `asr_provider`, set with `transcript` and `asr_ms`, which
+  its own docstring already says travel together and are set together.
+- A turn that ran its own ASR passes `providers.asr` directly, as before.
+
+The deterministic pin for this is named in the tests section: suspend the
+confirmation, hand over, then assert `heard`'s quartet describes the provider
+that transcribed rather than the one now bound.
 
 ### `sentence_synthesized` keeps its DEBUG level
 
