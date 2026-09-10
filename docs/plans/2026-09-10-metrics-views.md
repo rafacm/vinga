@@ -337,7 +337,7 @@ No new package, no new config, no API change.
 
 - [x] **[M1: the views, the reference and the
   proof](2026-09-10-metrics-views-implementation.md#m1-the-views-the-reference-and-the-proof)**
-  (PR TBD). `views.py`
+  (PR #447). `views.py`
   with the frozen contracts, migration `1006_metrics_views` (the plan
   said 1005; PR #442 took that slot after this plan was written, and
   the renumbering is recorded as a deviation), the
