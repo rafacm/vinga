@@ -61,6 +61,7 @@ from tests.support.sessions import (
 )
 from tests.support.sockets import OrderedSocket, RecordingSocket
 from tests.support.wire import speech_pcm
+from vinga_server.device.boundary import PlayableAudio
 from vinga_server.events import Emission
 from vinga_server.events.values import ReplyOutcome
 from vinga_server.providers import AsrResult
@@ -467,6 +468,51 @@ async def test_a_device_that_leaves_while_the_transcript_shows_still_says_heard(
     lifecycle = [name for name in tap.names() if name in _LIFECYCLE]
     assert lifecycle == ["turn_started", "heard", "reply_finished"]
     assert outcomes(tap) == ["device_gone"]
+
+
+async def test_the_playback_window_opens_at_the_frame_and_not_before_it() -> None:
+    """Where the opening stamp is taken, which is behavior.
+
+    Everything between handing a batch to the pacer and the first frame
+    reaching the device belongs to the pacer: the frame's own slot in
+    the cadence, the pause a barge-in confirmation holds the stream
+    with, and the send itself. The event used to be emitted in front of
+    all three, so a first delivery that was held or slow inflated an
+    interval the generated reference calls first frame out to last frame
+    out. It is stamped with the delivery now, and the pause is what
+    makes the difference measurable: the batch is handed over while the
+    stream is held, released a beat later, and the record has to name
+    the later instant.
+    """
+    held = asyncio.Event()
+
+    class Waiting:
+        """A device whose first frame cannot leave until it is let."""
+
+        def __init__(self) -> None:
+            self.frames = 0
+
+        async def send_text(self, text: str) -> None:
+            return None
+
+        async def send_bytes(self, data: bytes) -> None:
+            if self.frames == 0:
+                await held.wait()
+            self.frames += 1
+
+    session = talking(websocket=cast(Any, Waiting()))
+    tap = watching(session)
+    handed = events_of(session).now()
+    sending = asyncio.create_task(session.send_audio(PlayableAudio([b"frame", b"frame"])))
+    # Long enough that an interval opened at the hand-over would be
+    # visibly wrong rather than arguably early.
+    await asyncio.sleep(0.2)
+    assert tap.of("speaking_started") == [], "the window opened before a frame went out"
+    held.set()
+    await sending
+
+    (opened,) = tap.of("speaking_started")
+    assert opened.at >= handed + 0.2
 
 
 # --- nothing in the reply's tail can suppress the record ---------------

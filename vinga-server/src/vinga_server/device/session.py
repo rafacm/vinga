@@ -1128,6 +1128,34 @@ class DeviceSession:
         await self.begin_speaking()
         await self._send_text(messages.tts_message(self.session_id, "stop"))
 
+    def _speaking_started(self, at: float) -> None:
+        """Open the paced-playback interval, at the frame that opened it.
+
+        The `replied` event marks the last frame of a reply, so on its
+        own the logs cannot tell synthesis cost from speaking time; this
+        marks the first frame, making time-to-first-audio measurable
+        (#22). Emitted here rather than by the pacer: the attribution is
+        to whichever agent is speaking, and who that is has never been a
+        fact about the audio clock.
+
+        Stamped with the delivery rather than with the moment the batch
+        was handed over, which is the correction the review round asked
+        for. Everything between those two instants is the pacer's: the
+        wait for the frame's own slot, the pause a barge-in confirmation
+        holds the stream with, and the send itself. A reply whose first
+        frame was held for a confirmation would otherwise open a window
+        the pacer had not begun pacing, and `speaking_finished` closes
+        it at a real delivery, so the pair has to be measured the same
+        way at both ends.
+        """
+        self._events.emit(
+            lambda: SpeakingStarted(
+                agent=Identifier(self._agent),
+                conversation=ConversationId(self._conversation),
+            ),
+            at=at,
+        )
+
     def _finished_speaking(self) -> None:
         """Close the paced-playback interval `speaking_started` opened.
 
@@ -1236,19 +1264,6 @@ class DeviceSession:
         starts at the first frame of the reply, not at ASR time."""
         if not batch:
             return
-        if self._pacer.first_frame(asyncio.get_running_loop().time()):
-            # The `replied` event marks the last frame of a reply, so on
-            # its own the logs cannot tell synthesis cost from speaking
-            # time; this marks the first frame, making time-to-first-audio
-            # measurable (#22). Emitted here rather than by the pacer:
-            # the attribution is to whichever agent is speaking, and who
-            # that is has never been a fact about the audio clock.
-            self._events.emit(
-                lambda: SpeakingStarted(
-                    agent=Identifier(self._agent),
-                    conversation=ConversationId(self._conversation),
-                )
-            )
 
         async def deliver(packet: bytes) -> None:
             """What one paced frame's slot is spent on: the wire, then
@@ -1259,7 +1274,9 @@ class DeviceSession:
                 self._capture_audio.reply(packet)
 
         for packet in batch.packets:
-            await self._pacer.transmit(packet, deliver)
+            first = await self._pacer.transmit(packet, deliver)
+            if first is not None:
+                self._speaking_started(first)
 
     async def _send_text(self, text: str) -> None:
         """One outgoing message, with a device that has gone away

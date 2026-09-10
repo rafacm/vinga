@@ -363,9 +363,15 @@ async def test_the_fillers_first_frame_stamps_and_attributes_speaking_started(
 ) -> None:
     """When the mask speaks first, its first frame is the turn's
     `speaking_started`: one per reply, named for the agent that is
-    talking, and emitted before the frame reaches the socket rather than
-    after it. The stamp is what the barge-in refractory window is
-    measured from, so where it is taken is behavior."""
+    talking, and emitted once that frame has actually reached the
+    socket. The stamp is what the barge-in refractory window is measured
+    from, so where it is taken is behavior, and it moved: the event used
+    to be emitted before the batch was paced at all, which put the
+    frame's own slot, a barge-in confirmation's pause and the send
+    itself inside a window claiming to begin at the first frame out
+    (#66's review round). So the first frame goes out with the event
+    still unsaid and every frame after it with the event already
+    made."""
     session = await masked_session(
         stuttering_config(),
         POET_MAC,
@@ -382,10 +388,12 @@ async def test_the_fillers_first_frame_stamps_and_attributes_speaking_started(
     assert started.agent == "poet"
     assert caplog.records.index(played) < caplog.records.index(started)
     socket = cast(ProbingSocket, session.websocket)
-    assert socket.frame_probes, "the reply sent no frames at all"
-    # Every frame, including the filler's first, went out with the event
-    # already emitted: the stamp precedes the pacing and the send.
-    assert all(socket.frame_probes)
+    assert len(socket.frame_probes) > 1, "the reply sent too few frames to place one"
+    # The filler's first frame went out with the event still unsaid, and
+    # every frame after it with the event already made: the stamp
+    # follows the delivery it names rather than the decision to make it.
+    assert socket.frame_probes[0] is False
+    assert all(socket.frame_probes[1:])
 
 
 async def test_a_tool_only_handover_attributes_speaking_started_to_the_new_agent(

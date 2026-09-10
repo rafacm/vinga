@@ -62,12 +62,13 @@ class ReplyPacer:
         # Outgoing frame pacing, reset per reply on the first frame.
         self._pace_start: float | None = None
         self._pace_count = 0
-        # Whether this reply has sent any audio yet. Pacing restarts per
-        # agent leg, so it cannot double as this flag: what reads it
-        # must fire once per reply, not once per handover.
+        # Whether this reply has delivered any audio yet. Pacing
+        # restarts per agent leg, so it cannot double as this flag: what
+        # reads it must fire once per reply, not once per handover.
         self._speaking_started = False
-        # When this reply's first frame went out, for the barge-in
-        # refractory gate and the barge_in event's speaking_ms.
+        # When this reply's first frame reached the device, for the
+        # barge-in refractory gate and the barge_in event's
+        # speaking_ms.
         self._speaking_started_at: float | None = None
         # Whether this reply has told the device it is speaking. The
         # `tts start` it stands for is sent once per reply, and never
@@ -116,7 +117,7 @@ class ReplyPacer:
         """How much of this reply reached the device, and when the last
         of it did.
 
-        Answered rather than announced, for the reason `first_frame`
+        Answered rather than announced, for the reason `transmit`
         gives: what the end of a reply's audio occasions is an event
         attributed to whichever agent was speaking, and neither the
         event nor the agent is a term of this module. Nothing here is
@@ -129,21 +130,6 @@ class ReplyPacer:
         frame."""
         self._pace_start = None
         self._pace_count = 0
-
-    def first_frame(self, now: float) -> bool:
-        """Whether this is the first frame of the reply, stamping it if
-        it is.
-
-        Answered rather than announced: what a first frame occasions is
-        an event attributed to whichever agent is speaking, and neither
-        the event nor the agent is a term of this module. The caller
-        that gets True is the one that knows both.
-        """
-        if self._speaking_started:
-            return False
-        self._speaking_started = True
-        self._speaking_started_at = now
-        return True
 
     def tts_start_due(self) -> bool:
         """Whether the device still has to be told this reply is
@@ -159,8 +145,11 @@ class ReplyPacer:
         return True
 
     def speaking_started_at(self) -> float | None:
-        """When this reply's first frame was stamped, or None before it.
-        Read by the barge-in refractory gate and by the filler."""
+        """When this reply's first frame reached the device, or None
+        before one did. Read by the barge-in refractory gate and by the
+        filler, both of which are asking how long the user has been
+        hearing this reply, which is what makes the delivery and not the
+        decision to deliver the instant they want."""
         return self._speaking_started_at
 
     @property
@@ -197,9 +186,11 @@ class ReplyPacer:
 
     async def transmit(
         self, packet: bytes, deliver: Callable[[bytes], Awaitable[None]]
-    ) -> None:
+    ) -> float | None:
         """One packet's whole passage out: wait for its slot, wait out a
-        pause, hand it to `deliver`, and count it.
+        pause, hand it to `deliver`, and count it. Answers the instant
+        this delivery happened at where it was the reply's first, and
+        nothing on every later one.
 
         The count advances only after `deliver` returns, which is the
         one ordering rule a caller has to know and the reason this is a
@@ -209,6 +200,17 @@ class ReplyPacer:
         counting it would leave the cadence claiming a frame's worth of
         audio the speaker never played, and every slot after it would be
         that much late.
+
+        The first-frame stamp is inside that same rule, and it used to
+        be outside it: a caller asked before the send whether this was
+        the first frame, so the pacing wait, the pause a barge-in
+        confirmation holds the stream with, and the delivery itself all
+        fell inside an interval that claimed to begin at the first frame
+        out. Answered rather than announced, for the reason the count
+        is: what a first frame occasions is an event attributed to
+        whichever agent is speaking, and neither the event nor the agent
+        is a term of this module. The caller that gets a stamp is the
+        one that knows both.
         """
         loop = asyncio.get_running_loop()
         if self._pace_start is None:
@@ -224,3 +226,8 @@ class ReplyPacer:
         # not a frame of the interval anything here describes.
         self._delivered += 1
         self._delivered_at = loop.time()
+        if self._speaking_started:
+            return None
+        self._speaking_started = True
+        self._speaking_started_at = self._delivered_at
+        return self._delivered_at
