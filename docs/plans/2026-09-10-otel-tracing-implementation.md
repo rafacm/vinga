@@ -171,7 +171,7 @@ events, since the aggregate it used to use is not the capture's any more.
 ### Verification
 
 `uv run ruff check .`: all checks passed. `uv run pytest tests/unit -q -n
-auto --dist loadfile`: 5989 passed, 19 skipped. `uv run pytest
+auto --dist loadfile`: 5982 passed, 19 skipped. `uv run pytest
 tests/integration -q`: 245 passed. The five generated-document drift
 checks (`events reference`, `conversations schema`, `config reference`,
 `config reference server`, `config openapi`) all diff clean against the
