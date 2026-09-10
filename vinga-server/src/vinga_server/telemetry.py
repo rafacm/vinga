@@ -990,12 +990,37 @@ class Telemetry:
         self._accepting = False
         with self._closing:
             if self._finished is None:
-                self._finished = threading.Event()
-                threading.Thread(
-                    target=self.release,
-                    name="vinga-telemetry-shutdown",
-                    daemon=True,
-                ).start()
+                finished = self._finished = threading.Event()
+                try:
+                    threading.Thread(
+                        target=self.release,
+                        name="vinga-telemetry-shutdown",
+                        daemon=True,
+                    ).start()
+                except Exception:  # noqa: BLE001 - a teardown never raises at the operator
+                    # A process that cannot start a thread has larger
+                    # problems than its spans, and this method's job is
+                    # to leave none of them here. What must not survive
+                    # is an exporter nothing owns: the record was
+                    # written before the start, so a later `shutdown`
+                    # would wait on an event nobody was ever going to
+                    # set, and the SDK's silence would be held for the
+                    # life of the process by a release that never ran.
+                    #
+                    # So the claim goes back and the wait is ended, and
+                    # the provider is deliberately NOT shut down here:
+                    # that call blocks for as long as the collector
+                    # takes, and doing it inline would put a stalled
+                    # collector on the event loop, which is the one
+                    # thing this whole design refuses. What is lost is
+                    # the SDK's own thread, which is a daemon and dies
+                    # with the process.
+                    self._quieted.release()
+                    finished.set()
+                    logger.warning(
+                        "the telemetry exporter could not be released on a thread "
+                        "of its own and was left to the process's exit"
+                    )
             finished = self._finished
         # Off the loop for the wait itself, and with the bound passed to
         # `wait` rather than wrapped in `wait_for`, so the pool thread is

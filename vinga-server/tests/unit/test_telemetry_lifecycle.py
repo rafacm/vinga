@@ -22,6 +22,7 @@ The span map itself is `test_telemetry.py`'s, and the saturated
 collector is `tests/integration/test_telemetry_hardening.py`'s.
 """
 
+import asyncio
 from collections.abc import Iterator
 from typing import Any
 
@@ -29,6 +30,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import vinga_server.app as app_module
+import vinga_server.telemetry as telemetry_module
 from tests.support.apps import entered_app
 from tests.support.configs import config_with_agent
 from tests.support.telemetry import (
@@ -192,6 +194,59 @@ async def test_the_exporter_stops_taking_before_it_is_detached() -> None:
         "a session emitting into a tearing-down exporter opened a span"
     )
     await telemetry.shutdown()
+
+
+async def test_a_release_thread_that_will_not_start_ends_the_wait(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The failure with no owner, which the record-then-start order made
+    permanent.
+
+    The event saying "this exporter has been released" was written
+    before the thread that would set it was started, so a thread
+    creation that raised left an exporter nothing owned: every later
+    `shutdown` waited its whole bound on an event nobody was going to
+    set, and the SDK's silence was held for the life of the process by
+    a release that never ran.
+
+    What must happen instead is defined rather than best effort: the
+    claim on the silence goes back, the wait ends, and one plain
+    sentence says the work was left to the process's exit. The provider
+    is deliberately not shut down inline, because that call blocks for
+    as long as the collector takes and this is running on the event
+    loop.
+    """
+    telemetry, _ = exporting()
+    assert _QUIETING.held() == 1
+
+    real = telemetry_module.threading.Thread
+
+    class Refusing(real):  # type: ignore[valid-type, misc]
+        """A thread that will not start, which is what a process out of
+        them answers."""
+
+        def start(self) -> None:
+            raise RuntimeError("can't start new thread")
+
+    def chosen(*args: Any, **rest: Any) -> Any:
+        # Only the release thread, so the event loop's own executor can
+        # still make the one the bounded wait runs on: a lane that
+        # refused every thread would be testing the harness.
+        if rest.get("name") == "vinga-telemetry-shutdown":
+            return Refusing(*args, **rest)
+        return real(*args, **rest)
+
+    monkeypatch.setattr(telemetry_module.threading, "Thread", chosen)
+
+    # Bounded by the assertion rather than by the timeout: a shutdown
+    # that waited its whole bound here would be the defect.
+    await asyncio.wait_for(telemetry.shutdown(), 2.0)
+
+    assert _QUIETING.held() == 0, "an unstarted release kept the SDK silenced"
+    assert "left to the process's exit" in caplog.text
+    # And a second shutdown answers rather than waiting on an event that
+    # is already set, which is what a lifespan unwinding twice does.
+    await asyncio.wait_for(telemetry.shutdown(), 2.0)
 
 
 async def test_a_server_without_the_section_holds_no_exporter() -> None:
