@@ -107,13 +107,17 @@ Two kinds of trace, so every event has a destination:
   with its own trace id, carrying an OTel span link to the session
   span, so a backend can list a session's turns without every turn
   hiding inside one giant trace. The turn's root span opens at the
-  new `turn_started` event (below), which is emitted for every reply
-  attempt at the utterance-end instant, and closes at the new
-  `reply_finished` event, which the reply task's `finally` emits
-  unconditionally with a closed outcome. A turn whose
-  `reply_finished` never arrives (the process dies) is dropped, not
-  guessed: the batch queue is lost with the process, which is the
-  accepted posture.
+  new `turn_started` event (below), which is emitted exactly when a
+  reply attempt actually starts, stamped with the utterance-end
+  instant, and closes at the new `reply_finished` event, which the
+  reply task's `finally` emits exactly once with a closed outcome. A
+  barge-in candidate the gate rejects starts no turn and emits no
+  `turn_started`: the old reply resumes, and the rejection stays
+  gate vocabulary (the suppression variants, `provider_failed` for a
+  failed confirmation), landing on the turn being spoken over. A
+  turn whose `reply_finished` never arrives (the process dies) is
+  dropped, not guessed: the batch queue is lost with the process,
+  which is the accepted posture.
 
 ### The catalog delta: the turn lifecycle becomes vocabulary
 
@@ -122,55 +126,88 @@ does not yet speak the turn's own lifecycle. The gap is closed in
 the catalog, as milestone 1, before any OTel code exists, so both
 the exporter and every other consumer read the same facts:
 
-- **`turn_started`**, emitted at the utterance-end instant for every
-  reply attempt, on both paths into a reply: the ordinary
-  endpointed/manual-stop path and the confirmed barge-in path, where
-  the stamp is the one the gate preserved from the interrupting
-  utterance's end, not the confirmation's completion. Fields:
-  `speech_ms` (how long the user spoke) and `barge_in: bool`.
-- **`reply_finished`**, emitted unconditionally from the reply
-  task's `finally`, with `outcome` from a closed set chosen by
-  exception type at the sites that already classify
-  (`completed`, `nothing_heard`, `failed`, `barged_in`,
-  `device_gone`), plus `sentences_spoken`. `replied` keeps its
-  present meaning (one or more ordinary sentences finished) and its
-  present guard; consecutive silent or failed turns in one still-open
-  session each get their own completed pair.
+- **`turn_started`**, emitted exactly when a reply attempt starts,
+  on both paths that reach `start_reply`: the ordinary
+  endpointed/manual-stop path and the confirmed non-empty barge-in
+  path, where the stamp is the utterance-end instant the gate
+  preserved from the interrupting utterance, not the confirmation's
+  completion. Fields: `speech_ms` (how long the user spoke) and
+  `barge_in: bool`. A candidate the gate rejects (empty or failed
+  confirmation) never starts a reply and never emits it; the
+  rejection is already gate vocabulary (`BargeInWithoutTranscript`,
+  `provider_failed`) and stays there.
+- **`reply_finished`**, emitted exactly once per reply from the
+  reply task's `finally`, as its first statement, before any
+  cancellable cleanup: `SessionEvents.emit` is synchronous, so
+  placing it ahead of the filler settle and the turn recording makes
+  it cancellation-proof by construction. Its `outcome` comes from a
+  closed set in `values.py` and is latched at each initiating
+  boundary rather than guessed from `CancelledError`, which cannot
+  tell a barge-in from a shutdown: the barge-in cancel path latches
+  `barged_in` before cancelling, the session close path latches
+  `aborted`, failure classification latches `failed` by exception
+  type where it already classifies, the empty-transcript branch
+  latches `nothing_heard`, and an unlatched exit is `completed`.
+  Precedence is the latch: whoever initiated termination named it,
+  and exactly one initiator can, since the latch is
+  write-once per reply. Fields: `outcome`, `sentences_spoken`.
+  `replied` keeps its present meaning (one or more ordinary
+  sentences finished) and its present guard; consecutive silent or
+  failed turns in one still-open session each get their own pair.
 - **`heard` gains `asr_ms`**, the transcription latency, measured at
-  the site that already measures it. On the confirmed barge-in path,
-  where the reply reuses the gate's transcription, `heard` carries
-  the confirmation ASR's own measured latency rather than Absent, so
-  the interrupting turn's ASR span is as real as an ordinary one;
-  the gate measures it at its decision site in `turntaking`.
+  the site that already measures it. On the confirmed barge-in path
+  the gate measures its confirmation transcription at its own
+  decision site and the measured latency travels with the
+  transcription result it already hands to the reply, so the
+  interrupting turn's `heard` carries a real `asr_ms` rather than
+  Absent.
 - **`nothing_heard`**, the missing ASR outcome: emitted where empty
-  transcription is currently a log-only branch, with `duration_s`
-  and `asr_ms` and no text field at all, by type. This is the
-  issue's motivating Gap C (a 0.9 s utterance transcribed to
-  nothing) becoming a first-class event; ASR failure keeps
-  `provider_failed` as its outcome. Between the three, every
-  `turn_started` is followed by exactly one ASR outcome.
+  transcription is currently a log-only branch inside a started
+  reply, with `duration_s` and `asr_ms` and no text field at all,
+  by type. This is the issue's motivating Gap C (a 0.9 s utterance
+  transcribed to nothing) becoming a first-class event; ASR failure
+  keeps `provider_failed` as its outcome. Every `turn_started` is
+  followed by exactly one of the three; a gate-rejected candidate
+  has no `turn_started` and needs none.
 - **`sentence_synthesized`**, one per reply sentence, emitted when a
-  sentence's synthesis completes: `index`, `synthesis_ms`, and
-  `first_audio_ms` for index 0 where the reply already measures it.
-  This is the per-sentence TTS fact the issue requires, measured at
-  the `speak_after` seam that already distinguishes synthesis from
-  playback.
-- **`frames_dropped` promoted.** The capture's per-second aggregate
-  (`second`, `reasons` with server-owned reason keys) becomes a
-  typed catalog variant, and the capture JSONL and the tap both
-  consume the one declaration; the per-frame `dropped()`/`vad()`
-  calls stay outside the tap contract exactly as they are. The
-  exported form is the bounded aggregate, so the high-frequency
-  objection does not arise.
-- **`session_open` deepened with resolved providers.** The sanitized
-  resolved provider entries (the quartet: name, type, host, model,
-  per stage, per agent) join `session_open`, sourced from the same
-  sanitized derivation the session's provider manifest already uses,
-  so the exporter reads provider context from the catalog rather
-  than a private manifest. After a handover the active agent
-  changes, and the exporter switches which agent's entries it stamps
-  on subsequent spans by reading `handover`; the entries themselves
-  were all declared at `session_open`. A mid-session `apply` that
+  sentence's synthesis stream ends, with honest semantics for a
+  streamed, backpressured producer: `index`, `first_chunk_ms` (the
+  provider's latency to its first audio chunk, measured
+  producer-side before pacing backpressure can bite, since the
+  first chunk always finds buffer room) and `stream_ms` (the
+  stream's whole lifetime, documented as including playback
+  backpressure, because a paced consumer makes pure synthesis time
+  unobservable for a streaming provider). The TTS span reads both
+  and says what each is; nothing is called synthesis latency that
+  is not.
+- **`frames_dropped` promoted, with the aggregation moving to its
+  one home.** Per-frame counting moves into `SessionEvents` (the
+  `dropped()` entry point keeps its per-frame signature and stays
+  outside the tap contract), which keeps the bounded current-second
+  counter and, on second rollover and at close, emits one typed
+  `frames_dropped` variant (`second`, `reasons` from the
+  server-owned closed set) through the normal emit seam. The
+  capture's decision track receives it as the tap it already is,
+  and its independent aggregate writer is deleted: one declaration,
+  two consumers, no duplicate arithmetic.
+- **`speaking_finished`**, emitted by the session edge when a
+  reply's outgoing audio is done (the edge's finish-speaking site),
+  with the frames delivered. With `speaking_started` it bounds the
+  paced playback interval, which is what the issue's playback-pacing
+  span means: first frame out to last frame out, the interval
+  `ReplyPacer` actually paces, not the reply's whole tail. The pacer
+  itself stays vocabulary-free; the edge, which already emits
+  `speaking_started` for the same reason, emits this one too.
+- **`session_open` deepened with resolved providers.** A new
+  sanitized, typed per-agent, per-stage derivation is built from
+  the bound generation (name, type, host, model per entry, with
+  explicit absent rules where a provider has no host or model), and
+  becomes the one home both the session's provider manifest and
+  `session_open` read, replacing the manifest's own
+  current-agent-only serialization. `session_open` carries the
+  entries for every bound agent, so a handover switches the
+  exporter's active-agent context by reading `handover` without
+  needing entries it was never given. A mid-session `apply` that
   changes providers is out of trace scope for this issue: spans
   after an apply may carry the open-time entries, stated in the
   reference.
@@ -289,10 +326,15 @@ the piper kind), so the contributor-checkout weight argument that
 keeps `faster-whisper` and `piper` out does not apply. Unit tests
 drive the tap with the SDK's in-memory exporter and assert span
 structure, attributes and the gen_ai mapping; missing-extra behavior
-is pinned both faked and real, as above. The tier-closure lane gets
-the `otel` fixture the way `sim` arrived, and
-`tests/support/tiers.py` gains the distribution-to-import-name rows
-so the wheel metadata check closes over the third extra.
+is pinned both faked and real, as above. The tier machinery grows
+from three tiers to four, named as such: `tests/support/tiers.py`'s
+`declared()` and its consumers currently hardcode client, serve and
+sim, so the refactor extends that closed set with `otel` (its
+distribution-to-import-name rows included), the tier-closure lane
+gets an isolated `[otel]` environment fixture the way `sim`
+arrived, the wheel metadata check closes over the fourth tier, and
+the plain `[serve]` environment stays exactly as it is, since it is
+the one that proves the genuine missing-extra refusal.
 
 ### Verifying against a generic backend
 
@@ -370,9 +412,13 @@ new:
   baseline driver; `events.md`, the pins and the docgen move in the
   same change; the `outcome` set's variants each have a reachable
   decision site; consecutive silent and failed turns in one session
-  each produce their `turn_started`/`reply_finished` pair; both
-  barge-in confirmation outcomes (successful and empty) produce
-  honest `heard`/`nothing_heard` with measured `asr_ms`; lookahead
+  each produce their `turn_started`/`reply_finished` pair; a
+  confirmed barge-in produces `turn_started` with the preserved
+  stamp and `heard` with the gate-measured `asr_ms`, while a
+  rejected candidate (empty and failed, both) produces neither and
+  the old turn resumes; a reply cancelled during the filler settle
+  still has exactly one `reply_finished` with the latched outcome;
+  lookahead
   synthesis overlapping playback produces `sentence_synthesized`
   intervals that overlap the speaking window, pinned as such.
 - **Unit, span structure (M2/M3):** drive `SessionEvents` with real
@@ -435,11 +481,14 @@ new:
 ## Milestones
 
 - [ ] **M1: the catalog speaks the turn lifecycle.** `turn_started`,
-  `reply_finished` with its closed outcome set, `heard.asr_ms`
-  including the confirmed barge-in measurement, `nothing_heard`,
-  `sentence_synthesized`, the `frames_dropped` promotion with
-  capture reading the one declaration, and `session_open` deepened
-  with the sanitized resolved provider entries. No OTel anywhere.
+  `reply_finished` with its latched closed outcome set,
+  `heard.asr_ms` including the gate-measured confirmation latency,
+  `nothing_heard`, `sentence_synthesized` with its honest streamed
+  semantics, `speaking_finished`, the `frames_dropped` promotion
+  with the aggregation moving into `SessionEvents` and capture
+  consuming the one declaration, and `session_open` deepened with
+  the new per-agent sanitized provider derivation the manifest also
+  reads. No OTel anywhere.
   Design footprint: deepens the catalog and the decision sites that
   already classify; no new module. Documentation footprint:
   generated `events.md` and `conversations-schema.md` via their
@@ -465,7 +514,8 @@ new:
   today's server.
 - [ ] **M3: the full span map, the proof and the image.** ASR spans
   from the three outcomes, LLM round spans with the settled gen_ai
-  mapping, per-sentence TTS spans, the playback-pacing span, the
+  mapping, per-sentence TTS spans, the paced-playback span bounded
+  by `speaking_started` and `speaking_finished`, the
   span-event fold including the three barge-in suppression variants
   and the promoted `frames_dropped`, the stub OTLP receiver
   integration test, the blackholed-endpoint case, `[otel]` in both
@@ -648,3 +698,92 @@ faithful; resolutions appended per amendment.
     boot is added beside the faked-import pin, and the transport is
     defined as HTTP/protobuf exactly, with an unsupported-protocol
     refusal.
+
+### Delta re-review
+
+External review: codex CLI 0.154.0, model gpt-5.6-terra, read-only
+sandbox, 2026-09-10, runtime 6m17s, reviewing commit 5c871ef3 (the
+amended plan). Verdict as received: **not ready**. Findings
+condensed but faithful; where a resolution supersedes a first-round
+resolution note above, the note here governs.
+
+1. **P1: Confirmed empty or failed barge-in ASR cannot satisfy the
+   claimed lifecycle.** The gate resumes the old reply without
+   `start_reply()` on a failed or empty confirmation, so "every
+   turn_started has exactly one ASR outcome and both confirmation
+   outcomes produce heard/nothing_heard" was unimplementable as
+   written.
+
+   *Resolution.* Adopted. `turn_started` is emitted only when a
+   reply attempt actually starts; a gate-rejected candidate emits
+   nothing new, its rejection staying gate vocabulary
+   (`BargeInWithoutTranscript`, `provider_failed`) on the resumed
+   turn. The catalog-delta bullets and the M1 tests now say exactly
+   that, superseding the first-round note under finding 3.
+
+2. **P1: `reply_finished` was not actually unconditional.** The
+   `finally` opens with a cancellable await (the filler settle), so
+   a cancellation delivered there could bypass the event, and
+   `CancelledError` cannot distinguish barge-in from shutdown.
+
+   *Resolution.* Adopted. The emit is the `finally`'s first
+   statement, ahead of any await, cancellation-proof because `emit`
+   is synchronous; the outcome is a write-once latch set at each
+   initiating boundary (`barged_in`, `aborted`, `failed`,
+   `nothing_heard`), with an unlatched exit meaning `completed`,
+   and precedence defined by the latch itself. The
+   cancelled-during-settle case is a named test.
+
+3. **P1: The `frames_dropped` promotion had no emission path.** The
+   per-frame `dropped()` entry is deliberately outside the tap
+   contract and capture aggregates independently, so "both consume
+   one declaration" named no mechanism.
+
+   *Resolution.* Adopted as prescribed: per-frame counting moves
+   into `SessionEvents` behind the unchanged `dropped()` signature,
+   one typed variant is emitted through the normal seam on second
+   rollover and at close, capture's decision track consumes it as
+   the tap it already is, and capture's own aggregate writer is
+   deleted.
+
+4. **P1: `synthesis_ms` could not be measured at the named seam.**
+   The synthesis drain is producer-backpressured by the paced
+   consumer, so stream completion time includes playback, and
+   calling it synthesis latency would be false.
+
+   *Resolution.* Adopted, the honest-semantics option with a real
+   producer-side number: `sentence_synthesized` carries
+   `first_chunk_ms` (provider latency to first audio, measured
+   before backpressure can bite) and `stream_ms` (whole stream
+   lifetime, documented as including backpressure); nothing is
+   called synthesis latency that is not.
+
+5. **P2: The proposed playback-pacing span was not a pacing
+   interval.** Bounding it at `reply_finished` swallowed the
+   reply's non-pacing tail.
+
+   *Resolution.* Adopted via a new fact: `speaking_finished`,
+   emitted by the session edge at its finish-speaking site with the
+   frames delivered; the paced-playback span is
+   `speaking_started` to `speaking_finished`, the interval the
+   pacer actually paces, and the pacer itself stays
+   vocabulary-free.
+
+6. **P2: The provider-context resolution overstated the existing
+   derivation.** The manifest serializes only the current agent's
+   entries and not the plan's quartet.
+
+   *Resolution.* Adopted. The plan now specifies a new sanitized,
+   typed per-agent, per-stage derivation from the bound generation
+   with explicit absent rules, made the one home that both the
+   manifest and the deepened `session_open` read.
+
+7. **P2: The tier-closure change was incomplete.** `declared()` and
+   its consumers hardcode three tiers; rows alone would not
+   exercise `[otel]`.
+
+   *Resolution.* Adopted. The lanes section now names the
+   three-to-four refactor of `declared()` and its consumers, the
+   isolated `[otel]` environment fixture, the import map, and the
+   untouched plain `[serve]` environment that proves the genuine
+   refusal.
