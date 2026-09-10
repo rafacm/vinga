@@ -204,6 +204,29 @@ class TurnTaking:
         if self.endpointer is not None:
             self.endpointer.reset()
 
+    def forget_reply_audio(self) -> None:
+        """The reply's playback is over: the endpointer stops carrying
+        it into whatever the user says next.
+
+        A continuously listening session feeds the endpointer the
+        assistant's own echo for the whole of a reply, and the device's
+        playback trails the server by about 760 ms, so the loudest
+        thing in the buffer when the user answers is the question they
+        are answering. A recurrent endpointer scores their answer
+        against that, and misses it (#456).
+
+        Only the endpointer's memory of the audio, and deliberately not
+        `restart` beside it: a user who is already mid-sentence when
+        the reply ends keeps their buffer, their drop accounting and
+        their endpointing progress, which is the continuation `restart`
+        here would throw away (#80). Unconditional for the same reason
+        it is cheap: a re-warm costs about one window against a
+        trailing-silence budget of about twenty-one, so there is
+        nothing for a branch on "is an utterance open" to buy.
+        """
+        if self.endpointer is not None:
+            self.endpointer.forget_audio()
+
     async def manual_stop(self) -> None:
         """A manual end of utterance. Nothing buffered means nothing was
         said, so there is nothing to answer."""
