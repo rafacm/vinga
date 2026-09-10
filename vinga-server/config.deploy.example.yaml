@@ -146,7 +146,7 @@ server:
   # docs/reference/conversations-schema.md.
   # conversations:
   #   enabled: true
-  #   metrics: true
+  #   telemetry: true
   #   text: true
   #   retention_days: 90
   #   # Finding a past conversation by description and carrying on with

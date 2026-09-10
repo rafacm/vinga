@@ -2639,7 +2639,7 @@ server:
   conversations:
     enabled: false
     # store the structured events and every measured number
-    metrics: true
+    telemetry: true
     # store conversation text, and tool names, arguments and results
     text: true
     # prune conversations inactive for longer than this; 0 keeps
@@ -2680,7 +2680,7 @@ already recorded unreadable.
 The two switches under the flag are independent, and all four
 combinations are supported configurations:
 
-| `metrics` | `text` | What a session keeps |
+| `telemetry` | `text` | What a session keeps |
 | --- | --- | --- |
 | on | on | everything: the events, every measured number, and what was said |
 | on | off | the events and the numbers; the text columns, tool names, arguments and results are null |

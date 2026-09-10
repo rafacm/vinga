@@ -5246,7 +5246,7 @@
           "incomplete": {
             "type": "boolean",
             "title": "Incomplete",
-            "description": "Whether a write this thread needed was lost. Product state rather than telemetry, and deliberately outside the metrics switch that zeroes `dropped` on a session: a thread with a hole in it is a thread with a hole in it however the switches are set."
+            "description": "Whether a write this thread needed was lost. Product state rather than telemetry, and deliberately outside the telemetry switch that zeroes `dropped` on a session: a thread with a hole in it is a thread with a hole in it however the switches are set."
           },
           "created_at": {
             "type": "string",
@@ -5444,7 +5444,7 @@
           "incomplete": {
             "type": "boolean",
             "title": "Incomplete",
-            "description": "Whether a write this thread needed was lost. Product state rather than telemetry, and deliberately outside the metrics switch that zeroes `dropped` on a session: a thread with a hole in it is a thread with a hole in it however the switches are set."
+            "description": "Whether a write this thread needed was lost. Product state rather than telemetry, and deliberately outside the telemetry switch that zeroes `dropped` on a session: a thread with a hole in it is a thread with a hole in it however the switches are set."
           },
           "created_at": {
             "type": "string",
@@ -5529,7 +5529,7 @@
               }
             ],
             "title": "Heard Duration S",
-            "description": "How long the utterance lasted, in seconds. Null under metrics-off."
+            "description": "How long the utterance lasted, in seconds. Null under telemetry-off."
           },
           "language": {
             "anyOf": [
@@ -5553,7 +5553,7 @@
               }
             ],
             "title": "Language Confidence",
-            "description": "How sure the recognizer was of that language. Null under metrics-off."
+            "description": "How sure the recognizer was of that language. Null under telemetry-off."
           },
           "reply": {
             "anyOf": [
@@ -5592,7 +5592,7 @@
               }
             ],
             "title": "Asr Ms",
-            "description": "Transcription elapsed, in milliseconds. Null where none was measured this turn, and under metrics-off."
+            "description": "Transcription elapsed, in milliseconds. Null where none was measured this turn, and under telemetry-off."
           },
           "first_token_ms": {
             "anyOf": [
@@ -5604,7 +5604,7 @@
               }
             ],
             "title": "First Token Ms",
-            "description": "Request to the reply's first token, in milliseconds. Null under metrics-off."
+            "description": "Request to the reply's first token, in milliseconds. Null under telemetry-off."
           },
           "llm_ms": {
             "anyOf": [
@@ -5616,7 +5616,7 @@
               }
             ],
             "title": "Llm Ms",
-            "description": "The reply's LLM round durations summed, in milliseconds. Null under metrics-off."
+            "description": "The reply's LLM round durations summed, in milliseconds. Null under telemetry-off."
           },
           "tts_first_audio_ms": {
             "anyOf": [
@@ -5628,7 +5628,7 @@
               }
             ],
             "title": "Tts First Audio Ms",
-            "description": "The reply's first synthesis request to its first audio bytes, in milliseconds, measured at the provider boundary and deliberately not at the device. Null when the reply spoke nothing, and under metrics-off."
+            "description": "The reply's first synthesis request to its first audio bytes, in milliseconds, measured at the provider boundary and deliberately not at the device. Null when the reply spoke nothing, and under telemetry-off."
           },
           "rounds": {
             "anyOf": [
@@ -5640,7 +5640,7 @@
               }
             ],
             "title": "Rounds",
-            "description": "How many LLM rounds the reply took. Null under metrics-off."
+            "description": "How many LLM rounds the reply took. Null under telemetry-off."
           },
           "input_tokens": {
             "anyOf": [
@@ -5652,7 +5652,7 @@
               }
             ],
             "title": "Input Tokens",
-            "description": "Input tokens summed across the turn's rounds; OTel's `gen_ai.usage.input_tokens`. Null when the provider reported no usage, and under metrics-off."
+            "description": "Input tokens summed across the turn's rounds; OTel's `gen_ai.usage.input_tokens`. Null when the provider reported no usage, and under telemetry-off."
           },
           "output_tokens": {
             "anyOf": [
@@ -5664,7 +5664,7 @@
               }
             ],
             "title": "Output Tokens",
-            "description": "Output tokens summed across the turn's rounds; OTel's `gen_ai.usage.output_tokens`. Null when the provider reported no usage, and under metrics-off."
+            "description": "Output tokens summed across the turn's rounds; OTel's `gen_ai.usage.output_tokens`. Null when the provider reported no usage, and under telemetry-off."
           },
           "tool_calls": {
             "type": "integer",
@@ -5860,7 +5860,7 @@
           "events": {
             "type": "integer",
             "title": "Events",
-            "description": "How many events rows those sessions held. Zero for a session recorded under metrics-off, which wrote none."
+            "description": "How many events rows those sessions held. Zero for a session recorded under telemetry-off, which wrote none."
           },
           "conversations": {
             "type": "integer",
@@ -6827,7 +6827,7 @@
               }
             ],
             "title": "Duration S",
-            "description": "How long it lasted, in seconds. Null under metrics-off."
+            "description": "How long it lasted, in seconds. Null under telemetry-off."
           },
           "close_reason": {
             "anyOf": [
@@ -6888,10 +6888,10 @@
             "title": "Providers",
             "description": "The resolved provider entry per pipeline stage, the same structure the capture manifest carries. It holds environment variable names, never credentials."
           },
-          "metrics": {
+          "telemetry": {
             "type": "boolean",
-            "title": "Metrics",
-            "description": "Whether metrics storage was on for this session, so a null number is distinguishable from a number that was never stored."
+            "title": "Telemetry",
+            "description": "Whether telemetry storage was on for this session, so a null number is distinguishable from a number that was never stored."
           },
           "text": {
             "type": "boolean",
@@ -6911,7 +6911,7 @@
           "events": {
             "type": "integer",
             "title": "Events",
-            "description": "How many events rows it holds: the decision track, `session_open` through `session_closed`. Zero under metrics-off, where no events row lands. They are deliberately not served over REST; the database is that surface."
+            "description": "How many events rows it holds: the decision track, `session_open` through `session_closed`. Zero under telemetry-off, where no events row lands. They are deliberately not served over REST; the database is that surface."
           }
         },
         "additionalProperties": false,
@@ -6931,7 +6931,7 @@
           "server_version",
           "revision",
           "providers",
-          "metrics",
+          "telemetry",
           "text",
           "dropped",
           "turns",
@@ -7035,7 +7035,7 @@
               }
             ],
             "title": "Duration S",
-            "description": "How long it lasted, in seconds. A measured number: null under metrics-off."
+            "description": "How long it lasted, in seconds. A measured number: null under telemetry-off."
           },
           "close_reason": {
             "anyOf": [
@@ -7132,7 +7132,7 @@
               }
             ],
             "title": "Heard Duration S",
-            "description": "How long the utterance lasted, in seconds. Null under metrics-off."
+            "description": "How long the utterance lasted, in seconds. Null under telemetry-off."
           },
           "language": {
             "anyOf": [
@@ -7156,7 +7156,7 @@
               }
             ],
             "title": "Language Confidence",
-            "description": "How sure the recognizer was of that language. Null under metrics-off."
+            "description": "How sure the recognizer was of that language. Null under telemetry-off."
           },
           "reply": {
             "anyOf": [
@@ -7195,7 +7195,7 @@
               }
             ],
             "title": "Asr Ms",
-            "description": "Transcription elapsed, in milliseconds. Null where none was measured this turn, and under metrics-off."
+            "description": "Transcription elapsed, in milliseconds. Null where none was measured this turn, and under telemetry-off."
           },
           "first_token_ms": {
             "anyOf": [
@@ -7207,7 +7207,7 @@
               }
             ],
             "title": "First Token Ms",
-            "description": "Request to the reply's first token, in milliseconds. Null under metrics-off."
+            "description": "Request to the reply's first token, in milliseconds. Null under telemetry-off."
           },
           "llm_ms": {
             "anyOf": [
@@ -7219,7 +7219,7 @@
               }
             ],
             "title": "Llm Ms",
-            "description": "The reply's LLM round durations summed, in milliseconds. Null under metrics-off."
+            "description": "The reply's LLM round durations summed, in milliseconds. Null under telemetry-off."
           },
           "tts_first_audio_ms": {
             "anyOf": [
@@ -7231,7 +7231,7 @@
               }
             ],
             "title": "Tts First Audio Ms",
-            "description": "The reply's first synthesis request to its first audio bytes, in milliseconds, measured at the provider boundary and deliberately not at the device. Null when the reply spoke nothing, and under metrics-off."
+            "description": "The reply's first synthesis request to its first audio bytes, in milliseconds, measured at the provider boundary and deliberately not at the device. Null when the reply spoke nothing, and under telemetry-off."
           },
           "rounds": {
             "anyOf": [
@@ -7243,7 +7243,7 @@
               }
             ],
             "title": "Rounds",
-            "description": "How many LLM rounds the reply took. Null under metrics-off."
+            "description": "How many LLM rounds the reply took. Null under telemetry-off."
           },
           "input_tokens": {
             "anyOf": [
@@ -7255,7 +7255,7 @@
               }
             ],
             "title": "Input Tokens",
-            "description": "Input tokens summed across the turn's rounds; OTel's `gen_ai.usage.input_tokens`. Null when the provider reported no usage, and under metrics-off."
+            "description": "Input tokens summed across the turn's rounds; OTel's `gen_ai.usage.input_tokens`. Null when the provider reported no usage, and under telemetry-off."
           },
           "output_tokens": {
             "anyOf": [
@@ -7267,7 +7267,7 @@
               }
             ],
             "title": "Output Tokens",
-            "description": "Output tokens summed across the turn's rounds; OTel's `gen_ai.usage.output_tokens`. Null when the provider reported no usage, and under metrics-off."
+            "description": "Output tokens summed across the turn's rounds; OTel's `gen_ai.usage.output_tokens`. Null when the provider reported no usage, and under telemetry-off."
           },
           "tool_calls": {
             "type": "integer",
@@ -7541,7 +7541,7 @@
               }
             ],
             "title": "Duration Ms",
-            "description": "How long the call took, in milliseconds. Null where nothing ran, as for a refused or a successful handover, and null under metrics-off."
+            "description": "How long the call took, in milliseconds. Null where nothing ran, as for a refused or a successful handover, and null under telemetry-off."
           }
         },
         "additionalProperties": false,
@@ -7596,7 +7596,7 @@
               }
             ],
             "title": "Input Tokens",
-            "description": "Input tokens this agent spent on the turn. Null when the provider reported no usage, and under metrics-off."
+            "description": "Input tokens this agent spent on the turn. Null when the provider reported no usage, and under telemetry-off."
           },
           "output_tokens": {
             "anyOf": [
@@ -7608,7 +7608,7 @@
               }
             ],
             "title": "Output Tokens",
-            "description": "Output tokens this agent spent on the turn. Null when the provider reported no usage, and under metrics-off."
+            "description": "Output tokens this agent spent on the turn. Null when the provider reported no usage, and under telemetry-off."
           }
         },
         "additionalProperties": false,
