@@ -794,6 +794,15 @@ record's is, and an agent that has been told nothing gets no memory
 block. There is something to switch off, and it is an agent's own
 `memory` section, below.
 
+**An agent that is dictated to wants its own endpointer.** Telling an
+agent things to remember is slower speech than asking it a question,
+and the pauses between clauses run past the 700 ms silence that ends a
+turn by default, so the agent answers half a sentence and the rest
+arrives as an interruption. The bound is per VAD entry and an agent
+binds its own, so give that agent a patient entry rather than slowing
+every agent down: see
+[Listening and barge-in](#listening-and-barge-in).
+
 **The prompt carries the newest of an agent's facts, not all of them.**
 A scope of a thousand facts does not fit in front of a small local
 model, so the block is the newest 40 lines within 4 KiB and everything
@@ -2129,8 +2138,45 @@ that, and it turned out to catch only users finishing their own
 sentence, since half a second of classified speech cannot come out of
 the fraction of a second of reply the room has heard by then.
 Every one of these decisions is a structured log event, which is what
-the thresholds are tuned from. A manual `listen stop` mid-reply is the
+the threshold is tuned from. A manual `listen stop` mid-reply is the
 user holding the button and speaking, so it cancels unconditionally.
+
+**Where a turn ends is one number, and it belongs to the agent rather
+than to the server.** The endpointer ends an utterance after
+`trailing_silence_ms` of silence, 700 ms by default, which is the right
+bound for question-and-answer speech. Dictation is slower: telling an
+agent things to remember pauses between clauses for longer than that,
+so the turn ends mid-sentence, the reply answers a fragment, and the
+rest of the sentence arrives as an interruption to it. Raising the
+bound for the whole server would put the added latency on every turn of
+every agent to fix one agent's usage pattern, and there is no need to.
+The bound is an option on the VAD provider entry, and an agent binds
+the entry it wants:
+
+```yaml
+providers:
+  vad:
+    quick:
+      type: silero
+    patient:
+      type: silero
+      trailing_silence_ms: 1200
+
+agents:
+  quizmaster:
+    vad: quick
+  archivist:
+    vad: patient
+```
+
+Each agent's endpointer is built from the entry that agent binds, and a
+handover mid-conversation builds a fresh one from the incoming agent's,
+so the two agents above listen differently inside the same session.
+What a longer bound cannot do is tell a thinking pause from a finished
+sentence: every pause costs its full length before the reply starts,
+which is why this is per agent rather than raised everywhere, and why
+reading more than silence is its own piece of work
+([end-of-turn detection](../docs/glossary.md#end-of-turn-detection)).
 
 ## Masking reply latency
 

@@ -368,7 +368,8 @@ fragment and turns the user's continuation into a barge-in attempt
 against it. Dictation-style speech (telling an agent things to
 remember) pauses longer between clauses than question-answer
 exchanges do, which is what makes the trailing-silence bound a
-per-conversation tradeoff rather than a constant.
+per-conversation tradeoff rather than a constant, and why it is
+configured per agent rather than per server (see trailing silence).
 
 ### Pre-roll
 
@@ -469,6 +470,11 @@ believes a sentence ends. At the 700 ms default, question-answer
 turns end cleanly but dictation ("remember that...") pauses longer
 than that between clauses, so the same bound that feels responsive
 in one conversation manufactures premature endpoints in the other.
+Which is why it is not one number per server: `trailing_silence_ms`
+is an option on a VAD provider entry, an agent binds the entry it
+wants, and a handover builds the incoming agent's endpointer, so a
+dictation agent can be patient while its siblings stay quick
+([the server README](../vinga-server/README.md#listening-and-barge-in)).
 
 ### TTS (text-to-speech)
 

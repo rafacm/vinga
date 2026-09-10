@@ -12,3 +12,19 @@ type: silero
 # threshold: 0.5
 # trailing_silence_ms: 700
 # max_utterance_ms: 10000
+
+# trailing_silence_ms is where the server believes a sentence ends, and
+# 700 ms is chosen for question-and-answer speech. Dictation is slower:
+# telling an agent things to remember pauses between clauses for longer
+# than that, so at the default the turn ends mid-sentence, the reply
+# answers a fragment, and the rest of the sentence arrives as an
+# interruption to it.
+#
+# The bound belongs to the entry rather than to the server, so an agent
+# that takes dictation gets a longer one without slowing every other
+# agent's turns down. Install this file a second time under a second
+# name with the longer bound uncommented (`vinga provider set vad
+# patient -f ...`), then write `vad: patient` on the agent that takes
+# dictation and leave the others on the default entry. Each agent's
+# endpointer is built from the entry that agent binds, and a handover
+# mid-conversation swaps it.
