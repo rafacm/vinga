@@ -1419,7 +1419,6 @@ class PipelineRuntime:
                     self._asr_language = result.lock_language
                 transcript = result.text.strip()
                 if transcript:
-                    await self._output.show_transcript(transcript)
                     # Only engines that detected carry these; a mock or a
                     # pinned language adds no noise to the record. Absent
                     # rather than null, which are different answers: an
@@ -1461,6 +1460,17 @@ class PipelineRuntime:
                         result.language,
                         None if confidence is None else round(confidence, 2),
                     )
+                    # And only now the device, which is a socket and can
+                    # meet a peer that has gone away. The order used to
+                    # be the other way round, so a transcription that
+                    # succeeded and a disconnect a millisecond later
+                    # ended the turn `device_gone` with nothing saying
+                    # the ASR stage had answered at all. What the ear
+                    # answered is a fact about this turn and does not
+                    # depend on the device still being there to be shown
+                    # it; showing it is the reply's first act, not part
+                    # of hearing.
+                    await self._output.show_transcript(transcript)
                 else:
                     # The third ASR outcome, and until #66 the only one
                     # that was a log line rather than an event: an

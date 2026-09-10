@@ -447,6 +447,28 @@ async def test_a_mid_asr_merge_leaves_both_turns_with_an_asr_outcome() -> None:
     assert abandoned.payload["duration_s"] > 0
 
 
+async def test_a_device_that_leaves_while_the_transcript_shows_still_says_heard() -> None:
+    """The other way an ASR outcome went missing.
+
+    The transcript is shown to the device before the reply speaks, and
+    that send can meet a device that has gone away. `heard` used to be
+    emitted after it, so a successful transcription followed by a
+    disconnect ended the turn `device_gone` with nothing saying the ASR
+    stage had answered at all. The record is made where the result is
+    classified now, ahead of any socket: what the ear answered is a fact
+    about this turn and does not depend on the device still being there
+    to be shown it.
+    """
+    session = talking(websocket=cast(Any, Vanishing()))
+    tap = watching(session)
+    start_reply(session, UTTERANCE)
+    await wait_for_reply(session)
+
+    lifecycle = [name for name in tap.names() if name in _LIFECYCLE]
+    assert lifecycle == ["turn_started", "heard", "reply_finished"]
+    assert outcomes(tap) == ["device_gone"]
+
+
 # --- nothing in the reply's tail can suppress the record ---------------
 
 
