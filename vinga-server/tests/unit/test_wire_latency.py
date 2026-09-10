@@ -154,6 +154,21 @@ def one_turn(tmp_path: Path) -> Path:
     )
 
 
+def quiet_about(done: subprocess.CompletedProcess, *forbidden: str) -> None:
+    """Both streams, checked together.
+
+    Always both. A refusal is written to stderr and a report to stdout,
+    and which one a leak would land on is a property of the bug rather
+    than of the case: a case that checks only the stream it expects the
+    failure on cannot see content republished on the other, which is
+    what review found here.
+    """
+    for stream in (done.stdout, done.stderr):
+        assert "Traceback" not in stream
+        for value in forbidden:
+            assert value not in stream
+
+
 def turn_lines(stdout: str) -> list[str]:
     return [line.strip() for line in stdout.splitlines() if line.strip().startswith("turn ")]
 
@@ -437,16 +452,14 @@ def test_a_bad_invocation_is_a_sentence_and_exit_two(tmp_path: Path) -> None:
         assert done.returncode == 2
         assert done.stdout == ""
         assert len(done.stderr.strip().splitlines()) <= 2
-        assert "Traceback" not in done.stderr
+        quiet_about(done)
 
 
 def test_a_bad_invocation_never_repeats_what_was_typed(tmp_path: Path) -> None:
     hostile = tmp_path / SENTINEL
     for done in (run(str(hostile)), run(str(hostile), f"--{SENTINEL}")):
         assert done.returncode == 2
-        for stream in (done.stdout, done.stderr):
-            assert SENTINEL not in stream
-            assert "Traceback" not in stream
+        quiet_about(done, SENTINEL)
 
 
 def test_a_directory_with_no_capture_in_it_is_exit_one(tmp_path: Path) -> None:
@@ -455,6 +468,7 @@ def test_a_directory_with_no_capture_in_it_is_exit_one(tmp_path: Path) -> None:
     assert done.returncode == 1
     assert done.stdout == ""
     assert done.stderr.strip() == "no capture was found in the given directory"
+    quiet_about(done)
 
 
 def test_a_capture_missing_a_file_is_refused_without_naming_it(tmp_path: Path) -> None:
@@ -462,10 +476,7 @@ def test_a_capture_missing_a_file_is_refused_without_naming_it(tmp_path: Path) -
     (captures / f"{SENTINEL}.wav").write_bytes((captures / "session-a.wav").read_bytes())
     done = run(str(captures))
     assert done.returncode == 1
-    for stream in (done.stdout, done.stderr):
-        assert SENTINEL not in stream
-        assert "session-a" not in stream
-        assert "Traceback" not in stream
+    quiet_about(done, SENTINEL, "session-a")
     assert "could not be read" in done.stderr
     # The capture beside it still reports: one unreadable recording is
     # not a reason to say nothing about the others.
@@ -486,6 +497,7 @@ def test_an_unfinished_capture_is_refused_rather_than_measured(tmp_path: Path) -
     assert done.returncode == 1
     assert "was never finished" in done.stderr
     assert done.stdout.startswith("\n0 capture(s)")
+    quiet_about(done, "session-a")
 
 
 def test_an_empty_recording_has_no_timeline_to_measure_on(tmp_path: Path) -> None:
@@ -501,7 +513,7 @@ def test_an_empty_recording_has_no_timeline_to_measure_on(tmp_path: Path) -> Non
     done = run(str(captures))
     assert done.returncode == 1
     assert "no audio" in done.stderr
-    assert "Traceback" not in done.stderr
+    quiet_about(done, "session-a")
 
 
 def test_a_recording_in_another_format_is_refused(tmp_path: Path) -> None:
@@ -514,6 +526,7 @@ def test_a_recording_in_another_format_is_refused(tmp_path: Path) -> None:
     done = run(str(captures))
     assert done.returncode == 1
     assert "not a stereo 16 kHz recording" in done.stderr
+    quiet_about(done, "session-a")
 
 
 def test_malformed_content_is_refused_without_republishing_it(tmp_path: Path) -> None:
@@ -542,9 +555,7 @@ def test_malformed_content_is_refused_without_republishing_it(tmp_path: Path) ->
     assert "malformed manifest" in manifest.stderr
 
     for done_run in (done, bad_bytes, manifest):
-        for stream in (done_run.stdout, done_run.stderr):
-            assert SENTINEL not in stream
-            assert "Traceback" not in stream
+        quiet_about(done_run, SENTINEL)
 
 
 def test_a_number_the_parser_refuses_is_still_a_fixed_sentence(tmp_path: Path) -> None:
@@ -571,9 +582,7 @@ def test_a_number_the_parser_refuses_is_still_a_fixed_sentence(tmp_path: Path) -
     assert "malformed manifest" in in_manifest.stderr
 
     for done in (in_track, in_manifest):
-        for stream in (done.stdout, done.stderr):
-            assert oversized[:64] not in stream
-            assert "Traceback" not in stream
+        quiet_about(done, oversized[:64])
 
 
 def test_nesting_past_the_recursion_limit_is_still_a_fixed_sentence(
@@ -598,10 +607,7 @@ def test_nesting_past_the_recursion_limit_is_still_a_fixed_sentence(
     assert "malformed manifest" in in_manifest.stderr
 
     for done in (in_track, in_manifest):
-        for stream in (done.stdout, done.stderr):
-            assert SENTINEL not in stream
-            assert "Traceback" not in stream
-            assert "RecursionError" not in stream
+        quiet_about(done, SENTINEL, "RecursionError")
 
 
 def test_the_decision_tracks_own_fields_are_never_echoed(tmp_path: Path) -> None:
@@ -622,9 +628,7 @@ def test_the_decision_tracks_own_fields_are_never_echoed(tmp_path: Path) -> None
     )
     done = run(str(captures))
     assert done.returncode == 0
-    for stream in (done.stdout, done.stderr):
-        assert SENTINEL not in stream
-        assert "session-a" not in stream
+    quiet_about(done, SENTINEL, "session-a")
 
 
 def test_an_unreadable_capture_is_an_os_error_nobody_sees_the_shape_of(
@@ -638,7 +642,7 @@ def test_an_unreadable_capture_is_an_os_error_nobody_sees_the_shape_of(
         (captures / "session-a.json").chmod(0o600)
     assert done.returncode == 1
     assert done.stderr.strip() == "capture 1 could not be read"
-    assert "Traceback" not in done.stderr
+    quiet_about(done, "session-a")
 
 
 def test_a_partial_line_in_the_track_is_skipped_rather_than_refused(
