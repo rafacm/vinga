@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-09-10
+
+### Changed
+
+- **The conversations storage switch is named `telemetry`.**
+  `server.conversations.metrics` is now `server.conversations.telemetry`
+  (#437): it is a storage privacy switch, "metrics" is reserved for the
+  future aggregation surface, and the content-and-telemetry ADR already
+  names this substance. The session detail response serves `telemetry`
+  instead of `metrics` and its field descriptions say "telemetry-off",
+  `vinga session show` prints `telemetry:`, and the schema's column
+  comments follow through migration `1004_telemetry_names_the_switch`.
+  A config still saying `metrics:` is refused at boot by the existing
+  unknown-key error; there is no alias and no shim. The
+  `sessions.metrics` column keeps its name, because column names are a
+  compatibility surface and this renames vocabulary, not storage.
+
 ## 2026-09-06
 
 ### Added
