@@ -101,6 +101,22 @@ audio is over" already lives, so nothing new crosses a boundary:
   there would mean the edge reaching into the floor for a fact the
   runtime already has.
 
+The call is contained, which the first review round asked for and which
+the two lines under it were already doing. Everything after this point
+in the tail is the device's closing `tts stop`, and in auto mode that is
+what re-arms its listening, so a line that can raise here is a line that
+can strand a session; the reply task would carry the whole chain out to
+asyncio's unhandled-task reporting on the way. `forget_audio` reaches
+`pysilero-vad`'s own reset, so what could escape is a stranger's
+exception carrying a stranger's text. The failure is caught, the
+exception bound to an ordinary local (`except ... as` unbinds its own
+name at the end of its block, the rule `conversations/store.py: _prune`
+states), and the report built after the arm has been left, so a logging
+call that itself failed cannot escape with the library's message
+attached as `__context__`. What is written down is the class name and
+nothing else (#183), and the reply walks on through turn recording to
+the stop.
+
 The reset happens at the server's last frame rather than at the room's.
 The device's playback trails the server by about 760 ms (correlating the
 mic envelope against the speaker envelope over three separate replies:
@@ -203,6 +219,17 @@ Three pins, and how each was proven to bite.
   `forget_reply_audio()` call `restart()`: the pin fails with "the
   sentence the user was in the middle of was discarded" and 13
   neighbours pass.
+- **The reply's tail cannot be stranded**
+  (`tests/unit/test_session_reply_failures.py::test_an_endpointer_that_will_not_forget_still_closes_the_turn`).
+  An endpointer whose `forget_audio` raises with a credential-shaped
+  message and a credential-shaped `__cause__`. The turn still reaches
+  its closing `tts stop`, the report is the class name, and the
+  sentinel appears in neither log format, in no record's structured
+  half (which is what an event payload is), and on neither stdout nor
+  stderr, where `logging`'s own fallback dumps a raw record when a
+  handler breaks under it. **Mutation-proved** by removing the
+  containment: the failure escapes the reply with the credential in its
+  message and 18 neighbours pass.
 - **The margin**
   (`tests/unit/test_providers_silero.py::test_a_mid_speech_forget_costs_far_less_than_the_trailing_silence_budget`).
   A detector that needs a run of windows to find speech again after its
