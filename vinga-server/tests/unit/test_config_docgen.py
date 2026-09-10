@@ -175,6 +175,32 @@ def test_the_reference_documents_each_typed_types_options() -> None:
     assert "| `min_silence_duration_ms` |" in rendered
 
 
+def test_a_default_of_none_under_a_type_that_refuses_null_reads_as_unset() -> None:
+    """The one rendering rule a field that is optional without being
+    nullable needs.
+
+    Pydantic has nowhere but the default slot to keep "nothing was
+    written", so such a field's default IS None while its type refuses
+    null. Printing that as `null` advertises a value the type forbids,
+    which is the reading a client generated from the reference acts on
+    (#444). Both directions, since the rule is only worth anything if a
+    genuinely nullable field still prints its null.
+    """
+    from pydantic import BaseModel, Field, StrictInt
+
+    class Shape(BaseModel):
+        optional: StrictInt = Field(default=None)
+        nullable: StrictInt | None = Field(default=None)
+        valued: StrictInt = Field(default=7)
+
+    assert docgen.default(Shape.model_fields["optional"]) == "unset"
+    assert docgen.default(Shape.model_fields["nullable"]) == "null"
+    assert docgen.default(Shape.model_fields["valued"]) == "7"
+
+    assert not docgen.admits_null(Shape.model_fields["optional"].annotation)
+    assert docgen.admits_null(Shape.model_fields["nullable"].annotation)
+
+
 def test_the_typed_options_are_grouped_by_stage_and_then_by_type() -> None:
     """The order the sections appear in, which is the order a provider
     is addressed in: the pipeline's own stage order, and type names

@@ -814,6 +814,46 @@ def test_the_published_schema_says_which_names_a_key_may_not_take() -> None:
     assert openai_compatible(model="qwen3:8b", max_tokens=64).max_tokens == 64
 
 
+def test_the_published_cap_is_an_integer_a_client_cannot_send_null_for() -> None:
+    """Optional and nullable are two different things, and every
+    document says so.
+
+    The cap has no default value: leaving the key out sends no cap. The
+    first cut of #444 spelled that as a nullable field defaulting to
+    null, which published `int | null` with a null default in all three
+    generated references, so a client generated from the schema could
+    legitimately send the one value the model answers 422 to. What is
+    pinned is the agreement: the schema offers integer and nothing else,
+    carries no default, does not require the key, and the model refuses
+    the null a reader of the old schema would have sent.
+    """
+    from vinga_server.config import docgen
+
+    published = [
+        json.loads(docgen.schema("provider", "llm", "openai_compatible")),
+        json.loads(docgen.openapi())["components"]["schemas"]["LlmOpenaiCompatibleOptions"],
+        OpenaiCompatibleOptions.model_json_schema(),
+    ]
+
+    for schema in published:
+        cap = schema["properties"]["max_tokens"]
+        assert cap["type"] == "integer"
+        # Named as well as compared, because a nullable field publishes
+        # its null in an `anyOf` branch rather than in `type`, which a
+        # check on `type` alone would walk straight past.
+        assert "anyOf" not in cap
+        assert "null" not in json.dumps(cap)
+        assert "default" not in cap
+        assert "max_tokens" not in schema["required"]
+
+    # And the model's own answer to the value the old document offered.
+    assert refuse(OPENAI, max_tokens=None).problems[0].path == "/max_tokens"
+    # While omitting the key is the way to mean it, and says so as the
+    # reference prints it.
+    assert openai_compatible().max_tokens is None
+    assert docgen.default(OpenaiCompatibleOptions.model_fields["max_tokens"]) == "unset"
+
+
 # Where a refusal points
 #
 # Options are flat siblings of `type` in the fragment that is actually
