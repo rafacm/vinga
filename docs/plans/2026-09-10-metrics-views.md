@@ -15,8 +15,8 @@ commented aggregate views, added by migration and readable by
 columns, denominator and telemetry-off behavior; and a committed
 script measures per-turn latency from a capture, honestly, with its
 precision stated in its own output. Nothing changes in what is
-stored. The script milestone is blocked on a maintainer decision
-recorded below; the views milestone is not.
+stored. The script's metric identity was decided on the issue
+(shape (a), wire response latency); both milestones proceed.
 
 ## The issue's decisions, restated
 
@@ -59,17 +59,18 @@ channel 1 (what was paced out, when). That is a real and useful
 number, but it is not perceived latency: it excludes downlink
 transport and device playback, not merely a small playout buffer,
 and calling it perceived would be false labeling. The plan
-therefore does not relabel it. The decision is the issue author's,
-with three honest shapes: (a) rename the deliverable to wire
-response latency and keep the simulator criterion; (b) authorize a
-simulator acoustic-loopback facility so channel 0 carries a
-synthetic room and the acoustic algorithm has a lab fixture; (c)
-keep the acoustic-onset deliverable as a board-capture tool, drop
-the simulator criterion, and accept that on the tested board the
-expected answer is "no onset above ambient". A comment stating the
-contradiction and the three shapes goes on the issue when this plan
-lands; milestone 2 waits for the answer and its section below
-records what is fixed regardless of it.
+therefore does not relabel it. Three honest shapes were put to the
+issue author on the issue (2026-09-10): (a) rename the deliverable
+to wire response latency and keep the simulator criterion; (b)
+authorize a simulator acoustic-loopback facility; (c) keep the
+acoustic-onset deliverable as a board-capture tool and drop the
+simulator criterion. **Decided: shape (a)**, recorded on the
+issue the same day. The script measures and reports wire response
+latency, states the exclusion (downlink transport and device
+playback) in its own output, and the simulator acceptance
+criterion stands as written; the acoustic method is not pursued
+and can be revisited if a board without echo cancellation
+arrives.
 
 ### The views, and the one-home tension with frozen migrations
 
@@ -242,12 +243,11 @@ check list (the new page diffed beside the schema page), the docs
 index, and the command-spellings manifest, each named here so the
 milestone carries them deliberately.
 
-### The script (milestone 2, blocked on the maintainer decision)
+### The script (milestone 2)
 
-Whichever shape the maintainer picks, these hold and are recorded
-now:
+Under the decided shape (a):
 
-- `scripts/perceived_latency.py` (renamed if shape (a) is chosen)
+- `scripts/wire_latency.py`, reporting wire response latency
   in the committed-script house style (`upstream_watch.py`:
   docstring with a usage block, explicit exit codes 0/1/2, output
   that never echoes stray values), stdlib only (`wave` plus array
@@ -290,7 +290,7 @@ now:
   frozen literal DDL.
 - The docgen renderer beside the schema one, reading `views.py`,
   and the `views` verb beside `schema` in the conversations CLI.
-- `scripts/perceived_latency.py` with its unit tests (M2).
+- `scripts/wire_latency.py` with its unit tests (M2).
 
 No new package, no new config, no API change.
 
@@ -325,9 +325,8 @@ No new package, no new config, no API change.
 - **First views in the repo**: the autogenerate boundary above.
 - **Percentile semantics under tiny samples**: counts beside
   percentiles, stated on the page.
-- **The maintainer decision gates M2**: the milestone is marked
-  blocked and the issue comment carries the three shapes; M1 has no
-  dependency on the answer.
+- **The metric's identity was a maintainer decision**: taken as
+  shape (a) on the issue; the risk is retired and recorded.
 - **Parallel work**: #66's milestone train touches the CHANGELOG
   and the census manifest on the same days; every rebase re-runs
   the generators on the rebased tree rather than merging generated
@@ -351,13 +350,14 @@ No new package, no new config, no API change.
   store, and the still-open list entry for #439 (leaving #440
   named); the three `docs/concepts.md` anchors move from future to
   landed while budgets, users and cost stay future; CHANGELOG.
-- [ ] **M2 (blocked): latency from a capture.** Blocked on the
-  maintainer's choice among the three shapes in the
-  perceived-latency section; the script's fixed requirements
-  (house style, refusal boundary, specified speech-end algorithm,
-  the capture-producing integration case) are recorded there and
-  land with the milestone once unblocked. Documentation footprint:
-  the script's usage block is its page; CHANGELOG.
+- [ ] **M2: wire response latency from a capture.**
+  `scripts/wire_latency.py` under the decided shape (a), with the
+  fixed requirements from the script section (house style, refusal
+  boundary, specified speech-end algorithm, the exclusion stated
+  in its own output) and the capture-producing simulator
+  integration case feeding it, asserting a reported wire-path
+  latency and the precision and exclusion sentences. Documentation
+  footprint: the script's usage block is its page; CHANGELOG.
 
 ## Plan review round
 
