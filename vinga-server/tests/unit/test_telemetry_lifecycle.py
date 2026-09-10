@@ -23,6 +23,7 @@ collector is `tests/integration/test_telemetry_hardening.py`'s.
 """
 
 import asyncio
+import threading
 from collections.abc import Iterator
 from typing import Any
 
@@ -45,9 +46,9 @@ from tests.support.telemetry import (
 from vinga_server.app import StartupFailed, create_app
 from vinga_server.config import Config
 from vinga_server.config.loader import DatabaseBusyError
-from vinga_server.config.models import DatabaseConfig
+from vinga_server.config.models import DatabaseConfig, TelemetryConfig
 from vinga_server.events import server_taps
-from vinga_server.telemetry import _QUIETING, Telemetry
+from vinga_server.telemetry import _QUIETING, Telemetry, build_telemetry
 
 pytestmark = pytest.mark.asyncio(loop_scope="function")
 
@@ -194,6 +195,81 @@ async def test_the_exporter_stops_taking_before_it_is_detached() -> None:
         "a session emitting into a tearing-down exporter opened a span"
     )
     await telemetry.shutdown()
+
+
+async def test_a_direct_release_and_a_shutdown_are_one_completion() -> None:
+    """The two doors onto one operation, driven through both at once.
+
+    `release` is public and `shutdown` starts a worker that does the
+    same work, and neither used to know about the other. Running both
+    was a leak rather than a waste: the SDK's own processor early-
+    returns from a second shutdown, so the second caller finished
+    instantly and gave the logging lease back while the first was still
+    inside the export. That un-silences exactly the endpoint-bearing
+    failures the first one is about to log, which is the whole reason
+    the quieting outlives the bounded wait at all.
+
+    So the lease assertion in the middle is the one that bites. The
+    count beside it is the weaker half by construction, because the
+    SDK's guard makes a second provider shutdown a no-op at the
+    exporter; both are asserted because the claim is about the
+    operation, not only about its symptom.
+    """
+    entered = threading.Event()
+    finish = threading.Event()
+    calls: list[str] = []
+
+    class Slow:
+        """An exporter whose shutdown is held open by the test, so both
+        callers are genuinely in flight at once."""
+
+        def export(self, spans: Any) -> Any:
+            from opentelemetry.sdk.trace.export import SpanExportResult
+
+            return SpanExportResult.SUCCESS
+
+        def shutdown(self) -> None:
+            calls.append("shutdown")
+            entered.set()
+            finish.wait(10.0)
+
+        def force_flush(self, timeout_millis: int = 30000) -> bool:
+            return True
+
+    telemetry = build_telemetry(
+        TelemetryConfig(enabled=True),
+        exporter=Slow(),
+        batch_size=1,
+        schedule_delay_ms=1,
+        shutdown_timeout_s=0.2,
+    )
+    assert telemetry is not None
+    assert _QUIETING.held() == 1
+
+    direct = threading.Thread(target=telemetry.release, daemon=True)
+    direct.start()
+    assert entered.wait(5.0), "the direct release never reached the exporter"
+
+    # The other door, while the first is still inside. It must not start
+    # a second completion, and it must not end the silence.
+    await telemetry.shutdown()
+
+    assert _QUIETING.held() == 1, (
+        "a second caller gave the SDK's logging back while the first was "
+        "still shutting the exporter down"
+    )
+
+    finish.set()
+    direct.join(10.0)
+    assert not direct.is_alive()
+    assert calls == ["shutdown"], "the provider was shut down more than once"
+    assert _QUIETING.held() == 0
+
+    # And a caller arriving after it is all over returns rather than
+    # doing any of it again.
+    telemetry.release()
+    assert calls == ["shutdown"]
+    assert _QUIETING.held() == 0
 
 
 async def test_a_release_thread_that_will_not_start_ends_the_wait(
