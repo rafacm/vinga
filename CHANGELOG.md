@@ -9,6 +9,34 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **The record gains four named aggregate views** (#439, milestone 1).
+  `metrics_stage_latency_daily` gives p50, p95 and max per UTC day,
+  starting agent and pipeline stage, with the count they were computed
+  over beside them. `metrics_tokens_daily` gives per-agent token usage
+  attributed leg by leg across a handover, counting input and output
+  measurement independently because the store writes the two sums
+  independently. `metrics_event_rates_daily` gives provider failures per
+  turn and barge-in suppressions per session, each numerator aggregated
+  on its own and joined over the union of days, so an event on a day
+  with no session start still gets a row and a rate on a zero
+  denominator is null rather than zero. `metrics_sessions_daily` gives
+  the baseline underneath all of them, including how many of the day's
+  sessions had telemetry storage on. Nothing new is stored: the views
+  are added by migration `1006_metrics_views`, read what already lands,
+  and are readable by the existing `vinga_ro` analyst role with no new
+  grant. A day is a UTC day wherever it appears, derived from the
+  session's start plus the row's own `t_ms` with every cast naming UTC,
+  so the timezone of whoever is reading cannot move a row.
+- **`vinga-server conversations views`**, beside `schema`, printing the
+  new generated reference `docs/reference/metrics-views.md`: per view
+  the question it answers, its columns with their units and formulas,
+  its denominator and what telemetry-off does to it, plus the two
+  limits worth knowing before quoting a number. The first is that
+  retention makes a historical event rate a floor rather than a
+  measurement, because turns outlive their sessions' events and zero
+  cannot be told from pruned; the second is that `sessions.metrics` is
+  the telemetry switch under the name it had before the rename.
+
 - **The event catalog speaks the turn's own lifecycle.** Six additions
   and two deepenings, so a turn can be read off the events instead of
   inferred from the gaps between them (#66, milestone 1). `turn_started`

@@ -335,8 +335,12 @@ No new package, no new config, no API change.
 
 ## Milestones
 
-- [ ] **M1: the views, the reference and the proof.** `views.py`
-  with the frozen contracts, migration `1005_metrics_views`, the
+- [x] **[M1: the views, the reference and the
+  proof](2026-09-10-metrics-views-implementation.md#m1-the-views-the-reference-and-the-proof)**
+  (PR TBD). `views.py`
+  with the frozen contracts, migration `1006_metrics_views` (the plan
+  said 1005; PR #442 took that slot after this plan was written, and
+  the renumbering is recorded as a deviation), the
   docgen renderer, the `views` CLI verb with its moved pins, the
   generated `docs/reference/metrics-views.md` joining the CI drift
   checks and the docs index, the CI chain-head pin move, and the
