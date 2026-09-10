@@ -164,7 +164,7 @@ External review of PR #447: one P2, no P1, mergeable after it. Adopted.
 
 ## M2: wire response latency from a capture
 
-PR TBD.
+PR #448.
 
 ### What landed
 
