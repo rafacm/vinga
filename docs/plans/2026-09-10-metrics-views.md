@@ -354,7 +354,9 @@ No new package, no new config, no API change.
   store, and the still-open list entry for #439 (leaving #440
   named); the three `docs/concepts.md` anchors move from future to
   landed while budgets, users and cost stay future; CHANGELOG.
-- [ ] **M2: wire response latency from a capture.**
+- [x] **[M2: wire response latency from a
+  capture](2026-09-10-metrics-views-implementation.md#m2-wire-response-latency-from-a-capture).**
+  (PR TBD.)
   `scripts/wire_latency.py` under the decided shape (a), with the
   fixed requirements from the script section (house style, refusal
   boundary, specified speech-end algorithm, the exclusion stated

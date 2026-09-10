@@ -43,6 +43,22 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   name it had before the rename, session-level context for the day a
   session opened rather than a way to tell those two causes apart.
 
+- **A field capture answers how long the server took to reply** (#439,
+  milestone 2). `scripts/wire_latency.py` reads the triplet a recorded
+  session leaves behind and reports, per turn, the interval between the
+  end of user speech on the microphone channel and the first reply
+  audio paced out on the reply channel, found from the energy fall
+  inside the window the endpointer's own samples mark out. Every run
+  states what the number is worth: it is read in 20 ms frames and
+  reported to a tenth of a second, so it answers 800 ms or 2.5 s and
+  never a count of milliseconds, and it is the wire path only, so it
+  excludes downlink transport and device playback and is what the
+  server contributed rather than what the room waited. A turn that
+  cannot be measured names one of seven reasons instead of carrying a
+  guessed number. It needs nothing but `python3`, prints no filename,
+  session id or decision-track field, and answers every bad input with
+  a fixed sentence.
+
 - **The event catalog speaks the turn's own lifecycle.** Six additions
   and two deepenings, so a turn can be read off the events instead of
   inferred from the gaps between them (#66, milestone 1). `turn_started`
