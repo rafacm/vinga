@@ -367,6 +367,7 @@ def round_done(
     round_: int = 1,
     turns: int = 4,
     unbuilt: bool = False,
+    agent: str = AGENT,
 ) -> float:
     """One `llm_round`, built through the events' own assembly so the
     quartet's absence rules are the real ones.
@@ -378,7 +379,7 @@ def round_done(
     provider = FakeProvider(identity=None if unbuilt else Identity())
     return events.emit(
         lambda: assembly.llm_rounded(
-            AGENT,
+            agent,
             CONVERSATION,
             "llm",
             provider,
@@ -423,11 +424,12 @@ def synthesize(
     index: int = 0,
     stream_ms: int = 900,
     first_chunk_ms: int | None = 120,
+    agent: str = AGENT,
 ) -> float:
     """One sentence's synthesis stream ending."""
     return events.emit(
         lambda: SentenceSynthesized(
-            agent=Identifier(AGENT),
+            agent=Identifier(agent),
             conversation=ConversationId(CONVERSATION),
             index=Count(index),
             stream_ms=Whole(stream_ms),
