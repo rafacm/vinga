@@ -78,8 +78,12 @@ from vinga_server.events.catalog import (
     Handover,
     Heard,
     MilestoneRecorded,
+    NothingHeard,
     PromptAssembled,
     Replied,
+    ReplyFinished,
+    SentenceSynthesized,
+    TurnStarted,
     Variant,
 )
 from vinga_server.events.values import (
@@ -93,6 +97,8 @@ from vinga_server.events.values import (
     LanguageTag,
     PromptSources,
     Real,
+    ReplyOutcome,
+    Whole,
 )
 from vinga_server.filler import FallbackClip, FillerClips
 from vinga_server.generation import Generation, Generations
@@ -115,7 +121,7 @@ from vinga_server.runtime import prompt, resumption
 from vinga_server.runtime.filler_runner import FillerRunner
 from vinga_server.runtime.speech import _Synthesis, speak_after, withhold_tool_shaped
 from vinga_server.runtime.turns import BUILTIN, MCP, UNKNOWN, TurnUnderway, tool_source
-from vinga_server.runtime.turntaking import TurnTaking
+from vinga_server.runtime.turntaking import TurnTaking, Utterance
 from vinga_server.text import SentenceSplitter
 from vinga_server.tools import builtin, names
 from vinga_server.tools.arguments import with_lossless_coercions
@@ -728,6 +734,10 @@ class PipelineRuntime:
         # what they describe is one reply, and no reply has run.
         self._reply_spoke = False
         self._reply_withheld = False
+        # How the reply now running ended, written once by whichever
+        # boundary ended it and read by the `finally` that reports it.
+        # None means nothing has ended it, which is what `completed` is.
+        self._outcome: ReplyOutcome | None = None
         # The language the ASR provider asked this session to reuse
         # (`AsrResult.lock_language`). Session-scoped on purpose: the
         # provider is shared between sessions and holds no per-session
@@ -964,7 +974,7 @@ class PipelineRuntime:
         else:
             token = reason if reason in DEVICE_ABORT_REASONS else "other"
         logger.info("session %s: device aborted (%s)", self.session_id, token)
-        await self.cancel_reply()
+        await self.cancel_reply(ReplyOutcome.ABORTED)
         self._turntaking.restart()
 
     def replying(self) -> bool:
@@ -996,7 +1006,7 @@ class PipelineRuntime:
         store like every other lifecycle cleanup, which is what keeps a
         process that never restarts from accumulating them.
         """
-        await self.cancel_reply()
+        await self.cancel_reply(ReplyOutcome.ABORTED)
         if self._purge is not None:
             await asyncio.to_thread(self._purge, list(self._conversations.values()))
 
@@ -1320,18 +1330,23 @@ class PipelineRuntime:
             )
         )
 
-    async def _reply(self, pcm: bytes, result: AsrResult | None = None) -> None:
+    async def _reply(self, utterance: Utterance) -> None:
         """Run one utterance through ASR, the LLM, and TTS. Cancelled by
         `abort`; provider failures end the reply but not the session. The
         closing `tts stop` is sent even then, because the device (in auto
         mode) waits for it before listening again.
 
-        `result` is a transcription that already exists: a confirmed
-        barge-in ran ASR to decide the cancel, and reusing its full
-        result (language fields included) is what keeps ASR at one run
-        and `heard` at one event per interruption."""
+        `utterance.transcript` is a transcription that already exists: a
+        confirmed barge-in ran ASR to decide the cancel, and reusing its
+        full result (language fields included) is what keeps ASR at one
+        run and `heard` at one event per interruption. What that run
+        cost travels with it, so the interrupting turn's `heard` reports
+        a real latency rather than none."""
         assert self._providers is not None
         providers = self._providers
+        pcm = utterance.pcm
+        result = utterance.transcript
+        asr_ms = utterance.asr_ms
         spoken: list[str] = []
         self._output.reply_started()
         heard_s = round(len(pcm) / 2 / PIPELINE_SAMPLE_RATE, 2)
@@ -1357,12 +1372,16 @@ class PipelineRuntime:
                         result = await providers.asr.transcribe(
                             pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
                         )
+                    asr_ms = round((self._events.now() - started) * 1000)
                     # Only where this turn ran one. A reply handed a
                     # transcription reuses a confirmed barge-in's, measured
                     # at a different call site as part of a different
                     # decision, and a null here says "not measured this
                     # turn" rather than reporting somebody else's wait.
-                    self._turn.asr_ms = round((self._events.now() - started) * 1000)
+                    # The event beside it is less strict on purpose: what
+                    # `heard.asr_ms` answers is what the transcription
+                    # this turn is answering cost, whoever ran it.
+                    self._turn.asr_ms = asr_ms
                 # ASR is done, so the mid-ASR marker comes down: from here a
                 # barge-in has nothing of the user's left to destroy.
                 self._turntaking.clear_pending()
@@ -1389,6 +1408,7 @@ class PipelineRuntime:
                             agent=Identifier(self._agent),
                             conversation=ConversationId(self._conversation),
                             duration_s=Real(heard_s),
+                            asr_ms=ABSENT if asr_ms is None else Whole(asr_ms),
                             language=(
                                 ABSENT
                                 if result.language is None
@@ -1412,7 +1432,21 @@ class PipelineRuntime:
                         None if confidence is None else round(confidence, 2),
                     )
                 else:
-                    logger.info("session %s: nothing transcribed", self.session_id)
+                    # The third ASR outcome, and until #66 the only one
+                    # that was a log line rather than an event: an
+                    # utterance the engine answered, with nothing in the
+                    # answer. No text field on it at all, which the type
+                    # is what guarantees; a transcription that FAILED is
+                    # `provider_failed` and never this.
+                    self._latch(ReplyOutcome.NOTHING_HEARD)
+                    self._events.emit(
+                        lambda: NothingHeard(
+                            agent=Identifier(self._agent),
+                            conversation=ConversationId(self._conversation),
+                            duration_s=Real(heard_s),
+                            asr_ms=ABSENT if asr_ms is None else Whole(asr_ms),
+                        )
+                    )
                 if transcript:
                     self._turns.append(Turn("user", transcript))
                     self._filler.arm()
@@ -1424,6 +1458,11 @@ class PipelineRuntime:
                 # this process (#137) and belongs on the record below rather
                 # than being read as a disconnect and returned on in
                 # silence.
+                #
+                # Latched, because this arm RETURNS: an unlatched exit
+                # means the reply finished, and a device that vanished
+                # mid-sentence did not.
+                self._latch(ReplyOutcome.DEVICE_GONE)
                 return
             except asyncio.CancelledError:
                 # A barge-in or an abort is cancelling this reply, and the
@@ -1445,6 +1484,11 @@ class PipelineRuntime:
                 # out. What stays diagnosable: `provider_failed` names the
                 # stage, the provider and the host for anything that failed
                 # on the wire, and this line names the class for the rest.
+                # Where a reply's failure is already classified, so this
+                # is where the outcome is written down: the arm that
+                # catches it is the arm that knows the exception's kind,
+                # and nothing downstream has to read a message to guess.
+                self._latch(ReplyOutcome.FAILED)
                 logger.error(
                     "session %s: reply failed: %s", self.session_id, type(exc).__name__
                 )
@@ -1479,6 +1523,28 @@ class PipelineRuntime:
                 await self._filler.settle()
                 await self._filler.speak_fallback(FallbackReason.REPLY_FAILED)
         finally:
+            # The FIRST statement, ahead of every await below it, and
+            # that placement is the whole of what makes this
+            # unconditional. `emit` is synchronous, so a cancellation
+            # delivered into this `finally` lands in one of the awaits
+            # after it and this record is already made; the settle below
+            # is an await, and a `reply_finished` behind it would be the
+            # one a barge-in could skip.
+            #
+            # The outcome comes off the latch rather than off whatever
+            # exception is in flight: a `CancelledError` cannot tell a
+            # barge-in from a shutdown, and every canceller has already
+            # said which it is. Nothing latched means nothing ended this
+            # reply, which is what `completed` is.
+            outcome = self._outcome or ReplyOutcome.COMPLETED
+            self._events.emit(
+                lambda: ReplyFinished(
+                    agent=Identifier(self._agent),
+                    conversation=ConversationId(self._conversation),
+                    outcome=outcome,
+                    sentences_spoken=Count(len(spoken)),
+                )
+            )
             # Before the closing tts stop: an unfired timer is stood
             # down, and a clip already sounding finishes rather than
             # being cut mid-word by the stop.
@@ -2721,7 +2787,35 @@ class PipelineRuntime:
             tts,
             lambda exc, elapsed: self._provider_failed("tts", tts, exc, elapsed),
             lambda elapsed_ms: self._turn.first_audio(index, elapsed_ms),
+            lambda first_chunk_ms, stream_ms: self._sentence_synthesized(
+                index, first_chunk_ms, stream_ms
+            ),
             lambda synthesis: self._speak_and_record(synthesis, resampler, leg, spoken),
+        )
+
+    def _sentence_synthesized(
+        self, index: int, first_chunk_ms: int | None, stream_ms: int
+    ) -> None:
+        """One `sentence_synthesized` event, for a stream that has just
+        ended.
+
+        Both numbers as the producer measured them, and the record says
+        what each one is: the first is the voice's own latency to its
+        first audio, and the second is how long the whole stream lived,
+        which for a paced consumer includes the playback it was feeding.
+        Anything that averaged the two, or called the second synthesis
+        time, would be reporting the speaker's clock as the provider's.
+        """
+        self._events.emit(
+            lambda: SentenceSynthesized(
+                agent=Identifier(self._agent),
+                conversation=ConversationId(self._conversation),
+                index=Count(index),
+                stream_ms=Whole(stream_ms),
+                first_chunk_ms=(
+                    ABSENT if first_chunk_ms is None else Whole(first_chunk_ms)
+                ),
+            )
         )
 
     async def _speak(
@@ -2789,7 +2883,7 @@ class PipelineRuntime:
         await self._speak(synthesis, resampler, leg)
         spoken.append(synthesis.sentence)
 
-    def start_reply(self, pcm: bytes, result: AsrResult | None = None) -> None:
+    def start_reply(self, utterance: Utterance) -> None:
         """Answer this utterance, from now on.
 
         The task is created here rather than on the turn-taking side so
@@ -2798,20 +2892,63 @@ class PipelineRuntime:
         about, and a second owner of the field would be a second answer
         to the same question.
 
-        `result` is a transcription that already exists, which a
-        confirmed barge-in has and nothing else does."""
-        self._reply_task = asyncio.create_task(self._reply(pcm, result))
+        This is also where a turn begins as far as the record is
+        concerned, and the definition is deliberately this call rather
+        than a list of the ways into it: the ordinary endpointed
+        utterance, a manual stop, a confirmed barge-in and the mid-ASR
+        merge all arrive here, and a candidate the gate turned away
+        never does. Stamped with the instant the user stopped speaking,
+        which the utterance carries across the gate, so an interruption
+        is timed from the speech rather than from the confirmation that
+        took it seriously.
+        """
+        # Cleared here rather than in the reply body, and the difference
+        # is a real window: a cancel latches on the reply it cancelled
+        # and waits it out, so the reply ending is over by the time this
+        # line runs, while a body that cleared its own latch would clear
+        # it whenever the loop got round to starting the task.
+        self._outcome = None
+        self._events.emit(
+            lambda: TurnStarted(
+                agent=Identifier(self._agent),
+                conversation=ConversationId(self._conversation),
+                speech_ms=Whole(utterance.speech_ms),
+                barge_in=Flag(utterance.barge_in),
+            ),
+            at=utterance.ended_at,
+        )
+        self._reply_task = asyncio.create_task(self._reply(utterance))
 
-    async def cancel_reply(self) -> None:
+    async def cancel_reply(self, outcome: ReplyOutcome) -> None:
         """Cancel a reply in flight and see the cancellation through.
         Waiting matters: a fire-and-forget cancel leaves the task not yet
-        done, and an utterance finishing in that window would be dropped."""
+        done, and an utterance finishing in that window would be dropped.
+
+        `outcome` is what this canceller is: a barge-in, a device that
+        gave up, a session closing. It is taken as an argument rather
+        than inferred because `CancelledError` cannot tell those apart,
+        and it is latched before the cancel rather than after, so the
+        reply's own `finally` finds it already there however promptly
+        the cancellation lands.
+        """
         if self._reply_task is None:
             return
+        self._latch(outcome)
         self._reply_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await self._reply_task
         self._reply_task = None
+
+    def _latch(self, outcome: ReplyOutcome) -> None:
+        """Write down how the reply now running ended, once.
+
+        First writer wins, and that is the precedence rule whole: what
+        ended a reply is whatever acted first, and everything after it
+        is consequence. A barge-in that cancels a reply already inside
+        its failure arm did not fail it.
+        """
+        if self._outcome is None:
+            self._outcome = outcome
 
     async def confirm_transcript(self, pcm: bytes) -> AsrResult:
         """Transcribe an interruption, so that the gates in front of a

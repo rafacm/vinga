@@ -60,6 +60,7 @@ from tests.support.sockets import (
 )
 from vinga_server.config import Config
 from vinga_server.device.boundary import DeviceGone
+from vinga_server.events.values import ReplyOutcome
 from vinga_server.filler import FallbackClip, build_agent_fillers
 from vinga_server.logs import TEXT_FORMAT, JsonFormatter
 from vinga_server.providers import (
@@ -445,7 +446,7 @@ async def test_a_barge_in_hears_nothing_even_with_a_phrase_cached(
     with caplog.at_level("INFO"):
         start_reply(session, UTTERANCE)
         await asyncio.sleep(0.05)
-        await session.runtime.cancel_reply()
+        await session.runtime.cancel_reply(ReplyOutcome.BARGED_IN)
 
     assert events(caplog, "reply_fallback") == []
     assert cast(OrderedSocket, session.websocket).announced() == []

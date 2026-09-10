@@ -69,6 +69,7 @@ from vinga_server.audio import rms
 from vinga_server.audio.opus import OpusEncoder
 from vinga_server.audio.resample import Resampler
 from vinga_server.config import Config
+from vinga_server.events.values import ReplyOutcome
 from vinga_server.protocol import framing
 from vinga_server.providers import Turn
 from vinga_server.runtime.pipeline import AgentNotAllowed
@@ -496,7 +497,7 @@ async def test_a_barge_in_keeps_the_sentences_the_user_heard() -> None:
     start_reply(session, speech_pcm(600))
     await asyncio.sleep(0.6)
     heard_frames = socket.frames
-    await session.runtime.cancel_reply()
+    await session.runtime.cancel_reply(ReplyOutcome.BARGED_IN)
 
     # "Ready." was spoken in full and survives; the long sentence was
     # audible, interrupted, and left out.
@@ -532,13 +533,24 @@ async def test_only_a_sentence_whose_audio_finished_counts_as_spoken() -> None:
         # first synthesis.
         return None
 
+    def record_stream(first_chunk_ms: int | None, stream_ms: int) -> None:
+        # And the same for the stream that just ended: what a reply
+        # says about one is a reply's business.
+        return None
+
     # White-box for the two calls below: what is under test is which
     # sentences a cancellation leaves recorded as spoken, and the
     # recording happens inside one sentence's own speaking step. Driving
     # a whole reply would put the cancellation somewhere between two
     # sentences the test does not choose, and the moment is the claim.
     await session.runtime._speak(
-        _Synthesis("Short and finished.", tts, record_failure, record_first_audio),
+        _Synthesis(
+                "Short and finished.",
+                tts,
+                record_failure,
+                record_first_audio,
+                record_stream,
+            ),
         resampler,
         spoken,
     )
@@ -546,7 +558,9 @@ async def test_only_a_sentence_whose_audio_finished_counts_as_spoken() -> None:
 
     cut = asyncio.create_task(
         session.runtime._speak(
-            _Synthesis(LONG_REPLY, tts, record_failure, record_first_audio),
+            _Synthesis(
+                LONG_REPLY, tts, record_failure, record_first_audio, record_stream
+            ),
             resampler,
             spoken,
         )

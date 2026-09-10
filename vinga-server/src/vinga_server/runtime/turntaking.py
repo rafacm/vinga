@@ -28,6 +28,7 @@ the decision.
 """
 
 import asyncio
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vinga_server.config import ServerConfig
@@ -40,7 +41,7 @@ from vinga_server.events.catalog import (
     BargeInUnderFloor,
     BargeInWithoutTranscript,
 )
-from vinga_server.events.values import ABSENT, Absent, Real, Whole
+from vinga_server.events.values import ABSENT, Absent, Real, ReplyOutcome, Whole
 from vinga_server.providers import AsrResult, Endpointer
 
 if TYPE_CHECKING:
@@ -55,6 +56,41 @@ if TYPE_CHECKING:
 # trim can ever drop is silence nobody is going to transcribe.
 UTTERANCE_TAIL_S = 30
 UTTERANCE_TAIL_BYTES = UTTERANCE_TAIL_S * PIPELINE_SAMPLE_RATE * 2
+
+
+@dataclass(frozen=True)
+class Utterance:
+    """What the floor hands the orchestrator to answer.
+
+    One type rather than a widening argument list, and the reason is
+    that every field of it is a fact the floor knows and the reply
+    cannot recover: when the user stopped speaking, how much of what
+    they said was classified as speech, whether answering this one means
+    interrupting a reply, and the transcription the barge-in gate
+    already ran with what it cost.
+
+    `ended_at` is a reading of the session's clock taken as the
+    utterance closed, and it is the whole of why this type exists. The
+    confirmation ladder can spend a whole ASR call deciding whether an
+    interruption is real, so the instant the reply starts and the
+    instant the user stopped talking are hundreds of milliseconds apart
+    on exactly the path an operator most wants timed. Carrying the
+    earlier one across the gate is what lets `turn_started` be stamped
+    with the utterance rather than with the decision about it.
+
+    `transcript` and `asr_ms` travel together and are set together: a
+    confirmed barge-in already transcribed this audio to decide the
+    cancel, so the reply reuses the result rather than running ASR
+    twice, and the latency of the run that produced it belongs to the
+    turn that is answering it.
+    """
+
+    pcm: bytes
+    ended_at: float
+    speech_ms: int
+    barge_in: bool
+    transcript: AsrResult | None = None
+    asr_ms: int | None = None
 
 
 class TurnTaking:
@@ -180,6 +216,11 @@ class TurnTaking:
         cancellation wants; from the mic that case is already filtered
         in `_handle_audio`, so what reaches here is a manual `listen
         stop` mid-reply."""
+        # Read first, and before the gates below can spend an ASR call:
+        # this is the instant the user stopped speaking, and it is what
+        # the turn that answers them is stamped with however long the
+        # deciding takes.
+        ended_at = self._events.now()
         speech_ms = self.speech_ms()
         pcm = self._trimmed_utterance()
         self.restart()
@@ -188,7 +229,13 @@ class TurnTaking:
         # counts the idle timeout from both ends of a turn.
         self._output.user_turn_ended()
         result: AsrResult | None = None
-        if self._reply.replying():
+        asr_ms: int | None = None
+        # Whether answering this utterance means interrupting a reply,
+        # which is true of every shape that reaches `start_reply` with
+        # one in flight: a confirmed barge-in, a mid-ASR merge, and a
+        # manual stop that cut one short.
+        interrupting = self._reply.replying()
+        if interrupting:
             if not self._server.barge_in:
                 logger.warning(
                     "session %s: dropping an utterance, a reply is already streaming",
@@ -199,31 +246,47 @@ class TurnTaking:
                 gated = await self._gate_barge_in(pcm, speech_ms)
                 if gated is None:
                     return
-                pcm, result = gated
+                pcm, result, asr_ms = gated
             else:
                 self._events.emit(
                     lambda: BargeIn(
                         speech_ms=Whole(speech_ms), speaking_ms=self._speaking_ms()
                     )
                 )
-                await self._reply.cancel_reply()
+                await self._reply.cancel_reply(ReplyOutcome.BARGED_IN)
         logger.info(
             "session %s: utterance of %.1f s",
             self.session_id,
             len(pcm) / 2 / PIPELINE_SAMPLE_RATE,
         )
         self._reply_pcm = pcm if result is None else None
-        self._reply.start_reply(pcm, result)
+        self._reply.start_reply(
+            Utterance(
+                pcm=pcm,
+                ended_at=ended_at,
+                speech_ms=speech_ms,
+                barge_in=interrupting,
+                transcript=result,
+                asr_ms=asr_ms,
+            )
+        )
 
     async def _gate_barge_in(
         self, pcm: bytes, speech_ms: int
-    ) -> tuple[bytes, AsrResult | None] | None:
+    ) -> tuple[bytes, AsrResult | None, int | None] | None:
         """Decide what an endpointed utterance may do to the reply in
         flight: None to drop it and let the reply live, or the PCM to
-        answer (with its transcription, when confirming it already ran
-        ASR). The gates exist because a reply is only cancelled on
-        evidence of user speech; acoustics alone can at most pause it
-        (see the ADR of that name).
+        answer (with its transcription and what that transcription cost,
+        when confirming it already ran ASR). The gates exist because a
+        reply is only cancelled on evidence of user speech; acoustics
+        alone can at most pause it (see the ADR of that name).
+
+        The confirmation's latency is measured here, at the site that
+        runs it, and handed over with the result it belongs to. The turn
+        that goes on to answer this audio did not transcribe it and has
+        no way to time what it is reusing, so a `heard` carrying nothing
+        would be the one interruption an operator cannot see the ASR
+        cost of.
 
         In order: too little classified speech is a noise blip and is
         dropped; a reply still inside ASR was transcribing the head of
@@ -246,8 +309,8 @@ class TurnTaking:
         if self._reply_pcm is not None:
             head = self._reply_pcm
             self._events.emit(lambda: BargeInMerged(speech_ms=Whole(speech_ms)))
-            await self._reply.cancel_reply()
-            return head + pcm, None
+            await self._reply.cancel_reply(ReplyOutcome.BARGED_IN)
+            return head + pcm, None, None
         loop = asyncio.get_running_loop()
         if (
             self._output.speaking_started_at() is not None
@@ -260,10 +323,16 @@ class TurnTaking:
             return None
         self._pause_output()
         failed: str | None = None
+        # On the session's clock, which is the one the events are
+        # stamped with, so the latency and the offsets around it are
+        # comparable.
+        started = self._events.now()
+        measured: int | None = None
         try:
             # In the receive path on purpose: incoming frames buffer in
             # the socket for the duration, so ordering is unaffected.
             result = await self._reply.confirm_transcript(pcm)
+            measured = round((self._events.now() - started) * 1000)
         except Exception as exc:
             # The class name, and nothing else: no `exc_info`, no
             # `str(exc)`. The confirmation runs inside the runtime's
@@ -300,13 +369,13 @@ class TurnTaking:
         self._events.emit(
             lambda: BargeIn(speech_ms=Whole(speech_ms), speaking_ms=self._speaking_ms())
         )
-        await self._reply.cancel_reply()
+        await self._reply.cancel_reply(ReplyOutcome.BARGED_IN)
         # The pause belonged to the cancelled reply; the one about to
         # answer starts with the frames flowing. Resuming rather than
         # clearing by hand shifts a pacing clock the next agent leg
         # restarts from scratch anyway.
         self._resume_output()
-        return pcm, result
+        return pcm, result, measured
 
     def _speaking_ms(self) -> Whole | Absent:
         """The barge_in event's speaking_ms: milliseconds from

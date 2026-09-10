@@ -37,6 +37,7 @@ from tests.support.sessions import (
 )
 from tests.support.sockets import OrderedSocket, RecordingSocket
 from vinga_server.config.models import FallbackConfig
+from vinga_server.events.values import ReplyOutcome
 from vinga_server.filler import build_agent_fillers
 from vinga_server.providers import (
     LlmEvent,
@@ -209,7 +210,7 @@ async def test_a_cancel_during_the_watchdog_window_still_lands(
     with caplog.at_level("INFO"):
         start_reply(session, b"\x00\x00" * 320)
         await asyncio.sleep(0.05)
-        await session.runtime.cancel_reply()
+        await session.runtime.cancel_reply(ReplyOutcome.BARGED_IN)
 
     assert llm.calls == 1
     assert not session.runtime.replying()

@@ -25,8 +25,9 @@ from tests.support.providers import ScriptedEndpointer
 from vinga_server.config import ServerConfig
 from vinga_server.device.boundary import PIPELINE_SAMPLE_RATE, DeviceOutput, PlayableAudio
 from vinga_server.events import SessionEvents
+from vinga_server.events.values import ReplyOutcome
 from vinga_server.providers import AsrResult
-from vinga_server.runtime.turntaking import TurnTaking
+from vinga_server.runtime.turntaking import TurnTaking, Utterance
 
 SESSION = "turn-taking"
 
@@ -54,18 +55,21 @@ class FakeReply:
     def __init__(self, confirmation: AsrResult = HEARD) -> None:
         self._confirmation = confirmation
         self.confirmation_fails: BaseException | None = None
-        self.started: list[tuple[bytes, AsrResult | None]] = []
+        self.started: list[Utterance] = []
         self.confirmed: list[bytes] = []
-        self.cancels = 0
+        self.cancels: list[ReplyOutcome] = []
 
     def replying(self) -> bool:
         return bool(self.started)
 
-    def start_reply(self, pcm: bytes, result: AsrResult | None) -> None:
-        self.started.append((pcm, result))
+    def start_reply(self, utterance: Utterance) -> None:
+        self.started.append(utterance)
 
-    async def cancel_reply(self) -> None:
-        self.cancels += 1
+    async def cancel_reply(self, outcome: ReplyOutcome) -> None:
+        # The outcome kept rather than counted: every canceller names
+        # itself now, and which name it gave is what the reply's own
+        # record is built from.
+        self.cancels.append(outcome)
         self.started.clear()
 
     async def confirm_transcript(self, pcm: bytes) -> AsrResult:
@@ -156,7 +160,7 @@ async def test_too_little_speech_is_a_noise_blip_and_never_reaches_the_reply(
     assert suppressed.speech_ms == 100
     # The reply lives, nothing was asked of ASR, and the utterance that
     # was dropped is still reported as a turn the user took.
-    assert reply.cancels == 0
+    assert reply.cancels == []
     assert reply.confirmed == []
     assert len(reply.started) == 1
     assert device.turn_ends == 2
@@ -179,11 +183,11 @@ async def test_a_barge_in_inside_the_replys_own_asr_merges_the_two_halves(
         await taking.finish_utterance(endpointed=True)
 
     assert only(caplog, "barge_in_merged").speech_ms == 600
-    assert reply.cancels == 1
+    assert reply.cancels == [ReplyOutcome.BARGED_IN]
     # One reply answering the whole sentence, and no confirmation: the
     # merge is decided on the marker alone.
     assert reply.confirmed == []
-    assert reply.started == [(head + tail, None)]
+    assert [(one.pcm, one.transcript) for one in reply.started] == [(head + tail, None)]
 
 
 async def test_the_playback_onset_transient_is_swallowed_by_the_refractory_window(
@@ -202,7 +206,7 @@ async def test_the_playback_onset_transient_is_swallowed_by_the_refractory_windo
     suppressed = only(caplog, "barge_in_suppressed")
     assert suppressed.reason == "refractory"
     assert suppressed.speech_ms == 600
-    assert reply.cancels == 0
+    assert reply.cancels == []
     assert reply.confirmed == []
     assert len(reply.started) == 1
 
@@ -226,7 +230,7 @@ async def test_a_confirmation_that_heard_nothing_resumes_the_reply_it_paused(
     # The pause cost one ASR latency and nothing else: the frames flow
     # again, the reply was never cancelled, and no second one started.
     assert reply.confirmed == [interruption]
-    assert reply.cancels == 0
+    assert reply.cancels == []
     assert len(reply.started) == 1
     assert device.paused is False
     assert taking.output_paused is False
@@ -250,11 +254,11 @@ async def test_a_confirmed_barge_in_cancels_and_hands_its_transcript_on(
     # The reply was speaking, so the cancel decision is timed from it.
     assert barged.speaking_ms >= 0
     assert events(caplog, "barge_in_suppressed") == []
-    assert reply.cancels == 1
+    assert reply.cancels == [ReplyOutcome.BARGED_IN]
     # The confirmation is the new reply's ASR too, which is what keeps
     # one interruption at one transcription.
     assert reply.confirmed == [interruption]
-    assert reply.started == [(interruption, HEARD)]
+    assert [(one.pcm, one.transcript) for one in reply.started] == [(interruption, HEARD)]
     assert device.paused is False
 
 
@@ -275,7 +279,7 @@ async def test_a_confirmation_that_could_not_be_run_leaves_the_reply_alone(
 
     assert events(caplog, "barge_in") == []
     assert events(caplog, "barge_in_suppressed") == []
-    assert reply.cancels == 0
+    assert reply.cancels == []
     assert len(reply.started) == 1
     assert device.paused is False
     assert taking.output_paused is False
@@ -306,7 +310,7 @@ async def test_a_failed_confirmation_names_its_class_and_not_what_it_said(
     assert "barge-in confirmation failed: TimeoutError" in written
     assert SENTINEL not in written
     # And the resume-and-drop the line reports is still what happened.
-    assert reply.cancels == 0
+    assert reply.cancels == []
     assert taking.output_paused is False
 
 
@@ -355,7 +359,7 @@ async def test_the_buffer_keeps_only_a_bounded_tail_of_what_was_fed(
         await taking.feed(mark * 1000)
     await taking.finish_utterance()
 
-    (pcm, _result), = reply.started
+    pcm = reply.started[0].pcm
     # Exactly the cap, and exactly the newest of what was fed.
     assert pcm == b"\x02" * 1000 + b"\x03" * 1000
 
@@ -372,7 +376,7 @@ async def test_the_pre_roll_is_all_that_survives_in_front_of_the_speech() -> Non
     await taking.feed(b"\x00" * second)
     await taking.finish_utterance()
 
-    (pcm, _result), = reply.started
+    pcm = reply.started[0].pcm
     pre_roll = int(300 / 1000 * PIPELINE_SAMPLE_RATE) * 2
     assert len(pcm) == second - (second // 2 - pre_roll)
 
@@ -395,7 +399,7 @@ async def test_the_trim_maps_the_speech_start_through_what_the_cap_dropped(
 
     # 30,000 fed, 10,000 dropped, so the speech begins 15,000 into what
     # is left, and the pre-roll backs up from there.
-    (pcm, _result), = reply.started
+    pcm = reply.started[0].pcm
     assert len(pcm) == 20_000 - (15_000 - pre_roll)
 
 

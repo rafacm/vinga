@@ -55,6 +55,7 @@ from vinga_server.generation import Generations
 from vinga_server.memory.store import MemoryStore
 from vinga_server.providers import ProviderWorld, ToolCall, Turn
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
+from vinga_server.runtime.turntaking import Utterance
 from vinga_server.tools.mcp import McpServers
 
 # --- building one -----------------------------------------------------
@@ -636,8 +637,14 @@ async def drive_reply(session: DeviceSession, pcm: bytes) -> None:
     White-box, per the note above: `drain` answers that the reply
     finished and never how, which is the one thing a suite about a
     failing reply needs.
+
+    The reply body rather than `start_reply`, which is why a suite
+    driven through here sees no `turn_started`: what the floor decided
+    about this utterance is exactly what these suites are not about.
     """
-    await session.runtime._reply(pcm)
+    await session.runtime._reply(
+        Utterance(pcm=pcm, ended_at=events_of(session).now(), speech_ms=0, barge_in=False)
+    )
 
 
 # Long enough that a wedged reply fails the assertion rather than the
@@ -663,17 +670,38 @@ async def wait_for_reply(session: DeviceSession) -> None:
     await reply
 
 
-def start_reply(session: DeviceSession, pcm: bytes, result: Any = None) -> None:
+def start_reply(
+    session: DeviceSession,
+    pcm: bytes,
+    result: Any = None,
+    *,
+    speech_ms: int = 0,
+    barge_in: bool = False,
+    asr_ms: int | None = None,
+) -> None:
     """A reply in flight, registered the way an utterance registers one,
     so that everything asking whether this session is replying (the idle
     watchdog, the shutdown, the barge-in gates) sees it.
 
     The runtime's own public entry point, named here so that the suites
     driving a reply name it in one place. `result` is a transcription
-    that already exists, which is what a confirmed barge-in hands it.
-    Whether the reply has finished is `replying()`; waiting for it out
-    is `wait_for_reply` above, which raises what it was holding."""
-    session.runtime.start_reply(pcm, result)
+    that already exists, which is what a confirmed barge-in hands it,
+    and `asr_ms` is what running it cost, which the gate measures beside
+    it. The utterance's end is read here rather than passed, because
+    what a suite starting a reply by hand is standing in for is an
+    utterance that has just this moment closed. Whether the reply has
+    finished is `replying()`; waiting for it out is `wait_for_reply`
+    above, which raises what it was holding."""
+    session.runtime.start_reply(
+        Utterance(
+            pcm=pcm,
+            ended_at=events_of(session).now(),
+            speech_ms=speech_ms,
+            barge_in=barge_in,
+            transcript=result,
+            asr_ms=asr_ms,
+        )
+    )
 
 
 async def _nothing(*args: object, **kwargs: object) -> None:
