@@ -343,6 +343,32 @@ async def test_the_cap_on_a_reply_is_the_one_the_kit_names() -> None:
     assert built._max_tokens == DEFAULT_MAX_TOKENS
 
 
+async def test_a_silent_entry_still_sends_a_cap_of_its_own(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """What an entry that never mentions a cap puts on the wire.
+
+    At the body rather than at the object, because the claim is about
+    the request the endpoint receives: an entry naming only an endpoint
+    and a model composes `max_tokens` all the same, from a default this
+    repository chose, and an endpoint that refuses the field refuses the
+    conversation with it.
+    """
+    sent: dict[str, object] = recorded(monkeypatch)
+
+    built = await build_entry(
+        "llm",
+        "local",
+        provider_config(
+            type="openai_compatible", base_url="http://localhost:11434/v1", model="qwen3:8b"
+        ),
+    )
+
+    assert isinstance(built, OpenAiCompatibleLlm)
+    assert await spoken(built) == []
+    assert sent["max_tokens"] == DEFAULT_MAX_TOKENS
+
+
 # The configured cap, which until #277 could not be configured at all
 #
 # `max_tokens` contains the fragment `token`, so the shared secret-key
