@@ -12,15 +12,20 @@ almost every command needs a server to be running. An empty database is
 a valid state for that server to be running on, which is what makes
 configuring a deployment from nothing possible at all.
 
-Five commands are the exception. `schema`, `reference`, `openapi` and
-`cli-reference` render documents out of the models, the routes and the
-command tree, and `ota-url` derives a URL from the file half. Those five
-open no database, need no key and contact nothing at all.
+Six commands are the exception, in two groups. `schema`, `reference`,
+`openapi` and `cli-reference` render documents out of the models, the
+routes and the command tree, and `ota-url` derives a URL from the file
+half. Those five open no database, need no key and contact nothing at
+all. `check` is the sixth and reaches further than any of them: it
+reads the store the way a boot reads it, so it opens the database and
+needs the encryption keys, and it still contacts no server. It is what
+diagnoses a refused `apply`, and it has a section of its own below.
 
-Two of them do need the server half of this package to be installed,
-because what they read is the server's own code: `openapi` builds the
-configuration application in order to describe it, and `ota-url` derives
-its URL through the onboarding package. Run inside the image or from a
+Three of the six do need the server half of this package to be
+installed, because what they read is the server's own code: `openapi`
+builds the configuration application in order to describe it, `ota-url`
+derives its URL through the onboarding package, and `check` reads the
+store through the boot module itself. Run inside the image or from a
 checkout they behave as they always have; on a workstation that
 installed the CLI alone they answer one sentence saying which half is
 missing, and the committed [`api-openapi.json`](api-openapi.json) is
@@ -452,13 +457,59 @@ cannot run before the entity exists. The last step is the same argument
 once more: an apply builds the engines the document names, and their
 credentials are the step before it.
 
+## When an apply is refused
+
+`apply` refuses a stored configuration that does not compose into one a
+server could run, and its refusal deliberately says nothing about where
+the problem is. That is not an oversight and it is not a gap to be
+filled in the answer: what a reload refuses on is arbitrary stored
+state, and a sentence composed over that state can quote a value
+somebody wrote into the wrong field. The same is true of `diff`, which
+composes the same snapshot to compare it. So neither of them will ever
+say more than that the stored configuration was refused.
+
+`check` is where the location is said instead:
+
+```bash
+vinga-server config check
+```
+
+It reads both halves the way a boot reads them, composes them, and
+prints exactly what a server started on this store would print before it
+refused to start:
+
+```
+invalid config in the domain schema of the vinga database:
+  - default_agent is required when agents are defined and no device is bound to one; set it to one of: sam
+```
+
+It names the entry and the rule and never the value, which is what makes
+it sayable at all: a boot composes that sentence from the schema rather
+than from what is stored, so no stored value is in it. A store that
+composes says so in one line and exits 0; one that does not prints the
+refusal and exits 1, which is what a deployment script reads.
+
+It is a server-host command, like `ota-url` and for the same reason: the
+file half it reads is the one that names the database, and the database
+is what it opens. Nothing is served, nothing is built and nothing is
+written; the store is read, and a store behind on migrations is migrated
+exactly as a boot would migrate it, because the answer being asked for
+is what a boot would meet.
+
 ## When the server will not start
 
 A configuration the server refuses to boot on (a stored credential no
 configured key opens, an entity that cannot be loaded, a reference that
 no longer resolves) leaves nothing to write through: every command above
-is a request, and there is nobody to answer it. The way back is to
-rebuild the store rather than to operate on it.
+is a request, and there is nobody to answer it. `check` is the one
+command above that still answers, because it reads the store rather than
+asking a server about it, and what it prints is the sentence that server
+refused to start with. Run it first: it says which entry to correct in
+the document the rebuild below imports, so the rebuilt store is one that
+boots rather than the same refusal in a fresh database. The way back is
+still to rebuild the store rather than to operate on it, because every
+command that writes is a request and there is still nobody to answer
+one.
 
 Both halves of the configuration live in one Postgres database, in two
 schemas: `domain`, which is what refuses to boot, and `record`, which
@@ -744,6 +795,10 @@ Commands:
                    conversation already in progress meets new tools at its next
                    utterance and new prompt text at its next activation, while a
                    changed voice reaches the next conversation
+  check            say whether the stored configuration composes into one a
+                   server could boot on, naming the entry and the rule behind
+                   anything that does not; it reads the store the way a boot
+                   reads it and serves nothing
   ota-url          the URL to type into a device's captive portal; derived from
                    this configuration and the device-auth secret, and it
                    contacts nothing
@@ -2501,6 +2556,21 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+### `vinga check`
+
+```
+Usage: vinga check [OPTIONS]
+
+  say whether the stored configuration composes into one a server could boot on,
+  naming the entry and the rule behind anything that does not; it reads the
+  store the way a boot reads it and serves nothing
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
   -h, --help     Show this message and exit.
 ```
 
