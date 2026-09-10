@@ -54,7 +54,7 @@ from tests.support.problems import refused as refusal_body
 from tests.support.stores import body, planted
 from vinga_server import logs, serving
 from vinga_server.build_info import CONTAINER_ENV
-from vinga_server.config import Config, entities, views
+from vinga_server.config import Config, cli, entities, views
 from vinga_server.config.api import build_api
 from vinga_server.config.boot import load_boot_config
 from vinga_server.config.loader import ConfigError, StorageError, compose_config
@@ -64,6 +64,8 @@ from vinga_server.config.models import (
     FileConfig,
     McpServerConfig,
     ProviderConfig,
+    PromptFragmentConfig,
+    spoken_identity,
     url_credential,
     without_url_credential,
 )
@@ -857,6 +859,16 @@ def test_a_device_mac_cannot_carry_one_because_the_load_path_refuses_it(
 # quoted back by that refusal, which is the rule it has always kept.
 GONE = "no-such-provider"
 
+# A lawful name that reads like a credential and is not one. The
+# counterweight to every strip above: #382 settled that a stored
+# identity IS repository vocabulary a refusal speaks, and a rule that
+# withheld one for resembling a secret would leave an operator unable to
+# see which row is broken. It holds no slash, no userinfo and no control
+# character, so every door it goes through is the identity function on
+# it, and it is not one of the sentinels: nothing here asserts its
+# absence.
+SECRET_SHAPED = "sk-planted-4b71e0d2-never-a-real-credential"
+
 
 @pytest.fixture
 def unbootable(store: ConfigStore) -> ConfigStore:
@@ -968,6 +980,147 @@ def test_a_composed_locations_identity_is_named_without_its_credential() -> None
 
     assert f"agents.{HISTORIC_SHOWN}.llm: " in str(caught.value)
     _carries_no_sentinel(chain(caught.value))
+
+
+# The same sentences, reached by a command instead of by a boot (#443)
+#
+# `config check` runs the boot's own read and prints what it says, so
+# every sentence above is now reachable from an operator's terminal
+# without a server starting. That is a new SURFACE for the rule rather
+# than a new rule: the strip and the escape are applied where the
+# sentence is composed, which is one call away from both callers. The
+# cases below are what says so, and they are here rather than beside the
+# command because this file is where the identity-display claims live.
+#
+# All four kinds an entry can be, and they split two and two, which is
+# the thing worth writing down. An agent's name and a provider's are
+# held only to the addressability rule, so a planted URL-shaped one is
+# loaded, reaches a sentence, and is stripped there. An MCP entry's name
+# becomes a tool-name prefix and a fragment's is held to a character
+# class, so the same plant is refused on the way out of the store, by a
+# rule of its own, in a sentence that quotes nothing. The credential
+# reaches no surface either way and the two mechanisms are not
+# interchangeable, so both are asserted rather than one being taken for
+# the other.
+#
+# And the counterweight, without which every case here would be
+# satisfied by a refusal that named nothing at all: a lawful name that
+# merely LOOKS like a credential is spoken in full, because #382 settled
+# that a stored identity is this repository's vocabulary for the row.
+
+
+@pytest.fixture
+def _no_ambient_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The environment a `check` runs in: no configuration file and no
+    API address. It reaches no server, so an address would be a fact
+    about nothing."""
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+    monkeypatch.delenv(cli.API_URL_ENV, raising=False)
+
+
+def test_the_check_command_names_the_stored_entry_without_its_credential(
+    unbootable: ConfigStore,
+    _no_ambient_client: None,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The provider and the agent, through the reference check, printed
+    by a command rather than by a server that would not start.
+
+    The exit code and the stream are the command's own contract; the
+    sentence is the composition's, unchanged, which is the whole claim:
+    one refusal, two callers.
+    """
+    with caplog.at_level(logging.DEBUG):
+        assert cli.main(["check"]) == 1
+
+    printed = capsys.readouterr()
+    assert printed.out == ""
+    assert f"agents.{HISTORIC_SHOWN}.llm: names no llm provider that exists" in printed.err
+    assert f"(defined: {HISTORIC_SHOWN})" in printed.err
+    _carries_no_sentinel(printed.out, printed.err, *_logged(caplog))
+
+
+@pytest.mark.parametrize(
+    ("kind", "entry", "rule"),
+    [
+        pytest.param(
+            "mcp-server",
+            McpServerConfig(transport="stdio", command="uvx"),
+            "an entry name becomes a tool-name prefix",
+            id="mcp-server",
+        ),
+        pytest.param(
+            "prompt-fragment",
+            PromptFragmentConfig(text="hi"),
+            "a fragment name has to match",
+            id="prompt-fragment",
+        ),
+    ],
+)
+def test_the_check_command_refuses_a_narrow_name_before_it_could_list_it(
+    kind: str,
+    entry: BaseModel,
+    rule: str,
+    store: ConfigStore,
+    _no_ambient_client: None,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other two kinds, which never reach a list at all, and the
+    reason is a rule of their own rather than the strip.
+
+    An MCP entry's name becomes a tool-name prefix and a fragment's name
+    is held to a character class, so both are narrower than an agent's
+    or a provider's, and a planted row failing one is refused on the way
+    out of the store before any sentence could enumerate it. That
+    refusal quotes nothing, deliberately: what fails these rules is
+    exactly the kind of string that must not be echoed.
+
+    So for these two the guard is the first rule and not the strip, and
+    this case is what says which one is doing the work. It is the answer
+    to "extend the battery to all four kinds" rather than an exception
+    to it: the credential does not reach the surface either way, and the
+    two mechanisms are not interchangeable.
+    """
+    _plant(store, kind, (HISTORIC,), entry)
+
+    with caplog.at_level(logging.DEBUG):
+        assert cli.main(["check"]) == 1
+
+    printed = capsys.readouterr()
+    assert printed.out == ""
+    assert rule in printed.err
+    _carries_no_sentinel(printed.out, printed.err, *_logged(caplog))
+
+
+def test_the_check_command_speaks_a_name_that_is_itself_secret_shaped(
+    store: ConfigStore,
+    _no_ambient_client: None,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The other half of #382, stated rather than left implied.
+
+    A stored name that LOOKS like a credential and carries none is
+    spoken in full, because it is an identity a write accepted and the
+    repository's own vocabulary for that row. The strip takes what a
+    name HIDES, in the one form a name can hide anything (a URL's
+    userinfo), and it is the identity function on everything else; a
+    rule that suppressed a name for resembling a secret would leave an
+    operator unable to see which row is broken, which is the outcome
+    `spoken_identity` documents as the one to avoid.
+
+    So this is a claim about what the sentence SAYS, and it is the
+    counterweight to every case above: absence alone would be satisfied
+    by a refusal that named nothing at all.
+    """
+    _plant(store, "agent", (SECRET_SHAPED,), AgentConfig(prompt="hi"))
+
+    assert cli.main(["check"]) == 1
+
+    printed = capsys.readouterr()
+    assert f"set it to one of: {SECRET_SHAPED}" in printed.err
+    assert spoken_identity(SECRET_SHAPED) == SECRET_SHAPED
 
 
 # The two columns a location used to be built from before anything had
