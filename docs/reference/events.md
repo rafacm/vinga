@@ -705,6 +705,10 @@ store's, and what an operator measures with is how long the user spoke.
 
 #### Variant 1: `vinga_server.session` at INFO
 
+`provider` and `type` are atomic: a provider with an identity carries both,
+and one the registry never built carries neither. `host` is absent for an
+engine that runs in this process and `model` for a type that has none to name.
+
 ```text
 session %s: heard %.2f s of speech
 ```
@@ -725,6 +729,10 @@ session %s: heard %.2f s of speech
 | `asr_ms` | `INT` | no | no |  | What the transcription cost, measured where it was run. An interrupting turn carries the latency the barge-in gate measured for its own confirmation, since that is the transcription this turn is answering. |
 | `language` | `ID` | no | no | the `language` syntax | Only engines that detected carry this. |
 | `language_confidence` | `FLOAT` | no | no |  |  |
+| `provider` | `IDENTIFIER` | no | no |  |  |
+| `type` | `IDENTIFIER` | no | no |  |  |
+| `host` | `IDENTIFIER` | no | no |  |  |
+| `model` | `IDENTIFIER` | no | no |  | Present where the configured entry names one. The GenAI conventions' `gen_ai.request.model`. |
 
 ### `nothing_heard`
 
@@ -790,6 +798,10 @@ includes playback backpressure.
 
 #### Variant 1: `vinga_server.session` at DEBUG
 
+`provider` and `type` are atomic: a provider with an identity carries both,
+and one the registry never built carries neither. `host` is absent for an
+engine that runs in this process and `model` for a type that has none to name.
+
 ```text
 session %s: sentence %d synthesized in %d ms
 ```
@@ -810,6 +822,10 @@ session %s: sentence %d synthesized in %d ms
 | `index` | `COUNT` | yes | no |  | Which synthesis of this reply this was, counted from zero in the order the requests were made rather than in the order they answered. |
 | `stream_ms` | `INT` | yes | no |  | The whole stream's lifetime, request to last chunk. It INCLUDES playback backpressure: the buffer holds one chunk, so a paced consumer is what decides when the provider is asked for the next one, and pure synthesis time is unobservable for a streaming voice. |
 | `first_chunk_ms` | `INT` | no | no |  | The provider's latency to its first audio chunk, measured producer-side: the first chunk always finds buffer room, so this one number is backpressure-free. Absent where the stream produced no audio at all. |
+| `provider` | `IDENTIFIER` | no | no |  |  |
+| `type` | `IDENTIFIER` | no | no |  |  |
+| `host` | `IDENTIFIER` | no | no |  |  |
+| `model` | `IDENTIFIER` | no | no |  | Present where the configured entry names one. The GenAI conventions' `gen_ai.request.model`. |
 
 ### `replied`
 
