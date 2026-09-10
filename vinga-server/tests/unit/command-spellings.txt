@@ -243,7 +243,7 @@ docs/architecture/observability-surfaces.md:35  respell  vinga conversation dele
 docs/architecture/observability-surfaces.md:37  respell  vinga memory list
 docs/architecture/observability-surfaces.md:37  respell  vinga memory set
 docs/architecture/observability-surfaces.md:37  respell  vinga memory delete
-docs/concepts.md:316  respell  vinga conversation list
+docs/concepts.md:319  respell  vinga conversation list
 docs/deployment.md:567  respell  vinga info
 docs/deployment.md:569  respell  vinga events
 docs/devices/README.md:120  respell  vinga info
