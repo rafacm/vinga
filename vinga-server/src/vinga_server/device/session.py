@@ -109,6 +109,7 @@ from vinga_server.generation import Generation, Generations
 from vinga_server.protocol import framing, messages
 from vinga_server.protocol import mcp as mcp_protocol
 from vinga_server.providers.base import ToolDef
+from vinga_server.telemetry import Telemetry
 from vinga_server.tools.device import DeviceToolClient
 
 if TYPE_CHECKING:  # the registry names this class the same way
@@ -175,6 +176,7 @@ class DeviceSession:
         conversations: ConversationStore | None = None,
         sessions: "SessionRegistry | None" = None,
         live: LiveEvents | None = None,
+        telemetry: "Telemetry | None" = None,
     ) -> None:
         self.websocket = websocket
         # The world this server is serving, asked rather than kept: a
@@ -234,12 +236,21 @@ class DeviceSession:
         # rejection at capacity. The conversation store's tap attaches
         # after the hello, which is where it has a manifest to open a
         # record from, and every one of those refusals happens before
-        # it. `detach_live` below is what takes it off again, in an
+        # it. `detach_observers` below is what takes it off again, in an
         # outer `finally` over the whole of `run` and on the one branch
         # in `ws.py` where a session that was built never runs.
         self._live = live
         if live is not None:
             self._events.attach(live)
+        # And the OTLP exporter, when a deployment asked for one (#66),
+        # attached at the same point and for the same reason: what an
+        # exporter is for is the whole session, the refusals at its
+        # front included. It is asked for a tap of its own rather than
+        # handed this session, because what it needs is the emissions
+        # and nothing else about the connection.
+        self._telemetry = None if telemetry is None else telemetry.session_tap()
+        if self._telemetry is not None:
+            self._events.attach(self._telemetry)
         # The conversation behind this connection, built once the device
         # has proved which agents it may talk to. Until then there is
         # nothing to build one for: the rejections in `run` happen
@@ -342,30 +353,37 @@ class DeviceSession:
         """Serve this connection, and stop being watched when it ends.
 
         The outer `finally` is the whole of this wrapper, and it is
-        outside `_converse` rather than inside it because the live tap
-        was attached at construction: it has to come off however the
-        connection ended, including the rejections that return before
-        the guard inside, and including a cancellation on the way out.
-        The tap is a consumer of this session's events and holding it
-        after the session would keep an object alive for a conversation
-        that is over.
+        outside `_converse` rather than inside it because both observing
+        taps were attached at construction: they have to come off
+        however the connection ended, including the rejections that
+        return before the guard inside, and including a cancellation on
+        the way out. Each is a consumer of this session's events, and
+        holding one after the session would keep an object alive for a
+        conversation that is over.
         """
         try:
             await self._converse()
         finally:
-            self.detach_live()
+            self.detach_observers()
 
-    def detach_live(self) -> None:
-        """Stop feeding the live stream from this session.
+    def detach_observers(self) -> None:
+        """Stop feeding whatever is watching this session: the live
+        stream, and the trace exporter where there is one.
 
         Public because `ws.py` needs it: a session rejected at capacity
         is constructed and never run, so the `finally` above never fires
-        for it, and the tap it attached at construction would outlive
+        for it, and the taps it attached at construction would outlive
         the object. Detaching twice is not an error, for the reason
         `SessionEvents.detach` gives.
+
+        This is a detach and not a shutdown. The exporter outlives every
+        session it ever watched, and closing it here would mean a
+        conversation ending could stop a server exporting; that decision
+        belongs to the lifespan, which is where it is made.
         """
-        if self._live is not None:
-            self._events.detach(self._live)
+        for tap in (self._live, self._telemetry):
+            if tap is not None:
+                self._events.detach(tap)
 
     async def _converse(self) -> None:
         device_id = self.websocket.headers.get("device-id", "").strip()
