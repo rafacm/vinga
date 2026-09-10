@@ -174,9 +174,12 @@ the exporter and every other consumer read the same facts:
   reply, with `duration_s` and `asr_ms` and no text field at all,
   by type. This is the issue's motivating Gap C (a 0.9 s utterance
   transcribed to nothing) becoming a first-class event; ASR failure
-  keeps `provider_failed` as its outcome. Every `turn_started` is
-  followed by exactly one of the three; a gate-rejected candidate
-  has no `turn_started` and needs none.
+  keeps `provider_failed` as its outcome, and a transcription cut
+  short by a mid-ASR merge says so with `transcription_abandoned`
+  (the PR review round's finding 1: a cancelled call is none of the
+  other three, and calling it a provider failure would lie). Every
+  `turn_started` is followed by exactly one of the four; a
+  gate-rejected candidate has no `turn_started` and needs none.
 - **`sentence_synthesized`**, one per reply sentence, emitted when a
   sentence's synthesis stream ends, with honest semantics for a
   streamed, backpressured producer: `index`, `first_chunk_ms` (the
