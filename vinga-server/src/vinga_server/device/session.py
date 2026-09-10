@@ -371,6 +371,12 @@ class DeviceSession:
         client_id = self.websocket.headers.get("client-id", "").strip()
         await self.websocket.accept()
         self._opened_at = asyncio.get_running_loop().time()
+        # The same origin, handed to the emitter, so the seconds the
+        # dropped-frame aggregate counts into are the seconds the
+        # capture's audio timeline is measured in. One reading rather
+        # than two: two would put a frame dropped on a boundary in
+        # different seconds on the two surfaces.
+        self._events.opened_at = self._opened_at
 
         try:
             mac = self._mac = normalize_mac(device_id)
@@ -553,6 +559,11 @@ class DeviceSession:
             if self.runtime is not None:
                 await self._cleanly("the conversation", self.runtime.close())
             await self._cleanly("device tool discovery", self._stop_device_discovery())
+            # Before `session_closed` and while the capture's tap is
+            # still attached, so the partial second this session ended
+            # inside is on every surface that was reading the whole
+            # ones.
+            self._events.flush_dropped()
             self._events.emit(
                 lambda: SessionClosed(
                     duration_s=Real(self._open_duration_s()),

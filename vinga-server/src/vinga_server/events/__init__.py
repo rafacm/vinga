@@ -45,9 +45,14 @@ Three invariants shape the dispatch, and none of them is incidental:
   retained log is not reachable from code this module does not own.
 
 The tap contract is events only. `SessionEvents.vad()` and `.dropped()`
-stay capture-specific side channels: they feed the capture's VAD and drop
-tracks, which are sampled per frame and which no other consumer has a
-meaning for.
+are per-frame entry points and stay outside it: both are sampled at the
+mic's own rate, and a record per frame would swamp every surface that
+reads one. `vad()` feeds the capture's own track and stops there, since
+no other consumer has a meaning for it. `dropped()` does not stop there
+any more: the per-second total it accumulates leaves as a
+`frames_dropped` emission through the ordinary seam, so the capture's
+decision track and every other tap read one declaration instead of each
+doing the arithmetic.
 
 Two scopes, and the difference between them is a clock. A session event
 carries the session's identity and is stamped with the session loop's
@@ -84,8 +89,15 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
-from vinga_server.events.catalog import Variant, declaration_of
-from vinga_server.events.values import DeviceId, EventValue, SessionId
+from vinga_server.events.catalog import FramesDropped, Variant, declaration_of
+from vinga_server.events.values import (
+    DeviceId,
+    DroppedFrames,
+    DropReason,
+    EventValue,
+    SessionId,
+    Whole,
+)
 
 # The session log channel, by name rather than by `__name__`.
 #
@@ -129,7 +141,7 @@ class EventTap(Protocol):
 
 
 class SessionRecording(Protocol):
-    """The three methods a session capture answers, as this module sees
+    """The two methods a session capture answers, as this module sees
     them.
 
     Described here rather than imported from `capture.py`, and the
@@ -148,8 +160,6 @@ class SessionRecording(Protocol):
     def vad(
         self, speech_ms: float, listening: bool, replying: bool, now: float
     ) -> None: ...
-
-    def dropped(self, reason: str, now: float) -> None: ...
 
 
 class LogTap:
@@ -517,10 +527,23 @@ class SessionEvents:
         # stamps an event is visible at construction and swappable in a
         # test.
         self._clock = clock
+        # When this session opened, on the same clock, written by the
+        # edge as soon as it is inside the loop. It is what the dropped
+        # frames below are counted into seconds from, so their numbering
+        # is the one the capture's own timeline uses. None until then,
+        # and the first reading stands in: an emitter built outside a
+        # session (the conformance tests build one) has no open to
+        # count from and nothing to be misaligned with.
+        self.opened_at: float | None = None
         self._taps: list[EventTap] = []
         self._log = LogTap(logger)
         self._capture: SessionRecording | None = None
         self._capture_tap: CaptureTap | None = None
+        # The current second's dropped mic frames, by reason, and which
+        # second that is. Bounded by construction: one entry per member
+        # of the closed set, replaced whenever the second rolls over.
+        self._dropped: dict[str, int] = {}
+        self._dropped_second = -1
 
     # --- the consumers ------------------------------------------------
 
@@ -540,15 +563,15 @@ class SessionEvents:
 
     def attach_capture(self, capture: SessionRecording) -> None:
         """Begin recording the decision track. The capture keeps its own
-        pair of methods rather than being attached as a bare tap,
-        because `vad` and `dropped` below need the capture itself.
+        method rather than being attached as a bare tap, because `vad`
+        below needs the capture itself.
 
         A second capture replaces the first rather than joining it. One
         session records once, so two attached captures can only mean a
         caller that attached twice; leaving the first adapter in the tap
         list would keep writing to a recording nobody is going to close,
-        while `vad` and `dropped` went to the second one, which is a
-        recording split down the middle. Replacing rather than refusing,
+        while `vad` went to the second one, which is a recording split
+        down the middle. Replacing rather than refusing,
         because there is a legitimate second attach in reach (a capture
         that rolls over at its size limit) and refusing would make that
         a caller's problem to sequence.
@@ -586,7 +609,7 @@ class SessionEvents:
     # not is #120's turn record, whose offset has to equal its `heard`
     # event's exactly rather than to within however long the emit took.
 
-    def emit(self, build: Callable[[], Variant]) -> float:
+    def emit(self, build: Callable[[], Variant], at: float | None = None) -> float:
         """Say one typed conversation event, and answer the reading it
         was stamped with.
 
@@ -607,8 +630,17 @@ class SessionEvents:
         still answers the instant it was made at: the one caller that
         reads the answer has a record to place whether or not the event
         it was placed beside survived.
+
+        `at` is for the two events whose instant is not the instant they
+        are said at, and it is a reading of THIS clock rather than a
+        free number: `turn_started` is stamped with the moment the user
+        stopped speaking, which a confirmed barge-in decides several
+        hundred milliseconds before the reply it starts, and
+        `speaking_finished` with the moment the last frame went out,
+        which the edge notices at the end of the reply. Everything else
+        leaves it alone and is stamped where it is emitted.
         """
-        at = self._clock()
+        at = self._clock() if at is None else at
         checked = _built(logger, SESSION_LOGGER, self._identities(), build)
         if checked is None:
             # A refusal was reported, and there is nothing to dispatch
@@ -655,13 +687,69 @@ class SessionEvents:
         self._capture.vad(speech_ms, listening, replying, self._clock())
 
     def dropped(self, reason: str) -> None:
-        """One mic frame the session did not use, and why. Part of the
-        evidence the capture exists for: the frames dropped before the
-        decode are precisely the ones that explain a misfire. Outside
-        the tap contract for the reason `vad` gives."""
-        if self._capture is None:
+        """One mic frame the session did not use, and why.
+
+        Per frame in, per second out. This entry point stays outside the
+        tap contract for the reason `vad` gives, and it is not a
+        consumer-facing event: the frames dropped before the decode are
+        sampled at the mic's own rate, and a record per frame would
+        swamp every surface that reads them. What crosses to the
+        consumers is the second's total, as one `frames_dropped`
+        emission through the ordinary seam, so the capture's decision
+        track and any other tap read one declaration rather than each
+        doing the arithmetic.
+
+        Counted whether or not anything is recording. It used to leave
+        here at the first line when no capture was attached, which made
+        the drops invisible to a deployment that records nothing, and a
+        misfire on such a deployment is exactly the one nobody can
+        explain afterwards.
+        """
+        now = self._clock()
+        second = self._second_of(now)
+        if second != self._dropped_second:
+            self.flush_dropped()
+            self._dropped_second = second
+        self._dropped[reason] = self._dropped.get(reason, 0) + 1
+
+    def flush_dropped(self) -> None:
+        """Say what the second being counted lost, and start a new one.
+
+        Called on a rollover, and once more by the session's close path
+        BEFORE `session_closed`, so the partial second a session ends
+        inside is on the record and lands while the capture's tap is
+        still attached. Nothing to say is not an event: a second with no
+        drops in it emits none.
+        """
+        if not self._dropped:
             return
-        self._capture.dropped(reason, self._clock())
+        counted = self._dropped
+        self._dropped = {}
+        second = self._dropped_second
+        self.emit(
+            lambda: FramesDropped(
+                second=Whole(second),
+                # The lookup is inside the thunk, where the emitter's
+                # guard is: a string outside the set raises the
+                # enumeration's own error, which names the value, and
+                # the guard is what keeps that out of the report.
+                reasons=DroppedFrames(
+                    {str(DropReason(one)): held for one, held in counted.items()}
+                ),
+            )
+        )
+
+    def _second_of(self, now: float) -> int:
+        """Which second of this session one reading falls in.
+
+        From the open the edge wrote, so the numbering is the one the
+        capture's audio timeline uses. Zero before an open is known,
+        which is an emitter built outside a session: there is nothing
+        for its numbering to be misaligned with.
+        """
+        if self.opened_at is None:
+            return 0
+        return int(now - self.opened_at)
 
 
 class ServerEvents:

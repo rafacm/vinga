@@ -21,9 +21,11 @@ tests be written against reality. Three files per session:
   audible in any audio editor.
 - `<session>.jsonl`, the decision track: every structured event the
   session already emits, plus a `t_ms` offset that indexes into the WAV,
-  plus two things the logs do not carry (frames dropped before decode,
-  and the endpointer's opinion sampled continuously rather than only
-  where it decided something).
+  plus the one thing the logs do not carry: the endpointer's opinion
+  sampled continuously rather than only where it decided something. The
+  frames dropped before the decode used to be the second such thing and
+  are an ordinary event now (`frames_dropped`), counted by the emitter
+  and read here through the tap like everything else.
 - `<session>.json`, the manifest: what the capture was made against,
   because a capture outlives the code that made it.
 
@@ -39,7 +41,6 @@ import contextlib
 import json
 import shutil
 import struct
-import time
 from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
@@ -198,11 +199,6 @@ class SessionCapture:
         self._start_frame = 0
         self._data_bytes = 0
         self._stopped = False
-        # Dropped frames are counted per second rather than logged per
-        # frame: a misfire is explained by a rate, and per-frame records
-        # would swamp the decision track.
-        self._dropped: dict[str, int] = {}
-        self._dropped_second = -1
         # The furthest an event has landed, so the audio can be padded
         # out to cover it rather than leaving offsets past the end.
         # Starts below zero to mean "no events yet", so that a capture
@@ -376,32 +372,6 @@ class SessionCapture:
             now,
         )
 
-    def dropped(self, reason: str, now: float) -> None:
-        """A frame discarded before it could be decoded. Aggregated per
-        second: the guards drop whole seconds of audio at a time, and
-        what explains a misfire is the rate, not the individual frame."""
-        if self._stopped:
-            return
-        second = int(self._at(now))
-        if second != self._dropped_second:
-            self._emit_dropped(now)
-            self._dropped_second = second
-        self._dropped[reason] = self._dropped.get(reason, 0) + 1
-
-    def _emit_dropped(self, now: float) -> None:
-        if not self._dropped:
-            return
-        self._write_event(
-            {
-                "event": "frames_dropped",
-                "session": self._session_id,
-                "second": self._dropped_second,
-                "reasons": dict(self._dropped),
-            },
-            now,
-        )
-        self._dropped = {}
-
     def close(self) -> None:
         """Finish the files. Patching the WAV header is what makes a
         capture that ended cleanly self-describing; one that did not is
@@ -414,9 +384,6 @@ class SessionCapture:
                 self._on_close = None
             return
         self._closing = True
-        now = time.monotonic()
-        with contextlib.suppress(Exception):
-            self._emit_dropped(now)
         wav, events = self._wav, self._events
         self._wav = self._events = None
         if wav is not None:
