@@ -133,3 +133,103 @@ def test_reset_forgets_speech_and_resets_the_model_state() -> None:
     endpointer.reset()
     assert detector.resets == 1
     assert not any(feed_windows(endpointer, 40))
+
+
+# --- forgetting the audio without forgetting the utterance (#456) ------
+#
+# `reset` bundles two things a session sometimes wants separately: the
+# model's recurrent state, which carries the assistant's own playback
+# echo into the pause a user answers in, and the endpointer's own
+# accounting, which belongs to whatever the user is in the middle of
+# saying. `forget_audio` is the first half alone.
+
+# The trailing-silence budget, in whole windows: 700 ms of silence after
+# speech ends an utterance, and 700 / 32 is a little under 22, so 22
+# sub-threshold windows in a row is what it takes.
+BUDGET_WINDOWS = 22
+
+# What a mid-speech reset actually costs, measured by replaying an
+# utterance the server heard through the committed model and resetting
+# the detector in the middle of it (#70): one 32 ms window under the
+# threshold, then back over it and climbing.
+MEASURED_REWARM_WINDOWS = 1
+
+
+class RewarmingDetector:
+    """A model that needs a run of windows to find speech again after
+    its state is cleared, which is the one cost a recurrent detector's
+    reset has. Speech before the reset, `windows` of sub-threshold
+    scores after it, then speech again."""
+
+    def __init__(self, windows: int) -> None:
+        self._windows = windows
+        self._cold = 0
+        self.resets = 0
+
+    def __call__(self, window: bytes) -> float:
+        if self._cold > 0:
+            self._cold -= 1
+            return 0.0
+        return 0.9
+
+    def reset(self) -> None:
+        self.resets += 1
+        self._cold = self._windows
+
+    def chunk_bytes(self) -> int:
+        return WINDOW_BYTES
+
+    def chunk_samples(self) -> int:
+        return WINDOW_BYTES // 2
+
+
+def test_forgetting_the_audio_clears_the_model_and_keeps_the_accounting() -> None:
+    """The split the fix rests on: the detector goes back to knowing
+    nothing, and every number the endpointer keeps stays where it was.
+
+    An utterance in progress therefore survives a reply ending under it
+    (#80): the speech already heard still counts, the speech-start
+    offset still points at where it began, and the trailing-silence
+    window picks up where it stood rather than from zero.
+    """
+    detector = ScriptedDetector([0.9] * 10 + [0.0] * 100)
+    endpointer = scripted_endpointer([], detector)
+    feed_windows(endpointer, 10)
+
+    endpointer.forget_audio()
+
+    assert detector.resets == 1
+    assert endpointer.speech_ms() == 10 * WINDOW_MS
+    assert endpointer.speech_start() == 0
+    # And the utterance still ends on its own trailing silence, which is
+    # what a `reset()` here would have made unreachable: with no speech
+    # remembered, silence counts toward nothing at all.
+    assert any(feed_windows(endpointer, BUDGET_WINDOWS))
+
+
+def test_a_mid_speech_forget_costs_far_less_than_the_trailing_silence_budget() -> None:
+    """The margin, rather than a probability.
+
+    A recurrent model scores low for a moment after its state is
+    cleared, and long enough of that would look like the trailing
+    silence that ends an utterance. The claim is not that the re-warm
+    is free; it is that it is roughly one window against a budget of
+    roughly twenty-two, so a reply ending in the middle of a sentence
+    cannot endpoint it.
+    """
+    for rewarm in (MEASURED_REWARM_WINDOWS, MEASURED_REWARM_WINDOWS * 10):
+        detector = RewarmingDetector(rewarm)
+        endpointer = scripted_endpointer([], detector)
+        feed_windows(endpointer, 5)
+        endpointer.forget_audio()
+        assert not any(feed_windows(endpointer, rewarm + 5)), (
+            f"a re-warm of {rewarm} windows ended the utterance"
+        )
+
+    # And what it would take to break that: a re-warm as long as the
+    # whole budget, which is the distance the measurement leaves.
+    detector = RewarmingDetector(BUDGET_WINDOWS)
+    endpointer = scripted_endpointer([], detector)
+    feed_windows(endpointer, 5)
+    endpointer.forget_audio()
+    assert any(feed_windows(endpointer, BUDGET_WINDOWS))

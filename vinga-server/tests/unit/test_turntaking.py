@@ -439,3 +439,46 @@ async def test_a_session_with_no_endpointer_yet_buffers_nothing() -> None:
     await taking.manual_stop()
 
     assert reply.started == []
+
+
+# --- what the end of a reply does to the floor (#456) ------------------
+
+
+async def test_the_replys_audio_is_forgotten_and_the_user_is_not() -> None:
+    """The boundary this shares with #80.
+
+    A reply ending tells the endpointer to stop carrying the playback
+    echo it was fed, and tells it nothing else. A user who was already
+    mid-sentence at that instant still has every byte of what they said
+    waiting to be answered, which is exactly what `restart()` here would
+    have thrown away.
+    """
+    reply = FakeReply()
+    taking, _ = turn_taking(reply)
+    mid_sentence = b"\x01\x02" * 800
+    await taking.feed(mid_sentence)
+
+    taking.forget_reply_audio()
+
+    # Read before the finish, which starts a fresh utterance and does
+    # reset the endpointer: what is on trial is what the reply ending
+    # asked for, not what came after it.
+    endpointer = cast(ScriptedEndpointer, taking.endpointer)
+    asked = (endpointer.forgets, endpointer.resets)
+
+    await taking.finish_utterance()
+    assert [one.pcm for one in reply.started] == [mid_sentence], (
+        "the sentence the user was in the middle of was discarded"
+    )
+    assert asked == (1, 0)
+
+
+async def test_a_session_with_no_endpointer_yet_has_nothing_to_forget() -> None:
+    """The same guard `restart` carries, for the same reason: a reply
+    can end on a runtime whose agent was never activated (a failure
+    before the first activation), and there is nothing there to tell."""
+    reply = FakeReply()
+    taking, _ = turn_taking(reply)
+    taking.endpointer = None
+
+    taking.forget_reply_audio()
