@@ -2830,7 +2830,7 @@ def _session_block(session: Mapping[str, Any]) -> str:
         f"  turns: {_cell(session['turns'])}",
         f"  events: {_cell(session['events'])}",
         f"  dropped: {_cell(session['dropped'])}",
-        f"  metrics: {_yes(session['metrics'])}",
+        f"  telemetry: {_yes(session['telemetry'])}",
         f"  text: {_yes(session['text'])}",
         f"  server_version: {_cell(session['server_version'])}",
         f"  revision: {_cell(session['revision'])}",

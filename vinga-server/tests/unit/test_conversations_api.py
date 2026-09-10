@@ -231,7 +231,7 @@ def test_a_real_conversation_reads_back_over_the_same_server(
     assert detail["client"] == DEVICE_UUID
     assert detail["agents"] == ["assistant"]
     assert detail["providers"]["llm"]["type"] == "mock"
-    assert (detail["metrics"], detail["text"]) == (True, True)
+    assert (detail["telemetry"], detail["text"]) == (True, True)
     assert detail["dropped"] == 0
     # The decision track is counted here and served nowhere: the
     # database is that surface.
@@ -403,9 +403,11 @@ def test_the_detail_answers_every_column_the_row_has(
 
     detail = _get(client, "/sessions/session-00")
 
+    # `telemetry` for `metrics`, because the API speaks the switch's
+    # name while the column keeps the one it was born under (#437).
     assert set(detail) - {"turns", "events"} == {
         column.name for column in schema.sessions.c
-    }
+    } - {"metrics"} | {"telemetry"}
     assert detail["turns"] == 3
     assert detail["events"] == 1
     assert detail["providers"] == {"llm": {"name": "claude", "type": "anthropic"}}
@@ -528,7 +530,7 @@ def test_text_off_serves_the_content_columns_as_nulls(
     detail = _get(client, "/sessions/session-00")
     (turn,) = _get(client, "/sessions/session-00/turns")["items"]
 
-    assert (detail["metrics"], detail["text"]) == (True, False)
+    assert (detail["telemetry"], detail["text"]) == (True, False)
     assert (turn["heard"], turn["reply"]) == (None, None)
     # The numbers are not content and survive.
     assert turn["llm_ms"] == 900
@@ -542,15 +544,15 @@ def test_text_off_serves_the_content_columns_as_nulls(
     assert SENTINEL not in json.dumps([detail, turn])
 
 
-def test_metrics_off_serves_the_numbers_as_nulls_and_no_events(
+def test_telemetry_off_serves_the_numbers_as_nulls_and_no_events(
     client: TestClient,
 ) -> None:
-    recorded(None, sessions=1, metrics=False)
+    recorded(None, sessions=1, telemetry=False)
 
     detail = _get(client, "/sessions/session-00")
     (turn,) = _get(client, "/sessions/session-00/turns")["items"]
 
-    assert (detail["metrics"], detail["text"]) == (False, True)
+    assert (detail["telemetry"], detail["text"]) == (False, True)
     assert detail["duration_s"] is None
     assert detail["events"] == 0
     assert detail["turns"] == 1

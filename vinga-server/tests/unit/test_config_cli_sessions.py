@@ -221,7 +221,7 @@ def test_show_prints_the_detail_block(run, capsys) -> None:
     assert printed.startswith("session: alpha\n")
     assert "  agent: sam\n" in printed
     assert "  turns: 1\n" in printed
-    assert "  metrics: yes\n" in printed
+    assert "  telemetry: yes\n" in printed
     assert "  close_reason: client\n" in printed
 
 

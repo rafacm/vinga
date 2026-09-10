@@ -653,9 +653,10 @@ class ConversationsConfig(BaseModel):
     secrets next door.
 
     The two storage switches under the flag are independent, and every
-    combination is a supported configuration: metrics without text is the
-    stricter setting, and text without metrics keeps the conversation
-    record without the behavioural telemetry. They are deployment-wide,
+    combination is a supported configuration: telemetry without text is
+    the stricter setting, and text without telemetry keeps the
+    conversation record without the measured numbers and events. They
+    are deployment-wide,
     which is the only policy layer this release has; per-user and
     per-agent controls are a stricter filter above this one when they
     arrive, never a replacement for it (#120).
@@ -681,7 +682,7 @@ class ConversationsConfig(BaseModel):
         ),
     )
 
-    metrics: bool = Field(
+    telemetry: bool = Field(
         default=True,
         description=(
             "Store the structured events and every measured number: durations, "

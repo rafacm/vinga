@@ -86,7 +86,7 @@ class TurnLeg:
 
     Its own shape rather than a bare dict because the writer nulls its
     halves separately: the text under text-off, the token counts under
-    metrics-off. A turn's totals blend rounds and, after a handover,
+    telemetry-off. A turn's totals blend rounds and, after a handover,
     agents that may run different models, so the per-leg counts are what
     keeps the attribution honest without a join.
     """

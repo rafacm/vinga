@@ -170,7 +170,7 @@ def test_the_conversation_store_defaults_are_the_stated_ones() -> None:
         {"server": {"conversations": {"enabled": True}}}
     ).server.conversations
     assert conversations is not None
-    assert (conversations.metrics, conversations.text) == (True, True)
+    assert (conversations.telemetry, conversations.text) == (True, True)
     assert conversations.retention_days == RETENTION_DAYS_DEFAULT == 90
 
 
@@ -193,6 +193,17 @@ def test_an_unknown_conversations_key_is_refused() -> None:
     # that silently defaulted on would be a privacy setting nobody set.
     with pytest.raises(ConfigError):
         load_config_from_data({"server": {"conversations": {"txt": False}}})
+
+
+def test_the_old_metrics_key_is_refused_at_boot() -> None:
+    # `metrics` was the telemetry switch's name before #437. No alias
+    # and no shim, per the pre-release stance: a config still saying it
+    # fails at boot through the same unknown-key rule as any misspelling,
+    # which is what tells its operator the switch moved.
+    with pytest.raises(ConfigError):
+        load_config_from_data(
+            {"server": {"conversations": {"enabled": True, "metrics": False}}}
+        )
 
 
 def test_the_example_config_leaves_the_conversation_store_off() -> None:

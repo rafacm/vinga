@@ -186,7 +186,7 @@ sessions = Table(
         nullable=True,
         comment=(
             "How long the session lasted, in seconds. A measured number: null "
-            "under metrics-off."
+            "under telemetry-off."
         ),
     ),
     Column(
@@ -225,8 +225,8 @@ sessions = Table(
         Boolean,
         nullable=False,
         comment=(
-            "Whether metrics storage was on for this session, so a null number "
-            "is distinguishable from a number that was never stored."
+            "Whether telemetry storage was on for this session, so a null "
+            "number is distinguishable from a number that was never stored."
         ),
     ),
     Column(
@@ -247,7 +247,7 @@ sessions = Table(
             "Records this session lost: events refused at the in-flight bound, "
             "and anything a failed transaction rolled back. Written at close, "
             "so the store records its own incompleteness the way the capture "
-            "manifest records `complete`. Zero under metrics-off."
+            "manifest records `complete`. Zero under telemetry-off."
         ),
     ),
     Index("ix_sessions_device", "device"),
@@ -329,8 +329,8 @@ conversations = Table(
         comment=(
             "Whether a write this thread needed was lost, so a resume can say "
             "the record has gaps. Product state rather than telemetry, and "
-            "therefore deliberately outside the metrics switch: "
-            "`sessions.dropped` is zeroed under metrics-off and this is not. "
+            "therefore deliberately outside the telemetry switch: "
+            "`sessions.dropped` is zeroed under telemetry-off and this is not. "
             "Written by the durable path, which arrives with the writer's "
             "acknowledgements; false in every thread until then."
         ),
@@ -422,7 +422,7 @@ turns = Table(
         "heard_duration_s",
         Float,
         nullable=True,
-        comment="How long the utterance lasted, in seconds. Null under metrics-off.",
+        comment="How long the utterance lasted, in seconds. Null under telemetry-off.",
     ),
     Column(
         "language",
@@ -437,7 +437,7 @@ turns = Table(
         "language_confidence",
         Float,
         nullable=True,
-        comment="How sure the recognizer was of that language. Null under metrics-off.",
+        comment="How sure the recognizer was of that language. Null under telemetry-off.",
     ),
     Column(
         "reply",
@@ -456,7 +456,7 @@ turns = Table(
             "One entry per agent that took part in this turn, `{agent, text, "
             "input_tokens, output_tokens}`, present only when a handover split "
             "the reply. The text half is null under text-off and the token "
-            "halves under metrics-off, because a turn's totals blend agents "
+            "halves under telemetry-off, because a turn's totals blend agents "
             "that may use different models."
         ),
     ),
@@ -466,20 +466,23 @@ turns = Table(
         nullable=True,
         comment=(
             "Transcription elapsed, in milliseconds. Null where no elapsed was "
-            "measured this turn, and under metrics-off."
+            "measured this turn, and under telemetry-off."
         ),
     ),
     Column(
         "first_token_ms",
         Integer,
         nullable=True,
-        comment="Request to first token of the reply, in milliseconds. Null under metrics-off.",
+        comment="Request to first token of the reply, in milliseconds. Null under telemetry-off.",
     ),
     Column(
         "llm_ms",
         Integer,
         nullable=True,
-        comment="The reply's LLM round durations summed, in milliseconds. Null under metrics-off.",
+        comment=(
+            "The reply's LLM round durations summed, in milliseconds. Null "
+            "under telemetry-off."
+        ),
     ),
     Column(
         "tts_first_audio_ms",
@@ -489,14 +492,14 @@ turns = Table(
             "The reply's first synthesis request to its first audio bytes, in "
             "milliseconds, measured at the provider boundary and deliberately "
             "not at the device. Null when the reply spoke nothing, and under "
-            "metrics-off."
+            "telemetry-off."
         ),
     ),
     Column(
         "rounds",
         Integer,
         nullable=True,
-        comment="How many LLM rounds the reply took. Null under metrics-off.",
+        comment="How many LLM rounds the reply took. Null under telemetry-off.",
     ),
     Column(
         "input_tokens",
@@ -505,7 +508,7 @@ turns = Table(
         comment=(
             "Input tokens summed across the turn's rounds; OTel's "
             "`gen_ai.usage.input_tokens`. Null when the provider reported no "
-            "usage, and under metrics-off."
+            "usage, and under telemetry-off."
         ),
     ),
     Column(
@@ -515,7 +518,7 @@ turns = Table(
         comment=(
             "Output tokens summed across the turn's rounds; OTel's "
             "`gen_ai.usage.output_tokens`. Null when the provider reported no "
-            "usage, and under metrics-off."
+            "usage, and under telemetry-off."
         ),
     ),
     Column(
@@ -618,7 +621,7 @@ tool_invocations = Table(
         nullable=True,
         comment=(
             "How long the call took, in milliseconds. Null where nothing ran, "
-            "as for a refused or a successful handover, and under metrics-off."
+            "as for a refused or a successful handover, and under telemetry-off."
         ),
     ),
     CheckConstraint(

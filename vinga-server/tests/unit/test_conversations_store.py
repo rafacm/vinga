@@ -383,7 +383,7 @@ def test_the_writers_defaults_are_the_documented_ones(stores) -> None:
     assert store.retention_days == RETENTION_DAYS_DEFAULT == 90
     # Both storage switches default on under an enabled store, which is
     # what makes enabling it alone give the documented defaults.
-    assert (store.metrics, store.text) == (True, True)
+    assert (store.telemetry, store.text) == (True, True)
     # The timeout the connection really carries, rather than the
     # constant it was meant to be built from.
     # White-box: it rides on the connection the writer holds, and
@@ -568,17 +568,17 @@ def test_a_session_deleted_under_a_live_one_is_never_resurrected(
 # The two storage switches, at the row level
 
 
-@pytest.mark.parametrize("metrics", [True, False])
+@pytest.mark.parametrize("telemetry", [True, False])
 @pytest.mark.parametrize("text_storage", [True, False])
 def test_each_switch_combination_nulls_its_own_half(
-    stores, metrics: bool, text_storage: bool
+    stores, telemetry: bool, text_storage: bool
 ) -> None:
-    """Every combination is a supported configuration: metrics without
-    text is the stricter setting, text without metrics is the
+    """Every combination is a supported configuration: telemetry without
+    text is the stricter setting, text without telemetry is the
     transparency-first one, and the session row is the spine in all
     four. The pipeline always hands the full record; the nulling is the
     writer's, which is why it is asserted on the rows."""
-    store = stores(metrics=metrics, text=text_storage)
+    store = stores(telemetry=telemetry, text=text_storage)
     store.start()
     store.open_session("alpha", 100.0, MANIFEST)
     store.record_event("alpha", "heard", logging.INFO, {"duration_s": 1.0}, 101.0)
@@ -597,7 +597,7 @@ def test_each_switch_combination_nulls_its_own_half(
     # The spine, in every configuration: retention and every read key on it.
     assert session["started_at"] and session["closed_at"]
     assert session["close_reason"] == "limit"
-    assert (session["metrics"], session["text"]) == (int(metrics), int(text_storage))
+    assert (session["metrics"], session["text"]) == (int(telemetry), int(text_storage))
     # And the structural halves of a turn, which are neither content nor
     # telemetry.
     assert turn["t_ms"] == 1200
@@ -621,7 +621,7 @@ def test_each_switch_combination_nulls_its_own_half(
         assert invocation["result"] is None
         assert [leg["text"] for leg in legs] == [None, None]
 
-    if metrics:
+    if telemetry:
         assert session["duration_s"] == 30.0
         assert (turn["asr_ms"], turn["llm_ms"]) == (210, 900)
         assert (turn["input_tokens"], turn["output_tokens"]) == (512, 24)

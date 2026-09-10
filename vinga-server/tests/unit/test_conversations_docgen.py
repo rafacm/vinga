@@ -239,7 +239,9 @@ def test_the_reference_maps_the_gen_ai_vocabulary() -> None:
 
 def test_the_reference_explains_both_storage_switches() -> None:
     rendered = docgen.reference()
-    assert "`metrics`" in rendered
+    assert "`telemetry`" in rendered
     assert "`text`" in rendered
+    # The column kept the switch's original name (#437), and the
+    # reference says so rather than leaving the mismatch to the reader.
     assert "sessions.metrics" in rendered
     assert "voiceprint" in rendered

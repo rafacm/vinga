@@ -142,7 +142,7 @@ def reference() -> str:
         "",
         "| Switch | On | Off |",
         "| --- | --- | --- |",
-        "| `metrics` | every measured number, and one `events` row per structured "
+        "| `telemetry` | every measured number, and one `events` row per structured "
         "event | the numeric columns are null and no `events` rows are written |",
         "| `text` | conversation text, and tool names, arguments and results | those "
         "columns are null; the rows still land |",
@@ -160,7 +160,9 @@ def reference() -> str:
             "server decided, not a word anybody spoke. And "
             "`sessions.metrics` and `sessions.text` record which way the switches "
             "were set for that session, so a null column is distinguishable from a "
-            "column that was never stored."
+            "column that was never stored; the first keeps the column name the "
+            "telemetry switch originally had, because column names are a "
+            "compatibility surface and the switch's rename was not a schema change."
         ),
         "",
         *_paragraph(
