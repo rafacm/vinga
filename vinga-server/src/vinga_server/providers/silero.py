@@ -36,7 +36,7 @@ class SileroEndpointer:
         self.reset()
 
     def reset(self) -> None:
-        self._detector.reset()
+        self.forget_audio()
         self._pending = b""
         self._speech_heard = False
         self._silence_ms = 0.0
@@ -44,6 +44,26 @@ class SileroEndpointer:
         self._speech_ms = 0.0
         self._consumed_bytes = 0
         self._speech_start: int | None = None
+
+    def forget_audio(self) -> None:
+        """Drop the model's recurrent state, and nothing else.
+
+        Silero scores a window against what it heard in the windows
+        before it, which is what makes it good at speech and what makes
+        it carry the assistant's own playback echo into the pause after
+        a reply. `SileroVoiceActivityDetector.reset()` is exactly this
+        and no more: the model keeps no accounting of its own, so the
+        bookkeeping above is untouched and an utterance already in
+        progress keeps its speech-start offset and its trailing-silence
+        progress (#456).
+
+        The cost is a re-warm, and it is small: measured on the #70
+        capture, a reset in the middle of speech puts one 32 ms window
+        under the threshold before the score climbs back over it,
+        against a 700 ms trailing-silence budget of about twenty-one
+        such windows.
+        """
+        self._detector.reset()
 
     def feed(self, pcm: bytes) -> bool:
         self._pending += pcm

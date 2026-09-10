@@ -351,11 +351,32 @@ class Endpointer(Protocol):
     since the last reset, in milliseconds at the implementation's own
     window granularity. It exists for the same reason: only the
     endpointer can tell a sustained interjection from a noise blip, and
-    the session's barge-in gates need that distinction (#28)."""
+    the session's barge-in gates need that distinction (#28).
+
+    `reset` and `forget_audio` are two halves of what was once one
+    call, and the split is what lets a session ask for the second
+    without the first. `reset` starts a fresh utterance: every number
+    above goes back to where it began. `forget_audio` says only that
+    what was heard so far must stop colouring what is heard next, and
+    leaves all of that accounting exactly where it stands.
+
+    An implementation that scores each window from the window alone
+    carries nothing between them, so its `forget_audio` does nothing,
+    and that is a fact about what it holds rather than an omission. One
+    that does carry state (Silero is recurrent) clears it there,
+    because the loudest thing an endpointer ever hears is the
+    assistant's own playback: a detector still holding ten seconds of
+    it scores the user's answer to the question below the threshold
+    that would otherwise have heard it (#456). Not folded into `reset`,
+    because an utterance can be in progress when a reply ends, and the
+    speech-start offset and the trailing-silence progress belong to the
+    user rather than to the reply (#80)."""
 
     def feed(self, pcm: bytes) -> bool: ...
 
     def reset(self) -> None: ...
+
+    def forget_audio(self) -> None: ...
 
     def speech_start(self) -> int | None: ...
 
