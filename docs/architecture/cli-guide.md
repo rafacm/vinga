@@ -323,18 +323,43 @@ vinga import -f deployment.yaml
 vinga export > deployment.yaml
 vinga diff
 vinga apply
+vinga check
 vinga schema provider asr faster_whisper
 vinga ota-url
 ```
 
-Two groups, for two reasons. `info`, `import`, `export`, `diff` and
-`apply` act on the configuration as a whole: their subject is the
-deployment, and inventing a noun to put in front of them would be
-inventing a word (`deployment import`) that names the thing the program
-is already about. `schema`, `reference`, `openapi`,
+Two groups, for two reasons. `info`, `import`, `export`, `diff`,
+`apply` and `check` act on the configuration as a whole: their subject
+is the deployment, and inventing a noun to put in front of them would
+be inventing a word (`deployment import`) that names the thing the
+program is already about. `schema`, `reference`, `openapi`,
 `cli-reference` and `ota-url` render a document out of the models, the
 routes, the command tree or the file half, and reach no database, no
 key and no server at all; they have no stored subject to be a verb of.
+
+The split is by SUBJECT and not by what a command reaches, which
+`check` (#443) is what makes explicit. It is the first flat verb that
+reaches a database and an encryption key without reaching a server: it
+runs a boot's own read of the store and prints the refusal that boot
+would print, so an operator can learn where a refused `apply` is
+refusing. Every earlier member of the first group reaches a running
+server and every member of the second reaches nothing, so until now the
+two readings agreed and nothing had to choose between them.
+
+It stays flat because its subject is the deployment, which is the rule
+above. It composes the whole stored configuration and answers about the
+whole; there is no per-entity form of the question, since an entry that
+is valid by itself is exactly the case this exists for, and the rule a
+snapshot breaks is a rule about the set. `configuration check` would be
+the counterexample two sections up, a noun naming the thing the program
+is already about, and `store check` would name the storage rather than
+the subject.
+
+**Counterexample, constructed.** `vinga deployment check`, or a
+`--check` flag on `apply`. The first invents the word; the second makes
+a diagnosis a mode of the install it diagnoses, so the one command an
+operator runs when the install refuses would be the refused command
+again with a flag.
 
 `info` (#341) is in the first group and is the clearest case of what
 puts a word there. What it answers is which deployment this is: the
