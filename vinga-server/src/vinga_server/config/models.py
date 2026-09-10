@@ -2007,7 +2007,7 @@ def check_no_inline_secrets(name: str, value: object, *, declared: bool = False)
     """A secret-shaped key holds no value a credential could be written
     as, at any depth inside a provider's options.
 
-    Two halves, and the second is `could_be_inline_secret` below: the
+    Two halves, and the second is `could_be_inline_secret` above: the
     name says the key might carry one, the value says whether what it
     carries could be one. A number under such a key is a request
     parameter whose name happens to contain one of six words, and
