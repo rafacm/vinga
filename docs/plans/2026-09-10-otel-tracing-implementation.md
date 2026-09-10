@@ -914,6 +914,69 @@ since the abandoned transcription became a stage span.
 `tests/integration/test_telemetry_export.py` is the stub receiver, and
 `test_telemetry_hardening.py` gained the blackholed endpoint.
 
+### Rebasing onto M2's review chain
+
+M2 merged with a nine-finding review chain on top of the branch point
+this milestone was cut from, and four of those findings changed the
+module this milestone extends. Each is recorded with what the stage
+spans had to do about it, because two of them changed how a span gets
+its attributes at all.
+
+1. **The fold exports only what the catalog declares.** M2 gained
+   `SHAPES[Kind]`, an `APPROVED` table derived from the declarations,
+   and `_as_attribute`, so nothing permissive remains: a field the
+   catalog does not declare for an event is not exported, whatever put
+   it in the payload, and a mapping becomes deterministic JSON rather
+   than being dropped by the SDK without a word. The four stage-span
+   tables go THROUGH that gate rather than around it: each is read by
+   `_attributes`, which is the same function the span events use, so a
+   name in `ASR_ATTRIBUTES` or `LLM_ATTRIBUTES` is a request to export a
+   declared field under a vinga name and nothing more. One attribute on
+   one span is not a payload field at all and says so where it is set:
+   `vinga.asr.outcome` is the event's own NAME, one of four strings this
+   module writes down itself, so there is nothing for a shape gate to
+   check.
+
+2. **The provider context has one home, and the LLM span reads the
+   settled table.** M2 retains `session_open.providers` whole, moves the
+   active agent on `handover`, and stamps
+   `vinga.provider.<stage>.{name,type,host,model}` on the session span
+   and on each turn span. The LLM round span does not duplicate that:
+   it carries the GenAI correspondence off the ROUND's own declared
+   fields, which is what that round actually ran on, and it spells the
+   entry name `vinga.provider.llm.name`, the same attribute the retained
+   context uses for the same fact. That is the one deliberate change to
+   what this milestone first wrote (`vinga.provider`, a leaf under a
+   prefix that now means something else): one fact, one attribute name,
+   whichever span it is read from. The session and turn spans answer
+   what the session opened against; the round span answers what
+   answered.
+
+3. **Releasing an exporter is a process-wide lease and one exactly-once
+   completion.** Every suite that builds one has to give it back or the
+   lane-wide `_QUIETING.held() == 0` assertion fails for whoever runs
+   next. `test_telemetry_spans.py` takes the same autouse
+   drain-then-assert fixture `test_telemetry.py` established, and the
+   blackholed-endpoint case awaits `shutdown()` and then waits the
+   worker out with `release()` off the loop, which is the second door on
+   the one completion rather than a second release.
+
+4. **The dual-clock fix survived the replay and was re-run, not
+   assumed.** `_span_event` gained an `at` argument here and the
+   `handover` agent-move there, and both are in the merged version;
+   `_open_session` retains the provider context and folds the held
+   captures as `(epoch, emission)` pairs. The lease and completion
+   changes touch exactly the shutdown paths the stub-receiver and
+   blackhole cases exercise, so both were re-run rather than trusted:
+   they pass on the rebased tree.
+
+The Jaeger walkthrough was NOT re-run. What it proved is the span map
+and the clock conversion, and both are pinned by tests that were re-run
+on the rebased tree: the stub receiver decodes the same six span names
+off the wire with the same parentage and asserts every epoch is near
+now, and the two-clock cases pin the fix that walkthrough found. The
+recorded run above stands as the acceptance evidence.
+
 ### Verification
 
 `uv run ruff check .`: all checks passed. `uv run mypy`: success, no
