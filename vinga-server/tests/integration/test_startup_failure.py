@@ -27,9 +27,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database
+from vinga_server.telemetry import CANNOT_BUILD_EXPORTER
 
 STAGES = ("llm", "asr", "tts", "vad")
 
@@ -210,3 +213,144 @@ def test_nothing_a_provider_library_said_reaches_either_stream(
 
     assert SENTINEL not in written, written
     assert "api.example" not in written, written
+
+
+# The telemetry exporter's own environment
+#
+# The `OTEL_EXPORTER_OTLP_*` family is operator-written text this server
+# deliberately never reads, and the SDK parses several members of it
+# eagerly inside a constructor, quoting what it was handed when one will
+# not parse. That put a library `ValueError` on the boot path holding
+# exactly the bytes those variables exist to carry, and `ValueError` is
+# outside `BOOT_FAILURES`, so it reached the operator as uvicorn's
+# traceback and exit code 3.
+#
+# Two lanes, because the family has two halves. The whole boot is driven
+# for the member that refuses, which is what says the taxonomy carries
+# it out as one sentence and exit code 1. The build alone is driven for
+# all five, in a process of its own with logging turned all the way up,
+# which is what says the members the SDK ACCEPTS leak nothing either:
+# three of these five construct successfully today, and one of those
+# three (`HEADERS`) logs the value it could not parse as it does it.
+#
+# The malformed values carry the sentinel because that is what a real
+# one would: the headers variable holds the collector's credential by
+# design, an endpoint may have a password in its userinfo, and a person
+# who pasted one into the wrong variable is exactly who this is for.
+
+TELEMETRY_ENTRYPOINT = """
+import sys
+
+import vinga_server.main as main
+
+sys.argv = ["vinga-server"]
+main.main()
+"""
+
+# The build on its own, with every logger this process has wide open and
+# writing to stderr. A quieting that failed, or an SDK line that reached
+# a handler anyway, lands in the captured stream and fails the hunt
+# below; a boot would have swallowed the same line behind uvicorn's own
+# configuration.
+TELEMETRY_BUILD = """
+import asyncio
+import logging
+import sys
+
+logging.basicConfig(level=logging.DEBUG, stream=sys.stderr)
+
+from vinga_server.config import ConfigError
+from vinga_server.config.models import TelemetryConfig
+from vinga_server.telemetry import build_telemetry
+
+try:
+    built = build_telemetry(TelemetryConfig(enabled=True))
+except ConfigError as refusal:
+    print("REFUSED", refusal)
+else:
+    print("BUILT")
+    asyncio.run(built.shutdown())
+"""
+
+# One per member of the family the SDK reads, malformed in the way that
+# member can be, each with the sentinel in it.
+TELEMETRY_ENVIRONMENTS = {
+    "timeout": {"OTEL_EXPORTER_OTLP_TIMEOUT": SENTINEL},
+    "compression": {"OTEL_EXPORTER_OTLP_COMPRESSION": SENTINEL},
+    "headers": {"OTEL_EXPORTER_OTLP_HEADERS": SENTINEL},
+    "certificate": {"OTEL_EXPORTER_OTLP_CERTIFICATE": f"/nowhere/{SENTINEL}.pem"},
+    "endpoint": {"OTEL_EXPORTER_OTLP_ENDPOINT": f"::::{SENTINEL}"},
+}
+
+
+def run_with_otlp(
+    script: str, tmp_path: Path, database: str, environment: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    """One process told to export, with one member of the OTLP family
+    malformed.
+
+    The database is reachable and seeded, because the domain half is
+    read before the composition is built: an unreachable one refuses
+    first and this lane would be reading the database's sentence.
+    """
+    inherited = dict(os.environ)
+    inherited["VINGA_DB_NAME"] = database
+    inherited["PYTHONDONTWRITEBYTECODE"] = "1"
+    inherited["VINGA_SERVER__TELEMETRY__ENABLED"] = "true"
+    inherited.update(environment)
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        env=inherited,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+
+
+@pytest.mark.parametrize("member", sorted(TELEMETRY_ENVIRONMENTS))
+def test_a_malformed_otlp_variable_leaks_nothing_at_all(
+    tmp_path: Path, blank_database: str, member: str
+) -> None:
+    """The sentinel is nowhere, whichever member was malformed and
+    whether the SDK refused it or took it.
+
+    All five are driven rather than the two that raise today, because
+    which member raises is the SDK's business and moves with a release,
+    and the claim being made is about the family.
+    """
+    finished = run_with_otlp(
+        TELEMETRY_BUILD, tmp_path, blank_database, TELEMETRY_ENVIRONMENTS[member]
+    )
+    written = finished.stdout + finished.stderr
+
+    assert finished.returncode == 0, written
+    assert SENTINEL not in written, written
+    assert "Traceback (most recent call last)" not in written, written
+    assert written.startswith(("BUILT", "REFUSED")), written
+    if written.startswith("REFUSED"):
+        assert CANNOT_BUILD_EXPORTER in written, written
+
+
+def test_a_malformed_timeout_refuses_the_whole_boot(
+    tmp_path: Path, blank_database: str
+) -> None:
+    """And the same failure through the entry point a deployment runs.
+
+    A timeout is parsed as a float inside the exporter's constructor,
+    and the `ValueError` it raises quotes the string it was given, which
+    is the exact failure this containment was added for. What must come
+    out is one sentence and exit code 1, like every other refusal in
+    this file, rather than uvicorn's rendering of a library exception.
+    """
+    seed_domain(blank_database)
+
+    finished = run_with_otlp(
+        TELEMETRY_ENTRYPOINT, tmp_path, blank_database, TELEMETRY_ENVIRONMENTS["timeout"]
+    )
+
+    written = refused(finished, CANNOT_BUILD_EXPORTER)
+    assert SENTINEL not in written, written
+    assert "ValueError" not in written, written
+    assert "float" not in written, written
