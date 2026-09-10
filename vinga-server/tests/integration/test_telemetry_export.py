@@ -285,8 +285,13 @@ async def test_one_turn_arrives_at_a_collector_as_the_trace_it_is(
         for span in spans
     )
 
-    # And the identities every span in the trace is read by.
+    # And the identities every span in the trace is read by, plus what
+    # the session opened against: the retained provider context is
+    # stamped per stage on the session and on the turn, which is the
+    # fact a backend filters a deployment's traces by.
     assert attributes(session)["vinga.device.id"] == DEVICE_MAC
+    assert attributes(session)["vinga.provider.llm.type"] == "mock"
+    assert attributes(turn)["vinga.provider.asr.name"] == "mock"
     assert attributes(turn)["vinga.turn.outcome"] == "completed"
     assert attributes(named(spans, "asr"))["vinga.asr.outcome"] == "heard"
 
@@ -314,7 +319,9 @@ async def test_the_gen_ai_keys_arrive_spelled_as_the_conventions_spell_them(
     carried = attributes(llm)
 
     assert carried["gen_ai.provider.name"] == "mock"
-    assert carried["vinga.provider"] == "mock"
+    # The entry's name under the attribute the retained provider context
+    # uses for the same fact, rather than a second spelling of it.
+    assert carried["vinga.provider.llm.name"] == "mock"
     assert carried["vinga.llm.round"] == 1
     # Nothing the mock did not report, and nothing wearing a foreign
     # prefix that was not asked for.
