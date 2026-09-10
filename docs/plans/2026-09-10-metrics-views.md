@@ -346,7 +346,7 @@ No new package, no new config, no API change.
 ## Plan review round
 
 External review: codex CLI 0.154.0, model gpt-5.6-sol, read-only
-sandbox, 2026-09-10, runtime 12m04s, reviewing commit 0922c8c2.
+sandbox, 2026-09-10, runtime 8m03s, reviewing commit 0922c8c2.
 Verdict as received: **not ready**. Findings condensed but
 faithful; resolutions appended per amendment.
 
