@@ -1207,7 +1207,7 @@ docs/xiaozhi-notes.md:298  respell  config device pending claim
 docs/xiaozhi-notes.md:305  respell  vinga simulator check-in
 scripts/echo_leakage.py:1  respell  vinga session
 scripts/wire_latency.py:2  respell  vinga session
-scripts/wire_latency.py:535  respell  vinga session
+scripts/wire_latency.py:593  respell  vinga session
 vinga-server/Dockerfile:25  respell  vinga simulator
 vinga-server/Dockerfile:176  respell  config list
 vinga-server/README.md:198  respell  vinga-server config provider set asr ears
