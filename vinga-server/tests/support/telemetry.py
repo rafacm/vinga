@@ -13,25 +13,36 @@ suite's.
 """
 
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from vinga_server.config.models import TelemetryConfig
-from vinga_server.events import ServerEvents, SessionEvents
+from vinga_server.events import ServerEvents, SessionEvents, assembly
 from vinga_server.events.catalog import (
     CAPTURE_CHANNEL,
+    BargeIn,
+    BargeInInRefractory,
+    BargeInUnderFloor,
+    BargeInWithoutTranscript,
     CaptureStarted,
     FramesDropped,
     Handover,
+    Heard,
+    NothingHeard,
     PromptAssembled,
     ReplyFinished,
+    SentenceSynthesized,
     SessionClosed,
     SessionIdle,
     SessionOpen,
+    SpeakingFinished,
+    SpeakingStarted,
     TranscriptionAbandoned,
     TurnStarted,
 )
 from vinga_server.events.values import (
+    ABSENT,
     AgentNames,
     AlsoBoundTo,
     ClientId,
@@ -43,6 +54,7 @@ from vinga_server.events.values import (
     DroppedFrames,
     Flag,
     Identifier,
+    LanguageTag,
     PromptSources,
     ProviderEntries,
     Real,
@@ -276,6 +288,25 @@ def assemble_prompt(events: SessionEvents, sources: dict[str, int]) -> float:
     )
 
 
+def hear(
+    events: SessionEvents,
+    duration_s: float = 0.9,
+    asr_ms: int | None = 300,
+    language: str | None = "en",
+) -> float:
+    """The ASR outcome that answered."""
+    return events.emit(
+        lambda: Heard(
+            agent=Identifier(AGENT),
+            conversation=ConversationId(CONVERSATION),
+            duration_s=Real(duration_s),
+            asr_ms=Whole(asr_ms) if asr_ms is not None else ABSENT,
+            language=LanguageTag(language) if language is not None else ABSENT,
+            language_confidence=Real(0.98) if language is not None else ABSENT,
+        )
+    )
+
+
 def drop_frames(events: SessionEvents, reasons: dict[str, int], second: int = 3) -> float:
     """And the other. Emitted directly rather than through `dropped()`,
     because what the exporter is being asked about is the payload rather
@@ -286,6 +317,168 @@ def drop_frames(events: SessionEvents, reasons: dict[str, int], second: int = 3)
             reasons=DroppedFrames(dict(reasons)),
         )
     )
+
+
+def hear_nothing(
+    events: SessionEvents, duration_s: float = 0.9, asr_ms: int = 220
+) -> float:
+    """The ASR outcome that answered nothing at all, which is the issue's
+    motivating gap: 0.9 s of speech transcribed to an empty string."""
+    return events.emit(
+        lambda: NothingHeard(
+            agent=Identifier(AGENT),
+            conversation=ConversationId(CONVERSATION),
+            duration_s=Real(duration_s),
+            asr_ms=Whole(asr_ms),
+        )
+    )
+
+
+@dataclass
+class Identity:
+    """A provider's identity as the events read it, which is four names
+    off a built entry and nothing else.
+
+    A stand-in rather than the real `ProviderIdentity` because the
+    events' own assembly reads it by attribute (`_entry_of`), and what
+    these cases are about is which of the four reaches which span
+    attribute.
+    """
+
+    name: str = "openai-main"
+    type: str = "openai"
+    host: str | None = "api.openai.com"
+    model: str | None = "gpt-4o-mini"
+
+
+@dataclass
+class FakeProvider:
+    """One provider object, as far as `events/assembly.py` looks."""
+
+    identity: Identity | None = None
+
+
+def round_done(
+    events: SessionEvents,
+    duration_ms: int = 800,
+    first_token_ms: int | None = 250,
+    input_tokens: int | None = 420,
+    output_tokens: int | None = 37,
+    round_: int = 1,
+    turns: int = 4,
+    unbuilt: bool = False,
+) -> float:
+    """One `llm_round`, built through the events' own assembly so the
+    quartet's absence rules are the real ones.
+
+    `unbuilt` is a provider the registry never stamped (a test's, a
+    fixture's), which the catalog answers with four absences rather than
+    with a half quartet.
+    """
+    provider = FakeProvider(identity=None if unbuilt else Identity())
+    return events.emit(
+        lambda: assembly.llm_rounded(
+            AGENT,
+            CONVERSATION,
+            "llm",
+            provider,
+            round_,
+            turns,
+            duration_ms / 1000,
+            input_tokens,
+            output_tokens,
+            first_token_ms,
+        )
+    )
+
+
+def retry_round(events: SessionEvents, round_: int = 1, duration_ms: int = 10000) -> float:
+    """The first-token watchdog giving up on a round and asking again."""
+    provider = FakeProvider(identity=Identity())
+    return events.emit(
+        lambda: assembly.llm_retried(
+            AGENT, CONVERSATION, "llm", provider, round_, duration_ms / 1000
+        )
+    )
+
+
+def provider_failed(
+    events: SessionEvents,
+    stage: str = "asr",
+    duration_ms: int = 1500,
+    failure: BaseException | None = None,
+) -> float:
+    """A provider call that failed, at whichever stage."""
+    provider = FakeProvider(identity=Identity())
+    raised = TimeoutError() if failure is None else failure
+    return events.emit(
+        lambda: assembly.provider_failure(
+            AGENT, CONVERSATION, stage, provider, raised, duration_ms / 1000
+        )
+    )
+
+
+def synthesize(
+    events: SessionEvents,
+    index: int = 0,
+    stream_ms: int = 900,
+    first_chunk_ms: int | None = 120,
+) -> float:
+    """One sentence's synthesis stream ending."""
+    return events.emit(
+        lambda: SentenceSynthesized(
+            agent=Identifier(AGENT),
+            conversation=ConversationId(CONVERSATION),
+            index=Count(index),
+            stream_ms=Whole(stream_ms),
+            first_chunk_ms=(
+                Whole(first_chunk_ms) if first_chunk_ms is not None else ABSENT
+            ),
+        )
+    )
+
+
+def start_speaking(events: SessionEvents) -> float:
+    """The first frame of the reply reaching the device."""
+    return events.emit(
+        lambda: SpeakingStarted(
+            agent=Identifier(AGENT), conversation=ConversationId(CONVERSATION)
+        )
+    )
+
+
+def finish_speaking(events: SessionEvents, frames: int = 42) -> float:
+    """The last frame of the reply reaching the device."""
+    return events.emit(
+        lambda: SpeakingFinished(
+            agent=Identifier(AGENT),
+            conversation=ConversationId(CONVERSATION),
+            frames=Count(frames),
+        )
+    )
+
+
+def barge_in(events: SessionEvents, speech_ms: int = 700) -> float:
+    """Speech cutting a reply short, which opens and closes nothing and
+    is therefore what the default fold is for."""
+    return events.emit(lambda: BargeIn(speech_ms=Whole(speech_ms)))
+
+
+def suppress_barge_in(events: SessionEvents, which: str = "floor") -> float:
+    """One of the three suppression variants, each with the fixed reason
+    its own decision site chose.
+
+    Three variants rather than one with a reason argument, because that
+    is what the catalog declares: the closed reason set lives at the
+    decision sites, and a span event is named after the variant that was
+    emitted.
+    """
+    built = {
+        "floor": lambda: BargeInUnderFloor(speech_ms=Whole(120), floor_ms=Real(200.0)),
+        "refractory": lambda: BargeInInRefractory(speech_ms=Whole(300)),
+        "no_transcript": lambda: BargeInWithoutTranscript(speech_ms=Whole(400)),
+    }[which]
+    return events.emit(built)
 
 
 def go_idle(events: SessionEvents) -> float:
