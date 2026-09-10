@@ -59,6 +59,38 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   session id or decision-track field, and answers every bad input with
   a fixed sentence.
 
+- **Optional OpenTelemetry tracing, off by default.** A new
+  `server.telemetry` section with one switch, `enabled: false`, turns
+  this server into an OTLP exporter deriving traces from the structured
+  events it already emits (#66, milestone 2). A session becomes one root
+  span from open to close, carrying its close reason; each turn becomes
+  a trace of its own linked to that span, opened at the instant the user
+  stopped speaking and closed with its outcome; everything else lands as
+  a span event on whichever of the two is open. What a span carries is
+  metadata, the same line the event surface draws: timings, closed
+  reasons and server-minted identifiers, never a transcript and never
+  audio. Where the collector is, what credentials reach it and how long
+  a request may take are the standard `OTEL_EXPORTER_OTLP_*` variables
+  rather than keys in the configuration file, and none of those values
+  ever becomes a span attribute, a resource attribute or a line of log
+  text: the service name is fixed and the build revision is its version,
+  with no environment pass-through. The supported transport is OTLP over
+  HTTP/protobuf exactly. With telemetry off, no exporter is built, no
+  thread starts and no per-event work happens at all.
+
+  Three refusals, each one sentence at startup. Under
+  `server.local_only` an enabled exporter is refused before anything is
+  imported or constructed, because sending to a collector is egress like
+  any other. Enabled without the OpenTelemetry packages installed is
+  refused with the extra to install (`uv sync --extra otel`, which both
+  published images already carry). An `OTEL_EXPORTER_OTLP_PROTOCOL`
+  naming anything but `http/protobuf` is refused rather than
+  half-honored.
+
+  A slow or unreachable collector drops spans and never delays a reply:
+  the span queue is bounded, the export runs on the SDK's own background
+  thread, and the shutdown a redeploy waits for is bounded too.
+
 - **The event catalog speaks the turn's own lifecycle.** Six additions
   and two deepenings, so a turn can be read off the events instead of
   inferred from the gaps between them (#66, milestone 1). `turn_started`

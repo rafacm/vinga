@@ -236,3 +236,184 @@ changed the catalog and one changed an interval's meaning.
    Updated to the sanitized per-agent derivation: four names off each
    built provider, nothing to hold an environment variable name and
    nothing to mask.
+
+## M2: the switch, the seam and the hardened exporter
+
+The exporter exists, is off, and refuses three ways when it is on and
+cannot be. What landed is one module, one configuration key, a fourth
+dependency tier, and the hardening that had to arrive in the same
+milestone as the first export.
+
+### What was built
+
+- **The `[otel]` extra**: `opentelemetry-sdk` and
+  `opentelemetry-exporter-otlp-proto-http`, both pinned at `>=1.44.0`,
+  which is a current release rather than the oldest that works because
+  `filterwarnings` is `error`. It joins the `dev` group
+  (`vinga-server[serve,sim,otel]`), unlike the two engine extras: the
+  span mapping is vinga logic every unit lane runs, and neither the
+  weight argument nor the licensing one applies to a small pure-Python
+  Apache-2.0 SDK.
+- **The tier machinery, three to four.** `tests/support/tiers.py`
+  answers a `Tiers` record now instead of a positional triple,
+  `OTEL_MODULES` is its import map, the closure lane gained an isolated
+  `[otel]` environment with the exactness comparison, the bite and both
+  negative halves, and the wheel lane closes over the fourth extra in
+  both directions. The plain `[serve]` environment is untouched.
+- **`server.telemetry`** (`config/models.TelemetryConfig`), the
+  `capture`/`conversations` optional-section pattern exactly:
+  `extra="forbid"`, one `enabled: bool = False`, absent by default. Both
+  example configs document it commented out and the generated server
+  reference moved with it.
+- **`egress.check_feature`**, the third shape of the one egress rule: a
+  declaration that is neither a provider class's marking nor an
+  operator's entry, for a feature whose reach is a property of what it
+  is. The telemetry build declares `True` unconditionally.
+- **`src/vinga_server/telemetry.py`**: `build_telemetry(config, *,
+  local_only=False, ...) -> Telemetry | None`, with the OTel imports
+  inside the build (the registry's `_resolved` pattern) so the module
+  imports clean without the extra. The built object owns its
+  `TracerProvider`, fixes its resource to `vinga-server` plus the build
+  revision with no environment pass-through, records one
+  monotonic-to-epoch offset from two back-to-back clock reads, and puts
+  its spans behind a `BatchSpanProcessor` with a bounded queue. The SDK's
+  whole logging namespace is quieted before construction and restored at
+  shutdown.
+- **The wiring**: `Composition.telemetry`, built first of everything in
+  `_build_composition`; the server tap attached with its detach
+  registered in the same breath; the device session asking for a
+  per-session tap beside `LiveEvents`; and three exit-stack
+  registrations whose LIFO order is the teardown's (stop accepting,
+  detach, bounded shutdown).
+- **M2's span map**: the session root span from `session_open` to
+  `session_closed` with the close reason, turn root spans opened at
+  `turn_started` with the utterance-end stamp and closed at
+  `reply_finished` with the outcome, each in a trace of its own with an
+  OTel link back to the session span, and everything else folded as a
+  span event onto whichever span is open. `capture_started` arrives on
+  the server tap ahead of its session and is held, bounded, until the
+  span exists.
+
+### Deviations from the plan
+
+1. **`build_telemetry` takes the section, not the whole
+   `ServerConfig`.** The plan writes `build_telemetry(config)` and the
+   milestone's own pin is that `build_telemetry(None)` is None. Those
+   two only agree if the argument is `TelemetryConfig | None`, where
+   None IS the absent section; a `ServerConfig | None` would have made
+   the pin a statement about a server with no configuration, which is
+   not a state that exists. `local_only` is therefore a keyword
+   argument, which the composition passes from the same object.
+
+2. **`egress.check_feature` takes a `bool`, not the MCP tri-state.** The
+   MCP shape has three answers because an operator may decline to
+   declare; a feature that is not configured has no such hole, so the
+   two-state version has no unreachable branch. The declaration is still
+   the argument rather than implied by the call, so the call site says
+   what it is claiming.
+
+3. **`detach_live` became `detach_observers`.** A session now attaches
+   two taps at construction and has to take both off however the
+   connection ended, and a method named after one of them would have
+   been a name that lied at the second. It is still a detach and never a
+   shutdown, which the docstring says: the exporter outlives every
+   session it watched, and a conversation ending must not be able to
+   stop a server exporting.
+
+4. **`SessionEvents.taps()` and `events.server_taps()` are new.** The
+   claim "telemetry off attaches nothing" is a claim about the emitter
+   and the hub, and both held their tap lists privately, so the tests
+   for the milestone's own headline would have been underscore
+   reach-ins. Both are one-line readers beside `server_emitters()`,
+   which already exists for the same kind of question.
+
+5. **`Telemetry.flush()` is public.** For the same reason: "has what I
+   emitted actually left" cannot be answered from outside an exporter,
+   the shutdown asks it implicitly, and the alternative was every
+   telemetry test reaching for `_provider`.
+
+6. **The lifecycle cases are in the unit lane and the saturation case in
+   the integration lane**, which is what the plan's own test section
+   says; the milestone bullet reads as though all the hardening were one
+   lane's. The saturation case drives real scripted replies through
+   `tests/support/sessions.py` rather than over the wire: what it
+   measures is the reply path, and a websocket in front of it would add
+   noise to the number being bounded.
+
+7. **The span attribute names are vinga's own (`vinga.session.id`,
+   `vinga.turn.outcome` and their neighbours).** The settled `gen_ai.*`
+   correspondence belongs to the stage spans, which are M3's; nothing on
+   a session or turn root span is a GenAI fact, and putting one there to
+   have used the table would have been the wrong altitude.
+
+### Discoveries
+
+- **`session_open` is the edge's, so a session built below the edge has
+  no trace at all.** `tests/support/sessions.py` builds sessions by
+  transcribing what `run` does, and `session_open` is not among the four
+  lines it transcribes. A turn whose session span does not exist opens
+  nothing (there is nothing to link to), so the saturation case emits
+  the open by hand. Worth naming because it is the same gap the M1 notes
+  found for `drive_reply`: the support helpers stand in for the edge at
+  a precise depth, and the events emitted above that depth are not among
+  what they provide.
+
+- **A namespace package defeats a top-level import map.**
+  `SERVE_MODULES` and `SIM_MODULES` map a distribution to the top-level
+  module it installs, and for OpenTelemetry that module is
+  `opentelemetry` for every distribution in the ecosystem. Importing it
+  says nothing about which one is installed, so `OTEL_MODULES` maps to
+  the subtree instead (`opentelemetry.sdk`,
+  `opentelemetry.exporter.otlp.proto.http`), which is also what makes
+  the `[serve]` environment's negative check mean something.
+
+- **`Resource.create()` is the leak, not the exporter.** The obvious way
+  to build a resource merges `OTEL_SERVICE_NAME` and
+  `OTEL_RESOURCE_ATTRIBUTES` into what every span carries, which is
+  environment-derived text on the retained surface and would have passed
+  every test that did not plant a sentinel there. The constructor is
+  used directly, and the sentinel battery plants a value in both.
+
+- **A shared Postgres instance is what makes the parallel unit lane look
+  broken.** Running `-n auto` against the instance another worktree was
+  already using produced a dozen `OperationalError: server closed the
+  connection unexpectedly` failures scattered across unrelated suites.
+  An instance of this worktree's own (`VINGA_DB_PORT=55432 docker
+  compose up -d --wait postgres`) turns the same command green. Nothing
+  to do with this change, and worth an hour to somebody who meets it.
+
+### Tests
+
+`tests/unit/test_telemetry.py` holds the switch, the three refusals and
+the span map: `build_telemetry(None)` is None and attaches nothing;
+`local_only` refuses with the egress module's own sentence, unchained,
+value-free, and with both `_import_sdk` and `_otlp_exporter` proven
+never called; the missing extra refuses with the registry's sentence
+shape, faked by putting `None` in `sys.modules` so the real import
+statement raises a real `ImportError`; an unsupported protocol is
+refused by naming the supported one and never quoting the rejected one.
+The fold is driven through a real `SessionEvents` into the SDK's
+in-memory exporter for the session span, the linked turn traces, two
+turns as two trace ids, the between-turn and inside-turn destinations,
+the capture-before-open hold and its bound, and the one-offset pin (a
+span's converted end equals its event's converted stamp, exactly). The
+no-leak battery plants a credential-shaped value in the OTLP headers
+variable, in endpoint userinfo, in `OTEL_SERVICE_NAME` and in an event
+payload, and hunts it in exported span data, in both log formats and in
+stderr, including during an export against an endpoint nothing answers.
+
+`tests/unit/test_telemetry_lifecycle.py` runs the whole composition
+twice in one process, refuses a boot after the exporter was built, and
+pins that a stopped exporter takes no more emissions.
+`tests/integration/test_telemetry_hardening.py` is the saturation case
+and the bounded shutdown against a wedged collector.
+
+### Verification
+
+`uv run ruff check .`: all checks passed. `uv run mypy`: success, no
+issues in 5 source files. `uv run pytest tests/unit -q -n auto --dist
+loadfile`: 6021 passed, 19 skipped. `uv run pytest tests/integration
+-q`: 247 passed. The five generated-document drift checks (`events
+reference`, `conversations schema`, `config reference`, `config
+reference server`, `config openapi`) all diff clean against the
+committed copies.

@@ -521,7 +521,9 @@ new:
   generated `events.md` and `conversations-schema.md` via their
   generators; CHANGELOG. Releasable alone: richer events, nothing
   else moves.
-- [ ] **M2: the switch, the seam and the hardened exporter.** The
+- [x] **[M2: the switch, the seam and the hardened
+  exporter](2026-09-10-otel-tracing-implementation.md#m2-the-switch-the-seam-and-the-hardened-exporter)**
+  (PR TBD). The
   `[otel]` extra (pyproject, `dev` group, `tiers.py` rows, tier
   fixture), `server.telemetry` with both example configs and the
   generated reference, the egress-module extension and both boot
