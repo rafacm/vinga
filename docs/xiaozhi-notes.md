@@ -367,9 +367,8 @@ guess.
 
 How much of the assistant's own voice survives the board's AEC and reaches
 the endpointer is the number the entire barge-in gate stack is built
-around: the minimum speech floor, the refractory window, the
-transcribe-to-confirm step, and the `server.barge_in` off switch for
-boards that leak too much. It is also why session capture exists at all,
+around: the minimum speech floor, the transcribe-to-confirm step, and
+the `server.barge_in` off switch for boards that leak too much. It is also why session capture exists at all,
 since no test lane can produce the number. Owning the firmware means the
 playback reference is available on the device side, where cancelling it is
 a signal-processing problem rather than a statistical one.

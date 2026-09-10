@@ -61,3 +61,33 @@ merges the audio instead of destroying it.
   confirmed transcript against the assistant's own recent sentences)
   slot in as additional evidence checks behind the same rule rather
   than replacing it.
+
+## Amendment: the refractory window is gone (2026-09-11)
+
+The decision above stands whole; one of the concrete gates it named
+does not. The refractory window, "must fall outside the refractory
+window after playback starts", was itself a drop on acoustics alone,
+which is the one thing the rule says a gate may not do, and it was
+exempt only because the acoustics it read were believed to be the
+device's own playback rather than the user.
+
+The measurement says they cannot be. `server.barge_in_min_speech_ms`
+is checked first, so nothing reached the window without at least half
+a second of endpointer-classified speech; the primary board's playback
+trails the server by roughly 760 ms (mic envelope against speaker
+envelope, r = 0.60 to 0.74 at that lag over three replies, nothing at
+lag 0); and the window was counted from the first frame this server
+delivered, so its default second was at most about 240 ms of sound in
+the room. Echo cannot supply 500 ms of speech out of 240 ms of
+playback. The field agreed before the arithmetic did: every refractory
+suppression on record, four in 48 h of household use and five in a
+later commissioning window, was a user finishing their own sentence.
+
+So the rung is removed and the utterance falls through to the
+confirmation arm (#80), which is this record's own rule applied to the
+one gate that was exempt from it: a wrong pause costs one ASR latency,
+a wrong drop costs the user's sentence. `server.barge_in_refractory_ms`
+is removed with it, and `barge_in_suppressed` loses its `refractory`
+reason. What is left of the ladder is the speech floor, the
+merge-mid-ASR special case and the transcript confirmation, all three
+of which the decision above already justifies.

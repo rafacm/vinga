@@ -25,4 +25,4 @@ PLANTUML_LIMIT_SIZE=16384 plantuml -tsvg -failfast2 *.puml
 
 ## Keeping them true
 
-These describe the code, so they go stale the way comments do. The overview names provider types and their egress markings; the turn diagram names constants (`MAX_TOOL_ROUNDS`, the pipeline and output sample rates, the frame duration) and configuration keys; the barge-in diagram names both thresholds and every structured event a branch emits. Changing any of those is the moment to change the diagram, in the same commit.
+These describe the code, so they go stale the way comments do. The overview names provider types and their egress markings; the turn diagram names constants (`MAX_TOOL_ROUNDS`, the pipeline and output sample rates, the frame duration) and configuration keys; the barge-in diagram names the speech floor and every structured event a branch emits. Changing any of those is the moment to change the diagram, in the same commit.
