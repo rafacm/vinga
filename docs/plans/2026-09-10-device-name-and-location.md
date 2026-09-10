@@ -73,18 +73,58 @@ the stronger guarantee and is what the milestone pins.
 
 ## Smaller decisions the issue leaves open, decided here
 
-### The fold has one home and the index reads it
+### The fold, defined exactly, in two renderings proved equal
 
-The fold (lowercase, strip, collapse internal whitespace) is a rule two places
-must apply: the unique index in the database and the CLI's conflict refusal
-before it writes. Two structures that must agree are one structure with a bug
-pending, so the fold is a single function in the config models, the index is
-expressed over the same expression, and the CLI refusal calls the function.
+The fold is: lowercase by Unicode simple case folding, strip leading and
+trailing whitespace, and collapse internal runs of whitespace to one space. The
+whitespace class is Unicode's, not ASCII's.
 
-The migration is the deliberate exception, per the decision above: it writes the
-expression as a frozen literal, and the milestone's tests pin that the frozen
-literal and the live function agree TODAY, so a future divergence is a failing
-test rather than a silent one.
+It is applied in two places that cannot share an implementation: Python, at the
+repository's conflict check, and SQL, in the functional unique index. An earlier
+draft of this plan said one function and the index "reads the same expression",
+which is not a thing that can be built. Python string operations and a Postgres
+expression are different implementations, and their whitespace behaviour can
+diverge, so the design is two declared renderings and a proof of equivalence
+rather than a pretence of one.
+
+The proof is a shared corpus, executed against Postgres, covering at least: a
+non-breaking space, a tab, a newline, an ideographic space, a run of mixed
+whitespace, leading and trailing whitespace, and the Turkish dotted and dotless
+i, which is where case folding and lowercasing disagree. The migration keeps its
+frozen literal per the issue's decision, and the corpus covers that literal too,
+so a future divergence between any of the three is a failing test rather than a
+silent one.
+
+### Uniqueness is enforced in the repository, under the writer lock
+
+Not at the CLI. The API, `import`, the pending claim and any other repository
+caller bypass CLI logic entirely, and letting the unique index catch a conflict
+would surface the generic sanitized database failure rather than a refusal an
+operator can act on.
+
+So the folded-name check happens inside the repository while the domain writer
+lock is held, on every creation and every rename path, with the index kept as
+the invariant behind it. The typed conflict is what the CLI and the API each
+render. This follows the shape the repository already uses for correctness that
+cannot be expressed as a constraint.
+
+### The uuid is minted in the repository, never in a validator
+
+`normalize_device_bindings` absorbs the value-shape union, and that is the whole
+of what it does: it normalizes shape. It does not mint.
+
+Minting in a `mode="before"` validator would make parsing non-deterministic and
+`apply` non-idempotent, because re-parsing the same document would produce a new
+id every time. The id is therefore minted in the repository, under the domain
+writer lock, where the current row can be consulted: a stored id wins over an
+absent one, an absent id on a record whose MAC already exists adopts the stored
+one, and re-applying an unchanged document writes nothing. That is what makes
+`apply` idempotent, and a random default in a parser cannot.
+
+Every device ingress is changed explicitly rather than assumed to inherit this:
+`bind`, the pending claim, `apply` and `import`, the API writes, and stored-row
+loading. The plan's earlier claim that they all inherit the union from one place
+was true of parsing and false of everything that writes.
 
 ### `location` is written through the same repository path as everything else
 
@@ -126,8 +166,22 @@ choose which one to believe.
 - `config/cli.py` and `config/entities.py`: `vinga device` gains the name and
   location writes, held to `docs/architecture/cli-guide.md` (noun first, verb
   second, leading positionals as identity addressing).
-- `runtime/prompt.py`: the device block carries the two facts.
-- `tools/builtin.py` and `tools/names.py`: the new tool and its name.
+- `runtime/prompt.py`: the device block carries the two facts. M2 also adds the
+  read that supplies them, because there is no metadata path today:
+  `_live_binding` selects only `agents` and `DeviceBindings` resolves only
+  names, so `{id, name, location}` is read in the same snapshot the binding is
+  resolved from. The device facts are assembled independently of the memory
+  switch: `_system_prompt` skips the whole scope assembly when memory is off,
+  and an agent with memory off still has to know what it is speaking through,
+  because a device's name is not a remembered thing.
+- `tools/builtin.py`, `tools/names.py` and `tools/source.py`: the tool, its
+  reserved name, its place in `ORDERED_TOOL_NAMES` (two location writes in one
+  round are order-sensitive), and the offer and dispatch machinery that actually
+  routes it. `source.py` holds a `MemoryStore` and no domain repository today,
+  so M3 also covers the runtime factory and pipeline wiring and the app
+  lifecycle's ownership and disposal of a domain write engine. The write is
+  synchronous, so it is dispatched off the event loop the way other runtime
+  database work is.
 
 No new module: every one of these exists and gains a responsibility it already
 owns the neighbourhood of. The record model is the one thing that could argue
