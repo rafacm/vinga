@@ -268,6 +268,32 @@ def test_an_unsupported_protocol_is_refused_by_naming_the_supported_one(
     assert "grpc-with-a-secret-in-it" not in str(refusal.value)
 
 
+def test_an_unsupported_traces_specific_protocol_is_refused_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The variable the SDK actually reads first.
+
+    A deployment exporting metrics over gRPC writes the general variable
+    and the traces-specific one, and it is the second that decides where
+    the traces go. So it is refused on its own, and by a sentence that
+    names it: a refusal naming only the general variable sends an
+    operator to edit a value that was never going to be used, and
+    following it changes nothing at all.
+    """
+    monkeypatch.setenv(OTLP_PROTOCOL_ENV, SUPPORTED_PROTOCOL)
+    monkeypatch.setenv(OTLP_TRACES_PROTOCOL_ENV, "grpc")
+
+    with pytest.raises(ConfigError) as refusal:
+        build_telemetry(TelemetryConfig(enabled=True))
+
+    said = str(refusal.value)
+    assert said == UNSUPPORTED_PROTOCOL
+    assert OTLP_TRACES_PROTOCOL_ENV in said
+    assert OTLP_PROTOCOL_ENV in said
+    # And the rejected spelling is still never quoted back.
+    assert "grpc" not in said
+
+
 def test_the_traces_protocol_variable_wins_over_the_general_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

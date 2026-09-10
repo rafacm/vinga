@@ -83,9 +83,10 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   imported or constructed, because sending to a collector is egress like
   any other. Enabled without the OpenTelemetry packages installed is
   refused with the extra to install (`uv sync --extra otel`, which both
-  published images carry). An `OTEL_EXPORTER_OTLP_PROTOCOL`
-  naming anything but `http/protobuf` is refused rather than
-  half-honored.
+  published images carry). An `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL`, or
+  the general `OTEL_EXPORTER_OTLP_PROTOCOL` behind it, naming anything
+  but `http/protobuf` is refused rather than half-honored, by a sentence
+  that names both and says which of them decides.
 
   A slow or unreachable collector drops spans and never delays a reply:
   the span queue is bounded, the export runs on the SDK's own background

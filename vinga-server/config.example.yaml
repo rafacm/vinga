@@ -349,7 +349,8 @@ server:
   # variables (OTEL_EXPORTER_OTLP_ENDPOINT and its relatives), not keys
   # in this file: the SDK already reads them, and a second home for the
   # same fact is two that can disagree. The supported transport is OTLP
-  # over HTTP/protobuf exactly, so OTEL_EXPORTER_OTLP_PROTOCOL naming
+  # over HTTP/protobuf exactly, so OTEL_EXPORTER_OTLP_TRACES_PROTOCOL,
+  # or the general OTEL_EXPORTER_OTLP_PROTOCOL behind it, naming
   # anything else is refused at startup rather than half-honored. The
   # service name is fixed to `vinga-server` and the build revision rides
   # along as its version; neither is taken from the environment.
