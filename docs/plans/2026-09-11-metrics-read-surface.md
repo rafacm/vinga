@@ -194,17 +194,28 @@ sentence is what the surface reports, which is why it is declared per view.
 
 ## Module layout
 
-- `conversations/views.py` holds the view declarations and is where the
-  per-device variants are declared, beside the four they mirror. What its
-  callers stop having to know is the SQL.
-- `conversations/api.py` gains the read routes. No new module: this is the same
-  shape as the session and conversation reads beside it.
-- `conversations/cli.py` gains the noun and its two verbs.
-- The generated artifacts move through their generators only:
-  `api-openapi.json`, `cli.md`, `metrics-views.md`.
+- `conversations/views.py` holds the view declarations and gains the per-device
+  siblings beside the four they mirror, plus the declared metadata carrying the
+  common limitations so one home feeds docgen, the OpenAPI descriptions and the
+  CLI's output.
+- `conversations/api.py` gains the read routes, beside the session and
+  conversation reads it already serves.
+- `config/responses.py` gains the transport models. They live there rather than
+  beside the routes so the CLI can validate a response without importing
+  FastAPI, SQLAlchemy or the store, which is why the conversation shapes are
+  there today.
+- `config/cli.py` gains the noun and its two verbs, using the `Act`, transport,
+  validation and registration machinery it already has. **Not**
+  `conversations/cli.py`, which is the `vinga-server conversations schema|views`
+  documentation generator, opens nothing, and whose own docstring says querying
+  the views live is what this issue owns.
+- The generated artifacts move through their generators only: `api-openapi.json`,
+  `cli.md`, `metrics-views.md`. `config/api_descriptions/api.md` is
+  hand-authored and embedded into the generated OpenAPI, so the new namespace is
+  described there.
 
-No new module in any milestone. If one appears, it needs the deletion test
-applied to it in the implementation doc.
+No new module in any milestone. If one appears, the implementation doc applies
+the deletion test to it.
 
 ## Tests
 
@@ -253,164 +264,35 @@ restating their fixtures.
 ## Milestones
 
 - [ ] **M1: the aggregates on the API.** `/metrics` and `/metrics/{view}` over
-  the four phase-1 views, day-grained, with bounded windowing and the
-  storage-switch answers. Response models in the server's vocabulary, carrying
-  the views' own caveats in their field descriptions. `api-openapi.json` moves
-  through its generator. Design footprint: deepens `conversations/api.py`; adds
-  no module and no seam.
-- [ ] **M2: the CLI in front of it.** `vinga metrics list` and
-  `vinga metrics show <view>`, held to `docs/architecture/cli-guide.md`, a
-  client of the API like every other verb with `--local` as the break-glass.
-  `cli.md` moves through its generator; the census follows. Design footprint:
-  deepens `conversations/cli.py`.
-- [ ] **M3: the device dimension.** The views gain their per-device variants,
-  and the API and CLI gain the grouping, carrying `device` and a `name` that is
-  null until #449 M5. Migration on the conversations chain for the new views.
-  `metrics-views.md` and both generated references move. Design footprint:
-  deepens `conversations/views.py` with declarations beside the four they
-  mirror; adds no module.
-
-## Plan review round
-
-External review of commit `fd4e0ef6`, backend codex (codex-cli 0.154.0), model
-`gpt-5.6-sol`, 2026-09-11. Verdict as received: **not ready**, five P1 and five
-P2. Findings condensed but faithful, each with its resolution. Every P1 was
-checked against the code before being accepted; none was rejected.
-
-### 1 (P1): `metric show <view>` makes a plural noun address an entry
-
-The plan calls `metrics` a noun that addresses no entry and then makes `<view>`
-a leading identity positional, which is the guide's definition of addressing
-one. `session` and `conversation` are singular for exactly that reason.
-
-*Resolution*: accepted. **The noun becomes singular: `vinga metric list` and
-`vinga metric show <view>`.** The API paths stay `/metrics` and
-`/metrics/{view}`, which is the same collection-and-member shape `/sessions` and
-`/sessions/{session}` already use beside a singular CLI noun, so the two agree
-rather than diverge. The #437 citation is unaffected: it reserves "metrics" as
-the name of the aggregation surface, and one view of it is a metric.
-
-### 2 (P1): M2 targets the wrong CLI and invents a direct-read path
-
-`conversations/cli.py` is the `vinga-server conversations schema|views`
-documentation generator and opens nothing. Public API-backed commands live in
-`config/cli.py`, whose conversation commands state there is no local-database
-path, and no `--local` exists for them.
-
-*Resolution*: accepted, and the plan was wrong twice over. `conversations/cli.py`'s
-own docstring says "querying the views live is the API and CLI surface #440
-owns", so the module this plan named points at this work as belonging elsewhere.
-And `config/cli.py` states the rule the plan would have broken: "a command that
-touches the record is a request like every other, and there is no second way
-in." M2 deepens `config/cli.py` using its existing `Act`, transport, validation
-and registration machinery, and **`--local` is removed from the plan entirely**;
-no direct SQL fallback is designed or wanted.
-
-### 3 (P1): the conversations-off behaviour contradicts the running system
-
-The plan claims conversations-off means no `record` schema and proposes a
-refusal. Boot migrates that schema whether or not recording is on, reads work
-without a writer, and a deployment that never recorded gets ordinary empty
-shapes.
-
-*Resolution*: accepted, and the proposed refusal would have reversed a settled
-contract. `conversations/api.py` states it as a deliberate change under #283:
-"an empty list is the honest answer", and "both work with recording off, where
-there is no `ConversationStore` and no engine to borrow." So: **conversations-off
-stops new writes and keeps serving whatever aggregate history survives; a
-never-recorded deployment returns an ordinary empty result**, rendered by the
-CLI's existing empty-result sentence. No switch state is added to `ApiRuntime`
-and no current configuration is inferred from stored rows.
-
-### 4 (P1): the request contract is undecided
-
-No parameter names, defaults, bounds, boundary semantics, ordering, empty-result
-behaviour, response envelopes, per-device view names, or `GET /metrics` shape.
-
-*Resolution*: accepted; "bounded windowing" was a promise standing in for a
-design. Specified in full in "The request contract" below, and the tests section
-gains boundary, malformed-value, default, ordering and empty-window cases rather
-than only the oversized-window one.
-
-### 5 (P1): dynamic view selection has no closed mapping and no no-leak test
-
-`/metrics/{view}` is request-controlled relation selection, and a relation name
-cannot be a bound parameter.
-
-*Resolution*: accepted whole. The path value resolves through a **closed
-alias-to-declaration mapping derived from the view registry**, so an unknown
-alias never reaches SQL and the set of servable views cannot drift from the set
-of declared ones. Unknown views and groupings get fixed sanitized refusals that
-quote nothing back, per the rule `conversations/api.py` already states. The
-tests send hostile and control-character values through both the API and the
-CLI and assert they appear in no response, no stderr and no emitted record.
-
-### 6 (P2): the snapshot follow-up rests on wrong scheduling and retention assumptions
-
-`_prune` runs at writer start and after session close, **deletes first**, and
-does not run at all when `retention_days <= 0`; recording-off starts no writer.
-So a quiet deployment has something to lose immediately before the startup
-prune, and old turns can survive in active conversations whose events are
-already gone.
-
-*Resolution*: accepted, and the mechanism paragraph is deleted rather than
-patched. The plan overreached by designing a follow-up it had not verified. What
-replaces it is the constraint list any future snapshot design has to satisfy: it
-must run **before** destructive pruning, work with recording disabled and with
-retention zero, carry its own retention and erasure behaviour, and preserve
-whether a rate was already only a floor. This issue serves live views over
-whatever rows survive the store's asymmetric retention, and says so.
-
-### 7 (P2): response-model ownership is omitted
-
-Conversation response shapes live in `config/responses.py` so the CLI can
-validate them without importing FastAPI, SQLAlchemy or the store.
-
-*Resolution*: accepted. The transport models go in `config/responses.py` and are
-imported by both `conversations/api.py` and `config/cli.py`, which uses the
-existing deep module and adds none. The API-to-CLI contract coverage extends to
-them.
-
-### 8 (P2): the caveat-preservation mechanism cannot prove its guarantee
-
-`View` declares `question`, `denominator`, `telemetry_off`, columns and SQL. The
-retention-floor limit is hand-written common prose in the reference, so it
-cannot be generated into an API or CLI description today. Drift checks prove an
-artifact matches its generator, never that the generator kept anything. And
-telemetry-off produces no latency row at all while event-rate denominators
-survive and numerators vanish, so "rows report coverage" is not uniformly true.
-
-*Resolution*: accepted; "where possible" was doing too much work. The common
-limitations move into **declared metadata on the view registry**, with consumers
-in docgen, in the OpenAPI descriptions and in the CLI's output, so one home
-feeds three surfaces. The tests become semantic rather than structural: assert
-the zero-denominator rule, the retention-floor warning, the
-missing-measurement ambiguity and **each view's own** telemetry-off behaviour
-appear on both first-party surfaces.
-
-### 9 (P2): the null-device test would miss a broken full join
-
-The event-rate and sessions views combine independently aggregated streams with
-full outer joins, and ordinary equality does not join two SQL nulls. Asserting
-"no device is invented" would pass an implementation emitting three separate
-null-device rows.
-
-*Resolution*: accepted, and it is the sharpest finding of the round. Per-device
-streams join with **`IS NOT DISTINCT FROM`**, coalescing both the day and the
-device keys. The test drives one null-device session that contributes a turn and
-a counted event and asserts **exactly one** combined row with correct
-denominators and rates.
-
-### 10 (P2): upgrade-safe migration and required documentation are missing
-
-M3 does not say whether views are replaced or additive, nor name the new
-relations; the CHANGELOG the issue requires is absent from the milestones; the
-observability map still records #440 as open; and the API's hand-authored
-overview is embedded into the generated OpenAPI.
-
-*Resolution*: accepted. **The per-device views are additive siblings with names
-of their own**, the four shipped contracts are preserved byte for byte, and a
-test upgrades a database at `1006_metrics_views` and asserts the originals
-survive and still answer. Downgrade behaviour and the analyst grants are stated.
-`CHANGELOG.md`, `docs/architecture/observability-surfaces.md` and
-`config/api_descriptions/api.md` are named in the milestones that touch them.
+  the four phase-1 views, day-grained, with the request contract above: the
+  closed alias mapping derived from the registry, the parameters and their
+  bounds, inclusive UTC boundaries, the total ordering, empty windows as empty
+  lists, and the switch behaviours. Transport models in `config/responses.py`.
+  The common limitations become declared metadata on the view registry, with
+  docgen and the OpenAPI descriptions as its first two consumers.
+  `api-openapi.json` and `metrics-views.md` move through their generators;
+  `config/api_descriptions/api.md` describes the namespace; `CHANGELOG.md` gets
+  its entry. Design footprint: deepens `conversations/api.py` and
+  `conversations/views.py`; adds no module and no seam.
+- [ ] **M2: the CLI in front of it.** `vinga metric list` and
+  `vinga metric show <view>` in `config/cli.py`, held to
+  `docs/architecture/cli-guide.md`, a client of the API like every other verb
+  and with no local path, because a command that touches the record is a request
+  like every other. The declared limitations gain their third consumer here.
+  `cli.md` moves through its generator, the census follows, `CHANGELOG.md` gets
+  its entry. Design footprint: deepens `config/cli.py`.
+- [ ] **M3: the device dimension.** Four **additive sibling** views, named
+  `metrics_stage_latency_by_device_daily`, `metrics_tokens_by_device_daily`,
+  `metrics_event_rates_by_device_daily` and `metrics_sessions_by_device_daily`,
+  added by a migration on the conversations chain, with the four shipped views
+  preserved byte for byte and a test that upgrades a `1006_metrics_views`
+  database and asserts they survive and still answer. Per-device streams join
+  with `IS NOT DISTINCT FROM`, coalescing the day and device keys, because
+  ordinary equality does not join two SQL nulls and two of these views combine
+  independent streams with full outer joins. `group=device` on the API and its
+  CLI flag; rows carry `device` and a `name` that is null until #449 M5.
+  Downgrade behaviour and the `vinga_ro` grants are stated. All three generated
+  references move; `docs/architecture/observability-surfaces.md` stops recording
+  #440 as open; `CHANGELOG.md` gets its entry. Design footprint: deepens
+  `conversations/views.py` with declarations beside the four they mirror; adds
+  no module.
