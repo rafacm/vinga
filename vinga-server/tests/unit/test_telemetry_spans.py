@@ -30,10 +30,24 @@ what is proved is that the twelve names with a shape of their own do not
 also fold, and that the events beside them still do.
 """
 
+import asyncio
+import time
 from collections.abc import Iterator
+from typing import Any, cast
 
 import pytest
 
+from tests.support.configs import config_with_agent
+from tests.support.providers import ScriptedEndpointer
+from tests.support.sessions import (
+    end_utterance,
+    events_of,
+    plant_utterance,
+    realtime_session,
+    start_reply,
+    turn_taking,
+    wait_for_reply,
+)
 from tests.support.telemetry import (
     AGENT,
     CONVERSATION,
@@ -63,7 +77,9 @@ from tests.support.telemetry import (
     suppress_barge_in,
     synthesize,
 )
+from tests.support.wire import speech_pcm
 from vinga_server.events.values import ReplyOutcome
+from vinga_server.providers import AsrResult
 from vinga_server.telemetry import (
     _QUIETING,
     ASR_SPAN,
@@ -818,3 +834,74 @@ def test_the_round_speaks_for_its_own_stage_and_the_context_for_the_rest() -> No
     # And the context still speaks for the stages the round says
     # nothing about.
     assert llm.attributes["vinga.provider.asr.name"] == "ears"
+
+
+# --- the gate's rejection, driven through the real runtime ------------
+
+
+class FailingConfirmation:
+    """The reply's own ASR answers; every barge-in confirmation after it
+    fails, which is one of the two ways the gate turns a candidate
+    away."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def transcribe(
+        self, pcm: bytes, sample_rate: int, language_hint: str | None = None
+    ) -> AsrResult:
+        self.calls += 1
+        if self.calls == 1:
+            return AsrResult(text="the question")
+        raise ConnectionRefusedError("no route")
+
+
+CUT_IN = config_with_agent(
+    llm_reply="Answering {text}.", server={"barge_in_refractory_ms": 0}
+)
+
+
+async def test_a_rejected_confirmation_leaves_the_turn_with_one_asr_span() -> None:
+    """End to end, through the runtime that emits it.
+
+    A barge-in whose confirmation fails never reaches `start_reply`, so
+    it opens no turn: the reply being spoken over goes on being the
+    turn. But the gate says `provider_failed` at the ASR stage while
+    that turn is open, and a fold that built a stage span from every
+    ASR-ending event gave that turn TWO transcriptions, the second one
+    belonging to an utterance this turn never answered.
+
+    So the turn keeps the one ASR span its own transcription made, and
+    the rejection lands on it as the span event the gate's vocabulary
+    is.
+    """
+    telemetry, memory = exporting()
+    ears = FailingConfirmation()
+    session, socket = realtime_session(CUT_IN, cast(Any, ears))
+    events = events_of(session)
+    events.attach(telemetry.session_tap())
+    # The session's own identities, kept: this module's fixed ones would
+    # rename the agent a running session is talking as.
+    open_session(events, providers={}, keep_identities=True)
+    turn_taking(session).endpointer = ScriptedEndpointer(speech_ms=600)
+
+    start_reply(session, speech_pcm(600), speech_ms=600)
+    deadline = time.monotonic() + 10.0
+    while socket.frames < 3:
+        assert time.monotonic() < deadline, "the reply never started speaking"
+        await asyncio.sleep(0.02)
+
+    plant_utterance(session, speech_pcm(600))
+    await end_utterance(session)
+    assert ears.calls >= 2, "the gate never ran a confirmation"
+    await session.runtime.drain(5.0)
+    await wait_for_reply(session)
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    turn = named(spans, TURN_SPAN)
+    assert len(spans_of(ASR_SPAN, spans)) == 1
+    assert named(spans, ASR_SPAN).attributes["vinga.asr.outcome"] == "heard"
+    said = [event.name for event in turn.events]
+    assert "provider_failed" in said
+    assert said.count("provider_failed") == 1

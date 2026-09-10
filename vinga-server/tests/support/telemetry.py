@@ -193,27 +193,40 @@ def session_events(clock: Clock, telemetry: Telemetry) -> SessionEvents:
 
 
 def open_session(
-    events: SessionEvents, providers: dict[str, Any] | None = None
+    events: SessionEvents,
+    providers: dict[str, Any] | None = None,
+    keep_identities: bool = False,
 ) -> float:
     """The session's own open. `providers` is what it says the
     conversation opened against, defaulting to the two-agent world
     above: an empty one is a session nothing can be asserted about, and
     the suites that are not about provider context ignore what they get.
+
+    `keep_identities` is for an emitter that belongs to a REAL session:
+    the fixed ids below are this module's, and writing them onto a
+    running session renames the agent it is talking as, which the
+    pipeline then cannot find. So a caller with a live session asks for
+    its own identities to be kept and gets a `session_open` about the
+    session it actually has.
     """
     entries = PROVIDERS if providers is None else providers
-    events.device = DEVICE
-    events.agent = AGENT
-    events.conversation = CONVERSATION
+    if not keep_identities:
+        events.device = DEVICE
+        events.agent = AGENT
+        events.conversation = CONVERSATION
+    agent = events.agent or AGENT
+    conversation = events.conversation or CONVERSATION
+    device = events.device or DEVICE
     return events.emit(
         lambda: SessionOpen(
             client=ClientId("a-device-uuid"),
-            agent=Identifier(AGENT),
-            conversation=ConversationId(CONVERSATION),
-            agents=AgentNames(tuple(entries) or (AGENT,)),
+            agent=Identifier(agent),
+            conversation=ConversationId(conversation),
+            agents=AgentNames(tuple(entries) or (agent,)),
             providers=ProviderEntries(entries),
             protocol=Whole(1),
             revision=Identifier("abc1234"),
-            mac=DeviceId(DEVICE),
+            mac=DeviceId(device),
             said_client=ClientId("a-device-uuid"),
             bound_tail=AlsoBoundTo.of(()),
             sample_rate=Whole(16000),
