@@ -297,8 +297,9 @@ the SDK's `OTEL_EXPORTER_OTLP_*` environment variables, which is the issue's
 own decision and the locality rule applied: a second home in this file for
 facts the SDK already reads is two homes that can disagree. The supported
 transport is OTLP over HTTP/protobuf exactly, so an
-`OTEL_EXPORTER_OTLP_PROTOCOL` naming anything else is refused at boot rather
-than half-honored.
+`OTEL_EXPORTER_OTLP_TRACES_PROTOCOL`, or the general
+`OTEL_EXPORTER_OTLP_PROTOCOL` behind it, naming anything else is refused at
+boot rather than half-honored.
 
 What a span may carry is not configurable either. The resource is server-owned
 (the fixed service name and this build's revision), and span content is

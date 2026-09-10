@@ -104,9 +104,18 @@ OTLP_PROTOCOL_ENV = "OTEL_EXPORTER_OTLP_PROTOCOL"
 OTLP_TRACES_PROTOCOL_ENV = "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL"
 SUPPORTED_PROTOCOL = "http/protobuf"
 
+# Both variables, and which of them wins, because an operator can only
+# act on a sentence that names the one they have to edit. The SDK reads
+# the traces-specific variable in front of the general one, so a
+# deployment with a bad value in the specific one and a good value in
+# the general one is refused by a sentence that named only the general
+# one, and following that sentence changes nothing. Value-free, like
+# every refusal here: what is quoted is this repository's own words.
 UNSUPPORTED_PROTOCOL = (
     f"{TELEMETRY_KEY} is on, and this server exports over {SUPPORTED_PROTOCOL} "
-    f"only; set {OTLP_PROTOCOL_ENV} to {SUPPORTED_PROTOCOL} or leave it unset"
+    f"only; set {OTLP_TRACES_PROTOCOL_ENV} to {SUPPORTED_PROTOCOL} or leave it "
+    f"unset, and the same for {OTLP_PROTOCOL_ENV}. The traces-specific "
+    f"variable is the one that decides where both are set"
 )
 
 # And what an exporter that would not build at all is refused with.
