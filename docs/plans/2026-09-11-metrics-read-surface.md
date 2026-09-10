@@ -107,40 +107,50 @@ shapes, and are imported by both `conversations/api.py` and `config/cli.py`.
 That is what lets the CLI validate a response without importing FastAPI,
 SQLAlchemy or the store, which is why those shapes live there today.
 
-### The trend horizon: no snapshots in this issue, and the design recorded so it is not re-derived
+### The trend horizon: no snapshots, and the constraints any future one must meet
 
-The issue calls this its real design work, so this is a decision with reasons
-rather than a deferral.
+The issue calls this its real design work, so this is a decision with reasons.
 
-**No snapshot table now.** Three reasons, in order of weight:
+**No snapshot table.** Three reasons, in order of weight:
 
-1. **The consumers do not exist yet.** The admin UI (#129) and budgets are what
+1. **The consumers do not exist.** The admin UI (#129) and budgets are what
    would say what grain a snapshot needs, and neither is built. Snapshotting the
-   wrong grain is more expensive than not snapshotting, because a durable table
-   with rows in it is what nobody can change their mind about.
-2. **`retention_days` defaults to 90.** There are three months of slack before
-   any data ages out of the live views, so deferring costs nothing measurable
-   now and buys the information above.
+   wrong grain costs more than not snapshotting, because a durable table with
+   rows in it is what nobody can change their mind about.
+2. **`retention_days` defaults to 90**, so there are three months of slack
+   before anything ages out of the live views.
 3. **A snapshot would freeze a caveat rather than fix it.** The views already
-   say that a rate read outside the events' own retention window is a floor and
-   not a measurement, because the database cannot tell zero events from events
-   already pruned. A snapshot taken today inherits that and then makes it
-   permanent and unlabelled.
+   say a rate read outside the events' own retention window is a floor and not a
+   measurement, because the database cannot tell zero events from events already
+   pruned. A snapshot taken today inherits that and makes it permanent and
+   unlabelled.
 
-**The shape is decided anyway, so this surface does not preclude it**, which is
-the same commitment the issue already makes about a per-user key. Responses are
-shaped so a snapshot-backed row is indistinguishable from a live one: every row
-carries its `day` and its denominators, nothing in the response says "computed
-live", and no windowing parameter is defined in terms of retention.
+**So this issue serves live views over whatever rows survive the store's
+asymmetric retention**, and the surface says so rather than implying the numbers
+are complete.
 
-**And the mechanism is recorded, because it is the non-obvious part.** The
-server has no periodic scheduler: the retention prune runs at writer start and
-after each session close, event-driven. A snapshot writer needs no scheduler
-either. At the same hook, if a completed UTC day has no snapshot row, write it
-from the views. That is idempotent, needs no new machinery, and its only gap is
-a deployment quiet for longer than retention, which is exactly the deployment
-with nothing to lose. Filed as a follow-up with this paragraph in it rather than
-built here.
+**The shape does not preclude one**, which is the commitment the issue already
+makes about a per-user key: rows carry their `day` and their denominators,
+nothing in a response says "computed live", and no parameter is defined in terms
+of retention.
+
+The first draft went further and sketched a mechanism, riding the retention
+prune's existing hook. **That sketch was wrong and is deleted rather than
+patched**, which the review round records. `_prune` runs at writer start and
+after session close, it **deletes first**, and it does not run at all when
+`retention_days <= 0`; recording-off starts no writer. So a quiet deployment
+does have something to lose immediately before the startup prune, and old turns
+can survive in active conversations whose events are already gone.
+
+What replaces it is the constraint list a future design has to satisfy, so the
+next person starts from what was learned rather than from the same sketch:
+
+- It must run **before** destructive pruning, not beside it.
+- It must work with recording disabled and with `retention_days` at zero.
+- It needs its own retention and its own erasure behaviour, since it would
+  outlive the rows it summarizes.
+- It must preserve whether a rate was **already only a floor** when it was
+  taken, or it will report a floor as a measurement forever.
 
 ### The device dimension, decided with the maintainer
 
@@ -198,16 +208,35 @@ applied to it in the implementation doc.
 
 ## Tests
 
-- Reuse `tests/unit/test_conversations_api.py` and the view tests from #439
-  rather than restating their fixtures.
-- The windowing bounds: a window larger than the cap is refused with the fixed
-  sentence, not silently clamped.
-- The storage-switch answers, both levels, asserted as the sentence and the
-  status rather than as "it did not crash".
-- The per-device rows: two devices in one day, asserted to separate; a session
-  with a null `device` asserted not to invent one.
-- The generated-artifact drift checks, which CI runs and which a milestone that
-  edits a reference by hand fails.
+Reusing `tests/unit/test_conversations_api.py` and #439's view tests rather than
+restating their fixtures.
+
+- **The request contract, boundary by boundary**: each parameter's default, both
+  inclusive ends, a window at the 366-day cap and one past it, a malformed date,
+  an unknown `group`, `device` given without `group=device`, the total ordering,
+  and an empty window answering as an empty list.
+- **No-leak on request-controlled values.** Hostile and control-character values
+  sent as `{view}`, `group` and `device` through both the API and the CLI, with
+  the assertion that they appear in no response body, no stderr, and no emitted
+  record in either log format. This is the pin behind the closed mapping.
+- **The switch behaviours, as sentences and statuses** rather than as "it did
+  not crash": recording off with prior history, a deployment that never
+  recorded, and telemetry off asserted **per view**, since the latency view
+  produces no row while the event-rate view keeps denominators and loses
+  numerators.
+- **The caveats reach both surfaces.** Semantic assertions, not drift checks: a
+  drift check proves an artifact matches its generator, never that the generator
+  kept anything. The zero-denominator rule, the retention-floor warning, the
+  missing-measurement ambiguity and each view's own telemetry-off sentence are
+  asserted present on the API descriptions and in the CLI's output.
+- **The null-device join.** One session with a null `device` that contributes a
+  turn and a counted event, asserted to produce **exactly one** combined row with
+  correct denominators and rates. Two of the views combine independently
+  aggregated streams with full outer joins, and ordinary equality does not join
+  two SQL nulls, so this is what catches three separate null rows.
+- **The upgrade.** A database at `1006_metrics_views` migrated forward, with the
+  four original views asserted to survive and still answer, since the per-device
+  views are additive siblings and not replacements.
 
 ## Risks
 
