@@ -11,12 +11,14 @@ checklist.
 A turn a field tester asks about becomes one trace a backend can
 render, instead of an hour of log archaeology. The server gains an
 optional OpenTelemetry exporter that derives one trace per
-conversation turn from the events the pipeline already emits, sends
-it over OTLP to whatever collector the standard environment variables
-name, and costs nothing at all when it is off, which it is by
-default. The exporter is a tap on the one emission seam the events
-package already promises to #66 by name; it touches no emit site and
-invents no second vocabulary.
+conversation turn from the events the pipeline emits, sends it over
+OTLP to whatever collector the standard environment variables name,
+and costs nothing at all when it is off, which it is by default. The
+exporter is a tap on the one emission seam the events package already
+promises to #66 by name; it touches no emit site and invents no
+second vocabulary. Where the catalog does not yet speak a fact a
+trace needs, the catalog grows first, as its own milestone, so the
+one vocabulary stays the only one.
 
 ## The issue's decisions, restated
 
@@ -27,8 +29,8 @@ re-litigated here:
   `vad` records stay in the capture JSONL. The structured event log
   remains the source of truth.
 - One trace per turn, from utterance end (or barge-in) to reply
-  completion, with spans for ASR, each LLM round, TTS synthesis, and
-  playback pacing.
+  completion, with spans for ASR, each LLM round, TTS synthesis per
+  sentence, and playback pacing.
 - Session-level context on every span: session id (the capture
   filename stem), agent name, device id, build revision, resolved
   provider entries.
@@ -66,12 +68,20 @@ and the one the no-leak suite already covers ("an attached server
 tap" is a checked surface). The tap contract gives the exporter a
 deep copy of each payload and a guard that reports a raising tap
 once; the exporter adds its own never-block discipline on top, below.
+The server tap is attached and its detach registered in the same
+breath, the `app.py` pattern, and teardown runs in one order: the
+lifespan stops accepting session emissions, detaches the server tap,
+then shuts the exporter down with a bounded timeout. The exporter
+owns its `TracerProvider` outright and never touches OTel's
+process-global provider, so two sequential app lifespans in one
+process each get a fresh, working exporter, and a partial startup
+failure releases whatever was built.
 
 ### How spans get their timestamps
 
 Retrospectively, from the emission stamps and the durations the
-events already carry. `SessionEvents.emit` returns the monotonic
-stamp it read; an `llm_round` event carries `duration_ms` and
+events carry. `SessionEvents.emit` returns the monotonic stamp it
+read; an `llm_round` event carries `duration_ms` and
 `first_token_ms`, so its span is constructed at emission time with
 `start = at - duration_ms` and an event at `first_token_ms`. OTel
 accepts explicit start and end times, so nothing needs to observe a
@@ -81,57 +91,95 @@ when it is built (both clocks read back to back) and converts every
 stamp with it, so all spans in a process share one mapping and the
 inter-span arithmetic stays exact.
 
-### What the turn's root span is
+### The trace lifecycle: a session trace, turn traces linked to it
 
-The root span opens at utterance end and closes at reply completion,
-both read from events: `heard` marks the utterance (its stamp minus
-the ASR time is utterance end; its `duration_s` is how long the user
-spoke), `replied` marks completion however the reply ended, since the
-pipeline emits it from the reply task's `finally`. A barge-in turn is
-the same shape: `barge_in` lands as a span event on the turn it cut
-short, and the interrupting utterance opens its own trace. A turn
-that dies without `replied` (device gone mid-reply) is closed by
-`session_closed`, with the close reason as a span attribute, so no
-span leaks open past its session.
+Two kinds of trace, so every event has a destination:
 
-### The vocabulary gap: one field, one home
+- **The session-lifecycle trace.** One root span per device session,
+  opened at `session_open` and closed at `session_closed` with the
+  close reason as an attribute. Events with no turn land here as
+  span events: `session_idle`, `capture_started` (a server-channel
+  event carrying its session id), `handover`, and any turn-scoped
+  stragglers that arrive when no turn is open. A `capture_started`
+  that precedes `session_open` is held briefly and folded when the
+  session span opens, keyed by its session id.
+- **Turn traces, linked not parented.** Each turn is its own trace
+  with its own trace id, carrying an OTel span link to the session
+  span, so a backend can list a session's turns without every turn
+  hiding inside one giant trace. The turn's root span opens at the
+  new `turn_started` event (below), which is emitted for every reply
+  attempt at the utterance-end instant, and closes at the new
+  `reply_finished` event, which the reply task's `finally` emits
+  unconditionally with a closed outcome. A turn whose
+  `reply_finished` never arrives (the process dies) is dropped, not
+  guessed: the batch queue is lost with the process, which is the
+  accepted posture.
 
-Deriving spans strictly from the catalog exposes one missing fact:
-no event carries the ASR latency. `heard` is emitted when
-transcription completes and carries the utterance's `duration_s`, but
-the transcription time itself lives only in the turn accumulator and
-the conversations record. Under the one-vocabulary rule the fix is to
-add the fact to the catalog, not to smuggle it through a side
-channel: `heard` gains an `asr_ms` field, the same number
-`turns.asr_ms` stores, measured at the same site. That is a payload
-key on a pinned surface, so the baseline driver, `events.md` and the
-event pins move deliberately in the same change.
+### The catalog delta: the turn lifecycle becomes vocabulary
 
-No other stage needs a new fact for the issue's acceptance criteria:
-LLM rounds carry their numbers on `llm_round`, first sentence audio
-latency is on the record and the speaking window is bounded by
-`speaking_started` and `replied`. Per-sentence TTS synthesis spans,
-which the issue's proposal sketch mentions, are cut to what the
-vocabulary carries: one TTS-and-playback span per turn (the speaking
-window) with `spoken` sentence count, rather than a per-sentence
-ladder that would need several new catalog variants. If per-sentence
-depth earns its way in later, it arrives as catalog events first, by
-this same rule. This narrowing is a recorded deviation from the
-proposal sketch; the acceptance criterion says ASR, LLM and TTS
-spans, and it is met.
+Deriving spans strictly from the catalog exposes that the catalog
+does not yet speak the turn's own lifecycle. The gap is closed in
+the catalog, as milestone 1, before any OTel code exists, so both
+the exporter and every other consumer read the same facts:
 
-### `frames_dropped` is not an event, and stays out
+- **`turn_started`**, emitted at the utterance-end instant for every
+  reply attempt, on both paths into a reply: the ordinary
+  endpointed/manual-stop path and the confirmed barge-in path, where
+  the stamp is the one the gate preserved from the interrupting
+  utterance's end, not the confirmation's completion. Fields:
+  `speech_ms` (how long the user spoke) and `barge_in: bool`.
+- **`reply_finished`**, emitted unconditionally from the reply
+  task's `finally`, with `outcome` from a closed set chosen by
+  exception type at the sites that already classify
+  (`completed`, `nothing_heard`, `failed`, `barged_in`,
+  `device_gone`), plus `sentences_spoken`. `replied` keeps its
+  present meaning (one or more ordinary sentences finished) and its
+  present guard; consecutive silent or failed turns in one still-open
+  session each get their own completed pair.
+- **`heard` gains `asr_ms`**, the transcription latency, measured at
+  the site that already measures it. On the confirmed barge-in path,
+  where the reply reuses the gate's transcription, `heard` carries
+  the confirmation ASR's own measured latency rather than Absent, so
+  the interrupting turn's ASR span is as real as an ordinary one;
+  the gate measures it at its decision site in `turntaking`.
+- **`nothing_heard`**, the missing ASR outcome: emitted where empty
+  transcription is currently a log-only branch, with `duration_s`
+  and `asr_ms` and no text field at all, by type. This is the
+  issue's motivating Gap C (a 0.9 s utterance transcribed to
+  nothing) becoming a first-class event; ASR failure keeps
+  `provider_failed` as its outcome. Between the three, every
+  `turn_started` is followed by exactly one ASR outcome.
+- **`sentence_synthesized`**, one per reply sentence, emitted when a
+  sentence's synthesis completes: `index`, `synthesis_ms`, and
+  `first_audio_ms` for index 0 where the reply already measures it.
+  This is the per-sentence TTS fact the issue requires, measured at
+  the `speak_after` seam that already distinguishes synthesis from
+  playback.
+- **`frames_dropped` promoted.** The capture's per-second aggregate
+  (`second`, `reasons` with server-owned reason keys) becomes a
+  typed catalog variant, and the capture JSONL and the tap both
+  consume the one declaration; the per-frame `dropped()`/`vad()`
+  calls stay outside the tap contract exactly as they are. The
+  exported form is the bounded aggregate, so the high-frequency
+  objection does not arise.
+- **`session_open` deepened with resolved providers.** The sanitized
+  resolved provider entries (the quartet: name, type, host, model,
+  per stage, per agent) join `session_open`, sourced from the same
+  sanitized derivation the session's provider manifest already uses,
+  so the exporter reads provider context from the catalog rather
+  than a private manifest. After a handover the active agent
+  changes, and the exporter switches which agent's entries it stamps
+  on subsequent spans by reading `handover`; the entries themselves
+  were all declared at `session_open`. A mid-session `apply` that
+  changes providers is out of trace scope for this issue: spans
+  after an apply may carry the open-time entries, stated in the
+  reference.
 
-The issue lists `frames_dropped` among the one-shot events that
-become span events. The census found it is not an event at all: it is
-a per-second aggregated dict written straight into the capture JSONL
-through `SessionEvents.dropped()`, which is deliberately outside the
-tap contract for the same reason `vad()` is (a consumer of events has
-no meaning for it). Promoting it to a catalog variant just to export
-it would put a high-frequency capture fact onto the metadata surface
-against the grain of both designs. It stays capture-only, by the same
-argument the issue itself makes for excluding `vad`. Recorded here as
-a deviation from the issue's letter.
+Every addition is a payload change on a pinned surface: the baseline
+driver, `events.md`, the event pins and the conversations docgen
+move deliberately in the same milestone, the #437 discipline. The
+closed `outcome` set is declared in `values.py` with one variant per
+outcome, reachable each from a real decision site.
 
 ### `barge_in_suppressed` is three variants
 
@@ -141,7 +189,8 @@ fields. All three map to span events named by their event name with
 their existing fields; the acceptance criterion ("a barge-in
 suppression appears as a span event with its existing reason field")
 is met three-to-one, keeping the closed reason set exactly as the
-decision sites chose it.
+decision sites chose it. They land on the turn trace that was being
+spoken over when one is open, else on the session span.
 
 ### Config shape
 
@@ -151,10 +200,17 @@ never. `TelemetryConfig` is `extra="forbid"` like everything else and
 carries exactly one field today, `enabled: bool = False`. Endpoint,
 protocol, headers and timeouts stay with `OTEL_EXPORTER_OTLP_*` per
 the issue's decision; duplicating them into vinga config would be a
-second home for facts the SDK already reads. `service.name` defaults
-to `vinga-server` via the SDK resource, overridable with
-`OTEL_SERVICE_NAME`; the build revision rides the resource as
-`service.version`.
+second home for facts the SDK already reads. `service.name` is fixed
+to `vinga-server` and the resource is built entirely from
+server-owned values (service name, build revision as
+`service.version`); no environment-derived resource attributes are
+read, per the restriction-at-the-source invariant. The supported
+transport is OTLP over HTTP/protobuf, exactly: the extra depends on
+`opentelemetry-exporter-otlp-proto-http` alone, the generated
+reference says so, and an `OTEL_EXPORTER_OTLP_PROTOCOL` naming
+anything else is refused at build time with a sentence naming the
+supported value, rather than half-honoring a variable the
+distribution cannot serve.
 
 ### The two refusals, and where each lives
 
@@ -165,41 +221,63 @@ to `vinga-server` via the SDK resource, overridable with
   `BOOT_FAILURES`), raised in the telemetry build, not a pydantic
   validator: whether a package is installed is not a config
   cross-field fact, so the `BOOT_REFUSALS` registry is untouched and
-  its sweep stays green. The refusal message is pinned by a test that
-  fakes the import failure, the `test_providers.py` precedent, so the
-  pin runs in every lane whatever is installed.
-- **`local_only`.** The exporter sends session metadata to wherever
-  the environment points, and the server does not parse that
-  environment to guess locality, so under the recorded decision it
-  declares egress unconditionally: `server.local_only: true` with
-  `telemetry.enabled: true` refuses at startup, with a sentence
-  naming both keys. An operator running a genuinely local collector
-  under `local_only` cannot trace today; that is the strict reading
-  of the recorded decision, taken deliberately, and relaxing it later
-  (an explicit locality declaration, the `openai_compatible`
-  precedent) would be its own recorded change. The refusal is a
-  cross-field fact between two config keys, but it crosses the
-  file-half/composition seam the same way the provider egress check
-  does, so it lives beside the egress machinery in the composition
-  build, not as a model validator; if review prefers the
-  `BOOT_REFUSALS` registry route, the condition is expressible there
-  and the plan bends.
+  its sweep stays green. Pinned twice: a unit test that fakes the
+  import failure (the `test_providers.py` precedent) so the sentence
+  is pinned in every lane, and a tier-lane boot in the real `[serve]`
+  environment, where the packages are genuinely absent, asserting
+  the genuine refusal.
+- **`local_only`.** Egress enforcement has one home, `egress.py`,
+  and it stays one: the module gains a generic declared-egress check
+  (a declaration that is not a provider class, the MCP
+  operator-declaration shape) and the telemetry build invokes it
+  before any OTel import, exporter construction or thread creation,
+  so under `server.local_only: true` with `telemetry.enabled: true`
+  the refusal is the egress module's fixed, value-free sentence
+  naming both keys, translated to `ConfigError` with no exception
+  chain, and the exporter constructor is provably never reached. An
+  operator running a genuinely local collector under `local_only`
+  cannot trace today; that is the strict reading of the recorded
+  decision, taken deliberately, and relaxing it later (an explicit
+  locality declaration, the `openai_compatible` precedent) would be
+  its own recorded change.
 
 ### Never blocking, concretely
 
 The tap's `emit` runs synchronously on the reply path, so it does
 what `LiveEvents` does: bounded work, no locks shared with the
 export, no syscalls. Span construction is object assembly; the SDK's
-`BatchSpanProcessor` owns the queue and the background thread, and
-its queue is bounded and drops with a counter, which is exactly the
-"dropped spans are acceptable, a stalled reply is not" posture. Two
-sharp edges get explicit treatment: shutdown (the processor's flush
-gets a bounded timeout and runs in the lifespan release, never on a
-session's close path) and the exporter's own logging (the OTel SDK
-logs export failures through `logging`; those loggers are pointed at
-a quiet level so an unreachable collector does not spray the
-structured log, and none of its output reaches the event surface,
-which the AST guard and the no-leak sentinels already police).
+`BatchSpanProcessor` owns the bounded queue and the background
+thread, and a full queue drops with a counter, which is exactly the
+"dropped spans are acceptable, a stalled reply is not" posture. The
+hardening lands in the same milestone that first exports, not later:
+bounded shutdown in the lifespan release, detach ordering as above,
+SDK logging protection installed before the exporter is constructed
+and restored at shutdown, and a saturation test that replaces the
+transport with a deliberately blocking exporter behind a tiny batch
+queue, drives enough turns to fill it, and asserts a fixed upper
+bound on every scripted reply's latency, so the certificate is about
+the path that hurts, not the path that fails fast.
+
+### No-leak, at the exporter's real inputs
+
+The dangerous bytes enter below the catalog: `OTEL_EXPORTER_OTLP_*`
+headers (collector credentials by design), endpoint userinfo, and
+the SDK's own failure logging, which embeds the endpoint. The
+treatment, all pinned by planted sentinels:
+
+- Endpoint and headers are transport configuration only: they reach
+  the exporter's constructor and never become span attributes,
+  resource attributes, event fields or log text.
+- The resource is fixed and server-owned, as above; no
+  `OTEL_RESOURCE_ATTRIBUTES` or `OTEL_SERVICE_NAME` pass-through.
+- SDK loggers are quieted before construction and restored at
+  shutdown; nothing SDK-side reaches an emitter (the AST guard
+  already forbids the way back in).
+- Sentinels: a credential-shaped value planted in the OTLP headers
+  env var, in endpoint userinfo, in `OTEL_SERVICE_NAME`, and in an
+  event payload, asserted absent from exported span data (decoded),
+  from both log formats, from stderr, and from exception chains
+  during a failed export.
 
 ### What the lanes test without the extra
 
@@ -208,10 +286,11 @@ span-mapping logic is vinga logic and runs in every unit lane, unlike
 the engine wrappers whose extras stay out of `dev` for weight. The
 SDK is small, pure Python and Apache-2.0 (no licensing pressure of
 the piper kind), so the contributor-checkout weight argument that
-keeps `faster-whisper` and `piper` out does not apply. Unit tests drive the tap with the SDK's in-memory exporter
-and assert span structure, attributes and the gen_ai mapping;
-missing-extra behavior is pinned by faking the import, as above. The
-tier-closure lane gets the `otel` fixture the way `sim` arrived, and
+keeps `faster-whisper` and `piper` out does not apply. Unit tests
+drive the tap with the SDK's in-memory exporter and assert span
+structure, attributes and the gen_ai mapping; missing-extra behavior
+is pinned both faked and real, as above. The tier-closure lane gets
+the `otel` fixture the way `sim` arrived, and
 `tests/support/tiers.py` gains the distribution-to-import-name rows
 so the wheel metadata check closes over the third extra.
 
@@ -222,15 +301,16 @@ Two layers, per the acceptance criteria:
 - **In CI:** an integration test boots the server with telemetry
   enabled and `OTEL_EXPORTER_OTLP_ENDPOINT` pointed at a stub OTLP
   HTTP receiver in the test process, drives one simulator turn, and
-  asserts a trace arrives whose spans decode (the proto package rides
-  the exporter dependency) with the expected names, parentage and
-  `gen_ai.*` attributes. A second integration case blackholes the
-  endpoint (a non-routable address with a short SDK export timeout
-  via the standard env vars) and asserts the turn's reply latency is
-  indistinguishable from the telemetry-off baseline.
+  asserts a trace arrives whose spans decode (the proto package
+  rides the exporter dependency) with the expected names, links,
+  parentage and `gen_ai.*` attributes. The hostile-collector cases
+  are the saturation test above plus a blackholed endpoint, and the
+  latency assertion is a fixed bound per scripted reply against the
+  scripted providers' known timings, not an undefined
+  "indistinguishable".
 - **By hand, recorded on the PR:** Jaeger all-in-one from its
-  published image, one simulator conversation, the trace queried over
-  Jaeger's API; the walkthrough lands in the PR's verification
+  published image, one simulator conversation, the trace queried
+  over Jaeger's API; the walkthrough lands in the PR's verification
   section with what was seen. Langfuse is deliberately not part of
   this issue's verification; it is #67's.
 
@@ -250,19 +330,26 @@ extras generally.
 One new module, `src/vinga_server/telemetry.py`: the whole OTel
 surface behind one seam. Its callers stop having to know that
 OpenTelemetry exists: the composition asks
-`build_telemetry(config) -> Telemetry | None` (None when disabled,
-and the refusals above are this function's), the device session asks
-the built object for a per-session tap the way it already attaches
-`LiveEvents`, and the lifespan release calls its bounded `shutdown`.
-Everything else, the SDK bootstrap, the clock offset, the span map,
-the event-to-span-event fold, the gen_ai attribute table, is
-implementation. The OTel imports happen inside the build function
-(the registry's `_resolved` pattern), so the module imports clean
-without the extra. The mapping table the conversation-store plan
-promised ("#66/#67 exporters map by reading one table") is a literal
-dict in this module: event field to OTel attribute, with the
-deliberate non-correspondences (`provider`, `type`, `host` keep
-vinga's names as plain attributes) stated beside it.
+`build_telemetry(config) -> Telemetry | None` (None when disabled;
+the missing-extra refusal is this function's, and the egress check
+runs before it imports anything), the device session asks the built
+object for a per-session tap the way it already attaches
+`LiveEvents`, and the lifespan release calls its bounded `shutdown`
+after detaching. Everything else, the SDK bootstrap, the owned
+tracer provider, the clock offset, the trace lifecycle, the
+event-to-span-event fold and the attribute table, is implementation.
+The OTel imports happen inside the build function (the registry's
+`_resolved` pattern), so the module imports clean without the extra.
+
+The attribute mapping is the settled correspondence table from the
+conversation-store plan, shipped exactly: `type` to
+`gen_ai.provider.name`, `model` to `gen_ai.request.model`, `host` to
+`server.address`, `input_tokens`/`output_tokens` to
+`gen_ai.usage.input_tokens`/`gen_ai.usage.output_tokens`. Only
+`provider`, the configured entry name, is vinga-specific and stays a
+plain attribute. The table is a literal dict in this module, and the
+tests pin exact keys and values both in-memory and decoded from
+OTLP.
 
 The deletion test holds: inlining this into the composition would
 put SDK bootstrap and span assembly into a module whose job is
@@ -279,93 +366,115 @@ scope is its own decision and not this plan's.
 Reusing the assets that exist; new tests only where the surface is
 new:
 
-- **Unit, span structure:** drive `SessionEvents` with the baseline
-  driver's event shapes through the telemetry tap into the in-memory
-  exporter; assert per-turn root span, ASR/LLM/TTS child spans,
-  span-event fold for the one-shot events, session attributes,
-  gen_ai mapping, and the three-variant barge-in suppression fold.
+- **Unit, catalog delta (M1):** every new variant and field gets a
+  baseline driver; `events.md`, the pins and the docgen move in the
+  same change; the `outcome` set's variants each have a reachable
+  decision site; consecutive silent and failed turns in one session
+  each produce their `turn_started`/`reply_finished` pair; both
+  barge-in confirmation outcomes (successful and empty) produce
+  honest `heard`/`nothing_heard` with measured `asr_ms`; lookahead
+  synthesis overlapping playback produces `sentence_synthesized`
+  intervals that overlap the speaking window, pinned as such.
+- **Unit, span structure (M2/M3):** drive `SessionEvents` with real
+  event sequences (the baseline driver's shapes, in pipeline order,
+  including capture-before-open, idle between turns, and close with
+  no open turn) through the telemetry tap into the in-memory
+  exporter; assert the session span, linked turn traces, stage
+  spans, the span-event fold, session attributes and the exact
+  gen_ai keys.
 - **Unit, refusals:** the missing-extra sentence (faked import), the
-  `local_only` conflict sentence, and both refusal types staying
-  inside `BOOT_FAILURES`.
-- **Unit, no-leak:** the existing planted-credential sentinels
-  already sweep attached taps; add the telemetry tap to that sweep
-  so a credential-shaped value planted in an event never reaches an
-  exported span's attributes, in either rendering.
-- **Unit, catalog delta:** `heard.asr_ms` moves the baseline,
-  `events.md` and the pins in one deliberate commit; the docgen
-  drift check proves the regenerated page.
-- **Unit, config:** `server.telemetry` in `config.example.yaml`
-  satisfies the every-field sweep; unknown keys refused by
-  `extra="forbid"` as everywhere.
-- **Integration:** the stub-receiver trace assertion and the
-  blackholed-endpoint latency case, above; the tier-closure `otel`
-  fixture; the existing wheel lane picks up the `tiers.py` rows.
+  `local_only` refusal coming from the egress module's check with
+  the exporter constructor never reached, the unsupported-protocol
+  refusal, and all refusal types inside `BOOT_FAILURES`.
+- **Unit, no-leak:** the sentinel battery over headers, endpoint
+  userinfo, `OTEL_SERVICE_NAME`, and event payloads, asserted
+  absent from decoded exported spans, both log formats, stderr and
+  exception chains during a failed export.
+- **Unit, lifecycle:** two sequential enabled lifespans in one
+  process; partial startup failure releases what was built; detach
+  ordering; a span's converted end equals its event's converted
+  stamp (the one-offset pin).
+- **Integration:** the stub-receiver trace assertion; the blocking-
+  exporter saturation case with a fixed per-reply bound; the
+  blackholed endpoint; the real `[serve]`-tier boot against the
+  genuine missing-extra refusal; the tier-closure `otel` fixture;
+  the wheel lane picks up the `tiers.py` rows.
 - **Byte-for-byte off:** the existing suites running with no
   `telemetry` section are themselves the proof the default path is
-  untouched; the tap is simply never built, and a characterization
-  assertion pins that `build_telemetry(None)` is None and attaches
-  nothing.
+  untouched past M1's event additions; `build_telemetry(None)` is
+  None and attaches nothing, pinned.
 
 ## Risks
 
-- **The catalog delta ripples.** Touching `Heard` moves the baseline,
-  the docs and several pins at once. Mitigation: it is one field in
-  one commit with the regenerations in the same change, the #437
-  discipline.
-- **The SDK's background thread meets the test lanes.** A batch
-  processor thread per test server could leak across tests or hang a
-  worker at exit. Mitigation: tests use the in-memory exporter
-  (no thread) except the two integration cases, which shut the
-  processor down with a bounded timeout in teardown; the bounded-
-  runner rule from #283 applies to the stub receiver.
-- **Clock skew inside a trace.** Mixing the offset conversion with
-  any direct `time.time()` read would let spans disagree with their
-  own events. Mitigation: the offset is the only conversion site,
-  by construction in one module, and a test pins that a span's end
-  equals its event's converted stamp.
-- **The exporter's own logging leaks.** The SDK logs transport
-  errors with prose that may embed the endpoint URL. Mitigation:
-  quiet the SDK loggers at build time; the no-leak sentinel sweep
-  covers the attached tap; nothing SDK-side ever reaches an emitter.
+- **The catalog delta is the widest since the events re-cut.** Five
+  new or deepened variants move the baseline, `events.md` and many
+  pins at once. Mitigation: it is its own milestone with no OTel
+  code in it, one variant per commit, the #437 discipline per
+  commit; the exporter cannot drift from the vocabulary because it
+  does not exist yet.
+- **`turn_started` on the barge-in path crosses the gate.** The
+  utterance-end stamp must survive from `finish_utterance` through
+  confirmation to `start_reply`. Mitigation: the stamp travels with
+  the transcription result the gate already hands over; a pin
+  asserts the emitted stamp predates the confirmation ASR's
+  completion.
+- **The SDK's background thread meets the test lanes.** Mitigation:
+  unit tests use the in-memory exporter (no thread); the
+  integration cases shut down with a bounded timeout in teardown;
+  the bounded-runner rule from #283 applies to the stub receiver.
+- **Clock skew inside a trace.** Mitigation: the offset is the only
+  conversion site, by construction in one module, and the lifecycle
+  pin above.
+- **The exporter's own logging leaks.** Mitigation: the no-leak
+  battery above, installed-before-construction ordering, restored
+  at shutdown.
 - **Filterwarnings is `error`.** Any OTel deprecation warning fails
   the lane. Mitigation: pin the SDK lower bound to a current
   release; allowlist nothing until a real warning forces a decision.
 
 ## Milestones
 
-- [ ] **M1: the switch, the seam and the turn trace.** The `[otel]`
-  extra (pyproject, `dev` group, `tiers.py` rows), the
-  `server.telemetry` section with both example configs and the
-  generated reference, both boot refusals with their pinned
-  sentences, and `telemetry.py` building a real tracer that exports
-  the per-turn root span with the session-level attributes. Design
-  footprint: deepens the composition (one more built-and-released
-  member) and adds the `telemetry.py` adapter at the events seam;
-  callers stop knowing OpenTelemetry exists. Documentation
-  footprint: generated `server-config.md` moves via its generator;
-  `config.example.yaml` and `config.deploy.example.yaml` in the same
-  change as the schema; CHANGELOG. Releasable alone: enabled means
-  honest (thin) turn traces, disabled means today's server.
-- [ ] **M2: the span map.** `heard.asr_ms` (catalog, baseline,
-  `events.md`, pins, one commit), ASR/LLM/TTS child spans, gen_ai
-  attributes on LLM round spans, the span-event fold for the
-  one-shot events including the three barge-in suppression variants,
-  the session-closed backstop for turns that never replied, and the
-  no-leak sweep extension. Design footprint: deepens `telemetry.py`
-  only; the catalog change is one field in its one home.
-  Documentation footprint: generated `events.md` and
-  `conversations-schema.md` cross-reference via generators;
-  CHANGELOG.
-- [ ] **M3: hostile collectors, the proof, and the image.** The stub
-  OTLP receiver integration test, the blackholed-endpoint latency
-  case, bounded shutdown in the lifespan release, quieted SDK
-  loggers, `[otel]` in both image variants with the extras-import
-  check, the tier-closure fixture, and the Jaeger all-in-one
-  walkthrough recorded on the PR. Documentation footprint:
-  `docs/architecture/observability-surfaces.md` gains the exporter
-  as a surface with its retention answer (the collector's backend
-  owns retention; vinga sends and forgets), and its still-open list
-  drops #66; CHANGELOG.
+- [ ] **M1: the catalog speaks the turn lifecycle.** `turn_started`,
+  `reply_finished` with its closed outcome set, `heard.asr_ms`
+  including the confirmed barge-in measurement, `nothing_heard`,
+  `sentence_synthesized`, the `frames_dropped` promotion with
+  capture reading the one declaration, and `session_open` deepened
+  with the sanitized resolved provider entries. No OTel anywhere.
+  Design footprint: deepens the catalog and the decision sites that
+  already classify; no new module. Documentation footprint:
+  generated `events.md` and `conversations-schema.md` via their
+  generators; CHANGELOG. Releasable alone: richer events, nothing
+  else moves.
+- [ ] **M2: the switch, the seam and the hardened exporter.** The
+  `[otel]` extra (pyproject, `dev` group, `tiers.py` rows, tier
+  fixture), `server.telemetry` with both example configs and the
+  generated reference, the egress-module extension and both boot
+  refusals with their pinned sentences (faked and real-tier), and
+  `telemetry.py` with the owned tracer provider, fixed server-owned
+  resource, HTTP/protobuf-only transport with the
+  unsupported-protocol refusal, attach-and-detach lifecycle, bounded
+  shutdown, SDK log protection, the saturation test, and the
+  session-lifecycle trace plus linked turn root spans. Design
+  footprint: deepens `egress.py` (one generic check both callers
+  read) and the composition; adds the `telemetry.py` adapter at the
+  events seam; callers stop knowing OpenTelemetry exists.
+  Documentation footprint: generated `server-config.md` via its
+  generator; `config.example.yaml` and `config.deploy.example.yaml`
+  in the same change as the schema; CHANGELOG. Releasable alone:
+  enabled means honest session-and-turn traces, disabled means
+  today's server.
+- [ ] **M3: the full span map, the proof and the image.** ASR spans
+  from the three outcomes, LLM round spans with the settled gen_ai
+  mapping, per-sentence TTS spans, the playback-pacing span, the
+  span-event fold including the three barge-in suppression variants
+  and the promoted `frames_dropped`, the stub OTLP receiver
+  integration test, the blackholed-endpoint case, `[otel]` in both
+  image variants with the extras-import check, and the Jaeger
+  all-in-one walkthrough recorded on the PR. Documentation
+  footprint: `docs/architecture/observability-surfaces.md` gains the
+  exporter as a surface with its retention answer (the collector's
+  backend owns retention; vinga sends and forgets), and its
+  still-open list drops #66; CHANGELOG.
 
 ## Plan review round
 
@@ -384,12 +493,24 @@ faithful; resolutions appended per amendment.
    reply attempt and an ASR outcome covering non-empty, empty and
    failed; `heard.asr_ms` alone is insufficient.
 
+   *Resolution.* Adopted. The catalog delta now opens every reply
+   attempt with `turn_started` and closes the ASR stage with exactly
+   one of `heard`, `nothing_heard` (new, no text field by type) or
+   `provider_failed`; Gap C is a first-class event. M1 owns it.
+
 2. **P1: `replied` is not an unconditional completion marker.** It
    is guarded by `if spoken:`; empty transcription, early failure
    and pre-sentence cancellation never emit it, and `session_closed`
    as a backstop gives false durations across still-open sessions.
    The reply `finally` needs an unconditional reply-finished event
    with a closed outcome.
+
+   *Resolution.* Adopted. `reply_finished` is emitted
+   unconditionally from the `finally` with a closed `outcome` set
+   chosen by exception type at the classifying sites; `replied`
+   keeps its meaning and guard; the session-closed backstop is gone
+   from the design; consecutive silent/failed turns are a named
+   test.
 
 3. **P1: Confirmed barge-in ASR cannot be reconstructed.** The
    confirmation transcription runs in the gate before `BargeIn` and
@@ -399,6 +520,13 @@ faithful; resolutions appended per amendment.
    catalogue confirmation ASR at its decision site and carry the
    stamp across the gate.
 
+   *Resolution.* Adopted. The gate measures its confirmation ASR at
+   its own decision site and the interrupting turn's `heard` carries
+   that measured `asr_ms`; `turn_started` carries the preserved
+   utterance-end stamp across the gate, with a pin that the stamp
+   predates the confirmation's completion; both confirmation
+   outcomes are tested.
+
 4. **P1: The TTS narrowing contradicts a settled decision.** The
    issue requires per-sentence synthesis and playback-pacing spans;
    the plan's single speaking-window span measures neither, and the
@@ -407,12 +535,23 @@ faithful; resolutions appended per amendment.
    intervals and a separately bounded pacing interval, tested with
    lookahead overlapping playback.
 
+   *Resolution.* Adopted; the narrowing is withdrawn.
+   `sentence_synthesized` carries one synthesis interval per
+   sentence, the playback-pacing span is bounded separately
+   (`speaking_started` to `reply_finished`), and the
+   lookahead-overlap case is a named M1 pin.
+
 5. **P1: Excluding `frames_dropped` contradicts a settled
    decision.** The capture-side record is already a bounded
    per-second aggregate, so the high-frequency objection does not
    apply. Promote the aggregate to a typed catalog variant that both
    capture and telemetry read; per-frame calls and `vad` stay
    outside the tap.
+
+   *Resolution.* Adopted; the exclusion is withdrawn. The per-second
+   aggregate becomes a typed variant with server-owned reason keys,
+   capture consumes the one declaration, and the per-frame seam
+   stays outside the tap contract unchanged.
 
 6. **P1: Resolved provider context is unavailable at the attachment
    point.** No catalog event carries the sanitized resolved provider
@@ -421,6 +560,12 @@ faithful; resolutions appended per amendment.
    channel, violating the one-vocabulary rule. Deepen `SessionOpen`
    with the sanitized entries and define what handover changes.
 
+   *Resolution.* Adopted. `session_open` is deepened with the
+   sanitized per-agent entries from the same derivation the manifest
+   uses; the exporter switches active-agent context on `handover`;
+   the mid-session-apply boundary is stated in the reference as out
+   of trace scope for this issue.
+
 7. **P1: No destination for events outside an active turn.**
    `capture_started` precedes `session_open`, `session_idle` falls
    between turns, `session_closed` can land with no open turn; the
@@ -428,12 +573,23 @@ faithful; resolutions appended per amendment.
    with turn traces linked rather than parented, and state where
    pre-turn, between-turn and post-turn events land.
 
+   *Resolution.* Adopted. The trace lifecycle section now defines
+   the session-lifecycle trace, turn traces linked not parented,
+   the destination of every named out-of-turn event including the
+   capture-before-open hold, and a real-ordering test from capture
+   start to session close.
+
 8. **P1: The GenAI mapping omits correspondences the repository
    already settled.** The conversation-store plan maps `type` to
    `gen_ai.provider.name` and `host` to `server.address` alongside
    `model` and usage; the plan kept `type` and `host` vinga-only.
    Ship the settled mapping; only `provider` (the configured entry
    name) stays vinga-specific.
+
+   *Resolution.* Adopted; the plan misread the settled table's
+   direction. The module-layout section now ships the
+   correspondence exactly, with exact-key pins in-memory and
+   decoded.
 
 9. **P1: The no-leak tests miss the exporter's most dangerous
    inputs.** Headers, endpoint userinfo, `OTEL_SERVICE_NAME` and
@@ -445,12 +601,21 @@ faithful; resolutions appended per amendment.
    environment, logs, stderr, exception chains and exported spans
    during a failed export.
 
+   *Resolution.* Adopted in full: fixed server-owned resource with
+   no environment pass-through, transport-only endpoint and
+   headers, protection-before-construction and restore-at-shutdown,
+   and the sentinel battery as its own no-leak section.
+
 10. **P2: A telemetry `local_only` rule would duplicate the single
     egress home.** `egress.py` exists because duplicated enforcement
     diverged. Extend it with a generic declared-egress check the
     telemetry build invokes before any OTel import or construction,
     value-free and unchained, with a test that the exporter
     constructor is never reached under `local_only`.
+
+    *Resolution.* Adopted. The refusal moved into an `egress.py`
+    generic check invoked before any import or construction,
+    value-free, unchained, with the never-reached pin.
 
 11. **P2: Tap and tracer lifecycle ownership is incomplete.** The
     plan names attach and shutdown but not detach, and does not say
@@ -459,6 +624,10 @@ faithful; resolutions appended per amendment.
     emissions, detach, bounded shutdown), use an owned
     `TracerProvider`, and test two sequential lifespans and partial
     startup failure.
+
+    *Resolution.* Adopted in full; the attachment section now
+    states the owned provider, the paired detach registration, the
+    teardown order, and both lifecycle tests.
 
 12. **P2: The safety tests certify paths they do not exercise, in
     the wrong milestone.** A blackholed endpoint may fail fast and
@@ -470,3 +639,12 @@ faithful; resolutions appended per amendment.
     saturation test with a fixed per-reply bound, boot the real
     `[serve]` tier against the genuine refusal, and define the
     protocol support exactly.
+
+    *Resolution.* Adopted, via restructure: the milestones are
+    re-cut so no milestone exports before the hardening exists (M1
+    is vocabulary only; M2 is the exporter with all hardening and
+    the saturation test in it), the latency assertion is a fixed
+    per-reply bound against scripted timings, the real-tier refusal
+    boot is added beside the faked-import pin, and the transport is
+    defined as HTTP/protobuf exactly, with an unsupported-protocol
+    refusal.
