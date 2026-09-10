@@ -146,6 +146,13 @@ def main() -> None:
     # before the floor arrived. Without a level, because the one this
     # server was told to use is in the configuration nothing has read
     # yet, and the call is idempotent.
+    #
+    # Not the only site, and deliberately not: the console script `vinga`
+    # never reaches this function, so the configuration grammar applies
+    # the same floor at its own command boundary (`config/cli.py`'s
+    # `_Verbatim.invoke`), which is what makes the two spellings one
+    # program. Both run for a `vinga-server config` invocation, which
+    # costs nothing.
     logs.quiet_vendor_libraries()
 
     if sys.argv[1:2] == [CONFIG_COMMAND]:

@@ -165,7 +165,7 @@ from vinga_server.config.responses import (
     ThreadErasure,
 )
 from vinga_server.config.transport import APPLY_LOCATION, check_transportable
-from vinga_server.logs import quieted
+from vinga_server.logs import quiet_vendor_libraries, quieted
 
 # The simulator's two modules, imported by name rather than through the
 # package's `__init__`, which carries a docstring and no re-exports.
@@ -1262,10 +1262,15 @@ def _check(args: Invocation) -> None:
     reads the file half, opens and migrates the database, loads the
     snapshot, verifies every stored secret and composes the two halves,
     which are the five steps `config/boot.py` documents, and then stops.
-    The migration is part of that read rather than an extra this command
-    performs: what a boot would meet is the answer being asked for, and
-    a check that read an unmigrated store would be answering about a
-    store no server will ever see.
+
+    So it is not read-only, and saying "it only reads" would be the one
+    false sentence available here. It writes no domain configuration,
+    which is what an operator is asking about; the migration is part of
+    the read rather than an extra this command performs, because what a
+    boot would meet is the answer being asked for and a check that read
+    an unmigrated store would be answering about a store no server will
+    ever see. On a deployment mid-upgrade, running this is the same act
+    as starting the new image, and the reference says so.
 
     No value reaches either stream on either path. The success line is
     fixed, and the refusal is whatever the boot composed, which is the
@@ -7178,10 +7183,34 @@ class _Verbatim(TyperCommand):
     reason the boundary exists: forty-odd bodies reading it is forty-odd
     chances to forget, and the environment has to be loaded before the
     first thing looks at it whichever command that is.
+
+    And the floor under the libraries that narrate somebody else's bytes
+    is applied here, in the same breath and for the same reason. It was
+    `vinga_server.main`'s alone, which every `vinga-server config`
+    invocation passes through and no `vinga` invocation does: the
+    console script is its own entry point and reaches `cli.main`
+    directly. That gap was harmless while every command of this grammar
+    was an HTTP request, since the request path takes the libraries down
+    itself around the call (`quieted`, `REQUEST_LOGGERS`). `check` is
+    what made it matter: it opens and migrates a database, and a
+    SQLAlchemy engine whose logger is enabled for INFO echoes every
+    statement with the parameters bound to it, which for this store is
+    the stored configuration. So the floor is applied where a command is
+    about to run, whichever word started it, and the two spellings are
+    once again the same program.
+
+    Here rather than beside the boot read, which is the shape that would
+    have said this is one command's problem: any command that grows a
+    database open or a socket inherits the floor by being a command. And
+    here rather than at the boundary's mouth, for the reason the `.env`
+    read moved: an invocation that runs no command touches no library.
+    The call is idempotent and never lowers a level, so applying it on
+    both entry points costs an installation nothing.
     """
 
     def invoke(self, ctx: Any) -> Any:
         load_environment_file()
+        quiet_vendor_libraries()
         return super().invoke(ctx)
 
     def format_epilog(self, ctx: Any, formatter: Any) -> None:

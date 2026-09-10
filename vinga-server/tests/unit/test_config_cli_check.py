@@ -30,12 +30,14 @@ instance is a failure mode this command has and the reload answer does
 not.
 """
 
+import logging
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from tests.support.config_cli import chain, logged
+from vinga_server import logs
 from vinga_server.config import cli
 from vinga_server.config.loader import ConfigError, load_file_config
 from vinga_server.config.secrets import (
@@ -71,6 +73,10 @@ ALL_SENTINELS = (
 # The slot the rotated-away key case stores under, named once because
 # both the seeding and the assertion need the same location.
 SLOT = SecretLocation.mcp_server("weather", "headers.Authorization")
+
+# The library whose INFO records are the stored configuration itself,
+# read off the floors table rather than spelled a second time.
+SQL_LOGGER = "sqlalchemy"
 
 
 @pytest.fixture(autouse=True)
@@ -349,3 +355,39 @@ def test_the_refusal_carries_no_exception_chain(monkeypatch: pytest.MonkeyPatch)
         cli._check(cli.Invocation())
 
     assert PASSWORD_SENTINEL not in chain(refused.value)
+
+
+# The floor under the libraries that narrate somebody else's bytes
+
+
+def test_the_vendor_floor_is_applied_before_the_store_is_opened(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A SQLAlchemy logger deliberately turned all the way up, and a
+    command that turns it back down before opening anything.
+
+    The gap this closes is the console script's: `vinga-server config`
+    passes through `main.py`, which applies the floor before it
+    dispatches, and `vinga` does not, because the script is its own
+    entry point into `cli.main`. That was harmless while every command
+    was an HTTP request, which quiets the request libraries around its
+    own call. It stopped being harmless here: an engine whose logger is
+    enabled for INFO echoes every statement with the parameters bound to
+    it, and for this store those parameters are the stored
+    configuration.
+
+    Driven at the level a diagnosis would leave behind rather than at
+    the library's default, since the default is already quiet and a test
+    against it would pass with no floor at all. Through `caplog` rather
+    than by setting the level outright, so a logger's level, which is
+    process state, is given back to the next test whatever this one
+    does.
+    """
+    seeded(planted)
+
+    with caplog.at_level(logging.DEBUG, logger=SQL_LOGGER), caplog.at_level(0):
+        assert cli.main(["check"]) == 0
+
+    assert logging.getLogger(SQL_LOGGER).level == logs.VENDOR_LOG_FLOORS[SQL_LOGGER]
+    assert [record for record in caplog.records if record.name.startswith(SQL_LOGGER)] == []
+    absent(logged(caplog))
