@@ -412,8 +412,8 @@ and the bounded shutdown against a wedged collector.
 
 `uv run ruff check .`: all checks passed. `uv run mypy`: success, no
 issues in 5 source files. `uv run pytest tests/unit -q -n auto --dist
-loadfile`: 6021 passed, 19 skipped. `uv run pytest tests/integration
--q`: 247 passed. The five generated-document drift checks (`events
+loadfile`: 6011 passed, 19 skipped. `uv run pytest tests/integration
+-q`: 255 passed. The five generated-document drift checks (`events
 reference`, `conversations schema`, `config reference`, `config
 reference server`, `config openapi`) all diff clean against the
 committed copies.
