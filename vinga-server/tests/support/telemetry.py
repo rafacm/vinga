@@ -21,7 +21,9 @@ from vinga_server.events import ServerEvents, SessionEvents
 from vinga_server.events.catalog import (
     CAPTURE_CHANNEL,
     CaptureStarted,
+    FramesDropped,
     Handover,
+    PromptAssembled,
     ReplyFinished,
     SessionClosed,
     SessionIdle,
@@ -38,8 +40,10 @@ from vinga_server.events.values import (
     ConversationId,
     Count,
     DeviceId,
+    DroppedFrames,
     Flag,
     Identifier,
+    PromptSources,
     ProviderEntries,
     Real,
     ReplyOutcome,
@@ -207,6 +211,30 @@ def abandon_transcription(events: SessionEvents) -> float:
             conversation=ConversationId(CONVERSATION),
             duration_s=Real(0.9),
             asr_ms=Whole(140),
+        )
+    )
+
+
+def assemble_prompt(events: SessionEvents, sources: dict[str, int]) -> float:
+    """One of the two events whose payload carries a mapping."""
+    return events.emit(
+        lambda: PromptAssembled(
+            agent=Identifier(AGENT),
+            conversation=ConversationId(CONVERSATION),
+            characters=Count(sum(sources.values())),
+            sources=PromptSources(dict(sources)),
+        )
+    )
+
+
+def drop_frames(events: SessionEvents, reasons: dict[str, int], second: int = 3) -> float:
+    """And the other. Emitted directly rather than through `dropped()`,
+    because what the exporter is being asked about is the payload rather
+    than the counting."""
+    return events.emit(
+        lambda: FramesDropped(
+            second=Whole(second),
+            reasons=DroppedFrames(dict(reasons)),
         )
     )
 
