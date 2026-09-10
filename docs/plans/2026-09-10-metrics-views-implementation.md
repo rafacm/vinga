@@ -161,3 +161,114 @@ External review of PR #447: one P2, no P1, mergeable after it. Adopted.
   new pin on the corrected sentences with the two retired claims
   asserted absent, and the seeded case's docstring says what the pair
   of rows is evidence of.
+
+## M2: wire response latency from a capture
+
+PR TBD.
+
+### What landed
+
+`scripts/wire_latency.py` reads a directory of session captures and
+reports, per turn, the interval between the end of user speech on
+channel 0 and the first reply audio paced out on channel 1. Stdlib
+only: `wave` a frame at a time, `array` for the samples, and the RMS
+arithmetic in Python, so `python3 scripts/wire_latency.py <directory>`
+is the whole invocation and no environment has to be prepared. That
+choice is stated in the usage block rather than left to the reader.
+
+The metric is the decided shape (a). Every run prints two standing
+sentences under the numbers: the precision sentence, saying the answer
+is read in 20 ms frames and reported to a tenth of a second and so
+answers 800 ms or 2.5 s and never a count of milliseconds; and the
+exclusion sentence, saying the number excludes downlink transport and
+device playback and is therefore what the server contributed rather
+than what the room waited. The word "perceived" appears nowhere in the
+script, and a unit case asserts its absence from the output.
+
+Speech end is the end of the last channel-0 frame carrying speech
+energy at or before the endpointer's decision, where the decision comes
+from the `vad` samples (a run of samples counting speech while
+listening, ending where `speech_ms` returns to zero, where the samples
+stop, or after a gap). `heard.duration_s` bounds the pairing rather
+than timing it: a speech end outside `[heard - duration - slack, heard
++ slack]` reports no number. What counts as sound is a channel's own
+20th-percentile floor plus 12 dB, never under an absolute -60 dBFS, so
+a noisy room and a digitally silent simulator capture are both read on
+their own terms without a codec's dither being promoted to speech.
+
+Seven closed reasons cover every turn that cannot be measured:
+`nothing_transcribed`, `no_transcription_event`, `no_speech_energy`,
+`outside_heard_bound`, `reply_already_playing` (a barge-in over audio
+already in flight), `filler_audio_first` and `no_reply_audio`. Each is
+a module-level literal, and a unit case pins the closed set against the
+source so a reason can never be built from what was read.
+
+The refusal boundary follows `upstream_watch.py`: a `_FixedMessageParser`
+that never repeats what was typed, one `Refusal` per failure class
+(unreadable files, a recording in another format, an empty recording,
+an unfinished capture, a decision track that is not UTF-8, a malformed
+track, a malformed manifest, timings that do not make sense), raised
+after its `except` arm rather than inside it, and `main` as the one
+exception boundary so no traceback ever prints the locals. Exit codes
+are `check_doc_links.py`'s: 0, 1 for a capture that could not be read
+or a directory with none, 2 for a bad invocation.
+
+Tests: 23 unit cases over captures built sample by sample, run as a
+subprocess with both streams read whole, and one integration case that
+records a real session (a server with capture enabled, one simulator
+conversation through the `simulate` fixture) and runs the script over
+the triplet. It is the repository's first capture-producing test.
+
+### Deviations
+
+- **Captures are numbered, not named, in the output.** The plan asks
+  for output that never echoes stray values; the no-leak lens asks that
+  hostile filenames never reach a stream. A capture's filename is its
+  session id, and the file is a recording of somebody's room that this
+  tool was merely handed, so the report says "capture 1" in the
+  directory's sorted order and leaves identity where it was read from.
+  The cost is real (an operator maps the number by listing the
+  directory in the same order) and is stated in the docstring.
+
+- **The measured interval starts at the energy fall, not at the
+  endpointer's decision.** The plan specifies the fall corroborated by
+  the `vad` samples, and this is what corroboration turned out to mean
+  in code: the samples give the window, the envelope gives the instant
+  inside it. The consequence is deliberate and worth stating, because
+  it makes the number bigger: the endpointer's trailing silence sits
+  inside the measured interval, which is right, since the user waited
+  through it.
+
+- **A partial line in the decision track is skipped, not refused.** A
+  track is written by a live session that can be killed mid-write, and
+  one line missing its `t_ms` is not a reason to refuse a recording
+  somebody went out to make. A line that is not JSON at all is still a
+  malformed track and still a refusal.
+
+### Discoveries
+
+- **`turn_started` already stamps the end of user speech**, in its own
+  `speech_ms` field and, per its catalog note, at the instant the user
+  stopped. It is not used: the plan specifies the energy fall, and the
+  event's stamp is the endpointer's decision rather than the acoustic
+  end, which is exactly the difference the fall exists to capture. It
+  is recorded here as the obvious cross-check if a later reading ever
+  disagrees with this one.
+
+- **A simulator capture's timeline is arrival-paced, not
+  realtime.** The sdk sends a second of tone as fast as the socket
+  takes it, and the capture places audio by when it arrived, so the
+  mic channel can still be receiving frames of an utterance the
+  endpointer already ended: in a recorded run, `heard.duration_s` was
+  1.74 s over 0.57 s of wall clock. This is why the transcription
+  bound is one-sided (the speech end may not sit after the transcript,
+  and may not sit further back than the utterance's own duration) and
+  why the integration case asserts the shape of a measurement rather
+  than its value.
+
+- **The end-to-end number on mock providers is 0.0 s**, correctly: the
+  mock LLM answers in 26 ms and the mock TTS synthesizes immediately,
+  so the whole wire path fits inside one reported tenth of a second.
+  The integration case therefore matches the line's shape rather than
+  a figure, and the arithmetic that would catch a regression lives in
+  the unit lane.
