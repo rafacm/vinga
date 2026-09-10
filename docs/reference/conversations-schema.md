@@ -57,7 +57,7 @@ combination is a supported configuration.
 
 | Switch | On | Off |
 | --- | --- | --- |
-| `metrics` | every measured number, and one `events` row per structured event | the numeric columns are null and no `events` rows are written |
+| `telemetry` | every measured number, and one `events` row per structured event | the numeric columns are null and no `events` rows are written |
 | `text` | conversation text, and tool names, arguments and results | those columns are null; the rows still land |
 
 Three kinds of column survive both switches, and each for a reason worth
@@ -70,7 +70,10 @@ because it is what somebody said. The structural halves of a turn (`t_ms`,
 neither a measured number nor conversation text: which thread a turn is on is
 a fact this server decided, not a word anybody spoke. And `sessions.metrics`
 and `sessions.text` record which way the switches were set for that session,
-so a null column is distinguishable from a column that was never stored.
+so a null column is distinguishable from a column that was never stored; the
+first keeps the column name the telemetry switch originally had, because
+column names are a compatibility surface and the switch's rename was not a
+schema change.
 
 The switches are deployment-wide. Until per-user controls exist, enabling text
 storage on a device a household shares stores what guests say to it, which is
@@ -259,14 +262,14 @@ carries the per-leg counts, and the per-round, per-model truth is the
 | `protocol` | `TEXT` | yes | The device protocol version this session negotiated. |
 | `started_at` | `TEXT` | no | When the session opened, UTC ISO-8601. Survives both storage switches: retention prunes on this column, and a record that cannot be pruned cannot be kept. |
 | `closed_at` | `TEXT` | yes | When the session closed, UTC ISO-8601. Null in a session that is still running, and in one whose close was never persisted, which a crash and a failed close transaction both leave behind. |
-| `duration_s` | `FLOAT` | yes | How long the session lasted, in seconds. A measured number: null under metrics-off. |
+| `duration_s` | `FLOAT` | yes | How long the session lasted, in seconds. A measured number: null under telemetry-off. |
 | `close_reason` | `TEXT` | yes | What ended the session, one of: limit, idle, drain, client, error. The first cause to fire wins. Null until the session closes. |
 | `server_version` | `TEXT` | yes | The server version that recorded this session. |
 | `revision` | `TEXT` | yes | The build revision that recorded this session. |
 | `providers` | `JSON` | yes | The resolved provider entry per pipeline stage, the same structure the capture manifest carries. Holds environment variable names, never credentials. |
-| `metrics` | `BOOLEAN` | no | Whether metrics storage was on for this session, so a null number is distinguishable from a number that was never stored. |
+| `metrics` | `BOOLEAN` | no | Whether telemetry storage was on for this session, so a null number is distinguishable from a number that was never stored. |
 | `text` | `BOOLEAN` | no | Whether text storage was on for this session, so a null utterance is distinguishable from an utterance that was never stored. |
-| `dropped` | `INTEGER` | no | Records this session lost: events refused at the in-flight bound, and anything a failed transaction rolled back. Written at close, so the store records its own incompleteness the way the capture manifest records `complete`. Zero under metrics-off. |
+| `dropped` | `INTEGER` | no | Records this session lost: events refused at the in-flight bound, and anything a failed transaction rolled back. Written at close, so the store records its own incompleteness the way the capture manifest records `complete`. Zero under telemetry-off. |
 
 ### `conversations`
 
@@ -277,7 +280,7 @@ carries the per-leg counts, and the per-round, per-model truth is the
 | `agent` | `TEXT` | no | The agent this thread belongs to, and the only agent it will ever belong to: a conversation is a dialogue with exactly one agent, so a handover starts a second thread rather than moving this one. The name is the one that agent has now rather than the one it had then, because renaming an agent rewrites this column and is what keeps the thread reachable; the dated columns beside it, `sessions.agent` and `turns.agent`, keep the name of the moment they record. Not null, unlike those two, because a thread with no agent is not a thread. |
 | `device` | `TEXT` | no | The device the thread was begun on, in canonical MAC form. Provenance rather than ownership: a thread is agent-scoped, so a resume from any device bound to that agent reaches it, and this column says where it started rather than where it may be continued. |
 | `title` | `TEXT` | yes | What the thread is called, derived from the earliest utterance stored on it and truncated. The earliest utterance rather than the earliest turn, because a thread a session moved onto opens with the answer that greeted the move and nothing was heard on it. Conversation text, so it is null under text-off, and null in a thread that has never stored one. |
-| `incomplete` | `BOOLEAN` | no | Whether a write this thread needed was lost, so a resume can say the record has gaps. Product state rather than telemetry, and therefore deliberately outside the metrics switch: `sessions.dropped` is zeroed under metrics-off and this is not. Written by the durable path, which arrives with the writer's acknowledgements; false in every thread until then. |
+| `incomplete` | `BOOLEAN` | no | Whether a write this thread needed was lost, so a resume can say the record has gaps. Product state rather than telemetry, and therefore deliberately outside the telemetry switch: `sessions.dropped` is zeroed under telemetry-off and this is not. Written by the durable path, which arrives with the writer's acknowledgements; false in every thread until then. |
 | `created_at` | `TEXT` | no | When the thread's first turn landed, UTC ISO-8601. The row materializes with that turn rather than at activation, so a wake that produced no transcript leaves no empty thread behind. |
 | `last_active_at` | `TEXT` | no | When the thread's most recent turn landed, UTC ISO-8601, rewritten by every turn. The listing orders on it and retention prunes on it, which is what makes retention thread-aware: a thread stays whole while it is being talked to, however old the session that began it. |
 
@@ -291,18 +294,18 @@ carries the per-leg counts, and the per-round, per-model truth is the
 | `t_ms` | `INTEGER` | no | The utterance's offset from session open, in milliseconds, aligned with its `heard` event and with the capture's audio. Structural rather than telemetry: it survives both switches. |
 | `agent` | `TEXT` | yes | The agent that owns this turn, which is the one it started with and therefore the one whose thread the column above names. A handover makes it different from the session's, and makes it different from the agent that finished the reply; `legs` is where a split reply's per-agent truth lives. |
 | `heard` | `TEXT` | yes | What the device's user said, as transcribed. Null under text-off. |
-| `heard_duration_s` | `FLOAT` | yes | How long the utterance lasted, in seconds. Null under metrics-off. |
+| `heard_duration_s` | `FLOAT` | yes | How long the utterance lasted, in seconds. Null under telemetry-off. |
 | `language` | `TEXT` | yes | The language the transcript was recognized as. Neither a measured number nor conversation text, so it survives both switches. |
-| `language_confidence` | `FLOAT` | yes | How sure the recognizer was of that language. Null under metrics-off. |
+| `language_confidence` | `FLOAT` | yes | How sure the recognizer was of that language. Null under telemetry-off. |
 | `reply` | `TEXT` | yes | What the assistant said, the legs joined. Null under text-off, and null when the reply spoke nothing. |
-| `legs` | `JSON` | yes | One entry per agent that took part in this turn, `{agent, text, input_tokens, output_tokens}`, present only when a handover split the reply. The text half is null under text-off and the token halves under metrics-off, because a turn's totals blend agents that may use different models. |
-| `asr_ms` | `INTEGER` | yes | Transcription elapsed, in milliseconds. Null where no elapsed was measured this turn, and under metrics-off. |
-| `first_token_ms` | `INTEGER` | yes | Request to first token of the reply, in milliseconds. Null under metrics-off. |
-| `llm_ms` | `INTEGER` | yes | The reply's LLM round durations summed, in milliseconds. Null under metrics-off. |
-| `tts_first_audio_ms` | `INTEGER` | yes | The reply's first synthesis request to its first audio bytes, in milliseconds, measured at the provider boundary and deliberately not at the device. Null when the reply spoke nothing, and under metrics-off. |
-| `rounds` | `INTEGER` | yes | How many LLM rounds the reply took. Null under metrics-off. |
-| `input_tokens` | `INTEGER` | yes | Input tokens summed across the turn's rounds; OTel's `gen_ai.usage.input_tokens`. Null when the provider reported no usage, and under metrics-off. |
-| `output_tokens` | `INTEGER` | yes | Output tokens summed across the turn's rounds; OTel's `gen_ai.usage.output_tokens`. Null when the provider reported no usage, and under metrics-off. |
+| `legs` | `JSON` | yes | One entry per agent that took part in this turn, `{agent, text, input_tokens, output_tokens}`, present only when a handover split the reply. The text half is null under text-off and the token halves under telemetry-off, because a turn's totals blend agents that may use different models. |
+| `asr_ms` | `INTEGER` | yes | Transcription elapsed, in milliseconds. Null where no elapsed was measured this turn, and under telemetry-off. |
+| `first_token_ms` | `INTEGER` | yes | Request to first token of the reply, in milliseconds. Null under telemetry-off. |
+| `llm_ms` | `INTEGER` | yes | The reply's LLM round durations summed, in milliseconds. Null under telemetry-off. |
+| `tts_first_audio_ms` | `INTEGER` | yes | The reply's first synthesis request to its first audio bytes, in milliseconds, measured at the provider boundary and deliberately not at the device. Null when the reply spoke nothing, and under telemetry-off. |
+| `rounds` | `INTEGER` | yes | How many LLM rounds the reply took. Null under telemetry-off. |
+| `input_tokens` | `INTEGER` | yes | Input tokens summed across the turn's rounds; OTel's `gen_ai.usage.input_tokens`. Null when the provider reported no usage, and under telemetry-off. |
+| `output_tokens` | `INTEGER` | yes | Output tokens summed across the turn's rounds; OTel's `gen_ai.usage.output_tokens`. Null when the provider reported no usage, and under telemetry-off. |
 | `tool_calls` | `INTEGER` | no | How many tool invocations this turn issued, which is how many `tool_invocations` rows point at it. Structural rather than telemetry: it survives both switches. |
 
 ### `tool_invocations`
@@ -320,7 +323,7 @@ carries the per-leg counts, and the per-round, per-model truth is the
 | `arguments` | `JSON` | yes | What the model passed. Null under text-off, and null when malformed. |
 | `result` | `TEXT` | yes | What the call answered, including a refusal. Null under text-off. |
 | `is_error` | `BOOLEAN` | no | Whether the call answered as an error. |
-| `duration_ms` | `INTEGER` | yes | How long the call took, in milliseconds. Null where nothing ran, as for a refused or a successful handover, and under metrics-off. |
+| `duration_ms` | `INTEGER` | yes | How long the call took, in milliseconds. Null where nothing ran, as for a refused or a successful handover, and under telemetry-off. |
 
 ### `conversation_milestones`
 

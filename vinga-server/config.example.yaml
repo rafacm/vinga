@@ -310,7 +310,7 @@ server:
   #   # Store the structured events and every measured number (durations,
   #   # token counts, timings). With this off, no events rows land and
   #   # the numeric columns on turns and tool invocations are null.
-  #   metrics: true
+  #   telemetry: true
   #   # Store conversation text, and tool names, arguments and results.
   #   # With this off, rows still land with the content columns null, so
   #   # timing analysis survives the stricter setting.

@@ -261,11 +261,11 @@ scoped to this schema alone so that an analyst reads what was said without
 reaching the stored secrets next door.
 
 The two storage switches under the flag are independent, and every combination
-is a supported configuration: metrics without text is the stricter setting,
-and text without metrics keeps the conversation record without the behavioural
-telemetry. They are deployment-wide, which is the only policy layer this
-release has; per-user and per-agent controls are a stricter filter above this
-one when they arrive, never a replacement for it (#120).
+is a supported configuration: telemetry without text is the stricter setting,
+and text without telemetry keeps the conversation record without the measured
+numbers and events. They are deployment-wide, which is the only policy layer
+this release has; per-user and per-agent controls are a stricter filter above
+this one when they arrive, never a replacement for it (#120).
 
 `resumption` is the third switch and the only one that is not about storage:
 it decides whether a past thread can be found and picked up again by voice. It
@@ -275,7 +275,7 @@ combinations where there would be nothing to read (#190).
 | Key | Type | Default | Constraints | Description |
 | --- | --- | --- | --- | --- |
 | `enabled` | `bool` | `false` |  | Whether what was said is recorded to the database. Off by default, so a section left in a configuration file records nothing until somebody says it should: with this off no writer is started and no row is ever written. The tables exist either way, because the schema is migrated at every boot. Audio never enters it; `server.capture` is the recording, and this is the record. |
-| `metrics` | `bool` | `true` |  | Store the structured events and every measured number: durations, token counts, timings. With this off, no events rows land and the numeric columns on turns and tool invocations are null. |
+| `telemetry` | `bool` | `true` |  | Store the structured events and every measured number: durations, token counts, timings. With this off, no events rows land and the numeric columns on turns and tool invocations are null. |
 | `text` | `bool` | `true` |  | Store conversation text, and tool names, arguments and results. With this off, rows still land with the content columns null, so timing analysis survives the stricter setting. |
 | `retention_days` | `int` | `90` | >= 0 | Prune sessions older than this many days, whole sessions at a time, at startup and at each session close. 0 keeps everything, which is a deliberate choice rather than a default: a store with no policy retains forever. |
 | `resumption` | `bool` | `false` |  | Whether an agent can find one of its own past threads by description and carry on with it. Off by default, so a deployment that records conversations does not thereby start reading them back: what a device says next is answered out of the session it is in unless somebody asks for more. It reads what the two switches above wrote, so it is refused at boot with `enabled` off or with `text` off. |
