@@ -1160,16 +1160,6 @@ class ServerConfig(BaseModel):
         ),
     )
 
-    barge_in_refractory_ms: float = Field(
-        default=1000.0,
-        ge=0,
-        description=(
-            "How long after a reply's first audio frame interruptions are ignored, "
-            "in milliseconds. It covers the transient a device's echo cancellation "
-            "lets through at playback onset."
-        ),
-    )
-
     utterance_pre_roll_ms: float = Field(
         default=300.0,
         ge=0,

@@ -826,7 +826,13 @@ class DeviceSession:
         A capture outlives the code that made it, so it has to carry
         enough to be interpreted later. The barge-in thresholds matter
         most: an old capture analysed after they change is misleading
-        unless it states its own. The provider entries are the world's
+        unless it states its own. Which is also why a threshold that
+        stops existing stops being written rather than being written
+        null: a capture made before #80 states the `refractory_ms` its
+        session was held against and one made after states no such key,
+        and the `server.revision` beside them says which gates each ran.
+        A null would claim this session had the gate and left it
+        unbounded. The provider entries are the world's
         own sanitized derivation (`_provider_manifest` below): four
         names off each built provider, the exact model string among
         them, because that string is the only handle on a hosted model
@@ -861,7 +867,6 @@ class DeviceSession:
             "barge_in": {
                 "enabled": server.barge_in,
                 "min_speech_ms": server.barge_in_min_speech_ms,
-                "refractory_ms": server.barge_in_refractory_ms,
                 "utterance_pre_roll_ms": server.utterance_pre_roll_ms,
             },
         }

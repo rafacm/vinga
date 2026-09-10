@@ -108,17 +108,15 @@ server:
   # limits:
   #   max_sessions: 8
 
-  # Barge-in gating for a noisy deployment, defaults shown. Speech
-  # shorter than the floor never interrupts a reply, nothing does
-  # inside the refractory window after playback starts, and past both
-  # the reply is paused and cancelled only when ASR transcribes actual
+  # Barge-in gating for a noisy deployment, default shown. Speech
+  # shorter than the floor never interrupts a reply, and past it the
+  # reply is paused and cancelled only when ASR transcribes actual
   # words. When room noise or playback bleed still cuts replies short,
-  # raise the floor first. The companion knob is the threshold on the
+  # raise the floor. The companion knob is the threshold on the
   # silero provider entry (written by config.deploy.example.sh):
   # raising it makes the endpointer stricter about what counts as speech
-  # in the first place, so less noise ever reaches these gates.
+  # in the first place, so less noise ever reaches the gates.
   # barge_in_min_speech_ms: 500
-  # barge_in_refractory_ms: 1000
 
   # How long the LLM may take to its first token before the round is
   # cancelled and retried once; a second timeout ends the round as a

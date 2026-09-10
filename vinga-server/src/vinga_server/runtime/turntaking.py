@@ -354,8 +354,8 @@ class TurnTaking:
         Nothing is dropped for arriving early in the playback, and that
         absence is deliberate (#80). A refractory window used to sit
         between the merge and the confirmation, dropping an interruption
-        that endpointed within `barge_in_refractory_ms` of the reply's
-        first delivered frame as the onset transient a device's echo
+        that endpointed within a configured second of the reply's first
+        delivered frame as the onset transient a device's echo
         cancellation lets through. Three facts say echo cannot reach
         this far: the speech floor above is checked first, so anything
         arriving here already carries at least half a second of
