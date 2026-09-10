@@ -25,6 +25,7 @@ import http.server
 import math
 import struct
 import threading
+import time
 from typing import Any
 
 import pytest
@@ -49,6 +50,11 @@ FRAME_BYTES = SAMPLE_RATE * FRAME_MS // 1000 * 2
 REPLY_DEADLINE_S = 15.0
 BOOT_DEADLINE_S = 20.0
 SHUTDOWN_DEADLINE_S = 30.0
+
+# How close a decoded span's epoch has to land to the instant this case
+# ran. Generous, because what it separates is "now" from "a day and a
+# half from now".
+NOW_ENOUGH_S = 60.0
 
 
 class Receiver:
@@ -264,6 +270,19 @@ async def test_one_turn_arrives_at_a_collector_as_the_trace_it_is(
         span.trace_id == turn.trace_id
         for span in spans
         if span.parent_span_id == turn.span_id
+    )
+
+    # And when they say they happened, which is a claim only the wire
+    # can be asked for: a span whose epoch is hours from now decodes
+    # perfectly, satisfies every structural assertion above, and is
+    # invisible in a backend, because no search window a person types
+    # contains it. That is what one offset across two clocks cost until
+    # the Jaeger walkthrough found it, and this lane runs on the plain
+    # asyncio loop where the two clocks happen to agree, so what this
+    # asserts is the sanity rather than the fix.
+    assert all(
+        abs(span.start_time_unix_nano / 1e9 - time.time()) < NOW_ENOUGH_S
+        for span in spans
     )
 
     # And the identities every span in the trace is read by.
