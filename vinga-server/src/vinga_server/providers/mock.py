@@ -64,6 +64,13 @@ class EnergyEndpointer:
         self._fed_bytes = 0
         self._speech_start: int | None = None
 
+    def forget_audio(self) -> None:
+        """Nothing to forget, and that is a fact about this endpointer
+        rather than an omission: it scores each chunk on that chunk's
+        own RMS, so no audio it has already been fed can colour what it
+        makes of the next one. The recurrence `forget_audio` exists for
+        is Silero's (#456)."""
+
     def speech_start(self) -> int | None:
         return self._speech_start
 

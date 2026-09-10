@@ -205,16 +205,27 @@ class ScriptedEndpointer:
     does, and answers the scripted non-endpointing result: what a test
     controls is `speech_ms()`, so a scenario says how much speech the
     endpointer holds and then decides for itself when the utterance
-    ends."""
+    ends.
+
+    `resets` and `forgets` count the two halves of what a session can
+    ask of an endpointer, kept apart because the difference between
+    them is the point: a reply ending forgets the audio and must not
+    reset the accounting (#456).
+    """
 
     def __init__(self, speech_ms: float) -> None:
         self._speech_ms = speech_ms
+        self.resets = 0
+        self.forgets = 0
 
     def feed(self, pcm: bytes) -> bool:
         return False
 
     def reset(self) -> None:
-        return None
+        self.resets += 1
+
+    def forget_audio(self) -> None:
+        self.forgets += 1
 
     def speech_start(self) -> int | None:
         return None

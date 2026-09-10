@@ -692,6 +692,9 @@ class TellableEndpointer:
     def reset(self) -> None:
         return None
 
+    def forget_audio(self) -> None:
+        return None
+
     def speech_start(self) -> int | None:
         return None
 
