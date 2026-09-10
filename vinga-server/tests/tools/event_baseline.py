@@ -119,6 +119,7 @@ from tests.support.registry import check_in as bindings_check_in
 from tests.support.sessions import (
     Gate,
     _nothing,
+    agent_providers,
     call,
     device_session,
     drive_reply,
@@ -408,6 +409,12 @@ UTTERANCE = b"\x00\x00" * 320
 # a script borrows from the mock it stands in for.
 MODEL = "qwen3:8b"
 
+# The same for the two stages whose success events name their entry as
+# well (#450). Distinct from each other and from the LLM's, so a record
+# labelled from the wrong stage cannot pass by looking plausible.
+ASR_MODEL = "whisper-small"
+TTS_MODEL = "voice-nova"
+
 
 class TurnedAwaySocket:
     """Just enough websocket for a connection that is refused: the
@@ -660,8 +667,30 @@ def drive_prompt_assembled(_: Path) -> None:
     session_for(base_config(), POET_MAC)
 
 
+def stamped_session(stage: str, model: str) -> Any:
+    """A speaking session whose named stage is configured with a model,
+    planted on the identity the registry stamped for that entry.
+
+    What `drive_llm_round` does to the LLM script, for the two stages
+    whose success events name their entry too. A driver that configured
+    no model would leave `model` unexercised at those stages, and the
+    key range the conformance check asserts is a range precisely so
+    that an optional field quietly going missing is what this table
+    catches. `host` is deliberately not planted: a mock runs in this
+    process and reaches no host, which is exactly what that field is
+    absent for.
+    """
+    config = base_config()
+    world = agent_providers(config, {"poet": ScriptedLlm(["Two words."])})
+    engine = getattr(world.agents["poet"], stage)
+    engine.identity = dataclass_replace(engine.identity, model=model)
+    session = device_session(config, POET_MAC, world)
+    session.websocket = cast(Any, RecordingSocket())
+    return session
+
+
 async def drive_heard(_: Path) -> None:
-    await drive_reply(speaking_session({"poet": ScriptedLlm(["Two words."])}), UTTERANCE)
+    await drive_reply(stamped_session("asr", ASR_MODEL), UTTERANCE)
 
 
 async def drive_replied(_: Path) -> None:
@@ -1192,7 +1221,7 @@ async def drive_transcription_abandoned(_: Path) -> None:
 
 async def drive_sentence_synthesized(_: Path) -> None:
     """One sentence spoken, so one synthesis stream ends."""
-    await drive_reply(speaking_session({"poet": ScriptedLlm(["Two words."])}), UTTERANCE)
+    await drive_reply(stamped_session("tts", TTS_MODEL), UTTERANCE)
 
 
 def drive_speaking_finished(directory: Path) -> None:
