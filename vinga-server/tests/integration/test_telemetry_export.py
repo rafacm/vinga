@@ -299,9 +299,13 @@ async def test_one_turn_arrives_at_a_collector_as_the_trace_it_is(
         assert carried["vinga.agent"] == "assistant", span.name
         assert carried["vinga.conversation.id"], span.name
         # The mocks name no host and no model, so what the resolved
-        # entries can say here is the entry and its type; the round
-        # span answers for the LLM stage itself, which is why the
-        # stage asserted for all four is the ASR one.
+        # entries can say here is the entry and its type. The stage
+        # asserted for all four is the ASR one because it is the one
+        # every span here answers with the same word: the round and the
+        # stream spans answer for their own stages and carry the
+        # session's ASR entry, and the ASR span answers for that stage
+        # itself with the entry the transcription actually ran on, which
+        # in this lane is the same mock.
         assert carried["vinga.provider.asr.name"] == "mock", span.name
 
     # And the identities every span in the trace is read by, plus what
