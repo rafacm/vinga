@@ -126,15 +126,18 @@ does not yet speak the turn's own lifecycle. The gap is closed in
 the catalog, as milestone 1, before any OTel code exists, so both
 the exporter and every other consumer read the same facts:
 
-- **`turn_started`**, emitted exactly when a reply attempt starts,
-  on both paths that reach `start_reply`: the ordinary
-  endpointed/manual-stop path and the confirmed non-empty barge-in
-  path, where the stamp is the utterance-end instant the gate
-  preserved from the interrupting utterance, not the confirmation's
-  completion. Fields: `speech_ms` (how long the user spoke) and
-  `barge_in: bool`. A candidate the gate rejects (empty or failed
-  confirmation) never starts a reply and never emits it; the
-  rejection is already gate vocabulary (`BargeInWithoutTranscript`,
+- **`turn_started`**, emitted at every successful `start_reply`
+  invocation, which is the definition rather than a path list, so
+  all four ways in are covered: the ordinary endpointed path, the
+  manual stop (including one that interrupts a reply in progress),
+  the confirmed non-empty barge-in, and the mid-ASR merge
+  (`BargeInMerged`). The stamp is the original utterance-end
+  instant the gate preserved, never a confirmation's or merge's
+  completion time. Fields: `speech_ms` (how long the user spoke)
+  and `barge_in: bool`, true for the interrupting shapes. A
+  candidate the gate rejects (empty or failed confirmation) never
+  reaches `start_reply` and never emits it; the rejection is
+  already gate vocabulary (`BargeInWithoutTranscript`,
   `provider_failed`) and stays there.
 - **`reply_finished`**, emitted exactly once per reply from the
   reply task's `finally`, as its first statement, before any
@@ -143,14 +146,19 @@ the exporter and every other consumer read the same facts:
   it cancellation-proof by construction. Its `outcome` comes from a
   closed set in `values.py` and is latched at each initiating
   boundary rather than guessed from `CancelledError`, which cannot
-  tell a barge-in from a shutdown: the barge-in cancel path latches
-  `barged_in` before cancelling, the session close path latches
-  `aborted`, failure classification latches `failed` by exception
-  type where it already classifies, the empty-transcript branch
-  latches `nothing_heard`, and an unlatched exit is `completed`.
-  Precedence is the latch: whoever initiated termination named it,
-  and exactly one initiator can, since the latch is
-  write-once per reply. Fields: `outcome`, `sentences_spoken`.
+  tell a barge-in from a shutdown. The latch is reply-owned,
+  write-once, first-writer-wins, and `cancel_reply` takes the
+  initiating outcome as an argument and latches it before
+  cancelling, so every canceller names itself. The writers,
+  exhaustively: the barge-in cancel path latches `barged_in`, the
+  device-abort path latches `aborted`, the session close path
+  latches `aborted`, ordinary failure classification latches
+  `failed` by exception type where it already classifies, the
+  empty-transcript branch latches `nothing_heard`, and the reply
+  body latches `device_gone` where it deliberately catches
+  `DeviceGone` and returns, since an unlatched exit means
+  `completed` and a vanished device must not read as one.
+  Fields: `outcome`, `sentences_spoken`.
   `replied` keeps its present meaning (one or more ordinary
   sentences finished) and its present guard; consecutive silent or
   failed turns in one still-open session each get their own pair.
@@ -186,18 +194,32 @@ the exporter and every other consumer read the same facts:
   outside the tap contract), which keeps the bounded current-second
   counter and, on second rollover and at close, emits one typed
   `frames_dropped` variant (`second`, `reasons` from the
-  server-owned closed set) through the normal emit seam. The
-  capture's decision track receives it as the tap it already is,
-  and its independent aggregate writer is deleted: one declaration,
-  two consumers, no duplicate arithmetic.
+  server-owned closed set) through the normal emit seam. Counting
+  runs regardless of capture state, where today `dropped()` returns
+  early when capture is off, so telemetry sees drops on
+  capture-less deployments too. The close ordering is explicit: the
+  session close path flushes the pending partial second before it
+  emits `session_closed`, while the capture tap is still attached,
+  so the JSONL keeps recording everything it records today. The
+  capture's decision track receives the typed variant as the tap it
+  already is, and its independent aggregate writer is deleted: one
+  declaration, two consumers, no duplicate arithmetic.
 - **`speaking_finished`**, emitted by the session edge when a
-  reply's outgoing audio is done (the edge's finish-speaking site),
-  with the frames delivered. With `speaking_started` it bounds the
-  paced playback interval, which is what the issue's playback-pacing
-  span means: first frame out to last frame out, the interval
-  `ReplyPacer` actually paces, not the reply's whole tail. The pacer
-  itself stays vocabulary-free; the edge, which already emits
-  `speaking_started` for the same reason, emits this one too.
+  reply's outgoing audio is done, bounding with `speaking_started`
+  the paced playback interval: first frame out to last frame out,
+  the interval `ReplyPacer` actually paces, not the reply's whole
+  tail. The facts it needs do not exist yet and are added as
+  per-reply state: a successful-delivery count and a
+  last-delivery stamp (counted after `deliver` returns, the pacer's
+  own ordering rule), retained across handovers rather than reset
+  per agent leg, reset at `reply_started`, and snapshotted at the
+  edge's finish-speaking site. It is emitted only when at least one
+  frame was delivered, before the cancellable stop send, so a
+  cancelled reply's interval is truthful and a reply that never
+  spoke emits nothing. Fields: `frames`, and the interval is the
+  stamps'. The pacer itself stays vocabulary-free; the edge, which
+  already emits `speaking_started` for the same reason, emits this
+  one too.
 - **`session_open` deepened with resolved providers.** A new
   sanitized, typed per-agent, per-stage derivation is built from
   the bound generation (name, type, host, model per entry, with
@@ -787,3 +809,49 @@ resolution note above, the note here governs.
    isolated `[otel]` environment fixture, the import map, and the
    untouched plain `[serve]` environment that proves the genuine
    refusal.
+
+### Confirmation round
+
+External review: codex CLI 0.154.0, model gpt-5.6-terra, read-only
+sandbox, 2026-09-10, scoped to the delta resolutions, reviewing
+commit 5e59f84b. Verdict as received: **ready after amendments**.
+Findings condensed but faithful.
+
+1. **P1: `turn_started` still omitted real reply-start paths.** The
+   mid-ASR merge (`BargeInMerged`) and a manual stop during a reply
+   both cancel and then reach `start_reply`; the plan named only the
+   ordinary and confirmed-non-empty paths.
+
+   *Resolution.* Adopted. The bullet now defines emission as every
+   successful `start_reply` invocation, names all four ways in, and
+   keeps the original utterance-end stamp and `barge_in` marking
+   for the interrupting shapes.
+
+2. **P1: The outcome latch was incomplete.** `device_aborted`,
+   session close and barge-in all call the same unqualified
+   `cancel_reply`, and `DeviceGone` is caught-and-returned, so
+   "unlatched means completed" would mislabel a vanished device.
+
+   *Resolution.* Adopted. The latch is reply-owned, write-once,
+   first-writer-wins; `cancel_reply` takes the initiating outcome
+   as an argument; all six writers are enumerated, and
+   `device_gone` is restored where the reply body catches
+   `DeviceGone`.
+
+3. **P2: `frames_dropped` lacked the close ordering and the
+   capture-disabled rule.** Today `dropped()` returns early when
+   capture is off, and `session_closed` precedes capture detach.
+
+   *Resolution.* Adopted. Counting runs regardless of capture
+   state, and the close path flushes the pending second before
+   `session_closed`, while the capture tap is still attached.
+
+4. **P2: `speaking_finished` could not yet mean last frame out.**
+   No delivery count or final-frame stamp exists; the pacer's count
+   resets per agent leg.
+
+   *Resolution.* Adopted as prescribed: per-reply
+   successful-delivery count and last-delivery stamp, retained
+   across handovers, reset at `reply_started`, snapshotted at
+   finish-speaking, emitted only when at least one frame was
+   delivered, before the cancellable stop send.
