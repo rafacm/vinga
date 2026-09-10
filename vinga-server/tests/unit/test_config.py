@@ -199,11 +199,24 @@ def test_the_old_metrics_key_is_refused_at_boot() -> None:
     # `metrics` was the telemetry switch's name before #437. No alias
     # and no shim, per the pre-release stance: a config still saying it
     # fails at boot through the same unknown-key rule as any misspelling,
-    # which is what tells its operator the switch moved.
-    with pytest.raises(ConfigError):
+    # which is what tells its operator the switch moved. The refusal is
+    # held to the no-leak contract like any other: the rule's name and
+    # the section it fired in, never the value the dead key carried, and
+    # no chained exception holding either.
+    with pytest.raises(ConfigError) as caught:
         load_config_from_data(
-            {"server": {"conversations": {"enabled": True, "metrics": False}}}
+            {
+                "server": {
+                    "conversations": {"enabled": True, "metrics": PARSER_SENTINEL}
+                }
+            }
         )
+
+    refusal = str(caught.value)
+    assert f"server.conversations: {UNRECOGNIZED_KEY_REFUSED}" in refusal
+    assert PARSER_SENTINEL not in refusal
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_the_example_config_leaves_the_conversation_store_off() -> None:
