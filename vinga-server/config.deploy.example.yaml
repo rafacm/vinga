@@ -155,6 +155,16 @@ server:
   #   resumption: false
   #   resumption_budget_tokens: 6000
 
+  # Exporting traces to an OpenTelemetry collector. Absent, as here,
+  # means no exporter is built and nothing leaves this process. Turn it
+  # on and point OTEL_EXPORTER_OTLP_ENDPOINT at the collector; the
+  # credentials and timeouts are that variable's relatives rather than
+  # keys here. What a span carries is metadata (timings, closed reasons,
+  # token counts), never what was said. The reasoning behind the switch
+  # is in config.example.yaml.
+  # telemetry:
+  #   enabled: true
+
   # How long a shutdown waits for conversations in flight to finish
   # speaking. Set the orchestrator's grace period between SIGTERM and
   # SIGKILL to at least twice this, so a drain still in progress is

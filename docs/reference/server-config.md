@@ -107,6 +107,7 @@ and `VINGA_SERVER__ONBOARDING__KEY` than committed into a file.
 | `database` | `DatabaseConfig` | `{}` |  | The Postgres database this server keeps both of its halves in: the domain configuration written through the configuration API and read at each start, and the conversation record below. |
 | `capture` | `CaptureConfig \| null` | `null` |  | Recording room audio to disk for offline analysis. Absent, or present with `enabled` off, means no session is ever recorded, and absent is the default. |
 | `conversations` | `ConversationsConfig \| null` | `null` |  | Recording what was said into a database that can be queried. Absent, or present with `enabled` off, means no session is ever recorded and no writer is started, and absent is the default. The schema is migrated at boot either way, because a deployment that recorded last month and records nothing today still has to be able to read what it kept, and empty tables are not a recording. |
+| `telemetry` | `TelemetryConfig \| null` | `null` |  | Exporting traces over OTLP to a collector. Absent, or present with `enabled` off, means no exporter is built and nothing leaves this process, and absent is the default. Where the collector is and what reaches it are the standard `OTEL_EXPORTER_OTLP_*` environment variables; this switch is the only part that is configuration. Under `local_only` an enabled exporter is refused at boot, because sending to a collector is egress like any other. |
 | `local_only` | `bool` | `false` |  | Refuse to boot any provider that sends session data off this host. Running without a cloud dependency is otherwise a documentation property of a carefully chosen configuration; this makes it a checked one. Boot-time, never runtime: a local_only server that starts is a local_only server (#30). |
 | `barge_in` | `bool` | `true` |  | Whether speech arriving while a reply is playing interrupts it. On by default, because a device only streams its mic through playback when its echo cancellation is on, and what arrives is then the user's voice. Turn it off for a board whose cancellation leaks the speaker back into the mic (a single-mic board), where the reply would otherwise interrupt itself: conversations stay multi-turn, and what arrives during a reply is dropped instead. |
 | `barge_in_min_speech_ms` | `float` | `500.0` | >= 0 | The least endpointer-classified speech, in milliseconds, an utterance needs before it may interrupt a reply. Noise blips and playback bleed rarely sustain half a second of speech; a real interjection does (#28). |
@@ -280,6 +281,34 @@ combinations where there would be nothing to read (#190).
 | `retention_days` | `int` | `90` | >= 0 | Prune sessions older than this many days, whole sessions at a time, at startup and at each session close. 0 keeps everything, which is a deliberate choice rather than a default: a store with no policy retains forever. |
 | `resumption` | `bool` | `false` |  | Whether an agent can find one of its own past threads by description and carry on with it. Off by default, so a deployment that records conversations does not thereby start reading them back: what a device says next is answered out of the session it is in unless somebody asks for more. It reads what the two switches above wrote, so it is refused at boot with `enabled` off or with `text` off. |
 | `resumption_budget_tokens` | `int` | `6000` | >= 512 | How much of a resumed thread is rebuilt into the model's context, in tokens. Approximate by design: what the hydrator counts is characters over a fixed estimate, and what it drops is whole stored turns, oldest first, so a reply is never rebuilt without the utterance it answered. |
+
+## `server.telemetry`
+
+Exporting traces of what this server did over OTLP (#66).
+
+Off by default and absent by default, the shape `capture` and `conversations`
+have, and for a reason of the same family: an exporter sends metadata about
+conversations to a collector, which is a place outside this deployment, so
+nothing here can turn it on by accident.
+
+One field, and the endpoint is deliberately not among them. Where the
+collector is, what credentials reach it and how long a request may take are
+the SDK's `OTEL_EXPORTER_OTLP_*` environment variables, which is the issue's
+own decision and the locality rule applied: a second home in this file for
+facts the SDK already reads is two homes that can disagree. The supported
+transport is OTLP over HTTP/protobuf exactly, so an
+`OTEL_EXPORTER_OTLP_PROTOCOL` naming anything else is refused at boot rather
+than half-honored.
+
+What a span may carry is not configurable either. The resource is server-owned
+(the fixed service name and this build's revision), and span content is
+derived from the event catalog, which is the surface the no-leak rules already
+hold: timings, closed reasons and server-minted identifiers, never transcripts
+and never audio.
+
+| Key | Type | Default | Constraints | Description |
+| --- | --- | --- | --- | --- |
+| `enabled` | `bool` | `false` |  | Whether this server exports traces over OTLP. Off by default, so a section left in a configuration file exports nothing until somebody says it should. With it on, the OpenTelemetry packages have to be installed (the `otel` extra, which both published images carry) and the boot is refused if they are not; the collector's address comes from `OTEL_EXPORTER_OTLP_ENDPOINT`. A server whose telemetry is off constructs no exporter, starts no thread and does no per-event work. |
 
 ## Refused at boot
 
