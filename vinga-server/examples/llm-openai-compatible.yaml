@@ -9,10 +9,16 @@ base_url: http://localhost:11434/v1
 
 model: qwen3:8b
 
-# The cap on one reply's length, in tokens, written here at the value
-# the server uses when it is left out. Spoken replies are short, so this
-# bounds a runaway rather than a conversation.
+# The cap on one reply's length, in tokens. Left out, no cap is sent
+# and the endpoint decides, which is what a server this file has never
+# seen is better at deciding than this file is. Spoken replies are
+# short, so a cap bounds a runaway rather than a conversation.
 # max_tokens: 1024
+
+# The current OpenAI models refuse max_tokens and take this instead.
+# Nothing here declares it, so it travels as an ordinary passthrough
+# key, exactly as the paragraph below describes.
+# max_completion_tokens: 1024
 
 # Any other key is sent to the endpoint as part of the request, and this
 # is the one provider type that works that way. That is what the type is

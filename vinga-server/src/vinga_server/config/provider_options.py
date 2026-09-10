@@ -72,6 +72,7 @@ from pydantic import (
     StrictStr,
     ValidationError,
     WithJsonSchema,
+    field_validator,
     model_validator,
 )
 from pydantic.json_schema import JsonSchemaValue
@@ -599,7 +600,9 @@ class ElevenlabsOptions(BaseModel):
 # The door the model below keeps open is a door into the request body,
 # and a body has fields of its own: `model` is the entry's model,
 # `messages` is the conversation so far, `stream` is what makes the call
-# a stream at all, `max_tokens` is the declared cap, and the tools pair
+# a stream at all, `max_tokens` is the declared cap (composed when the
+# entry writes one and left out when it does not, which is a decision
+# about the request rather than about this set), and the tools pair
 # is what the session is about to answer. A key by one of those names
 # would not be a server-specific option, it would be a rewrite of the
 # request, and the SDK's own `extra_body` merges OVER what the caller
@@ -728,18 +731,43 @@ class OpenaiCompatibleOptions(BaseModel):
             "Ollama, an OpenAI model id on api.openai.com)."
         ),
     )
-    # 1024 is what `providers/kit.py` calls a reply's default cap, and it
-    # cannot be imported here: the kit speaks httpx, and this module is
-    # on three paths that load no client library. Stated as the number
-    # and pinned against the kit's constant by a case in
-    # `test_providers_llm.py`, which is on the side that may import both.
-    max_tokens: StrictInt = Field(
-        default=1024,
+    # No default, and the absence is the decision (#444). This type
+    # reaches a server this repository has never seen, and a cap it
+    # composes uninvited is a field that server may not take: OpenAI's
+    # current models refuse `max_tokens` outright and answer 400, which
+    # made every entry pointing at them unusable however it was written.
+    # An endpoint's own default is a better number than one chosen here
+    # for all of them, and an operator who wants a cap writes the one
+    # their endpoint spells, this field or `max_completion_tokens`
+    # through the door beside it.
+    max_tokens: StrictInt | None = Field(
+        default=None,
         description=(
-            "The cap on one reply's length, in tokens. Spoken replies are short, so "
-            "this bounds a runaway rather than a conversation."
+            "The cap on one reply's length, in tokens. Left out, no cap is sent and "
+            "the endpoint's own default applies. An endpoint of the current OpenAI "
+            "family refuses this field and takes max_completion_tokens instead, "
+            "which is written here like any other passthrough key."
         ),
     )
+
+    @field_validator("max_tokens", mode="before")
+    @classmethod
+    def _absence_has_one_spelling(cls, value: object) -> object:
+        """`max_tokens: null` is refused rather than read as absence.
+
+        A validator runs on what was written and not on a default, so
+        this is reached only when the key IS there. That is the whole
+        point: this type has no blank spelling of an absent option
+        (`base_url` and `model` refuse a blank as loudly as a missing
+        key), and a field gaining a nullable type must not quietly grow
+        one. Leaving the key out is how a cap is omitted.
+        """
+        if value is None:
+            raise ValueError(
+                "must be a whole number of tokens; leave the key out to send no cap "
+                "and let the endpoint's own default apply"
+            )
+        return value
 
 
 class OptionsRefused(Exception):

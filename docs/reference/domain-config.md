@@ -186,7 +186,7 @@ and forwarded into the outgoing request.
 | --- | --- | --- | --- |
 | `base_url` | `str` | `required` | The endpoint's OpenAI-compatible base URL, such as http://localhost:11434/v1 for a local Ollama; pointing it at api.openai.com works too. Required, because it is what decides which server this entry speaks to and whether session data leaves the host. |
 | `model` | `str` | `required` | The model to ask for, in the endpoint's own vocabulary (qwen3:8b on Ollama, an OpenAI model id on api.openai.com). |
-| `max_tokens` | `int` | `1024` | The cap on one reply's length, in tokens. Spoken replies are short, so this bounds a runaway rather than a conversation. |
+| `max_tokens` | `int \| null` | `null` | The cap on one reply's length, in tokens. Left out, no cap is sent and the endpoint's own default applies. An endpoint of the current OpenAI family refuses this field and takes max_completion_tokens instead, which is written here like any other passthrough key. |
 | ... | | | Passed through to the provider implementation. |
 
 #### `asr` options for `type: faster_whisper`

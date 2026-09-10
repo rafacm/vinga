@@ -263,9 +263,15 @@ def test_an_open_doors_fragment_documents_only_real_options() -> None:
     be sent to the endpoint.
 
     So the keys that survive the uncommenting are checked against what
-    the type actually declares. The one passthrough the file documents
-    is named here rather than counted, so documenting a second one is a
-    line of this test and a sentence of that file moving together.
+    the type actually declares. The passthroughs the file documents are
+    named here rather than counted, so documenting another one is a line
+    of this test and a sentence of that file moving together.
+
+    There are two now. `max_completion_tokens` is what the current
+    OpenAI models take instead of `max_tokens`, this repository declares
+    no such field, and until #444 the inline-secret guard refused the
+    key outright, so the fragment documenting it is half of what says
+    that endpoint is reachable at all.
     """
     from vinga_server.config.models import ProviderConfig
     from vinga_server.config.provider_options import OpenaiCompatibleOptions
@@ -274,7 +280,7 @@ def test_an_open_doors_fragment_documents_only_real_options() -> None:
     written = yaml.safe_load(_uncommented(fragment.read_text(encoding="utf-8")))
     declared = set(ProviderConfig.model_fields) | set(OpenaiCompatibleOptions.model_fields)
 
-    assert set(written) - declared == {"top_p"}
+    assert set(written) - declared == {"top_p", "max_completion_tokens"}
 
 
 def test_the_open_doors_fragment_names_the_keys_it_may_not_take() -> None:

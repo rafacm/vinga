@@ -142,7 +142,7 @@ class OpenAiCompatibleLlm(LlmProvider):
         self,
         base_url: str,
         model: str,
-        max_tokens: int,
+        max_tokens: int | None,
         api_key: str | None,
         timeout_s: float = DEFAULT_TIMEOUT_S,
         client: AsyncOpenAI | None = None,
@@ -211,9 +211,19 @@ class OpenAiCompatibleLlm(LlmProvider):
         request: dict[str, Any] = {
             "model": self.model,
             "messages": chat_messages(system, turns),
-            "max_tokens": self._max_tokens,
             "stream": True,
         }
+        # Absent means absent. An entry that names no cap sends no cap,
+        # and the endpoint's own default applies, which is the only
+        # answer that works for a type whose whole job is to reach a
+        # server this repository has never seen: OpenAI's current model
+        # family refuses `max_tokens` with a 400 naming
+        # `max_completion_tokens` instead, so a cap composed uninvited
+        # failed every conversation an entry pointing there ever had
+        # (#444). An operator who wants either field writes it, this one
+        # as the declared option and the other through the door below.
+        if self._max_tokens is not None:
+            request["max_tokens"] = self._max_tokens
         if tools:
             request["tools"] = chat_tools(tools)
             request["tool_choice"] = tool_choice
