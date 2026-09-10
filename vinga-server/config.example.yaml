@@ -333,6 +333,35 @@ server:
   #   # this is whole turns, oldest first.
   #   resumption_budget_tokens: 6000
 
+  # EXPORTS TRACES to an OpenTelemetry collector when enabled. Absent
+  # here, and off by default: with no section, or with `enabled: false`,
+  # no exporter is built, no background thread is started, and nothing
+  # leaves this process.
+  #
+  # What it sends is one trace per session and one per conversation
+  # turn, derived from the same structured events this server already
+  # logs: timings, closed reasons, token counts and server-minted
+  # identifiers. No transcript and no audio ever enters a span, which is
+  # the same line the event surface draws.
+  #
+  # Where the collector is, what credentials reach it and how long a
+  # request may take are the standard OpenTelemetry environment
+  # variables (OTEL_EXPORTER_OTLP_ENDPOINT and its relatives), not keys
+  # in this file: the SDK already reads them, and a second home for the
+  # same fact is two that can disagree. The supported transport is OTLP
+  # over HTTP/protobuf exactly, so OTEL_EXPORTER_OTLP_PROTOCOL naming
+  # anything else is refused at startup rather than half-honored. The
+  # service name is fixed to `vinga-server` and the build revision rides
+  # along as its version; neither is taken from the environment.
+  #
+  # Turning it on needs the OpenTelemetry packages, which both published
+  # images carry and a checkout gets from `uv sync`. A server told to
+  # export without them refuses at startup and says which extra to
+  # install. Under `local_only` above it is refused too: sending to a
+  # collector is egress like any other.
+  # telemetry:
+  #   enabled: false
+
   # Whether speech that arrives while a reply is playing interrupts it.
   # On by default: a device only keeps streaming its microphone through
   # playback when its echo cancellation is on, so what arrives then is
