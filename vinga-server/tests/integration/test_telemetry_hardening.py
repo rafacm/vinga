@@ -26,6 +26,7 @@ import asyncio
 import logging
 import threading
 import time
+from collections.abc import Iterator
 from typing import Any, cast
 
 import pytest
@@ -42,9 +43,18 @@ from tests.support.sessions import (
 from tests.support.sockets import RecordingSocket
 from tests.support.telemetry import open_session
 from vinga_server.config.models import TelemetryConfig
-from vinga_server.telemetry import build_telemetry
+from vinga_server.telemetry import _QUIETING, build_telemetry
 
 pytestmark = pytest.mark.asyncio
+
+
+@pytest.fixture(autouse=True)
+def _no_lease_outlives_its_case() -> Iterator[None]:
+    """The SDK's silence is one process-wide lease, and these cases
+    wedge exporters on purpose, so a release that did not happen would
+    leave the rest of this lane running against a silenced namespace."""
+    yield
+    assert _QUIETING.held() == 0, "a case left an exporter holding the SDK's silence"
 
 # 20 ms of silence, which the scripted ear answers whatever it holds.
 UTTERANCE = b"\x00\x00" * 320

@@ -104,6 +104,22 @@ class Clock:
         return self.at
 
 
+# Every exporter these helpers built and nobody released.
+#
+# The SDK's logging is quieted for as long as any exporter holds a lease
+# on it, process-wide and reference counted, so a suite that builds
+# thirty and releases none leaves the count high and the namespace
+# silent for everything after it. `released()` below is what the
+# telemetry suites drain it with, once per test.
+BUILT: list[Telemetry] = []
+
+
+def released() -> None:
+    """Give back everything `exporting` built, in reverse."""
+    while BUILT:
+        BUILT.pop().release()
+
+
 def exporting(**built: Any) -> tuple[Telemetry, Any]:
     """A `Telemetry` writing into the SDK's in-memory exporter, and the
     exporter to read back.
@@ -129,6 +145,7 @@ def exporting(**built: Any) -> tuple[Telemetry, Any]:
         **built,
     )
     assert telemetry is not None
+    BUILT.append(telemetry)
     return telemetry, memory
 
 

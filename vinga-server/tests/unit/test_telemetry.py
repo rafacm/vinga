@@ -28,6 +28,7 @@ lane's business.
 
 import logging
 import sys
+from collections.abc import Iterator
 
 import pytest
 
@@ -51,6 +52,7 @@ from tests.support.telemetry import (
     hand_over,
     named,
     open_session,
+    released,
     session_events,
     start_turn,
 )
@@ -60,6 +62,7 @@ from vinga_server.egress import EgressRefusal, check_feature
 from vinga_server.events import Emission, attach_server_tap, detach_server_tap
 from vinga_server.events.values import CloseReason, ReplyOutcome
 from vinga_server.telemetry import (
+    _QUIETING,
     APPROVED,
     NEEDS_THE_OTEL_EXTRA,
     OTEL_NAMESPACE,
@@ -91,6 +94,22 @@ def _no_protocol_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     reads."""
     monkeypatch.delenv(OTLP_PROTOCOL_ENV, raising=False)
     monkeypatch.delenv(OTLP_TRACES_PROTOCOL_ENV, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_lease_outlives_its_case() -> Iterator[None]:
+    """Every exporter a case built is released at the end of it.
+
+    The SDK's silence is one process-wide lease now, so an exporter
+    nobody released holds it for the rest of the run: the cases about
+    the count below would read somebody else's, and every case after
+    them would run against a silenced namespace. Asserted as well as
+    drained, because a leak that this tidies away is a leak a server
+    would have too.
+    """
+    yield
+    released()
+    assert _QUIETING.held() == 0, "a case left an exporter holding the SDK's silence"
 
 
 # --- off ---------------------------------------------------------------
@@ -851,11 +870,72 @@ def test_the_sdk_namespace_is_quieted_and_restored() -> None:
     server whose logging is its own again."""
     namespace = logging.getLogger(OTEL_NAMESPACE)
     was_level, was_propagate = namespace.level, namespace.propagate
+    assert _QUIETING.held() == 0, "something else is still holding the namespace"
 
     telemetry, _ = exporting()
     assert namespace.level > logging.CRITICAL
     assert namespace.propagate is False
 
-    telemetry._quieted.restore()
+    telemetry.release()
+    assert _QUIETING.held() == 0
     assert namespace.level == was_level
     assert namespace.propagate == was_propagate
+
+
+def test_two_overlapping_exporters_share_one_lease_on_the_silence() -> None:
+    """The exact sequence a wedged redeploy produces, which per-exporter
+    snapshots got wrong in both directions.
+
+    A wedged exporter's release outlives the bounded wait, so a server
+    that builds the next one while the last is still finishing has two
+    live claims on one process-wide logger. Snapshotting per exporter
+    meant B recorded SILENCE as the state to restore, A's late release
+    then un-silenced the SDK while B was still exporting (so B's next
+    failure logged its credentialed endpoint), and B's own release
+    finally restored A's quiet snapshot and left the namespace silent
+    for the rest of the process with nothing holding it.
+
+    Counted and locked instead: the snapshot is taken once and put back
+    once, after the last release.
+    """
+    namespace = logging.getLogger(OTEL_NAMESPACE)
+    was_level, was_propagate = namespace.level, namespace.propagate
+    assert _QUIETING.held() == 0
+
+    wedged, _ = exporting()
+    live, _ = exporting()
+    assert _QUIETING.held() == 2
+
+    # A's abandoned release finishes while B is still exporting. The
+    # namespace stays quiet, which is what stops B's next failure
+    # reaching a handler.
+    wedged.release()
+    assert _QUIETING.held() == 1
+    assert namespace.level > logging.CRITICAL
+    assert namespace.propagate is False
+
+    # And only the last release puts back what the PROCESS had, rather
+    # than what the second exporter found.
+    live.release()
+    assert _QUIETING.held() == 0
+    assert namespace.level == was_level
+    assert namespace.propagate == was_propagate
+
+
+def test_a_lease_given_back_twice_is_counted_once() -> None:
+    """The build's failure path and the release worker both call it
+    without either knowing whether the other did, so a second release
+    must not drop somebody else's claim."""
+    namespace = logging.getLogger(OTEL_NAMESPACE)
+    assert _QUIETING.held() == 0
+
+    first, _ = exporting()
+    second, _ = exporting()
+    first.release()
+    first.release()
+
+    assert _QUIETING.held() == 1, "a repeated release took another exporter's claim"
+    assert namespace.propagate is False
+
+    second.release()
+    assert _QUIETING.held() == 0
