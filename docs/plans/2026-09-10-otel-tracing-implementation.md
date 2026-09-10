@@ -671,3 +671,249 @@ loadfile`: 6028 passed, 19 skipped. `uv run pytest
 tests/integration/test_telemetry_hardening.py -q`: 3 passed. The five
 generated-document drift checks all diff clean against the committed
 copies.
+
+## M3: the full span map, the proof and the image
+
+The turn trace gained what is inside it, the proof moved from an
+in-memory exporter to a collector's wire, and the extra is in both
+images. One bug was found that no test in this repository could have
+found, and it was found by the walkthrough the acceptance criteria asked
+for.
+
+### What was built
+
+- **The stage spans**, all four constructed retrospectively out of the
+  event that ended each and the duration the pipeline had already
+  measured. `asr`, from all four ends of the ASR stage (`heard`,
+  `nothing_heard`, `provider_failed` at the ASR stage,
+  `transcription_abandoned`), with the outcome as the event's own name,
+  the utterance's length, the detected language where one was, and the
+  exception's class name and an ERROR status on the one of the four
+  that is a failure. `llm`, one per `llm_round`, carrying the settled
+  correspondence exactly (`type` to `gen_ai.provider.name`, `model` to
+  `gen_ai.request.model`, `host` to `server.address`,
+  `input_tokens`/`output_tokens` to the GenAI usage keys) with
+  `provider`, the configured entry name, as the one vinga attribute
+  among them, and `first_token_ms` as a span event inside the round.
+  `tts_stream`, one per `sentence_synthesized`. `playback`, bounded by
+  `speaking_started` and `speaking_finished`, with the frame count.
+- **The fold became a table with a default**, `Telemetry._folds`:
+  twelve names have a shape of their own and everything else, present
+  and future, is a span event on whichever span is open. The three
+  barge-in suppression variants keep their own names and their fixed
+  reasons, and the promoted `frames_dropped` needed no row.
+- **`tests/integration/test_telemetry_export.py`**, the stub OTLP
+  receiver: the real server booted with the exporter on, the standard
+  endpoint variable pointed at an HTTP receiver in the test process, one
+  simulator turn, and the protobuf decoded with the proto package the
+  exporter's own dependency installs.
+- **The blackholed endpoint**, a third case in
+  `test_telemetry_hardening.py`, with the real transport in place and
+  the SDK's own timeout variables.
+- **`[otel]` in both image variants**, with the extras-import check
+  naming the SUBTREES, and the reinstated claim that both images carry
+  it.
+- **One offset per clock**, which is the bug below.
+
+### Deviations from the plan
+
+1. **The paced-playback span is held open past `reply_finished`.** The
+   plan has the pair bound the interval and says nothing about the
+   emission order, which turns out to be the opposite of the reading
+   order: `reply_finished` is the reply `finally`'s FIRST statement and
+   `finish_speaking` is its last, so the event that closes the interval
+   is said after the event that closes the turn while being stamped at
+   the last delivery, which precedes both. Dropping an open playback at
+   the turn's close, which the first cut did, dropped every playback
+   span a real reply produced. The span is now left for its own event
+   to end it and what it bounds is unchanged; a next turn and the
+   session's close each drop one whose event never arrived, which is
+   the only shape a cancellation delivered into the reply's very last
+   statement can leave.
+
+2. **`provider_failed` is an ASR outcome only at the ASR stage.** The
+   plan lists it among the ASR ends without saying what an LLM or TTS
+   failure does. Those end no interval this exporter draws (the `llm`
+   and `tts_stream` spans are built from the rounds and streams that
+   FINISHED), so they fold as span events onto the turn, and a span
+   built from a failure would claim an interval nobody measured.
+
+3. **The ASR span does not repeat `asr_ms` as an attribute.** The span's
+   extent IS that measurement, and two structures that must agree are
+   one structure with a bug pending. An outcome that carried no latency
+   gets a span with no extent, which says the stage ended here and
+   declines to say when it began.
+
+4. **The GenAI table is not pinned by value in the integration lane.**
+   That lane's providers are the mocks, which report no host, no model
+   and no usage, and an absent field is the catalog's answer to an
+   unreported fact. So the decoded case pins the key that IS reported,
+   spelled exactly, plus the ABSENCE of the ones nothing measured; the
+   whole table's values are pinned against a real quartet in
+   `test_telemetry_spans.py`.
+
+5. **The slim image gained a positive import check.** The plan leaves
+   the slim job's engine-refusal check untouched, and it is untouched:
+   the refusal loop is exactly as it was. Beside it, where the existing
+   `pysilero_vad` assertion already lives, the slim image is now asked
+   to import the OTel subtrees too, because "both images carry the
+   extra" is a claim this milestone makes in three documents and an
+   unasserted claim about an image is one that goes stale in a
+   dependency bump nobody connects to it.
+
+6. **The exporter has two offsets, not one.** The plan says one
+   monotonic-to-epoch offset for the process. That is one offset too
+   few, and the discovery below says why.
+
+### Discoveries
+
+- **The events package has two clocks, and uvloop makes the difference
+  enormous.** A session event is stamped with the session loop's clock
+  (`asyncio.get_running_loop().time()`, because the capture's audio
+  tracks are aligned by it) and a server event with `time.monotonic`
+  (because server events fire where no loop is running). Under uvloop,
+  which is what uvicorn runs when it is installed, the loop's clock is
+  libuv's and shares no origin with `time.monotonic`: on the machine
+  this was found on they read 131,249 seconds apart, thirty-six hours.
+  One offset for both put every session span thirty-six hours in the
+  future. Jaeger accepted them, saved them, indexed their operation
+  names, and answered every trace search with nothing at all.
+
+  Nothing in this repository could have caught it. Every unit case
+  drives a clock anchored on `time.monotonic`, and the integration lane
+  runs on the plain asyncio loop where the two clocks agree by
+  construction; the shape of a trace is right either way, and shape is
+  what a structural assertion reads. The fix is one offset per clock:
+  the server clock's read at construction, the session clock's read at
+  the FIRST session emission, which is a reading taken on the loop that
+  does the stamping, whatever loop that turns out to be. The pin drives
+  a session clock a uvloop-shaped gap away and asserts the exported span
+  lands on now, and the decoded case now asks the wire the same question.
+
+- **A span event on a closed turn lands on the session.** `replied` and
+  `speaking_finished` are both emitted after `reply_finished`, so in a
+  real conversation `replied` appears as a span event on the SESSION
+  span rather than on the turn it describes. That is the default fold
+  working as designed rather than a defect, and it is worth writing
+  down because a reader looking for `replied` inside a turn will not
+  find it there.
+
+- **Jaeger's operations index and its trace search disagree happily.**
+  `/api/operations?service=vinga-server` listed all six span names while
+  `/api/traces?service=vinga-server` answered nothing, for the whole
+  time the timestamps were wrong. A collector that has stored a span is
+  not a collector that will show it to you, which is the difference
+  between the stub receiver's proof and this walkthrough's.
+
+### The Jaeger walkthrough
+
+Run on 2026-09-10 against Jaeger's published all-in-one image, on the
+real server started from a YAML file with its domain half in Postgres,
+driven by the packaged device simulator. Recorded verbatim, including
+the first run, which is the one that found the bug.
+
+```
+docker run --rm -d --name vinga-jaeger-m3 \
+  -p 16686:16686 -p 4318:4318 jaegertracing/all-in-one:1.60
+
+# the server, telemetry on, pointed at Jaeger's OTLP HTTP port
+VINGA_DB_PORT=55433 VINGA_DB_HOST=127.0.0.1 \
+VINGA_API_SECRET=... \
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 \
+  uv run vinga-server --config config.yaml
+# config.yaml: server.telemetry.enabled true, server.auth.enabled false,
+# server.port 8103, server.api.secret_env VINGA_API_SECRET
+
+uv run vinga-server config import -f document.yaml --config config.yaml
+uv run vinga-server config apply --config config.yaml --force
+# mock providers for the four stages, one agent, default_agent set
+
+uv run vinga simulator run http://127.0.0.1:8103/x/ --config config.yaml
+#   saying: Hello, can you hear me?
+#   heard: hello from a simulated board
+#   said: You said hello from a simulated board.
+#   reply: 26 frames, 12454 bytes, about 1560 ms of audio
+#   close: the session ended normally
+
+curl -s "http://127.0.0.1:16686/api/traces?service=vinga-server&lookback=1h&limit=20"
+```
+
+**The first run.** `/api/services` listed `vinga-server` and
+`/api/operations?service=vinga-server` listed all six operation names
+(`session`, `turn`, `asr`, `llm`, `tts_stream`, `playback`); Jaeger's own
+metrics said `jaeger_collector_spans_saved_by_svc_total{svc="vinga-server"}
+12`. Every trace search answered `{"data":[],"total":0}`, at every
+lookback and with an explicit start and end spanning a day either side.
+A plain probe trace sent from the same machine was searchable
+immediately, and so was a probe built in exactly this exporter's shape
+(explicit start and end times, an empty context, a link, a child span),
+which is what narrowed it to the timestamps and then to the two clocks.
+
+**The second run, after the fix.** The same commands, and the search
+answered two traces:
+
+```
+ trace fc7a7d4f354f06f1d502a190454bb0cf
+    session dur_us= 3319000 refs= []
+ trace 13d3a1f70f595322f185b150da8790b6
+    asr dur_us= 0 refs= [('CHILD_OF', '9eafe277d68b49b0')]
+    turn dur_us= 1524999 refs= [('FOLLOWS_FROM', '83a200f05197cab2')]
+    llm dur_us= 20000 refs= [('CHILD_OF', '9eafe277d68b49b0')]
+    tts_stream dur_us= 1387000 refs= [('CHILD_OF', '9eafe277d68b49b0')]
+    playback dur_us= 1500000 refs= [('CHILD_OF', '9eafe277d68b49b0')]
+```
+
+The turn is a trace of its own whose only reference is the
+`FOLLOWS_FROM` Jaeger renders an OTel link as, pointing at the session
+span; the four stages are `CHILD_OF` the turn. The attributes, as
+Jaeger shows them:
+
+```
+session   {"vinga.agent": "assistant", "vinga.conversation.id": "...",
+           "vinga.device.id": "02:00:00:00:00:01", "vinga.device.protocol": 1,
+           "vinga.session.close_reason": "client",
+           "vinga.session.duration_s": 3.32, "vinga.session.id": "..."}
+   log: event=replied agent=assistant conversation=... sentences=1
+turn      {"vinga.turn.barge_in": false, "vinga.turn.outcome": "completed",
+           "vinga.turn.sentences_spoken": 1, "vinga.turn.speech_ms": 1140, ...}
+asr       {"vinga.asr.duration_s": 1.68, "vinga.asr.outcome": "heard"}
+llm       {"gen_ai.provider.name": "mock", "vinga.provider": "mock",
+           "vinga.llm.round": 1, "vinga.llm.turns": 1, "vinga.agent": "assistant"}
+   log: event=first_token
+tts_stream {"vinga.tts.first_chunk_ms": 0, "vinga.tts.index": 0, ...}
+playback  {"vinga.playback.frames": 26, "vinga.agent": "assistant"}
+process   {"service.version": "..."} and service.name vinga-server
+```
+
+`asr` has a duration of zero because the mock ear answers instantly, and
+`gen_ai.request.model`, `server.address` and the usage keys are absent
+because a mock provider names no model, reaches no host and reports no
+usage. `replied` appears on the SESSION span, not the turn, for the
+ordering reason recorded above. The acceptance criterion is met: the
+trace was rendered by a generic OTLP backend that has never heard of
+this project, and every attribute a person would search on is visible in
+it.
+
+Torn down afterwards: `docker rm -f vinga-jaeger-m3`, the server stopped,
+and the worktree's Postgres brought down.
+
+### Tests
+
+`tests/unit/test_telemetry_spans.py` is new and holds the stage map: the
+four ASR ends with their outcomes, their extents and the one status;
+the GenAI keys pinned by name and by value with the set of foreign
+prefixes closed; the first-token mark and its absence; two rounds in one
+turn; the stream span's name and the absence of anything called
+synthesis; the paced interval closing after its turn and being dropped
+when its event never comes; a whole turn read as one trace; the three
+suppression variants and the dropped-frame aggregate still folding. Two
+clock cases joined `test_telemetry.py`, and the case there that pinned
+the default fold on `transcription_abandoned` now pins it on `barge_in`,
+since the abandoned transcription became a stage span.
+
+`tests/integration/test_telemetry_export.py` is the stub receiver, and
+`test_telemetry_hardening.py` gained the blackholed endpoint.
+
+### Verification
+
+Recorded at the foot of this section after the full run.

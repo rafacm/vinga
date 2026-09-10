@@ -541,8 +541,10 @@ new:
   in the same change as the schema; CHANGELOG. Releasable alone:
   enabled means honest session-and-turn traces, disabled means
   today's server.
-- [ ] **M3: the full span map, the proof and the image.** ASR spans
-  from the three outcomes, LLM round spans with the settled gen_ai
+- [x] **[M3: the full span map, the proof and the
+  image](2026-09-10-otel-tracing-implementation.md#m3-the-full-span-map-the-proof-and-the-image)**
+  (PR TBD). ASR spans
+  from the four outcomes, LLM round spans with the settled gen_ai
   mapping, per-sentence TTS spans, the paced-playback span bounded
   by `speaking_started` and `speaking_finished`, the
   span-event fold including the three barge-in suppression variants
