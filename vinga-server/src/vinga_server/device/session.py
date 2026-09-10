@@ -808,12 +808,14 @@ class DeviceSession:
         A capture outlives the code that made it, so it has to carry
         enough to be interpreted later. The barge-in thresholds matter
         most: an old capture analysed after they change is misleading
-        unless it states its own. The provider entries are recorded
-        verbatim rather than as a hash, because the exact model string
-        is the only handle on a hosted model whose behaviour changed
-        without a version bump on this side. They hold environment
-        variable names rather than secrets, which the config schema
-        enforces.
+        unless it states its own. The provider entries are the world's
+        own sanitized derivation (`_provider_manifest` below): four
+        names off each built provider, the exact model string among
+        them, because that string is the only handle on a hosted model
+        whose behaviour changed without a version bump on this side.
+        Nothing else off a provider's configuration reaches it, so a
+        credential has no way in rather than being masked on the way
+        past.
         """
         server = self._server
         return {
