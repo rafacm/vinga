@@ -366,19 +366,39 @@ def read_manifest(path: Path, number: int) -> dict:
     return manifest
 
 
-def utterances(vad: list[tuple[float, float, bool]]) -> list[Utterance]:
+def utterances(
+    vad: list[tuple[float, float, bool]], transcribed: list[float]
+) -> list[Utterance]:
     """The endpointer's utterances: runs of samples counting speech
-    while listening, each ending where `speech_ms` returns to zero, the
-    samples stop, or the session stopped listening long enough that the
-    next sample belongs to another utterance."""
+    while listening.
+
+    A run ends where `speech_ms` returns to zero, where the samples
+    stop, where the session stopped listening long enough that the next
+    sample belongs to another utterance, or where an utterance was
+    transcribed between two of the samples.
+
+    That last boundary is not redundant, it is the ordinary one. The
+    endpointer that decides an utterance has ended is reset in the same
+    breath (`turntaking.finish_utterance`), and the next frame fed to it
+    emits a sample that is already counting the speech after it, so a
+    reply the user talks over, or answers straight away, gives two
+    positive samples a fraction of a second apart with no zero between
+    them. Read on the samples alone that is one long utterance and both
+    turns are lost. The transcription event that landed between them is
+    what says otherwise, and the capture's own track carries it.
+    """
     found: list[Utterance] = []
     start: float | None = None
     last_speaking: float | None = None
     previous: float | None = None
+    boundaries = sorted(transcribed)
     for at, speech_ms, listening in sorted(vad):
         speaking = listening and speech_ms > 0
         gap = previous is not None and at - previous > VAD_GAP_MS
-        if start is not None and (not speaking or gap):
+        transcript_between = last_speaking is not None and any(
+            last_speaking < boundary <= at for boundary in boundaries
+        )
+        if start is not None and (not speaking or gap or transcript_between):
             found.append(Utterance(start, last_speaking if last_speaking else start))
             start = None
         if speaking:
@@ -440,7 +460,9 @@ def turns_of(mic: list[float], reply: list[float], track: Track) -> list[Turn]:
     mic_threshold = threshold_of(mic)
     reply_threshold = threshold_of(reply)
     audio_end_ms = max(len(mic), len(reply)) * FRAME_MS
-    found = utterances(track.vad)
+    found = utterances(
+        track.vad, [at for at, _ in track.heard] + list(track.nothing_heard)
+    )
     reports: list[Turn] = []
     for number, utterance in enumerate(found, 1):
         after = found[number].start_ms if number < len(found) else audio_end_ms
