@@ -220,7 +220,14 @@ async def test_the_frame_cadence_stays_smooth() -> None:
     frame_s = session_module.OUTPUT_AUDIO.frame_duration / 1000
     intervals = [later - earlier for earlier, later in zip(frames, frames[1:], strict=False)]
     flood = [gap for gap in intervals if gap < frame_s / 2]
-    assert not flood, (
+    # One sub-cadence gap is tolerated: on a loaded runner the event
+    # loop can be descheduled long enough that a frame lands late while
+    # the next keeps its absolute slot, which reads as one short
+    # interval with no stall anywhere.
+    # The defect this pin guards makes the frames after a stall burst
+    # out together, because their target times are all in the past, so
+    # it still shows up as several short intervals and still fails.
+    assert len(flood) <= 1, (
         f"{len(flood)} of {len(intervals)} frames went out faster than the "
         "cadence, which is the pacer catching up after a stall"
     )

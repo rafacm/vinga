@@ -7,6 +7,17 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-09-10
 
+### Fixed
+
+- **The frame-cadence pin tolerates one sub-cadence gap.** The unit
+  test guarding reply pacing failed once on a loaded CI runner when
+  event-loop descheduling made one frame land late while the next kept
+  its absolute slot, reading as a single short interval with no stall
+  anywhere (#432). The assertion now allows one such gap; the defect
+  it exists for, a stall followed by a catch-up burst, still fails
+  because the pacer's absolute schedule makes a real stall produce
+  several consecutive short intervals, proven by mutation.
+
 ### Changed
 
 - **The conversations storage switch is named `telemetry`.**
