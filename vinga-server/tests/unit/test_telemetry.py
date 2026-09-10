@@ -836,6 +836,78 @@ def test_the_json_of_a_mapping_does_not_depend_on_insertion_order() -> None:
     assert first == second
 
 
+def test_a_hostile_providers_payload_puts_nothing_on_a_span(
+    planted: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The other half of the approved-table claim, for the one field
+    that is not an attribute.
+
+    `providers` is retained as context and flattened into attribute
+    NAMES, which is the one place a payload gets to choose part of the
+    key rather than only the value. A fold that walked the mapping
+    itself would take an agent nobody named, a stage outside the
+    pipeline's own set, and a credential in `name`, and put them on a
+    span as `vinga.provider.<whatever they sent>.name`. That defeats
+    both promises this context makes: bounded cardinality, and
+    sanitized by construction.
+
+    So the value goes through `ProviderEntries` before it is retained,
+    and this drives a payload the emitter could not have built: an
+    arbitrary stage, a fifth key, and the sentinel in three places.
+    Nothing of it reaches a span, and the session span is asserted to
+    have opened at all, so this is not passing by exporting nothing.
+    """
+    caplog.set_level(logging.DEBUG)
+    clock = Clock()
+    telemetry, memory = exporting()
+    tap = telemetry.session_tap()
+
+    tap.emit(
+        Emission(
+            payload={
+                "event": "session_open",
+                "session": SESSION,
+                "agent": AGENT,
+                "conversation": CONVERSATION,
+                "protocol": 1,
+                "providers": {
+                    AGENT: {
+                        "../../etc/passwd": {"name": planted, "type": "anthropic"},
+                        "llm": {
+                            "name": "claude",
+                            "type": "anthropic",
+                            "authorization": planted,
+                        },
+                    }
+                },
+            },
+            at=clock(),
+            level=logging.INFO,
+            message="session %s open",
+            args=(SESSION,),
+        )
+    )
+    clock.tick(1.0)
+    tap.emit(
+        Emission(
+            payload={"event": "session_closed", "session": SESSION, "reason": "client"},
+            at=clock(),
+            level=logging.INFO,
+            message="session %s closed",
+            args=(SESSION,),
+        )
+    )
+
+    span = named(finished(telemetry, memory), "session")
+    rendered = str(dict(span.attributes))
+
+    assert span.attributes["vinga.session.id"] == SESSION
+    assert not [name for name in span.attributes if name.startswith("vinga.provider.")]
+    assert "passwd" not in rendered
+    assert planted not in rendered
+    assert planted not in every_format(caplog)
+
+
 def test_every_payload_kind_has_a_shape_decided_for_it() -> None:
     """The closed set at the decision site.
 

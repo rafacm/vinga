@@ -74,6 +74,7 @@ from vinga_server.events.values import (
     PROVIDER_ENTRY_OPTIONAL,
     PROVIDER_ENTRY_REQUIRED,
     Kind,
+    ProviderEntries,
 )
 
 logger = logging.getLogger(__name__)
@@ -255,23 +256,52 @@ PROVIDER_PREFIX = "vinga.provider"
 PROVIDER_FACTS = (*PROVIDER_ENTRY_REQUIRED, *PROVIDER_ENTRY_OPTIONAL)
 
 
+def _provider_context(held: Any) -> dict[str, dict[str, dict[str, str]]]:
+    """What a `session_open` payload said this conversation opened
+    against, validated, or nothing.
+
+    Through the catalog's own value type rather than by inspection here.
+    That is the difference between a claim and a check: `ProviderEntries`
+    is what makes these entries sanitized by construction, because it is
+    the type that refuses an agent name that is not an identifier, a
+    stage outside the pipeline's own set, an entry missing its name or
+    type or carrying a fifth key, and a value that is not an identifier.
+    A fold that walked the mapping itself would accept
+    `{"": {"../../etc": {"name": "<a credential>", "type": "x"}}}`
+    and put it on a span under an attribute name of the sender's
+    choosing, which is exactly the bounded-cardinality promise this
+    context is supposed to keep.
+
+    Nothing where the value does not validate, and nothing said about
+    why: a payload this module did not build is a caller's, and the
+    events package's own rule for one is that what is never looked at
+    cannot leak later. The ordinary path cannot reach this branch at
+    all, because the emitter builds payloads from the same type.
+    """
+    try:
+        entries = ProviderEntries(held)
+    except Exception:  # noqa: BLE001 - a payload nobody declared says nothing
+        return {}
+    return entries.carried()
+
+
 def _provider_attributes(
-    providers: dict[str, Any], agent: str | None
+    providers: dict[str, dict[str, dict[str, str]]], agent: str | None
 ) -> dict[str, Any]:
     """One agent's resolved providers, flattened into span attributes.
 
-    Empty for a session whose `session_open` carried none, for an agent
-    the entries do not describe, and for anything in them that is not
-    the shape the value type promised: a fold that repaired a
-    disagreement here would be inventing provider context.
+    Empty for a session whose `session_open` carried none and for an
+    agent the entries do not describe. What arrives here has already
+    been through `ProviderEntries`, so the stage is one of the
+    pipeline's own and every value is an identifier; the four facts are
+    read by name rather than by iterating the entry, so an entry that
+    somehow held a fifth key would still contribute nothing.
     """
     entries = providers.get(agent or "")
-    if not isinstance(entries, dict):
+    if entries is None:
         return {}
     attributes: dict[str, Any] = {}
     for stage, entry in entries.items():
-        if not isinstance(stage, str) or not isinstance(entry, dict):
-            continue
         for fact in PROVIDER_FACTS:
             held = entry.get(fact)
             if isinstance(held, str):
@@ -837,7 +867,7 @@ class _SessionTrace:
 
     span: Any
     turn: Any | None = None
-    providers: dict[str, Any] = field(default_factory=dict)
+    providers: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
     agent: str | None = None
 
 
@@ -1069,8 +1099,7 @@ class Telemetry:
         # the device is bound to, so a handover switches which of them a
         # span is stamped from rather than needing entries this exporter
         # was never given.
-        providers = payload.get("providers")
-        held = providers if isinstance(providers, dict) else {}
+        held = _provider_context(payload.get("providers"))
         agent = payload.get("agent")
         talking = agent if isinstance(agent, str) else None
         span = self._tracer.start_span(
