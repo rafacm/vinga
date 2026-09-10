@@ -2107,7 +2107,6 @@ over the assistant stops it, which is what barge-in means.
 server:
   barge_in: true               # speech during a reply interrupts it
   barge_in_min_speech_ms: 500  # least classified speech that may interrupt
-  barge_in_refractory_ms: 1000 # interruptions ignored after playback starts
 ```
 
 Turn it off for a board whose echo cancellation leaks the speaker back
@@ -2119,14 +2118,16 @@ speaking.
 
 An interruption the endpointer hears is gated before it may cancel: a
 reply is only cancelled on evidence of user speech. Speech shorter than
-`barge_in_min_speech_ms` is a noise blip and never interrupts; inside
-`barge_in_refractory_ms` of the reply's first audio frame, nothing
-does, since what the microphone hears then is as likely the playback
-onset as the user. Past both, the reply pauses while ASR transcribes
-the interruption, and only a non-empty transcript cancels; an empty
-one resumes the reply where it stopped, about one ASR pass later. An
-interruption landing while the reply is still transcribing merges with
-what it interrupted instead, so one reply answers the whole sentence.
+`barge_in_min_speech_ms` is a noise blip and never interrupts. Past
+that floor, the reply pauses while ASR transcribes the interruption,
+and only a non-empty transcript cancels; an empty one resumes the reply
+where it stopped, about one ASR pass later. An interruption landing
+while the reply is still transcribing merges with what it interrupted
+instead, so one reply answers the whole sentence. Nothing is dropped
+for arriving early in the playback: a refractory window used to do
+that, and it turned out to catch only users finishing their own
+sentence, since half a second of classified speech cannot come out of
+the fraction of a second of reply the room has heard by then.
 Every one of these decisions is a structured log event, which is what
 the thresholds are tuned from. A manual `listen stop` mid-reply is the
 user holding the button and speaking, so it cancels unconditionally.
