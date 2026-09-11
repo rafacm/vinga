@@ -671,14 +671,6 @@ class PipelineRuntime:
         # is stable, the location is not, and the tool that moves a
         # device is reached from inside the conversation it moves.
         self._devices = devices
-        # And the other direction through the same rows: how a
-        # conversation says its device has been moved. None is a server
-        # that cannot write device records at all, which is one composed
-        # from a configuration it was handed rather than from a store,
-        # and the tool then refuses with a sentence saying so rather
-        # than not being offered. It goes no further than the builtin
-        # source below: nothing else in a reply writes a device.
-        self._relocations = relocations
         # And the record this conversation attached to, resolved by the
         # edge in the same snapshot the binding came from and never
         # replaced. It is an ADDRESS and not a value: what a round
@@ -825,8 +817,14 @@ class PipelineRuntime:
                 self._memory_context,
                 self._remembering_now,
                 self._resumption,
+                # The other direction through the device rows, handed
+                # straight over rather than kept: nothing else in a
+                # reply writes a device. None is a server that cannot
+                # write those records at all, and the tool then refuses
+                # with a sentence saying so rather than not being
+                # offered.
                 relocations,
-                # The record this conversation attached to, as the
+                # And the record this conversation attached to, as the
                 # address every write to it uses, for the reason every
                 # read of it uses one: a MAC is where a board is
                 # standing and an id is which record it is. None is a
