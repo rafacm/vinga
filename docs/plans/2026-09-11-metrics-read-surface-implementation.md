@@ -657,6 +657,43 @@ honest.
   before it was trusted, and each commit body says which breakage and
   what it fails.
 
+### PR review round
+
+External review of PR #471: two P2 and one P3, mergeable after fixes.
+All three adopted.
+
+- **P2: an explicitly empty `--device` was silently treated as no
+  filter.** The option site defaulted the value with `device or ""`
+  and the window builder dropped every falsy entry, so `--device ''`
+  answered with every board instead of meeting a refusal: the
+  narrowest question the flag can ask, widened by a mistake in the
+  spelling of it. Fixed by keeping absent and empty apart, with
+  `Invocation.mac` becoming `str | None` and the empty value
+  travelling to the API, whose fixed MAC sentence refuses it the way
+  it refuses any other non-MAC. The new case plants two boards, asks
+  with the empty filter and asserts nothing comes back; it was written
+  first and failed on the unfixed code with exit 0 and both boards'
+  rows.
+
+- **P2: the CLI no-leak sweep did not cover hostile device values.**
+  The plan requires hostile and control-character values through the
+  view, the group and the device on both transports, and this
+  document's deviations note claimed the device was covered on both
+  surfaces; on the CLI it was covered by one credential-shaped
+  sentinel, so the claim was ahead of the proof. The view matrix
+  gained a sibling through `--group device --device VALUE`: the
+  sentinel, a bound-parameter injection pair, a log-forging CR/LF and
+  a terminal-steering escape sequence, hunted through stdout, stderr
+  and every captured record in both shipped log formats. The pin was
+  proven to bite by quoting the value into the API's MAC refusal,
+  where all five cases fail.
+
+- **P3: the 1007 migration named the wrong upgrade test.** The
+  survival assertion it credits to `test_conversations_views.py`
+  lives in `test_metrics_views_upgrade.py`; the filename is
+  corrected, and a reader following the pointer now finds the proof
+  it promises.
+
 ### Not done here
 
 Nothing of #440. The label is null until a copy of a device's name
