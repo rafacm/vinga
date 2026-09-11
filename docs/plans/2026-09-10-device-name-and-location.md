@@ -308,7 +308,7 @@ are already in `config/models.py`.
   order-sensitive. Refuses, with a spoken reason, for a default-covered MAC with
   no device row: minting a record is an operator act, not a conversational one.
   Tests: two calls in one round, and contention against another writer.
-- [ ] **M4: a board swap keeps the device.** The MAC-replacement operation,
+- [x] **[M4: a board swap keeps the device](2026-09-10-device-name-and-location-implementation.md#m4-a-board-swap-keeps-the-device).** (PR TBD) The MAC-replacement operation,
   rewriting `mac` on an existing record and moving that device's memory in the
   same transaction, which is the agent-rename pattern with
   `MemoryScope.DEVICE`: `rename_owner` already takes a scope, so no uuid enters

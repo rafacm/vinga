@@ -805,3 +805,208 @@ settles it.
   removed so a failed database read as a bad place, the refusal raised
   inside its handler, the confirmation left unnormalized, the id's
   spelling left unasked, and the location written to a log line.
+
+## M4: a board swap keeps the device
+
+The operation the stable id was minted for. Nothing about the schema
+moved and no migration was needed: what M4 adds is a verb that rewrites
+one column value and moves the memory hanging off it, in one
+transaction.
+
+### What was built
+
+- **`ConfigStore.replace_device(mac, to)`**, answering with `Replaced`:
+  the id, the address the record answered at, the address it answers at
+  now, the name, the place, the agents, and how many remembered facts
+  moved. The domain half runs the four phases every write here runs; the
+  memory half is `agent_memory.rename_owner(connection,
+  MemoryScope.DEVICE, old, new)`, which takes the memory chain's key 3
+  after this transaction's key 1, the ascending order
+  `db.advisory_key` states.
+- **`POST /devices/{mac}/replace`**, with `DeviceReplacement` as the
+  body model and a 409 description of its own, since neither of a
+  swap's occupied destinations clears by being retried.
+- **`vinga device replace <mac> <new mac>`**, the third verb on the
+  device noun.
+- **Five refusals**, none of which quotes an address back: a source MAC
+  with no record (the devices setting's own missing line, 404), a
+  destination another record answers at (`DEVICE_MAC_TAKEN`, 409), a
+  destination the deployment already remembers a board at
+  (`memory.store.SWAP_OCCUPIED`, 409), the address the device already
+  has (`SAME_MAC`, 422), and an address that is not a MAC (422).
+- **The documentation**: `docs/concepts.md`, `docs/glossary.md`, the
+  devices note the domain reference is generated from, the `devices.id`
+  column comment, `config.example.yaml`'s header and `CHANGELOG.md`, all
+  six of which said the replacement was the operation the id existed for
+  and that this server did not have it.
+
+### The grammar, and why `replace` rather than `swap`
+
+The plan left the spelling to
+[`../architecture/cli-guide.md`](../architecture/cli-guide.md), and the
+guide decides three things about it.
+
+The shape is settled by the rule the guide derives from the routes:
+`/devices/{mac}/replace` is a trailing segment with no identity after
+it, so it is an attribute of its parent rather than a sub-noun, and an
+act on one is a verb on the parent. That is `rename`'s shape exactly,
+one route along. The leading positional is the address in the API's own
+order and the new MAC is the payload behind it, which is `device rename`
+with a MAC where the name goes.
+
+The word is the act's own rather than the core set's, which the guide
+allows for a noun-specific verb as long as it IS a verb. `swap` is what
+this milestone is called in prose and is the wrong word for a command:
+a swap is an exchange of two things, and an address another record
+already answers at is refused rather than exchanged. `replace` takes
+its object from the payload, the way `rename`'s does: what is replaced
+is the board the new MAC names, and what survives is the device, which
+is what the help says in the words an operator reads.
+
+`destroys=False`, by the guide's line and not by a feeling about the
+word: the act is undone by `device replace <new> <old>`, which the
+operator has in the shell history of the command they just typed, and
+no refusal has to be lifted first because the address a swap frees is
+free. What keeps that true is the two occupied-destination refusals, so
+a swap can never merge two records or two memories and leave a second
+swap unable to tell them apart. If a merge is ever licensed, that row
+grows a confirmation on the day it is.
+
+### The transaction, and the third schema that is not in it
+
+One transaction, two schemas. The domain writer lock is taken by the
+engine's begin listener before the snapshot is read, the source and the
+destination are judged against that snapshot, one row is updated, and
+then `rename_owner` takes the memory chain's lock as its own first
+statement. Ascending key order, so this cannot close a cycle with the
+erasure that takes keys 2 and 3.
+
+The record chain's key 2 is never taken, and that is the decision rather
+than an omission. The agent rename moves `conversations.agent` because
+it is the one LIVE column of the record: the thread listing selects on
+it and the thread guard refuses a turn whose agent does not match. The
+device's analogue is not live. `sessions.device` is dated by every
+reading of it, and `conversations.device` says so in its own column
+comment ("provenance rather than ownership", a thread is agent-scoped,
+and a resume from any device bound to that agent reaches it). Nothing
+filters on the second one either: the two device-narrowed reads this
+server has (`threads.selected` and the session listing) both narrow on
+`sessions.device`, and the conversations column is selected for display
+and never compared. So a swap that moved it would rewrite where a
+thread was begun, which is a fact about a board rather than about a
+record.
+
+Failure atomicity is therefore free, and it is driven from the last
+statement: with a trigger refusing every update to `memory.facts`, the
+device row is still at the address it started at. That is the outcome
+worth testing, because it is the one this milestone exists to prevent:
+a record answering at the new address with its memory stranded at the
+old one.
+
+### Deviations from the plan
+
+Four.
+
+1. **The repository gains two private helpers and one split, where the
+   plan said "deepens `config/store.py`".** It does deepen it, and the
+   split is the part worth naming: `_refuse_repeated_identities` was
+   asked two different questions and now is two functions. The end-state
+   half (no two records holding one folded name or one id) is asked by
+   every device write, by `apply` and by the swap. The in-flight half
+   (no name taken from a device that is only giving it up in the same
+   transaction) is asked by the first two and NOT by the swap, because
+   it answers by MAC: a record that changed MAC would trip it on a name
+   that never moved. It can be skipped safely because the hazard it
+   exists for is the order two row writes happen in, and a swap writes
+   one.
+2. **The row moves by UPDATE rather than through `_device_row`.** Every
+   other device write goes through that one row builder, and this one
+   cannot: it is addressed BY the MAC, so an upsert keyed on the value
+   being changed would insert a second record rather than move this one.
+   `_swap_device_row` is `_rename_agent_row` one table across, and it
+   carries the same property: the rest of the body travels verbatim,
+   including any column the table gains later.
+3. **`memory/store.py` gains a sentence.** The plan's argument that
+   `rename_owner` "already takes a `MemoryScope`, so it is not
+   agent-specific" was true of the SQL and false of one string: the
+   refusal for an occupied destination named a rename, a name and the
+   agent listing, which is advice nobody who just replaced a board can
+   act on. The sentence is now chosen by the scope through a mapping, so
+   a third scope arriving there is a missing entry a reader sees rather
+   than a sentence about agents told to somebody who moved something
+   else. The two storage failures beside it stopped naming a destination
+   at all, since one act moves facts onto a name and the other onto an
+   address.
+4. **No migration**, as the plan expected, so the CI wheel step's
+   chain-head pin does not move. M4 rewrites a column VALUE.
+
+### Discoveries
+
+- **A placeholder name has to move with the address.** `Device <mac>` is
+  derived from the MAC, is reserved to the device whose own MAC it is
+  (M2's `DEVICE_NAME_RESERVED`), and is how every reader tells "nobody
+  has named this" from a name. Left behind after a swap it would be
+  three things wrong at once: a placeholder naming a board that is gone,
+  a value no writer may write, and therefore an exported document its
+  own store refuses on apply. So the swap re-derives it, and the test
+  asserts both halves: the new default is stored, and the document
+  carrying the old one really is refused. A name an operator chose does
+  not move, for the opposite reason: replacing the hardware does not
+  change what the thing in the room is called.
+- **Memory at an address with no record is an ordinary state**, which is
+  what makes the second occupied destination reachable rather than
+  theoretical: a default agent covers a device nothing bound, and
+  deleting a record leaves its notes behind. Both produce facts filed
+  under a MAC no record answers at, and a swap onto one of those would
+  merge two memories.
+- **The sweep found a column the plan had not considered.**
+  `conversations.device` is the third MAC-carrying column in the record,
+  and it is the one that had to be decided rather than recognized,
+  because the analogous column in an agent rename is the one that DOES
+  move. Its own comment settles it, and the readers confirm it.
+- **The conflict class was already wider than its name.** A taken MAC is
+  refused with `DeviceNameConflictError`, which reads as a name-only
+  type until you notice M1 already raises it for `DEVICE_ID_TAKEN`. What
+  it carries is an occupied destination on the device record, whichever
+  address is occupied, and it is what gives all of them the 409 that
+  says retrying will not help.
+
+### What a live conversation does across a swap
+
+It follows the record, and M2 and M3 had already built both halves of
+that: the per-round read is addressed by `id` and the tool's write is
+`relocate_device_by_id`. M4 verified it rather than assuming it, in
+`tests/unit/test_session_device_swap.py`, and the pins are three:
+
+- the round after a swap carries the same record's name and place;
+- a swap that frees an address, with a new board bound and named there,
+  does NOT hand the conversation in flight the new record, which is M2's
+  review-round bug in its other direction;
+- `set_device_location` still writes the record the conversation
+  attached to, at whatever address it now stands, with a second board
+  bound throughout and asserted untouched so the claim is about WHICH
+  record.
+
+What is deliberately not claimed is anything about the hardware. A swap
+is a write to a record and does not reach through the wire: the board on
+the other end goes on talking until it stops, and the board that took
+its place reaches the record at its next check-in.
+
+### Verification
+
+- `uv run ruff check .`, `uv run mypy`,
+  `uv run pytest tests/unit -q -n 4 --dist loadfile`,
+  `uv run pytest tests/integration -q`, and the generated-document drift
+  checks, all from `vinga-server/`.
+- No migration, so the CI wheel step's chain-head pin does not move.
+- Three generated artifacts move: `docs/reference/cli.md` and
+  `docs/reference/api-openapi.json` gain the verb and the route, and the
+  command-spellings census is regenerated. `docs/reference/events.md`
+  and `docs/reference/conversations-schema.md` do not move, because no
+  event gains a field and no stored column changes.
+- Every new pin was watched failing before its claim was made, one
+  mutation per claim: the device scope mapped back to the agent's
+  sentence, the memory move dropped (six cases fail), the placeholder
+  left behind, the occupied-destination check removed, the route left
+  out of the OpenAPI pin, the per-round record read put back to MAC
+  addressing, and the id resolution made sloppy.
