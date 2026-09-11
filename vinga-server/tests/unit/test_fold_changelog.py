@@ -568,6 +568,104 @@ def test_a_refusal_reproduces_no_repository_text(tmp_path: Path, build) -> None:
         assert "Traceback" not in stream
 
 
+# Filesystem failures
+#
+# Every one of these is an `OSError` on a path the script owns, and
+# `main` used to catch only `Refusal`, so each printed a traceback
+# carrying repository-derived paths into a public CI log. They are also
+# where a half-done fold could live, which is why the mutation order is
+# what it is: the fragments are removed first, into a directory the
+# removals themselves prove writable, and the changelog is replaced
+# atomically afterwards. A failure at either step leaves the tree as it
+# was, restored from text already in memory when it has to be.
+
+not_root = pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="permission bits do not constrain root",
+)
+
+
+@not_root
+def test_an_unreadable_fragment_directory_is_a_refusal(tmp_path: Path) -> None:
+    """Enumeration is a filesystem call like any other, and it used to
+    be the one nothing guarded: `iterdir` raised straight through."""
+    root = repo(tmp_path)
+    fragment(root, "467-unlistable.md", f"### Added\n\n- {SENTINEL} added.\n")
+    before = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    (root / "changelog.d").chmod(0o000)
+    try:
+        done = run("fold", str(root))
+    finally:
+        (root / "changelog.d").chmod(0o755)
+
+    assert done.returncode == 1
+    assert "cannot be listed" in done.stderr
+    assert (root / "CHANGELOG.md").read_text(encoding="utf-8") == before
+    for stream in (done.stdout, done.stderr):
+        assert SENTINEL not in stream
+        assert "Traceback" not in stream
+
+
+@not_root
+def test_a_fragment_that_cannot_be_removed_leaves_the_tree_alone(
+    tmp_path: Path,
+) -> None:
+    """The removals come first, so a directory that refuses them stops
+    the fold before the changelog has been touched at all."""
+    root = repo(tmp_path)
+    fragment(root, "467-unremovable.md", f"### Added\n\n- {SENTINEL} added.\n")
+    before = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    standing = (root / "changelog.d" / "467-unremovable.md").read_text(encoding="utf-8")
+    (root / "changelog.d").chmod(0o555)
+    try:
+        done = run("fold", str(root))
+    finally:
+        (root / "changelog.d").chmod(0o755)
+
+    assert done.returncode == 1
+    assert "could not be removed" in done.stderr
+    assert (root / "CHANGELOG.md").read_text(encoding="utf-8") == before
+    assert (root / "changelog.d" / "467-unremovable.md").read_text(encoding="utf-8") == standing
+    for stream in (done.stdout, done.stderr):
+        assert SENTINEL not in stream
+        assert "Traceback" not in stream
+
+
+@not_root
+def test_a_changelog_that_cannot_be_written_puts_the_fragments_back(
+    tmp_path: Path,
+) -> None:
+    """The rollback, exercised rather than described.
+
+    The fragments are already gone when the replacement fails, and what
+    has to happen is that they come back byte for byte. They can,
+    because the directory that accepted their removal is the directory
+    they are written into.
+    """
+    root = repo(tmp_path)
+    body = f"### Added\n\n- {SENTINEL} added.\n"
+    fragment(root, "467-unwritable.md", body)
+    before = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    root.chmod(0o555)
+    try:
+        done = run("fold", str(root))
+    finally:
+        root.chmod(0o755)
+
+    assert done.returncode == 1
+    assert "could not be written" in done.stderr
+    assert (root / "CHANGELOG.md").read_text(encoding="utf-8") == before
+    assert (root / "changelog.d" / "467-unwritable.md").read_text(encoding="utf-8") == body
+    assert sorted(path.name for path in root.iterdir()) == [
+        ".git",
+        "CHANGELOG.md",
+        "changelog.d",
+    ]
+    for stream in (done.stdout, done.stderr):
+        assert SENTINEL not in stream
+        assert "Traceback" not in stream
+
+
 # check
 
 

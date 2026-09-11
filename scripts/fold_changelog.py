@@ -44,6 +44,14 @@ reaches the disk:
   standing shape, its headings still present and still in the order
   they were in.
 
+And once they hold, the mutation is ordered so that no failure can
+leave the tree half folded: the fragments are removed first, into a
+directory their own removal proves writable, and the changelog is then
+replaced through a temporary file beside it, so it is never truncated
+and not yet whole. A failure at either step puts back what was already
+taken, from text held in memory, and a restore that itself fails says
+so in its own sentence rather than hiding inside the first.
+
 The post-conditions are deliberately not global. Settled history is
 not canonical (one section orders Fixed before Changed, another
 carries two Added headings), so a global rule would have to reject the
@@ -56,11 +64,14 @@ public CI log: fragment bodies, fragment filenames, changelog content
 and git's own diagnostics. Every message is a fixed sentence of this
 module's own, carrying at most a count. No fragment text, no heading,
 no filename, no git output, no exception text and no traceback is ever
-reproduced. Fragment paths that are symlinks or otherwise not regular
-files are refused before anything reads them, git runs as an
-argument-list subprocess with both streams captured and neither
-re-emitted, and the argument parser answers a bad invocation in this
-module's words rather than by repeating what was typed.
+reproduced. Every filesystem call is a named refusal with its
+exception chaining suppressed, and `main` carries an `OSError`
+backstop for the one somebody adds later without remembering.
+Fragment paths that are symlinks or otherwise not regular files are
+refused before anything reads them, git runs as an argument-list
+subprocess with both streams captured and neither re-emitted, and the
+argument parser answers a bad invocation in this module's words rather
+than by repeating what was typed.
 """
 
 import os
@@ -129,6 +140,11 @@ NOT_ONCE = "an entry would not appear exactly once in the changelog"
 CONFLICT_MARKER = "the changelog would carry a conflict marker"
 OUTSIDE_CHANGED = "the changelog outside the folded sections would change"
 MALFORMED_SECTION = "a folded section would not be well formed"
+CANNOT_LIST = "the changelog.d directory cannot be listed"
+CANNOT_REMOVE = "a fragment could not be removed"
+CANNOT_WRITE = "CHANGELOG.md could not be written"
+NOT_RESTORED = "a failed fold could not be undone and the tree is half folded"
+FILESYSTEM = "a filesystem operation failed"
 
 
 def _fail(reasons: list[str]) -> int:
@@ -147,16 +163,24 @@ def fragment_paths(root: Path) -> list[Path]:
     The README is excluded by name, and a dotfile is skipped rather
     than refused: a checkout is allowed to carry the operating
     system's own droppings, and they are not tracked.
+
+    Enumeration is a filesystem call like any other and fails like one,
+    so an unreadable directory is a fixed refusal rather than an
+    `OSError` climbing out of the script and printing a traceback with
+    repository paths in it.
     """
     directory = root / FRAGMENT_DIR
     if not directory.is_dir():
         return []
-    found = []
-    for path in sorted(directory.iterdir(), key=lambda p: p.name):
-        if path.name.startswith(".") or path.name == NOT_A_FRAGMENT:
-            continue
-        found.append(path)
-    return found
+    try:
+        listed = sorted(directory.iterdir(), key=lambda p: p.name)
+    except OSError:
+        raise Refusal(CANNOT_LIST) from None
+    return [
+        path
+        for path in listed
+        if not path.name.startswith(".") and path.name != NOT_A_FRAGMENT
+    ]
 
 
 def _read(path: Path) -> str:
@@ -566,9 +590,10 @@ def fold(root: Path) -> int:
         ordered.append((-position, path.name, date, path))
     ordered.sort(key=lambda row: (row[0], row[1]))
 
+    sources = {path: _read(path) for path in paths}
     folding: dict[str, dict[str, list[str]]] = {}
     for _, _, date, path in ordered:
-        for name, entry in entries_of(_read(path)):
+        for name, entry in entries_of(sources[path]):
             folding.setdefault(date, {}).setdefault(name, []).append(entry)
 
     after, created, appended = assemble(before, folding)
@@ -576,11 +601,74 @@ def fold(root: Path) -> int:
     if reasons:
         return _fail(reasons)
 
-    changelog.write_text(after, encoding="utf-8")
-    for path in paths:
-        path.unlink()
+    reasons = _mutate(changelog, before, after, sources)
+    if reasons:
+        return _fail(reasons)
     print(f"folded {len(paths)} fragments into {len(created) + len(appended)} sections")
     return 0
+
+
+def _mutate(changelog: Path, before: str, after: str, sources: dict[Path, str]) -> list[str]:
+    """The only part of a fold that touches the disk, ordered so that
+    every failure leaves the tree as it was.
+
+    The fragments are removed first and the changelog replaced second,
+    which is the order that makes the recovery possible rather than
+    hopeful: the directory that has just accepted a removal is the
+    directory a restored fragment is written back into, and the same
+    permission bit governs both. The reverse order would need a
+    directory that had refused a removal to accept a creation.
+
+    The changelog is replaced rather than rewritten in place, through a
+    temporary file beside it, so there is no moment at which the file
+    is truncated and not yet whole. A leftover temporary would fail the
+    fold workflow's own dirtiness assertion, which is the loud outcome;
+    it is removed here anyway.
+    """
+    removed: list[Path] = []
+    try:
+        for path in sources:
+            path.unlink()
+            removed.append(path)
+    except OSError:
+        return _restore(changelog, None, removed, sources, CANNOT_REMOVE)
+
+    staged = changelog.with_name(f"{changelog.name}.fold-tmp")
+    try:
+        staged.write_text(after, encoding="utf-8")
+        os.replace(staged, changelog)
+    except OSError:
+        try:
+            staged.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return _restore(changelog, before, removed, sources, CANNOT_WRITE)
+    return []
+
+
+def _restore(
+    changelog: Path,
+    before: str | None,
+    removed: list[Path],
+    sources: dict[Path, str],
+    reason: str,
+) -> list[str]:
+    """Put back what the failed mutation had already taken.
+
+    `before` is None when the changelog was never reached, which is the
+    ordinary case: only the fragments need restoring. A restore that
+    itself fails is reported as its own refusal, because a tree left
+    half folded is a different thing from a fold that declined to
+    start and must not be described as one.
+    """
+    try:
+        for path in removed:
+            path.write_text(sources[path], encoding="utf-8")
+        if before is not None and changelog.read_text(encoding="utf-8") != before:
+            changelog.write_text(before, encoding="utf-8")
+    except OSError:
+        return [reason, NOT_RESTORED]
+    return [reason]
 
 
 def check(root: Path) -> int:
@@ -633,6 +721,14 @@ def main(argv: list[str]) -> int:
         return fold(root) if verb == "fold" else check(root)
     except Refusal as refusal:
         return _fail([str(refusal)])
+    except OSError:
+        # The backstop, and it exists because the thing it catches is
+        # the thing this script must never do: an unhandled OSError
+        # prints a traceback, and a traceback carries repository paths
+        # into a public CI log. Every filesystem call above is guarded
+        # by name; this catches the one somebody adds later without
+        # remembering to.
+        return _fail([FILESYSTEM])
 
 
 if __name__ == "__main__":
