@@ -44,7 +44,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   device, and a second device section would leave the model choosing
   which one to believe. An agent whose `memory` section is switched off
   is told them too, because what a device is called is not a remembered
-  thing.
+  thing. A board still carrying the `Device <mac>` default is not
+  introduced by it, so an agent never reads a MAC address aloud when
+  somebody asks which speaker it is, and a deployment that has neither
+  named nor placed a device sends the prompts it sent before this
+  release, byte for byte. Naming or relocating one is what starts the
+  sentence appearing.
 
 ### Changed
 

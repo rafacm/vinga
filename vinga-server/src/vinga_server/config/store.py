@@ -266,20 +266,27 @@ class LiveDevice:
     round of every reply, because a device that was moved between two
     replies has moved for the second of them.
 
-    `name` is what the reply is told and is never absent: a row whose
-    name says nothing is not answered as a record, so there is no
-    "called nothing" for a prompt to render. `location` is nullable
-    because a device nobody has placed is an ordinary device. `id` is
-    the record's identity, which is what makes these two facts belong
-    to a row rather than to a MAC and what a board swap keeps; it is
-    None only where the answer came from a snapshot that never minted
-    one, which is a configuration composed in Python rather than read
-    from a store.
+    `name` is the row's own, never absent and never adjusted: a row
+    whose name says nothing is not answered as a record at all, so there
+    is no "called nothing" here. `location` is nullable because a device
+    nobody has placed is an ordinary device. `id` is the record's
+    identity, which is what makes these facts belong to a row rather
+    than to a MAC and what a board swap keeps; it is None only where the
+    answer came from a snapshot that never minted one, which is a
+    configuration composed in Python rather than read from a store.
+
+    `named` is the one derived field, and it is here rather than at a
+    reader because the rule it applies is this module's: binding a board
+    creates its record and calls it `Device <mac>` until somebody names
+    it, so a name equal to that default is a placeholder the server
+    minted and not a name anybody says out loud. Readers that want the
+    row say `name`; readers deciding whether to SAY it ask this first.
     """
 
     id: str | None
     name: str
     location: str | None
+    named: bool = True
 
 
 # What a refusal about these two rows names. Not a single row's
@@ -1136,6 +1143,11 @@ def read_live_device(engine: Engine, mac: str) -> LiveDevice | None:
     in front of it, so this is a row nothing in this server wrote; the
     honest reading of it is that this device has no name, rather than
     telling a model it is speaking through a device called nothing.
+
+    A name equal to `Device <mac>` is answered as a record nobody has
+    named (`named=False`), because that is what the default means:
+    binding a board mints it so that no onboarding flow has to ask for
+    a name the operator does not yet have.
     """
     normalized = _mac(mac)
     problem: ConfigError | None = None
@@ -1159,7 +1171,12 @@ def _live_device(connection: Connection, mac: str) -> LiveDevice | None:
     ).one_or_none()
     if row is None or not fold_device_name(row.name or ""):
         return None
-    return LiveDevice(id=row.id, name=row.name, location=row.location)
+    return LiveDevice(
+        id=row.id,
+        name=row.name,
+        location=row.location,
+        named=row.name != default_device_name(mac),
+    )
 
 
 def stored_secrets(snapshot: Snapshot) -> tuple[StoredSecret, ...]:

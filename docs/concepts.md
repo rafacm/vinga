@@ -165,7 +165,10 @@ distinct on purpose:
   prompt, in the same block as what is remembered about the device, so
   an agent can say which speaker it is and where it stands, and a board
   renamed or moved mid-conversation is renamed or moved for the very
-  next thing that is said.
+  next thing that is said. A board still called `Device <mac>` is not
+  introduced by that placeholder, so an agent says nothing about a
+  device nobody has named or placed rather than reading a MAC address
+  aloud.
   The
   [configuration reference](reference/domain-config.md) documents the
   fields.

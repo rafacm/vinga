@@ -186,8 +186,9 @@ def server_prompt_heading(entry: str) -> str:
     return f"Guidance the server behind the {entry}{names.SERVER_SEPARATOR} tools publishes:"
 
 
-def device_introduction(name: str, location: str | None) -> str:
-    """The one sentence that says what the reply is speaking through.
+def device_introduction(name: str | None, location: str | None) -> str:
+    """The one sentence that says what the reply is speaking through,
+    and the empty string where there is nothing to say.
 
     It sits in the device block above the notes rather than in a block
     of its own, and that is the whole design decision: a name and a
@@ -201,10 +202,17 @@ def device_introduction(name: str, location: str | None) -> str:
     the way the persona above it is written, and an agent whose memory
     is switched off still gets it.
 
-    The location clause is dropped rather than written as unknown. A
-    device nobody has placed is the ordinary case, "its location has not
-    been set" is a sentence about the configuration rather than about
-    the world, and a model reading it tends to say it out loud.
+    Either half may be missing and each is then left out rather than
+    written as unknown. A device nobody has placed is the ordinary case,
+    "its location has not been set" is a sentence about the
+    configuration rather than about the world, and a model reading one
+    tends to say it out loud. A device nobody has NAMED is the ordinary
+    case too, for as long as it takes an operator to think of a name:
+    the record carries `Device <mac>` until then, and a model told it is
+    speaking through a device called Device aa:bb:cc:dd:ee:ff will read
+    a MAC address aloud when somebody asks which speaker it is. Whether
+    a name is that placeholder is decided where the rule lives
+    (`LiveDevice.named`); what arrives here is a name to say or nothing.
 
     Both values are the operator's own text (the location is a
     conversation's too, from #449's tool onward), and both are trimmed
@@ -214,10 +222,15 @@ def device_introduction(name: str, location: str | None) -> str:
     escaped or bounded here: the name is prompt text the same way an
     agent's persona is.
     """
-    called = f"You are speaking through a device called {name.strip()}"
-    if location is None or not location.strip():
-        return f"{called}."
-    return f"{called}, which is in {location.strip()}."
+    called = "" if name is None or not name.strip() else name.strip()
+    where = "" if location is None or not location.strip() else location.strip()
+    if called and where:
+        return f"You are speaking through a device called {called}, which is in {where}."
+    if called:
+        return f"You are speaking through a device called {called}."
+    if where:
+        return f"You are speaking through a device in {where}."
+    return ""
 
 
 @dataclass(frozen=True)
@@ -468,14 +481,24 @@ def _device_block(device: "LiveDevice | None", remembered: str) -> Block | None:
     deployment is, the heading and its list are what somebody told it.
     The heading stays with the notes it introduces, so a deployment that
     remembers nothing about its devices sends the sentence alone, and a
-    deployment that has not named its devices sends exactly what it sent
-    before the record existed, byte for byte.
+    deployment that has neither named nor placed a device sends exactly
+    what it sent before the record existed, byte for byte. That last
+    case is every deployment the morning after this upgrade, since the
+    migration gives every existing row the `Device <mac>` default.
     """
     parts = [
         part
         for part in (
-            None if device is None else device_introduction(device.name, device.location),
-            None if not remembered else f"{DEVICE_HEADING}\n{remembered}",
+            ""
+            if device is None
+            else device_introduction(
+                # The whole of what this module knows about default
+                # names: the record always carries one, and `named` is
+                # the repository's answer to whether a person chose it.
+                device.name if device.named else None,
+                device.location,
+            ),
+            "" if not remembered else f"{DEVICE_HEADING}\n{remembered}",
         )
         if part
     ]

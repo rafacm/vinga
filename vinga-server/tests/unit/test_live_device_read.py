@@ -114,6 +114,7 @@ def test_a_relocated_device_reads_back_where_it_was_put(
         id=store.read_device(MAC).entry.id,
         name=f"Device {MAC}",
         location="the kitchen",
+        named=False,
     )
 
 
@@ -204,3 +205,42 @@ def test_a_name_that_names_nothing_is_answered_as_no_record(
         engine.dispose()
 
     assert read_live_device(lookup, MAC) is None
+
+
+def test_a_board_nobody_has_named_says_so(store: ConfigStore, lookup: Engine) -> None:
+    """Binding mints `Device <mac>` so that no onboarding flow has to
+    ask for a name the operator does not yet have, which makes that
+    exact string a placeholder rather than a name. Whoever decides
+    whether to say a name out loud reads this rather than re-deriving
+    the default rule.
+    """
+    bound(store)
+
+    answered = read_live_device(lookup, MAC)
+
+    assert answered is not None
+    assert answered.name == f"Device {MAC}" and answered.named is False
+
+
+def test_a_named_board_says_so_too(store: ConfigStore, lookup: Engine) -> None:
+    bound(store)
+
+    store.rename_device(MAC, "Kitchen Speaker")
+
+    answered = read_live_device(lookup, MAC)
+    assert answered is not None and answered.named is True
+
+
+def test_a_rename_back_to_the_default_is_a_board_nobody_has_named(
+    store: ConfigStore, lookup: Engine
+) -> None:
+    """The comparison is against the string rather than against a
+    history, which is the only thing a read of one row can do: an
+    operator who types the default back has typed the placeholder."""
+    bound(store)
+    store.rename_device(MAC, "Kitchen Speaker")
+
+    store.rename_device(MAC, f"Device {MAC}")
+
+    answered = read_live_device(lookup, MAC)
+    assert answered is not None and answered.named is False

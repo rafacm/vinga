@@ -72,7 +72,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import Engine
 
-from vinga_server.config.models import normalize_mac
+from vinga_server.config.models import default_device_name, normalize_mac
 from vinga_server.config.store import (
     LiveBinding,
     LiveDevice,
@@ -417,11 +417,20 @@ def _snapshot_record(config: "Config", mac: str) -> LiveDevice | None:
     `id` travels as it was found, which is None for a configuration
     composed in Python rather than read from a store. Nothing in a
     prompt renders it; it is what says these facts belong to a row.
+
+    `named` is decided by the same comparison the stored read makes, so
+    a fallback cannot say a board is named when the database would have
+    said it is still carrying the default.
     """
     record = config.devices.get(mac)
     if record is None or record.name is None:
         return None
-    return LiveDevice(id=record.id, name=record.name, location=record.location)
+    return LiveDevice(
+        id=record.id,
+        name=record.name,
+        location=record.location,
+        named=record.name != default_device_name(mac),
+    )
 
 
 __all__ = ["BoundNames", "DeviceAgents", "DeviceBindings"]

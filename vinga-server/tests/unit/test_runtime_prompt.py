@@ -491,6 +491,14 @@ def named(name: str = "Kitchen Speaker", location: str | None = None) -> LiveDev
     return LiveDevice(id="0" * 32, name=name, location=location)
 
 
+def unnamed(location: str | None = None) -> LiveDevice:
+    """A board bound and never named: the record carries the default the
+    repository minted, and `named` is how it says so."""
+    return LiveDevice(
+        id="0" * 32, name="Device aa:bb:cc:dd:ee:ff", location=location, named=False
+    )
+
+
 def test_a_named_device_is_introduced_above_its_notes() -> None:
     """One block and one heading. The sentence says what this device is,
     the heading introduces what somebody told it, and the two are a
@@ -595,3 +603,34 @@ def test_the_two_values_are_set_into_the_sentence_trimmed() -> None:
         "You are speaking through a device called Kitchen Speaker, which is in the "
         "kitchen."
     )
+
+
+def test_a_board_nobody_has_named_is_not_introduced_by_its_placeholder() -> None:
+    """`Device aa:bb:cc:dd:ee:ff` is what the repository mints so that
+    no onboarding flow has to ask for a name the operator does not yet
+    have. A model told that is its name reads a MAC address aloud when
+    somebody asks which speaker it is, and every deployment carries one
+    on every board the morning after the migration.
+    """
+    scopes = PromptMemory(state="", agent="", device="- a note")
+
+    assembled = prompt.with_scopes(prompt.know_how("POET"), scopes, unnamed())
+
+    assert assembled.text == prompt.with_scopes(prompt.know_how("POET"), scopes).text
+
+
+def test_a_board_nobody_has_named_still_says_where_it_is() -> None:
+    """The two facts are separate, and so is the placeholder rule: a
+    board somebody moved but nobody named is somewhere, and the reply
+    should know where without being told a MAC is its name."""
+    assembled = prompt.with_scopes(
+        prompt.know_how("POET"),
+        PromptMemory(state="", agent="", device=""),
+        unnamed("the kitchen"),
+    )
+
+    assert assembled.text == "POET\n\nYou are speaking through a device in the kitchen."
+
+
+def test_a_device_with_neither_fact_contributes_nothing() -> None:
+    assert prompt.device_introduction(None, None) == ""
