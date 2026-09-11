@@ -852,6 +852,57 @@ def test_a_device_that_is_not_a_mac_is_refused_without_quoting_it(
         assert SENTINEL not in where
 
 
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        SENTINEL,
+        # A MAC with a statement's tail on it, and one dressed as a
+        # tautology: the filter is a bound parameter, so what is
+        # asserted is that neither ever reads back out of anything.
+        "aa:bb:cc:dd:ee:ff; drop schema record cascade",
+        "aa:bb:cc:dd:ee:ff' or '1'='1",
+        # And control characters: a CR/LF pair that would forge a log
+        # line, and the terminal-steering set STEERING plants in cells.
+        "aa:bb:cc:dd:ee:ff\r\nlevel=CRITICAL",
+        "\x1b[31maa:bb:cc:dd:ee:ff\x1b[0m\x07",
+    ],
+)
+def test_a_hostile_device_reaches_no_stream_and_no_log(
+    run, store, capsys, caplog, hostile
+) -> None:
+    """The view matrix above, through `--group device --device VALUE`:
+    the filter is the one request-controlled value on this surface that
+    travels all the way to a query, so it is held to the same property
+    as the word that selects the relation.
+
+    Hunted through stdout, stderr and both shipped log formats, because
+    a value that reached a record as an argument is a value the
+    formatter puts back into the line. The refusal is the API's fixed
+    MAC sentence, which quotes nothing, and travel is safe however the
+    value is spelled: a query parameter is percent-encoded, so even the
+    pair that would forge a log line reaches the API as text and meets
+    the same sentence.
+    """
+    with caplog.at_level(logging.DEBUG):
+        code, printed, err = out(
+            run,
+            capsys,
+            "metric",
+            "show",
+            "sessions",
+            "--group",
+            "device",
+            "--device",
+            hostile,
+        )
+
+    assert code == 1
+    assert printed == ""
+    assert err.endswith("\n") and len(err.splitlines()) == 1
+    for where in (printed, err, leaked(caplog)):
+        assert hostile not in where
+
+
 def test_an_explicitly_empty_device_cannot_widen_the_answer(
     run, store, capsys
 ) -> None:
