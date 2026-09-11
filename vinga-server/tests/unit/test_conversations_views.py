@@ -132,7 +132,7 @@ def test_the_common_prose_is_declared_and_not_written_in_the_renderer() -> None:
     assert "A missing measurement has more than one cause" in declared
     assert "A rate is null when its denominator is zero**, never zero" in declared
     assert [group.heading for group in COMMON] == [
-        "What is true of all four",
+        "What is true of every one of them",
         "Three limits worth knowing before quoting a number",
     ]
 
