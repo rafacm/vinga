@@ -398,6 +398,37 @@ def test_entry_bytes_survive_the_fold_verbatim(tmp_path: Path) -> None:
     assert text.count(VERBATIM) == 1
 
 
+def test_crlf_bytes_survive_the_fold_on_both_sides(tmp_path: Path) -> None:
+    """Line endings are content, and nothing in this repository forces
+    them to be one thing.
+
+    Reading through universal-newline translation turned a CRLF
+    fragment into LF on the way in, so the entry was not moved byte for
+    byte; and it turned a CRLF changelog into LF on the way in and back
+    out, so every untouched section was rewritten while the
+    post-condition compared two already-normalized strings and saw
+    nothing. Both halves are asserted on bytes here, which is the only
+    altitude at which the claim means anything.
+    """
+    changelog = BASE.replace("\n", "\r\n")
+    root = repo(tmp_path, changelog=changelog)
+    entry = "- **A thing**, added.\r\n  With a second line.\r\n"
+    (root / "changelog.d" / "467-crlf.md").write_bytes(
+        f"### Added\r\n\r\n{entry}".encode()
+    )
+    land(root, when="2026-09-12T10:00:00+00:00")
+
+    done = run("fold", str(root))
+
+    assert done.returncode == 0, done.stderr
+    raw = (root / "CHANGELOG.md").read_bytes()
+    assert raw.count(entry.encode()) == 1
+    assert b"\n" not in raw.replace(b"\r\n", b"")
+    boundary = changelog.index("## 2026-09-11")
+    assert raw.startswith(changelog[:boundary].encode())
+    assert raw.endswith(changelog[boundary:].encode())
+
+
 def test_a_second_fold_with_no_fragments_is_a_no_op(tmp_path: Path) -> None:
     """Idempotence, which is what lets a queued run that lost the race
     exit green instead of folding half of something twice."""
