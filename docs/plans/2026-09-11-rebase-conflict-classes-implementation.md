@@ -124,3 +124,182 @@ origin/main...aab26155). Verdict: mergeable after the listed fixes.
    what the test pins.
 2. **P3: the implementation doc still said PR TBD** while the plan's
    tick carried #475. Fixed in `ecf7c1e9`.
+
+## M2: changelog fragments and the fold on `main`
+
+PR TBD.
+
+### What landed
+
+`changelog.d/` exists, with a `README.md` that states the fragment
+contract where fragments live: one file per change named
+`<issue>-<slug>.md`, `### <Class>` headings from the closed Keep a
+Changelog six, entry text in final changelog form, no date and no `##`
+heading, and the README excluded from folding by name.
+
+`scripts/fold_changelog.py` is the stdlib script with three verbs.
+`fold` reads the fragments, derives each one's dated section from the
+committer date of the commit that introduced it along first-parent
+history in that commit's own recorded offset, orders them by that
+commit's position with the filename as the tie-breaker, merges the
+entries verbatim into `CHANGELOG.md`, deletes the fragments, and
+refuses without writing a byte unless its post-conditions hold. `check`
+validates fragments without writing and without touching git, which is
+what lets it run on a shallow pull-request checkout. `guard` reads a
+changed-file list on stdin and the pull request body from `PR_BODY`,
+and refuses a list touching `CHANGELOG.md` unless the body carries
+`Corrects CHANGELOG history`, naming both the remedy and the phrase in
+its refusal.
+
+The post-conditions are the plan's, scoped as its review round settled:
+every entry present verbatim exactly once, no conflict marker anywhere
+in the assembled file, the file outside the touched sections
+byte-identical, a created section canonical (one heading per class in
+Keep a Changelog order) and an appended-into section keeping its
+standing shape, its headings still present and still in the order they
+were in. Legacy sections are parsed permissively and never validated,
+normalized or rewritten.
+
+`vinga-server/tests/unit/test_fold_changelog.py` is the subprocess
+suite beside `test_check_doc_links.py` and in its style: 39 cases over
+real git histories in temporary repositories. Nine refusal families run
+through two parametrized cases, one asserting each writes nothing and
+one asserting each reproduces nothing, with a credential-shaped
+sentinel planted in a fragment body, a fragment filename or the path a
+git failure is about.
+
+`.github/workflows/changelog-fold.yml` runs the fold on a push to
+`main` touching `changelog.d/**`, checking out `main` with
+`fetch-depth: 0`, serialized without cancellation, `contents: write`
+and nothing else, with the bot identity, the two-path `git add`, the
+porcelain assertion and the GITHUB_TOKEN non-triggering property all
+stated in the file. `.github/workflows/docs.yml` gains the `edited`
+activity type beside the three defaults written out, and two
+pull-request-gated steps: the guard, fed from the pull-request files
+API with the body passed as an `env:` entry rather than interpolated
+into the shell, and the fragment check.
+
+`changelog.d/` joins `_HISTORICAL_PATHS` in the census, with the
+fold-neutrality property stated at the classification site and asserted
+by `test_a_fragment_is_a_record_the_way_the_changelog_is`. `AGENTS.md`
+loses the changelog half of the recurring-conflicts paragraph (the
+class is gone, not resolved differently), says how an entry arrives in
+Writing conventions, and names the fold workflow in the CI paragraph.
+The `implement-issue` skill's brief points at the fragment contract,
+and the census sentence M1 left for this milestone is corrected here.
+
+### Deviations from the plan
+
+- **Three verbs, not two.** The plan's Module layout paragraph says
+  `fold_changelog.py` has "two verbs", written before the review round
+  added `guard` in resolution 4; the Enforcement section and the
+  resolution both specify the third. The review round wins, as the plan
+  says it does, and the docstring's usage block names all three.
+- **The environment variable is `PR_BODY`.** The plan says "an
+  environment variable" without naming one. The name is this
+  milestone's choice, pinned in the script, the workflow and the tests.
+- **Diagnostics go to stderr, the summary to stdout.**
+  `check_doc_links.py` prints its per-file findings on stdout and only
+  its usage error on stderr. A fold refusal is a whole-run refusal
+  rather than a per-file finding, so it leaves on stderr; the
+  one-line success summary is on stdout. Nothing else about that
+  script's output contract changes, and the sentinel assertions read
+  both streams whole either way.
+- **A created section at the end of the file tops up a blank line.**
+  The plan's post-condition says the file outside the touched sections
+  is byte-identical. A section created older than every existing one
+  would land after a last section that may not end in a blank line, and
+  inserting a heading straight after an entry line would be malformed
+  markdown. The fold appends the one newline and records that date as
+  touched rather than excusing it from the post-condition. The case
+  cannot arise for a fragment merged today and is not exercised by a
+  test; what is tested is the insertion between two sections.
+- **A dotfile under `changelog.d/` is skipped, not refused.** The
+  contract is about fragments, and a checkout is allowed to carry the
+  operating system's own droppings, which are untracked. Everything
+  else in the directory other than the README is a fragment and is held
+  to the filename shape.
+- **The conflict-marker refusal covers a marker that was already
+  there.** The plan lists "conflict markers anywhere in the changelog"
+  among the refusal cases; implemented as a post-condition over the
+  assembled text, so a marker spliced into the file before the fold
+  refuses the fold too. That is the stricter reading and the one the
+  test fixture exercises.
+
+### Discoveries
+
+- **A shallow clone does not report "no introduction commit"; it
+  reports the wrong one.** `git log --first-parent --diff-filter=A`
+  against a grafted history names the boundary commit as the adder of
+  every file in the tree, so a naive check for "nothing found" would
+  have passed and dated the fragment from the truncation. The refusal
+  tests for a root commit in a repository git reports as shallow, and
+  the test clones the constructed repository at depth one to prove it.
+- **`%cI` reads the commit's stored offset whatever the host timezone
+  is.** Confirmed by running the suite under `TZ=UTC`,
+  `TZ=Pacific/Auckland` and `TZ=America/Los_Angeles`, all 39 green. The
+  mutation that read the date as `--date=iso-local` instead was caught,
+  but by a different case than the one written for it, which is how the
+  timezone sensitivity of the mutation surfaced at all.
+- **The manifest did not move across the whole milestone.** A new
+  tracked directory, a new script, a new test module, two rewritten
+  documentation paragraphs and a changelog fragment, and
+  `uv run python -m tests.unit.test_command_spellings` rendered the
+  committed bytes unchanged. That is M1's property holding under a
+  change that would certainly have restaged the old positional
+  manifest, and it is also the fold-neutrality argument observed rather
+  than only asserted.
+- **The plan's legacy shapes are exactly the repository's.**
+  `## 2026-09-06` carries two `### Added` headings and `## 2026-09-10`
+  orders `### Fixed` before `### Changed`. The fixture reproduces both,
+  and the fold leaves every byte of them alone.
+- **The falsification was cheap and is worth recording.** Eighteen
+  mutations of the script, applied one at a time and each watched red:
+  the date read without the commit's offset, ordering by filename,
+  the tie-breaker removed while the directory listing was reversed,
+  reversed class order, stripped entry lines, each dropped
+  post-condition, a followed symlink, a graft-dated fragment, two leaks
+  (the filename and the rejected heading), a re-rendered untouched
+  section, a section inserted outside date position, an entry appended
+  under the first matching heading rather than the last, a loosely
+  matched escape phrase, an absent body read without a default, a write
+  before the post-conditions, and fragments left undeleted.
+
+### Verification
+
+All from `vinga-server/` with `uv`, against a dedicated Postgres
+(`docker compose -p vinga-467m2`, port 55468).
+
+- `uv run ruff check .`: All checks passed! (`scripts/` is outside
+  ruff's path here, as `check_doc_links.py` has always been; the test
+  suite beside it is not.)
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 6882 passed, 19
+  skipped in 199.97s.
+- `uv run pytest tests/integration -q`: see the PR's Verification
+  section for the run this milestone recorded.
+- `python3 scripts/check_doc_links.py .` from the checkout root:
+  checked 229 files, 0 failures.
+- `python3 scripts/fold_changelog.py check .` against this repository's
+  own first fragment: checked 1 fragments, 0 failures.
+- Both workflow files parse as YAML and their `run` scripts pass
+  `bash -n`.
+
+Not verified here, and it cannot be:
+
+- **The first live fold.** The fold workflow cannot run until this
+  milestone is on `main`, so the entry above exists as
+  `changelog.d/467-changelog-fragments.md` and not in `CHANGELOG.md`.
+  The PR's Verification box for it is unchecked with that reason. After
+  the merge the coordinator watches the run, verifies the folded
+  section, and appends the run link to this section in one
+  documentation-only direct commit to `main`, which is the follow-up
+  the plan names in its Tests section.
+- **The two pull-request steps as GitHub runs them.** `guard` and
+  `check` are unit-tested against their real inputs, but the `gh api`
+  call, the `env:` passing of the body and the `edited` activity type
+  are workflow semantics no local run reproduces. The first evidence is
+  this milestone's own docs run.
+- **The bot push.** `permissions: contents: write`, the absence of
+  branch protection on `main` and the GITHUB_TOKEN non-triggering rule
+  are all properties of the repository and the runner, not of anything
+  runnable here.

@@ -393,7 +393,9 @@ named where the rule is stated.
   Documentation footprint: AGENTS.md; the module's own docstring;
   CHANGELOG.md, edited directly for the last time. Server-workflow
   CI (unit lane).
-- [ ] **M2: changelog fragments and the fold on `main`.**
+- [x] **[M2: changelog fragments and the fold on
+  `main`](2026-09-11-rebase-conflict-classes-implementation.md#m2-changelog-fragments-and-the-fold-on-main)**
+  (PR TBD).
   `changelog.d/` with its README; `scripts/fold_changelog.py` with
   its subprocess suite; `changelog-fold.yml`; the two `docs.yml`
   steps (PR CHANGELOG.md refusal with the recorded escape phrase,
