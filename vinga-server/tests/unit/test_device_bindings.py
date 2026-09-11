@@ -20,6 +20,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import threading
 from pathlib import Path
 
 import pytest
@@ -741,3 +742,117 @@ def test_a_view_with_no_database_answers_authoritatively() -> None:
     snapshot_only = DeviceBindings.snapshot_only(world(Config()))
 
     assert snapshot_only.names_for(DEVICE_MAC).authoritative is True
+
+
+# The record the same view answers, which a reply asks per round
+
+
+def test_the_record_is_read_live_like_the_binding() -> None:
+    """Same view, same rows, same freshness rule: an operator who
+    renames or moves a board is answered by the next read rather than by
+    the next restart. The reply path asks this on every round, so "the
+    next read" is the next thing the agent says."""
+    config = booted(devices={DEVICE_MAC: ["assistant"]})
+    bindings = DeviceBindings.open(world(config))
+    try:
+        with store_at() as store:
+            store.rename_device(DEVICE_MAC, "Kitchen Speaker")
+            store.relocate_device(DEVICE_MAC, "the kitchen")
+
+        record = bindings.record_for(DEVICE_MAC)
+        assert record is not None
+        assert (record.name, record.location) == ("Kitchen Speaker", "the kitchen")
+
+        with store_at() as store:
+            store.relocate_device(DEVICE_MAC, "the hallway")
+
+        moved = bindings.record_for(DEVICE_MAC)
+        assert moved is not None and moved.location == "the hallway"
+        # And it is the same record throughout, which is what a reader
+        # of these two facts is entitled to assume.
+        assert moved.id == record.id
+    finally:
+        bindings.dispose()
+
+
+def test_a_mac_with_no_row_has_no_record() -> None:
+    """A device a default agent stands behind is served and has no
+    record, and this says so rather than inventing one."""
+    config = booted(devices={DEVICE_MAC: ["assistant"]}, default_agent="assistant")
+    bindings = DeviceBindings.open(world(config))
+    try:
+        assert bindings.record_for("11:22:33:44:55:66") is None
+    finally:
+        bindings.dispose()
+
+
+def test_a_failed_record_read_falls_back_to_the_served_world(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A `/data` hiccup mid-conversation must not make an agent stop
+    knowing what it is speaking through, and must not be silent about
+    having happened. The same rule the binding keeps, and the same
+    warning: the fixed sentence and the exception's class name."""
+    config = Config(
+        providers={stage: {"mock": {"type": "mock"}} for stage in STAGES},
+        agents={"assistant": AGENT},
+        devices={
+            DEVICE_MAC: {
+                "agents": ["assistant"],
+                "name": "Kitchen Speaker",
+                "location": "the kitchen",
+            }
+        },
+    )
+    bindings = DeviceBindings(world(config), _FailingEngine())
+
+    with caplog.at_level(logging.WARNING):
+        record = bindings.record_for(DEVICE_MAC)
+
+    assert record is not None
+    assert (record.name, record.location) == ("Kitchen Speaker", "the kitchen")
+    text, objects = _rendered(caplog.records)
+    assert SENTINEL not in text
+    assert objects and objects[0]["event"] == "device_bindings_unreadable"
+
+
+def test_a_device_the_served_world_never_named_has_no_record() -> None:
+    """The bare agent-list shorthand names nobody. What the database
+    would answer for such a device is the default name its row was
+    created with, and a view that invented one here would be answering a
+    question no writer has."""
+    config = Config(
+        providers={stage: {"mock": {"type": "mock"}} for stage in STAGES},
+        agents={"assistant": AGENT},
+        devices={DEVICE_MAC: ["assistant"]},
+    )
+    bindings = DeviceBindings.snapshot_only(world(config))
+    try:
+        assert bindings.record_for(DEVICE_MAC) is None
+    finally:
+        bindings.dispose()
+
+
+async def test_the_record_resolves_off_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reply path awaits this once per round, on the loop every live
+    conversation in the process shares. Proven by which thread it ran
+    on rather than by reading the call site, the way the prompt's memory
+    read is."""
+    ran: list[int] = []
+    real = DeviceBindings.record_for
+
+    def record_for(self: DeviceBindings, mac: str):  # type: ignore[no-untyped-def]
+        ran.append(threading.get_ident())
+        return real(self, mac)
+
+    monkeypatch.setattr(DeviceBindings, "record_for", record_for)
+    config = booted(devices={DEVICE_MAC: ["assistant"]})
+    bindings = DeviceBindings.open(world(config))
+    try:
+        await bindings.resolve_record(DEVICE_MAC)
+    finally:
+        bindings.dispose()
+
+    assert ran and all(where != threading.get_ident() for where in ran)

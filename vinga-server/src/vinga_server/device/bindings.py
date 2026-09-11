@@ -15,6 +15,17 @@ the `devices` rows and `default_agent` in `domain_settings`. It resolves
 by the same rule, the bound list else the default agent else nothing,
 and it stops there.
 
+It answers one more question off the same rows, added by #449 and kept
+here rather than given a view of its own: what the device behind a MAC
+is called and where it stands. The reply path asks it on every round,
+because a device that was moved between two replies has moved for the
+second of them, and a second live view of one table would be a second
+engine, a second fallback and a second thing to dispose. It is
+deliberately a separate read from the binding's: the binding decides
+whether a board is served at all and its statement is pinned byte for
+byte, while this one is asked by a conversation already in flight, and
+nothing ever needs both answers at once.
+
 What it deliberately does NOT do is decide which of those names this
 server can serve. That decision belongs to whoever is about to act on
 it, against the one generation they are acting in: a session captures a
@@ -62,7 +73,12 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Engine
 
 from vinga_server.config.models import normalize_mac
-from vinga_server.config.store import LiveBinding, read_live_binding
+from vinga_server.config.store import (
+    LiveBinding,
+    LiveDevice,
+    read_live_binding,
+    read_live_device,
+)
 from vinga_server.db import read_engine
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import BindingsUnreadable
@@ -77,6 +93,7 @@ if TYPE_CHECKING:
     # reference` (#143's weight pin). Nothing here needs the class
     # itself, only a holder to ask, so the name is a type and the
     # annotations that use it are strings.
+    from vinga_server.config import Config
     from vinga_server.generation import Generations
 
 events = ServerEvents(__name__)
@@ -270,6 +287,67 @@ class DeviceBindings:
         names = tuple(bound) if bound else ((default,) if default is not None else ())
         return BoundNames(names, authoritative)
 
+    async def resolve_record(self, mac: str) -> LiveDevice | None:
+        """`record_for`, awaited off the event loop.
+
+        What the reply path calls, and it calls it on every round: a
+        device that was moved between two replies has moved for the
+        second of them. The rule `resolve` states holds here with one
+        more reason behind it: this read happens while a person is
+        waiting for an answer, so running it inline would put a query in
+        front of every other conversation this process is holding, once
+        per round rather than once per connect.
+        """
+        return await asyncio.to_thread(self.record_for, mac)
+
+    def record_for(self, mac: str) -> LiveDevice | None:
+        """The record behind this MAC, from the database when it can be
+        read and from the world being served when it cannot.
+
+        The same fallback `names_for` keeps, and for the same reason
+        rather than for symmetry: a `/data` hiccup mid-conversation must
+        not make an agent stop knowing what it is speaking through. What
+        the served world answers is what boot read, so it is right
+        until somebody writes, and a write it has not heard about is
+        staleness in one round's prompt rather than a device that
+        forgot its own name.
+
+        None means this MAC has no record: no row in the database, or
+        no entry in the world being served. It is not an error and
+        nothing says it out loud; a device bound to nothing but a
+        default agent is exactly that, and the reply is assembled as it
+        was before the record existed.
+        """
+        normalized = normalize_mac(mac)
+        stored, answered = self._stored_record(normalized)
+        if answered:
+            return stored
+        return _snapshot_record(self._generations.current().config, normalized)
+
+    def _stored_record(self, mac: str) -> tuple[LiveDevice | None, bool]:
+        """This device's record as the database holds it, and whether
+        the database is what answered.
+
+        The second half is the same distinction `_stored` draws and is
+        read the other way round here, because the two callers want
+        different things from it: a binding falls back whenever it has
+        no row, since a default agent stands behind every unbound
+        device; a record falls back only when nothing was read, since a
+        database that answered "no row" has answered.
+        """
+        if self._engine is None:
+            return None, False
+        problem: Exception | None = None
+        try:
+            return read_live_device(self._engine, mac), True
+        # Deliberately everything, the reason `_stored` gives: what is
+        # being protected is a conversation in flight, and no failure of
+        # this read is worth ending one over.
+        except Exception as exc:
+            problem = exc
+        self._warn(mac, problem)
+        return None, False
+
     def _stored(self, mac: str) -> tuple[LiveBinding | None, bool]:
         """This device's binding and the default agent as the database
         holds them, and whether the answer came from the database at
@@ -323,6 +401,27 @@ class DeviceBindings:
                 device=DeviceId(mac), failure=ClassName.of(exc)
             )
         )
+
+
+def _snapshot_record(config: "Config", mac: str) -> LiveDevice | None:
+    """One device's record as the world being served holds it.
+
+    A record with no name is no record here. The configuration model
+    leaves every field but the agents optional, because absence in a
+    document means "the repository decides", and a device bound by the
+    bare agent-list shorthand has never been named by anybody: what the
+    database would have answered for it is the default name its row was
+    created with, and inventing one here would be this view answering a
+    question no writer has.
+
+    `id` travels as it was found, which is None for a configuration
+    composed in Python rather than read from a store. Nothing in a
+    prompt renders it; it is what says these facts belong to a row.
+    """
+    record = config.devices.get(mac)
+    if record is None or record.name is None:
+        return None
+    return LiveDevice(id=record.id, name=record.name, location=record.location)
 
 
 __all__ = ["BoundNames", "DeviceAgents", "DeviceBindings"]
