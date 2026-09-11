@@ -190,10 +190,11 @@ async def test_switch_agent_is_offered_only_where_there_is_somewhere_to_go() -> 
     # Both offers whole, so the conditional tool is the entire
     # difference between them: the device bound to one agent has nowhere
     # to switch, and is offered everything else these agents are due.
-    # The two conversation tools are unconditional on purpose, since
-    # what a server that cannot resume anything answers with is a
-    # sentence the agent reads out and a tool that is simply absent is a
-    # tool a model invents (#190); the memory family is due because
+    # The two conversation tools and the location tool are
+    # unconditional on purpose, since what a server that cannot resume
+    # anything, or cannot move its devices, answers with is a sentence
+    # the agent reads out, and a tool that is simply absent is a tool a
+    # model invents (#190, #449); the memory family is due because
     # neither agent's `memory` section says otherwise, which is the
     # condition `test_session_memory_policy.py` is about.
     assert [tool.name for tool in alone.seen[0][1]] == [
@@ -206,6 +207,7 @@ async def test_switch_agent_is_offered_only_where_there_is_somewhere_to_go() -> 
         "clear_state",
         "new_conversation",
         "resume_conversation",
+        "set_device_location",
     ]
     assert [tool.name for tool in paired.seen[0][1]] == [
         "switch_agent",
@@ -218,6 +220,7 @@ async def test_switch_agent_is_offered_only_where_there_is_somewhere_to_go() -> 
         "clear_state",
         "new_conversation",
         "resume_conversation",
+        "set_device_location",
     ]
     # The enum carries the device's full bound list, which is what lets
     # the agent answer "who can I talk to?".
@@ -351,6 +354,7 @@ async def test_remembering_is_offered_and_executed() -> None:
         "clear_state",
         "new_conversation",
         "resume_conversation",
+        "set_device_location",
     ]
     assert "the user is vegetarian" in facts(store)
 

@@ -348,6 +348,39 @@ def test_a_relocation_by_id_refuses_an_id_no_record_has(store: ConfigStore) -> N
     assert _record(store).location is None
 
 
+@pytest.mark.parametrize(
+    "addressed",
+    ["", "not-an-id", "0" * 31, None],
+    ids=["empty", "prose", "short", "nothing"],
+)
+def test_a_relocation_by_id_refuses_an_address_that_is_not_an_id(
+    store: ConfigStore, addressed: Any
+) -> None:
+    """A value no minted id is spelled like is the same refusal as an id
+    nothing holds, because no record can hold it either.
+
+    Asked before the write is staged, which is the half that matters: a
+    binding addressed by an id carries no MAC of its own until the row
+    holding that id supplies one, and one that reached the staging with
+    neither address would create a device whose MAC is the empty string,
+    which is a row nothing could ever read.
+
+    `None` is in the table although the signature says `str`, and it is
+    the case that found this: nothing type-checks this module, the
+    caller is a tool holding a record that may be gone, and an absent id
+    is exactly what that caller has. It was creating a device until the
+    spelling was asked about first.
+    """
+    _agents(store)
+    store.bind_device(MAC, ["sam"])
+
+    with pytest.raises(UnknownEntityError):
+        store.relocate_device_by_id(addressed, "the office")
+
+    assert list(bindings(store.load().domain.devices)) == [MAC]
+    assert _record(store).location is None
+
+
 def test_a_relocation_by_id_is_held_to_the_rules_the_mac_one_is(
     store: ConfigStore,
 ) -> None:
