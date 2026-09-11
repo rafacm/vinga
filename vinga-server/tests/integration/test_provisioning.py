@@ -371,7 +371,7 @@ def test_the_analyst_role_reads_every_declared_view(
     """
     open_conversations(_as_server_role(provisioned, server_role)).dispose()
 
-    for view in conversations_views.VIEWS:
+    for view in conversations_views.DEFINED:
         assert (
             _as_analyst(provisioned, f"select * from record.{view.name}")
             == "allowed"
