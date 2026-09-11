@@ -62,8 +62,9 @@ touched. Every other change (documentation, the skills, this file) runs
 `.github/workflows/docs.yml` instead, whose `paths-ignore` mirrors the
 server workflow's paths: it checks internal links and anchors
 (`scripts/check_doc_links.py`) and runs the command-spellings census,
-which sweeps every tracked file and is therefore staled by pure
-documentation moves. Between the two workflows every change runs the
+which sweeps every tracked file, so a documentation change can stale
+it: a spelling a document starts or stops quoting, or a move that gives
+one another class. Between the two workflows every change runs the
 census somewhere.
 
 ### Restoring a file mid-experiment
@@ -121,8 +122,15 @@ headings merge into one section in Keep a Changelog order rather than
 one side winning, and `tests/unit/command-spellings.txt`, which is
 generated and must be **regenerated on the rebased tree** rather than
 merged, since a textual merge of it is a state no generator produced.
-The manifest records line numbers, so any change that shifts a line
-anywhere restages it; #467 tracks removing both conflict classes.
+The manifest records no positions, so a change that only shifts a line
+leaves it alone: it moves when the distinct set of classified spellings
+moves, one line per spelling added, removed or reclassified, which git
+merges cleanly. Regenerating on the rebased tree stays the rule for the
+times it does conflict, and `test_the_manifest_is_the_census` is what
+enforces it, in both workflows: the manifest is rendered again and
+diffed, so a spliced resolution is a red run rather than a committed
+state no generator produced. #467 tracks removing both conflict
+classes.
 
 
 ## Workflow
