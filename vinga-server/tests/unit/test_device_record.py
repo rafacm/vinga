@@ -281,6 +281,89 @@ def test_the_record_verbs_refuse_a_mac_with_no_record(store: ConfigStore, act) -
     assert MAC not in str(caught.value)
 
 
+# --- the relocation a conversation makes, addressed by the record ------
+#
+# `relocate_device` is what an operator types, holding the board and
+# reading the MAC off a label. A conversation cannot address it that
+# way: it attached to one RECORD at its connect and has to go on meaning
+# that record, because the MAC it stands at can be deleted and bound
+# again, or moved to another record, while it is still talking. The
+# cases below are the difference between the two addresses, which is
+# invisible until the two part company.
+
+
+def test_a_relocation_by_id_writes_the_record_that_holds_the_id(
+    store: ConfigStore,
+) -> None:
+    _agents(store)
+    bound = store.bind_device(MAC, ["sam"])
+    store.rename_device(MAC, "Kitchen Speaker")
+
+    located = store.relocate_device_by_id(bound.id, "the office")
+
+    assert located.id == bound.id
+    assert located.mac == MAC
+    assert located.name == "Kitchen Speaker"
+    assert located.location == "the office"
+    assert _row(store, MAC)["location"] == "the office"
+
+
+def test_a_relocation_by_id_leaves_the_record_now_at_that_mac_alone(
+    store: ConfigStore,
+) -> None:
+    """The falsifying case for the whole of this addressing, and the
+    only one that tells the two apart.
+
+    A board is bound, named and placed; the operator deletes it and
+    binds the same board again, which mints a SECOND record at the same
+    MAC. A conversation that attached to the first one then says it has
+    moved. Addressed by MAC, that write lands on the record that is
+    there now, renaming nothing and relocating somebody else's device;
+    addressed by the id, it refuses, and the new record is untouched.
+    """
+    _agents(store)
+    gone = store.bind_device(MAC, ["sam"]).id
+    store.delete_device(MAC)
+    now = store.bind_device(MAC, ["sam"])
+
+    with pytest.raises(UnknownEntityError):
+        store.relocate_device_by_id(gone, "the office")
+
+    assert _record(store).id == now.id
+    assert _record(store).location is None
+    assert _row(store, MAC)["location"] is None
+
+
+def test_a_relocation_by_id_refuses_an_id_no_record_has(store: ConfigStore) -> None:
+    """What a conversation whose device was deleted under it meets. The
+    id is not quoted back, the rule every device refusal here keeps."""
+    _agents(store)
+    store.bind_device(MAC, ["sam"])
+    absent = "0" * 32
+
+    with pytest.raises(UnknownEntityError) as caught:
+        store.relocate_device_by_id(absent, "the office")
+
+    assert absent not in chain(caught.value)
+    assert _record(store).location is None
+
+
+def test_a_relocation_by_id_is_held_to_the_rules_the_mac_one_is(
+    store: ConfigStore,
+) -> None:
+    """One validation for both addresses, which is the whole reason this
+    verb reaches `_device_write` rather than the columns: a location
+    that folds to nothing is refused whoever asked for it."""
+    _agents(store)
+    bound = store.bind_device(MAC, ["sam"])
+
+    with pytest.raises(ConfigError) as caught:
+        store.relocate_device_by_id(bound.id, "\u00a0 \t ")
+
+    assert DEVICE_LOCATION_BLANK in str(caught.value)
+    assert _record(store).location is None
+
+
 # --- what a name has to be --------------------------------------------
 
 

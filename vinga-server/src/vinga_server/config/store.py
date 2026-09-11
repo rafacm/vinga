@@ -34,7 +34,7 @@ deliberately validates against the half rather than the whole.
 import re
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 
 from cryptography.fernet import MultiFernet
@@ -960,6 +960,34 @@ class ConfigStore:
             existing=True,
         )
 
+    def relocate_device_by_id(self, device: str, location: str) -> BoundDevice:
+        """Say where one device stands, addressed by the record's own
+        id rather than by the MAC a board is standing at.
+
+        `relocate_device`'s write, reached through the same staging, the
+        same validation and the same lock, with one thing changed: which
+        row it means. An operator relocating a board has the board in
+        front of them and addresses it the way they read it off a label,
+        which is the MAC; a conversation has been attached to one RECORD
+        since its connect and has to go on meaning that record, because
+        a MAC can be deleted and bound again, or (from M4) moved to
+        another record, while the conversation is still talking (#449).
+        Writing by MAC from inside a conversation is the failure the
+        stable id was minted to prevent, one direction later than the
+        read that M2 fixed.
+
+        A record with no such id is `UnknownEntityError`, which is what
+        a conversation whose device has been deleted under it meets. The
+        caller has nothing to retry and says so to whoever is in the
+        room.
+        """
+        return self._device_write(
+            _DeviceBinding(
+                mac=_UNRESOLVED_MAC, location=_device_location(location), located=True
+            ),
+            identified=device,
+        )
+
     def clear_device_location(self, mac: str) -> BoundDevice:
         """Back to nowhere in particular, which is an ordinary state for
         a device rather than a degenerate one.
@@ -978,6 +1006,7 @@ class ConfigStore:
         *,
         existing: bool = False,
         unconfigured: bool = False,
+        identified: str | None = None,
     ) -> BoundDevice:
         """Every device write, run through the phases every other write
         runs: staged into the candidate state read inside the
@@ -995,9 +1024,19 @@ class ConfigStore:
         something that is not there is a request that addressed nothing;
         `unconfigured` is the activation code's condition, refusing a
         device the configuration has already spoken about.
+
+        `identified` is the third way in, and it is an ADDRESS rather
+        than a condition: the binding arrives with no MAC on it and the
+        row holding that record id supplies one, read inside this same
+        transaction so that nothing can move the id to another MAC
+        between the lookup and the write. A caller addressing a record
+        by its id is asking about a record that may have been deleted,
+        so a missing one refuses here the way a missing MAC does.
         """
         with self._transaction() as connection:
             domain = _read_domain(connection)
+            if identified is not None:
+                binding = replace(binding, mac=_mac_holding(domain, identified))
             stored = domain.devices.get(binding.mac)
             if existing and stored is None:
                 raise UnknownEntityError(_NO_SUCH_DEVICE)
@@ -1425,6 +1464,20 @@ _AGENT_DEFAULTS = entities.descriptor("agent-defaults")
 # five kinds read theirs off theirs: one home per sentence.
 _NO_SUCH_DEVICE = entities.setting("devices").missing
 
+# And the same absence met from the other address. A separate sentence
+# rather than the one above, because the one above says "no device with
+# that MAC is bound" and a caller that addressed a record by its id
+# never sent a MAC: telling it about one would describe a request
+# nobody made. The id is not quoted back, the rule every device refusal
+# in this file keeps.
+_NO_SUCH_DEVICE_RECORD = "devices: no device record has that id"
+
+# The MAC a write addressed by a record id arrives with: none yet. It is
+# replaced inside the transaction by the MAC of the row holding that id,
+# which is the only place the two can be matched up without a second
+# read that something could land between.
+_UNRESOLVED_MAC = ""
+
 # The kinds a whole read walks one row per name. The provider is not one
 # of them, because its rows are grouped by stage and the group is
 # checked with a sentence of its own; neither is the singleton, which is
@@ -1818,6 +1871,23 @@ def _stage_entity(domain: DomainConfig, prepared: _Prepared) -> _Staged:
             else None
         ),
     )
+
+
+def _mac_holding(domain: DomainConfig, device: str) -> str:
+    """The MAC of the record carrying this id, or the refusal for an id
+    no record has.
+
+    A scan rather than an index, and deliberately: the devices map is
+    read whole into memory by every write already, it is a deployment's
+    worth of boards, and the alternative is a second lookup structure
+    that would have to be kept in step with the one being scanned. The
+    issue's own decision that a device row earns no cursor id is the
+    same argument one level down.
+    """
+    for mac, record in domain.devices.items():
+        if record.id == device:
+            return mac
+    raise UnknownEntityError(_NO_SUCH_DEVICE_RECORD)
 
 
 def _stage_device(domain: DomainConfig, binding: _DeviceBinding) -> _Staged:

@@ -6,7 +6,8 @@ then have to invent a tie-break, the namespace is structural:
 
 - builtins are bare (`switch_agent`, the memory family of `remember`,
   `update_memory`, `forget`, `restore_memory` and `recall`, `set_state`,
-  `clear_state`, `new_conversation`, `resume_conversation`);
+  `clear_state`, `new_conversation`, `resume_conversation`,
+  `set_device_location`);
 - the device's tools keep the firmware's `self.` prefix, with the dots
   sanitized away (`self_audio_speaker_set_volume`);
 - an MCP server's tools carry their configuration entry name and a
@@ -60,6 +61,14 @@ CLEAR_STATE = "clear_state"
 # far side may shadow.
 NEW_CONVERSATION = "new_conversation"
 RESUME_CONVERSATION = "resume_conversation"
+# The one builtin that writes a device record rather than a memory.
+# Spelled `set_device_location` rather than `move` or `relocate`,
+# because the name is what the model reads first: it says which thing
+# is changed (the device), which field of it (the location) and that
+# the call writes. The verb an operator types is `device relocate`, and
+# the two are deliberately not the same word: a command line addresses
+# a device by its MAC, and this tool addresses nothing at all.
+SET_DEVICE_LOCATION = "set_device_location"
 BUILTIN_TOOL_NAMES = (
     SWITCH_AGENT,
     REMEMBER,
@@ -71,6 +80,7 @@ BUILTIN_TOOL_NAMES = (
     CLEAR_STATE,
     NEW_CONVERSATION,
     RESUME_CONVERSATION,
+    SET_DEVICE_LOCATION,
 )
 
 # The family an agent's `memory` section switches on and off, which is
@@ -84,8 +94,13 @@ BUILTIN_TOOL_NAMES = (
 # Whole rather than partial, because a half-off agent is a worse answer
 # than either whole one: one that could write and not read would recall
 # nothing it had been told, and one that could read and not write would
-# be read a ledger it had no way to change. `switch_agent` and the two
-# conversation tools are not here: neither touches a memory.
+# be read a ledger it had no way to change. `switch_agent`, the two
+# conversation tools and `set_device_location` are not here: none of
+# them touches a memory. The last one is the one worth saying out loud,
+# since it does write: where a device stands is a fact of the
+# deployment rather than something an agent was told, so an agent that
+# may not remember anything may still say its board has moved, for the
+# reason it is still told its board's name.
 MEMORY_TOOL_NAMES = (
     REMEMBER,
     UPDATE_MEMORY,
@@ -99,12 +114,13 @@ MEMORY_TOOL_NAMES = (
 # The tools whose order in a round is their meaning, so a reply may not
 # run two of them at once.
 #
-# Every write to a memory is here, which is the smallest rule that is
-# actually true. The obvious ones are addressed by an identity the model
-# names: a key it chose for the ledger, a number it read out of a
-# lookup. Two of those in one round can name the same thing, a set and a
-# clear of `scene` or a correction and a removal of fact 7, and what is
-# true afterwards is whichever ran last.
+# Every write a conversation makes to something that outlives the round
+# is here, which is the smallest rule that is actually true. The obvious
+# ones are addressed by an identity the model names: a key it chose for
+# the ledger, a number it read out of a lookup. Two of those in one
+# round can name the same thing, a set and a clear of `scene` or a
+# correction and a removal of fact 7, and what is true afterwards is
+# whichever ran last.
 #
 # `remember` looks like the exception and is not. It appends, so two of
 # them leave both facts whichever order they land in, but a scope at its
@@ -114,6 +130,16 @@ MEMORY_TOOL_NAMES = (
 # rather than the address, and a rule that let one mutation overtake
 # another would have to know which scope was full to know whether it
 # mattered.
+#
+# `set_device_location` is the one that is not a memory, and it is the
+# plainest case of the rule rather than an exception to it: it writes
+# one column of one row, addressed by the device the conversation is
+# already on, so two calls in a round always name the same row. "You
+# have been moved to the office, no, the landing" is one utterance a
+# person really says, and what has to be true afterwards is the
+# landing. Run concurrently, two writes take the domain writer lock in
+# whatever order the pool hands the connections out, and the office
+# would stand about half the time.
 #
 # So the model's order IS the answer for all of them, and a round that
 # ran them concurrently would leave the database's lock arrival deciding
@@ -128,6 +154,7 @@ ORDERED_TOOL_NAMES = (
     RESTORE_MEMORY,
     SET_STATE,
     CLEAR_STATE,
+    SET_DEVICE_LOCATION,
 )
 
 # Names an mcp_servers entry may not take, because they already mean
