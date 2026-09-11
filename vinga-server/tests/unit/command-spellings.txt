@@ -966,6 +966,7 @@ docs/plans/2026-09-10-otel-tracing-implementation.md:988  historical  config ref
 docs/plans/2026-09-10-otel-tracing-implementation.md:988  historical  config openapi
 docs/plans/2026-09-10-provider-labelled-success-events.md:138  historical  vinga events tail
 docs/plans/2026-09-10-provider-labelled-success-events.md:407  historical  vinga events tail
+docs/plans/2026-09-11-metrics-read-surface-implementation.md:173  historical  config openapi
 docs/reference/api-openapi.json:5  generated  vinga schema provider
 docs/reference/api-openapi.json:7040  generated  vinga ota-url
 docs/reference/api-openapi.json:8007  generated  vinga provider secret set
