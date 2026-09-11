@@ -28,6 +28,19 @@ rather than a blank cell on the page.
 provisioning file that grants it, in `test_provisioning.py`, because
 what makes that grant reach a view is the file's default privileges and
 not anything in this module.
+
+The per-device siblings are asserted here beside the views they mirror,
+because a breakdown is a claim about numbers before it is anything
+else: two boards on one day have to be two rows whose ungrouped view is
+still the whole day, and a session whose device was never understood
+has to be one row rather than one row per stream. That last one is the
+case the join shape exists for, and it is the case an implementation
+gets wrong silently.
+
+That the four originals survive the migration that added the siblings
+is `test_metrics_views_upgrade.py`, on a database that stood at
+`1006_metrics_views`: nothing here could tell an untouched view from a
+rebuilt one, since both match their declaration.
 """
 
 import datetime
@@ -39,7 +52,7 @@ from sqlalchemy import text
 from tests.support.stores import plant_event, plant_session, plant_turn
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations.store import open_conversations
-from vinga_server.conversations.views import VIEWS
+from vinga_server.conversations.views import DEFINED
 
 
 @pytest.fixture
@@ -292,6 +305,129 @@ def test_an_event_on_a_day_with_no_session_start_still_gets_a_row(store) -> None
     ]
 
 
+# --- the per-device siblings --------------------------------------------
+
+
+# Two boards of the same fleet. They share a vendor OUI, the way a real
+# fleet does, so the assertions below are about the whole MAC.
+BOARD_A = "a4:cf:12:00:00:01"
+
+BOARD_B = "a4:cf:12:00:00:02"
+
+
+def test_two_boards_on_one_day_are_two_rows_and_the_day_is_still_the_day(store) -> None:
+    """The breakdown, and the view it breaks down, in one case.
+
+    Two boards, one day, and every number planted so that a row of a
+    sibling is that board's and the ungrouped row is both of them. The
+    second half is what says the sibling is additive rather than a
+    replacement: an analyst who never asked for a device still gets the
+    day.
+
+    The latency pair is the sharpest of the four. The ungrouped p50 of
+    100 and 300 is 200, which is a number neither board measured, so a
+    sibling that had quietly been served the ungrouped rows could not
+    produce these two and an ungrouped view rebuilt from the sibling
+    could not produce that one.
+    """
+    with store.begin() as connection:
+        plant_session(connection, "board-a", "2026-07-01T09:00:00+00:00", device=BOARD_A)
+        plant_session(connection, "board-b", "2026-07-01T10:00:00+00:00", device=BOARD_B)
+        plant_turn(connection, "board-a", 0, asr_ms=100, input_tokens=5, output_tokens=2)
+        plant_turn(connection, "board-b", 0, asr_ms=300, input_tokens=7, output_tokens=3)
+        plant_event(connection, "board-a", 0, "provider_failed")
+
+    day = datetime.date(2026, 7, 1)
+    assert rows(store, "metrics_sessions_by_device_daily") == [
+        (day, BOARD_A, None, 1, 1, 1),
+        (day, BOARD_B, None, 1, 1, 1),
+    ]
+    assert rows(store, "metrics_sessions_daily") == [(day, 2, 2, 2)]
+
+    assert rows(store, "metrics_stage_latency_by_device_daily") == [
+        (day, BOARD_A, None, "sam", "asr", 1, 100.0, 100.0, 100),
+        (day, BOARD_B, None, "sam", "asr", 1, 300.0, 300.0, 300),
+    ]
+    assert rows(store, "metrics_stage_latency_daily") == [
+        (day, "sam", "asr", 2, 200.0, 290.0, 300),
+    ]
+
+    assert rows(store, "metrics_tokens_by_device_daily") == [
+        (day, BOARD_A, None, "sam", 1, 1, 1, 5, 2),
+        (day, BOARD_B, None, "sam", 1, 1, 1, 7, 3),
+    ]
+    assert rows(store, "metrics_tokens_daily") == [(day, "sam", 2, 2, 2, 12, 5)]
+
+    # The failure is one board's, so its rate is one per turn and the
+    # other board's is a real zero. The day's rate is neither.
+    assert rows(store, "metrics_event_rates_by_device_daily") == [
+        (day, BOARD_A, None, 1, 1, 1, 0, 1.0, 0.0),
+        (day, BOARD_B, None, 1, 1, 0, 0, 0.0, 0.0),
+    ]
+    assert rows(store, "metrics_event_rates_daily") == [(day, 2, 2, 1, 0, 0.5, 0.0)]
+
+
+def test_a_session_with_no_device_is_one_group_and_not_one_row_per_stream(store) -> None:
+    """The case the join shape exists for, and the one that fails
+    silently without it.
+
+    `sessions.device` is null when a session was rejected before a
+    device was understood, and the two views below combine streams that
+    were aggregated independently. Two SQL nulls are not equal to each
+    other, so joining those streams with `=` leaves every one of them
+    unmatched by every other: the spine still yields one row per group,
+    because `UNION` treats two nulls as one value, and that row comes
+    back with zeroes where the other streams' numbers should have been
+    and its rates null. Asserting merely that exactly one row came back,
+    or that no device was invented, would pass on exactly that.
+
+    So what is asserted is the numbers. One session, one turn and one
+    counted failure, all of them on a device nobody knows, and the row
+    that has to come back says one, one, one and a rate of one failure
+    per turn.
+    """
+    with store.begin() as connection:
+        plant_session(connection, "unknown", "2026-07-02T09:00:00+00:00", device=None)
+        plant_turn(connection, "unknown", 0, asr_ms=100)
+        plant_event(connection, "unknown", 0, "provider_failed")
+
+    day = datetime.date(2026, 7, 2)
+    assert rows(store, "metrics_event_rates_by_device_daily") == [
+        (day, None, None, 1, 1, 1, 0, 1.0, 0.0),
+    ]
+    assert rows(store, "metrics_sessions_by_device_daily") == [(day, None, None, 1, 1, 1)]
+
+
+def test_a_board_and_a_stranger_on_one_day_keep_their_own_numbers(store) -> None:
+    """The null group beside a named one, which is where a join that
+    coalesced a missing key to something could put one board's numbers
+    on the other's row.
+
+    The two sessions differ in every number, so a row that borrowed from
+    the other would be visibly wrong rather than coincidentally right.
+    """
+    with store.begin() as connection:
+        plant_session(connection, "known", "2026-07-03T09:00:00+00:00", device=BOARD_A)
+        plant_session(connection, "stranger", "2026-07-03T10:00:00+00:00", device=None)
+        plant_turn(connection, "known", 0, asr_ms=100)
+        for offset in (0, 1000, 2000):
+            plant_turn(connection, "stranger", offset, asr_ms=200)
+        plant_event(connection, "stranger", 0, "provider_failed")
+        plant_event(connection, "stranger", 1, "barge_in_suppressed")
+
+    day = datetime.date(2026, 7, 3)
+    # Ordered by the day and then the device ascending with nulls last,
+    # which is the order the read surface pages on.
+    assert rows(store, "metrics_event_rates_by_device_daily") == [
+        (day, BOARD_A, None, 1, 1, 0, 0, 0.0, 0.0),
+        (day, None, None, 3, 1, 1, 1, 1 / 3, 1.0),
+    ]
+    assert rows(store, "metrics_sessions_by_device_daily") == [
+        (day, BOARD_A, None, 1, 1, 1),
+        (day, None, None, 1, 1, 3),
+    ]
+
+
 # --- the agreement ------------------------------------------------------
 
 
@@ -307,7 +443,7 @@ def test_every_live_view_matches_its_declaration(store) -> None:
     `compare_metadata` walks.
     """
     with store.connect() as connection:
-        for view in VIEWS:
+        for view in DEFINED:
             live = connection.execute(
                 text("select pg_get_viewdef(to_regclass(:name), true)"),
                 {"name": view.qualified},
@@ -338,7 +474,7 @@ def test_every_live_view_has_exactly_the_columns_it_declares(store) -> None:
     matrix entry with no column behind it would be a documented column
     that does not exist. Names and types, in order, both ways."""
     with store.connect() as connection:
-        for view in VIEWS:
+        for view in DEFINED:
             found = [
                 (row[0], row[1])
                 for row in connection.execute(
@@ -358,7 +494,7 @@ def test_every_view_carries_its_comment(store) -> None:
     """What `\\d+` shows an analyst before they trust a number: the
     question the view answers and what its denominator is."""
     with store.connect() as connection:
-        for view in VIEWS:
+        for view in DEFINED:
             found = connection.execute(
                 text("select obj_description(to_regclass(:name), 'pg_class')"),
                 {"name": view.qualified},
