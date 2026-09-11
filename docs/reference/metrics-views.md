@@ -13,12 +13,19 @@ views in the `record` schema, created by migration and readable by the
 of every table they read is in [the store's schema
 reference](conversations-schema.md).
 
+Each question has two views: the one that groups by its own dimensions, and a
+`_by_device` sibling beside it that adds the device the session ran on to what
+a row is unique by. The sibling is additive and the first is never rewritten,
+so a saved query keeps answering what it always answered. Every column of the
+pair means the same thing in both, and a row of a sibling is the same number
+with the day narrowed to one device.
+
 ```bash
 psql "postgresql://vinga_ro@127.0.0.1:5432/vinga" \
   -c 'select * from record.metrics_sessions_daily order by day desc limit 14'
 ```
 
-## What is true of all four
+## What is true of every one of them
 
 **A day is a UTC day.** `sessions.started_at` is UTC ISO-8601 text, and a turn
 and an event each carry `t_ms`, an offset from session open, so a row's day is
@@ -101,6 +108,41 @@ apart. Either way the turn still counts in `metrics_sessions_daily` and in the
 event view's denominator, which is what makes `measured_turns` worth reading
 beside a percentile.
 
+### `metrics_stage_latency_by_device_daily`
+
+How slow was each pipeline stage, by UTC day and by the agent the turn started
+with? Broken down by the device the session ran on.
+
+| Column | Type | Null | Units | Meaning | Formula |
+| --- | --- | --- | --- | --- | --- |
+| `day` | `date` | no | none | The UTC day the turn was spoken on. | The turn's session `started_at` converted to UTC, plus the turn's `t_ms`, cast to `date`. |
+| `device` | `text` | yes | none | The device the session ran on, as its MAC in canonical form. This is the stable key of the breakdown: it is what `sessions.device` holds and it survives whatever the device is called. | `sessions.device`, grouped. Null when the session was rejected before a device was understood, and a null groups as its own row rather than vanishing. |
+| `name` | `text` | yes | none | The device's human label, for a reader who does not read MACs. Null in every row of this release: the analyst role is granted on `record` and revoked on `domain`, so this column cannot be a join to the configuration, and what fills it is a copy of the label on this side. Read `device` as the identity and this as a convenience that is not there yet. | `NULL::text`. Declared now and selected as a literal so that the columns a caller reads do not move on the day the label arrives. |
+| `agent` | `text` | yes | none | The agent the turn started with, which is `turns.agent`. A handover does not move it: the per-agent split of a turn is `turns.legs`, and latency is not attributed leg by leg because the stage timings are the turn's. | `turns.agent`, grouped. A turn with no agent groups as a null row. |
+| `stage` | `text` | no | none | Which stage the numbers are about, one of: `asr`, `first_token`, `llm`, `tts_first_audio`. | A literal, unpivoted from the four measured columns `asr_ms`, `first_token_ms`, `llm_ms` and `tts_first_audio_ms`. |
+| `measured_turns` | `bigint` | no | turns | How many turns this row's percentiles were computed over. Read it first: a two-turn day's p95 is mostly interpolation. | `count(*)` over the rows where that stage's column is not null. |
+| `p50_ms` | `double precision` | no | milliseconds | The median of that stage's measured durations. | `percentile_cont(0.5)` within the group, which interpolates. |
+| `p95_ms` | `double precision` | no | milliseconds | The 95th percentile of that stage's measured durations. | `percentile_cont(0.95)` within the group, which interpolates. |
+| `max_ms` | `integer` | no | milliseconds | The slowest measured duration in the group, as it was stored rather than interpolated. | `max()` over that stage's column. |
+
+**One row per** `day`, `device`, `agent`, `stage`.
+
+**Denominator.** The denominator is the turns that measured that stage, never
+all turns, and it is `measured_turns` beside the percentiles rather than a
+number a reader has to go and find. Every denominator here is that device's
+own: the rows are split by device before anything is counted, so a column
+means what it means on the ungrouped view with the day narrowed to one device.
+A session whose device was never understood groups as a null-device row rather
+than vanishing, the way a null agent already does.
+
+**Telemetry-off.** A turn stored under telemetry-off has every stage column
+null, so it contributes no row here at all. A turn that simply did not measure
+a stage (a reply that spoke nothing has no `tts_first_audio_ms`) is absent
+from that stage in exactly the same way, and this view cannot tell the two
+apart. Either way the turn still counts in `metrics_sessions_daily` and in the
+event view's denominator, which is what makes `measured_turns` worth reading
+beside a percentile.
+
 ### `metrics_tokens_daily`
 
 What did each agent consume, by UTC day?
@@ -123,6 +165,48 @@ not counted, and a turn without `legs` contributes one attribution row from
 the turn itself. `input_measured_turns` and `output_measured_turns` are counts
 of attribution rows whose respective token field is not null, stated
 separately because the store writes the two sums independently.
+
+**Telemetry-off.** Under telemetry-off both token fields are null, so the
+attribution row still lands and still counts in `turns` while adding nothing
+to either measured count and nothing to either sum. A turn whose provider
+reported no usage is null in exactly the same way, and this view cannot tell
+the two apart: a gap between `turns` and a measured count says the tokens were
+not recorded, and never why. `metrics_sessions_daily.telemetry_sessions` is
+session-level context for the same day and not a discriminator here, because
+it counts sessions by the day they opened while these rows count turns by the
+day they were spoken, and it says nothing about which agent a turn was
+attributed to.
+
+### `metrics_tokens_by_device_daily`
+
+What did each agent consume, by UTC day? Broken down by the device the session
+ran on.
+
+| Column | Type | Null | Units | Meaning | Formula |
+| --- | --- | --- | --- | --- | --- |
+| `day` | `date` | no | none | The UTC day the turn was spoken on. | The turn's session `started_at` converted to UTC, plus the turn's `t_ms`, cast to `date`. |
+| `device` | `text` | yes | none | The device the session ran on, as its MAC in canonical form. This is the stable key of the breakdown: it is what `sessions.device` holds and it survives whatever the device is called. | `sessions.device`, grouped. Null when the session was rejected before a device was understood, and a null groups as its own row rather than vanishing. |
+| `name` | `text` | yes | none | The device's human label, for a reader who does not read MACs. Null in every row of this release: the analyst role is granted on `record` and revoked on `domain`, so this column cannot be a join to the configuration, and what fills it is a copy of the label on this side. Read `device` as the identity and this as a convenience that is not there yet. | `NULL::text`. Declared now and selected as a literal so that the columns a caller reads do not move on the day the label arrives. |
+| `agent` | `text` | yes | none | The agent the attribution row belongs to: the leg's own `agent` where the turn had legs, and `turns.agent` where it did not. | Grouped. A leg whose `agent` is null groups as a null row rather than vanishing, so usage nobody can attribute is still visible. |
+| `turns` | `bigint` | no | turns | How many physical turns own at least one attribution row in this group. A turn split across two agents counts once in each of their rows and is never double counted inside one. | `count(DISTINCT turns.id)` over the group's attribution rows. |
+| `input_measured_turns` | `bigint` | no | attribution rows | How many attribution rows in this group carried an input count. The rest carried none, either because telemetry storage was off or because the provider reported no usage, and the two are stored identically. | `count()` over the attribution rows whose input field is not null. |
+| `output_measured_turns` | `bigint` | no | attribution rows | How many attribution rows in this group carried an output count. As above, the rest are unrecorded rather than zero, and for either of the same two reasons. | `count()` over the attribution rows whose output field is not null. |
+| `input_tokens` | `bigint` | yes | tokens | Input tokens consumed by this agent on this day, OTel's `gen_ai.usage.input_tokens`. | `sum()` over the non-null input fields. Null when the group measured none, which is what `input_measured_turns` of zero says in a number. Null is not zero consumption: it is consumption nobody recorded. |
+| `output_tokens` | `bigint` | yes | tokens | Output tokens produced for this agent on this day, OTel's `gen_ai.usage.output_tokens`. | `sum()` over the non-null output fields. Null when the group measured none. |
+
+**One row per** `day`, `device`, `agent`.
+
+**Denominator.** The unit is the attribution row, not the turn: a turn with
+`legs` contributes one attribution row per leg and its turn-level totals are
+not counted, and a turn without `legs` contributes one attribution row from
+the turn itself. `input_measured_turns` and `output_measured_turns` are counts
+of attribution rows whose respective token field is not null, stated
+separately because the store writes the two sums independently. Every
+denominator here is that device's own: the rows are split by device before
+anything is counted, so a column means what it means on the ungrouped view
+with the day narrowed to one device. A session whose device was never
+understood groups as a null-device row rather than vanishing, the way a null
+agent already does.
 
 **Telemetry-off.** Under telemetry-off both token fields are null, so the
 attribution row still lands and still counts in `turns` while adding nothing
@@ -168,6 +252,46 @@ denominators here are counted on the day a turn was spoken or a session
 opened, and neither can say which of the day's sessions a missing event
 belonged to.
 
+### `metrics_event_rates_by_device_daily`
+
+How often did a provider fail and how often was a barge-in suppressed, against
+the traffic of the same day? Broken down by the device the session ran on.
+
+| Column | Type | Null | Units | Meaning | Formula |
+| --- | --- | --- | --- | --- | --- |
+| `day` | `date` | no | none | The UTC day, from whichever of the four streams has one. | `coalesce()` across the four streams' days. |
+| `device` | `text` | yes | none | The device the session ran on, as its MAC in canonical form. This is the stable key of the breakdown: it is what `sessions.device` holds and it survives whatever the device is called. | `sessions.device`, grouped. Null when the session was rejected before a device was understood, and a null groups as its own row rather than vanishing. |
+| `name` | `text` | yes | none | The device's human label, for a reader who does not read MACs. Null in every row of this release: the analyst role is granted on `record` and revoked on `domain`, so this column cannot be a join to the configuration, and what fills it is a copy of the label on this side. Read `device` as the identity and this as a convenience that is not there yet. | `NULL::text`. Declared now and selected as a literal so that the columns a caller reads do not move on the day the label arrives. |
+| `turns` | `bigint` | no | turns | How many turns were spoken on this day. | `count(*)` over turns by their UTC day, coalesced to zero on a day that has events and no turns. |
+| `sessions` | `bigint` | no | sessions | How many sessions opened on this day. | `count(*)` over sessions by their `started_at` day, coalesced to zero. |
+| `provider_failures` | `bigint` | no | events | How many `provider_failed` events landed on this day. Per stored row: two failures in one turn are two. | `count(*)` where `events.name = 'provider_failed'`, coalesced to zero. |
+| `barge_in_suppressions` | `bigint` | no | events | How many `barge_in_suppressed` events landed on this day, all three of the name's reason variants together. | `count(*)` where `events.name = 'barge_in_suppressed'`, with no filter on `fields.reason`, coalesced to zero. |
+| `provider_failures_per_turn` | `double precision` | yes | failures per turn | Provider failures divided by the day's turns. | Null when the day has no turns, never zero. |
+| `suppressions_per_session` | `double precision` | yes | suppressions per session | Barge-in suppressions divided by the day's sessions. | Null when the day has no sessions, never zero. |
+
+**One row per** `day`, `device`.
+
+**Denominator.** Failures are per turn and suppressions are per session, both
+by their UTC day, and both denominators are columns of this view rather than
+numbers a reader has to fetch from somewhere else. Each of the four streams is
+aggregated on its own and the four are joined over the union of their days, so
+an event on a day with no session start and no turn still gets a row. Every
+denominator here is that device's own: the rows are split by device before
+anything is counted, so a column means what it means on the ungrouped view
+with the day narrowed to one device. A session whose device was never
+understood groups as a null-device row rather than vanishing, the way a null
+agent already does.
+
+**Telemetry-off.** A telemetry-off session writes no `events` rows at all,
+while its session and its turns still count. It therefore raises both
+denominators and neither numerator, which is a property of the data this view
+reports rather than hides: read it beside
+`metrics_sessions_daily.telemetry_sessions`, which counts the same switch on
+the same session spine. That is context and not a correction: both
+denominators here are counted on the day a turn was spoken or a session
+opened, and neither can say which of the day's sessions a missing event
+belonged to.
+
 ### `metrics_sessions_daily`
 
 What baseline sits under the numbers in every other view?
@@ -185,6 +309,41 @@ What baseline sits under the numbers in every other view?
 divide by. Sessions are counted by the UTC day they opened on and turns by the
 UTC day they were spoken on, so a session that crossed midnight lands on one
 day and its later turns on the next.
+
+**Telemetry-off.** `telemetry_sessions` counts `sessions.metrics`, which is
+the telemetry switch and keeps the name it had before the switch was renamed.
+Subtract it from `sessions` to get the sessions that could not have
+contributed a measured number or an event to any other view. That is
+session-level context for the day a session opened, and no more: it cannot say
+why a particular turn measured nothing, because a turn is dated by the day it
+was spoken rather than the day its session opened, and because a null
+measurement elsewhere has a second cause (a provider that reported no usage, a
+stage that was never reached) that this column knows nothing about.
+
+### `metrics_sessions_by_device_daily`
+
+What baseline sits under the numbers in every other view? Broken down by the
+device the session ran on.
+
+| Column | Type | Null | Units | Meaning | Formula |
+| --- | --- | --- | --- | --- | --- |
+| `day` | `date` | no | none | The UTC day. | `coalesce()` across the session and turn streams' days. |
+| `device` | `text` | yes | none | The device the session ran on, as its MAC in canonical form. This is the stable key of the breakdown: it is what `sessions.device` holds and it survives whatever the device is called. | `sessions.device`, grouped. Null when the session was rejected before a device was understood, and a null groups as its own row rather than vanishing. |
+| `name` | `text` | yes | none | The device's human label, for a reader who does not read MACs. Null in every row of this release: the analyst role is granted on `record` and revoked on `domain`, so this column cannot be a join to the configuration, and what fills it is a copy of the label on this side. Read `device` as the identity and this as a convenience that is not there yet. | `NULL::text`. Declared now and selected as a literal so that the columns a caller reads do not move on the day the label arrives. |
+| `sessions` | `bigint` | no | sessions | How many sessions opened on this day. | `count(*)` over sessions by their `started_at` day, coalesced to zero on a day that only has turns. |
+| `telemetry_sessions` | `bigint` | no | sessions | How many of them had telemetry storage on. A day where this is below `sessions` had sessions that stored no measured number at all; it does not follow that a null number elsewhere came from one of them. | `count(*) FILTER (WHERE sessions.metrics)`, coalesced to zero. |
+| `turns` | `bigint` | no | turns | How many turns were spoken on this day. | `count(*)` over turns by their UTC day, coalesced to zero. |
+
+**One row per** `day`, `device`.
+
+**Denominator.** There is no ratio here: these are the counts the other views
+divide by. Sessions are counted by the UTC day they opened on and turns by the
+UTC day they were spoken on, so a session that crossed midnight lands on one
+day and its later turns on the next. Every denominator here is that device's
+own: the rows are split by device before anything is counted, so a column
+means what it means on the ungrouped view with the day narrowed to one device.
+A session whose device was never understood groups as a null-device row rather
+than vanishing, the way a null agent already does.
 
 **Telemetry-off.** `telemetry_sessions` counts `sessions.metrics`, which is
 the telemetry switch and keeps the name it had before the switch was renamed.

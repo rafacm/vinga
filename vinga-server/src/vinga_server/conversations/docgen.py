@@ -46,7 +46,7 @@ import textwrap
 from sqlalchemy import Table
 
 from vinga_server.conversations.schema import TABLES
-from vinga_server.conversations.views import COMMON, VIEWS, View
+from vinga_server.conversations.views import COMMON, DEFINED, VIEWS, View
 
 # Where the reference wraps its prose. The tables cannot wrap (a row is
 # a line), so only paragraphs go through this.
@@ -58,7 +58,7 @@ PROSE_WIDTH = 78
 EVENT_REFERENCE = "events.md"
 
 # The store's own schema reference, which the views page links rather
-# than restating: every column the four views read is described there,
+# than restating: every column these views read is described there,
 # and a second copy of those descriptions is a second copy to drift.
 # Relative to `docs/reference/`, where both pages are committed.
 SCHEMA_REFERENCE = "conversations-schema.md"
@@ -439,6 +439,15 @@ def views_reference() -> str:
             f"reference]({SCHEMA_REFERENCE})."
         ),
         "",
+        *_paragraph(
+            "Each question has two views: the one that groups by its own dimensions, "
+            "and a `_by_device` sibling beside it that adds the device the session ran "
+            "on to what a row is unique by. The sibling is additive and the first is "
+            "never rewritten, so a saved query keeps answering what it always "
+            "answered. Every column of the pair means the same thing in both, and a "
+            "row of a sibling is the same number with the day narrowed to one device."
+        ),
+        "",
         "```bash",
         "psql \"postgresql://vinga_ro@127.0.0.1:5432/vinga\" \\",
         "  -c 'select * from record.metrics_sessions_daily order by day desc limit 14'",
@@ -453,7 +462,7 @@ def views_reference() -> str:
         "",
     ]
 
-    for view in VIEWS:
+    for view in DEFINED:
         lines += _view_section(view)
 
     return "\n".join(lines).rstrip("\n") + "\n"

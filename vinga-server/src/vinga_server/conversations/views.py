@@ -20,6 +20,14 @@ the live view, so the database itself does the normalizing and drift
 between this module and the chain is a red test rather than a latent
 lie.
 
+Eight declarations answer four questions. Each question has an
+ungrouped view and a per-device sibling that mirrors it, and the
+sibling is **additive**: the four the chain shipped first are untouched,
+byte for byte, because what selects from them is somebody's saved query
+and a redefinition would move it without asking. `VIEWS` is the four
+questions, `DEFINED` is every relation, and `GROUPED` says which of the
+two answers a request that named a grouping.
+
 Views live outside `schema.py`'s `MetaData` deliberately. Alembic's
 autogenerate reflects tables, not views, so `compare_metadata` never
 sees one and cannot propose dropping it; the agreement test above is the
@@ -51,10 +59,23 @@ from vinga_server.conversations.schema import SCHEMA
 NAME_PREFIX = "metrics_"
 NAME_SUFFIX = "_daily"
 
+# What a per-device sibling's name carries between the question and the
+# suffix. Stripped by `View.alias` along with the two above, so a
+# sibling spells the same word a request spells: which relation answers
+# is the grouping's business and not the caller's vocabulary.
+BY_DEVICE = "_by_device"
+
 # The grain every view is cut on, and the first key column of each of
 # them. The read surface windows on it and orders it descending, so it
 # is one name here rather than a literal in four places.
 DAY = "day"
+
+# The dimension the per-device siblings add, and the label beside it.
+# Named here because the read surface filters on the first and neither
+# is a literal worth spelling twice.
+DEVICE = "device"
+
+NAME = "name"
 
 # The four stages the latency view unpivots, in the order a turn passes
 # through them. A closed set spelled in the SQL rather than derived from
@@ -144,8 +165,20 @@ class View:
         value that travels: a relation name cannot be a bound
         parameter, so an alias nothing answers to is refused before
         anything reaches SQL.
+
+        A per-device sibling answers to the same word as the view it
+        mirrors, which is why the infix comes off here too: the
+        question a request names is one question, and which of the two
+        relations answers it is what `group` says. `ALIASES` is
+        therefore built from `VIEWS`, where the word is unique, and
+        `GROUPED` is what turns the pair of them into a relation.
         """
-        return self.name.removeprefix(NAME_PREFIX).removesuffix(NAME_SUFFIX).replace("_", "-")
+        return (
+            self.name.removeprefix(NAME_PREFIX)
+            .removesuffix(NAME_SUFFIX)
+            .removesuffix(BY_DEVICE)
+            .replace("_", "-")
+        )
 
     @property
     def keys(self) -> tuple[Column, ...]:
@@ -182,7 +215,7 @@ class View:
 # surface that renders them adds no words of its own.
 COMMON: tuple[Caveats, ...] = (
     Caveats(
-        heading="What is true of all four",
+        heading="What is true of every one of them",
         notes=(
             "**A day is a UTC day.** `sessions.started_at` is UTC ISO-8601 text, and "
             "a turn and an event each carry `t_ms`, an offset from session open, so a "
@@ -776,6 +809,311 @@ FULL OUTER JOIN turn_days ON turn_days.day = session_days.day""",
 )
 
 
+# The per-device dimension, declared beside the four views it breaks
+# down rather than replacing them.
+#
+# Additive siblings, deliberately. The four above are what an analyst's
+# saved query, dashboard or spreadsheet already selects from, and a
+# redefinition that added two columns to them would move every one of
+# those without asking; a sibling relation leaves them exactly as they
+# were and the upgrade test asserts it. The cost is four more relations
+# in the schema, which is what a breakdown nobody has to opt out of is
+# worth.
+#
+# Everything but the SQL is derived from the view being mirrored, so a
+# sentence about what a column means has one home and the pair cannot
+# come to disagree about it.
+
+
+# What the breakdown adds to the question the mirrored view asks.
+BY_DEVICE_QUESTION = "Broken down by the device the session ran on."
+
+# And what it does to the denominator, which is not a new denominator:
+# the same rows, narrowed to one device before anything is counted.
+BY_DEVICE_DENOMINATOR = (
+    "Every denominator here is that device's own: the rows are split by device "
+    "before anything is counted, so a column means what it means on the ungrouped "
+    "view with the day narrowed to one device. A session whose device was never "
+    "understood groups as a null-device row rather than vanishing, the way a null "
+    "agent already does."
+)
+
+# The two columns every sibling carries, between the day and the
+# dimensions the mirrored view already had. The MAC is the key because
+# it is what the record stores and what survives a rename; the label is
+# declared now and filled in later, so the shape a caller reads does
+# not move on the day it arrives.
+#
+# The label cannot be a join. `deploy/postgres-init.sql` grants the
+# analyst role on `record` and revokes it on `domain`, so no analyst and
+# no dashboard can reach `domain.devices` at all: what puts a label on
+# this side is a copy in the `record` schema, which is #449's, and until
+# it lands the column is the literal null this view selects.
+BY_DEVICE_COLUMNS: tuple[Column, ...] = (
+    Column(
+        name=DEVICE,
+        type="text",
+        meaning=(
+            "The device the session ran on, as its MAC in canonical form. This is "
+            "the stable key of the breakdown: it is what `sessions.device` holds "
+            "and it survives whatever the device is called."
+        ),
+        units="none",
+        nullable=True,
+        formula=(
+            "`sessions.device`, grouped. Null when the session was rejected before "
+            "a device was understood, and a null groups as its own row rather than "
+            "vanishing."
+        ),
+        key=True,
+    ),
+    Column(
+        name=NAME,
+        type="text",
+        meaning=(
+            "The device's human label, for a reader who does not read MACs. Null "
+            "in every row of this release: the analyst role is granted on `record` "
+            "and revoked on `domain`, so this column cannot be a join to the "
+            "configuration, and what fills it is a copy of the label on this side. "
+            "Read `device` as the identity and this as a convenience that is not "
+            "there yet."
+        ),
+        units="none",
+        nullable=True,
+        formula=(
+            "`NULL::text`. Declared now and selected as a literal so that the "
+            "columns a caller reads do not move on the day the label arrives."
+        ),
+        key=False,
+    ),
+)
+
+
+def per_device(view: View, body: str) -> View:
+    """The per-device sibling of a declared view: its name, its prose
+    and its column matrix, derived; its SQL, given.
+
+    Only the SQL is written out, because only the SQL is really
+    different. Everything else is the mirrored view's, so a column
+    meaning corrected on one of them is corrected on both, and the pair
+    cannot come to describe the same number two ways.
+
+    The day stays first and the two new columns go directly behind it,
+    which puts what a row is about ahead of what it counts and makes
+    the read surface's ordering (the day descending, then the key
+    columns ascending) the ordering the plan names.
+
+    `telemetry_off` is copied rather than extended: the storage switch
+    does the same thing to a row here that it does to the row this one
+    is a slice of, and a second sentence saying so would be a second
+    sentence to keep true.
+    """
+    return View(
+        name=f"{view.name.removesuffix(NAME_SUFFIX)}{BY_DEVICE}{NAME_SUFFIX}",
+        question=f"{view.question} {BY_DEVICE_QUESTION}",
+        denominator=f"{view.denominator} {BY_DEVICE_DENOMINATOR}",
+        telemetry_off=view.telemetry_off,
+        columns=(view.columns[0], *BY_DEVICE_COLUMNS, *view.columns[1:]),
+        body=body,
+    )
+
+
+STAGE_LATENCY_BY_DEVICE = per_device(
+    STAGE_LATENCY,
+    f"""SELECT
+    {offset_day("t")} AS day,
+    s.device AS device,
+    NULL::text AS name,
+    t.agent AS agent,
+    stage.name AS stage,
+    count(*) AS measured_turns,
+    percentile_cont(0.5) WITHIN GROUP (ORDER BY stage.ms::double precision) AS p50_ms,
+    percentile_cont(0.95) WITHIN GROUP (ORDER BY stage.ms::double precision) AS p95_ms,
+    max(stage.ms) AS max_ms
+FROM {SCHEMA}.turns t
+JOIN {SCHEMA}.sessions s ON s.session = t.session
+CROSS JOIN LATERAL (
+    VALUES
+        ('{STAGES[0]}'::text, t.asr_ms),
+        ('{STAGES[1]}'::text, t.first_token_ms),
+        ('{STAGES[2]}'::text, t.llm_ms),
+        ('{STAGES[3]}'::text, t.tts_first_audio_ms)
+) AS stage(name, ms)
+WHERE stage.ms IS NOT NULL
+GROUP BY 1, 2, 4, 5""",
+)
+
+
+TOKENS_BY_DEVICE = per_device(
+    TOKENS,
+    f"""SELECT
+    attribution.day AS day,
+    attribution.device AS device,
+    NULL::text AS name,
+    attribution.agent AS agent,
+    count(DISTINCT attribution.turn) AS turns,
+    count(attribution.input_tokens) AS input_measured_turns,
+    count(attribution.output_tokens) AS output_measured_turns,
+    sum(attribution.input_tokens) AS input_tokens,
+    sum(attribution.output_tokens) AS output_tokens
+FROM (
+    SELECT
+        {offset_day("t")} AS day,
+        s.device AS device,
+        t.id AS turn,
+        CASE WHEN leg.entry IS NULL THEN t.agent
+             ELSE leg.entry ->> 'agent' END AS agent,
+        CASE WHEN leg.entry IS NULL THEN t.input_tokens
+             ELSE (leg.entry ->> 'input_tokens')::integer END AS input_tokens,
+        CASE WHEN leg.entry IS NULL THEN t.output_tokens
+             ELSE (leg.entry ->> 'output_tokens')::integer END AS output_tokens
+    FROM {SCHEMA}.turns t
+    JOIN {SCHEMA}.sessions s ON s.session = t.session
+    LEFT JOIN LATERAL json_array_elements(
+        CASE WHEN json_typeof(t.legs) = 'array' THEN t.legs END
+    ) AS leg(entry) ON true
+) AS attribution
+GROUP BY 1, 2, 4""",
+)
+
+
+# The two views below combine streams that are aggregated
+# independently, and both of them are joined on a key that can be null.
+#
+# Ordinary equality is what would be wrong, and quietly. A device key is
+# null for a session that was rejected before a device was understood,
+# and two SQL nulls are not equal to each other: an equality join would
+# leave every stream of a null-device group unmatched by every other, so
+# that group would come back with one stream's number and zeroes where
+# the others should have been, and its rates null or wrong. A null
+# device is one group, not an absence, which is what
+# `IS NOT DISTINCT FROM` says and `=` does not.
+#
+# So the shape is not the mirrored view's. The four shipped views chain
+# `FULL OUTER JOIN`s over the union of their days, and Postgres will not
+# execute a full join whose condition is not merge- or hash-joinable,
+# which `IS NOT DISTINCT FROM` is not ("FULL JOIN is only supported with
+# merge-joinable or hash-joinable join conditions"). The union the full
+# joins were there to produce is therefore taken directly, as a spine of
+# every (day, device) pair any stream has, and each stream is left
+# joined onto it. `UNION` is what dedupes the spine, and it already
+# treats two nulls as one value, so the spine has exactly one row per
+# group before anything is joined to it. The day is joined the same way
+# as the device, from symmetry rather than from need: a day is never
+# null, and a pair of conditions that read as one rule is worth more
+# than the distinction.
+EVENT_RATES_BY_DEVICE = per_device(
+    EVENT_RATES,
+    f"""WITH turn_days AS (
+    SELECT
+        {offset_day("t")} AS day,
+        s.device AS device,
+        count(*) AS turns
+    FROM {SCHEMA}.turns t
+    JOIN {SCHEMA}.sessions s ON s.session = t.session
+    GROUP BY 1, 2
+), session_days AS (
+    SELECT
+        {SESSION_DAY} AS day,
+        s.device AS device,
+        count(*) AS sessions
+    FROM {SCHEMA}.sessions s
+    GROUP BY 1, 2
+), failure_days AS (
+    SELECT
+        {offset_day("e")} AS day,
+        s.device AS device,
+        count(*) AS provider_failures
+    FROM {SCHEMA}.events e
+    JOIN {SCHEMA}.sessions s ON s.session = e.session
+    WHERE e.name = '{PROVIDER_FAILED}'
+    GROUP BY 1, 2
+), suppression_days AS (
+    SELECT
+        {offset_day("e")} AS day,
+        s.device AS device,
+        count(*) AS barge_in_suppressions
+    FROM {SCHEMA}.events e
+    JOIN {SCHEMA}.sessions s ON s.session = e.session
+    WHERE e.name = '{BARGE_IN_SUPPRESSED}'
+    GROUP BY 1, 2
+), spine AS (
+    SELECT day, device FROM turn_days
+    UNION
+    SELECT day, device FROM session_days
+    UNION
+    SELECT day, device FROM failure_days
+    UNION
+    SELECT day, device FROM suppression_days
+)
+SELECT
+    spine.day AS day,
+    spine.device AS device,
+    NULL::text AS name,
+    coalesce(turn_days.turns, 0) AS turns,
+    coalesce(session_days.sessions, 0) AS sessions,
+    coalesce(failure_days.provider_failures, 0) AS provider_failures,
+    coalesce(suppression_days.barge_in_suppressions, 0) AS barge_in_suppressions,
+    coalesce(failure_days.provider_failures, 0)::double precision
+        / nullif(coalesce(turn_days.turns, 0), 0) AS provider_failures_per_turn,
+    coalesce(suppression_days.barge_in_suppressions, 0)::double precision
+        / nullif(coalesce(session_days.sessions, 0), 0) AS suppressions_per_session
+FROM spine
+LEFT JOIN turn_days
+    ON turn_days.day IS NOT DISTINCT FROM spine.day
+    AND turn_days.device IS NOT DISTINCT FROM spine.device
+LEFT JOIN session_days
+    ON session_days.day IS NOT DISTINCT FROM spine.day
+    AND session_days.device IS NOT DISTINCT FROM spine.device
+LEFT JOIN failure_days
+    ON failure_days.day IS NOT DISTINCT FROM spine.day
+    AND failure_days.device IS NOT DISTINCT FROM spine.device
+LEFT JOIN suppression_days
+    ON suppression_days.day IS NOT DISTINCT FROM spine.day
+    AND suppression_days.device IS NOT DISTINCT FROM spine.device""",
+)
+
+
+SESSIONS_BY_DEVICE = per_device(
+    SESSIONS,
+    f"""WITH session_days AS (
+    SELECT
+        {SESSION_DAY} AS day,
+        s.device AS device,
+        count(*) AS sessions,
+        count(*) FILTER (WHERE s.metrics) AS telemetry_sessions
+    FROM {SCHEMA}.sessions s
+    GROUP BY 1, 2
+), turn_days AS (
+    SELECT
+        {offset_day("t")} AS day,
+        s.device AS device,
+        count(*) AS turns
+    FROM {SCHEMA}.turns t
+    JOIN {SCHEMA}.sessions s ON s.session = t.session
+    GROUP BY 1, 2
+), spine AS (
+    SELECT day, device FROM session_days
+    UNION
+    SELECT day, device FROM turn_days
+)
+SELECT
+    spine.day AS day,
+    spine.device AS device,
+    NULL::text AS name,
+    coalesce(session_days.sessions, 0) AS sessions,
+    coalesce(session_days.telemetry_sessions, 0) AS telemetry_sessions,
+    coalesce(turn_days.turns, 0) AS turns
+FROM spine
+LEFT JOIN session_days
+    ON session_days.day IS NOT DISTINCT FROM spine.day
+    AND session_days.device IS NOT DISTINCT FROM spine.device
+LEFT JOIN turn_days
+    ON turn_days.day IS NOT DISTINCT FROM spine.day
+    AND turn_days.device IS NOT DISTINCT FROM spine.device""",
+)
+
+
 # Declaration order, which is also the order the reference documents them
 # in: the two views that answer "how slow" and "how much", the rates that
 # need both, and the baseline underneath all of them.
@@ -791,11 +1129,71 @@ VIEWS = (STAGE_LATENCY, TOKENS, EVENT_RATES, SESSIONS)
 ALIASES: dict[str, View] = {view.alias: view for view in VIEWS}
 
 
+# The same four questions broken down by device, in the same order.
+BY_DEVICE_VIEWS = (
+    STAGE_LATENCY_BY_DEVICE,
+    TOKENS_BY_DEVICE,
+    EVENT_RATES_BY_DEVICE,
+    SESSIONS_BY_DEVICE,
+)
+
+
+# Every relation the chain creates, each question followed by its
+# per-device sibling, which is the order the migration creates them in
+# and the order the reference documents them in.
+#
+# This rather than `VIEWS` is what a reader of the database iterates:
+# the agreement test compares every definition here against the live
+# one, the analyst test proves `vinga_ro` may read each, and the
+# reference renders each. `VIEWS` is the narrower thing, the questions
+# a request may name, and the two are different sets on purpose: a
+# sibling is addressed by its question and a grouping, never by a word
+# of its own.
+DEFINED: tuple[View, ...] = tuple(
+    view for pair in zip(VIEWS, BY_DEVICE_VIEWS, strict=True) for view in pair
+)
+
+
+# Which relation answers a question, given how the caller asked for it
+# to be grouped.
+#
+# The tokens are the API's closed set (`config.responses.GROUPINGS`) and
+# they are spelled here rather than imported, because importing them
+# would put a module of the serve tier in the CLI's import path and the
+# CLI is a client of this API rather than a reader of this registry
+# (`test_cli_import_weight.py`). The two are held together by a test
+# instead: the vocabulary the document publishes and the relations there
+# are to answer it with are asserted to be the same set, so a grouping
+# cannot become servable without a relation or documented without one.
+GROUPED: dict[str, dict[str, View]] = {
+    "all": ALIASES,
+    "device": {view.alias: view for view in BY_DEVICE_VIEWS},
+}
+
+
+def grouped(view: View, grouping: str) -> View:
+    """The relation that answers this view's question under that
+    grouping.
+
+    Both arguments have been through their own closed set before they
+    arrive here, which is what makes this a lookup that cannot miss:
+    the word came out of `ALIASES` and the grouping out of the
+    published vocabulary.
+    """
+    return GROUPED[grouping][view.alias]
+
+
 __all__ = [
     "ALIASES",
     "BARGE_IN_SUPPRESSED",
+    "BY_DEVICE",
+    "BY_DEVICE_VIEWS",
     "COMMON",
     "DAY",
+    "DEFINED",
+    "DEVICE",
+    "GROUPED",
+    "NAME",
     "NAME_PREFIX",
     "NAME_SUFFIX",
     "PROVIDER_FAILED",
@@ -805,5 +1203,7 @@ __all__ = [
     "Caveats",
     "Column",
     "View",
+    "grouped",
     "offset_day",
+    "per_device",
 ]
