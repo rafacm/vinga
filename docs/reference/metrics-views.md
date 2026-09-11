@@ -226,7 +226,7 @@ the traffic of the same day?
 
 | Column | Type | Null | Units | Meaning | Formula |
 | --- | --- | --- | --- | --- | --- |
-| `day` | `date` | no | none | The UTC day, from whichever of the four streams has one. | `coalesce()` across the four streams' days. |
+| `day` | `date` | no | none | The UTC day, from whichever of the four streams has one. | The union of the four streams' days: a day any of them has gets a row, and the counts of the streams that have nothing on it are zero. |
 | `turns` | `bigint` | no | turns | How many turns were spoken on this day. | `count(*)` over turns by their UTC day, coalesced to zero on a day that has events and no turns. |
 | `sessions` | `bigint` | no | sessions | How many sessions opened on this day. | `count(*)` over sessions by their `started_at` day, coalesced to zero. |
 | `provider_failures` | `bigint` | no | events | How many `provider_failed` events landed on this day. Per stored row: two failures in one turn are two. | `count(*)` where `events.name = 'provider_failed'`, coalesced to zero. |
@@ -259,7 +259,7 @@ the traffic of the same day? Broken down by the device the session ran on.
 
 | Column | Type | Null | Units | Meaning | Formula |
 | --- | --- | --- | --- | --- | --- |
-| `day` | `date` | no | none | The UTC day, from whichever of the four streams has one. | `coalesce()` across the four streams' days. |
+| `day` | `date` | no | none | The UTC day, from whichever of the four streams has one. | The union of the four streams' days: a day any of them has gets a row, and the counts of the streams that have nothing on it are zero. |
 | `device` | `text` | yes | none | The device the session ran on, as its MAC in canonical form. This is the stable key of the breakdown: it is what `sessions.device` holds and it survives whatever the device is called. | `sessions.device`, grouped. Null when the session was rejected before a device was understood, and a null groups as its own row rather than vanishing. |
 | `name` | `text` | yes | none | The device's human label, for a reader who does not read MACs. Null in every row of this release: the analyst role is granted on `record` and revoked on `domain`, so this column cannot be a join to the configuration, and what fills it is a copy of the label on this side. Read `device` as the identity and this as a convenience that is not there yet. | `NULL::text`. Declared now and selected as a literal so that the columns a caller reads do not move on the day the label arrives. |
 | `turns` | `bigint` | no | turns | How many turns were spoken on this day. | `count(*)` over turns by their UTC day, coalesced to zero on a day that has events and no turns. |
@@ -298,7 +298,7 @@ What baseline sits under the numbers in every other view?
 
 | Column | Type | Null | Units | Meaning | Formula |
 | --- | --- | --- | --- | --- | --- |
-| `day` | `date` | no | none | The UTC day. | `coalesce()` across the session and turn streams' days. |
+| `day` | `date` | no | none | The UTC day. | The union of the session and turn streams' days: a day either of them has gets a row. |
 | `sessions` | `bigint` | no | sessions | How many sessions opened on this day. | `count(*)` over sessions by their `started_at` day, coalesced to zero on a day that only has turns. |
 | `telemetry_sessions` | `bigint` | no | sessions | How many of them had telemetry storage on. A day where this is below `sessions` had sessions that stored no measured number at all; it does not follow that a null number elsewhere came from one of them. | `count(*) FILTER (WHERE sessions.metrics)`, coalesced to zero. |
 | `turns` | `bigint` | no | turns | How many turns were spoken on this day. | `count(*)` over turns by their UTC day, coalesced to zero. |
@@ -327,7 +327,7 @@ device the session ran on.
 
 | Column | Type | Null | Units | Meaning | Formula |
 | --- | --- | --- | --- | --- | --- |
-| `day` | `date` | no | none | The UTC day. | `coalesce()` across the session and turn streams' days. |
+| `day` | `date` | no | none | The UTC day. | The union of the session and turn streams' days: a day either of them has gets a row. |
 | `device` | `text` | yes | none | The device the session ran on, as its MAC in canonical form. This is the stable key of the breakdown: it is what `sessions.device` holds and it survives whatever the device is called. | `sessions.device`, grouped. Null when the session was rejected before a device was understood, and a null groups as its own row rather than vanishing. |
 | `name` | `text` | yes | none | The device's human label, for a reader who does not read MACs. Null in every row of this release: the analyst role is granted on `record` and revoked on `domain`, so this column cannot be a join to the configuration, and what fills it is a copy of the label on this side. Read `device` as the identity and this as a convenience that is not there yet. | `NULL::text`. Declared now and selected as a literal so that the columns a caller reads do not move on the day the label arrives. |
 | `sessions` | `bigint` | no | sessions | How many sessions opened on this day. | `count(*)` over sessions by their `started_at` day, coalesced to zero on a day that only has turns. |
