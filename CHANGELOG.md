@@ -23,6 +23,7 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   later milestone of the same issue; recorded sessions are deliberately
   left alone, because a dated row names the board that was connected at
   the time.
+
 - **`vinga-server config device rename <mac> <name>`**, which gives a board
   the name the agent says out loud about it. Free-form, because a slug
   reads badly in speech, and unique across the deployment once case and
@@ -33,6 +34,7 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   has named: taking it for another device is refused with a sentence
   saying so. Refusals name the remedy, never come from a database error,
   and quote neither name.
+
 - **`vinga-server config device relocate <mac> <location>`** and
   **`vinga-server config device clear-location <mac>`**, which say where a
   board stands and unset it. Free text and not unique: two devices in one
@@ -40,6 +42,7 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   will be allowed to change; the name is the half only an operator writes.
 - The same three acts over the API: `POST /devices/{mac}/rename`,
   `PUT /devices/{mac}/location` and its `DELETE`.
+
 - **An agent knows which device it is speaking through, and where it
   stands** (#449, M2). The device's name and location join the device
   block of the system prompt, above the notes that were already there
@@ -70,6 +73,31 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   transcript or a provider the registry never built, keeps the entries
   the session opened against.
 
+- **The named aggregates are readable without a SQL client** (#440,
+  milestone 1). `GET /metrics` lists the four views over the
+  conversation record, each with the question it answers, the
+  denominator its numbers are counted against, what telemetry storage
+  being off does to that view in particular, and the columns a row of it
+  carries; `GET /metrics/{view}` answers one of them over a window of
+  whole UTC days. `since` and `until` are both included in the window,
+  default to the current UTC day and the thirty before it, and may span
+  at most 366, one leap year; a wider window is refused rather than
+  narrowed, because an answer trimmed to fit would be less than what was
+  asked for while saying it is what was asked for, and an `until` inside
+  the first thirty days of the calendar is refused rather than answered
+  from a day that does not exist. Rows come newest day
+  first and then by the columns a row of that view is unique by, which
+  is a total order. An empty window is an ordinary empty list, and so is
+  a deployment that never recorded: the schema is migrated at every boot
+  and the reads open their own connection, so switching recording off
+  stops new rows and not the reading of old ones. The word in the path
+  resolves through a closed mapping derived from the view declarations,
+  so the set that can be asked for cannot drift from the set that is
+  declared and no part of a request reaches the database. This surface
+  is for the readers that cannot speak SQL; a dashboard with a Postgres
+  connection reads the views directly, and the spelling it shares with a
+  Prometheus scrape path is a coincidence.
+
 ### Changed
 
 - **An interruption arriving at the playback onset is transcribed
@@ -92,6 +120,7 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   only a non-empty transcript cancels the reply, so a wrong pause costs
   one ASR latency where a wrong drop cost a sentence. The barge-in ADR
   carries a dated amendment saying which of its gates went and why.
+
 - **The endpointer's trailing-silence bound is documented as the
   per-agent setting it already was** (#80). `trailing_silence_ms` keeps
   its 700 ms default, which is right for question-and-answer speech and
@@ -114,16 +143,19 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   being served and says so in the log, which is the rule a binding
   lookup already kept: a storage hiccup must not make an agent stop
   knowing what it is speaking through.
+
 - **Binding a board creates its record.** `device bind` and a claim by
   activation code both mint an id and take the name `Device <full mac>`,
   so no existing flow gains a mandatory argument and a board onboarded
   before anybody has thought of a name still has a record. Naming it
   afterwards is `device rename`.
+
 - **A device reads and writes as a record.** `device show`, the device
   listing, the whole-configuration document and the export all carry the
   four fields, and an applied document takes them back. A bare agent list
   is still accepted as shorthand for a record naming only those agents,
   so every configuration written before this one still imports.
+
 - **The upgrade is stop-then-migrate.** Migration `3003_device_record`
   mints an id for every device row a deployment already had and backfills
   the name `Device <full mac>`, full rather than truncated because the
@@ -131,6 +163,19 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   the previous image is refused by the new constraints rather than
   silently accepted, which is the one-replica topology decision (#316)
   holding rather than a gap.
+
+- **What holds for every metrics view is declared rather than written
+  into the page** (#440, milestone 1). The four reading rules and the
+  three limits worth knowing before quoting a number were prose inside
+  the documentation generator, which made the generator their only
+  reader. They are now metadata on the view registry, so the committed
+  reference, the API's own contract and every answer the API sends carry
+  the same sentences from one home: a rate whose denominator is zero is
+  null and not zero, a rate read outside the events' own retention
+  window is a floor rather than a measurement, and a missing measurement
+  has more than one cause that the store writes identically. The
+  reference also states what each view's rows are unique by, which is
+  what the read surface orders on.
 
 ### Removed
 
@@ -141,6 +186,7 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   `refractory_ms` rather than writing it null, so a recording states
   the gates its own server had and `server.revision` beside it says
   which era it came from.
+
 - **The `refractory` reason on `barge_in_suppressed`** (#80), with the
   `BargeInInRefractory` variant behind it, since no path can produce it
   any more. `docs/reference/events.md` and the barge-in decision
