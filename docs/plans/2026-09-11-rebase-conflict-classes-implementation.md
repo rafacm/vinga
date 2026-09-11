@@ -127,7 +127,7 @@ origin/main...aab26155). Verdict: mergeable after the listed fixes.
 
 ## M2: changelog fragments and the fold on `main`
 
-PR TBD.
+PR #476.
 
 ### What landed
 
