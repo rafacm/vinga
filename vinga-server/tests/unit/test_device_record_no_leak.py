@@ -212,10 +212,14 @@ def test_the_name_is_on_session_open_and_on_no_other_record(
 
     every = [fields_of(record) for record in caplog.records]
     assert every, "nothing was logged, so nothing was checked"
+    # Each record's structured half serialized whole rather than its
+    # top-level strings walked: "no other record" is a claim about
+    # every depth, and a name nested in a mapping, a list or an
+    # exception payload would have passed a hunt over `values()`.
     carrying = {
         str(fields.get("event"))
         for fields in every
-        if any(isinstance(held, str) and NAME in held for held in fields.values())
+        if NAME in json.dumps(fields, default=repr)
     }
     assert carrying == {"session_open"}
     # More than one event was written, so the set above is a selection
