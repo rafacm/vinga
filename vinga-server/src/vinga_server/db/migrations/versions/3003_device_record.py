@@ -47,7 +47,8 @@ would end up with an index nothing here describes.
 `tests/unit/test_device_name_fold.py` drives the frozen copy, the live
 Python rendering and the live SQL rendering through one corpus, so a
 divergence between any of the three is a failing test rather than a
-silent one.
+silent one, and it drives the same corpus under a Turkish collation,
+which is where a fold that named no collation came apart.
 
 There is no schema staging for a writer from the previous image, and
 the reason is a decision this repository has already taken: the
@@ -77,11 +78,25 @@ SCHEMA = "domain"
 # The name-uniqueness fold, frozen. Lowercase by the simple mapping,
 # runs of Unicode whitespace collapsed to one space, the ends trimmed.
 #
+# Nothing in this expression is allowed to depend on the locale the
+# instance was initialized in, and both halves of it say so in their own
+# way.
+#
+# The case mapping names `pg_c_utf8`, Postgres 17's built-in collation
+# provider at locale C.UTF-8, whose case mapping comes from the Unicode
+# character database rather than from the host's libc or ICU. A bare
+# `lower()` would use the database's default collation instead, and
+# under a Turkish one `lower('I')` is `ı` where every other locale
+# answers `i`: the index would then disagree with the repository's
+# Python fold, approve what the index refuses, and hand the operator a
+# sanitized database failure. This is what sets this server's Postgres
+# floor at 17, which is the version every deployment artifact here
+# already pins; an older instance refuses this statement naming the
+# collation rather than building an index that means something else.
+#
 # The whitespace class is written out character by character rather than
 # as `\s`, because what `\s` means to a Postgres regular expression
-# depends on the database's ctype: a character that is whitespace under
-# one locale is a literal under another, and a name's folded form must
-# not be a property of how the instance was initialized. The set is
+# depends on the database's ctype for the same reason. The set is
 # Unicode's whitespace, which is what Python's own `\s` matches for a
 # `str`, and none of its members is `]`, `^`, `-` or `\`, so it is a
 # safe bracket expression as written.
@@ -98,8 +113,11 @@ FOLD_WHITESPACE = (
     "\u2028\u2029\u202f\u205f\u3000"
 )
 
+FOLD_COLLATION = "pg_c_utf8"
+
 FOLDED_NAME = (
-    f"btrim(regexp_replace(lower(name), '[{FOLD_WHITESPACE}]+', ' ', 'g'), ' ')"
+    f"btrim(regexp_replace(lower(name collate {FOLD_COLLATION}), "
+    f"'[{FOLD_WHITESPACE}]+', ' ', 'g'), ' ')"
 )
 
 NAME_INDEX = "uq_devices_folded_name"
