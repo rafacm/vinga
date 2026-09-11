@@ -56,6 +56,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   named nor placed a device sends the prompts it sent before this
   release, byte for byte. Naming or relocating one is what starts the
   sentence appearing.
+- **An agent can be told its device has moved** (#449, M3). A new
+  builtin tool, `set_device_location`, lets somebody say "you have been
+  moved to the office" and have the device's record say so from the very
+  next reply. It addresses nothing: what it writes is the location of
+  the device the conversation is happening on, which the server already
+  knows, so a model cannot relocate a speaker in another room. Anyone
+  talking to a device may move it, which is the same trust boundary as
+  talking to it at all, and the tool's own description says so. What it
+  may not change is the name, which stays the half only an operator
+  writes. The write goes through the repository an operator's own
+  command goes through, so a location a room offers meets exactly the
+  rules a typed one does, and a device a default agent merely covers,
+  with no record of its own, is refused in a sentence the agent reads
+  out: creating a device record is an operator's act.
 
 - **The ASR and TTS spans carry the provider that ran them** (#450,
   milestone 2). The exporter's two stage tables gain the four provider

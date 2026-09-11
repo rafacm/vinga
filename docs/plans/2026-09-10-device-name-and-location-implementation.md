@@ -541,3 +541,195 @@ has already merged past.
 - No generated reference moves: no event gains a field, no stored column
   changes, no CLI verb is added, and `prompt_assembled` reports the
   cached know-how half, which the device block is not part of.
+
+## M3: the agent can move the device
+
+The one write a conversation may make to a device record. Nothing about
+the schema moved, and nothing about the prompt: what M3 adds is a tool,
+the seam it writes through, and the engine that seam writes on.
+
+### What was built
+
+- **`set_device_location`**, in `tools/builtin.py` beside the other ten
+  builtins, offered and dispatched by `tools/source.py`. One argument,
+  and no device in it: what it writes is the location of the device the
+  conversation is on, which the runtime already knows. It joins
+  `BUILTIN_TOOL_NAMES`, which reserves the name against an MCP entry by
+  construction, and `ORDERED_TOOL_NAMES`, because two of them in one
+  round name the same row.
+- **The trust stance in the description.** The issue settles it: any
+  voice in the room may move a device, because being in the room is
+  already what talking to it takes. It is in the text the model reads
+  rather than in a comment, beside the other half of the same
+  sentence, which is that the tool may not change what the device is
+  CALLED. That is the mutability split the whole record is built
+  around, and the description is where a model and a reader both meet
+  it.
+- **`device/placement.py`**, the seam's implementation and the module
+  this milestone adds. It writes through `ConfigStore`, addressed by the
+  record's id; it dispatches the synchronous write to a worker thread;
+  and it translates the repository's refusals into the tool layer's own
+  vocabulary.
+- **`ConfigStore.relocate_device_by_id`**, `relocate_device`'s write
+  with the other address. Same staging, same validation, same lock.
+- **The wiring.** `bespoke_runtime_factory` takes the seam beside the
+  record read M2 gave it, `PipelineRuntime` hands it to `BuiltinTools`
+  with the id of the record the conversation attached to, and `app.py`
+  builds it over the domain write engine the lifespan already owned.
+
+### Why the tool addresses a record id and not the MAC
+
+The plan says "the same repository path the CLI uses", and this is that
+path with one thing changed: which row it means.
+
+An operator has the board in front of them and addresses it the way
+they read it off a label. A conversation cannot. It attached to one
+RECORD at its connect, and the MAC that record stands at can be deleted
+and bound again, or (from M4) moved to another record, while the
+conversation is still talking. Writing by MAC from inside a
+conversation is precisely the failure M2's review round found on the
+read side, one direction later: the conversation would relocate
+whichever record now answers to the address, which is a board in
+somebody else's room.
+
+So `relocate_device_by_id` sits beside `relocate_device` and reaches
+the same `_device_write`: the four phases, the folded-name check, the
+credential refusal, the blank-location refusal and the writer lock are
+all one implementation. What it adds is resolving the id to a MAC
+inside the transaction that then writes, so nothing can move the id
+between the lookup and the write.
+
+The test that tells the two apart deletes a bound board and binds it
+again under a running conversation, then has the agent say it has
+moved: the write refuses and the new record is untouched.
+
+### What the agent says, refusal by refusal
+
+Five sentences, all in `tools/builtin.py` with the rest of that closed
+vocabulary, and none of them the repository's own. That is the point
+rather than a detail: the repository's refusals are written for an
+operator at a command line and name a command to run, a document to
+edit or a field to correct, and whoever just said "you have been moved"
+can act on none of it.
+
+| What happened | What the agent is told |
+| --- | --- |
+| The call carried no place, or only whitespace | `LOCATION_NEEDS_A_PLACE`: what the call was missing |
+| The device has no record (a MAC a default agent covers, or a record deleted under the conversation) | `NO_DEVICE_RECORD`: tell the user this device has to be added before it can be given a place |
+| This server cannot write device records at all | `PLACEMENT_UNAVAILABLE`: tell the user that, and carry on |
+| The repository refused the value (a URL carrying a credential) | `LOCATION_NOT_A_PLACE`: ask the user where the device is and call it again |
+| Another writer holds the domain lock | `PLACEMENT_BUSY`: ask again in a moment |
+| Anything else, including a database that would not answer | `PLACEMENT_FAILED`: you could not record that |
+
+Two of those are worth reading twice. The first is that the two
+absences are two sentences: a server with no writable records will not
+gain one while this conversation is happening, and a device with no
+record is one an operator can bind, and a room can act on the
+difference. The second is that the blank-location refusal M1 added is
+NOT reachable from here, because the tool refuses a location that
+strips to nothing first, in the same words the other builtins refuse a
+missing argument. That is not luck: the fold M1 defined uses exactly
+`str.isspace`'s whitespace class, which is exactly what `strip`
+removes, so the two guards agree by construction.
+
+### The engine, and why there is still only one
+
+The plan's fourth review finding asks for "the app lifecycle's
+ownership and disposal of a domain write engine". The lifespan already
+had one: `open_store` opens and disposes the engine the configuration
+API writes through. What M3 does is move that open in front of the
+runtime factory and give it a second consumer, rather than open a
+second pool for the one column a room may change. One writer, one
+advisory lock, one pool over the domain half.
+
+Moving it earlier also improves the unwind. The open is now registered
+earlier on the exit stack and is therefore disposed later, after the
+drain has asked every live conversation to finish, so a conversation
+still writing cannot meet an engine that has already let go of its
+pool.
+
+A server composed from a configuration it was handed gets no placements
+at all (`seed.from_store` is false), which is the mode every surface
+spanning a store and a running world already refuses in: that database
+describes some other server, or none.
+
+### Off the event loop
+
+`ConfigStore` is synchronous, and the caller is the event loop every
+live conversation shares, so the write goes to a worker thread the way
+the per-round record read and the memory lookup on the same reply do.
+It is worth more here than for a read: this transaction takes the
+domain writer lock before it reads, so run inline it would put every
+other conversation in the process behind whatever else is writing
+configuration.
+
+Asserted by the thread the repository call ran on rather than by
+reading the call site.
+
+### Deviations from the plan
+
+Two.
+
+1. **The repository gains a verb.** The plan's module list for M3 named
+   `tools/source.py`, the runtime factory, the pipeline wiring and the
+   app lifecycle, and said the write goes through "the same repository
+   path the CLI uses". It does, and it needed one more entry point on
+   that path to be addressable by a conversation. Reasoned above; the
+   alternative was writing by MAC from inside a conversation, which is
+   the failure the stable id exists to prevent.
+2. **`device/placement.py` is a new module, where the plan said M3 adds
+   none.** It holds what neither neighbour can: `tools/builtin.py` may
+   not import the configuration repository (it would be a tool layer
+   speaking the repository's vocabulary, and the whole point of this
+   seam is that it stops doing so), and `device/bindings.py` is a
+   read-only, never-migrating view over a read engine whose docstring
+   states both. Inlining it into either would fail the deletion test in
+   the other direction: what it does is own a connection, cross a
+   thread boundary and translate a vocabulary, and a caller with those
+   three inlined would be harder to read.
+
+### Discoveries
+
+- **Falsifying a refusal found a row nothing could read.** The pin for
+  "a device a default agent covers is refused a place" was checked by
+  removing the tool's own guard, and the write SUCCEEDED. A relocation
+  addressed by id tells "by id" from "by MAC" by that argument being
+  absent, so a null id read as "addressed by MAC", the binding kept the
+  sentinel MAC an id-addressed write arrives with, and `_stage_device`
+  created a device whose MAC was the empty string. The id's spelling is
+  now asked about before anything is staged, and the resolved address is
+  asserted inside the transaction, so the sentinel cannot leak whichever
+  way in a caller came. The case is in the repository's own table, with
+  `None` in it and a note saying why a type-checked-looking argument is
+  tested with a value its annotation forbids.
+- **The confirmation's claim had to be weakened to stay honest.** The
+  tool answers with the location the ROW holds rather than the one the
+  call sent, which is the rule every device write here follows. Nothing
+  can observe the difference, because a device location is stored
+  exactly as written: the two strings are the same string. So the test
+  pins what is observable, which is that the confirmation is normalized
+  onto one line, and says in as many words that the rest is
+  unfalsifiable today.
+- **A server-scope tap does not see a session's events.** The no-leak
+  test began by attaching one, the way `test_device_record_no_leak.py`
+  does from the wire, and it saw nothing at all. What a session emits
+  reaches the log records with their structured half, which is what
+  `both_formats` renders, so that is what this claim is hunted in.
+
+### Verification
+
+- `uv run ruff check .`, `uv run mypy`,
+  `uv run pytest tests/unit -q -n 4 --dist loadfile`,
+  `uv run pytest tests/integration -q`, and the generated-document drift
+  checks, all from `vinga-server/`.
+- No migration, so the CI wheel step's chain-head pin does not move.
+- No generated reference moves: no event gains a field, no stored column
+  changes, and no CLI verb is added. The command-spellings census is
+  regenerated, because moving one statement in `app.py` shifts the line
+  numbers it records.
+- Every new pin was watched failing before its claim was made, one
+  mutation per claim: the tool out of `ORDERED_TOOL_NAMES`, the write
+  addressed by MAC, the write run inline, the repository's own sentence
+  forwarded, the two absences merged into one sentence, the refusal
+  raised inside its handler, the confirmation left unnormalized, and the
+  location written to a log line.
