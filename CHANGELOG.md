@@ -9,6 +9,29 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **The named aggregates are readable without a SQL client** (#440,
+  milestone 1). `GET /metrics` lists the four views over the
+  conversation record, each with the question it answers, the
+  denominator its numbers are counted against, what telemetry storage
+  being off does to that view in particular, and the columns a row of it
+  carries; `GET /metrics/{view}` answers one of them over a window of
+  whole UTC days. `since` and `until` are both included in the window,
+  default to the current UTC day and the thirty before it, and may span
+  at most 366, one leap year; a wider window is refused rather than
+  narrowed, because an answer trimmed to fit would be less than what was
+  asked for while saying it is what was asked for. Rows come newest day
+  first and then by the columns a row of that view is unique by, which
+  is a total order. An empty window is an ordinary empty list, and so is
+  a deployment that never recorded: the schema is migrated at every boot
+  and the reads open their own connection, so switching recording off
+  stops new rows and not the reading of old ones. The word in the path
+  resolves through a closed mapping derived from the view declarations,
+  so the set that can be asked for cannot drift from the set that is
+  declared and no part of a request reaches the database. This surface
+  is for the readers that cannot speak SQL; a dashboard with a Postgres
+  connection reads the views directly, and the spelling it shares with a
+  Prometheus scrape path is a coincidence.
+
 - **The ASR and TTS spans carry the provider that ran them** (#450,
   milestone 2). The exporter's two stage tables gain the four provider
   keys under the correspondence the round span already ships: the type
@@ -24,6 +47,21 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   having named an entry, so an outcome that names none, an empty
   transcript or a provider the registry never built, keeps the entries
   the session opened against.
+
+### Changed
+
+- **What holds for every metrics view is declared rather than written
+  into the page** (#440, milestone 1). The four reading rules and the
+  three limits worth knowing before quoting a number were prose inside
+  the documentation generator, which made the generator their only
+  reader. They are now metadata on the view registry, so the committed
+  reference, the API's own contract and every answer the API sends carry
+  the same sentences from one home: a rate whose denominator is zero is
+  null and not zero, a rate read outside the events' own retention
+  window is a floor rather than a measurement, and a missing measurement
+  has more than one cause that the store writes identically. The
+  reference also states what each view's rows are unique by, which is
+  what the read surface orders on.
 
 ### Fixed
 
