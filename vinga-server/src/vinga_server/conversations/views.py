@@ -3,11 +3,13 @@
 A view here is not a query somebody wrote down. It is a question with a
 frozen answer shape: the columns it hands back, what each one means and
 in what unit, when each one is null, and the formula that produces it.
-That whole declaration is the module's content, and three callers read
+That whole declaration is the module's content, and its callers read
 it rather than restating it: `docgen.views_reference` renders
 `docs/reference/metrics-views.md` from it, the agreement test compares
-every live definition against it, and the analyst test iterates it to
-prove `vinga_ro` may read each one.
+every live definition against it, the analyst test iterates it to
+prove `vinga_ro` may read each one, and the read surface resolves a
+request's view alias through `ALIASES` and orders a page on the columns
+a row is declared unique by.
 
 The migration spells the same `CREATE VIEW` statements literally, as
 frozen history must, and that is the one duplication this module does
@@ -24,19 +26,16 @@ sees one and cannot propose dropping it; the agreement test above is the
 drift guard in its place, and nobody should "fix" that by declaring a
 view as a `Table`.
 
-Three rules run through every definition, and each is here rather than
-in four places:
-
-- **Day is UTC.** `sessions.started_at` is UTC ISO-8601 text and turns
-  and events carry `t_ms`, an offset from session open, so a row's day
-  is `started_at::timestamptz AT TIME ZONE 'UTC'` plus that offset, cast
-  to `date`. Every cast names UTC, so the reader's own session timezone
-  cannot move a row to the day before.
-- **Counting is per stored row.** Two provider failures in one turn are
-  two. A view that deduplicated them would be answering a different
-  question than the one its name asks.
-- **A rate is null on a zero denominator**, never zero. Nothing happened
-  and nothing could have happened are different facts.
+What is true of every definition rather than of one column is
+declared too, in `COMMON`, rather than written out wherever a surface
+happens to need it: that a day is a UTC day, that counting is per
+stored row, that a rate is null on a zero denominator, and the three
+limits an analyst has to read before quoting a number. The reference
+renders it, the API serves it in its route descriptions and in the
+bodies those routes answer with, and the CLI prints what the API sent.
+One home, several surfaces; before #440 the retention-floor limit was
+hand-written prose inside the renderer, which is the one place it could
+never reach a caller from.
 
 Read-only, and deliberately so: nothing here opens a database.
 """
@@ -44,6 +43,18 @@ Read-only, and deliberately so: nothing here opens a database.
 from dataclasses import dataclass
 
 from vinga_server.conversations.schema import SCHEMA
+
+# What every view's name is made of, either side of the question it
+# answers. Named here because `View.alias` strips them to derive the
+# word a request spells, and a view whose name did not carry them would
+# get an alias nobody could predict.
+NAME_PREFIX = "metrics_"
+NAME_SUFFIX = "_daily"
+
+# The grain every view is cut on, and the first key column of each of
+# them. The read surface windows on it and orders it descending, so it
+# is one name here rather than a literal in four places.
+DAY = "day"
 
 # The four stages the latency view unpivots, in the order a turn passes
 # through them. A closed set spelled in the SQL rather than derived from
@@ -76,6 +87,30 @@ class Column:
     units: str
     nullable: bool
     formula: str
+    # Whether this column is part of what makes a row one row, which is
+    # the view's `GROUP BY` said as a declaration. Two readers need it
+    # and neither could derive it: the reference states what a row is
+    # unique by, and the read surface orders a page on exactly these
+    # columns, which is what makes the order total and the page
+    # reproducible.
+    key: bool = False
+
+
+@dataclass(frozen=True)
+class Caveats:
+    """A headed group of statements that hold for every view rather than
+    for one column.
+
+    Declared here rather than written into the renderer because more
+    than one surface has to carry them: an analyst reads them on the
+    committed reference, and a caller of the read surface reads them in
+    the route description and in the body it is answered with. Prose
+    with its own emphasis in it, exactly as a page shows it, because
+    the lead of each statement is the half a reader skims for.
+    """
+
+    heading: str
+    notes: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -93,6 +128,30 @@ class View:
     def qualified(self) -> str:
         """How SQL spells this view."""
         return f"{SCHEMA}.{self.name}"
+
+    @property
+    def alias(self) -> str:
+        """How a request spells this view.
+
+        Derived from the name rather than written beside it, which is
+        what stops the set a caller may ask for drifting from the set
+        declared here: every view shares the prefix and the suffix, so
+        what is left is the question it answers, kebab-cased the way
+        `docs/architecture/cli-guide.md` spells a word a person types.
+
+        This is the whole of the request-controlled selection of a
+        relation, and it is a lookup in a closed mapping rather than a
+        value that travels: a relation name cannot be a bound
+        parameter, so an alias nothing answers to is refused before
+        anything reaches SQL.
+        """
+        return self.name.removeprefix(NAME_PREFIX).removesuffix(NAME_SUFFIX).replace("_", "-")
+
+    @property
+    def keys(self) -> tuple[Column, ...]:
+        """The columns a row of this view is unique by, in declaration
+        order, which always begins with the day."""
+        return tuple(column for column in self.columns if column.key)
 
     @property
     def comment(self) -> str:
@@ -116,10 +175,76 @@ class View:
         return f"COMMENT ON VIEW {self.qualified} IS '{escaped}'"
 
 
+# What holds for all four, declared rather than written into a
+# renderer. Two headed groups because they are two kinds of statement:
+# the first is how to read a number, the second is what a number cannot
+# be made to say. The headings are here with the prose they head, so a
+# surface that renders them adds no words of its own.
+COMMON: tuple[Caveats, ...] = (
+    Caveats(
+        heading="What is true of all four",
+        notes=(
+            "**A day is a UTC day.** `sessions.started_at` is UTC ISO-8601 text, and "
+            "a turn and an event each carry `t_ms`, an offset from session open, so a "
+            "row's day is its session's start converted to UTC plus that offset, cast "
+            "to a date. Every cast names UTC, which is what stops the timezone of "
+            "whoever is reading from moving a row to the day before. A session is on "
+            "the day it opened; its turns are on the day they were spoken, which is "
+            "not always the same day.",
+            "**Counting is per stored row.** Two provider failures in one turn are "
+            "two, deliberately. Each numerator stream is aggregated on its own before "
+            "anything is joined, so an unrelated event beside a counted one cannot "
+            "multiply a denominator.",
+            "**A rate is null when its denominator is zero**, never zero. Nothing "
+            "happened and nothing could have happened are different facts, and a view "
+            "that reported them the same way would let a quiet day read as a healthy "
+            "one.",
+            "**Percentiles interpolate.** `p50_ms` and `p95_ms` are "
+            "`percentile_cont`, so a two-turn day's p95 is mostly arithmetic between "
+            "two numbers. The count they were computed over is the column beside "
+            "them; read it first.",
+        ),
+    ),
+    Caveats(
+        heading="Three limits worth knowing before quoting a number",
+        notes=(
+            "**Retention makes historical event rates a floor.** Turns survive with "
+            "their conversation, by its last activity, while events are deleted by "
+            "their own session's age, so a recently resumed conversation can hold "
+            "turns from arbitrarily old sessions whose events are long gone. The "
+            "database cannot tell zero events from events already pruned. So a rate "
+            "read outside the events' own retention window is a floor, not a "
+            "measurement, and zero cannot be told from pruned. No windowing "
+            "cleverness is attempted in the SQL: the honest sentence is the design.",
+            "**A missing measurement has more than one cause, and these views cannot "
+            "tell them apart.** A null token count means telemetry storage was off "
+            "OR the provider reported no usage; a stage absent from the latency view "
+            "means the switch was off OR that stage was never measured on that turn. "
+            "The store writes both causes identically, so what a measured count "
+            "reports is coverage and never its reason: a gap between `turns` and "
+            "`input_measured_turns` says those tokens were not recorded, and nothing "
+            "about why. Read a measured count as a denominator, never as a "
+            "diagnosis.",
+            "**`sessions.metrics` is the telemetry switch**, under the name the "
+            "switch had before it was renamed. Column names are a compatibility "
+            "surface and the rename was not a schema change, so the column keeps the "
+            "old spelling deliberately. `metrics_sessions_daily.telemetry_sessions` "
+            "counts it, and it is session-level context for the day a session opened "
+            "rather than a discriminator for the limit above: a turn is dated by the "
+            "day it was spoken, which need not be the day its session opened, the "
+            "column is not broken down by agent, and it knows nothing about the "
+            "second cause. A day where it sits below `sessions` had sessions that "
+            "stored no measured number at all, and that is the whole of what it "
+            "says.",
+        ),
+    ),
+)
+
+
 # The day a turn or an event belongs to, and the day a session belongs
-# to. One home for the rule the module docstring states; every view below
-# reads it from here so that four definitions cannot come to disagree
-# about what a day is.
+# to. One home for the rule `COMMON` states; every view below reads it
+# from here so that four definitions cannot come to disagree about what
+# a day is.
 SESSION_DAY = "(s.started_at::timestamptz AT TIME ZONE 'UTC')::date"
 
 
@@ -167,6 +292,7 @@ STAGE_LATENCY = View(
                 "The turn's session `started_at` converted to UTC, plus the "
                 "turn's `t_ms`, cast to `date`."
             ),
+            key=True,
         ),
         Column(
             name="agent",
@@ -180,6 +306,7 @@ STAGE_LATENCY = View(
             units="none",
             nullable=True,
             formula="`turns.agent`, grouped. A turn with no agent groups as a null row.",
+            key=True,
         ),
         Column(
             name="stage",
@@ -196,6 +323,7 @@ STAGE_LATENCY = View(
                 "`asr_ms`, `first_token_ms`, `llm_ms` and "
                 "`tts_first_audio_ms`."
             ),
+            key=True,
         ),
         Column(
             name="measured_turns",
@@ -294,6 +422,7 @@ TOKENS = View(
                 "The turn's session `started_at` converted to UTC, plus the "
                 "turn's `t_ms`, cast to `date`."
             ),
+            key=True,
         ),
         Column(
             name="agent",
@@ -310,6 +439,7 @@ TOKENS = View(
                 "rather than vanishing, so usage nobody can attribute is "
                 "still visible."
             ),
+            key=True,
         ),
         Column(
             name="turns",
@@ -440,6 +570,7 @@ EVENT_RATES = View(
             units="none",
             nullable=False,
             formula="`coalesce()` across the four streams' days.",
+            key=True,
         ),
         Column(
             name="turns",
@@ -585,6 +716,7 @@ SESSIONS = View(
             units="none",
             nullable=False,
             formula="`coalesce()` across the session and turn streams' days.",
+            key=True,
         ),
         Column(
             name="sessions",
@@ -650,12 +782,27 @@ FULL OUTER JOIN turn_days ON turn_days.day = session_days.day""",
 VIEWS = (STAGE_LATENCY, TOKENS, EVENT_RATES, SESSIONS)
 
 
+# The closed mapping a request's `{view}` resolves through, derived from
+# the registry above rather than written beside it: a view declared here
+# is servable, one that is not declared here is not, and the two sets
+# cannot come apart. A caller's bytes are a key looked up in this and
+# never anything else, which is what keeps a relation name out of reach
+# of a request.
+ALIASES: dict[str, View] = {view.alias: view for view in VIEWS}
+
+
 __all__ = [
+    "ALIASES",
     "BARGE_IN_SUPPRESSED",
+    "COMMON",
+    "DAY",
+    "NAME_PREFIX",
+    "NAME_SUFFIX",
     "PROVIDER_FAILED",
     "SESSION_DAY",
     "STAGES",
     "VIEWS",
+    "Caveats",
     "Column",
     "View",
     "offset_day",
