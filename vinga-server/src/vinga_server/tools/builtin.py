@@ -969,7 +969,16 @@ async def clear_state(
 # rest of this module answers in, and no value the repository was handed
 # and rejected appears in any of them.
 
-# The call arrived without a place in it.
+# The call arrived without a place in it, or with one the repository
+# found held nothing at all. One sentence for the two, because they are
+# one thing to the model: what it sent was not a place to write down,
+# and what it does about either is ask the user where the device is.
+#
+# The blankness is not decided here. A string the model sent goes to
+# the repository whatever it looks like, and comes back refused with a
+# type that says which rule it broke; deciding it here would be a
+# second definition of blank, in the layer furthest from the model that
+# owns the rule.
 LOCATION_NEEDS_A_PLACE = (
     'set_device_location needs a "location": where this device is now, in the words '
     "the user used for the place"
@@ -997,14 +1006,13 @@ PLACEMENT_UNAVAILABLE = (
     "that, and carry on with the conversation"
 )
 
-# The value was refused by the repository, which for a location means
-# it was a URL carrying a credential: a place that folds to nothing
-# never gets that far, because the guard below refuses it first and in
-# better words. One sentence rather than one per rule all the same,
-# because the repository refuses every value problem with one type and
-# reading its prose to tell them apart is what a closed vocabulary
-# exists to avoid. Neither the value nor the repository's reason is
-# repeated.
+# The value was refused by the repository for a reason it has a type
+# for nowhere else, which for a location today means it was a URL
+# carrying a credential. One sentence rather than one per rule,
+# because what is left after the typed refusals is a set nothing can
+# enumerate: reading the repository's prose to tell its members apart
+# is what a closed vocabulary exists to avoid. Neither the value nor
+# the repository's reason is repeated.
 LOCATION_NOT_A_PLACE = (
     "that is not something that can be written down as a place: a location is a room "
     "or a part of the home, in the words a person would say it. Ask the user where "
@@ -1056,9 +1064,20 @@ async def set_device_location(
     MAC does, and the rule is stricter here: a model that could name a
     device would be relocating somebody else's speaker from this one's
     microphone.
+
+    What a location may be is not decided here at all. Any string the
+    model sent is handed to the repository, which owns that rule and
+    answers with a type saying which one it broke; a place that folds
+    away comes back as the sentence above, translated where the type is
+    known.
     """
     location = arguments.get("location")
-    if not isinstance(location, str) or not location.strip():
+    # A string and nothing else, which is a question about the CALL
+    # rather than about the place: a number or a missing argument is not
+    # something the repository has an opinion on. Every string goes
+    # through, blank ones included, because what a location may be is
+    # the model's rule and this layer does not keep a copy of it.
+    if not isinstance(location, str):
         raise ValueError(LOCATION_NEEDS_A_PLACE)
     if relocations is None:
         raise ValueError(PLACEMENT_UNAVAILABLE)

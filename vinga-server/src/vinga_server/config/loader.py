@@ -256,6 +256,28 @@ class DeviceNameConflictError(ConfigError):
     """
 
 
+class DeviceLocationBlankError(ConfigError):
+    """The location a write submitted holds nothing once folded, so
+    nothing was written.
+
+    A type rather than a sentence to match on, and it exists for one
+    caller: the tool a conversation moves its device with. What a device
+    is nowhere in particular is said by the absence of a location, so a
+    value that folds away is a second spelling of a state that already
+    has one, and this refusal is the same whichever surface submitted
+    it.
+
+    What differs is what each surface can do about it. An operator is
+    told to clear the location instead, naming the command and the
+    document key; a room that just said where a speaker is has neither,
+    and has to be told what the call was missing. Translating a type is
+    how the second one gets its own words without a second definition of
+    what "blank" means: the rule stays `fold_device_name`, in the model
+    that owns it, and only the sentence changes hands
+    (`device/placement.py`).
+    """
+
+
 class DatabaseBusyError(ConfigError):
     """A lock this call needed did not arrive inside the lock timeout,
     because another connection was holding it. Nothing was changed, and

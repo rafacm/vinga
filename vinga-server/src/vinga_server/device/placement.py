@@ -12,8 +12,11 @@ repository can do on its own:
 - **It writes through the repository the CLI writes through**, so the
   rules about what a stored device location may be (not blank once
   folded, not a URL carrying a credential) are stated once, in the
-  place every other device write already meets them. Nothing here
-  touches a table.
+  place every other device write already meets them. Every string a
+  room says reaches that repository, including the ones it will refuse:
+  a second opinion here about what counts as blank would be a rule with
+  two homes, and the one furthest from the model that owns it is the
+  one that drifts. Nothing here touches a table.
 - **It addresses the record by its id.** A conversation attached to a
   record at its connect, and the MAC that record stands at can be
   deleted and bound again, or moved to another record, while the
@@ -46,6 +49,7 @@ import logging
 from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
+    DeviceLocationBlankError,
     StorageError,
     UnknownEntityError,
 )
@@ -94,6 +98,14 @@ class DevicePlacements:
             # default agent merely covers would meet if the tool had not
             # already refused it for having no record to attach to.
             refusal = builtin.NO_DEVICE_RECORD
+        except DeviceLocationBlankError:
+            # A place that holds nothing once folded. The rule is the
+            # model's and the fold is the one every reader of it asks,
+            # so what crosses here is which refusal happened rather than
+            # a second opinion about the value; what a room needs back
+            # is what the call was missing, since the repository's own
+            # sentence names a command to run and a document key.
+            refusal = builtin.LOCATION_NEEDS_A_PLACE
         except DatabaseBusyError:
             refusal = builtin.PLACEMENT_BUSY
         except StorageError:

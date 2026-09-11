@@ -145,6 +145,26 @@ def said(script: ScriptedLlm) -> list[str]:
 
 
 @contextlib.contextmanager
+def _submissions() -> Iterator[list[str]]:
+    """Every location the repository was actually handed, in order.
+
+    White-box on purpose and about one thing: whether a value the tool
+    could have judged for itself was submitted to the layer that owns
+    the judgement. Nothing else here reads it.
+    """
+    seen: list[str] = []
+    real = ConfigStore.relocate_device_by_id
+
+    def relocate(self: ConfigStore, device: str, location: str) -> Any:
+        seen.append(location)
+        return real(self, device, location)
+
+    with pytest.MonkeyPatch.context() as patching:
+        patching.setattr(ConfigStore, "relocate_device_by_id", relocate)
+        yield seen
+
+
+@contextlib.contextmanager
 def a_session(
     script: ScriptedLlm, mac: str = POET_MAC, relocations: Any = None
 ) -> Iterator[DeviceSession]:
@@ -434,26 +454,51 @@ async def test_a_server_that_keeps_no_writable_records_says_so() -> None:
     assert "set_device_location" in [tool.name for tool in script.seen[0][1]]
 
 
-async def test_a_call_with_no_place_in_it_is_told_what_is_missing() -> None:
-    """The argument refusal, in this module's own vocabulary: what the
-    call was missing rather than what arrived. A location of two
-    no-break spaces is caught here too, because the fold the repository
-    would refuse it by strips exactly what `strip` strips."""
+async def test_a_call_with_no_place_at_all_never_reaches_the_repository() -> None:
+    """The one refusal this layer keeps, and it is about the CALL rather
+    than about a place: a missing argument is not a string, and the
+    repository has no opinion on something that is not one. Nothing is
+    submitted, so nothing is refused."""
     a_named_board()
-    script = ScriptedLlm(
-        [
-            [
-                call("set_device_location"),
-                call("set_device_location", location="  \t "),
-            ],
-            "Where am I?",
-        ]
-    )
+    script = ScriptedLlm([[call("set_device_location")], "Where am I?"])
 
-    with placements() as writing, a_session(script, relocations=writing) as session:
-        await run_reply(session, "you have moved")
+    with _submissions() as submitted:
+        with placements() as writing, a_session(script, relocations=writing) as session:
+            await run_reply(session, "you have moved")
 
-    assert all(answer.endswith(builtin.LOCATION_NEEDS_A_PLACE) for answer in said(script))
+    (answer,) = said(script)
+    assert answer.endswith(builtin.LOCATION_NEEDS_A_PLACE)
+    assert submitted == []
+
+
+async def test_a_place_that_holds_nothing_is_refused_by_the_rule_that_owns_it() -> None:
+    """Whitespace goes to the repository like any other string, and
+    comes back as the sentence a room can act on.
+
+    The point is the path rather than the answer. What counts as blank
+    is `fold_device_name`, in the model that owns it and behind the
+    database index written over it; a copy of that rule in the tool
+    layer would be a second definition, furthest from its owner, and
+    agreeing with it today is not the same as being it. So the value
+    travels, the repository refuses it with a type, and the type is
+    translated where the vocabulary lives.
+
+    Both halves are asserted, because either alone passes for the wrong
+    reason: the sentence alone would pass for a guard that never
+    submitted anything, and the submission alone would pass for a
+    refusal in somebody else's words.
+    """
+    a_named_board()
+    blank = "\u00a0 \t "
+    script = ScriptedLlm([[call("set_device_location", location=blank)], "Where am I?"])
+
+    with _submissions() as submitted:
+        with placements() as writing, a_session(script, relocations=writing) as session:
+            await run_reply(session, "you have moved")
+
+    (answer,) = said(script)
+    assert answer.endswith(builtin.LOCATION_NEEDS_A_PLACE)
+    assert submitted == [blank]
     assert stored_location() is None
 
 
