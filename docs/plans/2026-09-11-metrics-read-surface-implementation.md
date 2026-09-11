@@ -589,10 +589,13 @@ chose, and the no-leak sweep covers it on both surfaces.
 
 **The two combining views do not use full outer joins.** The plan's M3
 bullet says "two of these views combine independent streams with full
-outer joins" and prescribes `IS NOT DISTINCT FROM`. Postgres will not
-run that pair together, as above. The rule the round was protecting is
-kept, on left joins onto an explicit union spine, and the semantics are
-the union of the streams' keys either way.
+outer joins" and prescribes `IS NOT DISTINCT FROM`, "coalescing the day
+and the device keys". Postgres will not run the first two together, as
+above. The rule the round was protecting is kept, on left joins onto an
+explicit union spine, and the semantics are the union of the streams'
+keys either way. The coalescing goes with the full joins and is not
+missing: it was there to recover the group's day and device from
+whichever stream had matched, and the spine carries both already.
 
 **`COMMON`'s first heading is no longer "What is true of all four".** It
 is "What is true of every one of them", because the page it heads now
@@ -637,8 +640,8 @@ honest.
 
 - `uv run ruff check .` and `uv run mypy` clean; `uv run pytest
   tests/unit -q -n 4 --dist loadfile` 6740 passed, 19 skipped; `uv run
-  pytest tests/integration -q` green. The lane runs `-n 4` rather than
-  `-n auto` on this machine, which exceeds the compose Postgres's
+  pytest tests/integration -q` 303 passed. The lane runs `-n 4` rather
+  than `-n auto` on this machine, which exceeds the compose Postgres's
   connection limit.
 - All three generated references regenerated through their own
   generators and diffed the way CI diffs them: `vinga-server
