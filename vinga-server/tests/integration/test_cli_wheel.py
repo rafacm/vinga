@@ -131,6 +131,11 @@ SECRET = "sk-wheel-3d7c1e58-never-a-real-credential"
 
 BOUND_MAC = "aa:bb:cc:dd:ee:ff"
 
+# And the board that one is swapped onto and back off, which is a third
+# address for the same reason the second is its own: what the swap reads
+# back is a record at an address no other case binds.
+SWAPPED_MAC = "02:00:00:00:00:41"
+
 # The second board, which arrives the other way: by checking in and
 # showing a code.
 WAITING_MAC = "11:22:33:44:55:66"
@@ -563,6 +568,19 @@ def test_the_settings_are_written_and_read_back(run) -> None:
     assert "the kitchen" not in answered(
         run("device", "show", BOUND_MAC), "device show"
     )
+
+    # And the board replaced, which from a bare install is the same
+    # claim one act further: moving a record onto another board and its
+    # memory with it is one HTTP request, and the client half carries
+    # none of the transaction behind it. Swapped back afterwards, so
+    # what the cases below read is the board this one found.
+    swapped = ("device", "replace", BOUND_MAC, SWAPPED_MAC)
+    assert answered(run(*swapped), *swapped).startswith("wrote ")
+    assert "Kitchen Speaker" in answered(
+        run("device", "show", SWAPPED_MAC), "device show"
+    )
+    back = ("device", "replace", SWAPPED_MAC, BOUND_MAC)
+    assert answered(run(*back), *back).startswith("wrote ")
 
     defaults = ("agent-defaults", "set", "llm=brain", "asr=ears", "tts=voice", "vad=gate")
     assert answered(run(*defaults), *defaults).startswith("wrote ")
