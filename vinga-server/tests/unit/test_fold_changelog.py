@@ -1,0 +1,671 @@
+"""The changelog fold's contract, exercised as a subprocess.
+
+The script lives at the repository root (`scripts/fold_changelog.py`)
+and runs in two workflows: the fold on `main`, whose commit lands
+without a CI run of its own, and the two pull-request steps in the
+docs workflow. Both are public CI log surfaces, so the no-leak
+standard applies to it exactly as it applies to
+`scripts/check_doc_links.py`, and these tests run the real script the
+way the workflows do and read both streams whole.
+
+The date derivation is driven through real git histories in temporary
+repositories rather than mocked, because what is being checked is what
+git answers: the committer date of the commit that introduced a
+fragment, in that commit's own recorded offset, and the first-parent
+position that orders two fragments.
+"""
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "fold_changelog.py"
+
+# Credential-shaped, and never a value that exists anywhere real.
+SENTINEL = "sk-SENTINEL8f3a1b2c4d5e6f70"
+
+# A changelog with two settled sections, the shape the repository's own
+# file has: newest first, entries already folded under their classes.
+BASE = (
+    "# Changelog\n"
+    "\n"
+    "All notable changes to this project will be documented in this file.\n"
+    "\n"
+    "## 2026-09-11\n"
+    "\n"
+    "### Added\n"
+    "\n"
+    "- **The standing entry**, folded on the day it landed.\n"
+    "\n"
+    "## 2026-09-06\n"
+    "\n"
+    "### Added\n"
+    "\n"
+    "- **An older entry**, folded long ago.\n"
+)
+
+# And the shapes settled history actually carries, which no canonical
+# rule describes: a section ordering Fixed before Changed (2026-09-10
+# in the repository) and a section with two Added headings (2026-09-06).
+LEGACY = (
+    "# Changelog\n"
+    "\n"
+    "All notable changes to this project will be documented in this file.\n"
+    "\n"
+    "## 2026-09-10\n"
+    "\n"
+    "### Added\n"
+    "\n"
+    "- **The first added entry.**\n"
+    "\n"
+    "### Fixed\n"
+    "\n"
+    "- **A fix, written above the changes.**\n"
+    "\n"
+    "### Changed\n"
+    "\n"
+    "- **A change, written below the fixes.**\n"
+    "\n"
+    "## 2026-09-06\n"
+    "\n"
+    "### Added\n"
+    "\n"
+    "- **The first of two Added headings.**\n"
+    "\n"
+    "### Changed\n"
+    "\n"
+    "- **A change between them.**\n"
+    "\n"
+    "### Added\n"
+    "\n"
+    "- **The second of two Added headings.**\n"
+)
+
+
+def run(*args: str, stdin: str = "", body: str | None = None) -> subprocess.CompletedProcess:
+    environment = dict(os.environ)
+    environment.pop("PR_BODY", None)
+    if body is not None:
+        environment["PR_BODY"] = body
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), *args],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=environment,
+    )
+
+
+def git(root: Path, *args: str, when: str | None = None) -> None:
+    environment = dict(os.environ)
+    if when is not None:
+        environment["GIT_COMMITTER_DATE"] = when
+        environment["GIT_AUTHOR_DATE"] = when
+    subprocess.run(
+        ["git", "-C", str(root), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=environment,
+    )
+
+
+def repo(tmp_path: Path, changelog: str = BASE, name: str = "repo") -> Path:
+    """A checkout with a changelog, a fragment directory and one commit."""
+    root = tmp_path / name
+    (root / "changelog.d").mkdir(parents=True)
+    (root / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+    (root / "changelog.d" / "README.md").write_text(
+        "# Changelog fragments\n\nThe contract, not a fragment.\n", encoding="utf-8"
+    )
+    git(root.parent, "init", "-q", "-b", "main", str(root))
+    git(root, "config", "user.email", "tester@example.invalid")
+    git(root, "config", "user.name", "Tester")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "The settled changelog", when="2026-09-11T09:00:00+00:00")
+    return root
+
+
+def write(root: Path, name: str, text: str) -> None:
+    (root / "changelog.d" / name).write_text(text, encoding="utf-8")
+
+
+def land(root: Path, when: str = "2026-09-12T10:00:00+00:00") -> None:
+    """Commit whatever is in the tree, as the merge that brought it in."""
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "A milestone", when=when)
+
+
+def fragment(root: Path, name: str, text: str, when: str = "2026-09-12T10:00:00+00:00") -> None:
+    write(root, name, text)
+    land(root, when)
+
+
+def section(text: str, date: str) -> str:
+    """One dated section of a changelog, heading included."""
+    after = text.split(f"## {date}\n", 1)[1]
+    return after.split("\n## ", 1)[0]
+
+
+def names(root: Path) -> list[str]:
+    return sorted(path.name for path in (root / "changelog.d").iterdir())
+
+
+# Folding
+
+
+def test_a_fragment_folds_into_the_dated_section_that_already_exists(
+    tmp_path: Path,
+) -> None:
+    """The ordinary case: the day already has a section and a class
+    heading, and the entry lands after the entry already under it."""
+    root = repo(tmp_path)
+    fragment(
+        root,
+        "467-a-thing.md",
+        "### Added\n\n- **A thing**, added by a milestone.\n",
+        when="2026-09-11T23:30:00+00:00",
+    )
+
+    done = run("fold", str(root))
+
+    assert done.returncode == 0, done.stderr
+    text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    day = section(text, "2026-09-11")
+    assert day.index("**The standing entry**") < day.index("**A thing**, added")
+    assert names(root) == ["README.md"]
+
+
+def test_a_new_day_creates_its_section_in_the_commits_own_offset(
+    tmp_path: Path,
+) -> None:
+    """The date is the introduction commit's committer date rendered in
+    the offset the commit records, which is what makes a merge just
+    before midnight and a fold just after agree.
+
+    Half past midnight at +02:00 is the twelfth where it was committed
+    and still the eleventh in UTC, so a fold reading UTC would file
+    this entry under the wrong day.
+    """
+    root = repo(tmp_path)
+    fragment(
+        root,
+        "467-past-midnight.md",
+        "### Added\n\n- **A thing that landed past midnight.**\n",
+        when="2026-09-12T00:30:00+02:00",
+    )
+
+    done = run("fold", str(root))
+
+    assert done.returncode == 0, done.stderr
+    text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "## 2026-09-12\n" in text
+    assert text.index("## 2026-09-12") < text.index("## 2026-09-11")
+    assert section(text, "2026-09-12") == "\n### Added\n\n- **A thing that landed past midnight.**\n"
+
+
+def test_a_created_section_lands_between_the_days_around_it(tmp_path: Path) -> None:
+    """Date position, not file position: a day older than the newest
+    section and newer than the oldest goes between them."""
+    root = repo(tmp_path)
+    fragment(
+        root,
+        "467-an-older-day.md",
+        "### Fixed\n\n- **A fix from the eighth.**\n",
+        when="2026-09-08T12:00:00+00:00",
+    )
+
+    done = run("fold", str(root))
+
+    assert done.returncode == 0, done.stderr
+    text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    dates = [line for line in text.splitlines() if line.startswith("## ")]
+    assert dates == ["## 2026-09-11", "## 2026-09-08", "## 2026-09-06"]
+
+
+def test_two_fragments_on_one_day_merge_in_keep_a_changelog_order(
+    tmp_path: Path,
+) -> None:
+    """Classes appear in Keep a Changelog order whatever order the
+    fragments arrived in, and a class the section has no heading for
+    gets one placed by that order."""
+    root = repo(tmp_path)
+    fragment(
+        root,
+        "467-a-fix.md",
+        "### Fixed\n\n- **A fix.**\n",
+        when="2026-09-11T10:00:00+00:00",
+    )
+    fragment(
+        root,
+        "467-a-change.md",
+        "### Changed\n\n- **A change.**\n",
+        when="2026-09-11T11:00:00+00:00",
+    )
+
+    done = run("fold", str(root))
+
+    assert done.returncode == 0, done.stderr
+    day = section((root / "CHANGELOG.md").read_text(encoding="utf-8"), "2026-09-11")
+    assert [line for line in day.splitlines() if line.startswith("### ")] == [
+        "### Added",
+        "### Changed",
+        "### Fixed",
+    ]
+
+
+def test_entries_of_one_class_follow_merge_order_not_filename_order(
+    tmp_path: Path,
+) -> None:
+    """Merge order is the introduction commit's place in first-parent
+    history. The filenames here sort the other way round, so a fold
+    ordering by name would read these two backwards."""
+    root = repo(tmp_path)
+    fragment(
+        root,
+        "9-merged-first.md",
+        "### Added\n\n- **The entry that landed first.**\n",
+        when="2026-09-11T10:00:00+00:00",
+    )
+    fragment(
+        root,
+        "1-merged-second.md",
+        "### Added\n\n- **The entry that landed second.**\n",
+        when="2026-09-11T11:00:00+00:00",
+    )
+
+    done = run("fold", str(root))
+
+    assert done.returncode == 0, done.stderr
+    day = section((root / "CHANGELOG.md").read_text(encoding="utf-8"), "2026-09-11")
+    assert day.index("landed first") < day.index("landed second")
+
+
+def test_two_fragments_from_one_commit_order_by_filename(tmp_path: Path) -> None:
+    """The tie-breaker, which is the half a history position cannot
+    supply: a git tree encodes no order between the files of one
+    commit, so one pull request adding two fragments would otherwise
+    fold in whatever order the directory happened to list them in."""
+    root = repo(tmp_path)
+    write(root, "467-beta.md", "### Added\n\n- **The beta entry.**\n")
+    write(root, "467-alpha.md", "### Added\n\n- **The alpha entry.**\n")
+    land(root, when="2026-09-11T12:00:00+00:00")
+
+    done = run("fold", str(root))
+
+    assert done.returncode == 0, done.stderr
+    day = section((root / "CHANGELOG.md").read_text(encoding="utf-8"), "2026-09-11")
+    assert day.index("alpha entry") < day.index("beta entry")
+
+
+def test_a_multi_class_fragment_splits_into_its_classes(tmp_path: Path) -> None:
+    """One file may carry several headings, and each entry goes to its
+    own class rather than the file going to one of them."""
+    root = repo(tmp_path)
+    fragment(
+        root,
+        "467-three-classes.md",
+        "### Security\n\n- **A security note.**\n"
+        "\n"
+        "### Added\n\n- **An addition.**\n"
+        "\n"
+        "### Fixed\n\n- **A fix.**\n",
+    )
+
+    done = run("fold", str(root))
+
+    assert done.returncode == 0, done.stderr
+    day = section((root / "CHANGELOG.md").read_text(encoding="utf-8"), "2026-09-12")
+    assert [line for line in day.splitlines() if line.startswith("### ")] == [
+        "### Added",
+        "### Fixed",
+        "### Security",
+    ]
+
+
+# The bytes an entry is written in are the bytes it is folded as: the
+# fragment is reviewed in final form on the pull request, and a fold
+# that reflowed or renumbered anything would make that review a review
+# of something else.
+VERBATIM = (
+    "- **A deeply formatted entry** (#467, M2), which carries a nested\n"
+    "  list and the punctuation that goes with it:\n"
+    "\n"
+    "  - one item, `with code` and *emphasis*\n"
+    "  - another, whose line is long enough that a reflowing fold would "
+    "have to break it somewhere\n"
+    "\n"
+    "  and a closing paragraph after the list.\n"
+)
+
+
+def test_entry_bytes_survive_the_fold_verbatim(tmp_path: Path) -> None:
+    """Byte preservation, asserted on the block rather than on a
+    sentence of it: blank lines, indentation and long lines all have to
+    arrive as they were written."""
+    root = repo(tmp_path)
+    fragment(root, "467-verbatim.md", f"### Changed\n\n{VERBATIM}")
+
+    done = run("fold", str(root))
+
+    assert done.returncode == 0, done.stderr
+    text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert text.count(VERBATIM) == 1
+
+
+def test_a_second_fold_with_no_fragments_is_a_no_op(tmp_path: Path) -> None:
+    """Idempotence, which is what lets a queued run that lost the race
+    exit green instead of folding half of something twice."""
+    root = repo(tmp_path)
+    fragment(root, "467-once.md", "### Added\n\n- **Folded once.**\n")
+
+    assert run("fold", str(root)).returncode == 0
+    folded = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+
+    again = run("fold", str(root))
+
+    assert again.returncode == 0
+    assert (root / "CHANGELOG.md").read_text(encoding="utf-8") == folded
+    assert folded.count("**Folded once.**") == 1
+
+
+def test_legacy_sections_are_byte_preserved_by_a_fold(tmp_path: Path) -> None:
+    """The post-conditions are scoped for a reason: settled history is
+    not canonical, and a global heading-order rule would have to reject
+    this fixture or rewrite it. Both of these shapes are the
+    repository's own, and a fold into a new day leaves every byte of
+    them alone."""
+    root = repo(tmp_path, changelog=LEGACY)
+    fragment(root, "467-a-new-day.md", "### Added\n\n- **A new day's entry.**\n")
+
+    done = run("fold", str(root))
+
+    assert done.returncode == 0, done.stderr
+    text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    boundary = LEGACY.index("## 2026-09-10")
+    assert text.startswith(LEGACY[:boundary])
+    assert text.endswith(LEGACY[boundary:])
+
+
+def test_an_entry_appends_under_the_last_heading_of_its_class(
+    tmp_path: Path,
+) -> None:
+    """A section with two headings of one class keeps both, and the
+    entry goes under the later one, which is where a reader of that
+    section looks for the day's additions."""
+    root = repo(tmp_path, changelog=LEGACY)
+    fragment(
+        root,
+        "467-into-the-duplicate.md",
+        "### Added\n\n- **The entry folded into a duplicated heading.**\n",
+        when="2026-09-06T12:00:00+00:00",
+    )
+
+    done = run("fold", str(root))
+
+    assert done.returncode == 0, done.stderr
+    day = section((root / "CHANGELOG.md").read_text(encoding="utf-8"), "2026-09-06")
+    assert [line for line in day.splitlines() if line.startswith("### ")] == [
+        "### Added",
+        "### Changed",
+        "### Added",
+    ]
+    assert day.index("second of two Added headings") < day.index("folded into a duplicated")
+
+
+# Refusals
+#
+# Each builds a checkout that the fold must refuse, and each plants the
+# sentinel where the refusal could leak it: in a fragment body, in a
+# fragment filename, or in the path a git failure is about. The two
+# tests below run every one of them, so a new refusal family is held to
+# writing nothing and to reproducing nothing by construction.
+
+
+def _unknown_heading(tmp_path: Path) -> Path:
+    root = repo(tmp_path)
+    fragment(root, "467-unknown.md", f"### Improved\n\n- {SENTINEL} improved.\n")
+    return root
+
+
+def _empty_body(tmp_path: Path) -> Path:
+    root = repo(tmp_path)
+    fragment(root, "467-empty.md", f"### Added\n\n\n### Fixed\n\n- {SENTINEL} fixed.\n")
+    return root
+
+
+def _date_heading(tmp_path: Path) -> Path:
+    root = repo(tmp_path)
+    fragment(root, "467-dated.md", f"## 2026-09-12\n\n### Added\n\n- {SENTINEL} added.\n")
+    return root
+
+
+def _duplicate_entry(tmp_path: Path) -> Path:
+    root = repo(tmp_path)
+    fragment(
+        root,
+        "467-duplicate.md",
+        "### Added\n\n- **The standing entry**, folded on the day it landed.\n",
+        when="2026-09-11T20:00:00+00:00",
+    )
+    return root
+
+
+def _conflict_marker(tmp_path: Path) -> Path:
+    spliced = BASE.replace(
+        "### Added\n\n- **The standing entry**",
+        "<<<<<<< HEAD\n### Added\n\n- **The standing entry**",
+        1,
+    )
+    root = repo(tmp_path, changelog=spliced)
+    fragment(root, "467-into-a-conflict.md", f"### Added\n\n- {SENTINEL} added.\n")
+    return root
+
+
+def _shallow_history(tmp_path: Path) -> Path:
+    origin = repo(tmp_path, name="origin")
+    fragment(origin, "467-before-the-graft.md", f"### Added\n\n- {SENTINEL} added.\n")
+    root = tmp_path / "shallow"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", f"file://{origin}", str(root)],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    return root
+
+
+def _bad_filename(tmp_path: Path) -> Path:
+    root = repo(tmp_path)
+    fragment(root, f"467-{SENTINEL}.md", "### Added\n\n- **A well formed entry.**\n")
+    return root
+
+
+def _symlinked_fragment(tmp_path: Path) -> Path:
+    root = repo(tmp_path)
+    outside = tmp_path / "outside.md"
+    outside.write_text(f"### Added\n\n- {SENTINEL} added.\n", encoding="utf-8")
+    (root / "changelog.d" / "467-a-link.md").symlink_to(outside)
+    land(root)
+    return root
+
+
+def _not_a_repository(tmp_path: Path) -> Path:
+    root = tmp_path / f"tree-{SENTINEL}"
+    (root / "changelog.d").mkdir(parents=True)
+    (root / "CHANGELOG.md").write_text(BASE, encoding="utf-8")
+    (root / "changelog.d" / "467-no-history.md").write_text(
+        "### Added\n\n- **A well formed entry.**\n", encoding="utf-8"
+    )
+    return root
+
+
+REFUSALS = [
+    ("unknown heading", _unknown_heading, "outside the Keep a Changelog six"),
+    ("empty body", _empty_body, "no entry text"),
+    ("date heading", _date_heading, "date or top-level heading"),
+    ("duplicate entry", _duplicate_entry, "exactly once"),
+    ("conflict marker", _conflict_marker, "conflict marker"),
+    ("shallow history", _shallow_history, "available history"),
+    ("bad filename", _bad_filename, "<issue>-<slug>.md"),
+    ("symlinked fragment", _symlinked_fragment, "not a regular file"),
+    ("git failure", _not_a_repository, "git command failed"),
+]
+
+
+@pytest.mark.parametrize(
+    ("build", "expected"),
+    [(build, expected) for _, build, expected in REFUSALS],
+    ids=[what for what, _, _ in REFUSALS],
+)
+def test_a_refusal_writes_nothing(tmp_path: Path, build, expected: str) -> None:
+    """Exit 1 and an untouched tree, for every family.
+
+    A fold that refused after writing would be worse than one that
+    folded wrongly: the changelog would be half a state nobody meant
+    and the fragments would be gone.
+    """
+    root = build(tmp_path)
+    before = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    standing = names(root)
+
+    done = run("fold", str(root))
+
+    assert done.returncode == 1
+    assert expected in done.stderr
+    assert (root / "CHANGELOG.md").read_text(encoding="utf-8") == before
+    assert names(root) == standing
+
+
+@pytest.mark.parametrize(
+    "build",
+    [build for _, build, _ in REFUSALS],
+    ids=[what for what, _, _ in REFUSALS],
+)
+def test_a_refusal_reproduces_no_repository_text(tmp_path: Path, build) -> None:
+    """The no-leak contract, held over both streams.
+
+    A fragment body, a fragment filename and git's own diagnostics are
+    repository-derived text landing in a public CI log. The sentinel is
+    planted in whichever of the three the family can carry it in, and
+    the refusal has to name the kind of failure without reproducing it.
+    """
+    root = build(tmp_path)
+
+    done = run("fold", str(root))
+
+    assert done.returncode == 1
+    for stream in (done.stdout, done.stderr):
+        assert SENTINEL not in stream
+        assert "Traceback" not in stream
+
+
+# check
+
+
+def test_check_passes_a_well_formed_fragment_without_writing(tmp_path: Path) -> None:
+    """The pull-request half, which needs no git history: a fragment is
+    held to its shape before it can reach main."""
+    root = repo(tmp_path)
+    write(root, "467-well-formed.md", "### Added\n\n- **A well formed entry.**\n")
+    before = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+
+    done = run("check", str(root))
+
+    assert done.returncode == 0, done.stderr
+    assert (root / "CHANGELOG.md").read_text(encoding="utf-8") == before
+    assert names(root) == ["467-well-formed.md", "README.md"]
+
+
+def test_check_refuses_a_malformed_fragment(tmp_path: Path) -> None:
+    """And the half a passing assertion cannot show."""
+    root = repo(tmp_path)
+    write(root, "467-malformed.md", f"### Improved\n\n- {SENTINEL} improved.\n")
+
+    done = run("check", str(root))
+
+    assert done.returncode == 1
+    assert "outside the Keep a Changelog six" in done.stderr
+    assert SENTINEL not in done.stdout + done.stderr
+
+
+def test_a_bad_invocation_is_a_sentence_and_exit_two() -> None:
+    """Argparse repeats what was typed, which is how a secret typed as
+    an argument reaches a public log. This parser answers in its own
+    words."""
+    for done in (run(), run("frobnicate"), run("fold"), run("fold", "/nonexistent-root")):
+        assert done.returncode == 2
+        assert done.stdout == ""
+        assert len(done.stderr.strip().splitlines()) == 1
+        assert "Traceback" not in done.stderr
+
+
+# guard
+
+FILES = ["README.md", "vinga-server/src/vinga_server/config/cli.py"]
+
+
+def test_guard_passes_a_pull_request_that_leaves_the_changelog_alone() -> None:
+    done = run("guard", stdin="\n".join(FILES))
+
+    assert done.returncode == 0, done.stderr
+
+
+def test_guard_refuses_a_pull_request_that_edits_the_changelog() -> None:
+    """And names the remedy and the escape phrase, because a check that
+    only says no is a check somebody works around."""
+    done = run("guard", stdin="\n".join([*FILES, "CHANGELOG.md"]), body="An ordinary body.")
+
+    assert done.returncode == 1
+    assert "changelog.d/<issue>-<slug>.md" in done.stderr
+    assert "Corrects CHANGELOG history" in done.stderr
+
+
+def test_guard_accepts_the_exact_escape_phrase() -> None:
+    """The recorded precedent is a restoration of entries that were
+    silently dropped, which is a genuine correction of history and has
+    to stay possible."""
+    body = "Restores five merges of dropped entries.\n\nCorrects CHANGELOG history.\n"
+
+    done = run("guard", stdin="CHANGELOG.md", body=body)
+
+    assert done.returncode == 0, done.stderr
+
+
+def test_guard_refuses_a_near_miss_of_the_escape_phrase() -> None:
+    """Literal, and case-sensitive: a phrase that matched loosely would
+    be a phrase a body could carry by accident."""
+    done = run("guard", stdin="CHANGELOG.md", body="corrects changelog history")
+
+    assert done.returncode == 1
+
+
+@pytest.mark.parametrize("body", [None, ""], ids=["absent", "empty"])
+def test_guard_treats_a_missing_body_as_no_body(body: str | None) -> None:
+    """A pull request opened with no description sends a null body
+    through the event payload, and an environment variable cannot hold
+    null. Both spellings mean the same thing and neither crashes."""
+    done = run("guard", stdin="CHANGELOG.md", body=body)
+
+    assert done.returncode == 1
+    assert "Traceback" not in done.stderr
+
+
+def test_guard_reproduces_neither_the_file_list_nor_the_body() -> None:
+    """The list comes from the pull request files API and the body from
+    the event payload. Both are contributor-written text, and this runs
+    on every pull request."""
+    done = run(
+        "guard",
+        stdin="\n".join([f"docs/{SENTINEL}.md", "CHANGELOG.md"]),
+        body=f"An ordinary body mentioning {SENTINEL}.",
+    )
+
+    assert done.returncode == 1
+    assert SENTINEL not in done.stdout + done.stderr
