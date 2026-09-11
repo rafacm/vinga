@@ -31,11 +31,11 @@ declared too, in `COMMON`, rather than written out wherever a surface
 happens to need it: that a day is a UTC day, that counting is per
 stored row, that a rate is null on a zero denominator, and the three
 limits an analyst has to read before quoting a number. The reference
-renders it, the API serves it in its route descriptions and in the
-bodies those routes answer with, and the CLI prints what the API sent.
-One home, several surfaces; before #440 the retention-floor limit was
-hand-written prose inside the renderer, which is the one place it could
-never reach a caller from.
+renders it and the API serves it, in its route descriptions and in the
+bodies those routes answer with, which is what puts it in front of the
+CLI that reads those bodies. One home, several surfaces: before #440
+the retention-floor limit was hand-written prose inside the renderer,
+which is the one place it could never reach a caller from.
 
 Read-only, and deliberately so: nothing here opens a database.
 """
