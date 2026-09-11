@@ -315,16 +315,15 @@ OCCUPIED_BY_SCOPE: dict[MemoryScope, str] = {
 # swap moves them onto an address, and neither caller needs to be told
 # back what it just asked for in order to know what failed.
 RENAME_FAILED = (
-    "the remembered facts could not be moved: the database this "
-    "server keeps memory in refused the write, and nothing was changed. Nothing of "
-    "the failure is repeated here, because a database error quotes the statement it "
-    "ran and the values bound into it"
+    "the remembered facts could not be moved: the database this server keeps memory in "
+    "refused the write, and nothing was changed. Nothing of the failure is repeated here, "
+    "because a database error quotes the statement it ran and the values bound into it"
 )
 
 RENAME_BUSY = (
-    "the remembered facts could not be moved: another connection was "
-    "writing to memory for longer than the lock timeout allows, and nothing was "
-    "changed. The same request may simply be made again"
+    "the remembered facts could not be moved: another connection was writing to memory for "
+    "longer than the lock timeout allows, and nothing was changed. The same request may "
+    "simply be made again"
 )
 
 # What a fact operation named with a scope no fact can carry answers.
