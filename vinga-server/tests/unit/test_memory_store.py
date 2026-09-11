@@ -1290,6 +1290,49 @@ async def test_renaming_onto_an_occupied_name_is_refused_and_moves_nothing() -> 
     assert _rows("bard") == ["somebody else's fact"]
 
 
+async def test_a_device_swap_onto_a_remembered_board_says_so_in_its_own_words() -> None:
+    """The other scope this verb serves, and the one thing about it that
+    is not the agent rename with a different argument.
+
+    What refuses is the same rule (a destination that already holds
+    facts cannot be merged into), and what the operator is told has to
+    be about the act they performed: a board swap onto an address, with
+    the door that lists a device's facts rather than an agent's. A
+    sentence about renaming an agent would send whoever swapped a board
+    to a command that answers nothing.
+    """
+    store = memory()
+    await store.add(
+        MemoryScope.DEVICE, "aa:bb:cc:dd:ee:01", "the speaker is in the hall", agent="poet"
+    )
+    await store.add(
+        MemoryScope.DEVICE, "aa:bb:cc:dd:ee:02", "somebody else's note", agent="poet"
+    )
+
+    engine = write_engine(DatabaseConfig(), MEMORY_CHAIN)
+    try:
+        with engine.begin() as connection:
+            with pytest.raises(AgentRenameConflictError) as refused:
+                store_module.rename_owner(
+                    connection,
+                    MemoryScope.DEVICE,
+                    "aa:bb:cc:dd:ee:01",
+                    "aa:bb:cc:dd:ee:02",
+                )
+    finally:
+        engine.dispose()
+
+    assert str(refused.value) == store_module.SWAP_OCCUPIED
+    assert "aa:bb:cc:dd:ee:01" not in str(refused.value)
+    assert "aa:bb:cc:dd:ee:02" not in str(refused.value)
+    # And the agent's sentence is not what a swap answers with, which is
+    # the whole of the claim: both are refusals of the same shape and
+    # only one of them names a command an operator can run about a board.
+    assert str(refused.value) != store_module.RENAME_OCCUPIED
+    assert _rows("aa:bb:cc:dd:ee:01", scope="device") == ["the speaker is in the hall"]
+    assert _rows("aa:bb:cc:dd:ee:02", scope="device") == ["somebody else's note"]
+
+
 async def test_renaming_an_owner_that_holds_nothing_moves_nothing() -> None:
     """Not addressed at a row, so nothing is refused for being absent,
     which is the contract `erase_facts` keeps for the same reason."""
