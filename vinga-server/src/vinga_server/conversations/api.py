@@ -244,6 +244,19 @@ _WINDOW_REFUSED = (
     f"what was asked for. What was sent is not quoted back"
 )
 
+# And the bound at the other end of the window, which is not a caller
+# being wrong about anything. `0001-01-01` is a well-formed UTC day and
+# it is the first one this calendar has, so the window put behind it by
+# default would begin before the calendar does. A stated refusal rather
+# than arithmetic failing, because the request is well formed and a 500
+# would say the server broke on it.
+_WINDOW_FLOOR = (
+    f"until has to leave the default window room behind it: with no since the window "
+    f"begins {WINDOW_DEFAULT_DAYS} days earlier, and this calendar begins at "
+    f"{dt.date.min.isoformat()}. Name a since to ask about a window that starts where "
+    f"the calendar does. What was sent is not quoted back"
+)
+
 # Built from the closed set rather than spelling it, so the sentence a
 # caller is refused with and the vocabulary the routes accept are the
 # same tuple.
@@ -535,7 +548,11 @@ UntilQuery = Annotated[
             "on it rather than before it. Absent means the current UTC day, which is "
             "the server's day and not the caller's. The two days may span at most "
             f"{WINDOW_MAX_DAYS}, one leap year, and a wider window is refused rather "
-            "than narrowed."
+            "than narrowed. Sent without a `since`, it also has to leave the default "
+            f"window room behind it: a day inside the first {WINDOW_DEFAULT_DAYS} of "
+            f"the calendar, which begins at {dt.date.min.isoformat()}, is refused "
+            "rather than answered from a day that does not exist, and naming a "
+            "`since` asks about it."
         )
     ),
 ]
@@ -1188,13 +1205,24 @@ def _window(since: str | None, until: str | None) -> tuple[dt.date, dt.date]:
     caller's, which is the same rule the views are cut on: a day is a
     UTC day, and a window that moved with whoever was asking would
     answer two callers differently about the same rows.
+
+    Three ways a pair that parsed is still not a window: the end before
+    the beginning, the two further apart than the cap, and an end with
+    no room behind it for the default. Only the last is about a request
+    nothing is wrong with, which is why it gets a sentence saying what
+    to send instead.
     """
     last = dt.datetime.now(dt.UTC).date() if until is None else _utc_day(until, _UNTIL_REFUSED)
-    first = (
-        last - dt.timedelta(days=WINDOW_DEFAULT_DAYS)
-        if since is None
-        else _utc_day(since, _SINCE_REFUSED)
-    )
+    if since is not None:
+        first = _utc_day(since, _SINCE_REFUSED)
+    elif (last - dt.date.min).days < WINDOW_DEFAULT_DAYS:
+        # Checked rather than caught: subtracting past the first day the
+        # calendar has raises, and a well-formed request that ends in an
+        # arithmetic failure would answer 500 about nothing the caller
+        # did wrong.
+        raise ConfigError(_WINDOW_FLOOR)
+    else:
+        first = last - dt.timedelta(days=WINDOW_DEFAULT_DAYS)
     # Both ends count, so a window of one day spans one day.
     if first > last or (last - first).days + 1 > WINDOW_MAX_DAYS:
         raise ConfigError(_WINDOW_REFUSED)
