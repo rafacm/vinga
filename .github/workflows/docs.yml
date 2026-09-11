@@ -30,6 +30,13 @@ on:
       - "deploy/**"
       - ".github/workflows/vinga-server.yml"
   pull_request:
+    # The three defaults, written out, plus `edited`. The CHANGELOG
+    # guard below advertises an escape phrase a contributor puts in the
+    # pull request body, and with the default type list adding it
+    # starts no new check: the advertised remedy would need a pointless
+    # push to take effect. Naming the defaults is what keeps adding the
+    # fourth from silently removing them.
+    types: [opened, synchronize, reopened, edited]
     paths-ignore:
       - "vinga-server/**"
       - "docs/reference/**"
@@ -94,6 +101,44 @@ jobs:
       # the install below spends its minute.
       - name: Internal links and anchors
         run: python3 scripts/check_doc_links.py .
+
+      # A branch may not edit CHANGELOG.md. It adds
+      # changelog.d/<issue>-<slug>.md, and the fold workflow moves the
+      # text into the dated section after the merge; two branches
+      # adding two files cannot conflict, which is the whole point.
+      #
+      # The changed files come from the pull-request files API rather
+      # than from a git diff: it needs no history, so the shallow
+      # checkout above is enough, and it is the same set the review UI
+      # shows. The decision itself lives in the script as `guard`,
+      # where it is unit-tested; this step only supplies the inputs.
+      #
+      # Direct pushes to main (which AGENTS.md permits for
+      # documentation-only changes) are outside this check and outside
+      # the hazard: they serialize on main, so the conflict class
+      # cannot occur there, and both spellings stay valid for them.
+      - name: A pull request may not edit CHANGELOG.md
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # The body arrives as an environment value and never as a
+          # ${{ }} interpolation inside the script below. A pull
+          # request body is contributor-written text, and interpolating
+          # it would splice it into the shell this step runs.
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          gh api --paginate \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --jq '.[].filename' \
+            | python3 scripts/fold_changelog.py guard
+
+      # And the fragments themselves, held to their shape here rather
+      # than on main: a bad filename or a heading outside the closed
+      # six fails on the pull request, where somebody can fix it.
+      - name: Changelog fragments are well formed
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/fold_changelog.py check .
 
       - uses: astral-sh/setup-uv@v9.0.0
         with:
