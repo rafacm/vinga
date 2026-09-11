@@ -602,7 +602,11 @@ EVENT_RATES = View(
             meaning="The UTC day, from whichever of the four streams has one.",
             units="none",
             nullable=False,
-            formula="`coalesce()` across the four streams' days.",
+            formula=(
+                "The union of the four streams' days: a day any of them has "
+                "gets a row, and the counts of the streams that have nothing "
+                "on it are zero."
+            ),
             key=True,
         ),
         Column(
@@ -748,7 +752,10 @@ SESSIONS = View(
             meaning="The UTC day.",
             units="none",
             nullable=False,
-            formula="`coalesce()` across the session and turn streams' days.",
+            formula=(
+                "The union of the session and turn streams' days: a day either "
+                "of them has gets a row."
+            ),
             key=True,
         ),
         Column(
