@@ -956,3 +956,67 @@ def test_a_word_a_flat_verb_cannot_take_makes_the_spelling_stale(
     assert found.invocation == invocation
     assert names_something(found.invocation) is names
 
+
+# What the manifest aggregates, and what it aggregates away
+#
+# Properties of the rendering rather than of today's tree, so they are
+# driven through the scanner over synthetic pages: the same sites in any
+# order render the same bytes, one pair quoted in two files renders one
+# line, one invocation given two classes renders two, and a site that
+# leaves renders no diff at all while a sibling keeps its pair.
+
+# One live invocation, quoted the way a document quotes one. Its class
+# is the file it is found in, which is what lets the same line stand for
+# a respell site and a historical one.
+LIVE = "run `vinga agent set kids` now"
+
+
+def _entries(rendered: str) -> list[str]:
+    """One rendered manifest's lines below its header."""
+    assert rendered.startswith(MANIFEST_HEADER)
+    return rendered.removeprefix(MANIFEST_HEADER).splitlines()
+
+
+def test_one_pair_quoted_in_two_files_is_one_manifest_line() -> None:
+    """The aggregation, which is the whole of the change: two sites of
+    one pair are one line, and the order they were scanned in is not in
+    the artifact either, so a rebase cannot reorder it."""
+    rows = found_in(LIVE, "docs/one.md") + found_in(LIVE, "docs/two.md")
+
+    assert len(rows) == 2
+    assert _entries(manifest_of(rows)) == ["respell  vinga agent set kids"]
+    assert manifest_of(list(reversed(rows))) == manifest_of(rows)
+
+
+def test_one_invocation_under_two_classes_is_two_manifest_lines() -> None:
+    """And the half the set must not collapse: the class is what the
+    manifest is reviewed for, so the same words given two classes are
+    two entries rather than one."""
+    rows = found_in(LIVE, "docs/one.md") + found_in(LIVE, "docs/plans/2026-01-01-a-plan.md")
+
+    assert _entries(manifest_of(rows)) == [
+        "historical  vinga agent set kids",
+        "respell  vinga agent set kids",
+    ]
+
+
+def test_a_site_leaving_a_pair_another_site_keeps_moves_nothing() -> None:
+    """The accepted limitation, asserted rather than described.
+
+    A distinct set makes membership of the set reviewable and nothing
+    else. When two sites carry one pair, dropping one of them renders
+    byte-identical, and reclassifying one leaves the old class standing
+    on the strength of the sibling: both are real losses of per-site
+    review granularity, priced when the positions were dropped. The
+    property is pinned here so no later documentation can quietly
+    recover the stronger claim that every classification change shows up
+    as a diff.
+    """
+    both = found_in(LIVE, "docs/one.md") + found_in(LIVE, "docs/two.md")
+    one_absent = found_in(LIVE, "docs/one.md")
+    one_reclassified = found_in(LIVE, "docs/one.md") + found_in(
+        LIVE, "docs/plans/2026-01-01-a-plan.md"
+    )
+
+    assert manifest_of(one_absent) == manifest_of(both)
+    assert "respell  vinga agent set kids" in _entries(manifest_of(one_reclassified))
