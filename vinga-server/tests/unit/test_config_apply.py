@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 from cryptography.fernet import Fernet, MultiFernet
 
+from tests.support.stores import bindings
 from vinga_server.config import ConfigError
 from vinga_server.config.models import DOMAIN_KEYS, DatabaseConfig
 from vinga_server.config.secrets import MASK, SecretLocation, generate_key
@@ -94,7 +95,7 @@ def test_one_document_writes_a_whole_deployment(store: ConfigStore) -> None:
     assert snapshot.domain.prompt_fragments["household"].text.startswith("The bins")
     assert snapshot.domain.agent_defaults.mcp == ["home"]
     assert snapshot.domain.agents["sam"].prompt == "You are Sam."
-    assert snapshot.domain.devices == {"aa:bb:cc:dd:ee:ff": ["sam"]}
+    assert bindings(snapshot.domain.devices) == {"aa:bb:cc:dd:ee:ff": ["sam"]}
     assert snapshot.domain.default_agent == "sam"
 
 
@@ -246,7 +247,7 @@ def test_a_section_the_document_does_not_name_is_untouched(store: ConfigStore) -
     snapshot = store.load()
     assert sorted(snapshot.domain.prompt_fragments) == ["house_style", "household"]
     assert snapshot.domain.agents["sam"].prompt == "You are Sam."
-    assert snapshot.domain.devices == {"aa:bb:cc:dd:ee:ff": ["sam"]}
+    assert bindings(snapshot.domain.devices) == {"aa:bb:cc:dd:ee:ff": ["sam"]}
     assert snapshot.domain.default_agent == "sam"
 
 

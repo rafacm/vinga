@@ -258,7 +258,12 @@ class DeviceBindings:
         stored, authoritative = self._stored(normalized)
         if stored is None:
             config = self._generations.current().config
-            bound = tuple(config.devices.get(normalized, ()))
+            # The record's binding and not the record: what this view
+            # answers is which agents a board reaches, and the rest of
+            # what #449 put on a device record is nobody's business
+            # here.
+            record = config.devices.get(normalized)
+            bound = () if record is None else tuple(record.agents)
             default = config.default_agent
         else:
             bound, default = stored.agents, stored.default_agent

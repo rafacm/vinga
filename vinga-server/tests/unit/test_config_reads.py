@@ -86,7 +86,7 @@ def test_every_kind_reads_back_what_was_written(store: ConfigStore) -> None:
     assert store.read_agent("sam").entry.prompt == "You are Sam."
     assert store.read_agent_defaults().entry.llm is None
     # The canonical form of the MAC, whichever spelling asked for it.
-    assert store.read_device("aa:bb:cc:dd:ee:ff").entry == ["sam"]
+    assert store.read_device("aa:bb:cc:dd:ee:ff").entry.agents == ["sam"]
     assert store.read_default_agent() == "sam"
 
 
@@ -289,7 +289,15 @@ def test_a_kind_that_holds_no_secret_is_shown_with_an_empty_mapping(
         assert set(envelope) == {"entity", "secrets"}
         assert envelope["secrets"] == {}
 
-    assert views.device(store.read_device("aa:bb:cc:dd:ee:ff"))["entity"] == {"agents": ["sam"]}
+    # Every field of the record, a null location included: what a read
+    # shows is what a write of one takes back, and a key that vanished
+    # when it held nothing would read as a device nobody had asked
+    # where it was.
+    shown = views.device(store.read_device("aa:bb:cc:dd:ee:ff"))["entity"]
+    assert set(shown) == {"id", "name", "location", "agents"}
+    assert shown["name"] == "Device aa:bb:cc:dd:ee:ff"
+    assert shown["location"] is None
+    assert shown["agents"] == ["sam"]
 
 
 def test_an_entrys_guidance_is_shown_write_shaped_and_unmasked(store: ConfigStore) -> None:
@@ -428,7 +436,7 @@ def test_the_whole_configuration_is_one_masked_document(store: ConfigStore) -> N
 
     assert set(document) == {"config", "secrets"}
     assert document["config"]["agents"]["sam"] == {"prompt": "You are Sam.", "tts": "voice"}
-    assert document["config"]["devices"] == {"aa:bb:cc:dd:ee:ff": ["sam"]}
+    assert document["config"]["devices"]["aa:bb:cc:dd:ee:ff"]["agents"] == ["sam"]
     assert document["config"]["default_agent"] == "sam"
     # A header that carries no secret keeps its literal value; masking
     # it would hide configuration for nothing.
@@ -468,7 +476,7 @@ def test_a_listing_is_keyed_by_identity(store: ConfigStore) -> None:
     assert views.providers(snapshot)["asr"] == {}
     assert set(views.mcp_servers(snapshot)) == {"weather"}
     assert views.agents(snapshot)["sam"]["entity"]["prompt"] == "You are Sam."
-    assert views.devices(snapshot)["aa:bb:cc:dd:ee:ff"]["entity"] == {"agents": ["sam"]}
+    assert views.devices(snapshot)["aa:bb:cc:dd:ee:ff"]["entity"]["agents"] == ["sam"]
     assert views.default_agent(snapshot.domain.default_agent) == {"name": "sam"}
 
 

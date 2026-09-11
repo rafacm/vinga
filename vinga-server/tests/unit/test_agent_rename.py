@@ -371,10 +371,10 @@ async def test_the_renamed_agent_keeps_what_it_was_bound_to_and_knew(
 
     domain = store.load().domain
     assert RENAMED in domain.agents and SENTINEL not in domain.agents
-    assert domain.devices[MAC] == [RENAMED]
+    assert domain.devices[MAC].agents == [RENAMED]
     # Every position of a binding, not the first: the other board names
     # the bystander beside it and keeps it.
-    assert domain.devices[OTHER_MAC] == [RENAMED, BYSTANDER]
+    assert domain.devices[OTHER_MAC].agents == [RENAMED, BYSTANDER]
     assert domain.default_agent == RENAMED
     assert {row["owner"] for row in memory_rows("facts")} == {RENAMED}
     assert {row["agent"] for row in rows("conversations")} == {RENAMED}
@@ -417,7 +417,7 @@ async def test_the_rename_leaves_no_reference_the_repository_can_name(
     domain = store.load().domain
     assert check_references(domain) == []
 
-    domain.devices[MAC] = [SENTINEL]
+    domain.devices[MAC] = domain.devices[MAC].model_copy(update={"agents": [SENTINEL]})
     assert check_references(domain) != []
 
 
@@ -920,7 +920,7 @@ async def test_a_domain_write_cannot_land_between_the_check_and_the_update(
     assert not writer.finished_early, "the second writer landed inside the decision"
     assert not isinstance(writer.answered[0], Exception), writer.answered[0]
     assert set(store.load().domain.agents) == {RENAMED}
-    assert store.load().domain.devices[OTHER_MAC] == [RENAMED]
+    assert store.load().domain.devices[OTHER_MAC].agents == [RENAMED]
 
 
 # And the order the lock and the check are issued in
