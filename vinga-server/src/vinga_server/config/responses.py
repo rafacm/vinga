@@ -2253,12 +2253,17 @@ class ThreadErasure(BaseModel):
 # anything that is not in this tuple and the shape below is typed from
 # it, so a grouping cannot be servable without being documented.
 #
-# One token today. The per-device breakdown is a sibling view per
-# declaration and arrives with the migration that adds them (#440 M3);
-# until those relations exist there is nothing a second token could be
-# answered from, and a vocabulary that always refused would be worse
-# than one that grew.
-GROUPINGS = ("all",)
+# Two tokens. `all` groups by the view's own dimensions and nothing
+# else; `device` reads the per-device sibling of the same view, whose
+# rows carry the device the session ran on and a label beside it, and
+# which is a relation of its own rather than a second reading of the
+# first.
+#
+# The relations that answer them are `conversations.views.GROUPED`,
+# which spells these two words again rather than importing them: this
+# module is on the CLI's import path and that one is not. A test holds
+# the vocabulary and the relations to the same set.
+GROUPINGS = ("all", "device")
 
 Grouping = Literal[*GROUPINGS]
 

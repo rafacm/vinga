@@ -23,8 +23,13 @@ from vinga_server.conversations import docgen
 from vinga_server.conversations.views import (
     ALIASES,
     BARGE_IN_SUPPRESSED,
+    BY_DEVICE_VIEWS,
     COMMON,
     DAY,
+    DEFINED,
+    DEVICE,
+    GROUPED,
+    NAME,
     PROVIDER_FAILED,
     STAGES,
     VIEWS,
@@ -68,7 +73,7 @@ def test_every_declared_column_is_described() -> None:
     whose number a reader has to guess the meaning of."""
     holes = [
         f"{view.name}.{column.name}.{field}"
-        for view in VIEWS
+        for view in DEFINED
         for column in view.columns
         for field in ("type", "meaning", "units", "formula")
         if not getattr(column, field).strip()
@@ -81,7 +86,7 @@ def test_every_view_states_its_question_and_both_sentences() -> None:
     for, what its denominator is, and what telemetry-off does to it."""
     holes = [
         f"{view.name}.{field}"
-        for view in VIEWS
+        for view in DEFINED
         for field in ("question", "denominator", "telemetry_off")
         if not getattr(view, field).strip()
     ]
@@ -93,7 +98,7 @@ def test_every_view_declares_what_a_row_is_unique_by() -> None:
     on exactly these columns and nothing else makes that order total, so
     a view that declared none would be served in whatever order the
     planner felt like."""
-    for view in VIEWS:
+    for view in DEFINED:
         names = [column.name for column in view.keys]
         assert names, f"{view.name} declares no key column"
         # The day first, because the read surface windows on it and
@@ -113,6 +118,104 @@ def test_every_alias_is_derived_from_the_name_and_unique() -> None:
         # types, and never the relation's own name.
         assert "_" not in alias and alias.islower()
         assert alias != view.name
+
+
+def test_a_sibling_answers_to_the_word_the_view_it_mirrors_answers_to() -> None:
+    """The infix comes off the alias, so a question is one question and
+    the grouping is what picks the relation. Two declarations sharing an
+    alias is exactly why `ALIASES` is built from `VIEWS` and not from
+    every relation: a caller's word has to resolve to one thing."""
+    for view, sibling in zip(VIEWS, BY_DEVICE_VIEWS, strict=True):
+        assert sibling.alias == view.alias
+        assert sibling.name != view.name
+        assert sibling.name.endswith("_by_device_daily")
+    assert len(ALIASES) == len(VIEWS)
+    assert len({view.name for view in DEFINED}) == len(DEFINED)
+
+
+def test_a_sibling_is_the_view_it_mirrors_plus_the_device_and_its_label() -> None:
+    """Derived rather than restated, which is what stops the pair coming
+    to describe the same number two ways. The day stays first and the
+    two new columns go directly behind it, so the read surface's
+    ordering is the day, then the device, then whatever the mirrored
+    view was already cut by."""
+    for view, sibling in zip(VIEWS, BY_DEVICE_VIEWS, strict=True):
+        assert [column.name for column in sibling.columns] == [
+            view.columns[0].name,
+            DEVICE,
+            NAME,
+            *[column.name for column in view.columns[1:]],
+        ], sibling.name
+        assert [column.name for column in sibling.keys][:2] == [DAY, DEVICE]
+        # The label is not part of what makes a row one row: it is
+        # whatever the device is called, which is not an identity.
+        assert NAME not in [column.name for column in sibling.keys]
+        # Everything the mirrored view said about a column, said once.
+        assert sibling.columns[3:] == view.columns[1:]
+        assert sibling.telemetry_off == view.telemetry_off
+        assert sibling.question.startswith(view.question)
+
+
+def test_the_label_is_declared_null_rather_than_left_out() -> None:
+    """Null in every row until a copy of the label lands on the `record`
+    side, and selected as a literal so the columns a caller reads do not
+    move on the day it arrives. The analyst role is revoked on `domain`,
+    so this cannot be a join and nobody should turn it into one."""
+    for sibling in BY_DEVICE_VIEWS:
+        [label] = [column for column in sibling.columns if column.name == NAME]
+        assert label.nullable
+        assert "NULL::text AS name" in sibling.body, sibling.name
+        assert "domain" not in sibling.body
+
+
+def test_both_combining_views_join_their_streams_null_safely() -> None:
+    """The two that combine independently aggregated streams, and the
+    join that makes a null device one group rather than one row per
+    stream.
+
+    Asserted on the declaration as well as on the numbers, because this
+    is a rule about how the next view of this shape is written: `=` is
+    what would be wrong, and the numbers case next door is what catches
+    it having been written.
+    """
+    from vinga_server.conversations.views import (
+        EVENT_RATES_BY_DEVICE,
+        SESSIONS_BY_DEVICE,
+    )
+
+    for view in (EVENT_RATES_BY_DEVICE, SESSIONS_BY_DEVICE):
+        assert "IS NOT DISTINCT FROM spine.device" in view.body, view.name
+        assert "IS NOT DISTINCT FROM spine.day" in view.body, view.name
+        # No `=` join on either key, which is the thing being ruled out.
+        assert "= spine.device" not in view.body, view.name
+        assert "= spine.day" not in view.body, view.name
+        # And a full join is not how the union is taken, because
+        # Postgres will not execute one on this condition.
+        assert "FULL OUTER JOIN" not in view.body, view.name
+
+
+def test_every_grouping_the_document_publishes_has_a_relation_behind_it() -> None:
+    """Two structures that must agree, held together by the one thing
+    that can: a test.
+
+    The vocabulary a request is held to lives in `config/responses.py`,
+    which is on the CLI's import path, and the relations that answer it
+    live here, which is not: a client that imported this registry to
+    find out would be a client the bare wheel cannot run. So the words
+    are spelled twice and asserted to be one set, in both directions,
+    with the same questions under each.
+    """
+    from vinga_server.config.responses import GROUPINGS
+
+    assert tuple(GROUPED) == GROUPINGS
+    for grouping, relations in GROUPED.items():
+        assert set(relations) == set(ALIASES), grouping
+    # And the two groupings answer from different relations, which is
+    # what makes the second token a different question rather than a
+    # second name for the first.
+    assert {view.name for view in GROUPED[GROUPINGS[0]].values()}.isdisjoint(
+        {view.name for view in GROUPED[GROUPINGS[-1]].values()}
+    )
 
 
 def test_the_common_prose_is_declared_and_not_written_in_the_renderer() -> None:
@@ -155,7 +258,7 @@ def test_no_view_reads_a_content_column() -> None:
     """
     found = [
         f"{view.name}: {reach}"
-        for view in VIEWS
+        for view in DEFINED
         for reach in CONTENT_REACHES
         if reach in view.body
     ]
@@ -190,7 +293,7 @@ def test_the_committed_reference_matches_the_declarations() -> None:
 
 def test_the_reference_names_every_view_and_every_column() -> None:
     rendered = docgen.views_reference()
-    for view in VIEWS:
+    for view in DEFINED:
         assert f"### `{view.name}`" in rendered
         for column in view.columns:
             assert f"| `{column.name}` |" in rendered, f"{view.name}.{column.name} is missing"
@@ -198,7 +301,7 @@ def test_the_reference_names_every_view_and_every_column() -> None:
 
 def test_the_reference_carries_each_views_two_sentences() -> None:
     flattened = flat(docgen.views_reference())
-    for view in VIEWS:
+    for view in DEFINED:
         assert flat(view.denominator) in flattened, view.name
         assert flat(view.telemetry_off) in flattened, view.name
 

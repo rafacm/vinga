@@ -62,6 +62,16 @@ SENTINEL = "sk-test-4a7e2c01-never-a-real-credential"
 # asserting about what it planted and not about when it was run.
 DAY = "2026-05-14"
 
+# Two boards of one fleet, sharing a vendor OUI the way a real fleet
+# does. The second is spelled back in the mixed, dash-separated form a
+# caller may type, which is what says the filter is normalized rather
+# than matched literally.
+BOARD_A = "a4:cf:12:00:00:01"
+
+BOARD_B = "a4:cf:12:00:00:02"
+
+BOARD_B_AS_TYPED = "A4-CF-12-00-00-02"
+
 
 @pytest.fixture
 def store() -> Any:
@@ -106,17 +116,30 @@ def _leaked(caplog: pytest.LogCaptureFixture) -> str:
     )
 
 
-def a_day(store: Any, day: str, *, session: str | None = None, agent: str = "sam") -> None:
+def a_day(
+    store: Any,
+    day: str,
+    *,
+    session: str | None = None,
+    agent: str = "sam",
+    device: str | None = BOARD_A,
+) -> None:
     """One session opened at noon on a named UTC day, with a measured
     turn and one counted event on it.
 
     Noon rather than midnight so that the day a row lands on is the day
     that was asked for whichever way a reader's own timezone leans, which
     is the property the views are cut on.
+
+    `device` is the board it ran on. `None` is the state the schema
+    documents, a session rejected before a device was understood, and it
+    is what the per-device rows have to carry as a group of its own.
     """
     named = session if session is not None else day
     with store.begin() as connection:
-        plant_session(connection, named, f"{day}T12:00:00+00:00", agent=agent)
+        plant_session(
+            connection, named, f"{day}T12:00:00+00:00", agent=agent, device=device
+        )
         plant_turn(
             connection, named, 0, agent=agent, asr_ms=120, input_tokens=7, output_tokens=3
         )
@@ -408,6 +431,150 @@ def test_a_grouping_nothing_serves_is_refused(client: TestClient, store: Any) ->
         assert grouping in sentence
 
 
+def test_the_device_grouping_answers_from_the_sibling(
+    client: TestClient, store: Any
+) -> None:
+    """The second token, and what makes it a different question rather
+    than a different rendering of the same one.
+
+    Two boards on one day. Ungrouped, the day is one row with two
+    sessions in it; grouped by device, it is two rows of one session
+    each, and the answer carries the relation that produced them, its
+    own columns and the two extra keys a page is now ordered on. A
+    surface that had answered the grouping from the ungrouped view would
+    give the same row twice and no device at all.
+    """
+    a_day(store, DAY, session="a", device=BOARD_A)
+    a_day(store, DAY, session="b", device=BOARD_B)
+
+    ungrouped = _get(client, "/metrics/sessions", since=DAY, until=DAY)
+    assert [row["sessions"] for row in ungrouped["rows"]] == [2]
+    assert "device" not in ungrouped["rows"][0]
+    assert ungrouped["view"]["relation"].endswith("metrics_sessions_daily")
+
+    answered = _get(client, "/metrics/sessions", since=DAY, until=DAY, group="device")
+
+    assert answered["group"] == "device"
+    # The word a request spelled is unchanged: the question is one
+    # question and the grouping chose which relation answers it.
+    assert answered["view"]["view"] == "sessions"
+    assert answered["view"]["relation"].endswith("metrics_sessions_by_device_daily")
+    assert [(row["device"], row["name"], row["sessions"]) for row in answered["rows"]] == [
+        (BOARD_A, None, 1),
+        (BOARD_B, None, 1),
+    ]
+    # The label is declared and null, not absent: a client renders a
+    # column it was told about.
+    declared = {column["name"]: column for column in answered["view"]["columns"]}
+    assert declared["device"]["key"] is True
+    assert declared["name"]["key"] is False
+    assert declared["name"]["nullable"] is True
+
+
+def test_every_view_answers_the_device_grouping_with_the_device_first(
+    client: TestClient, store: Any
+) -> None:
+    """All four, because which relation answers is derived from the
+    declarations rather than written per view, and because the plan's
+    ordering is a claim about every one of them: the day descending,
+    then the device ascending.
+
+    The null device is what makes the order worth asserting. It is a
+    group of its own and it sorts last, which is where a key nobody can
+    attribute belongs.
+    """
+    a_day(store, DAY, session="known", device=BOARD_A)
+    a_day(store, DAY, session="stranger", device=None)
+    a_day(store, "2026-05-15", session="later", device=BOARD_A)
+
+    for alias in ALIASES:
+        answered = _get(
+            client, f"/metrics/{alias}", since=DAY, until="2026-05-15", group="device"
+        )
+        assert answered["view"]["view"] == alias
+        assert [column["name"] for column in answered["view"]["columns"]][:3] == [
+            "day",
+            "device",
+            "name",
+        ], alias
+        assert [(row["day"], row["device"]) for row in answered["rows"]][:3] == [
+            ("2026-05-15", BOARD_A),
+            (DAY, BOARD_A),
+            (DAY, None),
+        ], alias
+
+
+def test_a_device_narrows_a_per_device_read_and_is_normalized_first(
+    client: TestClient, store: Any
+) -> None:
+    """One board of the three groups a day has, named in the spelling a
+    person types: upper case and dash-separated.
+
+    Normalized rather than matched literally, the way `/sessions`
+    normalizes the same argument, which is what makes the two spellings
+    one filter. A surface that matched the bytes would answer this with
+    an empty list, and an empty list is a true answer to a question the
+    caller did not ask.
+    """
+    a_day(store, DAY, session="a", device=BOARD_A)
+    a_day(store, DAY, session="b", device=BOARD_B)
+    a_day(store, DAY, session="stranger", device=None)
+
+    answered = _get(
+        client,
+        "/metrics/sessions",
+        since=DAY,
+        until=DAY,
+        group="device",
+        device=BOARD_B_AS_TYPED,
+    )
+
+    assert [row["device"] for row in answered["rows"]] == [BOARD_B]
+    # And without the filter the same window has all three groups,
+    # which is what says the filter did the narrowing.
+    assert len(
+        _get(client, "/metrics/sessions", since=DAY, until=DAY, group="device")["rows"]
+    ) == 3
+
+
+def test_a_device_without_the_grouping_is_refused_rather_than_ignored(
+    client: TestClient, store: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The ungrouped rows are not one device's, so a filter on them
+    would answer a different question in a shape the caller could not
+    tell apart. Refused rather than ignored, and refused rather than
+    taken as a grouping of its own: one argument silently changing what
+    another means is worse than either.
+    """
+    with caplog.at_level(logging.DEBUG):
+        response = client.get("/metrics/sessions", params={"device": BOARD_A})
+
+    assert response.status_code == 422
+    sentence = refused(response.json(), 422)
+    assert "device" in sentence
+    assert f"group={GROUPINGS[-1]}" in sentence
+    assert BOARD_A not in response.text
+    assert BOARD_A not in _leaked(caplog)
+
+
+def test_a_device_that_is_not_a_mac_is_refused_under_the_grouping(
+    client: TestClient, store: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The filter is held to the same rule every other MAC on this API
+    is held to, and the refusal is the same fixed sentence: matched
+    literally, a value that is not a MAC would answer an empty list and
+    call it the truth."""
+    with caplog.at_level(logging.DEBUG):
+        response = client.get(
+            "/metrics/sessions", params={"group": "device", "device": SENTINEL}
+        )
+
+    assert response.status_code == 422
+    assert "MAC" in refused(response.json(), 422)
+    assert SENTINEL not in response.text
+    assert SENTINEL not in _leaked(caplog)
+
+
 @pytest.mark.parametrize("argument", ["since", "until"])
 @pytest.mark.parametrize(
     "value",
@@ -455,12 +622,15 @@ def test_a_hostile_value_reaches_no_body_no_log_and_no_statement(
 ) -> None:
     """The pin behind the closed mapping.
 
-    `{view}` selects a database relation and `group` selects a shape, and
-    neither can be a bound parameter, so what makes this safe is that the
-    bytes are a key looked up in a mapping derived from the registry and
-    are never anything else. This sends each hostile value through both,
-    and hunts for it in the response, in both shipped log formats and in
-    the process output.
+    `{view}` selects a database relation and `group` selects which of
+    two relations answers, and neither can be a bound parameter, so what
+    makes this safe is that the bytes are a key looked up in a mapping
+    derived from the registry and are never anything else. `device` is
+    the one that does travel, as a bound value on a column of the
+    relation those two chose, and it is normalized or refused before it
+    gets there. This sends each hostile value through all three, and
+    hunts for it in the response, in both shipped log formats and in the
+    process output.
 
     That a value which resolved to no declaration reaches no statement is
     the case below this one, which counts the opens rather than reading
@@ -478,6 +648,9 @@ def test_a_hostile_value_reaches_no_body_no_log_and_no_statement(
             client.get("/metrics/" + quote(hostile, safe="")),
             client.get("/metrics/sessions", params={"group": hostile}),
             client.get("/metrics/sessions", params={"since": hostile}),
+            client.get(
+                "/metrics/sessions", params={"group": "device", "device": hostile}
+            ),
         ]
 
     for response in responses:
@@ -529,6 +702,15 @@ def test_a_refused_request_opens_no_connection_at_all(
         # view, the grouping, either day, and the rule about the pair.
         (404, client.get(f"/metrics/{SENTINEL}")),
         (422, client.get("/metrics/sessions", params={"group": SENTINEL})),
+        (
+            422,
+            client.get(
+                "/metrics/sessions", params={"group": "device", "device": SENTINEL}
+            ),
+        ),
+        # And the filter sent without the grouping that admits it, which
+        # is refused on the pair rather than on either value.
+        (422, client.get("/metrics/sessions", params={"device": SENTINEL})),
         (422, client.get("/metrics/sessions", params={"since": SENTINEL})),
         (422, client.get("/metrics/sessions", params={"until": SENTINEL})),
         (

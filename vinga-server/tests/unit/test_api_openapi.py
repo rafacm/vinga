@@ -665,7 +665,7 @@ def test_the_metric_column_schema_is_the_column_the_registry_declares() -> None:
 
 
 def test_the_metrics_read_describes_its_window_and_its_vocabulary() -> None:
-    """The four arguments this route parses itself, and what a client is
+    """The five arguments this route parses itself, and what a client is
     told about them. Nothing is derived from a type here either, so the
     descriptions are the whole of the contract."""
     from vinga_server.config.responses import GROUPINGS
@@ -676,7 +676,7 @@ def test_the_metrics_read_describes_its_window_and_its_vocabulary() -> None:
         parameter["name"]: parameter["description"] for parameter in read["parameters"]
     }
 
-    assert set(described) == {"view", "since", "until", "group"}
+    assert set(described) == {"view", "since", "until", "group", "device"}
     # Both ends inclusive, said on the argument each end belongs to.
     assert "begins on it rather than after it" in described["since"]
     assert "ends on it rather than before it" in described["until"]
@@ -691,6 +691,14 @@ def test_the_metrics_read_describes_its_window_and_its_vocabulary() -> None:
     for grouping in GROUPINGS:
         assert f"`{grouping}`" in described["group"]
     assert "GET /metrics" in described["view"]
+    # What the second grouping does, which a client cannot read off a
+    # word: it answers from another relation, whose own columns come
+    # back with the answer.
+    assert "per-device sibling" in described["group"]
+    # And the filter that only that grouping admits, said on the filter
+    # rather than only in the sentence it is refused with.
+    assert f"`group={GROUPINGS[-1]}`" in described["device"]
+    assert "refused without it rather than ignored" in described["device"]
     # And the document types the grouping rather than describing it in
     # prose alone, so a generated client cannot send a fifth word.
     schemas = json.loads(docgen.openapi())["components"]["schemas"]
