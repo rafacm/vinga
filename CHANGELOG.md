@@ -185,6 +185,41 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   other command in this grammar: there is no local-database path to the
   record and there is not going to be one.
 
+- **Every named aggregate can be broken down by device** (#440, milestone
+  3). Four views join the four the record already had, one per question:
+  `metrics_stage_latency_by_device_daily`,
+  `metrics_tokens_by_device_daily`,
+  `metrics_event_rates_by_device_daily` and
+  `metrics_sessions_by_device_daily`, each the same question with the
+  device a session ran on added to what makes a row one row. They are
+  additive siblings and the four that were there are untouched, because
+  a saved query, a dashboard or a downstream view selects from those and
+  a redefinition would move every one of them without asking. A row
+  carries the device as its MAC, which is the stable key, and a `name`
+  beside it that is null in every row of this release: the analyst role
+  is granted on the conversation record and revoked on the
+  configuration, so the label cannot be a join and has to be a copy on
+  the record side, which a later change makes. `vinga_ro` reads the new
+  views through the default privileges `deploy/postgres-init.sql`
+  already sets, so a deployment needs nothing rerun. A session whose
+  device was never understood is one null-device group rather than a row
+  per stream, which is what the null-safe joins in the two views that
+  combine independent streams are for.
+
+- **`GET /metrics/{view}?group=device`, and `vinga metric show <view>
+  --group device`** (#440, milestone 3), which answer from those views.
+  The word in the path is unchanged, because the question is one
+  question and the grouping is what says which relation answers it; the
+  answer carries that relation, its columns and the device and label in
+  every row, so a client renders the breakdown from what it was sent
+  rather than from a table of its own. `device` on the API and
+  `--device` on the command narrow the breakdown to one board, by MAC in
+  any spelling, normalized before it is matched the way `/sessions`
+  normalizes the same argument; sent without the grouping that gives it
+  meaning it is refused rather than ignored, because the ungrouped rows
+  are not one device's. Rows come newest day first and then by device
+  ascending with the null group last.
+
 ### Changed
 
 - **`memory.facts.owner` says that a board swap moves a device's notes**

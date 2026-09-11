@@ -457,3 +457,206 @@ adopted, one in part.
 M3's device dimension, as planned: the four sibling views, `group=device`
 as a token the API answers, and the `device` and `name` columns. The
 observability map still records #440 as open, which M3 closes.
+
+## M3: the device dimension
+
+PR TBD.
+
+### What landed
+
+Four more views in the `record` schema, one per question, added by
+`1007_metrics_views_by_device`:
+`metrics_stage_latency_by_device_daily`, `metrics_tokens_by_device_daily`,
+`metrics_event_rates_by_device_daily` and
+`metrics_sessions_by_device_daily`. Each is the view it mirrors with the
+device a session ran on and a label beside it added to what makes a row
+one row, and the four that were already there are untouched.
+
+`GET /metrics/{view}?group=device` and `vinga metric show <view> --group
+device` answer from them. The word in the path does not change, because
+the question is one question and the grouping is what says which
+relation answers it; `View.alias` therefore strips the `_by_device`
+infix the way it already strips the prefix and the suffix, `ALIASES`
+stays the four words a request may spell, and `views.GROUPED` is the
+pair of mappings a resolved word and a resolved grouping index into.
+
+A row carries `device`, the MAC, which is the stable key, and `name`,
+which is the literal null `NULL::text` in every row of this release.
+Nothing in this milestone depends on #449's M5: `record.sessions.device`
+already held the MAC, and the label is declared and selected now so that
+the columns a caller reads do not move on the day a copy of it lands on
+the `record` side. It cannot be a join: `deploy/postgres-init.sql`
+grants the analyst role on `record` and revokes it on `domain`, so no
+view here can reach `domain.devices` at all.
+
+`device` on the API and `--device` on the command narrow a per-device
+answer to one board, by MAC in any spelling, normalized by
+`normalize_mac` the way `/sessions` normalizes the same argument. Sent
+without the grouping that gives it meaning it is refused rather than
+ignored and rather than taken as a grouping of its own: the ungrouped
+rows are not one device's, so a filter on them would answer a different
+question in a shape the caller could not tell apart, and inferring the
+grouping from the filter would let one argument change what another
+means.
+
+### The four things the plan's review round settled for this milestone
+
+**1. Additive siblings, and a test that can tell.** The four shipped
+views are not redefined, because what selects from them is somebody's
+saved query, dashboard or downstream object and a redefinition moves
+every one of them without asking. `tests/integration/
+test_metrics_views_upgrade.py` stands a database at `1006_metrics_views`
+and migrates it forward.
+
+The first draft of that test compared `pg_get_viewdef` before and after,
+which cannot make the claim: a view dropped and recreated from the same
+SQL has the same definition. So it compares the **oids**, which is what
+every dependent object in the database points at, and it plants an
+analyst's own view on `metrics_sessions_daily` at the baseline and
+asserts it still answers afterwards, which is what `DROP VIEW ...
+CASCADE` would have taken silently. Both were run against a variant of
+`1007` that rebuilds the four from identical SQL: the oids differ and
+the saved view is gone, while the definition comparison alone stays
+green. The version stamp is asserted at both ends, so a fixture that had
+quietly migrated to head could not make any of it trivially true.
+
+**2. Null-safe joins, and the shape they forced.** A device key is null
+for a session rejected before a device was understood, and two SQL nulls
+are not equal, so the two views that combine independently aggregated
+streams join on `IS NOT DISTINCT FROM` on both the day and the device.
+
+They do not chain full outer joins the way their ungrouped siblings do,
+and that is not a preference: **Postgres refuses to execute a full join
+whose condition is not merge- or hash-joinable**, which
+`IS NOT DISTINCT FROM` is not ("FULL JOIN is only supported with
+merge-joinable or hash-joinable join conditions"). The union those joins
+existed to produce is therefore taken directly, as a `spine` CTE of
+every (day, device) pair any stream has, with each stream left joined
+onto it. `UNION` already treats two nulls as one value, so the spine has
+exactly one row per group before anything is joined to it.
+
+That changes what the null-device case has to assert, and the plan named
+the trap in its original form. With a spine, an equality join does
+**not** produce three rows: it produces exactly one, filled with zeroes
+where the other streams' numbers should have been and with null rates.
+A case asserting only that one row came back, or that no device was
+invented, would pass on precisely that. So
+`test_a_session_with_no_device_is_one_group_and_not_one_row_per_stream`
+asserts the numbers: one session, one turn, one counted failure, all on
+a device nobody knows, and the row says one, one, one and a rate of one
+failure per turn. Run with `=` in place of
+`IS NOT DISTINCT FROM` in both the declaration and the migration, that
+case and the one that puts a named board beside the unknown one both
+fail, and the rest of the file stays green.
+
+**3. Downgrade and the `vinga_ro` grants.** `vinga_ro` needs no grant,
+for the reason 1006 needed none: `deploy/postgres-init.sql` sets
+`ALTER DEFAULT PRIVILEGES ... GRANT SELECT ON TABLES` for the server
+role, Postgres counts a view as a relation of that class, and this
+migration runs as the server role. Nothing has to be rerun on a
+deployment. It is asserted rather than assumed: the analyst half of
+`test_provisioning.py` now iterates `views.DEFINED`, every relation
+rather than the four questions, so a sibling is covered by being
+declared. The downgrade drops the four it created and leaves the four it
+found, which is the inverse of an additive change, and that is asserted
+beside the upgrade.
+
+**4. The documentation that recorded #440 as open.** Both pages M1 and
+M2 named were checked rather than trusted.
+`docs/architecture/observability-surfaces.md` listed the read surface
+under "still open, each with its owner", and its conversation-store row
+described #439's four views with no reader in front of them: the first
+is gone and the second now says where the surface is and that each view
+has a per-device sibling. `docs/concepts.md` had three mentions, and
+they were three different claims: the cost paragraph said the read
+surface "is #440's", which is now "implemented today" with the command
+that answers it; the conversation section said "its read surface is
+#440's", now landed; and the users-and-budgets paragraph said the
+aggregation "is served by #440", which was already true and gains what
+the rows are keyed by.
+
+### Deviations from the plan
+
+**The `device` filter is here, though M3's own bullet does not mention
+it.** The plan's request-contract table has four parameters and M1's
+implementation note says the fourth "is M3's for the same reason" as the
+second grouping token: there were no per-device relations to filter.
+There are now, and M3 is the last milestone of #440, so the parameter
+lands here or the published contract stays a milestone short. It is the
+one request-controlled value on this surface that travels, as a bound
+parameter on a column of the relation the view and the grouping already
+chose, and the no-leak sweep covers it on both surfaces.
+
+**The two combining views do not use full outer joins.** The plan's M3
+bullet says "two of these views combine independent streams with full
+outer joins" and prescribes `IS NOT DISTINCT FROM`. Postgres will not
+run that pair together, as above. The rule the round was protecting is
+kept, on left joins onto an explicit union spine, and the semantics are
+the union of the streams' keys either way.
+
+**`COMMON`'s first heading is no longer "What is true of all four".** It
+is "What is true of every one of them", because the page it heads now
+renders eight relations. The statements themselves did not move, and the
+heading travels from the same one home to the reference, the API
+contract and the CLI.
+
+**The listing is still the four questions.** `GET /metrics` and `metric
+list` describe the views a request may name, not every relation the
+schema holds, so a per-device sibling is not a fifth entry there. What
+the grouping does, and that the answer carries the sibling's own
+columns, is on the `group` parameter's description, which is where a
+client reads what an argument does. The committed reference is the
+other way round and documents all eight, because its reader is an
+analyst selecting from the schema.
+
+### Discoveries
+
+**Postgres will not full-join on `IS NOT DISTINCT FROM`.** Recorded
+above because it is the milestone's one real surprise, it is not in the
+error's first line (`FeatureNotSupported`), and the next person writing
+a view of this shape meets it the same way: only when a row is selected,
+never when the view is created.
+
+**A definition check cannot see a rebuild.** Recorded above, and worth
+generalizing: an agreement test that compares a declaration with what
+the database says is green whether the relation was left alone or
+recreated from the same text, so "the views survive" needs the identity
+and a dependent, not the definition.
+
+**Two structures that must agree, kept apart on purpose.** The grouping
+vocabulary lives in `config/responses.py` and the relations that answer
+it in `conversations/views.py`, and the two spell the same two words.
+Deriving one from the other would put a module of the serve tier on the
+CLI's import path, which `test_cli_import_weight.py` exists to prevent
+and which the wheel lane would fail on. So they are held together by a
+test instead, in both directions and with the same questions under each
+grouping, which is the remaining way to keep one fact in two places
+honest.
+
+### Verification
+
+- `uv run ruff check .` and `uv run mypy` clean; `uv run pytest
+  tests/unit -q -n 4 --dist loadfile` 6740 passed, 19 skipped; `uv run
+  pytest tests/integration -q` green. The lane runs `-n 4` rather than
+  `-n auto` on this machine, which exceeds the compose Postgres's
+  connection limit.
+- All three generated references regenerated through their own
+  generators and diffed the way CI diffs them: `vinga-server
+  conversations views`, `vinga-server config openapi` and `vinga-server
+  config cli-reference`. The spelling census was regenerated rather than
+  edited.
+- The conversations chain pin in `.github/workflows/vinga-server.yml`
+  moved to `1007_metrics_views_by_device`, and so did `HEAD` in
+  `tests/unit/test_conversations_schema.py`. The CI check is the only
+  place the first would have failed, which is why it is worth saying
+  twice.
+- Every new pin was run against a deliberately broken implementation
+  before it was trusted, and each commit body says which breakage and
+  what it fails.
+
+### Not done here
+
+Nothing of #440. The label is null until a copy of a device's name
+reaches the `record` schema, which is #449's M5 and not this issue's:
+the column, the API field and the rendering are all in place for the day
+it lands, and nothing here waits on it.

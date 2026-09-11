@@ -352,11 +352,13 @@ special cases:
   reference](reference/metrics-views.md) says what each column means.
   What is still **decided direction** is the rest of the sentence
   (recorded on this page, 2026-08-21): issue #190 explicitly leaves
-  budgets and per-conversation accounting out of its scope, the read
-  surface over the aggregates is #440's, and the cost direction is
-  recorded there: usage is counted in tokens, and currency is at most
-  an optional price map over it. The accounting itself still awaits
-  users.
+  budgets and per-conversation accounting out of its scope, and the cost
+  direction is recorded there: usage is counted in tokens, and currency
+  is at most an optional price map over it. Reading those tokens without
+  a SQL client is **implemented today, issue #440**: `vinga metric show
+  tokens` answers them over a window of whole UTC days, and `--group
+  device` breaks the same numbers down by the board they were spent on.
+  The accounting itself still awaits users.
 
 The decided semantics, each with its owner:
 
@@ -610,8 +612,8 @@ recording rule for meta turns are both stated in
 [Conversation and session](#conversation-and-session) above: issue
 #190 left budgets, per-conversation accounting and cross-agent
 threads out of its scope. The cost question's aggregation substrate
-landed with #439 and its read surface is #440's; the recording rule
-is still unowned.
+landed with #439 and its read surface landed with #440, over the API
+and the command line; the recording rule is still unowned.
 
 ## The help agent
 
@@ -661,6 +663,8 @@ and the shared profile all gain a user in their key, and voiceprint
 recognition decides which user is speaking on a shared device. That is
 **decided direction** (recorded on this page, 2026-08-21; no owning
 issue or decision record yet, though the usage aggregation budgets
-will read landed with #439 and is served by #440). It is stated here
+will read landed with #439 and is served over the API and the command
+line by #440, whose rows are keyed by day and device and whose shape
+takes a user in the key without moving). It is stated here
 so the later refactor
 has a name rather than being a surprise.
