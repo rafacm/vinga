@@ -33,8 +33,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from tests.support.config_cli import chain
 from tests.support.stores import bindings, stored_row
-from vinga_server.config import ConfigError
+from vinga_server.config import ConfigError, views
 from vinga_server.config.api import build_api
 from vinga_server.config.loader import (
     DeviceAlreadyBoundError,
@@ -53,6 +54,7 @@ from vinga_server.config.store import (
     DEVICE_ID_TAKEN,
     DEVICE_NAME_IN_FLIGHT,
     DEVICE_NAME_TAKEN,
+    DEVICE_TEXT_CREDENTIAL,
     ConfigStore,
 )
 from vinga_server.db import open_database, schema
@@ -344,6 +346,102 @@ def test_the_default_names_of_two_boards_do_not_collide(store: ConfigStore) -> N
     second = store.bind_device(OTHER_MAC, ["sam"])
 
     assert fold_device_name(first.name) != fold_device_name(second.name)
+
+
+# --- what a stored string may carry ------------------------------------
+#
+# A device name and a device location are stored exactly as written and
+# read back on every surface that shows the record, which makes them the
+# same shape of hazard a provider's `base_url` is: a URL carrying a
+# credential names nothing suspicious and would sit in the
+# configuration rather than in the encrypted store.
+#
+# Leaving it to the display would not do, and the export is why. A read
+# strips the credential on its way out, so a name stored with one and
+# re-applied from an export would come back as a DIFFERENT name, which
+# is the one thing a document a deployment is rebuilt from may not do.
+
+# Not real credentials, and shaped so a substring hunt for either cannot
+# match by accident.
+IN_AUTHORITY = "https://user:pw-test-51c8fa03-never-real@example.invalid/room"
+
+IN_QUERY = "https://example.invalid/room?api_key=pw-test-9b4e27dd-never-real"
+
+# The control beside them: a URL that carries no credential at all. It is
+# a lawful name and a lawful location, and it has to survive the round
+# trip byte for byte, which is the property the refusals above protect.
+WITHOUT_CREDENTIAL = "https://example.invalid/the-kitchen"
+
+
+@pytest.mark.parametrize("carried", [IN_AUTHORITY, IN_QUERY], ids=["authority", "query"])
+@pytest.mark.parametrize(
+    ("what", "act"),
+    [
+        ("name", lambda store, value: store.rename_device(MAC, value)),
+        ("location", lambda store, value: store.relocate_device(MAC, value)),
+        (
+            "name",
+            lambda store, value: store.apply(
+                {"devices": {MAC: {"name": value, "agents": ["sam"]}}}
+            ),
+        ),
+        (
+            "location",
+            lambda store, value: store.apply(
+                {"devices": {MAC: {"location": value, "agents": ["sam"]}}}
+            ),
+        ),
+    ],
+    ids=["rename", "relocate", "apply-name", "apply-location"],
+)
+def test_a_credential_bearing_url_is_refused_on_every_write(
+    store: ConfigStore, what: str, act, carried: str
+) -> None:
+    """Both fields, both shapes of credential, and both the direct verb
+    and the applied document, because they are different write paths and
+    the review found the check on none of them."""
+    _agents(store)
+    store.bind_device(MAC, ["sam"])
+
+    with pytest.raises(ConfigError) as caught:
+        act(store, carried)
+
+    assert DEVICE_TEXT_CREDENTIAL.format(what=what) in str(caught.value)
+    # Not on the sentence, and not behind it either: a refusal raised
+    # inside a handler keeps the exception it was handling, and a
+    # validation error holds the whole rejected value.
+    assert carried not in chain(caught.value)
+    # And nothing was written, which is what makes the refusal a refusal.
+    assert _record(store).name == DEFAULT_NAME
+    assert _record(store).location is None
+
+
+@pytest.mark.parametrize("field", ["name", "location"])
+def test_a_url_that_carries_no_credential_survives_an_export_and_a_reapply(
+    store: ConfigStore, field: str
+) -> None:
+    """The property the refusals protect, asserted rather than assumed.
+
+    The display strips a credential from a URL on its way out, so a
+    field that could hold one would come back from an export as
+    something else and an apply of that export would CHANGE the row.
+    A URL with no credential passes the display untouched, so the round
+    trip is exact, and this is what says the two are the same question.
+    """
+    _agents(store)
+    store.bind_device(MAC, ["sam"])
+    if field == "name":
+        store.rename_device(MAC, WITHOUT_CREDENTIAL)
+    else:
+        store.relocate_device(MAC, WITHOUT_CREDENTIAL)
+    before = _record(store)
+
+    exported = views.config(store.load())["config"]["devices"][MAC]
+    assert exported[field] == WITHOUT_CREDENTIAL
+    applied = store.apply({"devices": {MAC: exported}})
+
+    assert [entry.wrote for entry in applied] == [False]
+    assert _record(store) == before
 
 
 # --- apply and import, which is the ingress the plan calls out ---------
