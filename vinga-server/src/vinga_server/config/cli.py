@@ -3304,12 +3304,18 @@ def _metric_rows(answer: Mapping[str, Any]) -> str:
     never a zero: a rate with no denominator is null, and a renderer
     that wrote `0` for it would report a day nothing could have happened
     on as a day nothing went wrong on.
+
+    The view's own telemetry-off sentence is here as well as on the
+    listing, because the behaviour is per view and the numbers are what
+    it qualifies: a reader about to quote one is on this rendering, not
+    on the vocabulary page they read once.
     """
     view = answer["view"]
     columns = view["columns"]
     lines = [
         _cell(view["view"]),
         *_metric_note("question", view["question"]),
+        *_metric_note("telemetry off", view["telemetry_off"]),
         f"{METRIC_WINDOW}: {_cell(answer['since'])} to {_cell(answer['until'])}"
         f", {METRIC_WINDOW_ENDS}",
         "",

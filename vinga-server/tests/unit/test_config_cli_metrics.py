@@ -589,6 +589,26 @@ def test_each_view_says_what_telemetry_off_does_to_it_in_particular(run, capsys)
     assert "raises both denominators and neither numerator" in joined
 
 
+@pytest.mark.parametrize("alias", [view.alias for view in VIEWS])
+def test_an_answer_carries_the_view_own_telemetry_off_sentence(
+    run, store, capsys, alias
+) -> None:
+    """On `show` and per view, not only on the vocabulary listing: the
+    numbers are what the sentence qualifies, and the listing is a page
+    nobody re-reads at the moment they are about to quote one. Asserted
+    for every view because the behaviour differs by view, which is
+    exactly what a rendering that dropped the sentence would flatten."""
+    a_day(store, DAY)
+    [view] = [one for one in VIEWS if one.alias == alias]
+
+    code, printed, _ = out(
+        run, capsys, "metric", "show", alias, "--since", SINCE, "--until", UNTIL
+    )
+
+    assert code == 0
+    assert plain(view.telemetry_off) in said(printed)
+
+
 # Refusals, which quote nothing back
 
 
