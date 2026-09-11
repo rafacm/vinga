@@ -86,6 +86,7 @@ than by repeating what was typed.
 
 import os
 import re
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -719,12 +720,14 @@ def _mutate(changelog: Path, before: str, after: str, sources: dict[Path, str]) 
     it is removed here anyway.
     """
     removed: list[Path] = []
+    modes: dict[Path, int] = {}
     try:
         for path in sources:
+            modes[path] = stat.S_IMODE(path.stat().st_mode)
             path.unlink()
             removed.append(path)
     except OSError:
-        return _restore(changelog, None, removed, sources, CANNOT_REMOVE)
+        return _restore(changelog, None, removed, sources, modes, CANNOT_REMOVE)
 
     staged = changelog.with_name(f"{changelog.name}.fold-tmp")
     try:
@@ -736,7 +739,7 @@ def _mutate(changelog: Path, before: str, after: str, sources: dict[Path, str]) 
             staged.unlink(missing_ok=True)
         except OSError:
             pass
-        return _restore(changelog, before, removed, sources, CANNOT_WRITE)
+        return _restore(changelog, before, removed, sources, modes, CANNOT_WRITE)
     return []
 
 
@@ -745,9 +748,17 @@ def _restore(
     before: str | None,
     removed: list[Path],
     sources: dict[Path, str],
+    modes: dict[Path, int],
     reason: str,
 ) -> list[str]:
     """Put back what the failed mutation had already taken.
+
+    Content and mode, because the tree a fold promises to leave behind
+    is the tree it found and not a copy of its bytes. A fragment is a
+    file with permissions; recreating it with whatever the process
+    default happens to be would satisfy every content assertion while
+    quietly changing what is on disk, and a mode is exactly the kind of
+    thing nobody notices being lost.
 
     `before` is None when the changelog was never reached, which is the
     ordinary case: only the fragments need restoring. A restore that
@@ -759,6 +770,7 @@ def _restore(
         for path in removed:
             with path.open("w", encoding="utf-8", newline="") as out:
                 out.write(sources[path])
+            os.chmod(path, modes[path])
         if before is not None and text_of(changelog) != before:
             with changelog.open("w", encoding="utf-8", newline="") as out:
                 out.write(before)
