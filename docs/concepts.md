@@ -134,12 +134,23 @@ distinct on purpose:
   wire, and it holds four things: a server-minted **id**, a **name**, a
   **location** and the agents it may reach.
 
-  The id is the device's identity and the MAC is only its address. A
-  board can be replaced; what the household told the device it stands
-  in cannot be re-learned, so the id is what per-device memory hangs
-  on and it survives a rename and a board swap. It is minted by the
-  server when the record is created, travels in an exported
-  configuration document, and is never chosen by an operator.
+  The id is the device's identity and the MAC is only its address. It
+  is minted by the server when the record is created, travels in an
+  exported configuration document, is never chosen by an operator, and
+  does not change when the name, the location or the bindings do. That
+  is all it does today, and it is worth saying plainly because the
+  reason it exists reaches further: a board can be replaced, and what
+  the household told the device it stands in cannot be re-learned, so
+  a record identified by the hardware could not outlive it.
+
+  **What a device remembers is still keyed by its MAC**, and replacing
+  a board is not an operation this server has yet (issue #449, M4). The
+  replacement will rewrite the MAC on the record that already exists and
+  move that board's notes onto the new one in the same transaction,
+  which is what having an identity separate from the address makes
+  possible. Recorded sessions are deliberately not part of that: a dated
+  row names the board that was physically connected at the time, and a
+  later swap does not make it untrue.
 
   The name and the location are two different things, and the
   difference is who may write them. The **name** is identity an

@@ -8587,7 +8587,7 @@
       },
       "DeviceRecord": {
         "additionalProperties": false,
-        "description": "One device as the configuration holds it: a stable identity, the\nname a person says out loud, where it stands, and the agents it may\nreach.\n\nThree of the four are optional here and only one of them is\noptional in the database, which is deliberate rather than lax.\nAbsence in a document means \"the repository decides\", and the\nrepository is where it can be decided: it holds the domain writer\nlock and can see the stored row, so an absent id adopts the stored\none or is minted, and an absent name keeps the stored one or takes\nthe `Device <mac>` default. A required `name` here would put a\nmandatory argument on `bind` and on the pending claim, which is the\nflow an operator reaches holding a board and nothing else.\n\n`location` distinguishes absence from null, through\n`model_fields_set`: a document that does not carry the key says\nnothing about where the device is, and a document carrying `null`\nsays it is nowhere in particular. The same distinction\n`default_agent` makes, for the same reason.\n\nThe MAC is not here. The configuration's devices map is keyed by\nMAC and stays keyed by it: keying by name would make a rename read\nto the differ as a removal plus an addition, so an apply would drop\nthe record and mint a fresh id, orphaning exactly the per-device\nmemory the stable id exists to keep.",
+        "description": "One device as the configuration holds it: a stable identity, the\nname a person says out loud, where it stands, and the agents it may\nreach.\n\nThree of the four are optional here and only one of them is\noptional in the database, which is deliberate rather than lax.\nAbsence in a document means \"the repository decides\", and the\nrepository is where it can be decided: it holds the domain writer\nlock and can see the stored row, so an absent id adopts the stored\none or is minted, and an absent name keeps the stored one or takes\nthe `Device <mac>` default. A required `name` here would put a\nmandatory argument on `bind` and on the pending claim, which is the\nflow an operator reaches holding a board and nothing else.\n\n`location` distinguishes absence from null, through\n`model_fields_set`: a document that does not carry the key says\nnothing about where the device is, and a document carrying `null`\nsays it is nowhere in particular. The same distinction\n`default_agent` makes, for the same reason.\n\nThe MAC is not here. The configuration's devices map is keyed by\nMAC and stays keyed by it: keying by name would make a rename read\nto the differ as a removal plus an addition, so an apply would drop\nthe record and mint a fresh id, which is the one thing a stable\nidentity may not do.",
         "properties": {
           "id": {
             "anyOf": [
@@ -8599,7 +8599,7 @@
               }
             ],
             "default": null,
-            "description": "The device's stable identity, 32 lowercase hex digits. Minted by the server when the record is created and unchanged by a rename, a move or a board swap. Leave it out and the stored one is kept.",
+            "description": "The device's stable identity, 32 lowercase hex digits. Minted by the server when the record is created and unchanged by a rename or a move. Leave it out and the stored one is kept.",
             "title": "Id"
           },
           "name": {
@@ -8745,7 +8745,7 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/DeviceRecord"
             },
-            "description": "The devices this deployment serves, keyed by MAC address as the Device-Id header sends it. Each entry is a record: a server-minted id that survives a rename and a board swap, the name the agent says out loud, where the device stands, and the agents it may talk to. A bare list of agent names is accepted as shorthand for a record naming only those agents.",
+            "description": "The devices this deployment serves, keyed by MAC address as the Device-Id header sends it. Each entry is a record: a server-minted id that stays the same as the rest of the record changes, the name the agent says out loud, where the device stands, and the agents it may talk to. A bare list of agent names is accepted as shorthand for a record naming only those agents.",
             "title": "Devices",
             "type": "object"
           },

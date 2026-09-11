@@ -14,11 +14,15 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   server-minted uuid-hex `id`, a `name`, a `location` and the `agents`
   list it always had. The id is the device's identity and the MAC is only
   its address, which is the distinction the record exists for: a board can
-  be replaced, and what the household told the device it stands in cannot
-  be re-learned, so per-device memory hangs on the id rather than on the
-  hardware. The id is minted by the server when a record is created,
-  travels in an exported configuration document, and is never chosen by an
-  operator.
+  be replaced, and a record identified by the hardware could not outlive
+  it. The id is minted by the server when a record is created, travels in
+  an exported configuration document, is never chosen by an operator, and
+  does not change when the name, the location or the bindings do. What a
+  device remembers is still keyed by its MAC, and moving it when a board
+  is replaced is the operation the id is there to make possible, in a
+  later milestone of the same issue; recorded sessions are deliberately
+  left alone, because a dated row names the board that was connected at
+  the time.
 - **`vinga-server config device rename <mac> <name>`**, which gives a board
   the name the agent says out loud about it. Free-form, because a slug
   reads badly in speech, and unique across the deployment once case and

@@ -32,8 +32,9 @@
 #   vinga-server config device relocate aa:bb:cc:dd:ee:ff "the kitchen"
 #
 # A device is a record rather than a binding: binding a board creates
-# one, with the server-minted id its memory and its history hang on and
-# the name `Device <mac>` until somebody gives it a better one. The name
+# one, with a server-minted id that stays the same while the rest of the
+# record changes and the name `Device <mac>` until somebody gives it a
+# better one. What a device remembers is still keyed by its MAC. The name
 # is what the agent says out loud about the board it is speaking
 # through, so it is free-form and unique only once case and spacing are
 # folded together; the location is free text and not unique, because two

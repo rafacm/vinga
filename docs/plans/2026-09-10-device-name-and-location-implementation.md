@@ -144,12 +144,12 @@ Four, each with its reason.
    both the refusal and that the two-step path works.
 3. **A written `id` that disagrees with the stored one is refused rather
    than ignored.** The plan says a stored id wins over an absent one and
-   is silent on a written one that disagrees. Silently ignoring an
-   explicit value is a footgun whose consequence is orphaned per-device
-   memory, so `DEVICE_ID_FIXED` says so. A written id on a MAC with no
-   row is adopted, which is what lets an exported document restore a
-   deployment onto an empty database with its identities intact, and one
-   id given to two devices is refused by `DEVICE_ID_TAKEN`.
+   is silent on a written one that disagrees. An id a write could replace
+   would not be an identity, so `DEVICE_ID_FIXED` says so rather than
+   letting it quietly not happen. A written id on a MAC with no row is
+   adopted, which is what lets an exported document restore a deployment
+   onto an empty database with the identities it had, and one id given to
+   two devices is refused by `DEVICE_ID_TAKEN`.
 4. **`vinga-server/examples/` gains no device fragment.** The plan's
    documentation footprint said "gains or updates the device example".
    There is none to update: `examples/` holds one fragment per
