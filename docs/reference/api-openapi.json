@@ -2507,6 +2507,96 @@
         }
       }
     },
+    "/devices/{mac}/replace": {
+      "post": {
+        "summary": "Replace Device",
+        "description": "Put this device record on another board: the record answers at\nthe new MAC from now on, and its id, its name, its place, its\nbindings and what it remembers go with it.\n\nThe act delete-and-bind cannot make. Deleted and bound again, the\noperator gets a new id, an unnamed device in nowhere in\nparticular, and a memory stranded at an address no board is\nstanding at; this is one transaction that moves the record and\nwhat the room told it, or writes nothing at all.\n\nWhat it does not rewrite is the record of what happened. A\nsession was held with the board that was connected at the time,\nand the row saying so is evidence rather than a reference.\n\nA POST because it addresses the device by the MAC it has and\ncarries the address it is to have, exactly as a rename carries a\nname. Refused 404 for a source MAC with no record; 409 when\nanother record already answers at the new address or the\ndeployment already remembers a board there, neither of which\nretrying clears; 422 for an address that is not a MAC, or one\nthat is the address the device already has.",
+        "operationId": "replace_device_devices__mac__replace_post",
+        "parameters": [
+          {
+            "name": "mac",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mac"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceReplacement"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing of that identity exists.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Either something the board swap would write is already taken, by a device record answering at the new address or by facts remembered about a board that stood there, or the configuration database's write lock is held by another request. A swap may never merge two records or two memories into one, because nothing afterwards could tell them apart and no second swap could separate them, which is why an occupied destination is refused rather than merged. Nothing was changed and neither address is quoted back. The held lock clears on its own and the request can be made again; an occupied destination does not clear, and what clears it is swapping onto an address nothing is bound to, or taking away what is filed under this one.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/devices/{mac}/location": {
       "put": {
         "summary": "Write Device Location",
@@ -8848,6 +8938,22 @@
           "to"
         ],
         "title": "DeviceRename",
+        "type": "object"
+      },
+      "DeviceReplacement": {
+        "additionalProperties": false,
+        "description": "What a board swap carries: the address the record is to answer at\nfrom now on.\n\nA body rather than a second path segment, for `DeviceRename`'s\nreason and more sharply: the device is addressed by the MAC the\nboard it is losing connects with, which is the identity the act is\nperformed on, and the address it is gaining is what the request\ncarries. Two identities in the path would read as though the route\naddressed both records, and the whole point of the act is that there\nis one.",
+        "properties": {
+          "to": {
+            "description": "The MAC of the board this device record is to answer at from now on. Stored in canonical form, so `AA-BB-CC-DD-EE-FF` and `aa:bb:cc:dd:ee:ff` are the same address. It has to be an address no device record already answers at and no memory is filed under, because a swap moves a record onto a board rather than merging two of them.",
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "title": "DeviceReplacement",
         "type": "object"
       },
       "DeviceLocation": {

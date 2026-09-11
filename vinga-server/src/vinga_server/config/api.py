@@ -124,6 +124,7 @@ from vinga_server.config.responses import (
     DeviceBinding,
     DeviceLocation,
     DeviceRename,
+    DeviceReplacement,
     Envelope,
     FieldError,
     McpServerStatus,
@@ -141,7 +142,7 @@ from vinga_server.config.responses import (
     request_body,
 )
 from vinga_server.config.secrets import MASK, SecretLocation, load_keys, provider_identity
-from vinga_server.config.store import Applied, ConfigStore, Renamed
+from vinga_server.config.store import Applied, ConfigStore, Renamed, Replaced
 from vinga_server.conversations import api as conversations
 from vinga_server.db import open_database
 from vinga_server.events import ServerEvents
@@ -413,6 +414,7 @@ ENTITY_MODELS: tuple[type[BaseModel], ...] = tuple(
 REQUEST_MODELS: tuple[type[BaseModel], ...] = (
     DeviceBinding,
     DeviceRename,
+    DeviceReplacement,
     DeviceLocation,
     DefaultAgentName,
     AgentRename,
@@ -453,6 +455,12 @@ _DEFAULT_AGENT_BODY = (
 _DEVICE_RENAME_BODY = (
     'the body has to be a JSON object with exactly one key, "to", holding the name '
     "the device is to have, as a string. Nothing sent is quoted back"
+)
+
+_DEVICE_REPLACEMENT_BODY = (
+    'the body has to be a JSON object with exactly one key, "to", holding the MAC '
+    "of the board the device record is to answer at, as a string. Nothing sent is "
+    "quoted back"
 )
 
 _DEVICE_LOCATION_BODY = (
@@ -659,6 +667,13 @@ _NO_RUNTIME_INFO_DESCRIPTION = _description("no-runtime-info")
 # says which is which, the way the reload's and the diff's do for the
 # same reason.
 _RENAME_OCCUPIED_DESCRIPTION = _description("rename-occupied")
+
+# And the same again for the board swap, which has two destinations
+# rather than one: a device record already answering at the new address,
+# and facts already remembered about a board that stood there. Neither
+# clears by itself, and the shared sentence's "the request can be
+# retried" would describe a retry loop that cannot terminate.
+_SWAP_OCCUPIED_DESCRIPTION = _description("swap-occupied")
 
 # And the shared 422 is about addressing, which is one of three things a
 # rename's own can mean: a new name this deployment cannot address, a
@@ -2680,6 +2695,53 @@ def _writes(api: FastAPI) -> None:
             _binding_notice(snapshot_only=snapshot_only),
         )
 
+    @api.post(
+        "/devices/{mac}/replace",
+        response_model=Acknowledgement,
+        responses=_problems(
+            401, 404, 409, 422, 500, instead={409: _SWAP_OCCUPIED_DESCRIPTION}
+        ),
+        openapi_extra=request_body(DeviceReplacement),
+    )
+    def replace_device(
+        mac: str,
+        body: RawBody,
+        store: StoreDep,
+        pending: PendingDep,
+        snapshot_only: SnapshotOnlyDep,
+    ) -> dict[str, Any]:
+        """Put this device record on another board: the record answers at
+        the new MAC from now on, and its id, its name, its place, its
+        bindings and what it remembers go with it.
+
+        The act delete-and-bind cannot make. Deleted and bound again, the
+        operator gets a new id, an unnamed device in nowhere in
+        particular, and a memory stranded at an address no board is
+        standing at; this is one transaction that moves the record and
+        what the room told it, or writes nothing at all.
+
+        What it does not rewrite is the record of what happened. A
+        session was held with the board that was connected at the time,
+        and the row saying so is evidence rather than a reference.
+
+        A POST because it addresses the device by the MAC it has and
+        carries the address it is to have, exactly as a rename carries a
+        name. Refused 404 for a source MAC with no record; 409 when
+        another record already answers at the new address or the
+        deployment already remembers a board there, neither of which
+        retrying clears; 422 for an address that is not a MAC, or one
+        that is the address the device already has.
+        """
+        replaced = store.replace_device(mac, _replacement(body))
+        # The new board is configured now, so it is not one an operator
+        # may still claim by a code it was showing. Housekeeping for the
+        # reason the bind above says: a claim refuses a device the
+        # configuration has already spoken about anyway.
+        pending.retire(replaced.mac)
+        return _acknowledge(
+            _replaced(replaced), _binding_notice(snapshot_only=snapshot_only)
+        )
+
     @api.put(
         "/devices/{mac}/location",
         response_model=Acknowledgement,
@@ -3057,6 +3119,37 @@ def _renamed(renamed: Renamed) -> str:
     return f"agent {spoken_identity(renamed.old)} renamed to {spoken_identity(renamed.new)}"
 
 
+def _replaced(replaced: Replaced) -> str:
+    """What a board swap says it did: the two addresses, and what moved
+    with the record.
+
+    Composed from the transaction's result rather than from the request,
+    the way every device line here is, so a MAC sent in the other
+    spelling is reported as the row stores it.
+
+    Both addresses are spoken plainly and neither goes through
+    `spoken_identity`, which is the difference from `_renamed` above: a
+    MAC is not free text an operator typed into a row, it is a
+    canonicalized identifier this server refuses to store in any other
+    shape, so there is nothing in one to escape.
+
+    The count is here because it is the one thing a caller cannot go and
+    read: after the commit, the state that had those rows under the old
+    address is gone. And it is worth saying out loud rather than
+    implying, because moving it is the whole reason this verb exists
+    rather than a delete and a bind.
+    """
+    moved = (
+        f"{replaced.facts} remembered fact{'' if replaced.facts == 1 else 's'}"
+        if replaced.facts
+        else "nothing remembered"
+    )
+    return (
+        f"device {replaced.old} answers at {replaced.mac} now, keeping its name, "
+        f"its place, its agents and {moved}"
+    )
+
+
 def _unloaded(agents: Sequence[str], loaded: Collection[str]) -> list[str]:
     """The names a write mentioned that this server has not built an
     agent for, which is what stands between the write and the device."""
@@ -3104,6 +3197,17 @@ def _device_name(body: object) -> str:
     value = _sole_value(body, "to", _DEVICE_RENAME_BODY)
     if not isinstance(value, str):
         raise ConfigError(_DEVICE_RENAME_BODY)
+    return value
+
+
+def _replacement(body: object) -> str:
+    """The address a swap is to move the record to, read and not looked
+    at, for the reason `_to` gives: what an address may be is the
+    repository's decision and is made once there, by the same
+    canonicalization every device path here goes through."""
+    value = _sole_value(body, "to", _DEVICE_REPLACEMENT_BODY)
+    if not isinstance(value, str):
+        raise ConfigError(_DEVICE_REPLACEMENT_BODY)
     return value
 
 

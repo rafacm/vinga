@@ -37,6 +37,10 @@ What it pins:
   that would otherwise refuse the exported document is what makes it
   matter rather than tidy.
 
+- **The route**, which is the other ingress that swaps: the same
+  transaction behind `POST /devices/{mac}/replace`, the two occupied
+  destinations as a 409 and an absent source as a 404.
+
 The live half of the same milestone, a conversation talking across a
 swap, is `tests/unit/test_session_device_swap.py`.
 """
@@ -49,6 +53,8 @@ from typing import Any
 
 import psycopg
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from tests.support.stores import (
@@ -60,6 +66,12 @@ from tests.support.stores import (
 )
 from vinga_server.config import entities
 from vinga_server.config import store as store_module
+
+# `_replaced` is the acknowledgement's line composer, reached by its own
+# name for the one arm the route cannot carry without arranging a whole
+# fixture around it: what a swap says when the board it moved had
+# nothing remembered about it.
+from vinga_server.config.api import _replaced, build_api
 from vinga_server.config.loader import (
     AgentRenameConflictError,
     ConfigError,
@@ -69,6 +81,7 @@ from vinga_server.config.loader import (
     UnknownEntityError,
 )
 from vinga_server.config.models import DatabaseConfig, default_device_name
+from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 from vinga_server.config.store import (
     DEVICE_MAC_TAKEN,
     SAME_MAC,
@@ -165,6 +178,31 @@ def store() -> Iterator[ConfigStore]:
 @pytest.fixture
 def thread() -> str:
     return uuid.uuid4().hex
+
+
+# The token the API is built with, which every request here carries.
+TOKEN = "tok-test-3f7a19c4-never-a-real-secret"
+
+
+@pytest.fixture
+def keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The master key, in the environment before anything opens the
+    database, because the API derives its keys when its lifespan opens
+    the engine."""
+    monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
+
+
+@pytest.fixture
+def api(keys: None) -> FastAPI:
+    return build_api(TOKEN, DatabaseConfig())
+
+
+@pytest.fixture
+def client(api: FastAPI) -> Iterator[TestClient]:
+    """Entered rather than merely constructed: the API's engine is
+    opened by the lifespan a `TestClient` runs as a context manager."""
+    with TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"}) as client:
+        yield client
 
 
 # What the fixture writes
@@ -625,3 +663,104 @@ async def test_a_swap_and_a_swap_back_leave_the_database_as_it_was(
         "a note about somebody else's board"
     ]
     assert [row["device"] for row in rows("sessions")] == [DYING]
+
+
+# The route, which is the other ingress that swaps
+
+
+async def test_the_route_swaps_the_board_and_says_what_moved(
+    client: TestClient, store: ConfigStore, thread: str
+) -> None:
+    """The API reaches the same transaction, and its acknowledgement is
+    composed from what the transaction did rather than from the request:
+    a MAC sent in the other spelling is reported as the row stores it,
+    and the count of notes that moved is the one fact a caller cannot go
+    back and read."""
+    minted = await a_board_that_has_been_lived_with(store, thread)
+
+    answer = client.post(f"/devices/{DYING}/replace", json={"to": FRESH.upper()})
+
+    assert answer.status_code == 200
+    assert answer.json()["wrote"] == (
+        f"device {DYING} answers at {FRESH} now, keeping its name, its place, "
+        "its agents and 2 remembered facts"
+    )
+    read = client.get(f"/devices/{FRESH}").json()["entity"]
+    assert read == {
+        "id": minted,
+        "name": NAME,
+        "location": LOCATION,
+        "agents": [AGENT, BYSTANDER],
+    }
+    assert [row["fact"] for row in memory_rows("facts", owner=FRESH)] == [
+        "the kettle is loud",
+        "the window is usually open",
+    ]
+
+
+async def test_the_acknowledgement_says_when_nothing_was_remembered(
+    store: ConfigStore
+) -> None:
+    """The other arm, which is what a board nobody has said anything to
+    gets. Read off the composer rather than through a request, because
+    what is being pinned is the sentence rather than the route."""
+    a_working_configuration(store)
+    store.bind_device(DYING, [AGENT])
+
+    assert _replaced(store.replace_device(DYING, FRESH)) == (
+        f"device {DYING} answers at {FRESH} now, keeping its name, its place, "
+        "its agents and nothing remembered"
+    )
+
+
+async def test_an_occupied_destination_is_a_409_over_the_route(
+    client: TestClient, store: ConfigStore, thread: str
+) -> None:
+    """A fact about the world rather than a malformed request, which is
+    what the status says, and it is the status both occupied
+    destinations answer under: retrying clears neither, and what does is
+    another address or clearing what is filed under this one."""
+    await a_board_that_has_been_lived_with(store, thread)
+    await a_remembered_note(FRESH, "what the board at the new address was told")
+
+    taken = client.post(f"/devices/{DYING}/replace", json={"to": STRANGER})
+    remembered = client.post(f"/devices/{DYING}/replace", json={"to": FRESH})
+
+    assert (taken.status_code, remembered.status_code) == (409, 409)
+    assert STRANGER not in taken.text and FRESH not in remembered.text
+    assert store.read_device(DYING).entry.name == NAME
+
+
+async def test_swapping_a_board_with_no_record_is_a_404(client: TestClient) -> None:
+    assert (
+        client.post(f"/devices/{DYING}/replace", json={"to": FRESH}).status_code == 404
+    )
+
+
+async def test_an_address_the_device_already_has_is_a_422(
+    client: TestClient, store: ConfigStore
+) -> None:
+    """422 for the reason every other unaddressable request here earns
+    one: the request named something this deployment cannot act on, and
+    nothing about the world has to change for it to keep being true."""
+    a_working_configuration(store)
+    store.bind_device(DYING, [AGENT])
+
+    refused = client.post(f"/devices/{DYING}/replace", json={"to": DYING})
+
+    assert refused.status_code == 422
+    assert DYING not in refused.json()["detail"]
+
+
+async def test_a_body_of_the_wrong_shape_is_refused_quoting_nothing(
+    client: TestClient, store: ConfigStore
+) -> None:
+    a_working_configuration(store)
+    store.bind_device(DYING, [AGENT])
+
+    refused = client.post(
+        f"/devices/{DYING}/replace", json={"to": FRESH, "name": "Kitchen"}
+    )
+
+    assert refused.status_code == 422
+    assert "Kitchen" not in refused.text

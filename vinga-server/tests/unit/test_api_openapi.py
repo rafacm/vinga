@@ -163,6 +163,11 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         # stands.
         "/devices/{mac}/rename": ["post"],
         "/devices/{mac}/location": ["delete", "put"],
+        # And the act on the record's own address, a POST for the reason
+        # the rename above is one: it moves rows in two schemas, it is
+        # not idempotent, and the address it carries is what the record
+        # is to have rather than an attribute of the record it has.
+        "/devices/{mac}/replace": ["post"],
         "/default-agent": ["delete", "get", "put"],
         # The whole domain half in one request, which is a write of the
         # configuration rather than a runtime action: it lands in the
