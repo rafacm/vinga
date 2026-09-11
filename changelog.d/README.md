@@ -26,6 +26,10 @@ milestone's entry from `main` for five merges.
   moved into `CHANGELOG.md` byte for byte: the same list items, the
   same bolding, the same wrapping. What is reviewed on the pull request
   is what the changelog will read.
+- **This directory is a directory.** Replacing it with a file or a
+  symlink is refused rather than read as an empty one, because an
+  empty answer and a switched-off mechanism would otherwise look the
+  same from every run.
 - **This README is not a fragment, and nothing else is exempt.** The
   README is excluded by name so it can sit here without ever being
   folded. Every other file in this directory is a fragment and is held

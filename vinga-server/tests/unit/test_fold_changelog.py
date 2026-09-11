@@ -16,6 +16,7 @@ position that orders two fragments.
 """
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -646,6 +647,67 @@ not_root = pytest.mark.skipif(
     hasattr(os, "geteuid") and os.geteuid() == 0,
     reason="permission bits do not constrain root",
 )
+
+
+def _as_a_regular_file(root: Path) -> None:
+    shutil.rmtree(root / "changelog.d")
+    (root / "changelog.d").write_text("not a directory at all\n", encoding="utf-8")
+
+
+def _as_a_symlink(root: Path) -> None:
+    elsewhere = root.parent / "somewhere-else"
+    elsewhere.mkdir()
+    (elsewhere / "467-smuggled.md").write_text(
+        "### Added\n\n- **An entry from outside the directory.**\n", encoding="utf-8"
+    )
+    shutil.rmtree(root / "changelog.d")
+    (root / "changelog.d").symlink_to(elsewhere, target_is_directory=True)
+
+
+@pytest.mark.parametrize("verb", ["check", "fold"])
+@pytest.mark.parametrize(
+    "replace",
+    [_as_a_regular_file, _as_a_symlink],
+    ids=["a regular file", "a symlink"],
+)
+def test_a_changelog_d_that_is_not_a_directory_is_a_refusal(
+    tmp_path: Path, replace, verb: str
+) -> None:
+    """The directory itself is part of the contract.
+
+    An empty listing used to mean the same thing as a healthy empty
+    directory, so a pull request replacing `changelog.d` with a regular
+    file or a symlink passed `check` with zero fragments and left
+    `main` with the whole mechanism switched off, every run green. It
+    is the dotfile hole one level up, and the answer is the same: a
+    path that is not what it claims is a refusal, not a silence.
+    """
+    root = repo(tmp_path)
+    replace(root)
+
+    done = run(verb, str(root))
+
+    assert done.returncode == 1
+    assert "not a directory" in done.stderr
+    assert "Traceback" not in done.stderr
+
+
+def test_a_symlinked_changelog_is_a_refusal(tmp_path: Path) -> None:
+    """The other path the fold owns, held to the same standard as the
+    directory: a committed symlink here would have the fold read one
+    file and decide the fate of another."""
+    root = repo(tmp_path)
+    fragment(root, "467-a-thing.md", "### Added\n\n- **A thing.**\n")
+    elsewhere = root / "somewhere.md"
+    elsewhere.write_text("# Not the changelog\n", encoding="utf-8")
+    (root / "CHANGELOG.md").unlink()
+    (root / "CHANGELOG.md").symlink_to(elsewhere)
+
+    done = run("fold", str(root))
+
+    assert done.returncode == 1
+    assert "a symlink" in done.stderr
+    assert elsewhere.read_text(encoding="utf-8") == "# Not the changelog\n"
 
 
 @not_root

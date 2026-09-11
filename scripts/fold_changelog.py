@@ -135,12 +135,13 @@ EMPTY_BODY = "a fragment has a class heading with no entry text"
 DATE_HEADING = "a fragment carries a date or top-level heading"
 NO_INTRODUCTION = "a fragment's introduction commit is not in the available history"
 GIT_FAILED = "a git command failed"
-UNREADABLE_CHANGELOG = "CHANGELOG.md is missing or not valid UTF-8"
+UNREADABLE_CHANGELOG = "CHANGELOG.md is missing, a symlink, or not valid UTF-8"
 NOT_ONCE = "an entry would not appear exactly once in the changelog"
 CONFLICT_MARKER = "the changelog would carry a conflict marker"
 OUTSIDE_CHANGED = "the changelog outside the folded sections would change"
 MALFORMED_SECTION = "a folded section would not be well formed"
 PREFIX_TEXT = "a fragment carries text before its first class heading"
+NO_DIRECTORY = "changelog.d is missing, a symlink, or not a directory"
 CANNOT_LIST = "the changelog.d directory cannot be listed"
 CANNOT_REMOVE = "a fragment could not be removed"
 CANNOT_WRITE = "CHANGELOG.md could not be written"
@@ -170,14 +171,23 @@ def fragment_paths(root: Path) -> list[Path]:
     is held to the grammar, and a stray file is a refusal rather than
     a silence.
 
+    The directory itself is part of the contract, and its absence is a
+    refusal rather than an empty answer. An empty listing used to mean
+    the same thing as a healthy empty directory, so a pull request
+    replacing `changelog.d` with a regular file or a symlink passed
+    `check` with zero fragments and left `main` with the mechanism
+    switched off and every run green. A symlink is refused even when
+    it points at a directory: the fold would then read and delete
+    files outside the checkout it is folding.
+
     Enumeration is a filesystem call like any other and fails like one,
     so an unreadable directory is a fixed refusal rather than an
     `OSError` climbing out of the script and printing a traceback with
     repository paths in it.
     """
     directory = root / FRAGMENT_DIR
-    if not directory.is_dir():
-        return []
+    if directory.is_symlink() or not directory.is_dir():
+        raise Refusal(NO_DIRECTORY)
     try:
         listed = sorted(directory.iterdir(), key=lambda p: p.name)
     except OSError:
@@ -606,7 +616,13 @@ def fold(root: Path) -> int:
     if reasons:
         return _fail(reasons)
 
+    # The other path the fold owns, held to being what it claims for
+    # the same reason the directory is: a committed symlink here would
+    # have the fold read one file and, through the replacement below,
+    # decide the fate of another.
     changelog = root / CHANGELOG
+    if changelog.is_symlink() or not changelog.is_file():
+        return _fail([UNREADABLE_CHANGELOG])
     try:
         before = changelog.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
