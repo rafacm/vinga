@@ -944,8 +944,15 @@ Five.
    else. The two storage failures beside it stopped naming a destination
    at all, since one act moves facts onto a name and the other onto an
    address.
-5. **No migration**, as the plan expected, so the CI wheel step's
-   chain-head pin does not move. M4 rewrites a column VALUE.
+5. **One migration, and it moves no row.** The plan expected none, and
+   the operation itself needs none: M4 rewrites a column VALUE. What
+   needed one is a sentence. `memory.facts.owner`'s column comment had
+   said since the schema was written that replacing a device orphans
+   its notes, a comment is committed DDL, and the review round below is
+   where that was caught. `2004_a_swap_moves_memory` is
+   `2003_rename_moves_memory` one clause later and for the same reasons
+   it records; the memory chain's head pin moves with it, in the unit
+   lane, the lifespan pin, two integration lanes and the CI wheel step.
 
 ### Discoveries
 
@@ -980,10 +987,13 @@ Five.
 
 ### What a live conversation does across a swap
 
-It follows the record, and M2 and M3 had already built both halves of
-that: the per-round read is addressed by `id` and the tool's write is
-`relocate_device_by_id`. M4 verified it rather than assuming it, in
-`tests/unit/test_session_device_swap.py`, and the pins are three:
+It follows the record. Two of the three paths it follows the record by
+were already built: M2's per-round read is addressed by `id` and M3's
+tool write is `relocate_device_by_id`. The third was not, and the review
+round below is where that was caught: what a device REMEMBERS is filed
+under a MAC, and the runtime went on addressing the MAC the connection
+opened with. All three are pinned in
+`tests/unit/test_session_device_swap.py`:
 
 - the round after a swap carries the same record's name and place;
 - a swap that frees an address, with a new board bound and named there,
@@ -992,12 +1002,73 @@ that: the per-round read is addressed by `id` and the tool's write is
 - `set_device_location` still writes the record the conversation
   attached to, at whatever address it now stands, with a second board
   bound throughout and asserted untouched so the claim is about WHICH
-  record.
+  record;
+- what the room told the device is still in the next prompt after a
+  swap, and `remember`, `update_memory`, `forget`, `restore_memory` and
+  `recall` all reach the moved rows during a session that is still
+  talking;
+- and a note written at the instant of a swap is carried along by it,
+  with the swap asserted unable to overtake while the write holds the
+  address still.
 
 What is deliberately not claimed is anything about the hardware. A swap
 is a write to a record and does not reach through the wire: the board on
 the other end goes on talking until it stops, and the board that took
 its place reaches the record at its next check-in.
+
+### Review round
+
+External review of PR #470 came back mergeable after fixes, with two
+findings. Both are recorded here because both changed behaviour or a
+committed artifact.
+
+**A conversation in flight lost its device memory across the swap, and
+could re-orphan it.** The transaction moved a device's facts to the new
+address and the runtime went on reading and writing them by the MAC the
+connection opened with: after a swap, in that live session, the prompt
+lost every note the household had given the device, `remember` filed a
+new one at the abandoned address, and update, forget, restore and recall
+could not reach the moved ones. It is M2's review finding one layer
+down, in the schema the id was minted to keep, and this milestone's own
+tests stayed green through it because they covered the name and the
+location and the location tool, none of which is filed under a MAC.
+
+The fix is two answers to one question, which is WHICH address.
+
+Which address is the record's rather than the session's:
+`_memory_context` is resolved per call from the record the conversation
+attached to, so every memory tool and the per-round prompt read address
+the MAC that record stands at now. The prompt's two reads stop being
+concurrent, because one of them is now the other's address; what that
+costs is one round trip on a primary key inside the turnaround a person
+is listening to, and what it buys is a conversation that does not lose
+what the room told it.
+
+When it may move is the second answer, and it is the one with teeth. A
+resolution that is merely READ is stale the moment it is answered, so a
+note written at the instant of a swap would land at the address the swap
+had just emptied. `ConfigStore.device_address` therefore resolves inside
+the transaction that holds the domain writer lock and keeps holding it,
+`DevicePlacements.address` hands that to the tool layer as an async
+context manager, and the three tools that WRITE hold it across the
+write. A swap takes that same lock before it reads anything, so the two
+are totally ordered: the note lands first and the swap carries it, or
+the swap lands first and the note resolves to the address it left.
+Inside the block the memory chain's key 3 is taken after this key 1,
+which is `db.advisory_key`'s ascending order, and the swap takes the
+same two in the same order, so nothing here can close a cycle.
+
+Reads deliberately take no lock. `recall` and the prompt use the address
+the round resolved, because a read one round out of date is exactly the
+staleness every per-round read in this server already has, and a `recall`
+that could fail because an operator was applying a document would be a
+worse answer than a slightly old one.
+
+**The documentation still said a replaced board orphans its notes**, in
+five places, and one of them is a column comment inside every database
+an earlier build migrated. That is what `2004_a_swap_moves_memory` is
+for, and the other four are prose, including one in the committed
+OpenAPI contract that had also been wrong about renames since #356.
 
 ### Verification
 
@@ -1005,12 +1076,19 @@ its place reaches the record at its next check-in.
   `uv run pytest tests/unit -q -n 4 --dist loadfile`,
   `uv run pytest tests/integration -q`, and the generated-document drift
   checks, all from `vinga-server/`.
-- No migration, so the CI wheel step's chain-head pin does not move.
-- Three generated artifacts move: `docs/reference/cli.md` and
-  `docs/reference/api-openapi.json` gain the verb and the route, and the
-  command-spellings census is regenerated. `docs/reference/events.md`
-  and `docs/reference/conversations-schema.md` do not move, because no
-  event gains a field and no stored column changes.
+- One migration, `2004_a_swap_moves_memory` on the memory chain, which
+  alters one column comment and moves no row. The CI wheel step's
+  memory-chain head pin moves with it; the domain and conversations
+  pins do not, and the two branches adding conversations-chain
+  migrations concurrently (#471 and #472, both at `1007`) cannot
+  collide with it.
+- Four generated artifacts move: `docs/reference/cli.md` and
+  `docs/reference/api-openapi.json` gain the verb and the route, the
+  same OpenAPI document carries a corrected description of what a
+  memory owner outlives, and the command-spellings census is
+  regenerated. `docs/reference/events.md` and
+  `docs/reference/conversations-schema.md` do not move, because no event
+  gains a field and no column of the conversation record changes.
 - A new CLI verb also stales a pin nothing in the unit lane can see:
   `test_cli_wheel.py` requires every ungated row of `cli.COMMANDS` to
   have been RUN from the installed binary and answered, so the swap is
@@ -1020,4 +1098,11 @@ its place reaches the record at its next check-in.
   sentence, the memory move dropped (six cases fail), the placeholder
   left behind, the occupied-destination check removed, the route left
   out of the OpenAPI pin, the per-round record read put back to MAC
-  addressing, and the id resolution made sloppy.
+  addressing, and the id resolution made sloppy. The review round's six
+  the same way: with the runtime reverted to the session's MAC, all five
+  of the device-memory cases fail, and with the lock released as soon as
+  it is read, the race's own assertion that a swap cannot overtake fails
+  on the first attempt.
+- The two concurrency pins were run repeatedly rather than once: the
+  race and the two multi-call cases beside it ten times as a group, and
+  the whole file ten times, with no failure in either.
