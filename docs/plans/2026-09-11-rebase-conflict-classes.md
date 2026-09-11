@@ -172,16 +172,31 @@ in merge order, appended after any entries already folded that day.
 ### Enforcement, in three places
 
 - **A PR cannot edit `CHANGELOG.md`.** A step in `docs.yml`, gated
-  on `pull_request` events, fails when the PR diff touches
-  `CHANGELOG.md`. `docs.yml` runs on every PR that touches the file,
-  because `CHANGELOG.md` is not in its `paths-ignore` (which mirrors
-  the server workflow's paths and gains nothing here). The failure
-  message names the remedy: write `changelog.d/<issue>-<slug>.md`.
-  The escape hatch for a genuine correction of history (the #450
-  restoration is the recorded precedent) is the literal phrase
-  `Corrects CHANGELOG history` in the PR body, read from the event
-  payload; it is visible in review, and the check's message says so.
-  Direct pushes to `main` (which AGENTS.md permits for
+  on `pull_request` events, fails when the PR's changed files
+  include `CHANGELOG.md`. `docs.yml` runs on every PR that touches
+  the file, because `CHANGELOG.md` is not in its `paths-ignore`
+  (which mirrors the server workflow's paths and gains nothing
+  here). The mechanics are specified so they are testable: the
+  decision lives in the fold script as a third verb, `guard`, which
+  reads the changed-file list on stdin and the PR body from an
+  environment variable (absent and empty both meaning no body), and
+  exits with the refusal or the pass; the workflow step supplies
+  the file list from the pull-request files API
+  (`gh api --paginate repos/.../pulls/N/files`), which needs no git
+  history and is the same set the review UI shows, and the body
+  from the event payload. The unit suite drives `guard` directly:
+  a list touching `CHANGELOG.md` refuses, one not touching it
+  passes, the exact escape phrase in the body passes, a
+  near-phrase refuses, and a null body refuses without crashing.
+  The failure message names the remedy: write
+  `changelog.d/<issue>-<slug>.md`. The escape hatch for a genuine
+  correction of history (the #450 restoration is the recorded
+  precedent) is the literal phrase `Corrects CHANGELOG history` in
+  the PR body; it is visible in review, and the check's message
+  says so. `docs.yml`'s `pull_request` trigger gains the `edited`
+  activity type beside the defaults, so adding the phrase to the
+  body regenerates the check without a push; the type list is
+  stated in the workflow with this reason. Direct pushes to `main` (which AGENTS.md permits for
   documentation-only changes) are outside the check and outside the
   hazard: they serialize on `main`, so the conflict class this
   removes cannot occur there, and both spellings (a direct
@@ -427,6 +442,14 @@ condensed but faithful; resolutions appended per amendment.
    the checkout does not supply. Specify the diff source and its
    requirements, test forbidden, allowed and null-body cases, and
    make body edits regenerate the check.
+
+   *Resolution.* Adopted. The decision moves into the script as a
+   `guard` verb (file list on stdin, body from the environment),
+   the workflow feeds it the pull-request files API so no git
+   history is needed, the unit suite covers forbidden, allowed,
+   exact-phrase, near-phrase and null-body cases, and `docs.yml`
+   gains the `edited` activity type so a body edit reruns the
+   check.
 
 5. **P2: "Merge order" does not totally order fragments introduced
    by one commit.** Git trees encode no order between files sharing
