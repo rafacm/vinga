@@ -16,10 +16,13 @@ none of it. It erases nothing and addresses nothing by an id; what a
 request names is which question and over which days, and the question
 is named by a word that resolves through a closed mapping derived from
 the declarations, because a relation name cannot be a bound parameter.
-That word, the grouping and both days are resolved before anything is
-opened, so a refusal there has reached no connection: the read takes
-the opener rather than an open connection and enters it around the one
-statement it is for.
+The grouping beside it says which of two relations answers that
+question, the ungrouped view or its per-device sibling, and it resolves
+through the same kind of mapping for the same reason. That word, the
+grouping, the device a per-device read may be narrowed to and both days
+are resolved before anything is opened, so a refusal there has reached
+no connection: the read takes the opener rather than an open connection
+and enters it around the one statement it is for.
 
 The route functions live here and are registered by `config/api.py`'s
 `_application()`, which is the application `document()` renders and the
@@ -150,7 +153,15 @@ from vinga_server.conversations.schema import (
     turns,
 )
 from vinga_server.conversations.store import CONVERSATIONS_CHAIN
-from vinga_server.conversations.views import ALIASES, COMMON, DAY, VIEWS, View
+from vinga_server.conversations.views import (
+    ALIASES,
+    COMMON,
+    DAY,
+    DEVICE,
+    VIEWS,
+    View,
+    grouped,
+)
 from vinga_server.db import is_busy, read_engine, write_engine
 from vinga_server.memory.store import Purged, purge
 from vinga_server.paging import LIMIT_DEFAULT, LIMIT_MAX, MAX_ROW_ID
@@ -270,6 +281,18 @@ _GROUP_REFUSED = (
     + f". It defaults to {GROUPINGS[0]}. What was sent is not quoted back"
 )
 
+# What a `device` sent without the grouping that gives it meaning is
+# told. Refused rather than ignored, and refused rather than taken as a
+# grouping of its own: the ungrouped rows are not one device's, so a
+# filter applied to them would answer a question nobody asked, and
+# inferring the grouping from the filter would make one argument change
+# what another means.
+_DEVICE_UNGROUPED = (
+    f"device names one device of a per-device breakdown, so it is sent with "
+    f"group={GROUPINGS[-1]}. Without it the rows are not broken down by device at "
+    f"all and there is nothing to filter. What was sent is not quoted back"
+)
+
 # What a purge with no selector is told. A refusal rather than a
 # deletion of everything, because a query string that lost its arguments
 # to a shell, a proxy or a typo would otherwise erase the whole store,
@@ -383,7 +406,9 @@ METRICS_PROBLEMS_INSTEAD: dict[int, str] = {
     404: "No metrics view of that name is served. GET /metrics lists the ones that are.",
     422: (
         "One of the query arguments could not be read: a day, the window the two of "
-        "them name, or the grouping. Nothing sent is quoted back."
+        "them name, the grouping, or the device filter, which is only meaningful "
+        "under the grouping that breaks the rows down by device. Nothing sent is "
+        "quoted back."
     ),
     500: (
         "The conversation store cannot be read, or the request failed for a reason "
@@ -568,7 +593,25 @@ GroupQuery = Annotated[
             "How the rows are grouped, one of: "
             + ", ".join(f"`{grouping}`" for grouping in GROUPINGS)
             + f". Defaults to `{GROUPINGS[0]}`, which groups by the view's own "
-            "dimensions and nothing else. Anything else is refused."
+            f"dimensions and nothing else. `{GROUPINGS[-1]}` reads the per-device "
+            "sibling of the same view instead: the same question, with the device "
+            "the session ran on and a label beside it added to what makes a row one "
+            "row, and the answer's `view` carries that relation's own columns. "
+            "Anything else is refused."
+        )
+    ),
+]
+
+MetricDeviceQuery = Annotated[
+    str | None,
+    Query(
+        description=(
+            "Only the rows of this device, by MAC. Colons or dashes, upper or lower "
+            "case; it is normalized before it is matched, the way `/sessions` "
+            f"normalizes the same argument. Only meaningful with `group="
+            f"{GROUPINGS[-1]}`, and refused without it rather than ignored. Absent "
+            "means every device, including the rows of the sessions whose device was "
+            "never understood, which group together under a null."
         )
     ),
 ]
@@ -1031,6 +1074,7 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         since: SinceQuery = None,
         until: UntilQuery = None,
         group: GroupQuery = None,
+        device: MetricDeviceQuery = None,
     ) -> dict[str, Any]:
         """One view over one window of whole UTC days, newest day first.
 
@@ -1053,11 +1097,17 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         # reach no connection reach no statement.
         named = _view(view)
         grouping = _grouping(group)
+        mac = _metric_device(device, grouping)
         since_day, until_day = _window(since, until)
+        # Which of the two relations answers is decided here rather than
+        # in the query builder: both arguments have been through their
+        # own closed set, so what comes back is a declaration this
+        # repository wrote.
+        answering = grouped(named, grouping)
         with _reading(opening) as reader:
-            rows = _aggregated(reader, named, since_day, until_day)
+            rows = _aggregated(reader, answering, since_day, until_day, mac)
         return {
-            "view": _described(named),
+            "view": _described(answering),
             "common": _caveats(),
             "since": since_day.isoformat(),
             "until": until_day.isoformat(),
@@ -1210,6 +1260,24 @@ def _grouping(value: str | None) -> str:
     return value
 
 
+def _metric_device(value: str | None, grouping: str) -> str | None:
+    """The device filter of a per-device read, or the refusal that says
+    what it needs beside it.
+
+    Normalized by the same rule every other MAC in this project is, so
+    `AA-BB-...` and `aa:bb:...` reach the same rows, and refused rather
+    than matched literally when it is not one: an empty page would be a
+    true answer to a question the caller did not mean to ask.
+
+    Held to the grouping before it is parsed at all, because a filter on
+    rows that are not broken down by device is not a narrower question,
+    it is a different one.
+    """
+    if value is not None and grouping == GROUPINGS[0]:
+        raise ConfigError(_DEVICE_UNGROUPED)
+    return _device(value)
+
+
 def _window(since: str | None, until: str | None) -> tuple[dt.date, dt.date]:
     """The two days a request meant, defaults filled in and the pair's
     own rule enforced.
@@ -1298,7 +1366,11 @@ def _caveats() -> list[dict[str, Any]]:
 
 
 def _aggregated(
-    reader: Connection, view: View, since: dt.date, until: dt.date
+    reader: Connection,
+    view: View,
+    since: dt.date,
+    until: dt.date,
+    device: str | None = None,
 ) -> list[dict[str, Any]]:
     """One view's rows over one window, in the total order the
     declaration defines.
@@ -1308,7 +1380,13 @@ def _aggregated(
     last. Those columns are what a row is unique by, so the order is
     total and the same request answers the same page twice; nulls last
     because a null key is usage nobody could attribute, which belongs
-    under the named groups rather than above them.
+    under the named groups rather than above them. On a per-device view
+    that is exactly the plan's ordering: the day, then the device, then
+    whatever else the mirrored view is cut by.
+
+    `device` narrows to one of them and is a normalized MAC or nothing.
+    It is only ever given on a view that has the column, because the
+    grouping that admits it is the grouping that chose the relation.
     """
     relation = _relation(view)
     day = relation.c[DAY]
@@ -1316,9 +1394,10 @@ def _aggregated(
     order += [
         relation.c[key.name].asc().nulls_last() for key in view.keys if key.name != DAY
     ]
-    found = _rows(
-        reader, select(relation).where(day >= since, day <= until).order_by(*order)
-    )
+    criteria: list[ColumnElement[Any]] = [day >= since, day <= until]
+    if device is not None:
+        criteria.append(relation.c[DEVICE] == device)
+    found = _rows(reader, select(relation).where(*criteria).order_by(*order))
     for row in found:
         # A date out of the driver, an ISO day on the wire: the same
         # spelling the request wrote it in, which is what lets an
