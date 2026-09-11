@@ -805,8 +805,8 @@ jobs:
           # The head of the packaged chain. A new migration moves this
           # line, deliberately: a wheel that carried an older chain than
           # the one this commit expects is exactly what the check is for.
-          if revisions != {"1006_metrics_views"}:
-              sys.exit(f"the wheel's conversations chain is at {sorted(revisions)}, not ['1006_metrics_views']")
+          if revisions != {"1007_sessions_name_the_device"}:
+              sys.exit(f"the wheel's conversations chain is at {sorted(revisions)}, not ['1007_sessions_name_the_device']")
           expected = {
               "sessions",
               "conversations",

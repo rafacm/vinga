@@ -256,6 +256,7 @@ carries the per-leg counts, and the per-round, per-model truth is the
 | `id` | `BIGINT` | no | Monotonic row id, never reused. The session list's cursor. |
 | `session` | `TEXT` | no | The session's uuid hex: the join key for every other table here, and the correlation key to the capture triplet of the same name. |
 | `device` | `TEXT` | yes | The device's MAC in canonical form. Null when the session was rejected before one was understood. |
+| `device_name` | `TEXT` | yes | What that device was called when this session opened, exactly as an operator wrote it. A copy rather than a join, and the one column here that is a copy of something next door: `deploy/postgres-init.sql` grants `vinga_ro` this schema and revokes it on `domain`, so an analyst grouping sessions by device can reach a name only if this side carries one. Dated like `agent` beside it and never rewritten, so a rename splits a per-device series here rather than retitling the sessions the device already had, and replacing its board does not touch it either. Null wherever no name is recorded for the session: a board nobody has named, a MAC a default agent covers with no record behind it, and every session that opened before this column existed. |
 | `client` | `TEXT` | yes | The client identifier the device announced, when it announced one. |
 | `agent` | `TEXT` | yes | The agent the session opened with, before any handover. |
 | `agents` | `JSON` | yes | Every agent the device is bound to, as the binding resolved at open. |

@@ -137,6 +137,24 @@ sessions = Table(
         ),
     ),
     Column(
+        "device_name",
+        Text,
+        nullable=True,
+        comment=(
+            "What that device was called when this session opened, exactly as an "
+            "operator wrote it. A copy rather than a join, and the one column here "
+            "that is a copy of something next door: `deploy/postgres-init.sql` "
+            "grants `vinga_ro` this schema and revokes it on `domain`, so an "
+            "analyst grouping sessions by device can reach a name only if this "
+            "side carries one. Dated like `agent` beside it and never rewritten, "
+            "so a rename splits a per-device series here rather than retitling the "
+            "sessions the device already had, and replacing its board does not "
+            "touch it either. Null wherever no name is recorded for the session: a "
+            "board nobody has named, a MAC a default agent covers with no record "
+            "behind it, and every session that opened before this column existed."
+        ),
+    ),
+    Column(
         "client",
         Text,
         nullable=True,
