@@ -8,7 +8,7 @@ questions, and what was discovered on the way.
 
 ## M1: the manifest stops recording positions
 
-PR TBD.
+PR #475.
 
 ### What landed
 
