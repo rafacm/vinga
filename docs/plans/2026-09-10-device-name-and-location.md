@@ -319,7 +319,7 @@ are already in `config/models.py`.
   its swap test is the sharper version of the id-preservation test.
   Design footprint: deepens `config/store.py` with a second three-schema
   operation beside the agent rename; adds no module.
-- [ ] **M5: the analyst can see a name.** A device-name column on
+- [x] **[M5: the analyst can see a name](2026-09-10-device-name-and-location-implementation.md#m5-the-analyst-can-see-a-name).** (PR TBD) A device-name column on
   `record.sessions` beside `sessions.device`, written at session open, on the
   conversations chain. Not a locality violation but a necessity:
   `deploy/postgres-init.sql` grants `vinga_ro` on `record` and explicitly

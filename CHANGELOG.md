@@ -92,6 +92,25 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   it attached to, and a note written at the moment of a swap is carried
   along by it rather than stranded at the address it left.
 
+- **A recorded session says which speaker it happened on** (#449, M5).
+  The session rows in the conversation record gain a `device_name`
+  column beside the MAC, and `session_open` gains the same field on the
+  log side. Both are there for one reader: the read-only analyst role
+  `vinga_ro` is granted the conversation record and deliberately revoked
+  on the configuration schema, so a dashboard grouping sessions by
+  device can never look a MAC up and would show MAC addresses forever.
+  The name is written when the session opens and never rewritten, which
+  is how the agent name beside it already behaves, so renaming a device
+  splits its series in a dashboard rather than retitling the sessions it
+  already had, and replacing its board does not touch them either. A
+  board nobody has named records nothing, rather than the `Device <mac>`
+  placeholder, and so does a MAC a default agent covers with no record
+  behind it. `GET /api/sessions/{session}` and
+  `vinga-server config session show` answer the same field. The
+  location, which is the half a conversation writes, still reaches no
+  event, no span and no capture, and that is permanent: what a person
+  said out loud is not metadata.
+
 - **The ASR and TTS spans carry the provider that ran them** (#450,
   milestone 2). The exporter's two stage tables gain the four provider
   keys under the correspondence the round span already ships: the type
