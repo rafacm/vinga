@@ -1858,6 +1858,10 @@ Commands:
   rename          give one device another name, which is what an agent says out
                   loud about the board it is speaking through; refused if
                   another device answers to it
+  replace         put one device record on another board, keeping its identity,
+                  its name, where it stands, the agents it reaches and what it
+                  remembers; refused if anything is already bound to or
+                  remembered about the new MAC
   relocate        say where one board stands, free-form and not unique
   clear-location  unset where one board stands, leaving it nowhere in particular
   pending         the boards waiting to be claimed, and claiming one
@@ -1946,6 +1950,34 @@ Arguments:
   NAME  the name to give it, free-form and spoken aloud by the agent, which no
         other device may already answer to once case and spacing are folded
         together  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+### `vinga device replace`
+
+```
+Usage: vinga device replace [OPTIONS] {MAC} {NEW_MAC}
+
+  put one device record on another board, keeping its identity, its name, where
+  it stands, the agents it reaches and what it remembers; refused if anything is
+  already bound to or remembered about the new MAC
+
+Arguments:
+  MAC      [required]
+  NEW_MAC  the MAC of the board this device is to answer at from now on, which
+           no other device may already be bound to and nothing may already have
+           been remembered about  [required]
 
 Options:
   --config PATH  path to the YAML config file naming server.port and

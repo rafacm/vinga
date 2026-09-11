@@ -145,6 +145,7 @@ from vinga_server.config.responses import (
     DeviceBinding,
     DeviceLocation,
     DeviceRename,
+    DeviceReplacement,
     Envelope,
     Erasure,
     McpServerStatus,
@@ -5323,6 +5324,10 @@ def _device_location_path(args: Invocation) -> str:
     return _path("devices", args.mac, "location")
 
 
+def _device_replace_path(args: Invocation) -> str:
+    return _path("devices", args.mac, "replace")
+
+
 def _device_name(args: Invocation) -> object:
     """The name a rename is to give the device it addresses, sent as it
     was typed, for the reason `_new_name` is."""
@@ -5331,6 +5336,13 @@ def _device_name(args: Invocation) -> object:
 
 def _device_location(args: Invocation) -> object:
     return {"location": args.location}
+
+
+def _device_replacement(args: Invocation) -> object:
+    """The address the record is to answer at, sent as it was typed, for
+    the reason `_device_name` is: the canonical spelling is the
+    repository's to decide and it decides it once."""
+    return {"to": args.to}
 
 
 def _claim_path(args: Invocation) -> str:
@@ -5394,6 +5406,19 @@ RENAME_DEVICE = Act(
     path=_device_rename_path,
     body=_device_name,
     sends=DeviceRename,
+    answers=Acknowledgement,
+    refusal=UNREADABLE_WRITE,
+    render=_acknowledged,
+)
+
+# The third act on the record, and the one about the hardware rather
+# than about what the household calls it: the board underneath a device
+# is replaced and the record stays.
+REPLACE_DEVICE = Act(
+    method="POST",
+    path=_device_replace_path,
+    body=_device_replacement,
+    sends=DeviceReplacement,
     answers=Acknowledgement,
     refusal=UNREADABLE_WRITE,
     render=_acknowledged,
@@ -6987,6 +7012,11 @@ DEVICE_NAME_HELP = (
 
 DEVICE_LOCATION_HELP = "where the board stands, free-form, as a person would say it"
 
+DEVICE_SWAP_HELP = (
+    "the MAC of the board this device is to answer at from now on, which no other "
+    "device may already be bound to and nothing may already have been remembered about"
+)
+
 SESSION_HELP = "the session's uuid hex, as a listing prints it"
 
 DEVICE_FILTER_HELP = "only the sessions of this board, by MAC (default: every board)"
@@ -8201,6 +8231,33 @@ def _device_renamed_to(row: Command) -> Callable[..., None]:
     return run
 
 
+def _device_replaced_by(row: Command) -> Callable[..., None]:
+    """One device addressed by the MAC it answers at now, with the MAC it
+    is to answer at behind it.
+
+    The address first and the payload second, the route's own order
+    again: `/devices/{mac}/replace` addresses the record by the board it
+    is losing, and the board it is gaining travels in the body. Both
+    positionals are MACs, which is why the second one's metavar says so
+    rather than repeating the first's.
+    """
+
+    def run(
+        context: typer.Context,
+        mac: Annotated[str, typer.Argument(metavar="MAC")],
+        to: Annotated[str, typer.Argument(metavar="NEW_MAC", help=DEVICE_SWAP_HELP)],
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
+    ) -> None:
+        row.perform(
+            _invocation(row, context, config, api_url, force, no_input, mac=mac, to=to)
+        )
+
+    return run
+
+
 def _device_located_at(row: Command) -> Callable[..., None]:
     """The same shape for the other half of the record: the board's MAC,
     and where it stands behind it."""
@@ -8664,6 +8721,40 @@ COMMANDS: tuple[Command, ...] = (
         help=(
             "give one device another name, which is what an agent says out loud about "
             "the board it is speaking through; refused if another device answers to it"
+        ),
+    ),
+    # `replace` is the third verb on the device and the only one about
+    # the hardware. A verb rather than a sub-noun by the rule the two
+    # above are held to: `/devices/{mac}/replace` is a trailing segment
+    # with no identity after it, so it is an attribute of its parent and
+    # reading or writing one is a verb on the parent.
+    #
+    # The word is the act's own. What is replaced is the BOARD, which is
+    # what the payload names, exactly as `rename` replaces the name the
+    # payload names; the device is what survives, which is the whole
+    # point and is what the help says. `swap` was the other candidate
+    # and is what this milestone is called in prose, and it is the wrong
+    # word for a command: a swap is an exchange of two things, and an
+    # address another record already answers at is refused rather than
+    # exchanged.
+    #
+    # `destroys=False` by the guide's line, the same line `agent rename`
+    # answers to: the act is undone by `device replace <new> <old>`,
+    # which the operator has in the shell history of the command they
+    # just typed, and no refusal has to be lifted first because the
+    # address a swap frees is free. What keeps that true is that both
+    # destinations are refused when occupied, so a swap can never merge
+    # two records or two memories and leave a second swap unable to tell
+    # them apart.
+    Command(
+        words=("device", "replace"),
+        kind="device",
+        does=REPLACE_DEVICE,
+        declare=_device_replaced_by,
+        help=(
+            "put one device record on another board, keeping its identity, its name, "
+            "where it stands, the agents it reaches and what it remembers; refused if "
+            "anything is already bound to or remembered about the new MAC"
         ),
     ),
     Command(
