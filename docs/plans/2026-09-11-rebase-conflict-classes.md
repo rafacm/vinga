@@ -250,7 +250,19 @@ named where the rule is stated.
   to the canonical classes present, whatever else the section
   holds; a fixture carries the repository's own duplicate-heading
   and out-of-order legacy shapes and proves them byte-preserved.
-  `check` validates fragments without writing. What its callers stop having to know:
+  `check` validates fragments without writing. The script inherits
+  `check_doc_links.py`'s no-leak contract wholesale, because its
+  inputs (fragment bodies and filenames, changelog content, git
+  output) are repository-derived text landing in a public CI log:
+  every diagnostic is a fixed sentence naming a path-free fact and
+  a count, never reproducing fragment text, headings, filenames,
+  git stderr, exception text or tracebacks; fragment paths that are
+  symlinks or otherwise non-regular files are refused before any
+  read; git runs as an argument-list subprocess with both streams
+  captured and never re-emitted; and the subprocess suite plants a
+  credential-shaped sentinel in a fragment body, a filename, and a
+  constructed git failure, asserting its absence from stdout and
+  stderr for every refusal family. What its callers stop having to know:
   the fold workflow and anyone folding by hand stop knowing Keep a
   Changelog ordering, section insertion, date derivation and the
   verbatim-move contract; they run one command and read its exit
@@ -400,6 +412,12 @@ condensed but faithful; resolutions appended per amendment.
    argument-list subprocesses with captured git diagnostics, and
    credential-sentinel assertions over both streams for every
    refusal family.
+
+   *Resolution.* Adopted in full. The fold script's module entry
+   now states the inherited contract: fixed path-free diagnostics,
+   symlink and non-regular refusal before reading, captured git
+   streams never re-emitted, and sentinel assertions over stdout
+   and stderr planted in a body, a filename and a git failure.
 
 4. **P2: The PR refusal escape hatch is not operationally complete
    or tested.** `docs.yml` uses the default `pull_request` activity
