@@ -64,8 +64,13 @@ server workflow's paths: it checks internal links and anchors
 (`scripts/check_doc_links.py`) and runs the command-spellings census,
 which sweeps every tracked file, so a documentation change can stale
 it: a spelling a document starts or stops quoting, or a move that gives
-one another class. Between the two workflows every change runs the
-census somewhere.
+one another class. On a pull request it also refuses an edit to
+`CHANGELOG.md` and holds every `changelog.d/` fragment to its shape.
+Between the two workflows every change runs the census somewhere. A
+third workflow, `.github/workflows/changelog-fold.yml`, runs only on a
+push to `main` that touches `changelog.d/`: it folds the fragments into
+the dated changelog section and pushes the result, which is the one bot
+commit this repository makes.
 
 ### Restoring a file mid-experiment
 
@@ -116,21 +121,38 @@ something, run because the tedious alternative invited automating it.
   grepping for the milestone's own symbols, and the unit-test count,
   which is what actually caught the nineteen lost commits.
 
-Two conflicts recur on almost every rebase here and both have a known
-resolution: the dated `CHANGELOG.md` section, where both sides' `###`
-headings merge into one section in Keep a Changelog order rather than
-one side winning, and `tests/unit/command-spellings.txt`, which is
-generated and must be **regenerated on the rebased tree** rather than
-merged, since a textual merge of it is a state no generator produced.
-The manifest records no positions, so a change that only shifts a line
-leaves it alone: it moves when the distinct set of classified spellings
-moves, one line per spelling added, removed or reclassified, which git
-merges cleanly. Regenerating on the rebased tree stays the rule for the
-times it does conflict, and `test_the_manifest_is_the_census` is what
-enforces it, in both workflows: the manifest is rendered again and
-diffed, so a spliced resolution is a red run rather than a committed
-state no generator produced. #467 tracks removing both conflict
-classes.
+Two files used to conflict on almost every rebase here. One of those
+conflict classes is gone and the other has a known resolution.
+
+The dated `CHANGELOG.md` section can no longer conflict, because a
+branch never edits that file. It writes one
+`changelog.d/<issue>-<slug>.md` with the entry in final form, and
+`.github/workflows/changelog-fold.yml` folds the fragments into the
+dated section on `main` after the merge; a `docs.yml` step refuses a
+pull request that touches `CHANGELOG.md`, naming the fragment as the
+remedy. Two branches adding two files have nothing to merge, so there
+is no recipe here any more: `changelog.d/README.md` states the
+contract, and a rebase that still reports a `CHANGELOG.md` conflict
+means a branch edited the file and should not have.
+
+`vinga-server/tests/unit/command-spellings.txt` is the one that
+remains. It is generated and must be **regenerated on the rebased
+tree** rather than merged, since a textual merge of it is a state no
+generator produced. The manifest records no positions, so a change
+that only shifts a line leaves it alone: it moves when the distinct
+set of classified spellings moves, one line per spelling added,
+removed or reclassified, which git merges cleanly. Regenerating on the
+rebased tree stays the rule for the times it does conflict, and
+`test_the_manifest_is_the_census` is what enforces it, in both
+workflows: the manifest is rendered again and diffed, so a spliced
+resolution is a red run rather than a committed state no generator
+produced.
+
+And the habit both classes taught, which outlives them: after any
+rebase, grep the tree for conflict markers before pushing, and count
+what should have changed. A resolution that left a marker behind, or
+that dropped a hunk, is invisible in a diff nobody reads line by
+line.
 
 
 ## Workflow
@@ -230,7 +252,17 @@ verb or a flag.
 - `CHANGELOG.md` follows Keep a Changelog 1.1.0, but with dates
   (`## YYYY-MM-DD`) as section headers instead of version numbers. Group
   entries under `### Added`, `### Changed`, `### Deprecated`, `### Removed`,
-  `### Fixed`, `### Security`. Update it with every notable change.
+  `### Fixed`, `### Security`. Record every notable change, and record it
+  as a fragment: a branch writes `changelog.d/<issue>-<slug>.md` carrying
+  those `###` headings and the entry text exactly as it should read in
+  `CHANGELOG.md`, states no date (the fold derives the day from the
+  commit that brought the fragment onto `main`), and never edits
+  `CHANGELOG.md` itself. The fold workflow moves the text into the dated
+  section after the merge, and a pull-request check refuses the direct
+  edit; `changelog.d/README.md` states the contract. A
+  documentation-only change pushed straight to `main` may still edit the
+  file, since nothing can conflict with it there, and either spelling
+  works for one.
 - Name open-source orchestrators and tooling where naming them is what
   makes a procedure runnable: Kubernetes, Docker Compose, an ingress
   controller. Do not name specific hosting providers in documentation;
