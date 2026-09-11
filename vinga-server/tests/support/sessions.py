@@ -48,6 +48,7 @@ from tests.support.stores import memory as lane_memory
 from vinga_server.config import Config
 from vinga_server.config.models import normalize_mac
 from vinga_server.conversations.store import Half
+from vinga_server.device.bindings import DeviceBindings
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import SessionEvents
 from vinga_server.filler import build_agent_fillers
@@ -123,6 +124,7 @@ def device_session(
     generations: Generations | None = None,
     threads: Any = None,
     fallbacks: dict[str, Any] | None = None,
+    devices: Any = None,
 ) -> session_module.DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one: the agents resolved from the binding, then the
@@ -161,7 +163,14 @@ def device_session(
     absence, because there is no deployment without a memory store
     (#314). None means the lane's own, which is empty unless the test
     put something in it; a suite that wants a store which cannot reach
-    its database hands one in."""
+    its database hands one in.
+
+    `devices` is the view a reply asks what device it is speaking
+    through, and it defaults the way a server with no database composes
+    one: over the world being served, which answers from the device
+    records that world holds. A suite about a record changing under a
+    running conversation hands in a view with an engine behind it,
+    which is the other shape `app.py` builds."""
     if generations is None:
         generations = world(
             config,
@@ -175,6 +184,7 @@ def device_session(
         memory if memory is not None else lane_memory(),
         conversations,
         threads,
+        devices if devices is not None else DeviceBindings.snapshot_only(generations),
     )
     session = session_module.DeviceSession(cast(Any, websocket), generations, factory)
     # White-box, deliberately, and the only four sites in this file that
@@ -217,6 +227,7 @@ def session_for(
     generations: Generations | None = None,
     threads: Any = None,
     fallbacks: dict[str, Any] | None = None,
+    devices: Any = None,
 ) -> DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one, with the named agents' LLMs replaced by
@@ -234,6 +245,7 @@ def session_for(
         generations,
         threads,
         fallbacks,
+        devices,
     )
 
 
@@ -243,6 +255,7 @@ def session_with(
     memory: MemoryStore | None = None,
     mac: str = POET_MAC,
     config: Config | None = None,
+    devices: Any = None,
 ):
     return session_for(
         config if config is not None else base_config(),
@@ -250,6 +263,7 @@ def session_with(
         scripts,
         memory=memory,
         mcp_servers=servers,
+        devices=devices,
     )
 
 

@@ -488,12 +488,20 @@ async def _build_composition(
     # opens nothing until it is asked; whether a conversation may be
     # resumed is the runtime's own read of the section, so the switch
     # has one home rather than a second one here.
+    #
+    # The bindings view goes in for the same reason it exists at all: a
+    # reply asks it what device it is speaking through, on every round,
+    # because an operator or a conversation can move a device while the
+    # conversation is happening. One view for both questions, so there
+    # is one engine over those rows and one place a failed read of them
+    # is logged and fallen back from.
     runtime_factory = bespoke_runtime_factory(
         generations,
         mcp_servers,
         memory,
         conversations,
         None if conversations is None else threads.Reads(database),
+        bindings,
     )
     # What a device says about itself at OTA check-in, kept for the
     # session that follows: a capture manifest needs the firmware
