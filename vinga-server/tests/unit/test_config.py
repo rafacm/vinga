@@ -1287,7 +1287,8 @@ def test_device_macs_are_normalized() -> None:
             "devices": {"AA-BB-CC-DD-EE-FF": ["assistant"]},
         }
     )
-    assert config.devices == {"aa:bb:cc:dd:ee:ff": ["assistant"]}
+    assert list(config.devices) == ["aa:bb:cc:dd:ee:ff"]
+    assert config.devices["aa:bb:cc:dd:ee:ff"].agents == ["assistant"]
     assert config.agents_for_device("AA:BB:CC:DD:EE:FF") == ["assistant"]
     assert config.agents_for_device("11:22:33:44:55:66") == ["assistant"]
 
@@ -1307,12 +1308,12 @@ def test_a_device_can_be_bound_to_several_agents() -> None:
 
 
 def test_a_binding_written_as_one_name_is_refused() -> None:
-    """A binding is a list of agent names, and a bare string is not one
-    of them any more. Composing a configuration from a raw mapping is
-    the one route that reaches the field with something a write path
-    has not already shaped, so it is where the refusal is asked for,
-    and the refusal is the field's own type reported against the device
-    it was written under."""
+    """A device entry is a record or the bare agent list that is
+    shorthand for one, and a string is neither. Composing a
+    configuration from a raw mapping is the one route that reaches the
+    field with something a write path has not already shaped, so it is
+    where the refusal is asked for, and the refusal is the field's own
+    type reported against the device it was written under."""
     data = {
         "agents": {"assistant": {}},
         "devices": {"aa:bb:cc:dd:ee:ff": "assistant"},
@@ -1322,7 +1323,7 @@ def test_a_binding_written_as_one_name_is_refused() -> None:
 
     message = str(excinfo.value)
     assert "devices.aa:bb:cc:dd:ee:ff" in message
-    assert "valid list" in message
+    assert "valid dictionary" in message
 
 
 def test_a_binding_that_is_a_pasted_credential_is_not_repeated() -> None:
