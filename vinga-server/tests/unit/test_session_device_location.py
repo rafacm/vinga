@@ -291,32 +291,52 @@ async def test_the_write_runs_off_the_event_loop() -> None:
 
 
 @contextlib.asynccontextmanager
-async def the_first_write_parked() -> Any:
-    """The first relocation held until a second one arrives.
+async def the_first_write_held_until_a_second_finishes() -> Any:
+    """The first relocation held until a second one has FINISHED, and a
+    record of when each of them ran.
 
     The shape `test_session_tools.py` uses for the memory writes, at the
-    seam the tool loop awaits: whichever call the model issued first is
-    parked, and a second one arriving releases it. Run one at a time,
-    nothing ever arrives to release the first, so it waits out the bound
-    and the second one never parks at all.
+    seam the tool loop awaits, with one thing changed and it is the
+    thing that makes this a proof. Releasing the first as soon as the
+    second ARRIVED left the two real writes racing for the domain lock
+    afterwards: unordered, the second could still take it last and leave
+    the right answer standing, so the assertion passed sometimes and the
+    regression went unnoticed. A flaky proof reads exactly like a proof.
+
+    So a second call runs its write to completion before the first is
+    let go. Unordered, the two overlap and the first one commits last,
+    which is the wrong place every time; ordered, no second call ever
+    arrives while the first is running, so the first waits out the bound
+    and they run in the model's order. The timeline is recorded as well,
+    because "these two never overlapped" is the claim itself rather than
+    a consequence of it.
     """
-    arrived = asyncio.Event()
+    finished = asyncio.Event()
     started = 0
+    running = 0
+    overlapped = False
     real = DevicePlacements.relocate
 
     async def relocate(self: DevicePlacements, device: str, location: str) -> str:
-        nonlocal started
+        nonlocal started, running, overlapped
         started += 1
-        if started > 1:
-            arrived.set()
-        else:
+        mine = started
+        if mine == 1:
             with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(arrived.wait(), OVERTAKE_S)
-        return await real(self, device, location)
+                await asyncio.wait_for(finished.wait(), OVERTAKE_S)
+        running += 1
+        overlapped = overlapped or running > 1
+        try:
+            written = await real(self, device, location)
+        finally:
+            running -= 1
+        if mine > 1:
+            finished.set()
+        return written
 
     with pytest.MonkeyPatch.context() as patching:
         patching.setattr(DevicePlacements, "relocate", relocate)
-        yield
+        yield lambda: overlapped
 
 
 async def test_two_places_in_one_round_land_in_the_model_s_order() -> None:
@@ -327,10 +347,14 @@ async def test_two_places_in_one_round_land_in_the_model_s_order() -> None:
     Run concurrently, the two writes take the domain writer lock in
     whatever order the pool hands the connections out, and the office
     would stand about half the time. `set_device_location` is in
-    `ORDERED_TOOL_NAMES` for exactly this, and parking the first write
-    until a second arrives is what makes the difference observable: with
-    the loop running them one at a time, no second write ever arrives to
-    release the first.
+    `ORDERED_TOOL_NAMES` for exactly this.
+
+    What makes the difference observable is holding the first write
+    until a second has finished its own: unordered, the first then
+    commits last and leaves the office every time, and ordered, no
+    second write is ever in flight to hold it. The overlap is asserted
+    beside the answer, because not overlapping is the property and the
+    stored place is only its consequence.
     """
     a_named_board()
     script = ScriptedLlm(
@@ -344,10 +368,14 @@ async def test_two_places_in_one_round_land_in_the_model_s_order() -> None:
     )
 
     with placements() as writing, a_session(script, relocations=writing) as session:
-        async with the_first_write_parked():
+        async with the_first_write_held_until_a_second_finishes() as overlapped:
             await run_reply(session, "you are in the office, no, the landing")
 
     assert stored_location() == LANDING
+    # And they never ran at the same time, which is the claim itself:
+    # the answer above would be the right one by luck in a round that
+    # let them race and happened to commit in the model's order.
+    assert not overlapped()
     # And both were answered, in the order the model asked: a round that
     # ran them one at a time still hands the model one result per call.
     assert said(script) == [
