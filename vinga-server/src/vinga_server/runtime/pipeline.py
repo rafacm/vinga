@@ -633,6 +633,7 @@ class PipelineRuntime:
         threads: resumption.ThreadReads | None = None,
         purge: Callable[[Sequence[str]], object] | None = None,
         devices: DeviceRecords | None = None,
+        relocations: builtin.DeviceRelocations | None = None,
         device: LiveDevice | None = None,
     ) -> None:
         self._output = output
@@ -670,6 +671,14 @@ class PipelineRuntime:
         # is stable, the location is not, and the tool that moves a
         # device is reached from inside the conversation it moves.
         self._devices = devices
+        # And the other direction through the same rows: how a
+        # conversation says its device has been moved. None is a server
+        # that cannot write device records at all, which is one composed
+        # from a configuration it was handed rather than from a store,
+        # and the tool then refuses with a sentence saying so rather
+        # than not being offered. It goes no further than the builtin
+        # source below: nothing else in a reply writes a device.
+        self._relocations = relocations
         # And the record this conversation attached to, resolved by the
         # edge in the same snapshot the binding came from and never
         # replaced. It is an ADDRESS and not a value: what a round
@@ -816,6 +825,14 @@ class PipelineRuntime:
                 self._memory_context,
                 self._remembering_now,
                 self._resumption,
+                relocations,
+                # The record this conversation attached to, as the
+                # address every write to it uses, for the reason every
+                # read of it uses one: a MAC is where a board is
+                # standing and an id is which record it is. None is a
+                # board with no record, whose conversation is told it
+                # has nowhere to write a place to.
+                None if device is None else device.id,
             ),
             DeviceTools(output, DEFAULT_TOOL_TIMEOUT_S),
             McpTools(mcp_servers, DEFAULT_TOOL_TIMEOUT_S),
@@ -3156,6 +3173,7 @@ def bespoke_runtime_factory(
     conversations: TurnStore | None = None,
     threads: resumption.ThreadReads | None = None,
     devices: DeviceRecords | None = None,
+    relocations: builtin.DeviceRelocations | None = None,
 ) -> RuntimeFactory:
     """The composition root's half of the seam: everything this runtime
     needs that outlives one connection, closed over once at startup.
@@ -3212,6 +3230,14 @@ def bespoke_runtime_factory(
     no view, which is an embedded caller and a test lane, and its
     replies say nothing about the device.
 
+    `relocations` is the write side of those same rows, closed over for
+    the same reason and separate from the read for two: it goes through
+    the repository rather than through a read-only connection, and what
+    it is handed is the engine this process writes its configuration
+    with. None is the same composition `devices` calls None, and its
+    conversations are told they cannot move their device rather than
+    offered no way to say so.
+
     That record is the one argument here that is neither closed over nor
     read off the world: it belongs to one connection, and it comes in
     beside the agents because it was resolved with them, in one snapshot
@@ -3245,6 +3271,7 @@ def bespoke_runtime_factory(
             threads,
             memory.purge_threads if conversations is None else None,
             devices,
+            relocations,
             device,
         )
 

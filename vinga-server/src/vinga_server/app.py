@@ -39,12 +39,14 @@ from vinga_server.config.responses import (
     RuntimeInfo,
 )
 from vinga_server.config.secrets import SecretStore
+from vinga_server.config.store import ConfigStore
 from vinga_server.conversations import ConversationStore, open_conversations, threads
 from vinga_server.conversations.store import (
     erasures_announced_to,
     renames_announced_to,
 )
 from vinga_server.device.bindings import DeviceBindings
+from vinga_server.device.placement import DevicePlacements
 from vinga_server.events import ServerEvents, attach_server_tap, detach_server_tap
 from vinga_server.events.catalog import CaptureDisabled, CaptureEnabled
 from vinga_server.events.live import LiveEvents
@@ -467,6 +469,45 @@ async def _build_composition(
         else DeviceBindings.snapshot_only(generations)
     )
     stack.callback(bindings.dispose)
+    # The configuration database this process writes its domain half
+    # through, opened once here rather than on every request (#142), and
+    # migrated in the same call because nothing may assume boot ran: an
+    # API-first deployment builds this application over a database that
+    # has no schema yet, and the check is a cheap no-op for one that
+    # has. The keys the store decrypts with are derived in the same
+    # breath, inside the handle. A lock another writer is holding
+    # refuses here, as the retryable database refusal, which is part of
+    # the boot taxonomy the lifespan above turns into one sentence.
+    #
+    # This is the mounted owner of the configuration API's engine.
+    # Starlette runs no lifespan for a mounted application, so the one
+    # `build_api` gave that application never runs and there is no
+    # second engine to collide with.
+    #
+    # Opened here, in front of the runtime factory rather than beside
+    # the API it was opened for, because it has a second consumer as of
+    # #449: a conversation that is told its device has moved writes that
+    # through the same repository an operator's command writes through,
+    # and therefore through the same engine. One writer, one advisory
+    # lock and one pool over the domain half, rather than a second pool
+    # for the one column a room may change. Registered earlier on the
+    # stack, so it is disposed later: the drain has asked every
+    # conversation to finish before the engine those conversations may
+    # have been writing through goes away.
+    store = stack.enter_context(open_store(database))
+    # How a conversation says where its device is: the repository over
+    # that engine, translated into what a tool may say. Absent for a
+    # server composed from a configuration it was handed, which is the
+    # mode every surface spanning a store and a running world refuses
+    # in, and for the same reason: the database this engine reaches
+    # describes some other server, or none. Its conversations are told
+    # they cannot move their device rather than left to answer "all
+    # right" and change nothing.
+    relocations = (
+        DevicePlacements(ConfigStore(store.engine, store.keys))
+        if seed.from_store
+        else None
+    )
     # One registry per app: what decides whether there is room for the
     # next conversation, what the drain reaches the live ones through,
     # and which world each of them is holding, which is what says when a
@@ -502,6 +543,7 @@ async def _build_composition(
         conversations,
         None if conversations is None else threads.Reads(database),
         bindings,
+        relocations,
     )
     # What a device says about itself at OTA check-in, kept for the
     # session that follows: a capture manifest needs the firmware
@@ -601,25 +643,6 @@ async def _build_composition(
         # subscribes a reader to (#342).
         live=live,
     )
-    # The configuration database, opened once here rather than on every
-    # request (#142), and migrated in the same call because nothing may
-    # assume boot ran: an API-first deployment builds this application
-    # over a database that has no schema yet, and the check is a cheap
-    # no-op for one that has. The keys the store decrypts with are
-    # derived in the same breath, inside the handle. A lock another
-    # writer is holding refuses here, as the retryable database refusal,
-    # which is part of the boot taxonomy the lifespan above turns into
-    # one sentence.
-    #
-    # This is the mounted owner. Starlette runs no lifespan for a mounted
-    # application, so the one `build_api` gave that application never
-    # runs and there is no second engine to collide with.
-    #
-    # The handle is installed through `installed`, registered after the
-    # open and therefore unwound before it, which is what keeps a request
-    # arriving after teardown from finding a handle whose engine would
-    # open fresh connections nobody owns.
-    store = stack.enter_context(open_store(database))
     stack.enter_context(installed(api_runtime, store))
     seed.api.state.api_runtime = api_runtime
     # The one thing on this app's state a handler reads back: the fields
