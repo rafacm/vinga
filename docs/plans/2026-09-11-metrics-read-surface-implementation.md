@@ -465,7 +465,9 @@ PR TBD.
 ### What landed
 
 Four more views in the `record` schema, one per question, added by
-`1007_metrics_views_by_device`:
+`1008_metrics_views_by_device` (numbered 1007 when this milestone was
+cut, renumbered in the final rebase behind #472's
+`1007_sessions_name_the_device`):
 `metrics_stage_latency_by_device_daily`, `metrics_tokens_by_device_daily`,
 `metrics_event_rates_by_device_daily` and
 `metrics_sessions_by_device_daily`. Each is the view it mirrors with the
@@ -649,7 +651,7 @@ honest.
   config cli-reference`. The spelling census was regenerated rather than
   edited.
 - The conversations chain pin in `.github/workflows/vinga-server.yml`
-  moved to `1007_metrics_views_by_device`, and so did `HEAD` in
+  moved to `1008_metrics_views_by_device`, and so did `HEAD` in
   `tests/unit/test_conversations_schema.py`. The CI check is the only
   place the first would have failed, which is why it is worth saying
   twice.
