@@ -633,7 +633,7 @@ class PipelineRuntime:
         threads: resumption.ThreadReads | None = None,
         purge: Callable[[Sequence[str]], object] | None = None,
         devices: DeviceRecords | None = None,
-        relocations: builtin.DeviceRelocations | None = None,
+        device_access: builtin.DeviceAccess | None = None,
         device: LiveDevice | None = None,
     ) -> None:
         self._output = output
@@ -681,6 +681,15 @@ class PipelineRuntime:
         # conversation that is still talking. None is a board with no
         # record, whose replies say nothing about their device.
         self._attached = device
+        # And the seam that holds that record's address still while a
+        # tool writes what the device remembers. The same object the
+        # location tool writes through, asked one question earlier: it
+        # owns the domain writer lock, which is what orders a `remember`
+        # against a board swap (#449, M4). None is a server that keeps
+        # no writable records, whose device memory is filed under the
+        # board this session is talking to and cannot be moved by
+        # anything.
+        self._filing = device_access
         # The conversation's content channel, beside the event tap and
         # separate from it on purpose: tool arguments and results never
         # rode the events, and the events are losing their text (#120).
@@ -823,7 +832,7 @@ class PipelineRuntime:
                 # write those records at all, and the tool then refuses
                 # with a sentence saying so rather than not being
                 # offered.
-                relocations,
+                device_access,
                 # And the record this conversation attached to, as the
                 # address every write to it uses, for the reason every
                 # read of it uses one: a MAC is where a board is
@@ -927,15 +936,36 @@ class PipelineRuntime:
         current = self._generations.current().config
         return current if agent in current.agents else self._generation.config
 
-    def _memory_context(self) -> builtin.MemoryContext:
+    async def _memory_context(self) -> builtin.MemoryContext:
         """Which memory this session's tool calls belong to, asked at the
         moment a call runs.
 
-        Not kept, because two of the three moves a reply can make change
+        Not kept, because three of the four moves a reply can make change
         the answer: a note written after a session has moved to another
-        thread belongs to the thread it is on now.
+        thread belongs to the thread it is on now, and a note written
+        after its board has been replaced belongs to the address that
+        record stands at now (#449, M4).
+
+        The device half is read here rather than taken from the session
+        because a device's facts are filed under a MAC and the MAC this
+        session dialled is not necessarily the one its record stands at
+        any more. The record is resolved by the same lock-free read a
+        round's prompt uses, which is enough for the two calls that only
+        READ memory; the three that write ask `filing` for it again and
+        hold it, because between an answer and a row is exactly where a
+        swap fits.
+
+        Falls back to the address this session is talking to, which is
+        where a board with no record has always filed its facts and
+        where a runtime composed without a store files all of them.
         """
-        return builtin.MemoryContext(self._device, self._conversation)
+        record = await self._device_record()
+        return builtin.MemoryContext(
+            device=self._device if record is None else record.mac,
+            conversation=self._conversation,
+            record=None if self._attached is None else self._attached.id,
+            filing=self._filing,
+        )
 
     @property
     def _turns(self) -> list[Turn]:
@@ -2810,25 +2840,32 @@ class PipelineRuntime:
         the second of them, and the activation may be an hour of
         conversation behind.
 
-        The two reads are started together, because they are two round
-        trips to two schemas and a reply should wait for one of them
-        rather than for both in a row: this runs inside the turnaround
-        a person is listening to.
+        The two reads used to be started together, and are not any more,
+        because one of them is now the other's address. A device's facts
+        are filed under a MAC, a board swap moves the record and its
+        facts to another one in one transaction (#449, M4), and a memory
+        read addressed by the MAC this session dialled would answer with
+        an empty device scope for the rest of the conversation. So the
+        record is read first and its address is what the scopes are read
+        under. What that costs is one round trip inside the turnaround a
+        person is listening to, on a primary key, against the same
+        database; what it buys is that a conversation does not lose what
+        the room told it because somebody changed the hardware.
+
+        The fallback is the session's own address, which is where a
+        board with no record has always filed its facts and where a
+        runtime with no view files all of them.
         """
         assert self._know_how is not None and self._agent is not None
         assert self._conversation is not None
+        record = await self._device_record()
         if not self._remembering_now():
-            return prompt.with_scopes(
-                self._know_how, NOTHING_REMEMBERED, await self._device_record()
-            ).text
-        scopes, record = await asyncio.gather(
-            asyncio.to_thread(
-                self._memory.read_for_prompt,
-                self._agent,
-                self._device,
-                self._conversation,
-            ),
-            self._device_record(),
+            return prompt.with_scopes(self._know_how, NOTHING_REMEMBERED, record).text
+        scopes = await asyncio.to_thread(
+            self._memory.read_for_prompt,
+            self._agent,
+            self._device if record is None else record.mac,
+            self._conversation,
         )
         return prompt.with_scopes(self._know_how, scopes, record).text
 
@@ -3171,7 +3208,7 @@ def bespoke_runtime_factory(
     conversations: TurnStore | None = None,
     threads: resumption.ThreadReads | None = None,
     devices: DeviceRecords | None = None,
-    relocations: builtin.DeviceRelocations | None = None,
+    device_access: builtin.DeviceAccess | None = None,
 ) -> RuntimeFactory:
     """The composition root's half of the seam: everything this runtime
     needs that outlives one connection, closed over once at startup.
@@ -3228,13 +3265,18 @@ def bespoke_runtime_factory(
     no view, which is an embedded caller and a test lane, and its
     replies say nothing about the device.
 
-    `relocations` is the write side of those same rows, closed over for
-    the same reason and separate from the read for two: it goes through
-    the repository rather than through a read-only connection, and what
-    it is handed is the engine this process writes its configuration
-    with. None is the same composition `devices` calls None, and its
-    conversations are told they cannot move their device rather than
-    offered no way to say so.
+    `device_access` is the other side of those same rows, closed over
+    for the same reason and separate from the read for two: it goes
+    through the repository rather than through a read-only connection,
+    and what it is handed is the engine this process writes its
+    configuration with. Two things reach it, which is why it is not
+    called the relocation: a room saying where the device is, and a room
+    writing what the device remembers, which has to resolve the record's
+    address under the same lock a board swap takes (#449, M4). None is
+    the same composition `devices` calls None, and its conversations are
+    told they cannot move their device rather than offered no way to say
+    so; their device memory is filed under the board they are talking
+    to, which is where it has always been.
 
     That record is the one argument here that is neither closed over nor
     read off the world: it belongs to one connection, and it comes in
@@ -3269,7 +3311,7 @@ def bespoke_runtime_factory(
             threads,
             memory.purge_threads if conversations is None else None,
             devices,
-            relocations,
+            device_access,
             device,
         )
 

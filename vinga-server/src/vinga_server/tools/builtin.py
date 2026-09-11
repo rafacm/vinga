@@ -48,7 +48,9 @@ model is told is what happened and what to do about it.
 """
 
 import asyncio
-from collections.abc import Awaitable, Callable, Sequence
+import contextlib
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
@@ -70,19 +72,62 @@ class MemoryContext:
     """Which memory a call belongs to: the device it is happening on and
     the thread it is happening in.
 
-    A value rather than two arguments threaded through the tool
+    A value rather than four arguments threaded through the tool
     interface, and read at the moment a call runs rather than kept: a
     reply can move a session to another conversation, and a note written
     after that move belongs to the thread the session is on now.
 
-    Both are optional because both genuinely can be absent. A session
-    whose device never identified itself has no device scope, and the
-    thread is minted at the first activation, which happens before any
-    tool can be called.
+    `device` is the address this call's device facts are filed under,
+    answered fresh for every call. That is a MAC rather than the record
+    id beside it because the memory schema files a device's facts under
+    its MAC, and the two part company the moment a board is swapped:
+    the record is the same record at a new address, and everything it
+    was told moved with it (#449, M4).
+
+    `record` is which record that is, and `filing` is what can hold it
+    still. A read may use `device` as it stands, because a read one
+    round out of date is the staleness every per-round read here
+    already has; a WRITE asks `filing`, which resolves the address again
+    and keeps a swap from moving it between the answer and the row. A
+    runtime with no store composes neither, and then `device` is the
+    board this session is talking to, which is exactly right, because a
+    deployment with no records has no swaps either.
+
+    The optionals are optional because they genuinely can be absent. A
+    session whose device never identified itself has no device scope,
+    the thread is minted at the first activation, which happens before
+    any tool can be called, and a board with no record has no id to
+    address one by.
     """
 
     device: str | None
     conversation: str | None
+    record: str | None = None
+    filing: "DeviceFiling | None" = None
+
+
+class DeviceFiling(Protocol):
+    """What this module needs in order to write a device's memory: the
+    address its facts are filed under, held there until the write is
+    done.
+
+    Named on this side for `DeviceRelocations`'s reason, and it is the
+    same seam asked one question earlier. What a server hands in is
+    `device.placement.DevicePlacements`, which owns the connection and
+    the lock discipline: it holds the domain writer lock across the
+    block, and a board swap takes that same lock before it moves
+    anything, so a fact written inside the block is either written
+    before the swap and carried with it or written after it at the
+    address the swap left.
+
+    The device is a record id and never a MAC, for the reason the
+    relocation's is. `None` inside the block is a record that is no
+    longer there, and the caller falls back to the board it is talking
+    to, which is where a device with no record has always filed its
+    facts.
+    """
+
+    def address(self, device: str) -> AbstractAsyncContextManager[str | None]: ...
 
 
 class DeviceRelocations(Protocol):
@@ -105,6 +150,19 @@ class DeviceRelocations(Protocol):
     """
 
     async def relocate(self, device: str, location: str) -> str: ...
+
+
+class DeviceAccess(DeviceRelocations, DeviceFiling, Protocol):
+    """Everything a conversation may do with the device record it
+    attached to: say where that device is standing, and find where its
+    memory is filed while it writes to it.
+
+    Two protocols above and one here, because the two are two different
+    numbers of sentences long at the two use sites and one object at the
+    composition root. A root handing in both separately would be handing
+    in the same object twice, and a reader would have to check that it
+    was the same one.
+    """
 
 
 def switch_agent_tool(agents: Sequence[str]) -> ToolDef:
@@ -729,8 +787,8 @@ async def remember(
     if not isinstance(text, str) or not text.strip():
         raise ValueError(REMEMBER_NEEDS_TEXT)
     scope = _fact_scope(arguments.get("scope"))
-    owner = agent if scope is MemoryScope.AGENT else _device_of(context)
-    fact_id = await store.add(scope, owner, text, agent=agent)
+    async with _owner_of(scope, context, agent) as owner:
+        fact_id = await store.add(scope, owner, text, agent=agent)
     return f"Remembered [{fact_id}]: {_said(text)}"
 
 
@@ -742,10 +800,11 @@ async def update_memory(
     text = arguments.get("text")
     if not isinstance(text, str) or not text.strip():
         raise ValueError(UPDATE_NEEDS_A_NUMBER_AND_TEXT)
-    await _wherever_it_is(
-        _owners(context, agent),
-        lambda scope, owner: store.update(scope, owner, fact_id, text, agent=agent),
-    )
+    async with _reachable(context, agent) as owners:
+        await _wherever_it_is(
+            owners,
+            lambda scope, owner: store.update(scope, owner, fact_id, text, agent=agent),
+        )
     return f"Corrected [{fact_id}]: {_said(text)}"
 
 
@@ -765,17 +824,18 @@ async def forget(
     costs is the fact.
     """
     fact_id = _numbered(arguments.get("id"), FORGET_NEEDS_A_NUMBER)
-    removed = await _wherever_it_is(
-        _owners(context, agent),
-        lambda scope, owner: store.forget(
-            scope,
-            owner,
-            fact_id,
-            _conversation_of(context),
-            agent=agent,
-            permanently=arguments.get("permanently") is True,
-        ),
-    )
+    async with _reachable(context, agent) as owners:
+        removed = await _wherever_it_is(
+            owners,
+            lambda scope, owner: store.forget(
+                scope,
+                owner,
+                fact_id,
+                _conversation_of(context),
+                agent=agent,
+                permanently=arguments.get("permanently") is True,
+            ),
+        )
     return f"Forgot [{fact_id}]: {removed}"
 
 
@@ -797,9 +857,10 @@ async def restore_memory(
     """
     named = arguments.get("id")
     fact_id = None if named is None else _numbered(named, RESTORE_TAKES_A_NUMBER)
-    brought = await store.restore(
-        _owners(context, agent), _conversation_of(context), fact_id, agent=agent
-    )
+    async with _reachable(context, agent) as owners:
+        brought = await store.restore(
+            owners, _conversation_of(context), fact_id, agent=agent
+        )
     return f"Brought back: {brought}"
 
 
@@ -821,8 +882,12 @@ async def recall(
     return found or NOTHING_MATCHED
 
 
-def _owners(context: MemoryContext, agent: str) -> tuple[tuple[MemoryScope, str], ...]:
-    """The memories this session may reach a fact in.
+@contextlib.asynccontextmanager
+async def _reachable(
+    context: MemoryContext, agent: str
+) -> AsyncIterator[tuple[tuple[MemoryScope, str], ...]]:
+    """The memories this session may reach a fact in, for the length of
+    one write.
 
     The agent's own and the device's, which is exactly what its prompt is
     assembled from: a number the model read out of a lookup came from one
@@ -832,8 +897,60 @@ def _owners(context: MemoryContext, agent: str) -> tuple[tuple[MemoryScope, str]
     else reads it that way: what the store is handed for a restore is the
     set, since which of them holds the newest thing this conversation
     forgot is the store's answer rather than the caller's guess.
+
+    A context manager rather than a value because the device half is an
+    address that can move: every one of these three calls writes, and a
+    write has to land where the record's facts are filed when it lands
+    rather than where they were filed when the call was parsed.
     """
-    return ((MemoryScope.AGENT, agent), (MemoryScope.DEVICE, _device_of(context)))
+    async with _device_memory(context) as owner:
+        yield ((MemoryScope.AGENT, agent), (MemoryScope.DEVICE, owner))
+
+
+@contextlib.asynccontextmanager
+async def _owner_of(
+    scope: MemoryScope, context: MemoryContext, agent: str
+) -> AsyncIterator[str]:
+    """Who a fact written in one scope belongs to, for the length of the
+    write.
+
+    The agent's own name under agent scope, which nothing can move, so
+    nothing is held for it: a note about the agent is unaffected by
+    which board it was said on. The device's address under device scope,
+    held the way `_reachable` holds it.
+    """
+    if scope is MemoryScope.AGENT:
+        yield agent
+        return
+    async with _device_memory(context) as owner:
+        yield owner
+
+
+@contextlib.asynccontextmanager
+async def _device_memory(context: MemoryContext) -> AsyncIterator[str]:
+    """Where this call's device facts are filed, held there until the
+    caller has written.
+
+    The address is the record's rather than the session's, which is the
+    whole of this (#449, M4). A conversation attached to a record, that
+    record's facts are filed under whichever MAC it currently stands at,
+    and a board swap moves both together; a write addressed by the MAC
+    the session dialled would file a fact at an address the swap has
+    already emptied, where nothing will ever read it again.
+
+    Two fallbacks, and both are the honest answer rather than a
+    degradation. A runtime composed without a store has no records and
+    therefore no swaps, so the board this session is talking to IS where
+    its facts belong. And a record that has gone while this conversation
+    ran leaves the same answer: the facts under that board's address are
+    the facts about that board, whatever the configuration says about it
+    now.
+    """
+    if context.filing is None or context.record is None:
+        yield _device_of(context)
+        return
+    async with context.filing.address(context.record) as standing:
+        yield standing or _device_of(context)
 
 
 async def _wherever_it_is[T](
@@ -1034,6 +1151,28 @@ PLACEMENT_BUSY = (
 PLACEMENT_FAILED = (
     "where this device is could not be written down; tell the user you could not "
     "record that"
+)
+
+# What a device-memory call is told when this server cannot say which
+# board it is speaking through.
+#
+# Two sentences rather than one, told apart by whether asking again can
+# help, which is the same split the two above draw and the only one a
+# model can act on. Neither is about memory being broken, because memory
+# is not: what could not be answered is which address this
+# conversation's device facts are filed under, and writing them under a
+# guess is the one thing this must not do. A fact filed at an address a
+# board swap has already emptied is a fact nothing will ever read again
+# (#449).
+DEVICE_MEMORY_BUSY = (
+    "what this device remembers could not be reached just now, because something else "
+    "is changing this server's configuration; nothing was written, and the user can be "
+    "told to ask again in a moment"
+)
+
+DEVICE_MEMORY_UNREACHABLE = (
+    "what this device remembers could not be reached, so nothing was written to it; "
+    "tell the user you could not note that about this room"
 )
 
 # What a successful move answers with. The place as the ROW now holds

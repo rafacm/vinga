@@ -1163,6 +1163,44 @@ class ConfigStore:
             )
         return _replaced_device(record, source, destination, facts)
 
+    @contextmanager
+    def device_address(self, device: str) -> Iterator[str | None]:
+        """Where the record with this id stands, held there for the
+        length of the block.
+
+        The read `replace_device` exists to make safe, and the only one
+        in this file whose answer a caller is meant to ACT on before it
+        lets go. A conversation's device memory is filed under a MAC
+        (`memory/scopes.py`), the record that MAC belongs to can be put
+        on another board while that conversation is talking, and a write
+        that resolved the address and then wrote under it would file a
+        fact at an address the swap has already emptied.
+
+        So this yields inside the transaction that resolved it. The
+        domain writer lock is held from before the read until after the
+        caller's write, and a swap takes that same lock before it reads,
+        so the two are totally ordered: either the swap goes first and
+        this resolves to the address it left, or this goes first and the
+        swap carries what it wrote along with everything else under the
+        old address. `db.advisory_key`'s ascending rule is what makes
+        that safe to combine with a memory write inside the block, which
+        takes key 3 while this holds key 1.
+
+        None for an id no record has, which is a conversation whose
+        device an operator deleted under it. It is not a refusal here
+        because the caller has somewhere to fall back to (the board it
+        is talking to is still at the address it dialled) and this
+        module has nothing better to offer it.
+
+        It reads the whole domain rather than one column, which is what
+        every other locked path here does, and it asks `_standing_at`,
+        which is the one implementation of this question and the one an
+        id-addressed write asks through `_mac_holding`. The cost is a
+        handful of small selects on a connection that is already open.
+        """
+        with self._transaction() as connection:
+            yield _standing_at(_read_domain(connection), device)
+
     def _device_write(
         self,
         binding: "_DeviceBinding",
@@ -2047,17 +2085,35 @@ def _mac_holding(domain: DomainConfig, device: str) -> str:
     """The MAC of the record carrying this id, or the refusal for an id
     no record has.
 
+    The addressing half of `_standing_at`: a write addressed by a record
+    id has nowhere to go when that record is gone, so the absence is a
+    refusal here rather than an answer.
+    """
+    mac = _standing_at(domain, device)
+    if mac is None:
+        raise UnknownEntityError(_NO_SUCH_DEVICE_RECORD)
+    return mac
+
+
+def _standing_at(domain: DomainConfig, device: str) -> str | None:
+    """Which MAC the record with this id stands at, or None.
+
     A scan rather than an index, and deliberately: the devices map is
     read whole into memory by every write already, it is a deployment's
     worth of boards, and the alternative is a second lookup structure
     that would have to be kept in step with the one being scanned. The
     issue's own decision that a device row earns no cursor id is the
     same argument one level down.
+
+    One implementation for the two callers, which want different things
+    from the same absence: a write refuses, and a conversation looking
+    for where its memory is filed falls back to the board it is talking
+    to.
     """
     for mac, record in domain.devices.items():
         if record.id == device:
             return mac
-    raise UnknownEntityError(_NO_SUCH_DEVICE_RECORD)
+    return None
 
 
 def _stage_device(domain: DomainConfig, binding: _DeviceBinding) -> _Staged:

@@ -35,7 +35,7 @@ groups' names. No two sources can own one name, so asking them in a
 fixed order settles nothing that was ever in doubt.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any, Protocol
 
 from vinga_server.device.boundary import DeviceOutput
@@ -208,6 +208,12 @@ class BuiltinTools:
     which is why it is a value where `context` is a callable: a reply
     can move a session to another conversation and it can never move it
     to another device.
+
+    The callable is awaited, because part of that answer is a read: a
+    device's facts are filed under a MAC and a board swap moves the
+    record they belong to onto another one, so which memory a call
+    belongs to is a question about the world rather than about this
+    object (#449, M4).
     """
 
     def __init__(
@@ -215,7 +221,7 @@ class BuiltinTools:
         agents: Sequence[str],
         memory: MemoryStore,
         timeout_s: float,
-        context: Callable[[], builtin.MemoryContext],
+        context: Callable[[], Awaitable[builtin.MemoryContext]],
         remembers: Callable[[], bool],
         threads: ThreadSearch | None = None,
         relocations: builtin.DeviceRelocations | None = None,
@@ -273,49 +279,49 @@ class BuiltinTools:
         if claim.name == names.REMEMBER:
             return (
                 await builtin.remember(
-                    self._memory, self._context(), agent, claim.arguments or {}
+                    self._memory, await self._context(), agent, claim.arguments or {}
                 ),
                 False,
             )
         if claim.name == names.UPDATE_MEMORY:
             return (
                 await builtin.update_memory(
-                    self._memory, self._context(), agent, claim.arguments or {}
+                    self._memory, await self._context(), agent, claim.arguments or {}
                 ),
                 False,
             )
         if claim.name == names.FORGET:
             return (
                 await builtin.forget(
-                    self._memory, self._context(), agent, claim.arguments or {}
+                    self._memory, await self._context(), agent, claim.arguments or {}
                 ),
                 False,
             )
         if claim.name == names.RESTORE_MEMORY:
             return (
                 await builtin.restore_memory(
-                    self._memory, self._context(), agent, claim.arguments or {}
+                    self._memory, await self._context(), agent, claim.arguments or {}
                 ),
                 False,
             )
         if claim.name == names.RECALL:
             return (
                 await builtin.recall(
-                    self._memory, self._context(), agent, claim.arguments or {}
+                    self._memory, await self._context(), agent, claim.arguments or {}
                 ),
                 False,
             )
         if claim.name == names.SET_STATE:
             return (
                 await builtin.set_state(
-                    self._memory, self._context(), agent, claim.arguments or {}
+                    self._memory, await self._context(), agent, claim.arguments or {}
                 ),
                 False,
             )
         if claim.name == names.CLEAR_STATE:
             return (
                 await builtin.clear_state(
-                    self._memory, self._context(), agent, claim.arguments or {}
+                    self._memory, await self._context(), agent, claim.arguments or {}
                 ),
                 False,
             )
