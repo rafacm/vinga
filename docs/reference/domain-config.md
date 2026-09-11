@@ -530,13 +530,15 @@ Binding a board creates its record, with a server-minted id and the name
 The id is the record's stable identity: it does not change when the name, the
 location or the agents do.
 
-What a device remembers is keyed by its MAC today, and replacing a board is
-not an operation this server has yet. It is the point of the id: the
-replacement will rewrite the MAC on the record that already exists and move
-that board's notes onto the new one in the same transaction. Recorded sessions
-keep the MAC they were written with, deliberately, because a dated row says
-which board was connected at the time and a later swap does not make that
-untrue.
+`vinga device replace <mac> <new mac>` puts the record on another board, which
+is the point of the id: it rewrites the MAC on the record that already exists
+and moves what that board was told onto the new address in the same
+transaction, so the name, the place, the bindings and the per-device memory
+stay with the device. Refused rather than merged when a device is already
+bound to the new address or anything is already remembered about it, which is
+what keeps it undoable by swapping back. Recorded sessions keep the MAC they
+were written with, deliberately, because a dated row says which board was
+connected at the time and a later swap does not make that untrue.
 
 `vinga device rename <mac> <name>` gives a board the name the agent says out
 loud about it. Free-form, because a slug reads badly in speech, and unique

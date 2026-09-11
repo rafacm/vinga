@@ -182,11 +182,12 @@ devices = Table(
     # An application-minted uuid hex, so the identity travels through
     # export, import and apply. The MAC used to be the key and is not,
     # because a board can be replaced and its record should not have to
-    # be: a row identified by the hardware cannot outlive it. Moving
-    # what that board remembered onto the new MAC is the operation this
-    # column is here to make possible, and it is not built yet (#449
-    # M4); what the column buys today is a record whose identity does
-    # not move when its name, its place or its bindings do.
+    # be: a row identified by the hardware cannot outlive it. That
+    # replacement is `ConfigStore.replace_device` (#449 M4), which
+    # rewrites this row's `mac` and moves what that board remembered
+    # onto the new address in the same transaction; what the column
+    # buys the rest of the time is a record whose identity does not move
+    # when its name, its place or its bindings do.
     Column("id", Text, primary_key=True),
     # Still unique and still selectable, deliberately: `_live_binding`
     # selects `agents` by MAC on the connection that never migrates, and
