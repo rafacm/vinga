@@ -9,6 +9,38 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+<<<<<<< HEAD
+=======
+- **A device is a record, not a binding** (#449, M1). `devices.<mac>` used
+  to hold a list of agent names and now holds four things: a
+  server-minted uuid-hex `id`, a `name`, a `location` and the `agents`
+  list it always had. The id is the device's identity and the MAC is only
+  its address, which is the distinction the record exists for: a board can
+  be replaced, and a record identified by the hardware could not outlive
+  it. The id is minted by the server when a record is created, travels in
+  an exported configuration document, is never chosen by an operator, and
+  does not change when the name, the location or the bindings do. What a
+  device remembers is still keyed by its MAC, and moving it when a board
+  is replaced is the operation the id is there to make possible, in a
+  later milestone of the same issue; recorded sessions are deliberately
+  left alone, because a dated row names the board that was connected at
+  the time.
+- **`vinga-server config device rename <mac> <name>`**, which gives a board
+  the name the agent says out loud about it. Free-form, because a slug
+  reads badly in speech, and unique across the deployment once case and
+  whitespace are folded together, so `Kitchen Speaker` and
+  `kitchen  speaker` are one name while the stored value stays exactly
+  what was typed. Refused with a sentence naming the remedy, never with a
+  database error, and quoting neither name.
+- **`vinga-server config device relocate <mac> <location>`** and
+  **`vinga-server config device clear-location <mac>`**, which say where a
+  board stands and unset it. Free text and not unique: two devices in one
+  room is normal. The location is the half of the record a conversation
+  will be allowed to change; the name is the half only an operator writes.
+- The same three acts over the API: `POST /devices/{mac}/rename`,
+  `PUT /devices/{mac}/location` and its `DELETE`.
+
+>>>>>>> 08809e0f (Say what the device id does today and no more)
 ### Changed
 
 - **An interruption arriving at the playback onset is transcribed

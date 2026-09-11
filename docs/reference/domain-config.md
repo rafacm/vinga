@@ -513,10 +513,10 @@ what takes rows away.
 `devices`
 
 The devices this deployment serves, keyed by MAC address as the Device-Id
-header sends it. Each entry is a record: a server-minted id that survives a
-rename and a board swap, the name the agent says out loud, where the device
-stands, and the agents it may talk to. A bare list of agent names is accepted
-as shorthand for a record naming only those agents.
+header sends it. Each entry is a record: a server-minted id that stays the
+same as the rest of the record changes, the name the agent says out loud,
+where the device stands, and the agents it may talk to. A bare list of agent
+names is accepted as shorthand for a record naming only those agents.
 
 ```bash
 vinga device bind <mac> <agent> [<agent> ...]
@@ -527,8 +527,16 @@ A MAC is stored in its canonical form (lowercase, colon separated), so
 
 Binding a board creates its record, with a server-minted id and the name
 `Device <mac>`, so onboarding asks for no name the operator does not have yet.
-The id is what per-device memory hangs on and it survives a rename and a board
-swap.
+The id is the record's stable identity: it does not change when the name, the
+location or the agents do.
+
+What a device remembers is keyed by its MAC today, and replacing a board is
+not an operation this server has yet. It is the point of the id: the
+replacement will rewrite the MAC on the record that already exists and move
+that board's notes onto the new one in the same transaction. Recorded sessions
+keep the MAC they were written with, deliberately, because a dated row says
+which board was connected at the time and a later swap does not make that
+untrue.
 
 `vinga device rename <mac> <name>` gives a board the name the agent says out
 loud about it. Free-form, because a slug reads badly in speech, and unique
@@ -571,5 +579,5 @@ been asked to apply it.
 | `prompt_fragments` | `dict[str, PromptFragmentConfig]` | `{}` | The shared blocks of prompt text agents include by name, keyed by fragment name. A fragment is written once and injected verbatim into the system prompt of every agent whose prompt_includes names it, which is how household facts or a house style stay in one place instead of being copied into every persona prompt and drifting apart. The name appears in the provenance the assembled prompt is reported under (fragment:<name>), so it must match [A-Za-z0-9_-]+. |
 | `agent_defaults` | `AgentDefaults` | `{}` | What every agent uses unless it names something else. One entry for the whole deployment, and deliberately without a prompt: a prompt is what makes an agent that agent, so inheriting one silently would make two agents the same one. |
 | `agents` | `dict[str, AgentConfig]` | `{}` | The agents this deployment serves, keyed by name. An agent is a prompt plus whichever stages it overrides, and every stage must resolve to a provider, here or in agent_defaults, for the server to start. |
-| `devices` | `dict[str, DeviceRecord]` | `{}` | The devices this deployment serves, keyed by MAC address as the Device-Id header sends it. Each entry is a record: a server-minted id that survives a rename and a board swap, the name the agent says out loud, where the device stands, and the agents it may talk to. A bare list of agent names is accepted as shorthand for a record naming only those agents. |
+| `devices` | `dict[str, DeviceRecord]` | `{}` | The devices this deployment serves, keyed by MAC address as the Device-Id header sends it. Each entry is a record: a server-minted id that stays the same as the rest of the record changes, the name the agent says out loud, where the device stands, and the agents it may talk to. A bare list of agent names is accepted as shorthand for a record naming only those agents. |
 | `default_agent` | `str \| null` | `null` | The agent an unknown device reaches. Leaving it unset makes the devices map an allowlist: a device with no binding is then turned away. |

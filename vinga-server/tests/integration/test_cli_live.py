@@ -715,10 +715,10 @@ def test_a_board_is_named_and_placed_over_the_wire(
     """The rest of the record a bind creates, over a running server.
 
     The id is what the record exists for, so it is read before and after
-    both writes: a rename that minted a second identity would orphan
-    exactly the per-device memory the id is there to keep. The name is
-    read back exactly as it was typed, because the agent says it out
-    loud; only its FOLDED form is unique.
+    both writes: an id that moved when a name did would not be an
+    identity, and the board would read as a different device after
+    every edit. The name is read back exactly as it was typed, because
+    the agent says it out loud; only its FOLDED form is unique.
     """
     assert run("device", "bind", KNOWN_MAC, "sam") == 0
     capsys.readouterr()

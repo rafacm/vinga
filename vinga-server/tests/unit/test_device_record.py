@@ -600,8 +600,8 @@ def test_a_document_carrying_a_null_location_clears_it(store: ConfigStore) -> No
 
 def test_an_id_for_a_mac_with_no_row_is_adopted(store: ConfigStore) -> None:
     """Which is what lets an exported document restore a deployment
-    onto an empty database with its identities, and its per-device
-    memory, intact."""
+    onto an empty database with the identities it had, rather than as a
+    set of devices nothing has ever seen before."""
     _agents(store)
     carried = "a" * 32
 
@@ -613,9 +613,12 @@ def test_an_id_for_a_mac_with_no_row_is_adopted(store: ConfigStore) -> None:
 def test_an_id_that_disagrees_with_the_stored_one_is_refused(
     store: ConfigStore,
 ) -> None:
-    """Refused rather than silently ignored. A write that asked for
-    something this will not do should be told so, because what it asked
-    for would orphan the device's memory."""
+    """Refused rather than silently ignored.
+
+    An id a write could replace would not be an identity: the record
+    under that MAC would become a second device rather than an edited
+    first one. A caller that asked for something this will not do
+    should be told so rather than have it quietly not happen."""
     _agents(store)
     store.bind_device(MAC, ["sam"])
 

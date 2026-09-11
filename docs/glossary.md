@@ -180,9 +180,12 @@ What `devices.<mac>` holds: a server-minted id,
 a [device name](#device-name), a [device location](#device-location)
 and the agents the device may reach. The id is the device's identity
 and the MAC is only its address, which is the distinction the record
-exists for: a board can be replaced, and what the household told the
-device it stands in cannot be re-learned, so per-device
-[memory](#memory) hangs on the id and survives the swap.
+exists for: a board can be replaced, and a record identified by the
+hardware could not outlive it. Today the id stays the same while the
+rest of the record changes, and no more than that: per-device
+[memory](#memory) is still keyed by the MAC, and moving it when a board
+is replaced is the operation the id is there to make possible (issue
+#449, M4).
 
 ### Echo leakage
 

@@ -347,9 +347,10 @@ DEVICE_NAME_IN_FLIGHT = (
 
 DEVICE_ID_FIXED = (
     "devices: the record stored for that device already has an id, and a write may "
-    "not give it another one: the id is what its memory and its history hang on. "
-    "Leave the id out to keep the stored one. Nothing was changed, and neither id is "
-    "quoted back"
+    "not give it another one: an id is what makes a record the same record after its "
+    "name, its place and its bindings have all changed, so a write that replaced one "
+    "would be creating a second device rather than editing this one. Leave the id out "
+    "to keep the stored one. Nothing was changed, and neither id is quoted back"
 )
 
 # What a rename refuses with, for the two states this module can be in
@@ -1642,8 +1643,8 @@ def _stage_device(domain: DomainConfig, binding: _DeviceBinding) -> _Staged:
     hand:
 
     - **A stored id wins.** A record whose MAC already has a row keeps
-      that row's id, whatever the document said, because the id is what
-      the device's memory and its history hang on. An id written for
+      that row's id, whatever the document said, because an id that a
+      write could replace would not be an identity. An id written for
       such a row is refused rather than ignored: a caller that asked for
       something this will not do should be told so.
     - **An absent id on a MAC with no row is minted**, unless the

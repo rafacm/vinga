@@ -3485,8 +3485,8 @@ class DeviceRecord(BaseModel):
     The MAC is not here. The configuration's devices map is keyed by
     MAC and stays keyed by it: keying by name would make a rename read
     to the differ as a removal plus an addition, so an apply would drop
-    the record and mint a fresh id, orphaning exactly the per-device
-    memory the stable id exists to keep.
+    the record and mint a fresh id, which is the one thing a stable
+    identity may not do.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -3495,8 +3495,8 @@ class DeviceRecord(BaseModel):
         default=None,
         description=(
             "The device's stable identity, 32 lowercase hex digits. Minted by the "
-            "server when the record is created and unchanged by a rename, a move or "
-            "a board swap. Leave it out and the stored one is kept."
+            "server when the record is created and unchanged by a rename or a move. "
+            "Leave it out and the stored one is kept."
         ),
     )
     name: str | None = Field(
@@ -3638,10 +3638,10 @@ DOMAIN_DESCRIPTIONS: dict[str, str] = {
     ),
     "devices": (
         "The devices this deployment serves, keyed by MAC address as the Device-Id "
-        "header sends it. Each entry is a record: a server-minted id that survives a "
-        "rename and a board swap, the name the agent says out loud, where the device "
-        "stands, and the agents it may talk to. A bare list of agent names is "
-        "accepted as shorthand for a record naming only those agents."
+        "header sends it. Each entry is a record: a server-minted id that stays the "
+        "same as the rest of the record changes, the name the agent says out loud, "
+        "where the device stands, and the agents it may talk to. A bare list of "
+        "agent names is accepted as shorthand for a record naming only those agents."
     ),
     "default_agent": (
         "The agent an unknown device reaches. Leaving it unset makes the devices "
