@@ -3756,7 +3756,7 @@
     "/metrics/{view}": {
       "get": {
         "summary": "Read Metric",
-        "description": "One view over one window of whole UTC days, newest day first.\n\nThe window includes both of the days it names, and the answer\nrepeats the two it used, so a caller that sent neither can read\nthe default off what came back rather than recomputing the\nserver's own day.\n\nAn empty list is an ordinary answer here. A window with nothing\nin it, a deployment that has switched recording off since, and\none that never recorded at all are the same answer, for the\nreason this module states about empty shapes: the schema is\nmigrated at every boot, and an empty list is the honest answer\nto a question about empty tables.",
+        "description": "One view over one window of whole UTC days, newest day first.\n\nThe window includes both of the days it names, and the answer\nrepeats the two it used, so a caller that sent neither can read\nthe default off what came back rather than recomputing the\nserver's own day.\n\nAn empty list is an ordinary answer here, and never a refusal. A\nwindow with nothing in it, a deployment that has switched\nrecording off since, and one that never recorded at all are the\nsame answer: the schema is migrated at every boot, so what a\ndeployment that never recorded has is empty tables, and an empty\nlist is the honest answer to a question about them.",
         "operationId": "read_metric_metrics__view__get",
         "parameters": [
           {
