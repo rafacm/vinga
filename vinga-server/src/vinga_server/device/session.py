@@ -67,6 +67,7 @@ from vinga_server.config.models import (
     ServerConfig,
     bounded_descriptor,
     normalize_mac,
+    without_url_credential,
 )
 from vinga_server.config.store import LiveDevice
 from vinga_server.conversations import ConversationStore, SessionSink
@@ -529,11 +530,23 @@ class DeviceSession:
             # And the operator's name for this board, bounded the same
             # way and for the same reason: a device name is trusted and
             # unshaped, so a newline in one would split a retained line
-            # in two. The conversation store's row beside it keeps the
-            # name as it was written, exactly as it keeps the client id
-            # header (#449).
+            # in two. Stripped before it is bounded, through the same
+            # `without_url_credential` every stored string a display
+            # hands back goes through (#381, `views.device_body`): the
+            # write path refuses a credential-bearing name, and this is
+            # what keeps one that arrived through a configuration file,
+            # or before the rule, out of the log, the event store and
+            # the capture's decision track. Stripped first because the
+            # strip must read the value as written, the order
+            # `spoken_identity` fixes. The conversation store's row
+            # beside it keeps the name as it was written, exactly as it
+            # keeps the client id header (#449).
             named = self._device_name()
-            said_name = bounded_descriptor(named, DEVICE_NAME_LIMIT) if named else ""
+            said_name = (
+                bounded_descriptor(without_url_credential(named), DEVICE_NAME_LIMIT)
+                if named
+                else ""
+            )
             self._events.emit(
                 lambda: SessionOpen(
                     client=ClientId(said_client) if said_client else None,
