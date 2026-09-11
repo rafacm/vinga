@@ -183,15 +183,46 @@ async def test_an_agent_that_may_not_remember_reads_no_memory(
     assert reads == []
 
 
+async def test_a_bound_board_nobody_has_named_sends_what_it_always_sent() -> None:
+    """The upgrade case, end to end: a board bound through the
+    repository carries `Device <mac>` from the moment it is bound, and
+    the migration gives every row a deployment already had the same
+    default. A prompt that introduced it would tell every agent in every
+    deployment that its device is called a MAC address, on every round,
+    the morning after this lands.
+    """
+    a_bound_board()
+
+    config = base_config()
+    llm = RecordingLlm()
+    scripts = {"poet": llm}
+    generations = world(config, providers=agent_providers(config, cast(Any, scripts)))
+    bindings = DeviceBindings(generations, read_engine(DatabaseConfig()))
+    try:
+        session = session_for(
+            config,
+            POET_MAC,
+            cast(Any, scripts),
+            generations=generations,
+            devices=bindings,
+        )
+        await run_reply(session, "hello")
+    finally:
+        bindings.dispose()
+
+    assert llm.systems == ["POET"]
+
+
 # The clock, which is the round's
 
 
-def a_named_board(name: str = NAME) -> str:
-    """A board bound and named in the lane's database the way an
-    operator's commands leave it, and the id its record was minted with.
+def a_bound_board() -> str:
+    """A board bound in the lane's database and never named, which is
+    what an operator has the moment they bind one and what the
+    migration leaves behind on every row a deployment already had.
 
     Written through the repository rather than composed in Python,
-    because the two tests under it are about a view with a real engine
+    because the tests under it are about a view with a real engine
     behind it, which is the shape a served deployment has.
     """
     with store_at() as store:
@@ -199,8 +230,16 @@ def a_named_board(name: str = NAME) -> str:
             store.set_provider(stage, "mock", {"type": "mock"})
         store.set_agent("poet", dict(AGENT))
         store.bind_device(POET_MAC, ["poet"])
-        store.rename_device(POET_MAC, name)
         return store.read_device(POET_MAC).entry.id
+
+
+def a_named_board(name: str = NAME) -> str:
+    """The same board, named the way an operator's `device rename`
+    leaves it, and the id its record was minted with."""
+    minted = a_bound_board()
+    with store_at() as store:
+        store.rename_device(POET_MAC, name)
+    return minted
 
 
 async def test_a_device_moved_between_two_rounds_is_moved_for_the_next_reply() -> None:

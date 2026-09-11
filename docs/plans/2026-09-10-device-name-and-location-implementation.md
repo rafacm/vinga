@@ -375,7 +375,7 @@ and M5 is expected to revise it. The location half is permanent.
 
 ### Deviations from the plan
 
-Three, each with its reason.
+Four, each with its reason.
 
 1. **The record is read by its own statement rather than in the
    binding's.** The plan's "in the same snapshot the binding is resolved
@@ -392,7 +392,26 @@ Three, each with its reason.
    The consequence is worth having on its own: a deployment with notes
    and no named device sends exactly the text it sent before this
    milestone, byte for byte.
-3. **`LiveDevice.id` is read and carried and rendered nowhere.** The
+3. **A board still carrying the `Device <mac>` default is not
+   introduced by it.** The plan says the name joins the block and does
+   not distinguish a name from the placeholder M1 mints, and the
+   integration lane is what showed the difference matters: two
+   end-to-end tests whose mock model echoes the prompt started reading
+   `You are speaking through a device called Device aa:bb:cc:dd:ee:11`
+   back, on deployments that have named nothing. That is what every
+   deployment looks like the morning after the migration, since the
+   backfill gives every existing row the same default, and a model told
+   that string is its device's name will read a MAC address aloud when
+   somebody asks which speaker it is. The decision is made where the
+   rule lives: `LiveDevice.named` is the repository's answer to whether
+   a person chose the name, computed against `default_device_name` in
+   both the stored read and the snapshot fallback, and the assembler
+   asks it rather than re-deriving the default. A board nobody named
+   but somebody moved still says where it is. Both integration tests
+   pass unedited with the rule in place, which is the evidence that the
+   milestone leaves a deployment that has named nothing exactly where
+   it was.
+4. **`LiveDevice.id` is read and carried and rendered nowhere.** The
    plan names the read as answering `{id, name, location}`, and it does.
    Nothing in a prompt says an id out loud; what it is for is that these
    two facts belong to a row rather than to a MAC, which is what M4's
@@ -416,6 +435,12 @@ Three, each with its reason.
   "this device has no name" is the only honest answer available; the
   alternative is telling a model it is speaking through a device called
   nothing.
+- **The end-to-end lane is where the placeholder showed up.** The unit
+  lane binds its boards with the agent-list shorthand, which names
+  nobody, so every prompt assertion in it was unchanged and green while
+  every served deployment would have gained a sentence. Two integration
+  tests whose mock model echoes the system prompt caught it, which is
+  the argument for that lane in one line.
 - **The device's own paragraph is trimmed at the ends and nowhere
   else.** The stored name is exactly what the operator typed, padding
   included, because the fold is for uniqueness rather than for display.
