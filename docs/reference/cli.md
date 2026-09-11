@@ -2563,7 +2563,8 @@ Options:
   --until DAY    the last UTC day of the window, as YYYY-MM-DD and inside it
                  (default: the API's own, the server's current UTC day)
   --group HOW    how to break the rows down, from the set the API publishes
-                 (default: the API's own, ungrouped)
+                 (default: the API's own, the view's own dimensions and no
+                 further)
   --config PATH  path to the YAML config file naming server.port and
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
