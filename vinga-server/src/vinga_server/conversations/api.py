@@ -16,6 +16,10 @@ none of it. It erases nothing and addresses nothing by an id; what a
 request names is which question and over which days, and the question
 is named by a word that resolves through a closed mapping derived from
 the declarations, because a relation name cannot be a bound parameter.
+That word, the grouping and both days are resolved before anything is
+opened, so a refusal there has reached no connection: the read takes
+the opener rather than an open connection and enters it around the one
+statement it is for.
 
 The route functions live here and are registered by `config/api.py`'s
 `_application()`, which is the application `document()` renders and the
@@ -625,6 +629,42 @@ EraserDep = Annotated[
 ]
 
 
+def _opening(request: Request) -> Callable[[], Iterator[Connection]]:
+    """How to open a read's connection, rather than one already open.
+
+    The shape `_eraser` has, and for a reason of the same kind. A
+    dependency that yields a connection is resolved by the framework
+    before the handler runs, so a route taking one has opened the store
+    before it has looked at a single thing the caller sent. On the reads
+    below that is harmless, because their path segment is an id they
+    would look up anyway. On a route whose path segment selects a
+    relation it is not: an unknown view has to be refused without
+    reaching the store, or the refusal turns into a 500 whenever the
+    database is unwell and the caller is told the store failed on a
+    request the store never saw.
+
+    Taking the factory puts the `with` inside the handler, after every
+    request-controlled value has been resolved, which is where it can
+    be.
+    """
+    runtime: ApiRuntime = request.app.state.api_runtime
+    return runtime.conversations
+
+
+OpeningDep = Annotated[Callable[[], Iterator[Connection]], Depends(_opening)]
+
+
+@contextmanager
+def _reading(opening: Callable[[], Iterator[Connection]]) -> Iterator[Connection]:
+    """One read's connection, for as long as the statement it is for.
+
+    The same generator the framework would have driven, driven here
+    instead: it opens an engine, yields its connection and disposes the
+    engine, so nothing is held between requests either way.
+    """
+    yield from opening()
+
+
 def _reader(request: Request) -> Iterator[Connection]:
     """The store, for the length of one request.
 
@@ -957,7 +997,7 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
     )
     def read_metric(
         view: ViewPath,
-        reader: ReaderDep,
+        opening: OpeningDep,
         since: SinceQuery = None,
         until: UntilQuery = None,
         group: GroupQuery = None,
@@ -976,16 +1016,23 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         deployment that never recorded has is empty tables, and an empty
         list is the honest answer to a question about them.
         """
+        # Every request-controlled value first, and the store after
+        # them. A refusal here has opened nothing, which is what keeps
+        # an unknown view a 404 on a deployment whose database is down
+        # and what makes the injection pin worth its name: bytes that
+        # reach no connection reach no statement.
         named = _view(view)
         grouping = _grouping(group)
         since_day, until_day = _window(since, until)
+        with _reading(opening) as reader:
+            rows = _aggregated(reader, named, since_day, until_day)
         return {
             "view": _described(named),
             "common": _caveats(),
             "since": since_day.isoformat(),
             "until": until_day.isoformat(),
             "group": grouping,
-            "rows": _aggregated(reader, named, since_day, until_day),
+            "rows": rows,
         }
 
 
@@ -1105,7 +1152,8 @@ def _view(alias: str) -> View:
     that travels: a relation name cannot be a bound parameter, so a
     caller's bytes are a key here and nothing else. What is found is a
     declaration this repository wrote; what is not found never reaches
-    the query builder, the connection or the log.
+    the query builder, the connection or the log, and the case that
+    counts the opens is what holds that true.
 
     The mapping is derived from the registry rather than written beside
     it, which is what stops the set that can be asked for drifting from
