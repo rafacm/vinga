@@ -1389,6 +1389,32 @@ class DeviceRename(BaseModel):
     )
 
 
+class DeviceReplacement(BaseModel):
+    """What a board swap carries: the address the record is to answer at
+    from now on.
+
+    A body rather than a second path segment, for `DeviceRename`'s
+    reason and more sharply: the device is addressed by the MAC the
+    board it is losing connects with, which is the identity the act is
+    performed on, and the address it is gaining is what the request
+    carries. Two identities in the path would read as though the route
+    addressed both records, and the whole point of the act is that there
+    is one.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    to: str = Field(
+        description=(
+            "The MAC of the board this device record is to answer at from now on. "
+            "Stored in canonical form, so `AA-BB-CC-DD-EE-FF` and "
+            "`aa:bb:cc:dd:ee:ff` are the same address. It has to be an address no "
+            "device record already answers at and no memory is filed under, because "
+            "a swap moves a record onto a board rather than merging two of them."
+        )
+    )
+
+
 class DeviceLocation(BaseModel):
     """What a relocation carries: where the device stands.
 
