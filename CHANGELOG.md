@@ -54,6 +54,22 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   release, byte for byte. Naming or relocating one is what starts the
   sentence appearing.
 
+- **The ASR and TTS spans carry the provider that ran them** (#450,
+  milestone 2). The exporter's two stage tables gain the four provider
+  keys under the correspondence the round span already ships: the type
+  as `gen_ai.provider.name`, the model as `gen_ai.request.model`, the
+  host as `server.address`, and the configured entry's name as
+  `vinga.provider.asr.name` and `vinga.provider.tts.name`, which is the
+  attribute the retained session context already spells that fact
+  under, so a backend filtering on it need not know which span it is
+  looking at. A stage span that names its own entry no longer also
+  carries what the session opened against at that stage: the two would
+  have mixed into a provider that never existed, an open-time type
+  beside a call-time model. The suppression is conditional on the event
+  having named an entry, so an outcome that names none, an empty
+  transcript or a provider the registry never built, keeps the entries
+  the session opened against.
+
 ### Changed
 
 - **An interruption arriving at the playback onset is transcribed
