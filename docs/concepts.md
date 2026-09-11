@@ -110,8 +110,10 @@ What is learned in conversation about the place the device stands in is
 kept under its name, on the server, and shared by every agent bound to
 it: the room, the household, how the hardware here behaves. Everything
 learned about a person stays with the agent, which is one entity across
-rooms. So replacing or moving hardware loses only the device's own
-notes, and nothing anybody told an assistant about themselves.
+rooms. Moving hardware loses neither: what the room told the device is
+the device record's and travels with it when the board underneath is
+replaced, and what anybody told an assistant about themselves was never
+the hardware's to lose.
 
 A device joins a deployment before any of this matters, and that is a
 solved problem rather than a planned one: the board is pointed at the

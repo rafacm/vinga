@@ -86,7 +86,11 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   physically connected at the time, and a later swap does not make that
   untrue. A conversation already in progress follows the record rather
   than the address, so an agent talking while a board is replaced goes
-  on knowing what it is speaking through.
+  on knowing what it is speaking through, goes on being told what the
+  household told it, and writes anything new where the rest of it is:
+  every memory a conversation reads or writes is addressed by the record
+  it attached to, and a note written at the moment of a swap is carried
+  along by it rather than stranded at the address it left.
 
 - **The ASR and TTS spans carry the provider that ran them** (#450,
   milestone 2). The exporter's two stage tables gain the four provider
@@ -131,8 +135,13 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
-
-
+- **`memory.facts.owner` says that a board swap moves a device's notes**
+  (#449, M4), through migration `2004_a_swap_moves_memory` on the memory
+  chain. The comment is committed DDL and had said since the schema was
+  first written that replacing a device orphans what it was told, which
+  stopped being true with this release; a database migrated by an
+  earlier build keeps saying it until something changes it there, which
+  is what the migration is for. It moves no row.
 - **An interruption arriving at the playback onset is transcribed
   rather than dropped** (#80). The barge-in gate ladder had one rung
   that dropped an utterance on acoustics alone: anything the endpointer

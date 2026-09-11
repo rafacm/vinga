@@ -105,10 +105,12 @@ facts = Table(
         nullable=False,
         comment=(
             "Whose fact this is, read under `scope`: an agent's configured "
-            "name, or a device's MAC in canonical form. A rename moves an "
-            "agent's rows with it, in the transaction that renames the agent, "
-            "so a renamed agent keeps what it remembered; replacing a device "
-            "orphans that device's notes."
+            "name, or a device's MAC in canonical form. Neither is orphaned "
+            "by the act that changes it: a rename moves an agent's rows in "
+            "the transaction that renames the agent, and a board swap moves "
+            "a device's in the transaction that puts its record on another "
+            "board, so what a household told the speaker in the corner "
+            "outlives the hardware it told it to."
         ),
     ),
     Column(
