@@ -375,3 +375,79 @@ Re-verified after the round, same Postgres:
 What the round did not change: the workflows, the census, `AGENTS.md`,
 the skill, and the milestone's own fragment. Everything still
 unverifiable above stays unverifiable for the same reasons.
+
+### Second fix round, PR #476
+
+The delta re-review came back not mergeable again, three P1s and a P2,
+three of them opened by the first round's own redesign of the write
+path and one an adjacent bypass it had not reached. All four correct.
+Taken in the order that kept each case red first, since finding 1's
+reordering makes finding 4's branch unreachable.
+
+- **P1, a `changelog.d` that is not a directory disabled everything**
+  (`f38a86a5`). An absent, replaced or symlinked directory made
+  `fragment_paths` return an empty list, and an empty list meant what
+  a healthy empty directory means, so a pull request replacing the
+  committed directory with a regular file or a symlink passed `check`
+  with zero fragments and left `main` with the mechanism switched off,
+  every run green. The dotfile hole one level up, and the same answer.
+  A symlink is refused even when it points at a directory, because the
+  fold reads and then deletes what it finds. `CHANGELOG.md` is held to
+  the same standard in the same change, one step past the finding and
+  through the same door.
+- **P1, line endings were translated away** (`53e5c448`). Every read
+  went through `read_text` and the assembler rebuilt entries with a
+  literal `\n`, so both of the script's loudest promises were false
+  for CRLF content: a CRLF fragment was folded as LF, and a CRLF
+  changelog was rewritten whole while the untouched-bytes
+  post-condition compared two already-normalized strings. Nothing
+  reads or writes through the translation now, and what the fold adds
+  is written in the changelog's own ending. The consequence is stated
+  rather than smoothed over: a fragment and a changelog that disagree
+  produce a section that disagrees with itself, because the
+  alternative is rewriting an entry, which is the one thing the
+  verbatim promise forbids.
+- **P2, the rollback lost a fragment's mode** (`1910b439`). It
+  recreated a removed fragment with the process default, so a failed
+  fold turned an executable fragment into a non-executable one and
+  reported that it had left the tree as it was. Every assertion in the
+  suite was about bytes, so the loss satisfied all of them. Snapshotted
+  before each removal, restored after each recreation.
+- **P1, the staging file could be planted** (`e04c6304`). Its name was
+  predictable and the write followed a symlink, so a committed
+  `CHANGELOG.md.fold-tmp` pointing elsewhere had the fold write the new
+  changelog through the link into that file and then move the link over
+  `CHANGELOG.md`, both inside what the workflow stages. `mkstemp` now:
+  exclusive, unguessable, same directory, and taking the changelog's
+  own mode so the replacement does not hand the repository a 0600 file.
+
+The mutation order changed again with the last of those, and
+simplified: staged file written before anything is removed, fragments
+removed next, changelog replaced last by a rename. The changelog is
+therefore never half a fold and `_restore` has only fragments to put
+back. One honest consequence, recorded rather than papered over:
+**the restore branch is now unreachable through the command line on
+POSIX without root**, because nothing after the removals can be made
+to fail from outside a read-only directory that would already have
+stopped the staging write. The mode restoration stays as its guard,
+its case still holds the guarantee on the reachable path, and the
+branch is argued structurally rather than exercised.
+
+Re-verified after the round, same Postgres:
+
+- `uv run ruff check .`: All checks passed!
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 6899 passed, 19
+  skipped in 194.83s. The fold suite is 56 cases, green under `TZ=UTC`
+  and `TZ=Pacific/Auckland`.
+- `python3 scripts/fold_changelog.py check .`: checked 1 fragments, 0
+  failures.
+- `python3 scripts/check_doc_links.py .`: checked 229 files, 0
+  failures. Census manifest regenerated: unchanged.
+- The full-clone fold rehearsal again, the write path having changed
+  again: same `## 2026-09-12` section, the same 2,275 bytes, preamble
+  and history byte-identical, `CHANGELOG.md` still mode 100644 through
+  the replacement, no staging file left behind, and the workflow's
+  dirtiness assertion clean.
+- `uv run pytest tests/integration -q` was not rerun. The round touches
+  `scripts/` and its unit suite only, and the previous round's 304
+  passed stands.
