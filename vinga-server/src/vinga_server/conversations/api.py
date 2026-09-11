@@ -969,12 +969,12 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         the default off what came back rather than recomputing the
         server's own day.
 
-        An empty list is an ordinary answer here. A window with nothing
-        in it, a deployment that has switched recording off since, and
-        one that never recorded at all are the same answer, for the
-        reason this module states about empty shapes: the schema is
-        migrated at every boot, and an empty list is the honest answer
-        to a question about empty tables.
+        An empty list is an ordinary answer here, and never a refusal. A
+        window with nothing in it, a deployment that has switched
+        recording off since, and one that never recorded at all are the
+        same answer: the schema is migrated at every boot, so what a
+        deployment that never recorded has is empty tables, and an empty
+        list is the honest answer to a question about them.
         """
         named = _view(view)
         grouping = _grouping(group)
