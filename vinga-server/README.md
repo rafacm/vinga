@@ -881,9 +881,12 @@ this door is correction and audit rather than that flow.
 
 The listings answer owners nothing is configured under, which is the
 point of them rather than an oversight: deleting an agent leaves what it
-remembered behind, replacing a board orphans that board's notes, and a
-rename leaves whatever a conversation still speaking the old name wrote
-before an apply caught up. `--all` is how those rows leave.
+remembered behind, deleting a device record leaves that board's notes
+behind, and a rename leaves whatever a conversation still speaking the
+old name wrote before an apply caught up. `--all` is how those rows
+leave. Replacing a board is not one of them: a swap moves the device's
+notes to the new address in the same transaction, so nothing is left
+under the old one.
 
 **Whether an agent remembers at all is one line of its
 configuration.** No builtin is granted the way an MCP server is, and

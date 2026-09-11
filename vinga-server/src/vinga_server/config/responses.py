@@ -2433,9 +2433,11 @@ class MemoryOwner(BaseModel):
             "Whose memory this is, read under the scope the path names: an agent's "
             "configured name, or a board's MAC in canonical form. It is what "
             "addresses the facts listing below it, and it is answered whether or "
-            "not the deployment still has an agent or a binding of that name: "
-            "renaming an agent and replacing a board both leave the rows where "
-            "they were."
+            "not the deployment still has an agent or a device record of that "
+            "name: deleting either leaves its rows where they were. Renaming an "
+            "agent moves its rows with it, and replacing the board under a device "
+            "moves that device's rows to the new address, so neither of those "
+            "leaves an owner behind."
         )
     )
     facts: int = Field(
