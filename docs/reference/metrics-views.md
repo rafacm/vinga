@@ -87,6 +87,8 @@ with?
 | `p95_ms` | `double precision` | no | milliseconds | The 95th percentile of that stage's measured durations. | `percentile_cont(0.95)` within the group, which interpolates. |
 | `max_ms` | `integer` | no | milliseconds | The slowest measured duration in the group, as it was stored rather than interpolated. | `max()` over that stage's column. |
 
+**One row per** `day`, `agent`, `stage`.
+
 **Denominator.** The denominator is the turns that measured that stage, never
 all turns, and it is `measured_turns` beside the percentiles rather than a
 number a reader has to go and find.
@@ -112,6 +114,8 @@ What did each agent consume, by UTC day?
 | `output_measured_turns` | `bigint` | no | attribution rows | How many attribution rows in this group carried an output count. As above, the rest are unrecorded rather than zero, and for either of the same two reasons. | `count()` over the attribution rows whose output field is not null. |
 | `input_tokens` | `bigint` | yes | tokens | Input tokens consumed by this agent on this day, OTel's `gen_ai.usage.input_tokens`. | `sum()` over the non-null input fields. Null when the group measured none, which is what `input_measured_turns` of zero says in a number. Null is not zero consumption: it is consumption nobody recorded. |
 | `output_tokens` | `bigint` | yes | tokens | Output tokens produced for this agent on this day, OTel's `gen_ai.usage.output_tokens`. | `sum()` over the non-null output fields. Null when the group measured none. |
+
+**One row per** `day`, `agent`.
 
 **Denominator.** The unit is the attribution row, not the turn: a turn with
 `legs` contributes one attribution row per leg and its turn-level totals are
@@ -146,6 +150,8 @@ the traffic of the same day?
 | `provider_failures_per_turn` | `double precision` | yes | failures per turn | Provider failures divided by the day's turns. | Null when the day has no turns, never zero. |
 | `suppressions_per_session` | `double precision` | yes | suppressions per session | Barge-in suppressions divided by the day's sessions. | Null when the day has no sessions, never zero. |
 
+**One row per** `day`.
+
 **Denominator.** Failures are per turn and suppressions are per session, both
 by their UTC day, and both denominators are columns of this view rather than
 numbers a reader has to fetch from somewhere else. Each of the four streams is
@@ -172,6 +178,8 @@ What baseline sits under the numbers in every other view?
 | `sessions` | `bigint` | no | sessions | How many sessions opened on this day. | `count(*)` over sessions by their `started_at` day, coalesced to zero on a day that only has turns. |
 | `telemetry_sessions` | `bigint` | no | sessions | How many of them had telemetry storage on. A day where this is below `sessions` had sessions that stored no measured number at all; it does not follow that a null number elsewhere came from one of them. | `count(*) FILTER (WHERE sessions.metrics)`, coalesced to zero. |
 | `turns` | `bigint` | no | turns | How many turns were spoken on this day. | `count(*)` over turns by their UTC day, coalesced to zero. |
+
+**One row per** `day`.
 
 **Denominator.** There is no ratio here: these are the counts the other views
 divide by. Sessions are counted by the UTC day they opened on and turns by the

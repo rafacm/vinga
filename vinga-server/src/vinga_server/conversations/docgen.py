@@ -39,7 +39,7 @@ import textwrap
 from sqlalchemy import Table
 
 from vinga_server.conversations.schema import TABLES
-from vinga_server.conversations.views import VIEWS, View
+from vinga_server.conversations.views import COMMON, VIEWS, View
 
 # Where the reference wraps its prose. The tables cannot wrap (a row is
 # a line), so only paragraphs go through this.
@@ -437,75 +437,11 @@ def views_reference() -> str:
         "  -c 'select * from record.metrics_sessions_daily order by day desc limit 14'",
         "```",
         "",
-        "## What is true of all four",
-        "",
-        *_paragraph(
-            "**A day is a UTC day.** `sessions.started_at` is UTC ISO-8601 text, and a "
-            "turn and an event each carry `t_ms`, an offset from session open, so a "
-            "row's day is its session's start converted to UTC plus that offset, cast "
-            "to a date. Every cast names UTC, which is what stops the timezone of "
-            "whoever is reading from moving a row to the day before. A session is on "
-            "the day it opened; its turns are on the day they were spoken, which is "
-            "not always the same day."
-        ),
-        "",
-        *_paragraph(
-            "**Counting is per stored row.** Two provider failures in one turn are "
-            "two, deliberately. Each numerator stream is aggregated on its own before "
-            "anything is joined, so an unrelated event beside a counted one cannot "
-            "multiply a denominator."
-        ),
-        "",
-        *_paragraph(
-            "**A rate is null when its denominator is zero**, never zero. Nothing "
-            "happened and nothing could have happened are different facts, and a view "
-            "that reported them the same way would let a quiet day read as a healthy "
-            "one."
-        ),
-        "",
-        *_paragraph(
-            "**Percentiles interpolate.** `p50_ms` and `p95_ms` are `percentile_cont`, "
-            "so a two-turn day's p95 is mostly arithmetic between two numbers. The "
-            "count they were computed over is the column beside them; read it first."
-        ),
-        "",
-        "## Three limits worth knowing before quoting a number",
-        "",
-        *_paragraph(
-            "**Retention makes historical event rates a floor.** Turns survive with "
-            "their conversation, by its last activity, while events are deleted by "
-            "their own session's age, so a recently resumed conversation can hold "
-            "turns from arbitrarily old sessions whose events are long gone. The "
-            "database cannot tell zero events from events already pruned. So a rate "
-            "read outside the events' own retention window is a floor, not a "
-            "measurement, and zero cannot be told from pruned. No windowing cleverness "
-            "is attempted in the SQL: the honest sentence is the design."
-        ),
-        "",
-        *_paragraph(
-            "**A missing measurement has more than one cause, and these views cannot "
-            "tell them apart.** A null token count means telemetry storage was off "
-            "OR the provider reported no usage; a stage absent from the latency view "
-            "means the switch was off OR that stage was never measured on that turn. "
-            "The store writes both causes identically, so what a measured count "
-            "reports is coverage and never its reason: a gap between `turns` and "
-            "`input_measured_turns` says those tokens were not recorded, and nothing "
-            "about why. Read a measured count as a denominator, never as a diagnosis."
-        ),
-        "",
-        *_paragraph(
-            "**`sessions.metrics` is the telemetry switch**, under the name the switch "
-            "had before it was renamed. Column names are a compatibility surface and "
-            "the rename was not a schema change, so the column keeps the old spelling "
-            "deliberately. `metrics_sessions_daily.telemetry_sessions` counts it, and "
-            "it is session-level context for the day a session opened rather than a "
-            "discriminator for the limit above: a turn is dated by the day it was "
-            "spoken, which need not be the day its session opened, the column is not "
-            "broken down by agent, and it knows nothing about the second cause. A day "
-            "where it sits below `sessions` had sessions that stored no measured "
-            "number at all, and that is the whole of what it says."
-        ),
-        "",
+        # What holds for all four, straight from the declaration: the
+        # renderer adds no heading and no sentence of its own, because a
+        # limit written here is one the API and the CLI could never
+        # carry.
+        *_caveats(),
         "## The views",
         "",
     ]
@@ -532,11 +468,32 @@ def _view_section(view: View) -> list[str]:
     ]
     lines += [
         "",
+        *_paragraph(
+            "**One row per** " + ", ".join(f"`{column.name}`" for column in view.keys) + "."
+        ),
+        "",
         *_paragraph("**Denominator.** " + view.denominator),
         "",
         *_paragraph("**Telemetry-off.** " + view.telemetry_off),
         "",
     ]
+    return lines
+
+
+def _caveats() -> list[str]:
+    """The statements that hold for every view, group by group.
+
+    Headings and prose both come from `views.COMMON`. The document used
+    to spell them here, which made the renderer their only reader: an
+    API description or a CLI rendering that wanted the retention limit
+    had no way to reach it, and the alternative to this was a second
+    copy.
+    """
+    lines: list[str] = []
+    for group in COMMON:
+        lines += [f"## {group.heading}", ""]
+        for note in group.notes:
+            lines += [*_paragraph(note), ""]
     return lines
 
 

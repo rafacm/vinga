@@ -21,7 +21,10 @@ from pathlib import Path
 
 from vinga_server.conversations import docgen
 from vinga_server.conversations.views import (
+    ALIASES,
     BARGE_IN_SUPPRESSED,
+    COMMON,
+    DAY,
     PROVIDER_FAILED,
     STAGES,
     VIEWS,
@@ -83,6 +86,62 @@ def test_every_view_states_its_question_and_both_sentences() -> None:
         if not getattr(view, field).strip()
     ]
     assert not holes, f"views with nothing to say: {', '.join(holes)}"
+
+
+def test_every_view_declares_what_a_row_is_unique_by() -> None:
+    """The `GROUP BY`, as a declaration. The read surface orders a page
+    on exactly these columns and nothing else makes that order total, so
+    a view that declared none would be served in whatever order the
+    planner felt like."""
+    for view in VIEWS:
+        names = [column.name for column in view.keys]
+        assert names, f"{view.name} declares no key column"
+        # The day first, because the read surface windows on it and
+        # orders it descending while the rest ascend.
+        assert names[0] == DAY, view.name
+
+
+def test_every_alias_is_derived_from_the_name_and_unique() -> None:
+    """The word a request spells, and the closed mapping behind it. It
+    is derived rather than written down, which is what stops the set a
+    caller may ask for drifting from the set declared here."""
+    assert set(ALIASES) == {"stage-latency", "tokens", "event-rates", "sessions"}
+    assert len(ALIASES) == len(VIEWS)
+    for alias, view in ALIASES.items():
+        assert view.alias == alias
+        # Kebab-case, the spelling the CLI guide gives a word a person
+        # types, and never the relation's own name.
+        assert "_" not in alias and alias.islower()
+        assert alias != view.name
+
+
+def test_the_common_prose_is_declared_and_not_written_in_the_renderer() -> None:
+    """The three limits and the four rules are metadata on the registry,
+    because the renderer is not their only reader: the API serves them
+    in its descriptions and in its bodies, and the CLI prints what the
+    API sent. Before this they lived in `docgen` alone, which is the one
+    place a caller could never reach them from.
+
+    The sentences themselves are pinned against the rendered page by the
+    cases below. What this pins is that they are reachable without
+    rendering anything.
+    """
+    declared = " ".join(flat(note) for group in COMMON for note in group.notes)
+
+    assert "a rate read outside the events' own retention window is a floor" in declared
+    assert "A missing measurement has more than one cause" in declared
+    assert "A rate is null when its denominator is zero**, never zero" in declared
+    assert [group.heading for group in COMMON] == [
+        "What is true of all four",
+        "Three limits worth knowing before quoting a number",
+    ]
+
+
+def test_the_reference_states_what_a_row_is_unique_by() -> None:
+    flattened = flat(docgen.views_reference())
+
+    assert "**One row per** `day`, `agent`, `stage`." in flattened
+    assert "**One row per** `day`." in flattened
 
 
 def test_no_view_reads_a_content_column() -> None:
