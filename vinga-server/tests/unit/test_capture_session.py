@@ -227,6 +227,16 @@ def test_the_manifest_says_what_the_capture_was_made_against(tmp_path: Path) -> 
     # they change is misleading unless it states its own.
     assert manifest["barge_in"]["min_speech_ms"] == 321.0
     assert manifest["barge_in"]["enabled"] is True
+    # The whole mapping, so a key coming back is a failure rather than
+    # something nobody looked for. `refractory_ms` in particular is
+    # ABSENT rather than null: a null would claim this session had the
+    # gate and left it unbounded, where no key says the server has no
+    # such gate at all.
+    assert set(manifest["barge_in"]) == {
+        "enabled",
+        "min_speech_ms",
+        "utterance_pre_roll_ms",
+    }
     assert manifest["server"]["revision"]
     assert manifest["device"]["mac"] == DEVICE_MAC.lower()
     assert manifest["device"]["client"] == DEVICE_UUID

@@ -23,8 +23,9 @@ type: silero
 # The bound belongs to the entry rather than to the server, so an agent
 # that takes dictation gets a longer one without slowing every other
 # agent's turns down. Install this file a second time under a second
-# name with the longer bound uncommented (`vinga provider set vad
-# patient -f ...`), then write `vad: patient` on the agent that takes
+# name with a longer bound written in (`trailing_silence_ms: 1200` is a
+# reasonable dictation starting point, and uncommenting the 700 above
+# changes nothing), then write `vad: patient` on the agent that takes
 # dictation and leave the others on the default entry. Each agent's
 # endpointer is built from the entry that agent binds, and a handover
 # mid-conversation swaps it.
