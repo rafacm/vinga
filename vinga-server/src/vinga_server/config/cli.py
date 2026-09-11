@@ -158,6 +158,8 @@ from vinga_server.config.responses import (
     MemoryState,
     MemoryStateErasure,
     MemoryStateKey,
+    MetricRows,
+    MetricViews,
     PendingDevice,
     Problem,
     RuntimeInfo,
@@ -584,6 +586,40 @@ NO_STATE = (
     "conversation goes and is deleted whole when the thread ends, so this is what a "
     "thread that has ended, or one that has been told nothing, reads as"
 )
+
+# What the named aggregates print
+#
+# Nothing here says what a view is. The answer carries the declaration
+# `conversations/views.py` holds, column matrix and caveats and all, so
+# these render what came back rather than a second description of it:
+# the headings are the answer's columns upper-cased, and the statements
+# under a listing are the ones the registry declares. A word written
+# here would be a second home for a fact that has one.
+METRIC_WINDOW = "days"
+
+# Said once over the whole answer rather than on every row, which is
+# what the guide's rule about a boundary asks for: both of the days the
+# window names are inside it, and the two printed are the two the
+# server used, so a caller that named neither reads its defaults here.
+METRIC_WINDOW_ENDS = "both included"
+
+NO_METRIC_ROWS = (
+    "no rows on those days. Nothing was recorded in the window, which is also what a "
+    "deployment that has recorded nothing at all answers: an empty window is an "
+    "ordinary answer here and never a refusal"
+)
+
+# The markers the declared statements carry because they are written
+# once for three surfaces, two of which render Markdown. A terminal is
+# the third and is not one of them, so the emphasis and the code spans
+# are taken out and nothing else is: the words, their order and their
+# punctuation are the registry's.
+_MARKDOWN_MARKERS = ("**", "`")
+
+# A paragraph of those statements is wrapped where every other piece of
+# generated prose in this repository wraps, which is a fixed width and
+# therefore the same bytes into a pipe as onto a terminal.
+METRIC_PROSE_WIDTH = docgen.PROSE_WIDTH
 
 # What a page that is not the whole of a listing says, on stderr,
 # because it is about this invocation rather than about the artifact:
@@ -1077,6 +1113,28 @@ class Invocation:
     fact: str = ""
     all_of_it: bool = False
     cursor: str = ""
+
+    # Which named aggregate a request is about, under the name the
+    # route's own path parameter uses: `/metrics/{view}` addresses one
+    # view and this is the whole of that address. Its own field rather
+    # than `name`, because `name` is an agent everywhere else in this
+    # grammar and a view is not one.
+    #
+    # And the two days that bound the window, which address nothing:
+    # they narrow the answer the way `--device` narrows a session
+    # listing. Text and not read here, for the reason `limit` is not:
+    # what a day has to be is the API's rule, said in the API's own
+    # fixed sentence, and a second parser in front of it would be a
+    # second vocabulary for one refusal.
+    #
+    # `group` is how the rows are broken down, and it is text for the
+    # same reason. The set it is held to is the API's closed vocabulary,
+    # published in the document and refused there; a copy of it here
+    # would be a second set to keep in step with the first.
+    view: str = ""
+    since: str = ""
+    until: str = ""
+    group: str = ""
 
     # What narrows the live event stream beyond the board and the
     # session above, which `mac` and `session` carry for it: what
@@ -3095,6 +3153,177 @@ def _memory_fact_line(fact: Mapping[str, Any]) -> str:
     it. One rendering rather than two, so what a correction answers and
     what the listing shows are the same shape."""
     return _memory_fact_blocks({"items": [fact]})
+
+
+# What the named aggregates look like on a terminal
+#
+# Both renderings are a function of the answer and of nothing else. The
+# columns are the ones the answer's own declaration lists, in its order,
+# and the statements under them are the ones the registry declares and
+# the API sends: a header written here would be a second encoding of a
+# view's shape, and a caveat written here would be a fourth copy of a
+# sentence that has one home (`conversations/views.py`).
+
+
+def _readable(text: str) -> str:
+    """One declared statement, as a terminal should read it.
+
+    The statements are written once and rendered by three surfaces, two
+    of which render Markdown: the committed reference and the API's own
+    contract. A terminal is the third and is not one of them, so the
+    emphasis and the code-span markers come out and nothing else does.
+    The words, their order and their punctuation are the registry's, and
+    what is removed cannot hide anything, since `_stored` has already
+    turned every character a terminal would obey into a question mark.
+    """
+    plain = _stored(text)
+    for marker in _MARKDOWN_MARKERS:
+        plain = plain.replace(marker, "")
+    return plain
+
+
+def _wrapped(text: str, indent: str, hanging: str = "") -> list[str]:
+    """A paragraph at the width every other piece of generated prose
+    here is written to, indented.
+
+    A fixed width rather than the terminal's, which is the output rule
+    this module keeps everywhere: two runs of one answer are the same
+    bytes on a laptop, on a runner and through a pipe. `hanging` is what
+    a labelled statement's continuation lines are set in, so the label
+    is the only thing at the left margin of its block; a paragraph with
+    no label is set flush and passes none.
+    """
+    return [
+        indent + line
+        for line in textwrap.wrap(
+            text,
+            width=METRIC_PROSE_WIDTH - len(indent),
+            break_long_words=False,
+            break_on_hyphens=False,
+            subsequent_indent=hanging,
+        )
+    ]
+
+
+def _separated(blocks: Sequence[Sequence[str]]) -> list[str]:
+    """Several blocks of lines as one, a blank line between them and
+    none above the first or below the last."""
+    return [
+        line for index, block in enumerate(blocks) for line in ([""] if index else []) + list(block)
+    ]
+
+
+def _metric_note(label: str, value: object, indent: str = "  ") -> list[str]:
+    """One labelled statement of a view's declaration."""
+    return _wrapped(f"{label}: {_readable(str(value))}", indent, hanging="  ") or [
+        f"{indent}{label}: {NOTHING_THERE}"
+    ]
+
+
+def _metric_columns(columns: Sequence[Mapping[str, Any]]) -> str:
+    """A view's columns, each with its unit where it has one.
+
+    The unit and not the SQL type, because what a reader about to quote
+    a number needs is what the number is of; a column whose value has no
+    unit says so in the declaration and is printed bare rather than with
+    the word `none` after it.
+    """
+    return ", ".join(
+        f"{_cell(column['name'])} ({_cell(column['units'])})"
+        if str(column["units"]) not in ("none", "")
+        else _cell(column["name"])
+        for column in columns
+    )
+
+
+def _metric_view_block(view: Mapping[str, Any]) -> list[str]:
+    """One view: how it is spelled, what it answers, what it cannot say,
+    and the row it hands back."""
+    return [
+        _cell(view["view"]),
+        *_metric_note("question", view["question"]),
+        *_metric_note("denominator", view["denominator"]),
+        *_metric_note("telemetry off", view["telemetry_off"]),
+        *_metric_note("columns", _metric_columns(view["columns"])),
+        *_metric_note("select from", view["relation"]),
+    ]
+
+
+def _metric_caveats(common: Sequence[Mapping[str, Any]]) -> list[str]:
+    """What holds for every view, under the headings the registry gives
+    them.
+
+    Printed beside the numbers rather than left on a documentation page,
+    because what a number here cannot be made to say is the half a
+    reader is most likely to be missing at the moment they quote one.
+    That is why the API sends them with every answer, and this is the
+    third reader of the one declaration.
+
+    Answered with the blank line that separates them from whatever they
+    follow, and with nothing at all where a server sent none, so both
+    renderings end the same way rather than each carrying its own
+    conditional.
+    """
+    blocks = [
+        [
+            _cell(group["heading"]),
+            *(
+                line
+                for note in group["notes"]
+                for line in _wrapped(_readable(str(note)), "  ")
+            ),
+        ]
+        for group in common
+    ]
+    return ["", *_separated(blocks)] if blocks else []
+
+
+def _metric_view_listing(answer: Mapping[str, Any]) -> str:
+    """The aggregates this deployment serves, a block each.
+
+    Blocks rather than columns, because three of the five things worth
+    reading about a view are sentences and one is a list, and a column
+    holding either is a column that wraps.
+    """
+    lines = _separated([_metric_view_block(view) for view in answer["items"]])
+    lines += _metric_caveats(answer["common"])
+    return "\n".join(lines) + "\n"
+
+
+def _metric_rows(answer: Mapping[str, Any]) -> str:
+    """One view over one window: what answered, which days, the numbers,
+    and what they cannot be made to say.
+
+    The window is stated once over the whole answer rather than on every
+    row, and it is the window the server used rather than the one that
+    was typed, so a caller that named neither day reads its defaults
+    here. The rows are columns because every cell of them is a number, a
+    day or a short name.
+
+    A null cell prints the placeholder every other listing here uses and
+    never a zero: a rate with no denominator is null, and a renderer
+    that wrote `0` for it would report a day nothing could have happened
+    on as a day nothing went wrong on.
+    """
+    view = answer["view"]
+    columns = view["columns"]
+    lines = [
+        _cell(view["view"]),
+        *_metric_note("question", view["question"]),
+        f"{METRIC_WINDOW}: {_cell(answer['since'])} to {_cell(answer['until'])}"
+        f", {METRIC_WINDOW_ENDS}",
+        "",
+    ]
+    rows = answer["rows"]
+    if not rows:
+        lines.append(NO_METRIC_ROWS)
+    else:
+        table = [tuple(str(column["name"]).upper() for column in columns)] + [
+            tuple(_cell(row.get(column["name"])) for column in columns) for row in rows
+        ]
+        lines += _columns(table).splitlines()
+    lines += _metric_caveats(answer["common"])
+    return "\n".join(lines) + "\n"
 
 
 def _paged(listing: Callable[[Any], str]) -> Callable[[Any], None]:
@@ -6024,6 +6253,57 @@ def _owner(args: Invocation) -> str:
     return args.name or args.mac or args.conversation
 
 
+# The fourth reading of the same rows, and the one that answers about
+# days rather than about a session, a thread or a memory.
+#
+# Requests like the three above them, and for the same reason the
+# amendment to #190 gives: a command that touches the record is a
+# request like every other, and there is no second way in. The plan for
+# this surface promised a local path in its first draft and the review
+# round took it out, so there is nothing here that reads a view
+# directly; `vinga-server conversations views` renders what the views
+# ARE from the declarations and reaches no database, and this asks a
+# running server what is in them.
+
+
+def _metrics_path(args: Invocation) -> str:
+    return _path("metrics")
+
+
+def _metric_path(args: Invocation) -> str:
+    return _path("metrics", args.view)
+
+
+def _metric_window(args: Invocation) -> dict[str, str]:
+    """What bounds the answer. The rule the session filters follow: only
+    what was written, so the API's own defaults are the defaults, said
+    once and read back off the answer rather than computed here."""
+    return {
+        name: value
+        for name, value in (
+            ("since", args.since),
+            ("until", args.until),
+            ("group", args.group),
+        )
+        if value
+    }
+
+
+LIST_METRICS = Act(
+    method="GET",
+    path=_metrics_path,
+    answers=MetricViews,
+    render=_printed(_metric_view_listing),
+)
+
+SHOW_METRIC = Act(
+    method="GET",
+    path=_metric_path,
+    query=_metric_window,
+    answers=MetricRows,
+    render=_printed(_metric_rows),
+)
+
 # The read that says which deployment answered, which none of the reads
 # above it does: they say what is stored or what is running, and this
 # one says whose. `info`'s first act.
@@ -7059,6 +7339,35 @@ MEMORY_CURSOR_HELP = (
     "first page)"
 )
 
+# What addresses one named aggregate, and what bounds the answer.
+#
+# The view is the positional because it is the address: `/metrics/{view}`
+# is the route and the word is its last segment. The three flags are not
+# an address at all, so they are flags, the way `--device` and `--limit`
+# are on a session listing.
+#
+# None of the three says what a value may be beyond the shape it is
+# written in. What a day has to be, how far apart two of them may sit
+# and which breakdowns exist are the API's rules, said in the API's own
+# fixed sentences, and a second vocabulary for them here would be a
+# second sentence per refusal.
+METRIC_VIEW_HELP = "which aggregate, by the word metric list prints for it"
+
+METRIC_SINCE_HELP = (
+    "the first UTC day of the window, as YYYY-MM-DD and inside it (default: the "
+    "API's own, 30 days before the last)"
+)
+
+METRIC_UNTIL_HELP = (
+    "the last UTC day of the window, as YYYY-MM-DD and inside it (default: the API's "
+    "own, the server's current UTC day)"
+)
+
+METRIC_GROUP_HELP = (
+    "how to break the rows down, from the set the API publishes (default: the API's "
+    "own, ungrouped)"
+)
+
 # The two that follow `schema provider`. A provider type is addressed by
 # its stage and its name together everywhere else in this command group,
 # and its options are addressed the same way for the same reason: one
@@ -7792,6 +8101,52 @@ def _filtered_sessions(row: Command) -> Callable[..., None]:
     return run
 
 
+def _over_a_window(row: Command) -> Callable[..., None]:
+    """One named aggregate, over a window of whole UTC days.
+
+    The view is a positional because it is the address the route is
+    written in, and it leads for the reason every address here leads.
+    The three that follow are flags because none of them addresses a
+    view: two say which days to answer about and one says how to break
+    the rows down, which is what `--device` and `--limit` are to a
+    session listing.
+    """
+
+    def run(
+        context: typer.Context,
+        view: Annotated[str, typer.Argument(metavar="VIEW", help=METRIC_VIEW_HELP)],
+        since: Annotated[
+            str | None, typer.Option("--since", metavar="DAY", help=METRIC_SINCE_HELP)
+        ] = None,
+        until: Annotated[
+            str | None, typer.Option("--until", metavar="DAY", help=METRIC_UNTIL_HELP)
+        ] = None,
+        group: Annotated[
+            str | None, typer.Option("--group", metavar="HOW", help=METRIC_GROUP_HELP)
+        ] = None,
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row,
+                context,
+                config,
+                api_url,
+                force,
+                no_input,
+                view=view,
+                since=since or "",
+                until=until or "",
+                group=group or "",
+            )
+        )
+
+    return run
+
+
 def _tailed(row: Command) -> Callable[..., None]:
     """The event tail: three filters and the one option that says when
     it stops.
@@ -8512,6 +8867,18 @@ GROUPS: dict[tuple[str, ...], str] = {
     # what the events ARE and needs no server, this one prints what a
     # server is saying and reaches one.
     ("events",): "what the running server is saying right now, as it says it",
+    # The named aggregates over the same record, and the reading that
+    # answers about days rather than about one session or one thread.
+    # Singular under the naming rule, because `show` addresses one of
+    # them: a view is an entry of a published vocabulary, the way an
+    # agent is an entry of the configuration, and `/metrics/{view}` is
+    # the route that says so.
+    #
+    # `metric latency` would have been shorter and is excluded: a noun
+    # in the verb slot reads as a possessive and hides what the command
+    # does, and `agent preview` is the precedent for not granting that
+    # exception to the first command that asks for it.
+    ("metric",): "the aggregates over the record: what each answers, and one over days",
     # What the agents, the boards and the conversations remember.
     # Singular under the naming rule, because its verbs address one
     # memory; one noun rather than three, because the scope is the first
@@ -8948,6 +9315,29 @@ COMMANDS: tuple[Command, ...] = (
             "sessions themselves are left with a gap rather than deleted"
         ),
         destroys=True,
+    ),
+    # The aggregates over the same rows, read as days rather than as
+    # one session or one thread. Two reads and no erasure: a view owns
+    # nothing and a question cannot be deleted.
+    Command(
+        words=("metric", "list"),
+        does=LIST_METRICS,
+        declare=_plain,
+        help=(
+            "the aggregates this server serves, each with the question it answers, "
+            "its denominator, what telemetry storage being off does to it and the "
+            "columns a row of it carries, and what holds for all of them"
+        ),
+    ),
+    Command(
+        words=("metric", "show"),
+        does=SHOW_METRIC,
+        declare=_over_a_window,
+        help=(
+            "one aggregate over a window of whole UTC days, newest day first; bound "
+            "it with --since and --until, both of them inside the window, and the "
+            "answer says which two days it used"
+        ),
     ),
     # What this deployment remembers, and the one noun in this grammar
     # whose verbs reach three resources apiece: the scope is the first
