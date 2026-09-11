@@ -161,6 +161,11 @@ distinct on purpose:
   because two devices in one room is normal. Binding a board creates
   its record and calls it `Device <mac>` until somebody names it, so
   no onboarding flow asks for a name the operator does not yet have.
+  Both are read on every round of every reply and put in the agent's
+  prompt, in the same block as what is remembered about the device, so
+  an agent can say which speaker it is and where it stands, and a board
+  renamed or moved mid-conversation is renamed or moved for the very
+  next thing that is said.
   The
   [configuration reference](reference/domain-config.md) documents the
   fields.

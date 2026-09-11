@@ -286,7 +286,7 @@ are already in `config/models.py`.
   `_live_binding` characterized before and byte-unchanged after. Design
   footprint: deepens `config/store.py`, whose callers stop knowing a device is
   columns; adds no module and no seam.
-- [ ] **M2: the agent knows where it is.** Name and location join the existing
+- [x] **[M2: the agent knows where it is](2026-09-10-device-name-and-location-implementation.md#m2-the-agent-knows-where-it-is).** (PR TBD) Name and location join the existing
   device block in `runtime/prompt.py`, carried by a metadata read added in the
   same snapshot the binding is resolved from, since none exists today. The
   device facts are read independently of the memory switch, because
