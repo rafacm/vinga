@@ -449,6 +449,12 @@ WAITING_MAC = "11:22:33:44:55:66"
 # would make the reading ambiguous.
 RENAMED_MAC = "02:00:00:00:00:31"
 
+# And the board a swap moves a record onto, which is its own for the
+# same reason: what that case reads back is a record at an address no
+# other case has bound, so a board another case is about would make the
+# reading ambiguous.
+SWAPPED_MAC = "02:00:00:00:00:32"
+
 # And the board nobody owns, which presents its own documented default
 # rather than a third address invented here.
 SIMULATED_MAC = board.DEFAULT_MAC
@@ -748,6 +754,43 @@ def test_a_board_is_named_and_placed_over_the_wire(
     assert cleared["name"] == "Kitchen Speaker"
 
     assert run("device", "delete", KNOWN_MAC) == 0
+    capsys.readouterr()
+
+
+def test_a_board_is_replaced_and_the_device_is_kept_over_the_wire(
+    deployed: Live, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The swap over a running server, which is what the whole record
+    exists for: the hardware changes and the device does not.
+
+    The id is read before and after, because every other assertion here
+    would be satisfied by a swap that deleted the record and bound the
+    new board: the same name and the same place could be typed again,
+    and the identity could not. The old address answers nothing
+    afterwards, which is what a board that has been taken away is.
+    """
+    assert run("device", "bind", KNOWN_MAC, "sam") == 0
+    assert run("device", "rename", KNOWN_MAC, "Hall Speaker") == 0
+    assert run("device", "relocate", KNOWN_MAC, "the hall") == 0
+    capsys.readouterr()
+    assert run("device", "show", KNOWN_MAC) == 0
+    minted = document(capsys.readouterr().out)["id"]
+
+    assert run("device", "replace", KNOWN_MAC, SWAPPED_MAC) == 0
+    assert capsys.readouterr().out.startswith("wrote ")
+
+    assert run("device", "show", SWAPPED_MAC) == 0
+    assert document(capsys.readouterr().out) == {
+        "id": minted,
+        "name": "Hall Speaker",
+        "location": "the hall",
+        "agents": ["sam"],
+    }
+
+    assert run("device", "show", KNOWN_MAC) == 1
+    assert capsys.readouterr().out == ""
+
+    assert run("device", "delete", SWAPPED_MAC) == 0
     capsys.readouterr()
 
 
