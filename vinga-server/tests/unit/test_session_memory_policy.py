@@ -66,7 +66,12 @@ MEMORY_TOOLS = [
     "clear_state",
 ]
 
-CONVERSATION_TOOLS = ["new_conversation", "resume_conversation"]
+# The three the section does not touch: two that move the conversation
+# and one that moves the device. All unconditional, for one reason: a
+# tool that is simply absent is a tool a model invents, and what each of
+# them answers where this server cannot act is a sentence somebody
+# hears.
+UNCONDITIONAL_TOOLS = ["new_conversation", "resume_conversation", "set_device_location"]
 
 OFF: dict[str, object] = {"memory": {"enabled": False}}
 
@@ -116,12 +121,12 @@ async def test_a_switched_off_agent_is_offered_nothing_its_sibling_reads() -> No
 
     await run_reply(session, "hand me over")
 
-    # The offers, whole: the switch is structural and the two
-    # conversation tools are unconditional, so the seven are the entire
-    # difference between the agent that may remember and the one beside
-    # it that may not.
-    assert offered(poet) == ["switch_agent", *CONVERSATION_TOOLS]
-    assert offered(tutor) == ["switch_agent", *MEMORY_TOOLS, *CONVERSATION_TOOLS]
+    # The offers, whole: the switch is structural and the three beside
+    # it are unconditional, so the seven are the entire difference
+    # between the agent that may remember and the one beside it that
+    # may not.
+    assert offered(poet) == ["switch_agent", *UNCONDITIONAL_TOOLS]
+    assert offered(tutor) == ["switch_agent", *MEMORY_TOOLS, *UNCONDITIONAL_TOOLS]
     # And the prompts. The poet is sent its persona and nothing else,
     # although it has a fact of its own and stands on a board with a
     # note on it; the tutor is sent both blocks.
