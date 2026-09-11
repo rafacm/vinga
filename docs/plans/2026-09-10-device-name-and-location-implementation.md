@@ -1011,6 +1011,10 @@ its place reaches the record at its next check-in.
   command-spellings census is regenerated. `docs/reference/events.md`
   and `docs/reference/conversations-schema.md` do not move, because no
   event gains a field and no stored column changes.
+- A new CLI verb also stales a pin nothing in the unit lane can see:
+  `test_cli_wheel.py` requires every ungated row of `cli.COMMANDS` to
+  have been RUN from the installed binary and answered, so the swap is
+  driven there too, onto a third board and back.
 - Every new pin was watched failing before its claim was made, one
   mutation per claim: the device scope mapped back to the agent's
   sentence, the memory move dropped (six cases fail), the placeholder
