@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from vinga_server.config.models import (
     AgentConfig,
     AgentDefaults,
+    DeviceRecord,
     McpServerConfig,
     PromptFragmentConfig,
     ProviderConfig,
@@ -31,8 +32,14 @@ class Snapshot:
     prompt_fragments: dict[str, PromptFragmentConfig] = field(default_factory=dict)
     agent_defaults: AgentDefaults = field(default_factory=AgentDefaults)
     agents: dict[str, AgentConfig] = field(default_factory=dict)
-    devices: dict[str, list[str]] = field(default_factory=dict)
+    devices: dict[str, DeviceRecord] = field(default_factory=dict)
     default_agent: str | None = None
+
+
+def _bound(**devices: list[str]) -> dict[str, DeviceRecord]:
+    """The devices section as the snapshot holds it now: a record per
+    MAC rather than the bare list #449 turned into shorthand."""
+    return {mac: DeviceRecord(agents=agents) for mac, agents in devices.items()}
 
 
 def _providers(**llm: str) -> ProvidersConfig:
@@ -66,7 +73,7 @@ def test_an_unknown_provider_reference_is_a_reference_problem() -> None:
 
 
 def test_an_unknown_mcp_reference_is_a_reference_problem() -> None:
-    snapshot = Snapshot(agents={"sam": AgentConfig(mcp=["home"])}, devices={"aa": ["sam"]})
+    snapshot = Snapshot(agents={"sam": AgentConfig(mcp=["home"])}, devices=_bound(aa=["sam"]))
 
     problems = check_references(snapshot)
 
@@ -77,7 +84,10 @@ def test_an_unknown_mcp_reference_is_a_reference_problem() -> None:
 
 
 def test_an_unknown_binding_and_default_are_reference_problems() -> None:
-    snapshot = Snapshot(devices={"aa:bb:cc:dd:ee:ff": ["ghost"]}, default_agent="nobody")
+    snapshot = Snapshot(
+        devices={"aa:bb:cc:dd:ee:ff": DeviceRecord(agents=["ghost"])},
+        default_agent="nobody",
+    )
 
     problems = check_references(snapshot)
 

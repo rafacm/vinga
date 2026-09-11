@@ -16,6 +16,7 @@ which no model here ever carries.
 
 import os
 import re
+import uuid
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from contextvars import ContextVar
 from pathlib import Path
@@ -3131,6 +3132,144 @@ def normalize_mac(value: str) -> str:
     return mac
 
 
+# The device record's identity, and the shape one has.
+#
+# An application-minted uuid hex, following `sessions.session` and
+# `conversations.conversation` rather than the `BigInteger Identity()`
+# row id those tables also carry. A database-assigned integer cannot
+# travel in a configuration document through export, import and apply,
+# so it cannot be a device's identity; a value this side writes can.
+#
+# Thirty-two lowercase hex digits with no dashes, which is what
+# `uuid4().hex` produces and what a row holds.
+DEVICE_ID_RULE = (
+    "devices: a device id is 32 lowercase hexadecimal digits, the form uuid4().hex "
+    "writes. The server mints one when a device record is created and it travels with "
+    "the record from then on; the value written is not quoted back"
+)
+
+_DEVICE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def is_device_id(value: object) -> bool:
+    """Whether a value is spelled the way a minted device id is.
+
+    A predicate rather than a check that raises, for the reason
+    `is_valid_fragment_name` is one: a caller deciding whether a value
+    may be spoken about at all cannot be handed an exception carrying
+    the value it was asking about.
+    """
+    return isinstance(value, str) and _DEVICE_ID_RE.match(value) is not None
+
+
+def mint_device_id() -> str:
+    """A new device identity.
+
+    Here beside the rule that says what one looks like, and called from
+    the repository under the domain writer lock rather than from a
+    validator. Minting while parsing would make the same document
+    produce a different id every time it was read, which is exactly the
+    idempotence `apply` promises: the repository can consult the stored
+    row and this cannot.
+    """
+    return uuid.uuid4().hex
+
+
+def default_device_name(mac: str) -> str:
+    """What a device record is called when nobody has named it.
+
+    The FULL MAC and not a tail of it. The leading octets are the vendor
+    OUI and a fleet shares them, so a truncated default would collide on
+    real hardware, and the collision would surface inside a migration
+    backfilling a `NOT NULL UNIQUE` column, which is the worst place for
+    it. The full MAC is unique by construction, because `mac` is.
+    """
+    return f"Device {mac}"
+
+
+# The characters the device-name fold treats as whitespace, written out
+# rather than left to a regex shorthand.
+#
+# `\s` means one thing to Python and another to Postgres, and the
+# Postgres one depends on the database's ctype: a character that is
+# whitespace under one locale is a literal under another, which would
+# make a name's folded form a property of how the instance happened to
+# be initialized. Spelling the set out is what lets the two renderings
+# below claim to be the same fold on any deployment.
+#
+# The set is Unicode's whitespace, which is exactly what `str.isspace`
+# answers to and what Python's own `\s` matches for a `str`. None of
+# these characters is `]`, `^`, `-` or `\`, so the same string is a
+# safe bracket expression in both engines.
+DEVICE_NAME_WHITESPACE = (
+    # U+0009 to U+000D, the ASCII controls a text file is written with.
+    "\t\n\v\f\r"
+    # U+001C to U+001F, the four separators Python counts as space.
+    "\x1c\x1d\x1e\x1f"
+    # The space itself, the next line, and the no-break space.
+    " \x85\xa0"
+    # Ogham space mark; the en/em quad family; line and paragraph
+    # separator; narrow and medium mathematical space; ideographic space.
+    "\u1680"
+    "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
+    "\u2028\u2029\u202f\u205f\u3000"
+)
+
+# Unicode gives U+0130 the one unconditional full lowercase mapping that
+# expands: LATIN CAPITAL LETTER I WITH DOT ABOVE lowercases to `i` plus a
+# combining dot above. Its SIMPLE mapping is `i` alone, and simple is
+# what a database's `lower()` applies. Named rather than derived,
+# because it is the whole of the difference between the two mappings and
+# a reader checking the equivalence claim should be able to see it
+# without going to the Unicode data files.
+_SIMPLE_LOWER = {"\u0130": "i"}
+
+_DEVICE_NAME_RUN = re.compile(f"[{DEVICE_NAME_WHITESPACE}]+")
+
+
+def fold_device_name(name: str) -> str:
+    """One device name reduced to the form two names collide on.
+
+    The fold, in its Python rendering: lowercase by the simple mapping,
+    collapse internal runs of whitespace to one space, and trim the
+    ends. `Kitchen  Speaker` and ` kitchen speaker ` are one name; the
+    stored value stays exactly what the operator typed, because the
+    agent says it out loud and a slug reads badly in speech.
+
+    Character by character rather than `name.lower()`, and that is the
+    whole reason this is a loop. Whole-string lowering applies the
+    context-sensitive Greek final-sigma rule, so `ΑΣ` would lower to
+    `ας` here and to `ασ` in the database; per character there is no
+    context and both say `σ`. The one expanding mapping is handled
+    above.
+
+    `device_name_fold_sql` is the other rendering, and the two are
+    proved equal against Postgres over a shared corpus rather than
+    asserted to be one implementation, which they cannot be.
+    """
+    lowered = "".join(_SIMPLE_LOWER.get(character, character.lower()) for character in name)
+    return _DEVICE_NAME_RUN.sub(" ", lowered).strip(" ")
+
+
+def device_name_fold_sql(column: str) -> str:
+    """The same fold as a Postgres expression over one column.
+
+    Declared beside the Python rendering rather than beside the index
+    that uses it, because what has to be reviewable is that the two say
+    the same thing. The functional unique index on `devices` is built
+    from this, and `3003_device_record` freezes a literal copy: a
+    migration is a historical record of what ran, and one importing a
+    rule that can later change would reproduce a behaviour it never had.
+    The corpus that proves the two renderings equal covers the frozen
+    copy too, so a divergence between any of the three is a failing test
+    rather than a silent one.
+    """
+    return (
+        f"btrim(regexp_replace(lower({column}), "
+        f"'[{DEVICE_NAME_WHITESPACE}]+', ' ', 'g'), ' ')"
+    )
+
+
 # What a device may say about itself on a retained log line, and how
 # much of it.
 #
@@ -3258,20 +3397,129 @@ def check_prompt_fragment_names(
     return value
 
 
+# What a device name that holds nothing is told. It names the section
+# and the rule and never the name, the shape every refusal in this file
+# has: a device name is free text an operator types on a command line,
+# so it is a place a paste lands.
+DEVICE_NAME_BLANK = (
+    "devices: a device name has to hold something other than whitespace, because it "
+    "is what an agent says out loud about the board it is speaking through. The name "
+    "written is not quoted back"
+)
+
+
+class DeviceRecord(BaseModel):
+    """One device as the configuration holds it: a stable identity, the
+    name a person says out loud, where it stands, and the agents it may
+    reach.
+
+    Three of the four are optional here and only one of them is
+    optional in the database, which is deliberate rather than lax.
+    Absence in a document means "the repository decides", and the
+    repository is where it can be decided: it holds the domain writer
+    lock and can see the stored row, so an absent id adopts the stored
+    one or is minted, and an absent name keeps the stored one or takes
+    the `Device <mac>` default. A required `name` here would put a
+    mandatory argument on `bind` and on the pending claim, which is the
+    flow an operator reaches holding a board and nothing else.
+
+    `location` distinguishes absence from null, through
+    `model_fields_set`: a document that does not carry the key says
+    nothing about where the device is, and a document carrying `null`
+    says it is nowhere in particular. The same distinction
+    `default_agent` makes, for the same reason.
+
+    The MAC is not here. The configuration's devices map is keyed by
+    MAC and stays keyed by it: keying by name would make a rename read
+    to the differ as a removal plus an addition, so an apply would drop
+    the record and mint a fresh id, orphaning exactly the per-device
+    memory the stable id exists to keep.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str | None = Field(
+        default=None,
+        description=(
+            "The device's stable identity, 32 lowercase hex digits. Minted by the "
+            "server when the record is created and unchanged by a rename, a move or "
+            "a board swap. Leave it out and the stored one is kept."
+        ),
+    )
+    name: str | None = Field(
+        default=None,
+        description=(
+            "What this device is called, free-form, spoken aloud by the agent. Names "
+            "are unique once case and spacing are folded together. Leave it out and "
+            "the stored name is kept, or `Device <mac>` is taken for a new record."
+        ),
+    )
+    location: str | None = Field(
+        default=None,
+        description=(
+            "Where the device stands, free-form, or null for nowhere in particular. "
+            "Not unique: two devices in one room is normal. Leave the key out and the "
+            "stored location is kept."
+        ),
+    )
+    agents: list[NonBlankStr] = Field(
+        description=(
+            "The agents this device may reach, by name. The first is the agent a "
+            "conversation starts on and the rest are the ones it may be switched to."
+        ),
+    )
+
+    @field_validator("id")
+    @classmethod
+    def _check_id(cls, value: str | None) -> str | None:
+        if value is not None and not is_device_id(value):
+            raise ValueError(DEVICE_ID_RULE)
+        return value
+
+    @field_validator("name")
+    @classmethod
+    def _check_name(cls, value: str | None) -> str | None:
+        """A name that folds to nothing names nothing.
+
+        Held here rather than by a `min_length` constraint, because
+        what has to be non-empty is the FOLDED form: a name of two
+        no-break spaces is not blank to a length check and is blank to
+        every reader of it.
+        """
+        if value is not None and not fold_device_name(value):
+            raise ValueError(DEVICE_NAME_BLANK)
+        return value
+
+
 def normalize_device_bindings(value: object) -> object:
-    """The devices mapping with every MAC in its canonical form, and
-    every binding held to the rules a list of agent names has to
-    satisfy. Anything that is not a mapping is left for pydantic to
-    report."""
+    """The devices mapping with every MAC in its canonical form, every
+    entry in the record shape, and every agent list held to the rules
+    its type cannot state. Anything that is not a mapping is left for
+    pydantic to report.
+
+    Shape and nothing else, which is the whole of what a `mode="before"`
+    validator may do here. It does not mint an id and it does not choose
+    a name: minting while parsing would make re-reading one document
+    produce a different id every time, which is `apply`'s idempotence
+    gone. Both decisions belong to the repository, under the writer lock
+    where the stored row can be consulted.
+
+    The value-shape union is absorbed here so that every parser inherits
+    it from one place: a bare list of agent names is the shorthand every
+    configuration written before #449 uses, and it means a record with
+    that agent list and nothing else said about it.
+    """
     if not isinstance(value, dict):
         return value
     normalized: dict[str, object] = {}
-    for mac, bound in value.items():
+    for mac, written in value.items():
         key = normalize_mac(str(mac))
         if key in normalized:
             raise ValueError(f'device "{mac}" appears more than once (as {key})')
-        _check_binding(key, bound)
-        normalized[key] = bound
+        record = {"agents": written} if isinstance(written, list) else written
+        if isinstance(record, Mapping):
+            _check_binding(key, record.get("agents"))
+        normalized[key] = record
     return normalized
 
 
@@ -3316,9 +3564,11 @@ DOMAIN_DESCRIPTIONS: dict[str, str] = {
         "a provider, here or in agent_defaults, for the server to start."
     ),
     "devices": (
-        "Which agents each device may talk to, keyed by MAC address as the "
-        "Device-Id header sends it. The first name in a list is the agent a "
-        "conversation starts on and the rest are the ones it may be switched to."
+        "The devices this deployment serves, keyed by MAC address as the Device-Id "
+        "header sends it. Each entry is a record: a server-minted id that survives a "
+        "rename and a board swap, the name the agent says out loud, where the device "
+        "stands, and the agents it may talk to. A bare list of agent names is "
+        "accepted as shorthand for a record naming only those agents."
     ),
     "default_agent": (
         "The agent an unknown device reaches. Leaving it unset makes the devices "
@@ -3393,9 +3643,11 @@ class DomainConfig(BaseModel):
     agents: dict[NonBlankStr, AgentConfig] = Field(
         default_factory=dict, description=DOMAIN_DESCRIPTIONS["agents"]
     )
-    # One device may be bound to several agents; the value is a list of
+    # One device may be bound to several agents; `agents` is a list of
     # agent names, the first of them the one a conversation starts on.
-    devices: dict[str, list[NonBlankStr]] = Field(
+    # The bare list every configuration written before #449 uses is
+    # absorbed into the record shape by the validator below.
+    devices: dict[str, DeviceRecord] = Field(
         default_factory=dict, description=DOMAIN_DESCRIPTIONS["devices"]
     )
     default_agent: NonBlankStr | None = Field(
@@ -3439,7 +3691,7 @@ class DomainSnapshot(Protocol):
     prompt_fragments: dict[str, PromptFragmentConfig]
     agent_defaults: AgentDefaults
     agents: dict[str, AgentConfig]
-    devices: dict[str, list[str]]
+    devices: dict[str, DeviceRecord]
     default_agent: str | None
 
 
@@ -3504,8 +3756,8 @@ def check_references(snapshot: DomainSnapshot) -> list[str]:
     # chose, it is the canonical form of an address the binding was
     # normalized to, and a value that is not one never gets this far.
     # What the entry holds is a name, so it is named by its position.
-    for mac, bound in snapshot.devices.items():
-        for position, agent in enumerate(bound, start=1):
+    for mac, record in snapshot.devices.items():
+        for position, agent in enumerate(record.agents, start=1):
             if agent not in snapshot.agents:
                 problems.append(
                     f"devices.{mac}: entry {position} names no agent that exists, and "
@@ -3820,9 +4072,9 @@ class Config(DomainConfig):
         conversation starts on. Unknown devices fall back to default_agent;
         a device with no binding and no default_agent resolves to nothing,
         and is turned away."""
-        bound = self.devices.get(normalize_mac(mac))
-        if bound:
-            return list(bound)
+        record = self.devices.get(normalize_mac(mac))
+        if record is not None and record.agents:
+            return list(record.agents)
         return [self.default_agent] if self.default_agent is not None else []
 
 
