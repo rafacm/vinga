@@ -275,7 +275,7 @@ are already in `config/models.py`.
 
 ## Milestones
 
-- [x] **[M1: the device record](2026-09-10-device-name-and-location-implementation.md#m1-the-device-record).** (PR #462) Schema, migration `3003`, the fold in its two
+- [x] **[M1: the device record](2026-09-10-device-name-and-location-implementation.md#m1-the-device-record).** (PR #464) Schema, migration `3003`, the fold in its two
   proved-equal renderings, the repository reads and writes with minting and the
   folded-name conflict both under the writer lock, the widened
   `normalize_device_bindings` absorbing the value-shape union, and every device
@@ -286,7 +286,7 @@ are already in `config/models.py`.
   `_live_binding` characterized before and byte-unchanged after. Design
   footprint: deepens `config/store.py`, whose callers stop knowing a device is
   columns; adds no module and no seam.
-- [x] **[M2: the agent knows where it is](2026-09-10-device-name-and-location-implementation.md#m2-the-agent-knows-where-it-is).** (PR TBD) Name and location join the existing
+- [x] **[M2: the agent knows where it is](2026-09-10-device-name-and-location-implementation.md#m2-the-agent-knows-where-it-is).** (PR #465) Name and location join the existing
   device block in `runtime/prompt.py`, carried by a metadata read added in the
   same snapshot the binding is resolved from, since none exists today. The
   device facts are read independently of the memory switch, because
