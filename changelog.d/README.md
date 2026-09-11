@@ -15,7 +15,9 @@ milestone's entry from `main` for five merges.
   `467-changelog-fragments.md` is the shape.
 - **Headings are `### <Class>`**, from the closed Keep a Changelog six:
   `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`. One
-  file may carry several, and each must be followed by entry text.
+  file may carry several, and each must be followed by entry text. The
+  file opens with one: text above the first heading has nowhere to go
+  in the changelog, so it is refused rather than dropped.
 - **No date header and no `##` heading.** The date is not the fragment's
   to state: the fold derives it from the commit that brought the
   fragment onto `main`, so a session running past midnight no longer

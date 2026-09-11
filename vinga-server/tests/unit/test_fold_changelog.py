@@ -498,6 +498,20 @@ def _symlinked_fragment(tmp_path: Path) -> Path:
     return root
 
 
+def _text_before_the_first_heading(tmp_path: Path) -> Path:
+    root = repo(tmp_path)
+    fragment(
+        root,
+        "467-a-preamble.md",
+        f"- {SENTINEL}, an entry written without its heading.\n"
+        "\n"
+        "### Added\n"
+        "\n"
+        "- **The entry that does have one.**\n",
+    )
+    return root
+
+
 def _dotted_filename(tmp_path: Path) -> Path:
     root = repo(tmp_path)
     fragment(root, f".467-{SENTINEL}.md", "### Added\n\n- **A well formed entry.**\n")
@@ -518,6 +532,11 @@ REFUSALS = [
     ("unknown heading", _unknown_heading, "outside the Keep a Changelog six"),
     ("empty body", _empty_body, "no entry text"),
     ("date heading", _date_heading, "date or top-level heading"),
+    (
+        "text before the first heading",
+        _text_before_the_first_heading,
+        "before its first class heading",
+    ),
     ("duplicate entry", _duplicate_entry, "exactly once"),
     ("conflict marker", _conflict_marker, "conflict marker"),
     ("shallow history", _shallow_history, "available history"),
@@ -688,6 +707,31 @@ def test_check_passes_a_well_formed_fragment_without_writing(tmp_path: Path) -> 
     assert done.returncode == 0, done.stderr
     assert (root / "CHANGELOG.md").read_text(encoding="utf-8") == before
     assert names(root) == ["467-well-formed.md", "README.md"]
+
+
+def test_check_refuses_text_before_a_fragments_first_heading(
+    tmp_path: Path,
+) -> None:
+    """The other silence, and the same shape as the dotfile one.
+
+    The parser read a fragment from its first `###` heading onward and
+    ignored everything above it, so an entry written without its
+    heading, or an introductory paragraph somebody added, passed
+    `check` and then vanished during the fold. A fragment is accounted
+    for whole now: nonblank text before the first class heading is a
+    refusal, so the writer is told rather than the text discarded.
+    """
+    root = repo(tmp_path)
+    write(
+        root,
+        "467-a-stray-line.md",
+        "A note to the reviewer.\n\n### Added\n\n- **The entry.**\n",
+    )
+
+    done = run("check", str(root))
+
+    assert done.returncode == 1
+    assert "before its first class heading" in done.stderr
 
 
 def test_check_refuses_a_fragment_whose_name_begins_with_a_dot(
