@@ -1106,3 +1106,251 @@ OpenAPI contract that had also been wrong about renames since #356.
 - The two concurrency pins were run repeatedly rather than once: the
   race and the two multi-call cases beside it ten times as a group, and
   the whole file ten times, with no failure in either.
+
+## M5: the analyst can see a name
+
+The last milestone, and the only one whose subject is a reader rather
+than a device: somebody with a SQL connection and a dashboard, who can
+see everything this server recorded and nothing of what it was
+configured with.
+
+### What was built
+
+- **`record.sessions.device_name`**, nullable, beside the MAC in
+  `device`, added by migration `1007_sessions_name_the_device` on the
+  conversations chain. Written at the open from the record the
+  conversation attached to, and never written again.
+- **`session_open.device_name`**, the same value bounded for the log
+  surface, carried by a new `DeviceName` value type.
+- **A second argument on `open_session`**, not a second key in the
+  manifest, which is the one structural decision here and is argued
+  below.
+- **`SessionDetail.device_name`**, because `_session` serves
+  `select(sessions)` whole and the response model forbids extras. The
+  listing's `SUMMARY_COLUMNS` is untouched.
+- **The revision of M2's no-leak assertion**, which M2's own section
+  said to expect, split into a permanent half and a narrow positive
+  one.
+
+### Why a copy is not a duplicated fact
+
+`deploy/postgres-init.sql` grants `vinga_ro` USAGE on `record`, SELECT
+on every table in it now and on every table the server role creates
+later, and then, in two statements written down rather than left
+implicit, REVOKES everything on `domain`. Verified against the file
+rather than assumed. So the analyst role cannot reach `domain.devices`
+at all: a MAC is not a foreign key it can follow, it is a string it can
+group by. Without a name on this side a per-device dashboard shows MAC
+addresses forever, which is the motivating case and the reason #440's
+per-device dimension reads this column.
+
+Everything else in this schema is the writer's own, so this is the one
+column that is a copy, and the column comment says so in those words.
+
+### The name travels beside the manifest rather than inside it
+
+The manifest is the honest place, and it is the wrong place. One
+manifest has two consumers, which is the property `device/session.py`
+maintains deliberately: the capture writes it beside the audio and the
+conversation store builds its session row from it, so the two records
+of one session cannot drift. Putting the name in it would have been two
+lines instead of six.
+
+It would also have put the name in the capture, and the capture is the
+one surface with no reader who needs it. A capture is a file on the
+operator's own disk, written by a deployment they run, with the device
+record one SQL statement away; the whole argument for this column is a
+reader who has no such statement. So `open_session` takes the name as
+its own argument, `Open` carries it, and `_session_row` writes it,
+which is the shape `renames` already had beside it: something the row
+needs that the manifest is not the home of.
+
+`test_the_manifest_says_which_board_and_not_what_it_is_called` is what
+keeps that true field by field rather than by substring.
+
+### Why the event's value type is a descriptor and not an identifier
+
+`Identifier` is the kind for a trusted name the operator or this server
+chose, and by provenance a device name is exactly that. It is still the
+wrong kind, and the reason is the one `values.py` states about
+`Identifier` itself: its domain is the configuration's own and no
+tighter, deliberately, because narrowing it would turn a lawful
+deployment's every `session_open` into a refused emission. What the
+configuration guarantees about a device name is only that it folds to
+something. It may be any length, and it may hold a newline, because the
+fold collapses whitespace rather than rejecting it. A newline on a
+retained log line splits one record into two whoever wrote it, and a
+terminal escape paints somebody's screen whoever pasted it.
+
+So the kind that fits is the one whose whole content is a bound and a
+charset. `DeviceName` is a `Descriptor` with `DEVICE_NAME_LIMIT` (64,
+the same as the board and the client id, and for a stronger reason: a
+name past it is a name nobody would read aloud), bounded at the
+decision site by `bounded_descriptor` exactly as the client id beside
+it in the same emission, and bounded again at the value type because
+those are two pieces of code.
+
+That made `Descriptor` say something it had not said. Its docstring and
+the `DESCRIPTOR` kind's own sentence both described a far-side string,
+which is where every previous one came from. They now say the kind is
+the guarantee the surface needs rather than a claim about who wrote the
+value, and name the two provenances that need it. The generated
+reference moves by one row for the new field and one for the kind.
+
+The store keeps the name as written, untruncated, which is the same
+split the client id has: `record.sessions` is a column and not a line.
+
+### What a null means, and why the placeholder is one
+
+Three states record nothing, and a reader treats them alike:
+
+- a MAC a default agent covers with no device record at all, which the
+  plan's sixth finding made an ordinary state rather than an edge;
+- a record still carrying the `Device <mac>` spelling this server mints
+  when a board is bound, which M2 reserved to that board at write time
+  so that `LiveDevice.named` is a fact rather than a guess;
+- every session that opened before the column existed.
+
+The placeholder is the interesting one. Copying it would put a MAC in
+two columns of the same row and give a dashboard a legend of MAC
+addresses that merely looked like names, and M2 already refuses to say
+it out loud to a model for the same reason. Null is what a reader
+falls back from, to the MAC, which is what they had before this column.
+
+The migration therefore backfills nothing, and that is the second half
+of the same rule: the column is dated, so stamping the name a device
+has NOW onto sessions that opened before it existed would be the one
+thing it promises not to do.
+
+### The dated rule, stated where a dashboard author will meet it
+
+Nothing rewrites the column. `rename_agent`'s docstring is the
+authority and `sessions.agent` beside it is the precedent, and M4
+followed the same rule for the MAC. The consequence is real and worth
+saying out loud: **a per-device series in a dashboard splits at a
+rename**, and the sessions a device recorded under its old name stay
+under it. A board swap does not touch the column either, in either
+direction.
+
+That is intended. A dated row says what was true when it was written,
+and a dashboard that retitled last month's sessions when somebody moved
+a speaker would be reporting a month that never happened. It is in the
+column comment, in the changelog entry and in the two tests named after
+it, because the alternative is a dashboard author discovering it in a
+graph.
+
+### The no-leak revision, and the one surface that moved with it
+
+The plan's fifth finding settled `location` forever and `name` for M1
+to M4, and M2's section said so explicitly so that M5 would not read
+its test as a rule. The revision keeps the rule and changes one fact
+about it.
+
+The rule is provenance: `location` is what a person said out loud, so
+it reaches no event, no span and no capture file, ever. `name` is what
+an operator wrote, and what kept it off the events was never trust, it
+was that the MAC already identifies a device, so a second copy would be
+one fact with two homes going stale at the next rename. Both halves of
+that turn out to be answerable: M5 found the reader for whom a MAC
+identifies nothing, and the dated rule is what stops the copy going
+stale, because it is not trying to be current.
+
+So the assertions split rather than weaken:
+
+- the location's is now over the whole surface at once, the capture's
+  two text files included;
+- the name's is a positive claim with an exact set,
+  `{"session_open"}`, over every record a driven run produced, which is
+  what keeps the revision from becoming a habit;
+- the capture MANIFEST still carries neither, pinned field by field.
+
+**Its decision track does carry the name**, and that is the surface
+that moved without being named in the plan. That file is the events
+written where the audio is, so it holds what `session_open` holds.
+Filtering one field out of it on the way would be sink-side scrubbing,
+which is precisely the mechanism the content-and-telemetry ADR rejects
+in favour of source-side restriction: a field is lawful because it was
+declared. The test says this in place of leaving a reader to infer it
+from the directory listing.
+
+`record.events.fields` carries it for the same reason and needs no
+statement of its own: those rows are the same events, in the schema the
+analyst is already granted.
+
+### Deviations from the plan
+
+Four.
+
+1. **`docs/reference/api-openapi.json` moves, where the milestone named
+   only `conversations-schema.md` and `events.md`.** Not a scope
+   decision: `_session` serves `select(sessions)` whole and
+   `SessionDetail` forbids extras, so the column either joins that
+   model or 500s the detail read. It joined, with its own description.
+   The session LISTING is left alone deliberately: its columns are an
+   explicit tuple, the reader this milestone is for uses SQL, and
+   widening a paginated read for no stated consumer is a cost with no
+   payer.
+2. **The plan's own review resolution contradicts the milestone it
+   plans.** Finding 5's resolution says neither field reaches any
+   structured event, full stop; the M5 bullet gives `session_open` the
+   name. The bullet is the later text and the one this milestone
+   implements, and the contradiction is recorded here rather than
+   edited out of the review round, because a review round is a record
+   of what was found and answered on the day.
+3. **A second argument on `open_session` rather than a manifest key**,
+   which the plan did not specify either way. Reasoned above; it is the
+   difference between the capture having a copy of the name and not.
+4. **`Descriptor` and the `DESCRIPTOR` kind gained a provenance.** The
+   plan said the name reaches `session_open` and left the value type
+   open. Choosing a descriptor meant the class could no longer describe
+   itself as far-side only, so two sentences moved and the generated
+   reference moved with them.
+
+### Discoveries
+
+- **The server tap does not see session-scope events.** The first
+  version of the name's positive claim asked `attach_server_tap`, which
+  the no-leak file already used, and reported an empty set: that tap
+  sees `ota_check` and the capture's own events and nothing a session
+  emits. The claim had to be asked of the log records instead, and the
+  tap is kept beside it for what it can answer, which is that nothing
+  before a session names the board.
+- **A test lane's `session_open` is a constructor call like any
+  other.** `tests/support/telemetry.py` builds one by hand for the span
+  suites, so a new field with no default reddened 66 tests in one file
+  with a schema refusal rather than a type error. It now passes `None`,
+  which is what the board that lane drives really is: bound, and named
+  by nobody.
+- **The default-agent world in the recording lane was already the
+  no-record case.** `recording_config` reaches its agent through
+  `default_agent` and binds nothing, so every existing session-row test
+  in `test_conversations_session.py` is a device with no record, and
+  they passed unedited with the column null. That is the evidence that
+  the null path is what a deployment with no device records actually
+  gets.
+
+### Verification
+
+- `uv run ruff check .`, `uv run mypy`,
+  `uv run pytest tests/unit -q -n 4 --dist loadfile`,
+  `uv run pytest tests/integration -q`, and every generated-document
+  drift check, all from `vinga-server/`.
+- **The migration moves the CI wheel step's conversations pin**, from
+  `1006_metrics_views` to `1007_sessions_name_the_device`, in
+  `.github/workflows/vinga-server.yml`, and the unit lane's own `HEAD`
+  constant with it. That pin is only reachable in CI, and a migration
+  that did not move it fails the integration lane with "the wheel's
+  conversations chain is at [...]".
+- Three generated artifacts move: `conversations-schema.md` for the
+  column, `events.md` for the field and for the kind's widened
+  sentence, and `api-openapi.json` for the detail read. The
+  command-spellings census is regenerated.
+- Every claim was watched failing before it was made, one mutation per
+  claim: the bare column against the migration (the baseline-equality
+  test, which is what proves the migration is what makes it pass); the
+  three positive row claims against the unwritten column; the
+  placeholder rule by answering the stored name unconditionally, which
+  reddens the board nobody named; the event field against the bare
+  catalog; and the bound by handing the raw name to `DeviceName`, which
+  refuses the emission rather than carrying four hundred characters and
+  a terminal escape.
