@@ -167,8 +167,11 @@ caller's.
 
 ### Verification
 
-- `uv run ruff check .`, `uv run mypy`, `uv run pytest tests/unit -q -n 4
-  --dist loadfile` and `uv run pytest tests/integration -q`, all green.
+- `uv run ruff check .` and `uv run mypy` clean; `uv run pytest
+  tests/unit -q -n 4 --dist loadfile` 6232 passed, 19 skipped; `uv run
+  pytest tests/integration -q` 282 passed. The lane runs `-n 4` rather
+  than `-n auto` on this machine, which exceeds the compose Postgres's
+  connection limit.
 - `uv run vinga-server conversations views` and `uv run vinga-server
   config openapi` diffed against the committed references, which is what
   CI's two drift checks run.
