@@ -45,12 +45,14 @@ reaches the disk:
   they were in.
 
 And once they hold, the mutation is ordered so that no failure can
-leave the tree half folded: the fragments are removed first, into a
-directory their own removal proves writable, and the changelog is then
-replaced through a temporary file beside it, so it is never truncated
-and not yet whole. A failure at either step puts back what was already
-taken, from text held in memory, and a restore that itself fails says
-so in its own sentence rather than hiding inside the first.
+leave the tree half folded. The new changelog is written first, into a
+file created exclusively beside the old one under a name nothing can
+guess; then the fragments are removed; then the changelog is replaced
+by a rename, which either happens or does not. So the changelog is
+never half a fold, and a failure before the rename puts the fragments
+back, content and mode, into the directory whose own removals just
+proved it writable. A restore that itself fails says so in its own
+sentence rather than hiding inside the first.
 
 Line endings are content, and nothing in this repository forces them
 to be one thing, so nothing here reads or writes through Python's
@@ -89,6 +91,7 @@ import re
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 # The closed six, in Keep a Changelog order. The order is the artifact:
@@ -695,30 +698,74 @@ def fold(root: Path) -> int:
     if reasons:
         return _fail(reasons)
 
-    reasons = _mutate(changelog, before, after, sources)
+    reasons = _mutate(changelog, after, sources)
     if reasons:
         return _fail(reasons)
     print(f"folded {len(paths)} fragments into {len(created) + len(appended)} sections")
     return 0
 
 
-def _mutate(changelog: Path, before: str, after: str, sources: dict[Path, str]) -> list[str]:
-    """The only part of a fold that touches the disk, ordered so that
-    every failure leaves the tree as it was.
+def _stage(changelog: Path, after: str) -> Path:
+    """The new changelog, written beside the old one under a name
+    nothing can guess.
 
-    The fragments are removed first and the changelog replaced second,
-    which is the order that makes the recovery possible rather than
-    hopeful: the directory that has just accepted a removal is the
-    directory a restored fragment is written back into, and the same
-    permission bit governs both. The reverse order would need a
-    directory that had refused a removal to accept a creation.
+    Three properties, and each closes a door. Exclusive creation, so an
+    existing path at that name is an error rather than a target: the
+    previous spelling was a predictable `CHANGELOG.md.fold-tmp` opened
+    with an ordinary write, so a committed symlink there had the fold
+    write the whole new changelog through the link into another file
+    and then move the link itself over `CHANGELOG.md`, ruining two
+    paths that both sit inside what the fold workflow stages. An
+    unguessable name, so nothing can be planted at it. And the same
+    directory, so the replacement below is a rename rather than a copy.
 
-    The changelog is replaced rather than rewritten in place, through a
-    temporary file beside it, so there is no moment at which the file
-    is truncated and not yet whole. A leftover temporary would fail the
-    fold workflow's own dirtiness assertion, which is the loud outcome;
-    it is removed here anyway.
+    The staged file takes the changelog's own mode, because `mkstemp`
+    creates a private one and the replacement would otherwise hand the
+    repository a 0600 changelog.
     """
+    handle, name = tempfile.mkstemp(
+        dir=changelog.parent, prefix=".changelog-fold-", suffix=".tmp"
+    )
+    staged = Path(name)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8", newline="") as out:
+            out.write(after)
+        os.chmod(staged, stat.S_IMODE(changelog.stat().st_mode))
+    except OSError:
+        _discard(staged)
+        raise
+    return staged
+
+
+def _discard(path: Path) -> None:
+    """Remove a staged file, without letting the removal become the
+    failure being reported."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _mutate(changelog: Path, after: str, sources: dict[Path, str]) -> list[str]:
+    """The only part of a fold that touches the disk, ordered so that
+    no failure can leave the tree half folded.
+
+    The staged changelog is written first, before anything is removed,
+    so the step most likely to fail fails while the tree is still
+    untouched. The fragments go next. The changelog is changed last and
+    only by a rename, which either happens or does not, so there is no
+    state in which the file is half a fold and `_restore` never has a
+    changelog to put back, only fragments.
+
+    And the fragments can be put back, which is an argument rather than
+    a hope: they are written into the directory whose own removals just
+    proved it writable, under the same permission bit.
+    """
+    try:
+        staged = _stage(changelog, after)
+    except OSError:
+        return [CANNOT_WRITE]
+
     removed: list[Path] = []
     modes: dict[Path, int] = {}
     try:
@@ -727,31 +774,24 @@ def _mutate(changelog: Path, before: str, after: str, sources: dict[Path, str]) 
             path.unlink()
             removed.append(path)
     except OSError:
-        return _restore(changelog, None, removed, sources, modes, CANNOT_REMOVE)
+        _discard(staged)
+        return _restore(removed, sources, modes, CANNOT_REMOVE)
 
-    staged = changelog.with_name(f"{changelog.name}.fold-tmp")
     try:
-        with staged.open("w", encoding="utf-8", newline="") as out:
-            out.write(after)
         os.replace(staged, changelog)
     except OSError:
-        try:
-            staged.unlink(missing_ok=True)
-        except OSError:
-            pass
-        return _restore(changelog, before, removed, sources, modes, CANNOT_WRITE)
+        _discard(staged)
+        return _restore(removed, sources, modes, CANNOT_WRITE)
     return []
 
 
 def _restore(
-    changelog: Path,
-    before: str | None,
     removed: list[Path],
     sources: dict[Path, str],
     modes: dict[Path, int],
     reason: str,
 ) -> list[str]:
-    """Put back what the failed mutation had already taken.
+    """Put back the fragments a failed mutation had already taken.
 
     Content and mode, because the tree a fold promises to leave behind
     is the tree it found and not a copy of its bytes. A fragment is a
@@ -760,20 +800,15 @@ def _restore(
     quietly changing what is on disk, and a mode is exactly the kind of
     thing nobody notices being lost.
 
-    `before` is None when the changelog was never reached, which is the
-    ordinary case: only the fragments need restoring. A restore that
-    itself fails is reported as its own refusal, because a tree left
-    half folded is a different thing from a fold that declined to
-    start and must not be described as one.
+    A restore that itself fails is reported as its own refusal, because
+    a tree left half folded is a different thing from a fold that
+    declined to start and must not be described as one.
     """
     try:
         for path in removed:
             with path.open("w", encoding="utf-8", newline="") as out:
                 out.write(sources[path])
             os.chmod(path, modes[path])
-        if before is not None and text_of(changelog) != before:
-            with changelog.open("w", encoding="utf-8", newline="") as out:
-                out.write(before)
     except OSError:
         return [reason, NOT_RESTORED]
     return [reason]
