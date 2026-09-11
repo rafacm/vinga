@@ -143,10 +143,14 @@ possible:
 - Small commits: one logical change, imperative ~50-char title, a
   body explaining what and why, ending with the Claude trailer.
 - No em-dashes anywhere. `config.example.yaml` updates in the same
-  change as any server-section schema change. `CHANGELOG.md`
-  date-based entries. The implementation-doc section is written in
-  the change that ticks its milestone, ticked with "PR TBD" until
-  the PR exists.
+  change as any server-section schema change. A changelog entry is
+  a `changelog.d/<issue>-<slug>.md` fragment, `### <Class>` headings
+  from the Keep a Changelog six with the text in final changelog
+  form and no date; never an edit to `CHANGELOG.md`, which a
+  pull-request check refuses and a workflow on `main` folds the
+  fragments into. The implementation-doc section is written in the
+  change that ticks its milestone, ticked with "PR TBD" until the
+  PR exists.
 - The plan's documentation footprint for this milestone lands in
   the same milestone as the behavior it describes: update the page
   that owns the fact and leave summaries linking to it, never a
@@ -162,14 +166,18 @@ possible:
 - `PYTHONDONTWRITEBYTECODE=1` outside pytest (the stale-bytecode
   trap in AGENTS.md).
 - No pushes and no GitHub commands from subagents.
-- A documentation move can stale the command-spellings census,
-  which scans every tracked file. The `docs` workflow now runs the
-  census on the changes the server workflow ignores (the hole that
-  once turned `main`'s unit lane red with no run going red,
-  2026-08-27), but a PR should arrive synchronized rather than
-  lean on CI to say so: after moving or renaming documentation,
-  run `tests/unit/test_command_spellings.py`; when stale,
-  regenerate the manifest with
+- A documentation change can stale the command-spellings census,
+  which scans every tracked file: a spelling a document starts or
+  stops quoting, or a move that gives one another class. A move
+  that changes neither leaves the manifest alone, since it records
+  the distinct set of `class  invocation` pairs and no positions.
+  The `docs` workflow runs the census on the changes the server
+  workflow ignores (the hole that once turned `main`'s unit lane
+  red with no run going red, 2026-08-27), but a PR should arrive
+  synchronized rather than lean on CI to say so: after editing,
+  moving or renaming documentation, run
+  `tests/unit/test_command_spellings.py`; when stale, regenerate
+  the manifest with
   `uv run python -m tests.unit.test_command_spellings`, never by
   hand.
 
