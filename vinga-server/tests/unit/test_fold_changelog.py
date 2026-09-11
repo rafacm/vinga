@@ -723,6 +723,35 @@ def test_a_changelog_d_that_is_not_a_directory_is_a_refusal(
     assert "Traceback" not in done.stderr
 
 
+def test_a_planted_symlink_at_the_old_temp_path_corrupts_nothing(
+    tmp_path: Path,
+) -> None:
+    """The staging file used to have a name anybody could predict, and
+    it was opened with a write that follows a symlink.
+
+    So a pull request could commit `CHANGELOG.md.fold-tmp` pointing at
+    another file in the tree, and the fold would write the whole new
+    changelog through the link into that file and then move the link
+    itself over `CHANGELOG.md`. Both paths it ruins are inside the two
+    the fold workflow stages, so the porcelain guard would have watched
+    the bot commit the wreckage. The staging file is created
+    exclusively under a name nothing can guess now, so a planted link
+    is just a stray file.
+    """
+    root = repo(tmp_path)
+    readme = root / "changelog.d" / "README.md"
+    standing = readme.read_text(encoding="utf-8")
+    (root / "CHANGELOG.md.fold-tmp").symlink_to(readme)
+    fragment(root, "467-a-thing.md", "### Added\n\n- **A thing.**\n")
+
+    done = run("fold", str(root))
+
+    assert readme.read_text(encoding="utf-8") == standing
+    assert not (root / "CHANGELOG.md").is_symlink()
+    assert "**A thing.**" in (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "Traceback" not in done.stderr
+
+
 def test_a_symlinked_changelog_is_a_refusal(tmp_path: Path) -> None:
     """The other path the fold owns, held to the same standard as the
     directory: a committed symlink here would have the fold read one
