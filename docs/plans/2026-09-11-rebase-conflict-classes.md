@@ -344,10 +344,14 @@ named where the rule is stated.
   distinct-pair manifest cannot change.
 - **What CI cannot prove locally is exercised once, honestly**: the
   fold workflow's first live run is milestone 2's own changelog
-  entry, written as the repository's first fragment; the PR states
-  the box unchecked with the reason, and the fold run on `main`
-  after the merge is linked from the implementation doc as the
-  verification.
+  entry, written as the repository's first fragment. M2's PR ships
+  its implementation-doc section and milestone tick as the
+  convention requires, with the live-fold Verification box
+  unchecked and the reason stated. After the merge, the coordinator
+  watches the fold run, verifies the folded section, and appends
+  the run link to the M2 section in one documentation-only direct
+  commit to `main` (which AGENTS.md permits), named here so the
+  follow-up is planned work rather than a loose end.
 
 ## Risks
 
@@ -512,3 +516,9 @@ condensed but faithful; resolutions appended per amendment.
    M2 merges, yet the implementation section and the milestone tick
    land together. Name the post-merge documentation update, who
    performs it, and how M2's record carries it.
+
+   *Resolution.* Adopted. The tests section now names the
+   follow-up: M2 ticks with its PR, the live-fold box unchecked
+   with the reason, and the coordinator appends the verified run
+   link in one documentation-only direct commit to `main` after
+   the first fold.
