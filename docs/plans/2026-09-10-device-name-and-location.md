@@ -275,7 +275,7 @@ are already in `config/models.py`.
 
 ## Milestones
 
-- [x] **[M1: the device record](2026-09-10-device-name-and-location-implementation.md#m1-the-device-record).** (PR TBD) Schema, migration `3003`, the fold in its two
+- [x] **[M1: the device record](2026-09-10-device-name-and-location-implementation.md#m1-the-device-record).** (PR #462) Schema, migration `3003`, the fold in its two
   proved-equal renderings, the repository reads and writes with minting and the
   folded-name conflict both under the writer lock, the widened
   `normalize_device_bindings` absorbing the value-shape union, and every device
