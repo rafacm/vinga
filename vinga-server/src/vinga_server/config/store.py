@@ -311,6 +311,31 @@ DEVICE_ID_TAKEN = (
     "changed, and the id is not quoted back"
 )
 
+# What a device name or a device location carrying a credential is told.
+#
+# One sentence for the two fields and for both shapes of credential,
+# because there is one rule and one remedy. The provider and MCP
+# refusals below distinguish a credential in the authority from one in
+# the query and send the operator to `api_key_env`, which is the right
+# answer for a value that IS an address and no answer at all for a value
+# that is a room's name.
+#
+# It exists because these two fields are stored exactly as written and
+# read back on every surface that shows the record, so the value would
+# sit in the configuration rather than in the encrypted store a
+# credential belongs in. And because leaving it to the display would
+# make an export lossy: a read strips the credential on its way out, so
+# a name stored with one and re-applied from an export would come back
+# as a different name, which is the one thing the document a deployment
+# is rebuilt from may not do.
+DEVICE_TEXT_CREDENTIAL = (
+    "devices: a device {what} is stored exactly as it was written and is read back "
+    "on every surface that shows the record, so it may not be a URL carrying a "
+    "credential, either before its host or as a query parameter. Nothing was "
+    "changed, and the value is not quoted back: write a {what} there rather than an "
+    "address"
+)
+
 DEVICE_NAME_IN_FLIGHT = (
     "devices: one of the names this would write is the name another device still has, "
     "so it asks for a swap or a hand-over that cannot be made inside one transaction: "
@@ -3009,6 +3034,30 @@ def _mac(mac: str) -> str:
     raise ConfigError(problem)
 
 
+def _refuse_device_credential(what: str, value: str | None) -> None:
+    """One submitted device name or location, refused if it is a URL
+    carrying a credential.
+
+    Asked of what a caller SENT and never of what a row holds, the rule
+    `_check_addressable` already follows: a value written before this
+    existed still reads, still exports and is still deletable, and a
+    check on the read path would make a stored row unreadable rather
+    than fixable.
+
+    `url_credential` is the detection, shared with the provider and MCP
+    walks so there is one answer to "does this string carry a
+    credential"; the sentence is this file's own, because the remedy
+    those two give is to name an environment variable, and a device
+    location is not an address with a variable behind it.
+
+    The value is not passed to the sentence, and the field name that is
+    passed is one of two literals from the call sites rather than
+    anything a caller chose.
+    """
+    if value is not None and url_credential(value) is not None:
+        raise ConfigError(DEVICE_TEXT_CREDENTIAL.format(what=what))
+
+
 def _device_change(mac: str, written: object) -> _DeviceBinding:
     """One device entry, taken as far as it goes without the store: the
     MAC made canonical and the value read as a record.
@@ -3038,6 +3087,12 @@ def _device_change(mac: str, written: object) -> _DeviceBinding:
     if not isinstance(value, Mapping):
         raise ConfigError(_NOT_A_BINDING)
     record = _load(DeviceRecord, f"devices.{key}", dict(value))
+    # Both free-text fields, and only where the document really carried
+    # one: an absent name is the stored name, and a stored name is not
+    # something this document submitted.
+    _refuse_device_credential("name", record.name)
+    if "location" in record.model_fields_set:
+        _refuse_device_credential("location", record.location)
     return _DeviceBinding(
         mac=key,
         # Trimmed here for the reason the binding always was: `sam` and
@@ -3052,19 +3107,27 @@ def _device_change(mac: str, written: object) -> _DeviceBinding:
 
 def _device_name(name: str) -> str:
     """One name a rename was given, held to the model's own rule rather
-    than to a second copy of it."""
-    return _load(DeviceRecord, "devices", {"agents": [], "name": name}).name or name
+    than to a second copy of it, and then to the rule about what a
+    stored string may carry."""
+    checked = _load(DeviceRecord, "devices", {"agents": [], "name": name}).name or name
+    _refuse_device_credential("name", checked)
+    return checked
 
 
 def _device_location(location: str) -> str:
     """One location a relocation was given.
 
-    Free text, unlike a name: it is not unique, it addresses nothing,
-    and there is no rule to hold it to beyond being a string. Named
-    anyway, so the two writes read alike at their call sites and so
-    that a rule this gains later has a place to be.
+    Freer than a name: it is not unique and it addresses nothing. What
+    it shares with a name is the only rule either of them has, which is
+    that a value stored as written and read back everywhere may not be
+    a URL carrying a credential.
     """
-    return location
+    checked = _load(
+        DeviceRecord, "devices", {"agents": [], "location": location}
+    ).location
+    _refuse_device_credential("location", checked)
+    assert checked is not None, "a submitted location is a string"
+    return checked
 
 
 def _readable(location: str, section: str, fragment: object) -> dict[str, object]:
