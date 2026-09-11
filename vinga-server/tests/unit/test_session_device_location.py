@@ -521,7 +521,7 @@ async def test_a_place_that_holds_nothing_is_refused_by_the_rule_that_owns_it() 
     script = ScriptedLlm([[call("set_device_location", location=blank)], "Where am I?"])
 
     with _submissions() as submitted:
-        with placements() as writing, a_session(script, relocations=writing) as session:
+        with placements() as writing, a_session(script, device_access=writing) as session:
             await run_reply(session, "you have moved")
 
     (answer,) = said(script)
