@@ -197,6 +197,19 @@ _HISTORICAL_PATHS = (
     "docs/adr/",
     "spikes/",
     "CHANGELOG.md",
+    # And the changelog before it is folded. A changelog entry is
+    # written as `changelog.d/<issue>-<slug>.md` and moved verbatim into
+    # `CHANGELOG.md` on `main` after the merge, so it is the same record
+    # under two names and has to carry the same class under both.
+    #
+    # That is also the property the fold workflow's commit rests on. It
+    # moves text between two paths of one class without changing a word
+    # of it, so the class and the invocation of every pair are the same
+    # before and after, and the distinct-pair manifest cannot move. A
+    # bot commit that lands without a CI run of its own therefore cannot
+    # stale this artifact, which is asserted rather than assumed in
+    # `test_a_fragment_is_a_record_the_way_the_changelog_is`.
+    "changelog.d/",
     # And the differential: its transcript is a capture of what the
     # grammar answered on the commit before the rename, and the module
     # beside it names, in the old spelling, exactly what the rename
@@ -955,6 +968,31 @@ def test_a_word_a_flat_verb_cannot_take_makes_the_spelling_stale(
 
     assert found.invocation == invocation
     assert names_something(found.invocation) is names
+
+
+# The fragment a changelog entry arrives as
+#
+# A changelog entry is written as `changelog.d/<issue>-<slug>.md` and
+# folded into `CHANGELOG.md` on `main` after the merge. Both paths are
+# records, and the fold is a verbatim move between them, so the property
+# stated beside `changelog.d/` in `_HISTORICAL_PATHS` is asserted here:
+# the same text under either path is the same class, so the distinct
+# pair the manifest carries is the same pair before and after a fold.
+
+
+def test_a_fragment_is_a_record_the_way_the_changelog_is() -> None:
+    """The fold cannot stale the census.
+
+    An entry quoting a command is historical while it waits in
+    `changelog.d/` and historical once it is in `CHANGELOG.md`, so the
+    bot commit that moves it renders the manifest byte-identical. That
+    is what lets the fold commit land without a CI run of its own.
+    """
+    fragment = found_in(LIVE, "changelog.d/467-changelog-fragments.md")
+    folded = found_in(LIVE, "CHANGELOG.md")
+
+    assert [row.kind for row in fragment] == ["historical"]
+    assert manifest_of(fragment) == manifest_of(folded)
 
 
 # What the manifest aggregates, and what it aggregates away
