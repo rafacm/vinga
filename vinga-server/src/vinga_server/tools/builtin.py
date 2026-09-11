@@ -997,12 +997,14 @@ PLACEMENT_UNAVAILABLE = (
     "that, and carry on with the conversation"
 )
 
-# The value was refused. One sentence for both refusals a location can
-# meet, because they share a remedy and because the repository refuses
-# them with one type: a place that is only whitespace and a place that
-# is a URL carrying a credential are both answered by saying a room out
-# loud, and a model cannot act on the difference. Neither the value nor
-# the repository's reason is repeated.
+# The value was refused by the repository, which for a location means
+# it was a URL carrying a credential: a place that folds to nothing
+# never gets that far, because the guard below refuses it first and in
+# better words. One sentence rather than one per rule all the same,
+# because the repository refuses every value problem with one type and
+# reading its prose to tell them apart is what a closed vocabulary
+# exists to avoid. Neither the value nor the repository's reason is
+# repeated.
 LOCATION_NOT_A_PLACE = (
     "that is not something that can be written down as a place: a location is a room "
     "or a part of the home, in the words a person would say it. Ask the user where "
@@ -1026,10 +1028,14 @@ PLACEMENT_FAILED = (
     "record that"
 )
 
-# What a successful move answers with. The place as the model sent it,
-# on one line, the way the memory confirmations quote what they wrote:
-# what the model does with a result is speak, and a confirmation that
-# named no place would leave it guessing whether its own words landed.
+# What a successful move answers with. The place as the ROW now holds
+# it, on one line, the way the memory confirmations quote what they
+# wrote: what the model does with a result is speak, and a confirmation
+# that named no place would leave it guessing whether its own words
+# landed. A device location is stored exactly as it was written, so the
+# two are the same string today and the normalization is the whole of
+# the difference; it is the row's value all the same, because what the
+# next round reads back is the row.
 MOVED = "This device is now recorded as being {location}"
 
 
