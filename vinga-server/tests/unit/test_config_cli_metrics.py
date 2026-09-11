@@ -760,6 +760,39 @@ def test_a_cell_an_operator_wrote_cannot_steer_the_terminal(run, store, capsys) 
     assert terminal.getvalue() == piped
 
 
+def test_a_heading_an_answer_wrote_cannot_steer_the_terminal(run, capsys) -> None:
+    """The headings are the answer's own column names, so they are an
+    answer's text the way a cell is and go through the same bounding.
+    A synthetic response rather than a planted row, because no store
+    this server runs can put a control character into a column name:
+    the case is a compromised or impersonated API, which is exactly
+    what the cell rule is for.
+
+    The planted name carries a clear-screen sequence, a bell, a
+    carriage return and a newline; asserted the way the cell case is,
+    by hunting the instruction bytes through the whole rendering."""
+    hostile = "day\x1b[2Jcleared\x07\rone\ntwo"
+    answer = an_empty_answer("sessions")
+    answer["view"]["columns"][0]["name"] = hostile
+    answer["rows"] = [
+        {
+            column["name"]: DAY if column["name"] == hostile else 1
+            for column in answer["view"]["columns"]
+        }
+    ]
+    asked(run, answer)
+
+    code, printed, err = out(run, capsys, "metric", "show", "sessions")
+
+    assert (code, err) == (0, "")
+    assert "\x1b" not in printed
+    assert "\x07" not in printed
+    assert "\r" not in printed
+    # The other headings still arrive, so the bounding mangled the one
+    # hostile name rather than dropping the table.
+    assert "SESSIONS" in printed and "TURNS" in printed
+
+
 def test_a_read_says_nothing_about_the_run_it_made(run, store, capsys) -> None:
     """Stdout carries the thing a caller came for and stderr carries
     everything about the run that produced it. A read produced nothing

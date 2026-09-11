@@ -3324,7 +3324,10 @@ def _metric_rows(answer: Mapping[str, Any]) -> str:
     if not rows:
         lines.append(NO_METRIC_ROWS)
     else:
-        table = [tuple(str(column["name"]).upper() for column in columns)] + [
+        # The headings are the answer's text the way the cells are, so
+        # they go through the same bounding: uppercased first, because
+        # the mangling `_cell` does must be the last hand on the value.
+        table = [tuple(_cell(str(column["name"]).upper()) for column in columns)] + [
             tuple(_cell(row.get(column["name"])) for column in columns) for row in rows
         ]
         lines += _columns(table).splitlines()
