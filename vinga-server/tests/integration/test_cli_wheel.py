@@ -157,6 +157,18 @@ WHEEL_CONVERSATION = "5f6a7b8c9d0e1f20314253647586a9b0"
 # above because that one is erased mid-case.
 WHEEL_MEMORY_THREAD = "314253647586a9b05f6a7b8c9d0e1f20"
 
+# The session the metrics case counts, and the window around the day
+# every manifest here opens on. A named window rather than the default
+# one, so what the case asserts is the row it planted rather than
+# whatever day the lane happened to run on.
+METRIC_SESSION = "wheel-metric"
+
+METRIC_DAY = "2026-08-15"
+
+METRIC_SINCE = "2026-08-01"
+
+METRIC_UNTIL = "2026-08-31"
+
 
 def session_manifest(device: str) -> dict[str, object]:
     """The manifest a session opens its row with, as the device session
@@ -955,6 +967,55 @@ def test_the_memory_verbs_reach_the_third_schema_from_the_installed_wheel(
         run("memory", "delete", "conversation", WHEEL_MEMORY_THREAD, "--all"),
         "memory delete",
     ) == "state: 1\n"
+
+
+def test_the_metric_verbs_read_the_aggregates_from_the_installed_wheel(
+    run, module_database: str
+) -> None:
+    """The `metric` noun from the same bare install, and the same claim
+    the three nouns above it make: two reads over the record's named
+    aggregates, carrying none of the store half with them.
+
+    Worth a case of its own rather than a line in one of theirs because
+    of what the answer carries. These bodies hold the statements the
+    view registry declares, and the registry is a module of the serve
+    tier; a client that had to import it to print them would be a client
+    the bare wheel cannot run, and it would fail here and nowhere else.
+    """
+    seeded = ConversationStore(
+        DatabaseConfig(name=module_database), retention_days=0
+    )
+    seeded.start()
+    try:
+        seeded.open_session(METRIC_SESSION, 100.0, session_manifest(SESSION_MAC))
+        seeded.record_turn(
+            METRIC_SESSION,
+            TurnRecord(
+                at=101.2,
+                conversation=WHEEL_CONVERSATION,
+                agent="sam",
+                heard="how has today been",
+                reply="Quiet.",
+            ),
+        )
+        seeded.close_session(METRIC_SESSION, duration_s=2.0, reason="client")
+    finally:
+        seeded.stop()
+
+    listed = answered(run("metric", "list"), "metric list")
+    assert "\nsessions\n" in f"\n{listed}"
+    assert "A rate is null when its denominator is zero, never zero." in " ".join(
+        listed.split()
+    )
+
+    shown = answered(
+        run("metric", "show", "sessions", "--since", METRIC_SINCE, "--until", METRIC_UNTIL),
+        "metric show",
+    )
+    [heading] = [line for line in shown.splitlines() if line.startswith("DAY")]
+    assert heading.split() == ["DAY", "SESSIONS", "TELEMETRY_SESSIONS", "TURNS"]
+    [row] = [line for line in shown.splitlines() if line.startswith(METRIC_DAY)]
+    assert int(row.split()[-1]) >= 1
 
 
 # The commands that reach no server at all
