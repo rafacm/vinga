@@ -39,6 +39,7 @@ from vinga_server.config import ConfigError, views
 from vinga_server.config.api import build_api
 from vinga_server.config.loader import (
     DeviceAlreadyBoundError,
+    DeviceLocationBlankError,
     DeviceNameConflictError,
     UnknownEntityError,
 )
@@ -486,6 +487,38 @@ def test_a_location_holding_nothing_is_refused(
 
     assert DEVICE_LOCATION_BLANK in str(caught.value)
     assert _record(store).location == "the kitchen"
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\xa0\u3000\t"], ids=["empty", "spaces", "unicode"])
+@pytest.mark.parametrize(
+    "act",
+    [
+        lambda store, value: store.relocate_device(MAC, value),
+        lambda store, value: store.relocate_device_by_id(_record(store).id or "", value),
+    ],
+    ids=["by-mac", "by-id"],
+)
+def test_a_blank_location_is_refused_with_a_type_of_its_own(
+    store: ConfigStore, act, blank: str
+) -> None:
+    """The refusal carries a type because one of its callers cannot act
+    on its sentence.
+
+    That sentence names the command an operator clears a location with
+    and the key a document does the same with, which is the right answer
+    for whoever typed the value and no answer at all for a room that
+    said where a speaker is out loud. The tool layer translates this
+    type into its own words, so a submitted location travels to the rule
+    that owns it (`fold_device_name`, in the model) and comes back
+    saying WHICH rule it broke rather than being judged twice.
+    """
+    _agents(store)
+    store.bind_device(MAC, ["sam"])
+
+    with pytest.raises(DeviceLocationBlankError):
+        act(store, blank)
+
+    assert _record(store).location is None
 
 
 def test_the_api_refuses_a_location_holding_nothing(

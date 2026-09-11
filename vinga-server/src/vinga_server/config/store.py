@@ -50,11 +50,13 @@ from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
     DeviceAlreadyBoundError,
+    DeviceLocationBlankError,
     DeviceNameConflictError,
     StorageError,
     UnknownEntityError,
 )
 from vinga_server.config.models import (
+    DEVICE_LOCATION_BLANK,
     DOMAIN_KEYS,
     PROMPT_FRAGMENT_NAME_RULE,
     PROVIDER_STAGES,
@@ -3419,7 +3421,23 @@ def _device_location(location: str) -> str:
     it shares with a name is the only rule either of them has, which is
     that a value stored as written and read back everywhere may not be
     a URL carrying a credential.
+
+    The other rule it has is the model's, that a location folding to
+    nothing is not a location, and it is asked here as well so that the
+    refusal carries a TYPE. The rule itself is not restated: this asks
+    `fold_device_name`, which is the same function the model's validator
+    asks and the same one the database's index is written over, so there
+    is one definition of blank and three readers of it. What the type
+    buys is a caller that cannot act on the sentence. The message names
+    the command that clears a location and the document key that does
+    the same, which is the right answer for an operator and no answer at
+    all for whoever is standing in the room talking to the device; the
+    tool layer translates this type into words a room can act on
+    (`device/placement.py`). Matching on the prose instead is what a
+    closed vocabulary exists to avoid.
     """
+    if not fold_device_name(location):
+        raise DeviceLocationBlankError(DEVICE_LOCATION_BLANK)
     checked = _load(
         DeviceRecord, "devices", {"agents": [], "location": location}
     ).location
