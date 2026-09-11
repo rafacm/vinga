@@ -170,6 +170,17 @@ distinct on purpose:
   nobody has named or placed rather than reading a MAC address aloud.
   The spelling is reserved for the board whose MAC it is, which is what
   makes it mean "nobody has named this" wherever it is read.
+
+  **A conversation changes the location, and only the location**, with
+  the `set_device_location` tool: somebody says the speaker has been
+  moved to the office and the record says so from the very next reply.
+  Anyone talking to a device may move it, which is deliberately the
+  same trust boundary as talking to it at all, and the tool writes
+  through the same repository an operator's command writes through, so
+  a place a room offers meets the rules a typed one meets. A device a
+  default agent merely covers, with no record of its own, is refused in
+  a sentence the agent reads out, because creating a device record is
+  an operator's act.
   The
   [configuration reference](reference/domain-config.md) documents the
   fields.
