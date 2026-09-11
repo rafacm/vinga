@@ -266,3 +266,168 @@ said as a reason rather than as a state.
   value, one of which is the Turkish one that broke the first version.
 - The migration is proved on rows in `tests/integration/`, on three
   boards of one fleet sharing a vendor OUI.
+
+## M2: the agent knows where it is
+
+The runtime half of the two facts M1 stored. Nothing about the schema,
+the repository or the CLI moved; what M2 adds is the path from the row
+to the model, and the clock that path runs on.
+
+### What was built
+
+- **A second live read, beside the binding's.**
+  `config/store.py` gains `LiveDevice` (`id`, `name`, `location`) and
+  `read_live_device`, one statement on the read-only, repeatable-read,
+  never-migrated connection the binding is read on, with the same MAC
+  canonicalization and the same normalization of a database failure.
+- **The view answers it.** `device/bindings.py` gains `record_for` and
+  the `resolve_record` that awaits it off the event loop, with the
+  fallback that module already keeps: a read that fails logs the fixed
+  `device_bindings_unreadable` warning and answers from the world being
+  served, so a `/data` hiccup mid-conversation does not make an agent
+  stop knowing what it is speaking through.
+- **The assembler carries it.** `runtime/prompt.py` gains
+  `device_introduction`, one sentence, and `with_scopes` takes the
+  record as a third argument. The sentence joins the device block above
+  the notes; there is no second heading, per the plan.
+- **The reply reads it per round.** `runtime/pipeline.py` names a
+  `DeviceRecords` protocol (one method, answering None rather than
+  raising, the shape `resumption.ThreadReads` already uses), holds the
+  view as a collaborator, and reads the record in `_system_prompt` on
+  every round, whether or not memory is read. `app.py` passes the
+  bindings view it already builds into the runtime factory, so there is
+  one engine over the device rows and one place a failed read of them is
+  logged.
+
+### How the two facts reach the prompt, and why by this path
+
+The plan's third review finding is the whole of M2: there was no
+metadata path. `_live_binding` selects `agents` and nothing else, and
+`DeviceBindings` resolved names and nothing else.
+
+The read added is a **second statement on the same view** rather than a
+widening of the binding's. The plan says "read in the same snapshot the
+binding is resolved from", and the snapshot that can be shared is the
+view: the same engine, the same isolation, the same fallback, the same
+disposal. The statement cannot be shared, because M1 pinned
+`read_live_binding`'s SQL byte for byte off the cursor, deliberately, so
+that a widened select on the path a board depends on to be served at all
+cannot pass unnoticed. Spending that pin to save a round trip nobody
+makes would have been the wrong trade twice over: the two answers are
+never wanted together, since the binding is resolved once per connection
+by the edge and the record is read once per round by a reply already in
+flight.
+
+What a round pays is therefore one statement, asserted as one in
+`test_live_device_read.py`, started concurrently with the memory read
+rather than after it, so a reply waits for the slower of the two rather
+than for their sum.
+
+### Why it cannot ride the memory switch
+
+`_system_prompt` returned `self._know_how.text` early when
+`_remembering_now()` was false, which skipped the whole scope assembly.
+A device's name is not a remembered thing: it is what the deployment IS,
+and an agent whose `memory` section is off is still speaking through a
+named board in a room. So the early return now assembles too, with
+`NOTHING_REMEMBERED` for the scopes and the record read all the same,
+and the memory round trip still does not happen. Both halves are pinned:
+the agent that may not remember is told its device, and no memory read
+is made for it.
+
+### How the per-round clock was proved rather than assumed
+
+By moving a device under a running conversation and reading the next
+prompt. `test_a_device_moved_between_two_rounds_is_moved_for_the_next_reply`
+binds and names a board through the repository, opens a session against
+a view with a real engine behind it (the shape `app.py` composes), takes
+one reply, relocates the board through `relocate_device`, and takes
+another: the first prompt carries the name with no location and the
+second carries the name and the new location. The activation happened
+before the write, so a record captured there would answer the old
+location forever, and the know-how half is asserted unrebuilt (the
+registry was asked once), which is the other way the test could have
+passed for the wrong reason. Its sibling does the same for a rename and
+asserts the record's id did not move under it.
+
+Two more clock tests: the record is read exactly once per round (a
+two-round reply reads twice) and never on the event loop, proven by the
+thread it ran on rather than by reading the call site.
+
+### The no-leak claim, as M2 leaves it
+
+Neither field reaches a structured event, either log format, or the
+capture manifest and its decision track. Asserted as absence rather than
+as sanitization, because nothing takes either value to those surfaces:
+a session driven with a credential-shaped name and a credential-shaped
+location has both in the prompt the model received and neither anywhere
+in the captured records, in either rendering, nor in the two text files
+a capture leaves on disk.
+
+One note for whoever implements M5. The plan's fifth finding settles
+`location` forever (it is conversation-derived and the structured-events
+row is metadata only) and settles `name` for M1 to M4 only: M5's own
+bullet gives `session_open` and `record.sessions` a device name, on the
+argument that `vinga_ro` is granted nothing on the `domain` schema. So
+the name half of `test_neither_field_reaches_an_event_or_a_log_line` is
+a statement about this milestone's surface rather than a permanent ban,
+and M5 is expected to revise it. The location half is permanent.
+
+### Deviations from the plan
+
+Three, each with its reason.
+
+1. **The record is read by its own statement rather than in the
+   binding's.** The plan's "in the same snapshot the binding is resolved
+   from" is honoured as the same live view, engine, isolation and
+   fallback; it is not honoured as one SELECT, because M1's
+   byte-for-byte pin on the binding statement is worth more than a round
+   trip no caller makes. Reasoned above.
+2. **The introduction sits above the device heading rather than under
+   it.** The plan says the two facts join the existing block, and they
+   do, in one block under the one `device` provenance. Inside it the
+   sentence comes first and the heading keeps its notes, because the
+   heading says "the conversation and the remembered facts above take
+   precedence", which is true of notes and false of a device's own name.
+   The consequence is worth having on its own: a deployment with notes
+   and no named device sends exactly the text it sent before this
+   milestone, byte for byte.
+3. **`LiveDevice.id` is read and carried and rendered nowhere.** The
+   plan names the read as answering `{id, name, location}`, and it does.
+   Nothing in a prompt says an id out loud; what it is for is that these
+   two facts belong to a row rather than to a MAC, which is what M4's
+   swap keeps and what the tests assert (the answer carries the id the
+   record was minted with, and a rename does not move it). It is
+   `str | None` because the fallback answers from a served snapshot, and
+   a configuration composed in Python has never minted one.
+
+### Discoveries
+
+- **The test lane's sessions now compose a view the way the server
+  does.** `tests/support/sessions.py` defaults to
+  `DeviceBindings.snapshot_only`, which is what a server with no store
+  composes, rather than passing nothing: a session built by the lane is
+  wired as a served one, and the lane's own configurations bind their
+  boards with the agent-list shorthand, which names nobody, so every
+  existing prompt assertion is unchanged.
+- **A name that folds to nothing is answered as no record.** The column
+  is `NOT NULL` and every writer holds the fold's refusal in front of
+  it, so such a row is one nothing in this server wrote. Reading it as
+  "this device has no name" is the only honest answer available; the
+  alternative is telling a model it is speaking through a device called
+  nothing.
+- **The device's own paragraph is trimmed at the ends and nowhere
+  else.** The stored name is exactly what the operator typed, padding
+  included, because the fold is for uniqueness rather than for display.
+  A value being set inside a sentence is the one place this module
+  adjusts what it was handed, and it says so.
+
+### Verification
+
+- `uv run ruff check .`, `uv run mypy`, `uv run pytest tests/unit -q -n 4
+  --dist loadfile`, `uv run pytest tests/integration -q`, and the
+  generated-document drift checks, all from `vinga-server/`.
+- No migration, so the CI wheel step's chain-head pin does not move.
+- No generated reference moves: no event gains a field, no stored column
+  changes, no CLI verb is added, and `prompt_assembled` reports the
+  cached know-how half, which the device block is not part of.

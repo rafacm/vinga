@@ -37,6 +37,14 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   will be allowed to change; the name is the half only an operator writes.
 - The same three acts over the API: `POST /devices/{mac}/rename`,
   `PUT /devices/{mac}/location` and its `DELETE`.
+- **An agent knows which device it is speaking through, and where it
+  stands** (#449, M2). The device's name and location join the device
+  block of the system prompt, above the notes that were already there
+  and under no heading of their own: they are facts about the same
+  device, and a second device section would leave the model choosing
+  which one to believe. An agent whose `memory` section is switched off
+  is told them too, because what a device is called is not a remembered
+  thing.
 
 ### Changed
 
@@ -69,6 +77,14 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   from the incoming agent's. The silero example fragment, the server
   README's listening and memory sections, and the glossary now say so.
 
+- **A device that moves is moved for the next reply.** The record is read
+  on every round, beside the memory scopes and on the same live view the
+  bindings are resolved through, so renaming or relocating a board
+  reaches the conversation already happening rather than waiting for the
+  next one. A read that fails falls back to the world being served and
+  says so in the log, which is the rule a binding lookup already kept: a
+  storage hiccup must not make an agent stop knowing what it is speaking
+  through.
 - **Binding a board creates its record.** `device bind` and a claim by
   activation code both mint an id and take the name `Device <full mac>`,
   so no existing flow gains a mandatory argument and a board onboarded
