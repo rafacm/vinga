@@ -168,6 +168,11 @@ entries into a new section by hand: the section is derived from when
 the change landed, not from when the fold ran. Within a section,
 classes appear in Keep a Changelog order and entries within a class
 in merge order, appended after any entries already folded that day.
+Merge order is a total order: fragments sort by their introduction
+commit's position in first-parent history, and fragments sharing an
+introduction commit (one PR adding two) sort by filename, since a
+git tree encodes no order between files of one commit; both cases
+are tested, the shared-commit one explicitly.
 
 ### Enforcement, in three places
 
@@ -455,6 +460,10 @@ condensed but faithful; resolutions appended per amendment.
    by one commit.** Git trees encode no order between files sharing
    an introduction commit. Define introduction-commit order with a
    deterministic filename tie-breaker and test both cases.
+
+   *Resolution.* Adopted verbatim: first-parent introduction order,
+   filename tie-breaker, both cases tested including two fragments
+   from one commit.
 
 6. **P2: The manifest's claimed reviewability exceeds what a
    distinct-set artifact provides.** Removing or reclassifying one
