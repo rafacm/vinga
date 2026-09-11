@@ -399,6 +399,59 @@ it would fail there and in no other lane.
   was trusted, and the ten breakages and what each one fails are
   recorded in the commit that adds the cases.
 
+### PR review round
+
+External review of PR #469: three P1s, two P2s, not mergeable. All
+adopted, one in part.
+
+- **P1: `metric show` dropped the view's telemetry-off sentence.** The
+  claim above that both verbs print the sentence was true of the code
+  for `list` alone, and the test held only `list`, so removing the
+  sentence from `show` passed. The claim and its weak pin are the M1
+  round's lesson repeating: this document said it first and the case
+  was written to agree. The renderer now prints the sentence under the
+  question on `show`, and a per-view case drives `show` for every
+  declared view; it was written first and failed on all four.
+- **P1: a response-controlled column heading bypassed the cell
+  bounding.** Headings went to the column layout with only an
+  uppercase on them, so a structurally valid answer with a CSI
+  sequence, a bell or a newline in a column name reached stdout
+  verbatim, which the cli-guide's terminal rule allows no exception
+  for. Fixed by passing the uppercased heading through the same cell
+  bounding, and pinned with a synthetic response whose column name
+  carries a clear-screen sequence, a bell, a carriage return and a
+  newline; the case failed on the escape byte before the fix.
+- **P1: a malformed row read as a meaningful null.** `MetricRows.rows`
+  was bare dicts under a description claiming each row carries exactly
+  the declared keys, and the renderer prints the placeholder for an
+  absent value, so a body missing the non-null `turns` validated and
+  printed the null placeholder: a legitimate null nobody sent. A model
+  validator now derives the rule from the answer's own `view`: key set
+  equal to the declared columns, and no null in a column declared
+  non-nullable. A breach meets the fixed unreadable-answer sentence
+  with nothing of the body in it. Three cases (missing, undeclared,
+  null in non-nullable) were written first with a planted sentinel
+  value and all exited 0 before the validator.
+- **P2: the `--group` help called the default "ungrouped".** It is
+  not: `group=all` still groups by the view's own dimensions. The help
+  now says so, and the generated reference and the spelling census
+  moved with it.
+- **P2: the grouping refusal was pinned with the plain sentinel
+  only.** The plan requires control characters through `group` as well
+  as through `{view}`, and only the view had them. The refusal case is
+  now parameterized with a CRLF log-forging value, a NUL and a CSI
+  sequence, hunted through both streams and both shipped log formats.
+  All four pass on the existing behaviour, so this closed a coverage
+  hole rather than a defect. The round also asked for a live-client
+  case pinning URL logging; not adopted, because that boundary is held
+  suite-wide by `test_config_cli_transport.py`, which writes records
+  under `httpx` and `httpcore` while a request is in flight and
+  asserts they are dropped, and the quieting lives in the shared
+  transport seam per request rather than per command.
+- **P2: the ticked milestone said `PR TBD`.** Both the plan's
+  checklist entry and this section's heading line now record PR #469,
+  the way M1 records PR #463.
+
 ### Not done here
 
 M3's device dimension, as planned: the four sibling views, `group=device`
