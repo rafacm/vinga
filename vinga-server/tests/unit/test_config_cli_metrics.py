@@ -852,6 +852,41 @@ def test_a_device_that_is_not_a_mac_is_refused_without_quoting_it(
         assert SENTINEL not in where
 
 
+def test_an_explicitly_empty_device_cannot_widen_the_answer(
+    run, store, capsys
+) -> None:
+    """`--device ''` is a filter that was given, so it meets the API's
+    own MAC refusal rather than reading as no filter at all.
+
+    A client that dropped the empty value before sending it would turn
+    the narrowest question this flag can ask into the widest one, which
+    is the wrong direction for a mistake to fail in: two boards planted,
+    and the assertion is that neither of their rows comes back.
+    """
+    a_day(store, DAY, session="a", device=BOARD_A)
+    a_day(store, DAY, session="b", device=BOARD_B)
+
+    code, printed, err = out(
+        run,
+        capsys,
+        "metric",
+        "show",
+        "sessions",
+        "--since",
+        SINCE,
+        "--until",
+        UNTIL,
+        "--group",
+        "device",
+        "--device",
+        "",
+    )
+
+    assert code == 1
+    assert printed == ""
+    assert "MAC" in err
+
+
 @pytest.mark.parametrize("flag", ["--since", "--until"])
 @pytest.mark.parametrize(
     "value",
