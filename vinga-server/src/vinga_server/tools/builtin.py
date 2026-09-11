@@ -518,8 +518,8 @@ def set_device_location_tool() -> ToolDef:
             "only for where the device itself is and not for where anything else is. "
             "Anyone talking to this device may move it: being in the room is what it "
             "takes to talk to you at all, so it is also what it takes to say where you "
-            "are standing. You cannot change what this device is CALLED, which is the "
-            "name only whoever set this server up can give it."
+            "are standing. It does not change what this device is called: that name is "
+            "one only whoever set this server up can give it."
         ),
         input_schema={
             "type": "object",
