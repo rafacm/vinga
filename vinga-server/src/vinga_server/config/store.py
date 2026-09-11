@@ -254,6 +254,34 @@ class LiveBinding:
     default_agent: str | None
 
 
+@dataclass(frozen=True)
+class LiveDevice:
+    """What a running server re-reads about the device a conversation is
+    speaking through: the record behind the MAC, minus the binding.
+
+    A value beside `LiveBinding` rather than a field on it, because the
+    two are read by different callers on different clocks. The binding
+    is resolved once, at the OTA check-in and at the connect, and
+    decides whether a board is served at all; this is read on every
+    round of every reply, because a device that was moved between two
+    replies has moved for the second of them.
+
+    `name` is what the reply is told and is never absent: a row whose
+    name says nothing is not answered as a record, so there is no
+    "called nothing" for a prompt to render. `location` is nullable
+    because a device nobody has placed is an ordinary device. `id` is
+    the record's identity, which is what makes these two facts belong
+    to a row rather than to a MAC and what a board swap keeps; it is
+    None only where the answer came from a snapshot that never minted
+    one, which is a configuration composed in Python rather than read
+    from a store.
+    """
+
+    id: str | None
+    name: str
+    location: str | None
+
+
 # What a refusal about these two rows names. Not a single row's
 # location, because the two are validated together, and the model that
 # validates them names the field that failed inside this.
@@ -1081,6 +1109,57 @@ def _live_binding(connection: Connection, mac: str) -> LiveBinding:
     return LiveBinding(
         () if record is None else tuple(record.agents), live.default_agent
     )
+
+
+def read_live_device(engine: Engine, mac: str) -> LiveDevice | None:
+    """One device's record as the rows hold it now, for the reply being
+    assembled, or None where that MAC has no row.
+
+    The binding's sibling: same engine, same read-only connection that
+    never migrates and never takes the advisory lock, same
+    normalization of the MAC and the same normalization of a database
+    failure. What it deliberately does not do is join the binding read,
+    and the reason is what each of them is for. A binding decides
+    whether a board is served, is asked twice per connection, and its
+    statement is pinned byte for byte
+    (`tests/unit/test_live_binding_pin.py`) because a widened select
+    there is a change to the path a board depends on to be served at
+    all. This is asked once per round by a reply that is already
+    talking, and the two answers are never needed together, so a single
+    widened statement would buy nothing and spend the pin.
+
+    One statement rather than two: the whole record is three columns of
+    one row, so there is no second row a write could land between.
+
+    A name that folds to nothing is answered as no record at all. The
+    column is `NOT NULL` and every writer holds the fold's own refusal
+    in front of it, so this is a row nothing in this server wrote; the
+    honest reading of it is that this device has no name, rather than
+    telling a model it is speaking through a device called nothing.
+    """
+    normalized = _mac(mac)
+    problem: ConfigError | None = None
+    try:
+        with engine.connect() as connection:
+            return _live_device(connection, normalized)
+    except ConfigError:
+        raise
+    except SQLAlchemyError as exc:
+        problem = _database_problem(exc)
+    raise problem
+
+
+def _live_device(connection: Connection, mac: str) -> LiveDevice | None:
+    row = connection.execute(
+        select(
+            schema.devices.c.id,
+            schema.devices.c.name,
+            schema.devices.c.location,
+        ).where(schema.devices.c.mac == mac)
+    ).one_or_none()
+    if row is None or not fold_device_name(row.name or ""):
+        return None
+    return LiveDevice(id=row.id, name=row.name, location=row.location)
 
 
 def stored_secrets(snapshot: Snapshot) -> tuple[StoredSecret, ...]:
@@ -3503,8 +3582,10 @@ __all__ = [
     "DomainConfig",
     "Entity",
     "LiveBinding",
+    "LiveDevice",
     "Renamed",
     "read_live_binding",
+    "read_live_device",
     "Snapshot",
     "StoredSecret",
     "stored_secrets",
