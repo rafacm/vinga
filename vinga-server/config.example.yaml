@@ -34,11 +34,17 @@
 # A device is a record rather than a binding: binding a board creates
 # one, with a server-minted id that stays the same while the rest of the
 # record changes and the name `Device <mac>` until somebody gives it a
-# better one. What a device remembers is still keyed by its MAC. The name
-# is what the agent says out loud about the board it is speaking
-# through, so it is free-form and unique only once case and spacing are
-# folded together; the location is free text and not unique, because two
-# devices in one room is normal.
+# better one. That is what lets the hardware be replaced:
+#
+#   vinga-server config device replace aa:bb:cc:dd:ee:ff 11:22:33:44:55:66
+#
+# rewrites the MAC on the record that is already there and moves what
+# that board was told onto the new one, so the name, the place, the
+# bindings and the memory all stay with the device. The name is what the
+# agent says out loud about the board it is speaking through, so it is
+# free-form and unique only once case and spacing are folded together;
+# the location is free text and not unique, because two devices in one
+# room is normal.
 #
 # Those commands write through the configuration API described under
 # server.api below, so they need a running server, and an empty database

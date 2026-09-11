@@ -143,14 +143,18 @@ distinct on purpose:
   the household told the device it stands in cannot be re-learned, so
   a record identified by the hardware could not outlive it.
 
-  **What a device remembers is still keyed by its MAC**, and replacing
-  a board is not an operation this server has yet (issue #449, M4). The
-  replacement will rewrite the MAC on the record that already exists and
-  move that board's notes onto the new one in the same transaction,
-  which is what having an identity separate from the address makes
-  possible. Recorded sessions are deliberately not part of that: a dated
-  row names the board that was physically connected at the time, and a
-  later swap does not make it untrue.
+  **Replacing a board keeps the device**, which is the operation the id
+  makes possible: `vinga device replace <mac> <new mac>` rewrites the
+  MAC on the record that already exists and moves what that board was
+  told onto the new address in the same transaction, so the id, the
+  name, the place, the bindings and the per-device notes all stay with
+  the device. It is refused rather than merged when anything is already
+  bound to or remembered about the new address, which is what keeps it
+  undoable by swapping back. A conversation in flight follows the record
+  rather than the address, because it attached to the record at its
+  connect. Recorded sessions are deliberately not part of any of it: a
+  dated row names the board that was physically connected at the time,
+  and a later swap does not make it untrue.
 
   The name and the location are two different things, and the
   difference is who may write them. The **name** is identity an

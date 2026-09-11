@@ -181,11 +181,13 @@ a [device name](#device-name), a [device location](#device-location)
 and the agents the device may reach. The id is the device's identity
 and the MAC is only its address, which is the distinction the record
 exists for: a board can be replaced, and a record identified by the
-hardware could not outlive it. Today the id stays the same while the
-rest of the record changes, and no more than that: per-device
-[memory](#memory) is still keyed by the MAC, and moving it when a board
-is replaced is the operation the id is there to make possible (issue
-#449, M4).
+hardware could not outlive it. Replacing one is
+`vinga device replace <mac> <new mac>`, which rewrites the MAC on the
+record and moves that board's per-device [memory](#memory) onto the new
+address in the same transaction, so what the household established
+about the thing in the room outlives the thing. Recorded sessions keep
+the MAC they were written with: a dated row says which board was
+connected at the time.
 
 ### Echo leakage
 

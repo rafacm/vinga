@@ -70,6 +70,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   rules a typed one does, and a device a default agent merely covers,
   with no record of its own, is refused in a sentence the agent reads
   out: creating a device record is an operator's act.
+- **A board can be replaced and the device kept** (#449, M4).
+  `vinga-server config device replace <mac> <new mac>`, over
+  `POST /devices/{mac}/replace`, puts an existing device record on
+  another board: the record's id, its name, where it stands, the agents
+  it reaches and everything that has been remembered about it move to
+  the new address in one transaction, or nothing moves at all. This is
+  what the id added in M1 was for, and it is what delete-and-bind cannot
+  do: that leaves a new id, an unnamed device in nowhere in particular
+  and a memory stranded at an address no board is standing at. Refused
+  rather than merged when another device is already bound to the new
+  address, or anything is already remembered about a board that stood
+  there, which is what makes it undoable by replacing back. Recorded
+  sessions are deliberately left alone: a dated row says which board was
+  physically connected at the time, and a later swap does not make that
+  untrue. A conversation already in progress follows the record rather
+  than the address, so an agent talking while a board is replaced goes
+  on knowing what it is speaking through.
 
 - **The ASR and TTS spans carry the provider that ran them** (#450,
   milestone 2). The exporter's two stage tables gain the four provider
