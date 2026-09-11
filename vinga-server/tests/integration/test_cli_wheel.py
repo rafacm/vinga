@@ -541,10 +541,28 @@ def test_the_deployment_reads_back_through_every_read(run) -> None:
 
 
 def test_the_settings_are_written_and_read_back(run) -> None:
-    """The two device writes addressed by a MAC, and the agent defaults
+    """The device writes addressed by a MAC, and the agent defaults
     written back over themselves."""
     assert answered(run("device", "bind", BOUND_MAC, "sam"), "device bind").startswith("wrote ")
     assert "sam" in answered(run("device", "show", BOUND_MAC), "device show")
+
+    # The rest of the record a bind creates. From a bare install, which
+    # is this lane's claim about every verb here: naming a board and
+    # saying where it stands are HTTP requests and nothing else, so a
+    # client with no store half performs both.
+    named = ("device", "rename", BOUND_MAC, "Kitchen Speaker")
+    assert answered(run(*named), *named).startswith("wrote ")
+    placed = ("device", "relocate", BOUND_MAC, "the kitchen")
+    assert answered(run(*placed), *placed).startswith("wrote ")
+    read = answered(run("device", "show", BOUND_MAC), "device show")
+    assert "Kitchen Speaker" in read
+    assert "the kitchen" in read
+
+    cleared = ("device", "clear-location", BOUND_MAC, "--force")
+    assert answered(run(*cleared), *cleared).startswith("wrote ")
+    assert "the kitchen" not in answered(
+        run("device", "show", BOUND_MAC), "device show"
+    )
 
     defaults = ("agent-defaults", "set", "llm=brain", "asr=ears", "tts=voice", "vad=gate")
     assert answered(run(*defaults), *defaults).startswith("wrote ")
