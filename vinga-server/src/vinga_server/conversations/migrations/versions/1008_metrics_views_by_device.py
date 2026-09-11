@@ -15,7 +15,7 @@ Additive rather than a redefinition, deliberately. The four views 1006
 created are left exactly as they are, byte for byte: what selects from
 them is somebody's saved query, dashboard or spreadsheet, and adding
 two columns to a relation moves every one of those without asking.
-`tests/integration/test_conversations_views.py` upgrades a database
+`tests/integration/test_metrics_views_upgrade.py` upgrades a database
 standing at 1006 and asserts the originals survive this migration and
 still answer.
 
