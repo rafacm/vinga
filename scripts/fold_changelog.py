@@ -140,6 +140,7 @@ NOT_ONCE = "an entry would not appear exactly once in the changelog"
 CONFLICT_MARKER = "the changelog would carry a conflict marker"
 OUTSIDE_CHANGED = "the changelog outside the folded sections would change"
 MALFORMED_SECTION = "a folded section would not be well formed"
+PREFIX_TEXT = "a fragment carries text before its first class heading"
 CANNOT_LIST = "the changelog.d directory cannot be listed"
 CANNOT_REMOVE = "a fragment could not be removed"
 CANNOT_WRITE = "CHANGELOG.md could not be written"
@@ -226,6 +227,24 @@ def entries_of(text: str) -> list[tuple[str, str]]:
     return [(name, _trimmed(text)) for name, text in found]
 
 
+def prefix_of(text: str) -> str:
+    """Whatever a fragment says before its first class heading.
+
+    `entries_of` reads a fragment from that heading onward, so
+    anything above it is text the fold would discard without telling
+    anyone: an entry somebody wrote without its heading, or a note to
+    the reviewer that would silently not become a changelog line. The
+    parser accounts for the whole file, and this is the half that has
+    nowhere to go.
+    """
+    taken: list[str] = []
+    for line in text.splitlines():
+        if ENTRY_HEADING.match(line.rstrip()):
+            break
+        taken.append(line)
+    return "".join(f"{line}\n" for line in taken)
+
+
 def _trimmed(text: str) -> str:
     """One entry's lines with the blank ones at either end removed and
     a single trailing newline."""
@@ -250,6 +269,8 @@ def validate(root: Path) -> list[str]:
             continue
         if any(TOP_HEADING.match(line.rstrip()) for line in text.splitlines()):
             reasons.append(DATE_HEADING)
+        if prefix_of(text).strip():
+            reasons.append(PREFIX_TEXT)
         declared = entries_of(text)
         if not declared:
             reasons.append(NO_HEADING)
