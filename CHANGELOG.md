@@ -9,22 +9,6 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
-- **The ASR and TTS spans carry the provider that ran them** (#450,
-  milestone 2). The exporter's two stage tables gain the four provider
-  keys under the correspondence the round span already ships: the type
-  as `gen_ai.provider.name`, the model as `gen_ai.request.model`, the
-  host as `server.address`, and the configured entry's name as
-  `vinga.provider.asr.name` and `vinga.provider.tts.name`, which is the
-  attribute the retained session context already spells that fact
-  under, so a backend filtering on it need not know which span it is
-  looking at. A stage span that names its own entry no longer also
-  carries what the session opened against at that stage: the two would
-  have mixed into a provider that never existed, an open-time type
-  beside a call-time model. The suppression is conditional on the event
-  having named an entry, so an outcome that names none, an empty
-  transcript or a provider the registry never built, keeps the entries
-  the session opened against.
-
 ### Changed
 
 - **An interruption arriving at the playback onset is transcribed
@@ -55,6 +39,24 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   binds the entry it wants, and a handover builds a fresh endpointer
   from the incoming agent's. The silero example fragment, the server
   README's listening and memory sections, and the glossary now say so.
+
+- **Binding a board creates its record.** `device bind` and a claim by
+  activation code both mint an id and take the name `Device <full mac>`,
+  so no existing flow gains a mandatory argument and a board onboarded
+  before anybody has thought of a name still has a record. Naming it
+  afterwards is `device rename`.
+- **A device reads and writes as a record.** `device show`, the device
+  listing, the whole-configuration document and the export all carry the
+  four fields, and an applied document takes them back. A bare agent list
+  is still accepted as shorthand for a record naming only those agents,
+  so every configuration written before this one still imports.
+- **The upgrade is stop-then-migrate.** Migration `3003_device_record`
+  mints an id for every device row a deployment already had and backfills
+  the name `Device <full mac>`, full rather than truncated because the
+  leading octets are the vendor OUI and a fleet shares them. A writer from
+  the previous image is refused by the new constraints rather than
+  silently accepted, which is the one-replica topology decision (#316)
+  holding rather than a gap.
 
 ### Removed
 
