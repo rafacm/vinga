@@ -43,6 +43,7 @@ from vinga_server.config.loader import (
     UnknownEntityError,
 )
 from vinga_server.config.models import (
+    DEVICE_LOCATION_BLANK,
     DatabaseConfig,
     DeviceRecord,
     fold_device_name,
@@ -334,6 +335,55 @@ def test_a_name_that_folds_to_nothing_is_refused(store: ConfigStore, blank: str)
         store.rename_device(MAC, blank)
 
     assert _record(store).name == DEFAULT_NAME
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\xa0\u3000\t"], ids=["empty", "spaces", "unicode"])
+@pytest.mark.parametrize(
+    "act",
+    [
+        lambda store, value: store.relocate_device(MAC, value),
+        lambda store, value: store.apply(
+            {"devices": {MAC: {"location": value, "agents": ["sam"]}}}
+        ),
+    ],
+    ids=["relocate", "apply"],
+)
+def test_a_location_holding_nothing_is_refused(
+    store: ConfigStore, act, blank: str
+) -> None:
+    """There is one way to say a device is nowhere in particular, and it
+    is the absence of a location. An empty string would be a second
+    spelling of a state that already has one, and it would read as
+    somewhere on every surface that tests the field for a value.
+
+    Both write paths, because they are two, and the folded form rather
+    than the length, because a location of two no-break spaces is not
+    empty to a length check.
+    """
+    _agents(store)
+    store.bind_device(MAC, ["sam"])
+    store.relocate_device(MAC, "the kitchen")
+
+    with pytest.raises(ConfigError) as caught:
+        act(store, blank)
+
+    assert DEVICE_LOCATION_BLANK in str(caught.value)
+    assert _record(store).location == "the kitchen"
+
+
+def test_the_api_refuses_a_location_holding_nothing(
+    client: TestClient, store: ConfigStore
+) -> None:
+    """The third path to the same field, which is the one an admin UI
+    would take: an empty text box is a request to clear, and clearing is
+    the DELETE the contract declares."""
+    _agents(store)
+    store.bind_device(MAC, ["sam"])
+
+    refused = client.put(f"/devices/{MAC}/location", json={"location": "  "})
+
+    assert refused.status_code == 422
+    assert client.get(f"/devices/{MAC}").json()["entity"]["location"] is None
 
 
 def test_the_default_names_of_two_boards_do_not_collide(store: ConfigStore) -> None:
