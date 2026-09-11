@@ -214,11 +214,11 @@ and the census sentence M1 left for this milestone is corrected here.
   touched rather than excusing it from the post-condition. The case
   cannot arise for a fragment merged today and is not exercised by a
   test; what is tested is the insertion between two sections.
-- **A dotfile under `changelog.d/` is skipped, not refused.** The
-  contract is about fragments, and a checkout is allowed to carry the
-  operating system's own droppings, which are untracked. Everything
-  else in the directory other than the README is a fragment and is held
-  to the filename shape.
+- **A dotfile under `changelog.d/` is skipped, not refused.**
+  *Retired by the fix round below, finding 2: the skip was a silent
+  hole and only the README is excluded now.* The original reasoning
+  was that the contract is about fragments and a checkout is allowed
+  to carry the operating system's own droppings, which are untracked.
 - **The conflict-marker refusal covers a marker that was already
   there.** The plan lists "conflict markers anywhere in the changelog"
   among the refusal cases; implemented as a post-condition over the
@@ -312,3 +312,66 @@ Not verified here, and it cannot be:
   branch protection on `main` and the GITHUB_TOKEN non-triggering rule
   are all properties of the repository and the runner, not of anything
   runnable here.
+
+### Fix round, PR #476
+
+External review of the PR diff came back not mergeable with three P1s
+and one P2, all on the fold script and all correct. One commit each,
+each test watched red against the code as it stood.
+
+- **P1, filesystem failures raised instead of refusing**
+  (`b48139db`). `iterdir`, the changelog write and the unlinks were
+  unguarded while `main` caught only `Refusal`, so an `OSError` printed
+  a traceback carrying repository paths into a public CI log; and the
+  changelog was written before the fragments were removed, so a failed
+  unlink left a folded changelog beside fragments that should have been
+  gone. Each call is a named refusal now with its chaining suppressed,
+  `main` carries an `OSError` backstop, and the mutation order is
+  reversed so recovery is an argument rather than a hope: the fragments
+  go first, into a directory their own removal proves writable, and the
+  changelog is then replaced through a temporary file beside it so it
+  is never truncated and not yet whole. A restore that itself fails
+  gets its own sentence. Three cases, each skipped under a root euid.
+- **P1, tracked dotfiles bypassed everything** (`c1648d9a`). A
+  `changelog.d/.467-entry.md` was skipped before its name was checked,
+  so `check` answered "checked 0 fragments, 0 failures" on the pull
+  request and the fold then reported nothing to fold, losing the entry
+  with no run going red. Only `README.md` is excluded now. This retires
+  the deviation recorded above for it.
+- **P1, text above the first heading silently discarded**
+  (`d75f1aa6`). `entries_of` read from the first `###` heading onward
+  and `validate` never looked higher, so an entry written without its
+  heading passed `check` and vanished during the fold. `prefix_of`
+  accounts for that half of the file and anything nonblank there is a
+  refusal. The same shape as the dotfile finding, and worth naming
+  once: both were a reader skipping input silently, and what the
+  silence costs is an entry a contributor believed they had written.
+- **P2, a reused filename took the old date** (`ef9ccad8`). The fold
+  deletes the fragments it reads, so a path can validly be used again;
+  `introduction` took the oldest addition and filed the second entry
+  under the first one's day. It takes the newest addition now, which is
+  the commit that introduced the file standing in the tree. Selecting
+  rather than refusing reuse, deliberately: refusing would make a slug
+  unusable forever and would refuse a legitimate second change under
+  one issue with no remedy but renaming.
+
+Re-verified after the round, same Postgres:
+
+- `uv run ruff check .`: All checks passed!
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 6892 passed, 19
+  skipped in 194.72s. The fold suite is 49 cases, green under `TZ=UTC`
+  and `TZ=Pacific/Auckland` as well.
+- `python3 scripts/fold_changelog.py check .`: checked 1 fragments, 0
+  failures.
+- `uv run pytest tests/integration -q`: 304 passed in 424.95s. Nothing
+  in the round touches server code, and the lane says so.
+- `python3 scripts/check_doc_links.py .`: checked 229 files, 0
+  failures. Census manifest regenerated: unchanged.
+- The full-clone fold rehearsal again, because the write path changed:
+  same `## 2026-09-12` section, the same 2,275 bytes, the preamble and
+  all history byte-identical, no temporary file left behind, and the
+  workflow's dirtiness assertion clean.
+
+What the round did not change: the workflows, the census, `AGENTS.md`,
+the skill, and the milestone's own fragment. Everything still
+unverifiable above stays unverifiable for the same reasons.
