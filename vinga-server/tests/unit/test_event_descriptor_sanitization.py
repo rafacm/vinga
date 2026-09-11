@@ -34,6 +34,17 @@ different bound: `ota_check_body` keeps the whole of what a board
 reported, so its section below plants its rejected sentinel past
 `CHECK_IN_BODY_LIMIT` rather than past a descriptor's, and asserts the
 truncation mechanism as well as the containment.
+
+A sixth joined with #449 M5, and it is the first whose provenance is
+not a stranger's: the name an OPERATOR gives a device, carried on
+`session_open` so a log reader and an analyst can say which speaker a
+session happened on. Nothing about it is untrusted, and the bound is
+not there because it might be: a device name is deliberately free-form,
+so it may be any length and may hold a newline, and a newline on a
+retained line splits one record into two whoever wrote it. The
+`DESCRIPTOR` kind is the guarantee the surface needs rather than a
+claim about authorship, and the model below is the same model, sentinel
+for sentinel.
 """
 
 import json
@@ -56,7 +67,12 @@ from tests.support.wire import handshake, shake_hands
 from vinga_server.app import create_app
 from vinga_server.auth import build_device_auth
 from vinga_server.config import Config
-from vinga_server.config.models import BOARD_LIMIT, CLIENT_ID_LIMIT, FIRMWARE_LIMIT
+from vinga_server.config.models import (
+    BOARD_LIMIT,
+    CLIENT_ID_LIMIT,
+    DEVICE_NAME_LIMIT,
+    FIRMWARE_LIMIT,
+)
 from vinga_server.events import Emission, attach_server_tap, detach_server_tap
 from vinga_server.events.catalog import OtaCheckBodyReported
 from vinga_server.events.live import Filters, LiveEvents, Streamed, Subscription
@@ -884,3 +900,52 @@ def test_the_capacity_refusal_still_names_a_device_it_recognizes(
     record = only(caplog, "session_rejected")
     assert fields_of(record)["device"] == NORMALIZED
     assert record.args == (NORMALIZED,)
+
+
+# --- device/session.py: the name an operator gave the device ----------
+#
+# Written into the configuration rather than sent over a wire, so the
+# hostile spelling here is one an operator could really produce by
+# pasting: a newline and a terminal escape from a copied terminal
+# buffer, and far more characters than anybody says out loud.
+
+HOSTILE_NAME = f"{ADMISSIBLE}\n\x1b[2J" + "x" * 400 + REJECTED
+
+
+def named_board(name: str) -> Config:
+    """One agent, and this board's record carrying that name."""
+    return Config(
+        providers=MOCK_PROVIDERS,
+        agents={"assistant": MOCK_AGENT},
+        devices={DEVICE_MAC: {"name": name, "agents": ["assistant"]}},
+    )
+
+
+def test_session_open_bounds_the_device_name_an_operator_wrote(
+    caplog: pytest.LogCaptureFixture, tap: Tap
+) -> None:
+    """The event carries a bounded, printable copy and nothing past the
+    cut, which is the whole of what the bound is for."""
+    with caplog.at_level(logging.INFO), TestClient(create_app(named_board(HOSTILE_NAME))) as client:
+        open_a_session(client, DEVICE_UUID)
+
+    held = fields_of(only(caplog, "session_open"))["device_name"]
+    assert len(held) <= DEVICE_NAME_LIMIT
+    assert held.isprintable()
+    assert carrying(caplog, ADMISSIBLE) == {("session_open", "device_name")}
+    assert carrying(caplog, REJECTED) == set()
+    assert REJECTED not in both_formats(caplog)
+    assert REJECTED not in tap.rendered()
+
+
+def test_a_lawful_device_name_is_carried_exactly_as_written(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A name a person really types, which is the case every deployment
+    has: spaces and capitals and nothing cut."""
+    with caplog.at_level(logging.INFO), TestClient(
+        create_app(named_board("Kitchen Speaker"))
+    ) as client:
+        open_a_session(client, DEVICE_UUID)
+
+    assert fields_of(only(caplog, "session_open"))["device_name"] == "Kitchen Speaker"

@@ -102,7 +102,7 @@ refuse a lawful deployment's traffic.
 | `TOKEN` | One value out of the field's declared closed set, listed in full below. |
 | `CLASS_NAME` | An exception or type name. Never a message: a type name says what went wrong, a message says what a stranger wrote. |
 | `ID` | A bounded machine form this server minted or normalized, held to a named syntax rather than to a generic length. |
-| `DESCRIPTOR` | A far-side string retained deliberately: what a device says about itself at check-in, bounded and stripped of unprintables at its decision site and bounded again at emit. |
+| `DESCRIPTOR` | A string whose shape nothing here chose, bounded and stripped of unprintables at its decision site and bounded again at emit: what a device says about itself at check-in, and the free-form name an operator gives a device. The kind is the guarantee the surface needs, not a claim about who wrote the value. |
 | `INT` | A whole number. Booleans are refused, since `True` is an `int` to Python. |
 | `FLOAT` | A finite number, whole or fractional. Infinities and NaN are refused: they are not measurements and JSON cannot carry them. |
 | `BOOL` | `True` or `False`. |
@@ -501,6 +501,7 @@ session %s open: device %s (client %s) agent %s%s, protocol v%d, %d Hz %d ms fra
 | `providers` | `PROVIDER_ENTRIES` | yes | no | agent, then stage, then `name`, `type`, `host`, `model` | What this conversation opened against, for every agent the device is bound to: the entry, its type, the host it reaches and the model it runs, per pipeline stage. The one derivation the capture manifest reads too. A world applied mid-session does not move it: what a record says is what the conversation opened with. |
 | `protocol` | `INT` | yes | no |  |  |
 | `revision` | `IDENTIFIER` | yes | no |  | Which build this server is, so every session from here on is attributable to one. |
+| `device_name` | `DESCRIPTOR` | yes | yes | at most 64 characters, every one printable | What an operator calls the board this session opened on, bounded for the event; the conversation store's session row keeps it as it was written. Null where no name is recorded: a board nobody has named, and a MAC a default agent covers with no device record behind it. The MAC on every record is what identifies the device, and this is what a person reading a log or grouping a dashboard calls it. Dated, like the row: a rename afterwards does not move what this session said. |
 
 ### `session_limit`
 

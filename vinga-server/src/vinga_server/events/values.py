@@ -48,6 +48,7 @@ from typing import ClassVar, Final, Literal
 from vinga_server.config.models import (
     BOARD_LIMIT,
     CLIENT_ID_LIMIT,
+    DEVICE_NAME_LIMIT,
     FIRMWARE_LIMIT,
     PROVIDER_STAGES,
 )
@@ -75,8 +76,12 @@ class Kind(Enum):
     # A bounded machine form this server minted or normalized, with a
     # per-field syntax rather than a generic "bounded string".
     ID = "id"
-    # A far-side string retained deliberately, bounded and sanitized at
-    # its decision site and bounded again here.
+    # A string this server bounds rather than shapes, sanitized and cut
+    # at its decision site and bounded again here: what a device says
+    # about itself at check-in, and the free-form name an operator gives
+    # a device. The kind is about the guarantee the surface needs and
+    # not about who wrote the value, which is what `IDENTIFIER` above is
+    # about.
     DESCRIPTOR = "descriptor"
     INT = "int"
     FLOAT = "float"
@@ -267,6 +272,11 @@ SYNTAXES: dict[str, Syntax] = {
 BOARD_BOUNDS = Bounds(BOARD_LIMIT)
 FIRMWARE_BOUNDS = Bounds(FIRMWARE_LIMIT)
 CLIENT_BOUNDS = Bounds(CLIENT_ID_LIMIT)
+
+# And the one whose decision site is a configuration rather than a
+# check-in. Same import rule and the same reason: `config/models.py`
+# holds what `device/session.py` truncates a device name to.
+DEVICE_NAME_BOUNDS = Bounds(DEVICE_NAME_LIMIT)
 
 # And the one descriptor bound whose home IS here, because its decision
 # site has no bound of its own to import: the compact serialization of
@@ -921,16 +931,30 @@ class AgentNames(EventValue):
 
 @dataclass(frozen=True)
 class Descriptor(TextValue):
-    """A far-side string retained deliberately, bounded and sanitized at
-    its decision site and bounded again here.
+    """A string retained deliberately whose SHAPE nothing here chose,
+    bounded and sanitized at its decision site and bounded again here.
 
-    The ADR's 2026-08-17 amendment is what admits these at all: what a
-    device says ABOUT ITSELF at check-in is metadata once bounded, while
-    what a person said through it never is. The bound is the subclass's,
-    because the decision site's is, and it is applied here a second time
-    for the reason the untyped registry applied it a second time: the site that
-    bounds it and the surface that carries it are different pieces of
-    code, and only one of them is this one.
+    Two provenances need that, and neither is the other's trust class.
+
+    The far side is the one the ADR's 2026-08-17 amendment admits at
+    all: what a device says ABOUT ITSELF at check-in is metadata once
+    bounded, while what a person said through it never is.
+
+    The near side is operator free text, which needs no amendment
+    because it was never untrusted: a device's name (#449) is
+    configuration, written by the person who runs the deployment. What
+    it shares with the far side is the absence of a promise about
+    shape. It is deliberately free-form, so it may be any length and may
+    carry a newline, and a newline on a retained line splits one record
+    into two whoever wrote it. `Identifier` is the kind for a trusted
+    name this server can say something about; this is the kind for a
+    string it can only bound.
+
+    The bound is the subclass's, because the decision site's is, and it
+    is applied here a second time for the reason the untyped registry
+    applied it a second time: the site that bounds it and the surface
+    that carries it are different pieces of code, and only one of them
+    is this one.
     """
 
     KIND: ClassVar[Kind] = Kind.DESCRIPTOR
@@ -959,6 +983,28 @@ class ClientId(Descriptor):
     """
 
     BOUNDS: ClassVar[Bounds | None] = CLIENT_BOUNDS
+
+
+@dataclass(frozen=True)
+class DeviceName(Descriptor):
+    """What an operator calls a device, bounded for the event.
+
+    The one descriptor here that nobody outside the deployment wrote,
+    and it is a descriptor rather than an `Identifier` for a reason
+    about shape rather than about trust. An identifier's domain is the
+    configuration's own and no tighter, deliberately, so that a lawful
+    deployment's every emission is not turned into a refusal; a device
+    name is lawful at any length, with a newline in it, because the fold
+    that guards it only asks that it say something. Carrying that on a
+    retained line is the hazard `Bounds` exists for, and the decision
+    site (`device/session.py`) takes a bounded copy the way it already
+    does for the client id beside it.
+
+    Event-only, exactly as that neighbour is: `record.sessions` keeps
+    the name as the operator wrote it, because a column is not a line.
+    """
+
+    BOUNDS: ClassVar[Bounds | None] = DEVICE_NAME_BOUNDS
 
 
 @dataclass(frozen=True)
@@ -1672,6 +1718,7 @@ __all__ = [
     "DropReason",
     "DroppedFrames",
     "DeviceId",
+    "DeviceName",
     "DeviceOrUnidentified",
     "EchoOutcome",
     "EventName",

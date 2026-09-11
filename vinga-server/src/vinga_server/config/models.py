@@ -3354,6 +3354,25 @@ BOARD_LIMIT = 64
 FIRMWARE_LIMIT = 32
 CLIENT_ID_LIMIT = 64
 
+# And what an OPERATOR may call a device on the same line, which is a
+# different provenance with the same need.
+#
+# A device name is trusted: it is configuration, written by the person
+# who runs the deployment, and #449's design reserves it to them (the
+# location beside it is the half a conversation may change, and it
+# reaches no event at all). What it is not is SHAPED. It is deliberately
+# free-form, spaces and punctuation and all, because the agent says it
+# out loud and a slug reads badly in speech, and the only rule in front
+# of it is that it folds to something. So it may be any length and may
+# carry a newline, which on a retained log line would split one record
+# into two, and it goes through `bounded_descriptor` at its decision
+# site for exactly the reason the three limits above do.
+#
+# 64 is the same number as the board and the client id, and for a
+# stronger reason: this one is read aloud by an agent, so a name past
+# it is a name nobody would say.
+DEVICE_NAME_LIMIT = 64
+
 
 def bounded_descriptor(value: str, limit: int) -> str:
     """One device-reported descriptor, cut down to what a log line may

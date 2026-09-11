@@ -75,6 +75,7 @@ from vinga_server.events.values import (
     ConversationId,
     Count,
     DeviceId,
+    DeviceName,
     DeviceOrUnidentified,
     DroppedFrames,
     EchoOutcome,
@@ -1117,6 +1118,19 @@ class SessionOpen(Variant):
         note=(
             "Which build this server is, so every session from here on "
             "is attributable to one."
+        )
+    )
+    device_name: DeviceName | None = value(
+        note=(
+            "What an operator calls the board this session opened on, "
+            "bounded for the event; the conversation store's session "
+            "row keeps it as it was written. Null where no name is "
+            "recorded: a board nobody has named, and a MAC a default "
+            "agent covers with no device record behind it. The MAC on "
+            "every record is what identifies the device, and this is "
+            "what a person reading a log or grouping a dashboard calls "
+            "it. Dated, like the row: a rename afterwards does not move "
+            "what this session said."
         )
     )
     mac: DeviceId = value(carried=False)

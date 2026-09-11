@@ -95,9 +95,73 @@ def test_session_open_and_closed_bracket_the_conversation(
     assert opened.agents == ["assistant"]
     assert opened.protocol == 1
     assert opened.revision == revision()
+    # This world reaches its agent through `default_agent`, so the board
+    # has no device record at all and there is no name to carry. The MAC
+    # on every record is what identifies it, exactly as before #449.
+    assert opened.device_name is None
     closed = only(caplog, "session_closed")
     assert closed.session == opened.session
     assert closed.duration_s >= 0
+
+
+# What the board is called, which is the one operator-authored string on
+# this surface.
+
+DEVICE_NAME = "Kitchen Speaker"
+
+
+def a_named_board(name: str = DEVICE_NAME) -> Config:
+    """The one-agent world with this board's record carrying a name,
+    which is what a deployment looks like once somebody has run
+    `device rename`."""
+    return Config(
+        providers={
+            "llm": {"mock": {"type": "mock"}},
+            "asr": {"mock": {"type": "mock", "text": "hello"}},
+            "tts": {"mock": {"type": "mock"}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        agents={"assistant": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")},
+        devices={DEVICE_MAC: {"name": name, "agents": ["assistant"]}},
+    )
+
+
+def test_session_open_says_what_the_device_is_called(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#449 M5. The name is here for the same reason it is on the
+    session row this event's own store writes: an operator reading a
+    JSON log and an analyst grouping sessions both want the speaker
+    rather than its MAC, and the analyst role is granted `record` and
+    revoked on `domain`, so nothing downstream can look one up.
+
+    A field and not a sentence: the MAC already identifies the device in
+    the line an operator reads, and a free-form name inside it would be
+    a shape the template cannot promise.
+    """
+    with caplog.at_level("INFO"):
+        hold_a_conversation(a_named_board())
+
+    opened = only(caplog, "session_open")
+    assert opened.device_name == DEVICE_NAME
+    assert opened.device == DEVICE_MAC.lower()
+    assert f"device {DEVICE_MAC.lower()}" in opened.getMessage()
+    assert DEVICE_NAME not in opened.getMessage()
+
+
+def test_session_open_says_nothing_about_a_board_nobody_named(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`Device <mac>` is the spelling this server mints when a board is
+    bound and reserves to that board, so it is a placeholder rather than
+    a name. It is not carried, for the reason the prompt will not say it
+    out loud: a MAC repeated in a second field tells a reader nothing
+    the first one did not.
+    """
+    with caplog.at_level("INFO"):
+        hold_a_conversation(a_named_board(f"Device {DEVICE_MAC.lower()}"))
+
+    assert only(caplog, "session_open").device_name is None
 
 
 def test_session_open_names_the_build_that_served_it(
