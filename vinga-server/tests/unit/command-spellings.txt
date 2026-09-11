@@ -1211,10 +1211,12 @@ docs/reference/domain-config.md:430  generated  vinga mcp-server status
 docs/reference/domain-config.md:483  generated  vinga apply
 docs/reference/domain-config.md:506  generated  vinga memory delete
 docs/reference/domain-config.md:522  generated  vinga device bind
-docs/reference/domain-config.md:528  generated  vinga device delete
-docs/reference/domain-config.md:538  generated  vinga default-agent set
-docs/reference/domain-config.md:541  generated  vinga default-agent clear
-docs/reference/domain-config.md:551  generated  vinga show
+docs/reference/domain-config.md:533  generated  vinga device rename
+docs/reference/domain-config.md:537  generated  vinga device relocate
+docs/reference/domain-config.md:541  generated  vinga device delete
+docs/reference/domain-config.md:551  generated  vinga default-agent set
+docs/reference/domain-config.md:554  generated  vinga default-agent clear
+docs/reference/domain-config.md:564  generated  vinga show
 docs/reference/events.md:403  generated  vinga-server config apply
 docs/reference/events.md:1524  generated  vinga-server config device pending claim
 docs/reference/events.md:1549  generated  vinga-server config apply
