@@ -108,6 +108,20 @@ subagent brief:
   lists, and "nothing else touches X" claims are backed by grep or
   an AST check named in the plan's verification; after any rebase,
   recorded hashes and counts are refreshed.
+- **Falsify before claiming.** A new test is written to break its
+  claim and watched failing before the claim is made; a test
+  written to agree with an implementation proves the
+  implementation, not the behavior, and the commit body states
+  that the check was done. Distinct from pin-before-reshaping,
+  which preserves behavior across a move: this lens governs new
+  claims. A proof's strength matches what it proves: a concurrency
+  mutation that failed once has not been proved, so it is run
+  repeatedly and the run count stated, while straight-line logic
+  (argument guards, arm order, sentence choice) needs one run and
+  claiming more is noise. A mutation that survives its test is a
+  finding about the test, reported explicitly, never a relief:
+  the surviving breakage is how a substring assertion is caught
+  posing as a pinned line.
 
 ## Step 2: external plan review
 

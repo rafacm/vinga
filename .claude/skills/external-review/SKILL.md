@@ -114,7 +114,10 @@ After the comment lands:
 
 1. Fix every finding with its own commit; delegate to the milestone
    subagent that wrote the code when one exists, since it has the
-   context.
+   context. Route the findings by reference, never by paste: brief
+   the fixing agent to read the "## External review round" comment
+   itself with `gh`, which is cheaper for the orchestrator's
+   context and strictly more faithful than a paraphrase.
 2. Record the round in the implementation doc, in the house style
    of the existing "PR review round" sections.
 3. Reply on the PR with per-finding resolutions and commit hashes,
