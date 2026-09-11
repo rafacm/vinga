@@ -154,6 +154,36 @@ accrues [memory](#memory) and conversations. Three units of one
 true of all three. A device reports which board it is at every
 check-in, so a board is observed rather than configured.
 
+### Device location
+
+Where a device stands, in a person's own words
+("the kitchen"), held on the [device record](#device-record). Free
+text and deliberately not unique: two devices in one room is normal.
+Context rather than identity, which is why it is the half of the
+record a conversation may change while the
+[device name](#device-name) is the half only an operator writes.
+
+### Device name
+
+What a device is called, held on the
+[device record](#device-record) and said out loud by the agent
+speaking through it ("you are on the kitchen speaker"). Free-form,
+because a slug reads badly in speech, and unique across the deployment
+once case and whitespace are folded together. A record created by
+binding a board is called `Device <mac>` until somebody gives it a
+better name, so no onboarding flow asks for one the operator does not
+yet have.
+
+### Device record
+
+What `devices.<mac>` holds: a server-minted id,
+a [device name](#device-name), a [device location](#device-location)
+and the agents the device may reach. The id is the device's identity
+and the MAC is only its address, which is the distinction the record
+exists for: a board can be replaced, and what the household told the
+device it stands in cannot be re-learned, so per-device
+[memory](#memory) hangs on the id and survives the swap.
+
 ### Echo leakage
 
 How much of the assistant's own voice survives the
