@@ -25,7 +25,7 @@ from fastapi.testclient import TestClient
 from tests.support.leaks import renderings
 from tests.support.notices import CHECK_IN, RELOAD, boundaries
 from tests.support.problems import PROBLEM_KEYS, refused
-from tests.support.stores import holding_the_write_lock, the_lock_held
+from tests.support.stores import bindings, holding_the_write_lock, the_lock_held
 from vinga_server.config import entities
 
 # `_renamed` is the acknowledgement's line composer, reached by its own
@@ -305,7 +305,7 @@ def test_the_notice_is_about_the_row_and_not_about_the_request(
     assert boundaries(answer_body) == {CHECK_IN}
     # And the row really does hold the stripped name, which is what
     # makes the notice the true one.
-    assert store.read_device("aa:bb:cc:dd:ee:ff").entry == ["sam"]
+    assert store.read_device("aa:bb:cc:dd:ee:ff").entry.agents == ["sam"]
 
 
 def test_the_default_agent_notice_is_about_the_row_too(
@@ -564,7 +564,7 @@ def test_an_empty_database_becomes_a_working_configuration(
     assert domain.mcp_servers["weather"].transport == "streamable_http"
     assert domain.agent_defaults.llm == "claude"
     assert domain.agents["sam"].prompt == "You are Sam."
-    assert domain.devices == {"aa:bb:cc:dd:ee:ff": ["sam"]}
+    assert bindings(domain.devices) == {"aa:bb:cc:dd:ee:ff": ["sam"]}
     assert domain.default_agent == "sam"
 
 

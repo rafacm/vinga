@@ -88,6 +88,7 @@ from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
     DeviceAlreadyBoundError,
+    DeviceNameConflictError,
     ProviderRefusedError,
     ReloadInProgressError,
     RunningConfigMovedError,
@@ -121,6 +122,8 @@ from vinga_server.config.responses import (
     DefaultAgent,
     DefaultAgentName,
     DeviceBinding,
+    DeviceLocation,
+    DeviceRename,
     Envelope,
     FieldError,
     McpServerStatus,
@@ -343,6 +346,9 @@ REFUSAL_STATUS: dict[type[ConfigError], int] = {
     # Without this row it would fall through to the 422 below and read
     # as a malformed request, which is what it is not.
     AgentRenameConflictError: 409,
+    # And the same again for the device record's own occupied
+    # destination: a name another board already answers to, folded.
+    DeviceNameConflictError: 409,
     StorageError: 500,
     NoRuntimeError: 503,
     # The seventh is an ordinary 422 with a type of its own, which is what
@@ -406,6 +412,8 @@ ENTITY_MODELS: tuple[type[BaseModel], ...] = tuple(
 # model-chosen key.
 REQUEST_MODELS: tuple[type[BaseModel], ...] = (
     DeviceBinding,
+    DeviceRename,
+    DeviceLocation,
     DefaultAgentName,
     AgentRename,
     SecretValue,
@@ -440,6 +448,16 @@ _DEVICE_BODY = (
 _DEFAULT_AGENT_BODY = (
     'the body has to be a JSON object with exactly one key, "name", holding the '
     "agent's name as a string. Nothing sent is quoted back"
+)
+
+_DEVICE_RENAME_BODY = (
+    'the body has to be a JSON object with exactly one key, "to", holding the name '
+    "the device is to have, as a string. Nothing sent is quoted back"
+)
+
+_DEVICE_LOCATION_BODY = (
+    'the body has to be a JSON object with exactly one key, "location", holding where '
+    "the device stands, as a string. Nothing sent is quoted back"
 )
 
 _RENAME_BODY = (
@@ -2631,6 +2649,74 @@ def _writes(api: FastAPI) -> None:
             _binding_notice(snapshot_only=snapshot_only),
         )
 
+    @api.post(
+        "/devices/{mac}/rename",
+        response_model=Acknowledgement,
+        responses=_problems(401, 404, 409, 422, 500),
+        openapi_extra=request_body(DeviceRename),
+    )
+    def rename_device(
+        mac: str, body: RawBody, store: StoreDep, snapshot_only: SnapshotOnlyDep
+    ) -> dict[str, Any]:
+        """Give one device another name, which is what an agent says out
+        loud about the board it is speaking through.
+
+        Identity an operator manages. The other half of the record, the
+        location, is the half a conversation may change, and that split
+        is the point of two verbs rather than one write of a whole
+        record.
+
+        A POST because it addresses the device by the MAC it has and
+        carries the name it is to have, exactly as an agent's rename
+        does. Refused 404 for a MAC with no record, because renaming
+        something that is not there addressed nothing; 409 when another
+        device already answers to that name once case and spacing are
+        folded together; 422 for a name holding nothing but whitespace.
+        No refusal quotes the name.
+        """
+        renamed = store.rename_device(mac, _device_name(body))
+        return _acknowledge(
+            f"device {renamed.mac} is now {spoken_identity(renamed.name)}",
+            _binding_notice(snapshot_only=snapshot_only),
+        )
+
+    @api.put(
+        "/devices/{mac}/location",
+        response_model=Acknowledgement,
+        responses=_problems(401, 404, 409, 422, 500),
+        openapi_extra=request_body(DeviceLocation),
+    )
+    def write_device_location(
+        mac: str, body: RawBody, store: StoreDep, snapshot_only: SnapshotOnlyDep
+    ) -> dict[str, Any]:
+        """Say where one device stands.
+
+        Free text and not unique: two devices in one room is normal.
+        Refused 404 for a MAC with no record, because a location is a
+        field of a device record and not a thing on its own."""
+        located = store.relocate_device(mac, _location(body))
+        return _acknowledge(
+            f"device {located.mac} is in {spoken_identity(located.location or '')}",
+            _binding_notice(snapshot_only=snapshot_only),
+        )
+
+    @api.delete(
+        "/devices/{mac}/location",
+        response_model=Acknowledgement,
+        responses=_problems(401, 404, 409, 422, 500),
+    )
+    def remove_device_location(
+        mac: str, store: StoreDep, snapshot_only: SnapshotOnlyDep
+    ) -> dict[str, Any]:
+        """Back to nowhere in particular, which is an ordinary state for
+        a device. Idempotent, like the CLI: a device that had no
+        location still has none afterwards."""
+        cleared = store.clear_device_location(mac)
+        return _acknowledge(
+            f"device {cleared.mac} is nowhere in particular",
+            _binding_notice(snapshot_only=snapshot_only),
+        )
+
     @api.put(
         "/default-agent",
         response_model=Acknowledgement,
@@ -3008,6 +3094,23 @@ def _name(body: object) -> str:
     value = _sole_value(body, "name", _DEFAULT_AGENT_BODY)
     if not isinstance(value, str):
         raise ConfigError(_DEFAULT_AGENT_BODY)
+    return value
+
+
+def _device_name(body: object) -> str:
+    """The name a device rename is to give, read and not looked at, for
+    the reason `_to` gives: what a name may be is the repository's
+    decision and is made once there."""
+    value = _sole_value(body, "to", _DEVICE_RENAME_BODY)
+    if not isinstance(value, str):
+        raise ConfigError(_DEVICE_RENAME_BODY)
+    return value
+
+
+def _location(body: object) -> str:
+    value = _sole_value(body, "location", _DEVICE_LOCATION_BODY)
+    if not isinstance(value, str):
+        raise ConfigError(_DEVICE_LOCATION_BODY)
     return value
 
 

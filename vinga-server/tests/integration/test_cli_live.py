@@ -699,7 +699,7 @@ def test_a_board_is_bound_by_the_mac_you_already_know(
     assert bound.err.strip()
 
     assert run("device", "show", KNOWN_MAC) == 0
-    assert document(capsys.readouterr().out) == {"agents": ["sam"]}
+    assert document(capsys.readouterr().out)["agents"] == ["sam"]
 
     assert run("device", "delete", KNOWN_MAC) == 0
     assert capsys.readouterr().out.startswith("wrote ")
@@ -751,7 +751,7 @@ def test_a_board_is_onboarded_by_the_code_on_its_screen(
     assert claimed.err.strip()
 
     assert run("device", "show", WAITING_MAC) == 0
-    assert document(capsys.readouterr().out) == {"agents": ["sam"]}
+    assert document(capsys.readouterr().out)["agents"] == ["sam"]
 
     # And the code is retired with the claim, so the board that was
     # waiting is no longer waiting for anything.

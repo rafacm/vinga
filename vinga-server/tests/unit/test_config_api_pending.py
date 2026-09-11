@@ -200,7 +200,7 @@ def test_claiming_a_code_binds_the_device_it_belongs_to(
     # The acknowledgement names the MAC that was bound, which is the
     # thing the operator did not have to go and find.
     assert response.json()["wrote"] == f"device {MAC} bound to assistant"
-    assert client.get(f"/devices/{MAC}").json()["entity"] == {"agents": ["assistant"]}
+    assert client.get(f"/devices/{MAC}").json()["entity"]["agents"] == ["assistant"]
 
 
 def test_a_claim_says_the_device_needs_no_restart(
@@ -305,7 +305,7 @@ def test_two_concurrent_claims_of_one_code_bind_it_once(
     assert second.status_code == 409
     assert "again" in refusal_body(second.json(), 409)
     assert first[0].status_code == 200, first[0].text
-    assert client.get(f"/devices/{MAC}").json()["entity"] == {"agents": ["assistant"]}
+    assert client.get(f"/devices/{MAC}").json()["entity"]["agents"] == ["assistant"]
 
 
 def test_a_refused_write_leaves_the_code_claimable(
@@ -441,9 +441,9 @@ def test_a_claim_will_not_replace_a_binding_made_underneath_it(
     assert refused.json()["detail"] == ALREADY_BOUND
     assert MAC not in refused.text
     # The newer decision stands.
-    assert client.get(f"/devices/{MAC}").json()["entity"] == {
-        "agents": ["written-since-boot"]
-    }
+    assert client.get(f"/devices/{MAC}").json()["entity"]["agents"] == [
+        "written-since-boot"
+    ]
     # And the code is retired rather than left claimable: it is not one
     # anybody may use now.
     assert client.get("/devices/pending").json() == {}
@@ -638,7 +638,7 @@ def test_the_acknowledgement_is_about_the_row_and_not_the_request(
     assert boundaries(answer.json()) == {CHECK_IN}
     # And the row really does hold the stripped name, which is what
     # makes the notice the true one.
-    assert client.get(f"/devices/{MAC}").json()["entity"] == {"agents": ["assistant"]}
+    assert client.get(f"/devices/{MAC}").json()["entity"]["agents"] == ["assistant"]
 
 
 def test_a_write_that_failed_after_the_code_expired_leaves_it_claimable(

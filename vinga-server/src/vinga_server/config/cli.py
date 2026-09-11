@@ -143,6 +143,8 @@ from vinga_server.config.responses import (
     ConversationTurns,
     DefaultAgentName,
     DeviceBinding,
+    DeviceLocation,
+    DeviceRename,
     Envelope,
     Erasure,
     McpServerStatus,
@@ -1009,6 +1011,12 @@ class Invocation:
     # and this is what the request carries. Spelled as the body's own
     # key, the way `agents` is.
     to: str = ""
+
+    # And where a device is being put, which addresses nothing either:
+    # the route is `/devices/{mac}/location`, so `mac` above is the
+    # whole address and this is what the request carries. Spelled as the
+    # body's own key, the way `agents` and `to` are.
+    location: str = ""
 
     # And the provider type a schema is asked about, which goes with the
     # `stage` above: the two together name one type's options, since the
@@ -3856,8 +3864,11 @@ ENTRIES = dict[str, BODY]
 STAGED_ENTRIES = dict[str, ENTRIES]
 
 # The devices section, which is the one entity-shaped thing in the
-# document that is not an entity: a MAC, and the agents it reaches.
-BOUND = dict[str, list[str]]
+# document that is not an entity: a MAC, and the record under it. Read
+# as a body for the reason an entry's body is read as one: what is
+# wanted of it is that it is a mapping at all, and each key is read by
+# whatever knows the key.
+BOUND = dict[str, BODY]
 
 NAMED = str | None
 
@@ -4076,8 +4087,8 @@ def _summary(document: Mapping[str, object]) -> str:
     # than finding one.
     lines.append("devices:")
     lines += [
-        f"  {printable(mac)} -> {', '.join(printable(agent) for agent in bound)}"
-        for mac, bound in read["devices"].items()
+        f"  {printable(mac)} {_device_summary(body)}"
+        for mac, body in read["devices"].items()
     ] or ["  (none)"]
 
     # The tree's word for an unset default agent is the tree's `(none)`,
@@ -4099,6 +4110,37 @@ def _summary(document: Mapping[str, object]) -> str:
 
 def _summarized(kind: str, body: Mapping[str, object]) -> str:
     return _SUMMARY[kind](body)
+
+
+def _device_summary(body: Mapping[str, object]) -> str:
+    """One device as the tree shows it: what it is called, where it
+    stands when it stands anywhere, and the agents it reaches.
+
+    Beside the five kinds' summaries rather than in `_SUMMARY` with
+    them, because a device is not an entity and its body is not a
+    fragment: `_summarized` is asked by kind, and there is no kind here
+    to ask by.
+
+    The id is not on this line. It is what the record is FOR rather
+    than something anybody reads off a tree, it is thirty-two
+    indistinguishable hex digits, and `device show <mac>` prints it
+    where whoever wants it can find it.
+
+    Read one key at a time through the display door, like every other
+    renderer here: what answered is an API body, and a name that is not
+    a string is a value nothing has vouched for.
+    """
+    said = [_short(body.get("name"))]
+    location = body.get("location")
+    if location is not None:
+        said.append(f"in {_short(location)}")
+    bound = body.get("agents")
+    reached = (
+        ", ".join(_short(agent) for agent in bound)
+        if isinstance(bound, list) and bound
+        else "(nothing)"
+    )
+    return f"{', '.join(said)} -> {reached}"
 
 
 def _provider_summary(body: Mapping[str, object]) -> str:
@@ -5273,6 +5315,24 @@ def _binding(args: Invocation) -> object:
     return {"agents": list(args.agents)}
 
 
+def _device_rename_path(args: Invocation) -> str:
+    return _path("devices", args.mac, "rename")
+
+
+def _device_location_path(args: Invocation) -> str:
+    return _path("devices", args.mac, "location")
+
+
+def _device_name(args: Invocation) -> object:
+    """The name a rename is to give the device it addresses, sent as it
+    was typed, for the reason `_new_name` is."""
+    return {"to": args.to}
+
+
+def _device_location(args: Invocation) -> object:
+    return {"location": args.location}
+
+
 def _claim_path(args: Invocation) -> str:
     return _path("devices", "pending", args.code)
 
@@ -5321,6 +5381,37 @@ ADD_DEVICE = Act(
     path=_claim_path,
     body=_binding,
     sends=DeviceBinding,
+    answers=Acknowledgement,
+    refusal=UNREADABLE_WRITE,
+    render=_acknowledged,
+)
+
+# The two halves of the record beside the binding, each with its own
+# verb: what an operator names, and where a conversation may say the
+# board stands.
+RENAME_DEVICE = Act(
+    method="POST",
+    path=_device_rename_path,
+    body=_device_name,
+    sends=DeviceRename,
+    answers=Acknowledgement,
+    refusal=UNREADABLE_WRITE,
+    render=_acknowledged,
+)
+
+RELOCATE_DEVICE = Act(
+    method="PUT",
+    path=_device_location_path,
+    body=_device_location,
+    sends=DeviceLocation,
+    answers=Acknowledgement,
+    refusal=UNREADABLE_WRITE,
+    render=_acknowledged,
+)
+
+CLEAR_DEVICE_LOCATION = Act(
+    method="DELETE",
+    path=_device_location_path,
     answers=Acknowledgement,
     refusal=UNREADABLE_WRITE,
     render=_acknowledged,
@@ -6889,6 +6980,13 @@ RENAME_TO_HELP = (
     "conversations may already be under"
 )
 
+DEVICE_NAME_HELP = (
+    "the name to give it, free-form and spoken aloud by the agent, which no other "
+    "device may already answer to once case and spacing are folded together"
+)
+
+DEVICE_LOCATION_HELP = "where the board stands, free-form, as a person would say it"
+
 SESSION_HELP = "the session's uuid hex, as a listing prints it"
 
 DEVICE_FILTER_HELP = "only the sessions of this board, by MAC (default: every board)"
@@ -8078,6 +8176,55 @@ def _bound_by_code(row: Command) -> Callable[..., None]:
     return run
 
 
+def _device_renamed_to(row: Command) -> Callable[..., None]:
+    """One device addressed by its MAC, with the name it is to be given
+    behind it.
+
+    The address first and the payload second, which is the route's own
+    order: `/devices/{mac}/rename` addresses the board by the MAC it
+    connects with, and the name it is to have travels in the body.
+    """
+
+    def run(
+        context: typer.Context,
+        mac: Annotated[str, typer.Argument(metavar="MAC")],
+        to: Annotated[str, typer.Argument(metavar="NAME", help=DEVICE_NAME_HELP)],
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
+    ) -> None:
+        row.perform(
+            _invocation(row, context, config, api_url, force, no_input, mac=mac, to=to)
+        )
+
+    return run
+
+
+def _device_located_at(row: Command) -> Callable[..., None]:
+    """The same shape for the other half of the record: the board's MAC,
+    and where it stands behind it."""
+
+    def run(
+        context: typer.Context,
+        mac: Annotated[str, typer.Argument(metavar="MAC")],
+        location: Annotated[
+            str, typer.Argument(metavar="LOCATION", help=DEVICE_LOCATION_HELP)
+        ],
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row, context, config, api_url, force, no_input, mac=mac, location=location
+            )
+        )
+
+    return run
+
+
 def _simulated_board(row: Command) -> Callable[..., None]:
     """The simulator's verbs: one URL, and two options about the board
     it pretends to be.
@@ -8273,7 +8420,7 @@ GROUPS: dict[tuple[str, ...], str] = {
     **{(kind.name,): _about("read and write", kind) for kind in entities.ENTITIES},
     ("provider", "secret"): "credentials stored on providers.<stage>.<name>",
     ("mcp-server", "secret"): "credentials stored on mcp_servers.<name>",
-    ("device",): "read and write devices.<mac>, which agents a board reaches",
+    ("device",): "read and write devices.<mac>: a board's name, place and agents",
     ("device", "pending"): "the boards waiting to be claimed, and claiming one",
     ("default-agent",): "the agent an unbound device reaches",
     # A noun with verbs rather than two flat words, because it has a
@@ -8487,7 +8634,7 @@ COMMANDS: tuple[Command, ...] = (
         kind="device",
         does=SHOW_DEVICE,
         declare=_by_mac,
-        help="print devices.<mac>: the agents that board is bound to",
+        help="print devices.<mac>: that board's id, name, place and agents",
     ),
     Command(
         words=("device", "delete"),
@@ -8495,6 +8642,43 @@ COMMANDS: tuple[Command, ...] = (
         does=DELETE_DEVICE,
         declare=_by_mac,
         help="delete devices.<mac>, so the board it names reaches the default agent",
+        destroys=True,
+    ),
+    # The other two halves of the device record, each a verb on the
+    # device rather than a `location` sub-noun: `/devices/{mac}/location`
+    # is a trailing segment with no identity after it, which the
+    # cli-guide calls an attribute of its parent, and an attribute in
+    # the verb slot reads as a possessive. `preview` is the merged
+    # precedent for giving such an act a verb of its own.
+    #
+    # `rename` is `destroys=False` by the guide's own line: the act is
+    # undone by `device rename <mac> <old name>`, which the operator has
+    # in the shell history of the command they just typed, and no
+    # refusal has to be lifted first because a name freed by a rename is
+    # free.
+    Command(
+        words=("device", "rename"),
+        kind="device",
+        does=RENAME_DEVICE,
+        declare=_device_renamed_to,
+        help=(
+            "give one device another name, which is what an agent says out loud about "
+            "the board it is speaking through; refused if another device answers to it"
+        ),
+    ),
+    Command(
+        words=("device", "relocate"),
+        kind="device",
+        does=RELOCATE_DEVICE,
+        declare=_device_located_at,
+        help="say where one board stands, free-form and not unique",
+    ),
+    Command(
+        words=("device", "clear-location"),
+        kind="device",
+        does=CLEAR_DEVICE_LOCATION,
+        declare=_by_mac,
+        help="unset where one board stands, leaving it nowhere in particular",
         destroys=True,
     ),
     Command(

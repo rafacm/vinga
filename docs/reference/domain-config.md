@@ -512,9 +512,11 @@ what takes rows away.
 
 `devices`
 
-Which agents each device may talk to, keyed by MAC address as the Device-Id
-header sends it. The first name in a list is the agent a conversation starts
-on and the rest are the ones it may be switched to.
+The devices this deployment serves, keyed by MAC address as the Device-Id
+header sends it. Each entry is a record: a server-minted id that survives a
+rename and a board swap, the name the agent says out loud, where the device
+stands, and the agents it may talk to. A bare list of agent names is accepted
+as shorthand for a record naming only those agents.
 
 ```bash
 vinga device bind <mac> <agent> [<agent> ...]
@@ -556,5 +558,5 @@ been asked to apply it.
 | `prompt_fragments` | `dict[str, PromptFragmentConfig]` | `{}` | The shared blocks of prompt text agents include by name, keyed by fragment name. A fragment is written once and injected verbatim into the system prompt of every agent whose prompt_includes names it, which is how household facts or a house style stay in one place instead of being copied into every persona prompt and drifting apart. The name appears in the provenance the assembled prompt is reported under (fragment:<name>), so it must match [A-Za-z0-9_-]+. |
 | `agent_defaults` | `AgentDefaults` | `{}` | What every agent uses unless it names something else. One entry for the whole deployment, and deliberately without a prompt: a prompt is what makes an agent that agent, so inheriting one silently would make two agents the same one. |
 | `agents` | `dict[str, AgentConfig]` | `{}` | The agents this deployment serves, keyed by name. An agent is a prompt plus whichever stages it overrides, and every stage must resolve to a provider, here or in agent_defaults, for the server to start. |
-| `devices` | `dict[str, list[str]]` | `{}` | Which agents each device may talk to, keyed by MAC address as the Device-Id header sends it. The first name in a list is the agent a conversation starts on and the rest are the ones it may be switched to. |
+| `devices` | `dict[str, DeviceRecord]` | `{}` | The devices this deployment serves, keyed by MAC address as the Device-Id header sends it. Each entry is a record: a server-minted id that survives a rename and a board swap, the name the agent says out loud, where the device stands, and the agents it may talk to. A bare list of agent names is accepted as shorthand for a record naming only those agents. |
 | `default_agent` | `str \| null` | `null` | The agent an unknown device reaches. Leaving it unset makes the devices map an allowlist: a device with no binding is then turned away. |

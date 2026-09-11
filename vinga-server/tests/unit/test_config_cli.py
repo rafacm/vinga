@@ -96,7 +96,7 @@ def test_an_empty_database_becomes_a_working_configuration(
     assert shown["mcp_servers"]["home"]["command"] == "uvx"
     assert shown["agent_defaults"]["mcp"] == ["home"]
     assert shown["agents"]["sam"]["prompt"] == "You are Sam."
-    assert shown["devices"] == {"aa:bb:cc:dd:ee:ff": ["sam"]}
+    assert shown["devices"]["aa:bb:cc:dd:ee:ff"]["agents"] == ["sam"]
     assert shown["default_agent"] == "sam"
 
 
@@ -921,7 +921,7 @@ def test_show_renders_every_entity_kind(run, capsys: pytest.CaptureFixture[str])
     run("agent-defaults", "show")
     assert _document(capsys.readouterr().out) == {"llm": "claude"}
     run("device", "show", "AA-BB-CC-DD-EE-FF")
-    assert _document(capsys.readouterr().out) == {"agents": ["sam"]}
+    assert _document(capsys.readouterr().out)["agents"] == ["sam"]
 
 
 def test_an_agent_is_printed_prompt_first(
@@ -1329,7 +1329,7 @@ def test_import_writes_a_whole_deployment_from_one_file(
     assert run("show") == 0
     shown = _document(capsys.readouterr().out)
     assert shown["agents"]["sam"]["prompt"] == "You are Sam."
-    assert shown["devices"] == {"aa:bb:cc:dd:ee:ff": ["sam"]}
+    assert shown["devices"]["aa:bb:cc:dd:ee:ff"]["agents"] == ["sam"]
     assert shown["default_agent"] == "sam"
 
 
