@@ -9,8 +9,6 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
-<<<<<<< HEAD
-=======
 - **A device is a record, not a binding** (#449, M1). `devices.<mac>` used
   to hold a list of agent names and now holds four things: a
   server-minted uuid-hex `id`, a `name`, a `location` and the `agents`
@@ -40,7 +38,6 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 - The same three acts over the API: `POST /devices/{mac}/rename`,
   `PUT /devices/{mac}/location` and its `DELETE`.
 
->>>>>>> 08809e0f (Say what the device id does today and no more)
 ### Changed
 
 - **An interruption arriving at the playback onset is transcribed
