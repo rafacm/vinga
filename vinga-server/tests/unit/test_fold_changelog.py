@@ -206,7 +206,9 @@ def test_a_new_day_creates_its_section_in_the_commits_own_offset(
     text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
     assert "## 2026-09-12\n" in text
     assert text.index("## 2026-09-12") < text.index("## 2026-09-11")
-    assert section(text, "2026-09-12") == "\n### Added\n\n- **A thing that landed past midnight.**\n"
+    assert section(text, "2026-09-12") == (
+        "\n### Added\n\n- **A thing that landed past midnight.**\n"
+    )
 
 
 def test_a_created_section_lands_between_the_days_around_it(tmp_path: Path) -> None:
