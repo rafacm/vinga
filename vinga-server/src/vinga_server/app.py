@@ -643,6 +643,11 @@ async def _build_composition(
         # subscribes a reader to (#342).
         live=live,
     )
+    # And the handle onto the runtime the API reads it from, installed
+    # here because this is where that runtime exists. Registered after
+    # the open above and therefore unwound before it, which is what
+    # keeps a request arriving after teardown from finding a handle
+    # whose engine would open fresh connections nobody owns.
     stack.enter_context(installed(api_runtime, store))
     seed.api.state.api_runtime = api_runtime
     # The one thing on this app's state a handler reads back: the fields
