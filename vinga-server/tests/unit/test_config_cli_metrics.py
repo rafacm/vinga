@@ -793,6 +793,48 @@ def test_a_heading_an_answer_wrote_cannot_steer_the_terminal(run, capsys) -> Non
     assert "SESSIONS" in printed and "TURNS" in printed
 
 
+@pytest.mark.parametrize("broken", ["missing", "extra", "null"])
+def test_a_row_that_breaks_its_own_declaration_is_refused_not_softened(
+    run, capsys, caplog, broken
+) -> None:
+    """The declaration the answer itself carries is what a row is held
+    to: a row missing a declared column, one carrying an undeclared
+    key, and a null in a column declared non-nullable are all bodies
+    this client cannot read, not data.
+
+    The missing case is the one that lies rather than crashes: the
+    renderer prints the placeholder for an absent value, and the
+    placeholder means null, so a response missing the non-null `turns`
+    would report a legitimate null nobody sent. Refused with the same
+    fixed sentence every unreadable answer meets, nothing of the body
+    in it and no traceback behind it."""
+    answer = an_empty_answer("sessions")
+    row: dict[str, Any] = {
+        column["name"]: 1 for column in answer["view"]["columns"]
+    }
+    row["day"] = DAY
+    # A value of the row planted where a refusal might quote it back.
+    row["sessions"] = SENTINEL
+    if broken == "missing":
+        del row["turns"]
+    elif broken == "extra":
+        row["undeclared"] = SENTINEL
+    else:
+        row["turns"] = None
+    answer["rows"] = [row]
+    asked(run, answer)
+
+    with caplog.at_level(logging.DEBUG):
+        code, printed, err = out(run, capsys, "metric", "show", "sessions")
+
+    assert code == 1
+    assert printed == ""
+    assert cli.UNREADABLE_READ in err
+    assert err.endswith("\n") and len(err.splitlines()) == 1
+    for where in (printed, err, leaked(caplog)):
+        assert SENTINEL not in where
+
+
 def test_a_read_says_nothing_about_the_run_it_made(run, store, capsys) -> None:
     """Stdout carries the thing a caller came for and stderr carries
     everything about the run that produced it. A read produced nothing

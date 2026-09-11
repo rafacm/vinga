@@ -2416,6 +2416,34 @@ class MetricRows(BaseModel):
         )
     )
 
+    @model_validator(mode="after")
+    def _rows_carry_exactly_the_declared_columns(self) -> "MetricRows":
+        """`carrying exactly those keys` above is held here rather than
+        trusted, because the renderer prints the null placeholder for
+        an absent value and the placeholder means null: a body missing
+        a non-null column would otherwise validate and read as a
+        legitimate null nobody sent, which is the one lie a refusal
+        exists to prevent. A key the declaration does not name and a
+        null in a column declared non-nullable are the same defect in
+        the other directions.
+
+        The declaration is the answer's own `view`, so the rule needs
+        no second copy of any schema. Nothing of the body is quoted:
+        which rule broke is all a reader can act on, and a value here
+        can be an operator's text.
+        """
+        declared = [column.name for column in self.view.columns]
+        names = set(declared)
+        required = {column.name for column in self.view.columns if not column.nullable}
+        for row in self.rows:
+            if set(row) != names:
+                raise ValueError(
+                    "a row does not carry exactly the columns its own view declares"
+                )
+            if any(row[name] is None for name in required):
+                raise ValueError("a row is null in a column declared non-nullable")
+        return self
+
 
 # What the memory namespace answers
 #
