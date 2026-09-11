@@ -279,15 +279,50 @@ RENAME_OCCUPIED = (
     "it with `vinga-server config memory delete agent <name> --all`"
 )
 
+# The same refusal met under the other scope this verb serves, and the
+# reason it is a second sentence rather than a parameter in the one
+# above: what a caller does about it is the same and every word saying
+# so is different. Under `agent` the destination is a name and the act
+# is a rename; under `device` the destination is a MAC and the act is a
+# board swap (#449, M4), and the door an operator reads what is filed
+# there through takes a different scope word.
+#
+# Neither address is quoted back, which is the rule the sentence above
+# states and which holds here for a reason of its own as well: a device
+# fact is what a room told a board, so the remedy names the listing and
+# lets the operator address it themselves.
+SWAP_OCCUPIED = (
+    "memory: facts are already remembered about the board at the new address, and a "
+    "board swap may not merge two memories into one, because nothing could tell them "
+    "apart afterwards and no second swap could separate them. Nothing was changed, "
+    "and neither address is quoted back. Swap onto an address nothing remembers, or "
+    "read what is stored under this one with "
+    "`vinga-server config memory list device <mac>` and clear it with "
+    "`vinga-server config memory delete device <mac> --all`"
+)
+
+# Which of the two a move under one scope answers with. A mapping rather
+# than a conditional at the raise site, so a third scope arriving here
+# is a missing entry a reader can see rather than a sentence about
+# agents told to somebody who moved something else.
+OCCUPIED_BY_SCOPE: dict[MemoryScope, str] = {
+    MemoryScope.AGENT: RENAME_OCCUPIED,
+    MemoryScope.DEVICE: SWAP_OCCUPIED,
+}
+
+# The two failures say no destination at all, which is deliberate now
+# that two acts reach them: a rename moves facts onto a name and a board
+# swap moves them onto an address, and neither caller needs to be told
+# back what it just asked for in order to know what failed.
 RENAME_FAILED = (
-    "the remembered facts could not be moved to the new name: the database this "
+    "the remembered facts could not be moved: the database this "
     "server keeps memory in refused the write, and nothing was changed. Nothing of "
     "the failure is repeated here, because a database error quotes the statement it "
     "ran and the values bound into it"
 )
 
 RENAME_BUSY = (
-    "the remembered facts could not be moved to the new name: another connection was "
+    "the remembered facts could not be moved: another connection was "
     "writing to memory for longer than the lock timeout allows, and nothing was "
     "changed. The same request may simply be made again"
 )
@@ -1329,7 +1364,7 @@ def purge(connection: Connection, threads: Sequence[str]) -> Purged:
 def rename_owner(
     connection: Connection, scope: MemoryScope, old: str, new: str
 ) -> int:
-    """Move everything one owner holds in one scope onto another name,
+    """Move everything one owner holds in one scope onto another owner,
     on a connection the caller already holds, and answer how many rows
     moved.
 
@@ -1340,6 +1375,14 @@ def rename_owner(
     memory has not. A failure therefore reaches the caller and takes its
     transaction down with it. The signature is `erase_facts`'s with a
     destination added, because what it addresses is the same pair.
+
+    Two acts reach it, which is the whole reason the scope is a
+    parameter rather than a constant: an agent rename moves facts from
+    one agent name to another, and a board swap moves what a room told a
+    device onto the MAC of the board that stands there now (#449, M4).
+    Nothing below is agent-specific, and the one thing that was, the
+    sentence an occupied destination is refused with, is now chosen by
+    the scope.
 
     The chain's advisory lock is taken before the first statement, for
     `purge`'s reason: it is what makes the ascending order
@@ -1371,8 +1414,13 @@ def rename_owner(
     Every refusal is built inside the handler and raised outside it, the
     rule this module keeps everywhere: a SQLAlchemy failure carries the
     statement it ran and the parameters bound into it, and the
-    parameters here are two agent names.
+    parameters here are two owners.
     """
+    # Before the connection is reached, which is where every operation
+    # here asks it: a scope no fact can carry would otherwise be refused
+    # by the check constraint as a database failure, and this module
+    # would report a healthy database as broken.
+    _only_a_fact_scope(scope)
     moved = 0
     occupied = False
     problem: Exception | None = None
@@ -1403,7 +1451,7 @@ def rename_owner(
     if problem is not None:
         raise problem
     if occupied:
-        raise AgentRenameConflictError(RENAME_OCCUPIED)
+        raise AgentRenameConflictError(OCCUPIED_BY_SCOPE[scope])
     return moved
 
 
@@ -2152,6 +2200,7 @@ __all__ = [
     "NOTHING_REMEMBERED",
     "NOTHING_TO_REMEMBER",
     "NOT_A_FACT_SCOPE",
+    "OCCUPIED_BY_SCOPE",
     "NOT_STORABLE",
     "NOTHING_TO_SET",
     "NO_FACT_TO_FORGET",
@@ -2162,6 +2211,7 @@ __all__ = [
     "RENAME_BUSY",
     "RENAME_FAILED",
     "RENAME_OCCUPIED",
+    "SWAP_OCCUPIED",
     "QUIET_TIMEOUT_S",
     "RECALL_BYTES",
     "RECALL_LINES",
