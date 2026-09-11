@@ -46,6 +46,7 @@ import logging
 from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
+    StorageError,
     UnknownEntityError,
 )
 from vinga_server.config.store import ConfigStore
@@ -95,6 +96,14 @@ class DevicePlacements:
             refusal = builtin.NO_DEVICE_RECORD
         except DatabaseBusyError:
             refusal = builtin.PLACEMENT_BUSY
+        except StorageError:
+            # A database that could not be read or written. In front of
+            # the arm below rather than after it, because both are
+            # `ConfigError`s and only the order tells them apart: a
+            # storage failure answered as a value problem would tell a
+            # room that the place it named was not a place, which is
+            # wrong about the world and unactionable besides.
+            refusal = builtin.PLACEMENT_FAILED
         except ConfigError:
             # What the repository refused about the value itself: a
             # place that folds to nothing, or one that is a URL carrying
