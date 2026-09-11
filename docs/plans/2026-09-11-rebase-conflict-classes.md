@@ -80,12 +80,21 @@ full: a stale spelling entering a document still fails
 `test_every_live_spelling_names_a_command_the_tree_has` with
 positions in the failure, whether or not the manifest moved.
 
+The set is honest about what it can no longer show, and the claim
+is scoped to what a distinct set provides: only pair-set membership
+changes are reviewable. A site removal or reclassification is
+invisible when another site retains the old pair, and a new
+classification is invisible when its pair already exists elsewhere;
+a test demonstrates exactly this lossy case (two files carrying one
+pair, one of them moving class, manifest unchanged) so no later
+documentation quietly recovers the stronger claim.
+
 Not committing the manifest at all (the issue's second option) is
 rejected because the committed set is what makes a classification
-change reviewable: a document move that silently reclassifies a
-live spelling as historical shows up as a diff line in the manifest
-and nowhere else, since the guards only constrain the `respell`
-class.
+change reviewable when it does change the set: a document move that
+reclassifies the last live site of a spelling as historical shows
+up as a diff line in the manifest and nowhere else, since the
+guards only constrain the `respell` class.
 
 ### The fold is a workflow, not a documented manual step
 
@@ -472,6 +481,11 @@ condensed but faithful; resolutions appended per amendment.
    already exists elsewhere. State that only pair-set membership
    changes remain reviewable, accept the invisible cases explicitly,
    and add a test demonstrating the lossy case.
+
+   *Resolution.* Adopted. The manifest section scopes the claim to
+   pair-set membership, names both invisible cases, and adds the
+   lossy-case test; the not-committing rejection is restated to
+   hold only for the last live site of a spelling.
 
 7. **P2: The bot-commit workflow omits required commit and
    write-scope mechanics.** A fresh runner needs a git author, and
