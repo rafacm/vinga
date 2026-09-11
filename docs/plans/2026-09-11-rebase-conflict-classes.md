@@ -297,9 +297,18 @@ named where the rule is stated.
   verbatim-move contract; they run one command and read its exit
   code. Deletion test: inlined into the workflow YAML it would be
   untestable and would exist twice (fold and check).
-- `.github/workflows/changelog-fold.yml` (M2): checkout `main`,
-  run `fold`, commit and push when the script wrote; concurrency
-  group without cancellation; `permissions: contents: write`.
+- `.github/workflows/changelog-fold.yml` (M2): checkout `main` with
+  `fetch-depth: 0`, run `fold`, commit and push when the script
+  wrote; concurrency group without cancellation;
+  `permissions: contents: write`. The commit mechanics are fixed
+  rather than left to the runner: the author is the standard bot
+  identity (`github-actions[bot]
+  <41898282+github-actions[bot]@users.noreply.github.com>`),
+  configured in the step; staging is exactly `git add CHANGELOG.md
+  changelog.d`, never `git add -A`; and before committing the step
+  asserts `git status --porcelain` reports nothing outside those
+  two paths, failing the run rather than sweeping an unexpected
+  write into a bot commit.
 - `changelog.d/README.md` (M2): the fragment contract, stated where
   fragments live.
 - `.github/workflows/docs.yml` (M2): the PR-gated CHANGELOG.md
@@ -493,6 +502,10 @@ condensed but faithful; resolutions appended per amendment.
    identity, stage only `CHANGELOG.md` and the validated fragment
    deletions, assert nothing else is dirty, and never use an
    unrestricted `git add -A`.
+
+   *Resolution.* Adopted. The workflow entry now fixes the bot
+   identity, stages exactly `CHANGELOG.md` and `changelog.d`, and
+   asserts a clean porcelain outside those paths before the commit.
 
 8. **P3: The promised post-merge verification record requires an
    unnamed follow-up change.** The first live fold cannot run until
