@@ -8625,7 +8625,7 @@
               }
             ],
             "default": null,
-            "description": "Where the device stands, free-form, or null for nowhere in particular. Not unique: two devices in one room is normal. Leave the key out and the stored location is kept.",
+            "description": "Where the device stands, free-form, or null for nowhere in particular. Not unique: two devices in one room is normal. Leave the key out and the stored location is kept. Null is the only way to say nowhere: a location holding nothing but whitespace is refused, because it would be a second spelling of a state that already has one.",
             "title": "Location"
           },
           "agents": {
