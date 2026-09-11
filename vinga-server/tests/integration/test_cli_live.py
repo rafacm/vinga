@@ -104,6 +104,7 @@ from vinga_server.config.secrets import (
 from vinga_server.config.store import APPLY_LIMIT, TOO_MANY_ENTRIES, ConfigStore
 from vinga_server.conversations.records import TurnRecord
 from vinga_server.conversations.store import ConversationStore
+from vinga_server.conversations.views import VIEWS
 from vinga_server.db import open_database
 from vinga_server.device_endpoint import SUPPLIED_ENDPOINT
 from vinga_server.memory.scopes import MemoryScope
@@ -146,6 +147,18 @@ LANE_THREAD = "0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f6"
 # above because that one is erased mid-case and a ledger keyed to a
 # deleted thread would go with it.
 LANE_MEMORY_THREAD = "7e8f90a1b2c3d4e5f60d1e2f3a4b5c6d"
+
+# The session the metrics case counts, and the window around the day
+# every manifest in this lane opens on. A named window rather than the
+# default one, so what the case asserts is the row it planted rather
+# than whatever day the lane happened to run on.
+METRIC_SESSION = "lane-metric"
+
+METRIC_DAY = "2026-08-15"
+
+METRIC_SINCE = "2026-08-01"
+
+METRIC_UNTIL = "2026-08-31"
 
 
 def session_manifest(device: str) -> dict[str, object]:
@@ -1642,6 +1655,69 @@ def test_the_memory_verbs_read_and_correct_over_the_wire(
     assert leaked(SECRET, logs=watched.everything()) == []
 
 
+def test_the_metric_verbs_read_the_named_aggregates_over_the_wire(
+    deployed: Live,
+    module_database: str,
+    capsys: pytest.CaptureFixture[str],
+    watched: Watched,
+) -> None:
+    """The two verbs of the `metric` noun against a real uvicorn: the
+    vocabulary, and one view over a window of days.
+
+    The fourth reading of the record this lane has driven, and the one
+    that answers about days. Seeded through the store the server writes
+    a session with, into the database this lane's server is serving
+    from, for the reason the session case gives: the commands are what
+    is under test rather than the pipeline that fills the store.
+
+    Two things only a real server shows. The listing is the registry
+    rather than the store, so it answers over a connection that opens
+    no reader at all; and the statements the view registry declares
+    cross the wire in the body and are printed here, which is the whole
+    of how they reach an operator with no psql.
+    """
+    seeded = ConversationStore(
+        DatabaseConfig(name=module_database), retention_days=0
+    )
+    seeded.start()
+    try:
+        seeded.open_session(METRIC_SESSION, 100.0, session_manifest(SESSION_MAC))
+        seeded.record_turn(
+            METRIC_SESSION,
+            TurnRecord(
+                at=101.2,
+                conversation=LANE_CONVERSATION,
+                agent="sam",
+                heard="how has today been",
+                reply="Quiet.",
+            ),
+        )
+        seeded.close_session(METRIC_SESSION, duration_s=2.0, reason="client")
+    finally:
+        seeded.stop()
+
+    assert run("metric", "list") == 0
+    listed = capsys.readouterr().out
+    for view in VIEWS:
+        assert f"\n{view.alias}\n" in f"\n{listed}"
+    # And what the numbers cannot be made to say, which is declared once
+    # on the registry and reaches a terminal only through this body.
+    assert "A rate is null when its denominator is zero, never zero." in " ".join(
+        listed.split()
+    )
+
+    assert run(
+        "metric", "show", "sessions", "--since", METRIC_SINCE, "--until", METRIC_UNTIL
+    ) == 0
+    answered = capsys.readouterr().out
+    [heading] = [line for line in answered.splitlines() if line.startswith("DAY")]
+    assert heading.split() == ["DAY", "SESSIONS", "TELEMETRY_SESSIONS", "TURNS"]
+    [row] = [line for line in answered.splitlines() if line.startswith(METRIC_DAY)]
+    assert int(row.split()[-1]) >= 1
+
+    assert leaked(SECRET, logs=watched.everything()) == []
+
+
 def test_the_documents_that_reach_nothing_render_in_the_same_environment(
     deployed: Live, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -2240,6 +2316,20 @@ REFUSALS: tuple[Refusal, ...] = (
         ("events", "tail", "--device", PLANTED),
         "device has to be a MAC address: six colon-separated or dash-separated hex "
         "pairs, for example aa:bb:cc:dd:ee:ff. What was sent is not quoted back",
+        True,
+    ),
+    # The fourth reading of the same store, and the sentence is the
+    # server's once more: a view nothing answers to, refused with the
+    # place the vocabulary is published rather than an echo of the word.
+    # The word handed to it is the planted credential, because `{view}`
+    # is where this command's own input can carry one and it is the only
+    # request-controlled value on that API that selects a relation.
+    Refusal(
+        ("metric",),
+        ("metric", "show", PLANTED),
+        "no metrics view of that name is served. The views are listed by GET /metrics, "
+        "each with the question it answers and the columns it hands back, and the name "
+        "is the last segment of one of their paths.",
         True,
     ),
     Refusal(("apply",), ("apply", "extra"), USAGE, False),
