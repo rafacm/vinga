@@ -275,14 +275,23 @@ All from `vinga-server/` with `uv`, against a dedicated Postgres
   suite beside it is not.)
 - `uv run pytest tests/unit -q -n 4 --dist loadfile`: 6882 passed, 19
   skipped in 199.97s.
-- `uv run pytest tests/integration -q`: see the PR's Verification
-  section for the run this milestone recorded.
+- `uv run pytest tests/integration -q`: 304 passed in 429.88s.
 - `python3 scripts/check_doc_links.py .` from the checkout root:
   checked 229 files, 0 failures.
 - `python3 scripts/fold_changelog.py check .` against this repository's
   own first fragment: checked 1 fragments, 0 failures.
 - Both workflow files parse as YAML and their `run` scripts pass
   `bash -n`.
+- The fold itself, rehearsed against this repository: a full clone of
+  the milestone branch, folded with the same command the workflow
+  runs. It created `## 2026-09-12` at the head of the real
+  `CHANGELOG.md`, added 2,275 bytes and changed nothing else (the
+  preamble and every byte from `## 2026-09-11` down are identical),
+  deleted the fragment, and left the tree clean outside the two paths
+  the workflow stages. Regenerating the census on the folded tree
+  rendered the manifest byte-identical, which is the fold-neutrality
+  property observed against the real repository rather than only
+  against a synthetic page.
 
 Not verified here, and it cannot be:
 
