@@ -905,9 +905,16 @@ old one.
 
 ### Deviations from the plan
 
-Four.
+Five.
 
-1. **The repository gains two private helpers and one split, where the
+1. **It is a two-schema operation, where the milestone's design
+   footprint called it "a second three-schema operation beside the agent
+   rename".** The body of the same milestone says the opposite and is
+   the half that was right: history is deliberately untouched, so the
+   conversation record is never reached. The footprint line was counting
+   the agent rename's schemas rather than this one's. The section above
+   says which third is missing and why.
+2. **The repository gains two private helpers and one split, where the
    plan said "deepens `config/store.py`".** It does deepen it, and the
    split is the part worth naming: `_refuse_repeated_identities` was
    asked two different questions and now is two functions. The end-state
@@ -919,14 +926,14 @@ Four.
    that never moved. It can be skipped safely because the hazard it
    exists for is the order two row writes happen in, and a swap writes
    one.
-2. **The row moves by UPDATE rather than through `_device_row`.** Every
+3. **The row moves by UPDATE rather than through `_device_row`.** Every
    other device write goes through that one row builder, and this one
    cannot: it is addressed BY the MAC, so an upsert keyed on the value
    being changed would insert a second record rather than move this one.
    `_swap_device_row` is `_rename_agent_row` one table across, and it
    carries the same property: the rest of the body travels verbatim,
    including any column the table gains later.
-3. **`memory/store.py` gains a sentence.** The plan's argument that
+4. **`memory/store.py` gains a sentence.** The plan's argument that
    `rename_owner` "already takes a `MemoryScope`, so it is not
    agent-specific" was true of the SQL and false of one string: the
    refusal for an occupied destination named a rename, a name and the
@@ -937,7 +944,7 @@ Four.
    else. The two storage failures beside it stopped naming a destination
    at all, since one act moves facts onto a name and the other onto an
    address.
-4. **No migration**, as the plan expected, so the CI wheel step's
+5. **No migration**, as the plan expected, so the CI wheel step's
    chain-head pin does not move. M4 rewrites a column VALUE.
 
 ### Discoveries
