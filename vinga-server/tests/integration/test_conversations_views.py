@@ -36,15 +36,10 @@ from collections.abc import Iterator
 import pytest
 from sqlalchemy import text
 
+from tests.support.stores import plant_event, plant_session, plant_turn
 from vinga_server.config.models import DatabaseConfig
-from vinga_server.conversations import schema
 from vinga_server.conversations.store import open_conversations
 from vinga_server.conversations.views import VIEWS
-
-# One thread for every planted turn, in the shape the runtime mints.
-# Nothing here reads it: the views aggregate by day and agent, and the
-# column is not null, so it has to be some thread.
-CONVERSATION = "3b1e5c7a9d2f4068a1b3c5d7e9f02468"
 
 
 @pytest.fixture
@@ -60,56 +55,6 @@ def store() -> Iterator:
         yield engine
     finally:
         engine.dispose()
-
-
-def plant_session(
-    connection,
-    session: str,
-    started_at: str,
-    *,
-    metrics: bool = True,
-    agent: str | None = "sam",
-) -> None:
-    connection.execute(
-        schema.sessions.insert().values(
-            session=session,
-            device="aa:bb:cc:dd:ee:ff",
-            agent=agent,
-            started_at=started_at,
-            metrics=metrics,
-            text=True,
-            dropped=0,
-        )
-    )
-
-
-def plant_turn(
-    connection, session: str, t_ms: int, *, agent: str | None = "sam", **measured
-) -> int:
-    """One turn, with whatever measured columns the case is about.
-
-    `agent` is the turn's own rather than the session's, which is the
-    distinction the token view turns on: a handover leaves the session
-    agent alone and splits the reply across `legs`.
-    """
-    return connection.execute(
-        schema.turns.insert().values(
-            session=session,
-            conversation=CONVERSATION,
-            t_ms=t_ms,
-            agent=agent,
-            tool_calls=0,
-            **measured,
-        )
-    ).inserted_primary_key[0]
-
-
-def plant_event(connection, session: str, t_ms: int, name: str) -> None:
-    connection.execute(
-        schema.events.insert().values(
-            session=session, t_ms=t_ms, name=name, level=20, fields={}
-        )
-    )
 
 
 def rows(engine, view: str, *, timezone: str | None = None) -> list[tuple]:
