@@ -1715,6 +1715,38 @@ def test_the_metric_verbs_read_the_named_aggregates_over_the_wire(
     [row] = [line for line in answered.splitlines() if line.startswith(METRIC_DAY)]
     assert int(row.split()[-1]) >= 1
 
+    # And the same question broken down by the board it was asked on,
+    # which is a second relation rather than a second rendering: the
+    # flag goes out on the request, the server answers from the
+    # per-device sibling, and the columns of that answer are what is
+    # printed. The label is null until it is copied onto the record
+    # side, so it prints the placeholder rather than a blank.
+    assert run(
+        "metric",
+        "show",
+        "sessions",
+        "--since",
+        METRIC_SINCE,
+        "--until",
+        METRIC_UNTIL,
+        "--group",
+        "device",
+        "--device",
+        SESSION_MAC.upper(),
+    ) == 0
+    broken_down = capsys.readouterr().out
+    [heading] = [line for line in broken_down.splitlines() if line.startswith("DAY")]
+    assert heading.split() == [
+        "DAY",
+        "DEVICE",
+        "NAME",
+        "SESSIONS",
+        "TELEMETRY_SESSIONS",
+        "TURNS",
+    ]
+    [row] = [line for line in broken_down.splitlines() if line.startswith(METRIC_DAY)]
+    assert row.split()[1:3] == [SESSION_MAC, cli.NOTHING_THERE]
+
     assert leaked(SECRET, logs=watched.everything()) == []
 
 
