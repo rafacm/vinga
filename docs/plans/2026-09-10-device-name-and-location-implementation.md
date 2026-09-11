@@ -605,8 +605,8 @@ moved: the write refuses and the new record is untouched.
 
 ### What the agent says, refusal by refusal
 
-Five sentences, all in `tools/builtin.py` with the rest of that closed
-vocabulary, and none of them the repository's own. That is the point
+Six sentences and a confirmation, all in `tools/builtin.py` with the
+rest of that closed vocabulary, and none of them the repository's own. That is the point
 rather than a detail: the repository's refusals are written for an
 operator at a command line and name a command to run, a document to
 edit or a field to correct, and whoever just said "you have been moved"
