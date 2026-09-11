@@ -204,6 +204,12 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         "/conversations": ["get"],
         "/conversations/{conversation}": ["delete", "get"],
         "/conversations/{conversation}/turns": ["get"],
+        # And the third reading of the same rows, which answers about
+        # days: the listing that publishes the vocabulary and the one
+        # view that vocabulary addresses. No DELETE on either, because a
+        # view owns no rows, and nothing addressed by an id.
+        "/metrics": ["get"],
+        "/metrics/{view}": ["get"],
         # And what this deployment remembers, registered the same way
         # from vinga_server/memory/api.py. Three owner listings, because
         # the audit question is asked of a scope before it is asked of
@@ -556,6 +562,13 @@ def test_every_field_the_conversation_reads_answer_with_is_required() -> None:
         "SessionTurn",
         "ToolInvocation",
         "TurnLeg",
+        # And the aggregates, where the rule bites for a second reason:
+        # a caveat a client cannot find is a caveat it will not print.
+        "MetricViews",
+        "MetricView",
+        "MetricColumn",
+        "MetricCaveats",
+        "MetricRows",
     ):
         schema = schemas[name]
         assert set(schema["required"]) == set(schema["properties"]), name
@@ -623,6 +636,86 @@ def test_the_conversation_reads_describe_their_pagination() -> None:
     assert "1 to 200" in described["limit"]
     assert "50" in described["limit"]
     assert "row id" in described["cursor"]
+
+
+def test_the_metric_column_schema_is_the_column_the_registry_declares() -> None:
+    """The transport shape and the declaration it is copied from, held
+    equal: `_described` copies a column with `asdict`, so a field added
+    to the registry and not to the shape would be a key the document
+    does not describe, and one added the other way round would be a key
+    no answer carries."""
+    from dataclasses import fields
+
+    from vinga_server.conversations.api import MetricColumn
+    from vinga_server.conversations.views import Column
+
+    assert set(MetricColumn.model_fields) == {field.name for field in fields(Column)}
+
+
+def test_the_metrics_read_describes_its_window_and_its_vocabulary() -> None:
+    """The four arguments this route parses itself, and what a client is
+    told about them. Nothing is derived from a type here either, so the
+    descriptions are the whole of the contract."""
+    from vinga_server.config.responses import GROUPINGS
+    from vinga_server.conversations.api import WINDOW_DEFAULT_DAYS, WINDOW_MAX_DAYS
+
+    read = json.loads(docgen.openapi())["paths"]["/metrics/{view}"]["get"]
+    described = {
+        parameter["name"]: parameter["description"] for parameter in read["parameters"]
+    }
+
+    assert set(described) == {"view", "since", "until", "group"}
+    # Both ends inclusive, said on the argument each end belongs to.
+    assert "begins on it rather than after it" in described["since"]
+    assert "ends on it rather than before it" in described["until"]
+    assert str(WINDOW_DEFAULT_DAYS) in described["since"]
+    assert "current UTC day" in described["until"]
+    # The cap, and that it refuses rather than trims, which is the half
+    # a client would otherwise have to discover from a short answer.
+    assert str(WINDOW_MAX_DAYS) in described["until"]
+    assert "refused rather than narrowed" in described["until"]
+    # The closed sets, both of them: the grouping's vocabulary and where
+    # the view's is published.
+    for grouping in GROUPINGS:
+        assert f"`{grouping}`" in described["group"]
+    assert "GET /metrics" in described["view"]
+    # And the document types the grouping rather than describing it in
+    # prose alone, so a generated client cannot send a fifth word.
+    schemas = json.loads(docgen.openapi())["components"]["schemas"]
+    grouping = schemas["MetricRows"]["properties"]["group"]
+    # `const` for one token and `enum` for several, which is JSON
+    # Schema's own spelling of a closed set and moves under this test
+    # the day the per-device grouping lands. What is pinned is the
+    # vocabulary, not which of the two words carries it.
+    assert grouping.get("enum", [grouping.get("const")]) == list(GROUPINGS)
+
+
+def test_the_metrics_answer_carries_the_caveats_the_views_declare() -> None:
+    """The risk this whole surface was written against: a number served
+    without the sentence the SQL would have qualified it with.
+
+    Semantic rather than structural, deliberately. The drift check holds
+    the document to its generator byte for byte and would stay green
+    with every caveat deleted from both, so what is asserted here is
+    that the sentences are in the contract a client reads.
+
+    Telemetry-off is asserted per view, because it is not one behaviour:
+    a turn stored under the switch contributes no latency row at all,
+    while the event-rate view keeps both denominators and loses both
+    numerators. A surface that flattened that into one sentence would be
+    reporting a quiet day and a blind one as the same day.
+    """
+    from vinga_server.conversations.views import VIEWS
+
+    read = json.loads(docgen.openapi())["paths"]["/metrics/{view}"]["get"]
+    answer = " ".join(read["responses"]["200"]["description"].split())
+
+    assert "A rate is null when its denominator is zero**, never zero" in answer
+    assert "a rate read outside the events' own retention window is a floor" in answer
+    assert "A missing measurement has more than one cause" in answer
+    for view in VIEWS:
+        assert " ".join(view.telemetry_off.split()) in answer, view.name
+        assert " ".join(view.question.split()) in answer, view.name
 
 
 def test_the_entity_schemas_are_registered_with_their_definitions() -> None:

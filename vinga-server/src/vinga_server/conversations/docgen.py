@@ -1,6 +1,6 @@
 """The conversation store's documentation, rendered from its declarations.
 
-Two documents, and each has exactly one source. `reference()` renders
+Three renderings, and each has exactly one source. `reference()` renders
 `docs/reference/conversations-schema.md` from `schema.py`: `comment=` on
 every column is written once and read here and by `vinga-server
 conversations schema`, and the drift test fails on a column with no
@@ -10,8 +10,15 @@ for the domain models next door. `views_reference()` renders
 where the per-column declaration matrix is the comment's equivalent and
 a column missing from it is a red test rather than a blank cell.
 
-Both renderers live here rather than in two modules because they are one
-responsibility, documenting this store, and because they share the
+`views_description()` is the third, and it is not a file: it is what
+the read surface's own document says a metrics answer means, rendered
+from the same declarations the page above is. It is here rather than
+beside the routes because it is the same responsibility, writing a
+declaration out for a person, and because the alternative is a second
+copy of the retention limit in the transport code.
+
+The renderers live here rather than in three modules because they are
+one responsibility, documenting this store, and because they share the
 wrapping and the cell escaping: two copies of `_paragraph` would be two
 things to keep agreeing about what a committed page looks like.
 
@@ -452,6 +459,50 @@ def views_reference() -> str:
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
+def views_description() -> str:
+    """What a metrics answer means, for the OpenAPI document that
+    describes the read surface and for whatever is generated from it.
+
+    The same declarations the page renders, minus the SQL and the column
+    matrix, which the answer itself carries: what is left is the half a
+    client cannot compute from a number, which is what holds for every
+    view and what telemetry storage being off does to each one. That
+    last part is per view deliberately and must not be flattened: the
+    latency view produces no row at all for a turn stored under the
+    switch, while the event-rate view keeps its denominators and loses
+    its numerators.
+
+    Generated rather than written here so that the contract a client
+    reads and the page an analyst reads cannot come apart. A drift check
+    would prove the document matches this function and never that this
+    function kept a caveat, so the suite asserts the sentences
+    themselves.
+    """
+    lines = [
+        *_paragraph(
+            "The rows are the view's own, in the shape `columns` declares. What "
+            "follows is what they cannot be made to say, which is the half a caller "
+            "cannot compute from a number."
+        ),
+        "",
+    ]
+    for group in COMMON:
+        lines += [f"### {group.heading}", ""]
+        for note in group.notes:
+            lines += [*_paragraph(note), ""]
+    lines += ["### What each view answers, and what telemetry-off does to it", ""]
+    for view in VIEWS:
+        lines += [
+            f"#### `{view.alias}`",
+            "",
+            *_paragraph(view.question),
+            "",
+            *_paragraph("**Telemetry-off.** " + view.telemetry_off),
+            "",
+        ]
+    return "\n".join(lines).rstrip("\n")
+
+
 def _view_section(view: View) -> list[str]:
     lines = [
         f"### `{view.name}`",
@@ -537,4 +588,10 @@ def _paragraph(prose: str) -> list[str]:
     return textwrap.wrap(prose, width=PROSE_WIDTH, break_long_words=False, break_on_hyphens=False)
 
 
-__all__ = ["GEN_AI", "SCHEMA_REFERENCE", "reference", "views_reference"]
+__all__ = [
+    "GEN_AI",
+    "SCHEMA_REFERENCE",
+    "reference",
+    "views_description",
+    "views_reference",
+]

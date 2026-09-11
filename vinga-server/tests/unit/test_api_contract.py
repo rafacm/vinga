@@ -88,6 +88,16 @@ EXCLUDED: dict[tuple[str, str], str] = {
         "`vinga events tail` reads it through the streaming client seam instead of "
         "through a row (#342, milestone 2)"
     ),
+    ("GET", "/metrics"): (
+        "the aggregates' vocabulary, which no command reads yet: the noun and its two "
+        "verbs are the milestone after the one that served these routes, and a "
+        "command pointed at a route the API did not have yet would have been the "
+        "other half of this same assertion (#440, milestone 2)"
+    ),
+    ("GET", "/metrics/{view}"): (
+        "one aggregate over a window, excluded for the reason the listing beside it "
+        "is: it is what `vinga metric show` will read (#440, milestone 2)"
+    ),
     ("GET", "/sessions/{session}/turns"): (
         "the session's own timeline, which the grammar has no verb for: a turn listing "
         "wraps and a wrapped column is not a column, so reading dialogue is the "
