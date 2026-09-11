@@ -7,7 +7,7 @@ questions, and what was discovered on the way.
 
 ## M1: the aggregates on the API
 
-PR TBD.
+PR #463.
 
 ### What landed
 
@@ -45,6 +45,13 @@ key columns ascending with nulls last. An empty window is an ordinary
 empty list with its window stated, and so is a deployment that never
 recorded: no refusal, no 404.
 
+Every request-controlled value is resolved before the store is reached.
+The route takes the opener rather than an open connection, the way the
+erasures already take their transaction's factory, and enters it around
+the one statement it is for; a dependency that yields a connection is
+resolved by the framework before the handler runs, which would mean
+opening the store before looking at anything the caller sent.
+
 The refusals are the module's existing rule, a fixed sentence that
 quotes nothing back. An unknown view is a 404 saying that `GET /metrics`
 lists the ones that are served; a day that is not an extended-form UTC
@@ -64,9 +71,14 @@ is a `dict.get` on it and raises `UnknownEntityError` on a miss. Nothing
 else in the request path touches the caller's bytes: the query is built
 by `_relation()` from the declaration's own name and column names, so a
 value that resolves to no declaration reaches no query builder, no
-connection and no log. Deriving the mapping rather than writing it
-beside the registry is what stops the servable set drifting from the
-declared set, and a test asserts the derivation and the four aliases.
+connection and no log, which is counted rather than asserted: with
+`read_engine` replaced by a spy that fails, a broken view, grouping,
+day or day-pair each performs zero opens and still answers its own 404
+or 422, and a valid request opens exactly once and takes the failure,
+which is what proves the spy is in the path. Deriving the mapping
+rather than writing it beside the registry is what stops the servable
+set drifting from the declared set, and a test asserts the derivation
+and the four aliases.
 
 **2. Transport models are in `config/responses.py`.** `MetricCaveats`,
 `MetricColumn`, `MetricView`, `MetricViews` and `MetricRows`, beside the
@@ -182,6 +194,29 @@ caller's.
   zero-denominator rule, the retention-floor warning, the
   missing-measurement ambiguity and each view's own question and
   telemetry-off sentence are in the contract a client reads.
+
+### PR review round
+
+External review of PR #463: one P1, one P2, mergeable after fixes. Both
+adopted.
+
+- **P1: invalid requests opened the database before being refused, and
+  the pin did not prove otherwise.** The route took `ReaderDep`, which
+  FastAPI resolves before the handler runs, so an unknown view answered
+  500 rather than 404 whenever the store was unwell, and the claim in
+  this document that a refused request reached no connection was false.
+  The case that was supposed to prove it asserted something weaker than
+  its own docstring: it re-read the store afterwards, which only shows
+  that nothing was written. Fixed by taking the opener rather than an
+  open connection, the shape the erasures already had, validating every
+  request-controlled value first and entering the connection around
+  `_aggregated` alone. The new case counts opens at `read_engine` with
+  a spy that fails, so a refusal that opened anything would answer 500
+  and be caught; it was written first and run against the unfixed code,
+  where it failed on the unknown view answering 500.
+  The defect and the weak test were one mistake made twice: the
+  assertion in this document came first and the test was written to
+  agree with it rather than to try to break it.
 
 ### Not done here
 
