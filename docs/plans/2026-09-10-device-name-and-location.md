@@ -298,7 +298,7 @@ are already in `config/models.py`.
   a location changed between rounds. Design footprint: deepens
   `runtime/prompt.py`'s device block; no new block, since a second heading would
   make the model choose which to believe.
-- [x] **[M3: the agent can move the device](2026-09-10-device-name-and-location-implementation.md#m3-the-agent-can-move-the-device).** (PR TBD) `set_device_location`, writing
+- [x] **[M3: the agent can move the device](2026-09-10-device-name-and-location-implementation.md#m3-the-agent-can-move-the-device).** (PR #468) `set_device_location`, writing
   through the same repository path the CLI uses, scoped to the device the
   conversation is on, with the trust stance in the tool description. Covers
   `tools/source.py`'s offer and dispatch, the runtime factory and pipeline

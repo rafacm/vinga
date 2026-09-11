@@ -734,6 +734,59 @@ Two.
   reaches the log records with their structured half, which is what
   `both_formats` renders, so that is what this claim is hunted in.
 
+### Review round
+
+External review of PR #468 came back mergeable after fixes, with three
+findings. Each is answered by a commit of its own; the two that changed
+behaviour or evidence are recorded here.
+
+**A blank location was defined twice.** The tool refused a whitespace
+place with its own `str.strip()`, while the rule belongs to
+`fold_device_name` in the model that owns it, behind the database index
+written over it. This milestone's own note argued the duplication was
+safe because the two agree exactly, and the finding is that agreeing
+today is not the same as being one rule: a second definition can drift,
+and this one sat in the layer furthest from its owner.
+
+Every string a room says now reaches `ConfigStore`, blank ones included.
+What the repository answers for this one is
+`DeviceLocationBlankError`, a type rather than a sentence to match on,
+and `DevicePlacements` translates it into the words the tool already
+had. The type is what the milestone actually needed, and it is the same
+shape as every other translation here: the repository's sentence names
+the command an operator clears a location with and the key a document
+does the same with, which is the right answer for whoever typed the
+value and no answer at all for somebody standing in a room. What the
+tool still refuses for itself is an argument that is not a string, which
+is a question about the call rather than about a place.
+
+The test asserts both halves, because either alone passes for the wrong
+reason: the spoken sentence alone would pass for a guard that submitted
+nothing, and the submission alone would pass for a refusal in somebody
+else's words.
+
+**The ordered-write proof was nondeterministic, so it was not a proof.**
+The gate released the first relocation as soon as the second ARRIVED,
+and the two real writes then raced for the domain lock. With the tool
+taken out of `ORDERED_TOOL_NAMES`, the second could still commit last
+and leave the right answer standing, so the mutation failed only
+sometimes. That is worse than having no proof, because a flaky one is
+read as a proof, and this one was reported as a proof after being
+watched failing once.
+
+A second call now finishes its write before the first is let go:
+unordered, the first commits last and leaves the office every time.
+The timeline is recorded beside the answer and asserted directly, since
+"these two never overlapped" is the property and the stored place is
+only its consequence.
+
+**Once is not the claim.** The mutation was re-run 25 times and fails 25
+out of 25, with 25 restored runs passing. The two other mutations in
+this milestone that touch concurrency were re-checked the same way, 15
+runs each: the write run inline and the missing busy arm each fail 15
+out of 15. The rest of the list is straight-line logic, where one run
+settles it.
+
 ### Verification
 
 - `uv run ruff check .`, `uv run mypy`,
