@@ -24,8 +24,11 @@ milestone's entry from `main` for five merges.
   moved into `CHANGELOG.md` byte for byte: the same list items, the
   same bolding, the same wrapping. What is reviewed on the pull request
   is what the changelog will read.
-- **This README is not a fragment.** It is excluded by name, so it can
-  sit here without ever being folded.
+- **This README is not a fragment, and nothing else is exempt.** The
+  README is excluded by name so it can sit here without ever being
+  folded. Every other file in this directory is a fragment and is held
+  to the name above, dotfiles included: an entry that is quietly
+  skipped is an entry nobody folds and nobody is told about.
 
 ## What enforces it
 

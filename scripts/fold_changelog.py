@@ -160,9 +160,14 @@ def _fail(reasons: list[str]) -> int:
 def fragment_paths(root: Path) -> list[Path]:
     """Every fragment file, in filename order.
 
-    The README is excluded by name, and a dotfile is skipped rather
-    than refused: a checkout is allowed to carry the operating
-    system's own droppings, and they are not tracked.
+    The README is excluded by name and nothing else is excluded at
+    all. A skipped entry is an entry nobody folds and nobody is told
+    about: a tracked `.467-entry.md` passed `check` with zero failures
+    and then made the fold report nothing to fold, which is a dropped
+    changelog entry arriving through the door this mechanism was built
+    to close. So every other name in the directory is a fragment and
+    is held to the grammar, and a stray file is a refusal rather than
+    a silence.
 
     Enumeration is a filesystem call like any other and fails like one,
     so an unreadable directory is a fixed refusal rather than an
@@ -176,11 +181,7 @@ def fragment_paths(root: Path) -> list[Path]:
         listed = sorted(directory.iterdir(), key=lambda p: p.name)
     except OSError:
         raise Refusal(CANNOT_LIST) from None
-    return [
-        path
-        for path in listed
-        if not path.name.startswith(".") and path.name != NOT_A_FRAGMENT
-    ]
+    return [path for path in listed if path.name != NOT_A_FRAGMENT]
 
 
 def _read(path: Path) -> str:
