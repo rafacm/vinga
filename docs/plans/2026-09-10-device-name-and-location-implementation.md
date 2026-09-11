@@ -1329,6 +1329,47 @@ Four.
   the null path is what a deployment with no device records actually
   gets.
 
+### Review round
+
+External review of PR #472 came back not mergeable with three
+findings, one per severity. Each is answered by a commit of its own.
+
+**The spoken name missed the URL-credential strip.** The `session_open`
+copy went through `bounded_descriptor` alone and the session-detail
+answer served the recorded column verbatim, so a name that is a URL
+carrying a credential, refused at the repository write but reachable
+through a configuration file or a row written before the rule, surfaced
+as written on the log, the event store's rows, the capture's decision
+track and the HTTP body. Both surfaces now read
+`without_url_credential`, the one home the display walk (#381), the
+provider build (#413) and the spoken identities (#414) already read:
+the event copy is stripped at its decision site before it is bounded,
+in the order `spoken_identity` fixes, and the detail answer strips the
+column the way `views.device_body` strips the record it was copied
+from. The dated column itself keeps the name as the operator wrote it,
+because `vinga_ro` is granted the record schema on purpose and a row is
+not a display; stripping at the emit site is source-side restriction,
+not the sink-side scrubbing the content-and-telemetry ADR rejects. The
+new test plants a name carrying a JWT-shaped userinfo password, a
+token-named query value and an authorization-named one through the
+configuration-file path, and holds every surface to the stripped
+projection with the stripped address as the control.
+
+**`session show` omitted the field the changelog promised.** The
+changelog's parity claim named the block and the API as answering the
+same field, and `_session_block` never rendered `device_name`. The
+block gains the line beside the MAC, through the same `_cell` bounding
+as every other line, pinned for a named value, for the null
+placeholder, and in the block's line count.
+
+**The "no other record" hunt read only top-level strings.** The
+carrying-event set was selected by walking each record's `values()`, so
+a name nested in a mapping, a list or an exception payload would have
+left the claim green while false, which was demonstrated before the
+change. Each record's structured half is now serialized canonically
+before the hunt, the same rendering the credential-projection test
+reads the event store's rows through.
+
 ### Verification
 
 - `uv run ruff check .`, `uv run mypy`,
