@@ -285,7 +285,9 @@ restating their fixtures.
   like every other. The declared limitations gain their third consumer here.
   `cli.md` moves through its generator, the census follows, `CHANGELOG.md` gets
   its entry. Design footprint: deepens `config/cli.py`.
-- [ ] **M3: the device dimension.** Four **additive sibling** views, named
+- [x] **[M3: the device
+  dimension](2026-09-11-metrics-read-surface-implementation.md#m3-the-device-dimension)**
+  (PR TBD). Four **additive sibling** views, named
   `metrics_stage_latency_by_device_daily`, `metrics_tokens_by_device_daily`,
   `metrics_event_rates_by_device_daily` and `metrics_sessions_by_device_daily`,
   added by a migration on the conversations chain, with the four shipped views
