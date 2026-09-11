@@ -15,7 +15,7 @@ import pytest
 from cryptography.fernet import Fernet, MultiFernet
 from sqlalchemy import insert, select, update
 
-from tests.support.stores import planted, stored_row, stored_rows
+from tests.support.stores import bindings, planted, stored_row, stored_rows
 from vinga_server.config import ConfigError
 from vinga_server.config.loader import StorageError, UnknownEntityError, compose_config
 from vinga_server.config.models import (
@@ -133,7 +133,7 @@ def test_a_configuration_round_trips_through_the_rows(store: ConfigStore) -> Non
     # A list replaces rather than extends, so an empty one is not a null.
     assert domain.agents["poet"].mcp == []
     assert domain.agents["sam"].mcp is None
-    assert domain.devices == {"aa:bb:cc:dd:ee:ff": ["sam"]}
+    assert bindings(domain.devices) == {"aa:bb:cc:dd:ee:ff": ["sam"]}
     assert domain.default_agent == "sam"
 
 

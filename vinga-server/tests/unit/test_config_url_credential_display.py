@@ -648,7 +648,12 @@ def historic(store: ConfigStore) -> ConfigStore:
     _plant(store, "agent", (HISTORIC,), AgentConfig(prompt="hi", llm=HISTORIC))
     planted(
         store,
-        insert(schema.devices).values(mac="aa:bb:cc:dd:ee:ff", agents=[HISTORIC]),
+        insert(schema.devices).values(
+            id="0" * 32,
+            mac="aa:bb:cc:dd:ee:ff",
+            name="Device aa:bb:cc:dd:ee:ff",
+            agents=[HISTORIC],
+        ),
         insert(schema.domain_settings).values(key=schema.DEFAULT_AGENT_KEY, value=HISTORIC),
         # A slot is addressed by the same rule a name is, so it has the
         # same history. The envelope is never opened by a read: what a
@@ -686,7 +691,7 @@ def test_the_whole_configuration_document_names_nothing_verbatim(
     config = document["config"]
     assert list(config["providers"]["llm"]) == [HISTORIC_SHOWN]
     assert list(config["agents"]) == [HISTORIC_SHOWN]
-    assert config["devices"] == {"aa:bb:cc:dd:ee:ff": [HISTORIC_SHOWN]}
+    assert config["devices"]["aa:bb:cc:dd:ee:ff"]["agents"] == [HISTORIC_SHOWN]
     assert config["default_agent"] == HISTORIC_SHOWN
     assert [stored["slot"] for stored in document["secrets"]] == [HISTORIC_SHOWN]
     assert [stored["identity"] for stored in document["secrets"]] == [f"llm.{HISTORIC_SHOWN}"]
@@ -703,9 +708,9 @@ def test_the_listings_and_the_name_projections_name_nothing_verbatim(
 
     assert list(views.providers(snapshot)["llm"]) == [HISTORIC_SHOWN]
     assert list(views.agents(snapshot)) == [HISTORIC_SHOWN]
-    assert views.devices(snapshot)["aa:bb:cc:dd:ee:ff"]["entity"] == {
-        "agents": [HISTORIC_SHOWN]
-    }
+    assert views.devices(snapshot)["aa:bb:cc:dd:ee:ff"]["entity"]["agents"] == [
+        HISTORIC_SHOWN
+    ]
     assert views.default_agent(snapshot.domain.default_agent) == {"name": HISTORIC_SHOWN}
     assert list(views.providers(snapshot)["llm"][HISTORIC_SHOWN]["secrets"]) == [
         HISTORIC_SHOWN
@@ -827,7 +832,12 @@ def test_a_device_mac_cannot_carry_one_because_the_load_path_refuses_it(
     is where the order between those two reads is what decides whether
     the MAC is repeated.
     """
-    planted(store, insert(schema.devices).values(mac=HISTORIC, agents=["sam"]))
+    planted(
+        store,
+        insert(schema.devices).values(
+            id="0" * 32, mac=HISTORIC, name="a planted row", agents=["sam"]
+        ),
+    )
 
     with pytest.raises(StorageError) as caught:
         store.load()
@@ -1192,7 +1202,12 @@ def test_a_malformed_binding_under_such_a_mac_repeats_neither(
     and that check was handed a location built from the MAC itself.
     """
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    planted(store, insert(schema.devices).values(mac=HISTORIC, agents="sam"))
+    planted(
+        store,
+        insert(schema.devices).values(
+            id="0" * 32, mac=HISTORIC, name="a planted row", agents="sam"
+        ),
+    )
 
     with pytest.raises(StorageError) as caught:
         store.load()

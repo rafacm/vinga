@@ -171,7 +171,7 @@ from vinga_server.capture import CaptureStore, SessionCapture
 from vinga_server.config import Config
 from vinga_server.config.api import build_api
 from vinga_server.config.loader import ConfigError, StorageError
-from vinga_server.config.models import DatabaseConfig, ProviderConfig
+from vinga_server.config.models import DatabaseConfig, DeviceRecord, ProviderConfig
 from vinga_server.conversations import store as store_module
 from vinga_server.conversations import threads
 from vinga_server.conversations.records import Acknowledgement, ToolInvocation, TurnRecord
@@ -1653,7 +1653,7 @@ def drive_ota_check_activating(directory: Path) -> None:
 
 def drive_ota_check_agent_not_loaded(directory: Path) -> None:
     config = unbound_config()
-    config.devices[NORMALIZED] = ["written-since-boot"]
+    config.devices[NORMALIZED] = DeviceRecord(agents=["written-since-boot"])
     with entered_client(apart(config, directory)) as client:
         check_in(client)
 

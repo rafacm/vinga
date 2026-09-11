@@ -117,10 +117,9 @@ def test_a_device_write_says_it_is_stored_and_waits_for_a_start(
     assert boundaries(bound.json()) == {STORE_BOOT}
     # Stored, which is the half the acknowledgement promises: a server
     # started from this directory would read it.
-    assert client.get(f"{MOUNT_PATH}/devices/{DEVICE}").json() == {
-        "entity": {"agents": ["assistant"]},
-        "secrets": {},
-    }
+    read = client.get(f"{MOUNT_PATH}/devices/{DEVICE}").json()
+    assert read["secrets"] == {}
+    assert read["entity"]["agents"] == ["assistant"]
 
 
 def test_every_live_write_names_the_same_boundary(client: TestClient) -> None:
