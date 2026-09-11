@@ -11,7 +11,7 @@
 .github/workflows/vinga-server.yml:604  respell  vinga-server config cli-reference
 .github/workflows/vinga-server.yml:607  respell  vinga-server config cli-reference
 .github/workflows/vinga-server.yml:631  respell  vinga-server config cli-reference
-AGENTS.md:178  respell  vinga-server config schema
+AGENTS.md:215  respell  vinga-server config schema
 CHANGELOG.md:26  historical  vinga-server config device rename
 CHANGELOG.md:36  historical  vinga-server config device relocate
 CHANGELOG.md:37  historical  vinga-server config device clear-location

@@ -88,6 +88,43 @@ a scripted cycle finishes inside one second, and the `.pyc` validation looks at
 nothing else. If a result ever contradicts the source you are reading, suspect
 this before suspecting the code.
 
+### Rebasing a milestone branch
+
+Three traps, all of which cost this repository work in one session. They
+share a shape with the two above: a command that silently discards
+something, run because the tedious alternative invited automating it.
+
+- **Never `git rebase --skip`, and never as a fallback after
+  `--continue`.** It discards the commit being applied. A helper written
+  to resolve this repository's two recurring rebase conflicts ended each
+  iteration with `--continue || --skip || break`, and on one branch it
+  discarded nineteen commits of a finished milestone and exited 0. The
+  only safe fallback is `|| break`, which stops and surfaces the
+  conflict. Resolve an unexpected conflict by reading it, not by
+  reaching for the next flag.
+- **`git fetch` and reset to `origin/<branch>` before rebasing a branch a
+  pull request may have merged into.** A milestone that merged into its
+  plan branch on GitHub is not in the worktree that created it, so the
+  local branch can be many commits behind while looking healthy. Rebasing
+  that and force-pushing deletes the merged milestone from the branch.
+- **Check the work is there afterwards, by content and not only by
+  count.** `git rev-list --count <base>..HEAD` is a useful alarm: a
+  number that should rise and falls means look. It is not a verdict in
+  either direction, because a regenerated-artifact commit legitimately
+  becomes empty during a rebase and git drops it. What settles it is
+  grepping for the milestone's own symbols, and the unit-test count,
+  which is what actually caught the nineteen lost commits.
+
+Two conflicts recur on almost every rebase here and both have a known
+resolution: the dated `CHANGELOG.md` section, where both sides' `###`
+headings merge into one section in Keep a Changelog order rather than
+one side winning, and `tests/unit/command-spellings.txt`, which is
+generated and must be **regenerated on the rebased tree** rather than
+merged, since a textual merge of it is a state no generator produced.
+The manifest records line numbers, so any change that shifts a line
+anywhere restages it; #467 tracks removing both conflict classes.
+
+
 ## Workflow
 
 - Implementing an issue end to end follows the pipeline encoded in
