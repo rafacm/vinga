@@ -21,13 +21,27 @@ reads memory.
 
 The last section is the no-leak claim, which is a claim about two
 different trust classes. The name is the operator's; the location is a
-conversation's, from the tool #449's M3 adds onward. Neither reaches a
-structured event, either log format or the capture manifest in this
-milestone: the MAC is what identifies a device on those surfaces, and a
-spoken string on a dated event row would sit on the telemetry surface
-with telemetry retention and no per-conversation erasure. The
-assertions are absence rather than sanitization, because nothing is
-being cleaned on the way anywhere.
+conversation's, from the tool #449's M3 adds onward.
+
+**The location reaches nothing here, ever.** Not a structured event,
+not either log format, not a capture file. A spoken string on a dated
+event row would sit on the telemetry surface with telemetry retention
+and no per-conversation erasure, unrewritten by any later correction,
+and the observability map's structured-events row is metadata only.
+
+**The name reaches exactly one event, `session_open`**, which M5 added
+for a reader the earlier argument had not considered: `vinga_ro` is
+granted `record` and revoked on `domain`, so an analyst cannot resolve
+a MAC to a name and a dashboard grouped by device is grouped by MAC
+forever. The sessions this file drives are built below that open, so
+what the claim is here is the narrow one: no event of a ROUND carries
+it. The whole-surface version, and the capture's, are in
+`test_device_record_no_leak.py`.
+
+The assertions are absence rather than sanitization wherever they are
+absences, because nothing is being cleaned on the way to those
+surfaces; the bound the name is held to where it IS carried is
+`test_event_descriptor_sanitization.py`'s.
 """
 
 import asyncio
@@ -453,16 +467,20 @@ def _written(records: list[logging.LogRecord]) -> str:
     )
 
 
-async def test_neither_field_reaches_an_event_or_a_log_line(
+async def test_neither_field_reaches_a_round_s_events_or_log_lines(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """The two are two trust classes and neither is on a retained
-    surface. The name is the operator's and could have gone where
-    `board` and `version` go; it does not, because the MAC already
-    identifies the device and a second home for a name is a name that
-    goes stale at the next rename. The location cannot: it is what
-    somebody said out loud, and the structured-events row of
-    `docs/architecture/observability-surfaces.md` is metadata only.
+    """A reply's own events name the device by MAC and nothing else.
+
+    Two trust classes, one assertion, and they hold it for different
+    reasons. The location is barred from every event there is: it is
+    what somebody said out loud, and the structured-events row of
+    `docs/architecture/observability-surfaces.md` is metadata only. The
+    name is not barred, since M5 put it on `session_open` for an analyst
+    who cannot reach the device record; what it is barred from is
+    everything else, because one fact with two homes on a dated surface
+    is a fact that goes stale at the next rename. A session driven from
+    here never opens over the wire, so every record below is a round's.
 
     Absence, not sanitization: nothing is being cleaned on the way to
     these surfaces, because nothing takes either value there.
@@ -480,16 +498,28 @@ async def test_neither_field_reaches_an_event_or_a_log_line(
     assert LEAKY_NAME in system and LEAKY_LOCATION in system
     written = _written(caplog.records)
     assert caplog.records, "nothing was logged, so nothing was checked"
+    assert "session_open" not in written, "this harness opened a session after all"
     assert LEAKY_NAME not in written
     assert LEAKY_LOCATION not in written
 
 
-async def test_neither_field_reaches_the_capture_manifest(tmp_path: Path) -> None:
-    """The recording an operator switches on for a hardware problem, and
-    the decision track beside it. Both are written from the events, and
-    a capture is kept as a file on disk for as long as its retention
+async def test_the_capture_manifest_names_neither_field(tmp_path: Path) -> None:
+    """The recording an operator switches on for a hardware problem.
+
+    A capture is kept as a file on disk for as long as its retention
     says, which is why a conversation-derived string must never be in
-    one."""
+    one. The manifest carries neither field, and it carries neither for
+    two different reasons: the location because no surface may have it,
+    and the name because a capture sits on the operator's own disk with
+    the device record an SQL statement away, so it has no reader who
+    cannot look one up.
+
+    The decision track beside it is the one file that does carry the
+    name, and it is not an exception: that file IS the events, written
+    where the audio is, so it holds what `session_open` holds. Asserted
+    here rather than left implicit, because a reader who has just read
+    the manifest claim would otherwise assume it of the directory.
+    """
     config = base_config(
         server={"capture": {"enabled": True, "dir": str(tmp_path / "captures")}},
         devices={
@@ -527,14 +557,21 @@ async def test_neither_field_reaches_the_capture_manifest(tmp_path: Path) -> Non
         await websocket.close()
         await task
 
-    # The manifest and the decision track beside it, which are the two
-    # text files a capture leaves behind; the audio is the third and
-    # carries no field at all.
-    written = "".join(
-        path.read_text()
-        for path in (tmp_path / "captures").iterdir()
-        if path.suffix in {".json", ".jsonl"}
+    # The manifest, which is one of the two text files a capture leaves
+    # behind; the audio is the third and carries no field at all.
+    manifest = next((tmp_path / "captures").glob("*.json")).read_text()
+    assert json.loads(manifest)
+    assert LEAKY_NAME not in manifest
+    assert LEAKY_LOCATION not in manifest
+
+    # And the decision track, which is the events and says so: the one
+    # that opens the session carries the name, and no line of it carries
+    # the location.
+    track = "".join(
+        path.read_text() for path in (tmp_path / "captures").glob("*.jsonl")
     )
-    assert json.loads(next((tmp_path / "captures").glob("*.json")).read_text())
-    assert LEAKY_NAME not in written
-    assert LEAKY_LOCATION not in written
+    lines = [json.loads(line) for line in track.splitlines() if line.strip()]
+    assert {line["event"] for line in lines if LEAKY_NAME in str(line)} == {
+        "session_open"
+    }
+    assert LEAKY_LOCATION not in track
