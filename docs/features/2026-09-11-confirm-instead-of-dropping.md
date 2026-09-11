@@ -78,8 +78,13 @@ it invites tuning a behaviour that no longer exists, and it makes the
 schema disagree with the code. Per the pre-release stance (#225, #235)
 there are no third-party installs to keep working, so it is removed
 rather than deprecated, and a configuration still setting it is refused
-at boot by `extra="forbid"` with the ordinary unknown-key error, which
-names the key.
+at boot by `extra="forbid"` with the ordinary unknown-key error. That
+error does NOT name the key: `safe_location` strips a segment the
+caller invented before either rendering, because a key is as good a
+place to paste a credential as a value, and the sentence is printed by
+the CLI, answered by the API and written to the boot log. What the
+operator is told is the section, `server`, and the rule; finding the
+stale line is a search of their own file.
 
 **The capture and session-record manifest drops `refractory_ms`**
 rather than writing it null. The manifest states what a session was
