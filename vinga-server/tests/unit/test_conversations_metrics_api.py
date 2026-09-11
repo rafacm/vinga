@@ -46,6 +46,7 @@ from vinga_server import logs
 from vinga_server.config.api import MOUNT_PATH, build_api
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.responses import GROUPINGS
+from vinga_server.conversations import api as conversations_api
 from vinga_server.conversations.api import WINDOW_DEFAULT_DAYS, WINDOW_MAX_DAYS
 from vinga_server.conversations.store import ConversationStore, open_conversations
 from vinga_server.conversations.views import ALIASES, COMMON, VIEWS
@@ -409,10 +410,9 @@ def test_a_hostile_value_reaches_no_body_no_log_and_no_statement(
     and hunts for it in the response, in both shipped log formats and in
     the process output.
 
-    The statement half is proved by what does not happen rather than by
-    reading SQL: a refused request never reaches the reader at all, and
-    a value that resolved to no declaration has nothing to be
-    interpolated into.
+    That a value which resolved to no declaration reaches no statement is
+    the case below this one, which counts the opens rather than reading
+    SQL.
     """
     a_day(store, DAY)
 
@@ -439,9 +439,61 @@ def test_a_hostile_value_reaches_no_body_no_log_and_no_statement(
     assert hostile not in _leaked(caplog)
     captured = capsys.readouterr()
     assert hostile not in captured.out + captured.err
-    # And the store is exactly as it was: nothing here writes, and a
-    # refused read reached no connection.
+    # And the store is exactly as it was, since nothing here writes.
     assert _get(client, "/metrics/sessions", since=DAY, until=DAY)["rows"] != []
+
+
+def test_a_refused_request_opens_no_connection_at_all(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What the closed mapping is worth, counted rather than asserted.
+
+    A value nothing answers to must be refused before the store is
+    reached, for two reasons that are one property. It is what makes the
+    refusal honest: an unknown view is a 404 saying where the list is,
+    and a 404 that turned into a 500 whenever the database was down
+    would be telling a caller the store failed on a request the store
+    never saw. And it is the strong half of the injection pin: bytes
+    that reach no connection reach no statement, whatever anybody later
+    changes about how the query is built.
+
+    Counted at `read_engine`, which is the one door a read opens, so
+    this holds however the connection is reached. The failing engine is
+    what makes the count meaningful: with storage down, a refusal that
+    opened anything would answer 500, and the last case proves the spy
+    really is in the path by taking exactly that 500 on a request that
+    is valid.
+    """
+    opens: list[Any] = []
+
+    def failing(database: DatabaseConfig) -> None:
+        opens.append(database)
+        raise RuntimeError(f"the store is unreachable near {SENTINEL}")
+
+    monkeypatch.setattr(conversations_api, "read_engine", failing)
+
+    refused_with = [
+        # Every request-controlled value, each broken on its own: the
+        # view, the grouping, either day, and the rule about the pair.
+        (404, client.get(f"/metrics/{SENTINEL}")),
+        (422, client.get("/metrics/sessions", params={"group": SENTINEL})),
+        (422, client.get("/metrics/sessions", params={"since": SENTINEL})),
+        (422, client.get("/metrics/sessions", params={"until": SENTINEL})),
+        (
+            422,
+            client.get("/metrics/sessions", params={"since": "2026-05-15", "until": DAY}),
+        ),
+    ]
+
+    for status, response in refused_with:
+        assert response.status_code == status, response.text
+        assert SENTINEL not in response.text
+    assert opens == [], "a refused request opened the store"
+
+    # And the spy is in the path: a request that passes every rule opens
+    # it exactly once, and meets the failure this one was armed with.
+    assert client.get("/metrics/sessions").status_code == 500
+    assert len(opens) == 1
 
 
 def test_the_gate_is_in_front_of_both_routes(api: FastAPI) -> None:

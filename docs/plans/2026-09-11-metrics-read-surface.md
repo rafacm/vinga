@@ -265,7 +265,7 @@ restating their fixtures.
 
 - [x] **[M1: the aggregates on the
   API](2026-09-11-metrics-read-surface-implementation.md#m1-the-aggregates-on-the-api)**
-  (PR TBD). `/metrics` and `/metrics/{view}` over
+  (PR #463). `/metrics` and `/metrics/{view}` over
   the four phase-1 views, day-grained, with the request contract above: the
   closed alias mapping derived from the registry, the parameters and their
   bounds, inclusive UTC boundaries, the total ordering, empty windows as empty
