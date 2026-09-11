@@ -1021,7 +1021,12 @@ class Invocation:
     # the CLI's positionals for the same reason.
     stage: str = ""
     name: str = ""
-    mac: str = ""
+    # `None` rather than the empty string the fields around it default
+    # to, because `mac` is the one of them an optional filter also
+    # rides: a `--device` that was not given and a `--device ''` are
+    # different questions, and a default of `""` would make the second
+    # unsayable.
+    mac: str | None = None
     code: str = ""
     slot: str = ""
 
@@ -6295,18 +6300,23 @@ def _metric_window(args: Invocation) -> dict[str, str]:
     The device is one of them and is not held to anything here: which
     groupings admit a filter, and what a MAC has to be, are the API's
     rules and its own fixed sentences, and a second vocabulary in front
-    of them would be a second sentence per refusal.
+    of them would be a second sentence per refusal. It is kept apart
+    from the three above on one point only: an explicitly empty value
+    still travels, so `--device ''` meets the API's MAC refusal rather
+    than reading as no filter and widening the answer to every board.
     """
-    return {
+    window = {
         name: value
         for name, value in (
             ("since", args.since),
             ("until", args.until),
             ("group", args.group),
-            ("device", args.mac),
         )
         if value
     }
+    if args.mac is not None:
+        window["device"] = args.mac
+    return window
 
 
 LIST_METRICS = Act(
@@ -8169,7 +8179,11 @@ def _over_a_window(row: Command) -> Callable[..., None]:
                 since=since or "",
                 until=until or "",
                 group=group or "",
-                mac=device or "",
+                # Passed through rather than defaulted, because absent
+                # and explicitly empty are different questions here:
+                # `--device ''` travels and meets the API's own MAC
+                # refusal instead of quietly widening to every board.
+                mac=device,
             )
         )
 
