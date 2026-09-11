@@ -103,8 +103,16 @@ def _seeded(store: ConfigStore, config: Config) -> Snapshot:
     store.set_agent_defaults(_fragment(config.agent_defaults))
     for name, agent in config.agents.items():
         store.set_agent(name, _fragment(agent))
-    for mac, bound in config.devices.items():
-        store.bind_device(mac, bound)
+    # The whole record and not only its binding, through the verbs an
+    # operator would use: a device is four things since #449, and a
+    # lane that seeded the agents alone would serve a deployment the
+    # `Config` it was handed does not describe.
+    for mac, record in config.devices.items():
+        store.bind_device(mac, record.agents)
+        if record.name is not None:
+            store.rename_device(mac, record.name)
+        if record.location is not None:
+            store.relocate_device(mac, record.location)
     if config.default_agent is not None:
         store.set_default_agent(config.default_agent)
     return store.load()

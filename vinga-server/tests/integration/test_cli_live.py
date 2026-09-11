@@ -678,13 +678,14 @@ def test_one_entity_is_written_read_exported_and_deleted(
     assert "Traceback" not in gone.err
 
 
-# The two device commands, and the settings beside them
+# The device commands, and the settings beside them
 #
-# Which of the two an operator wants depends on what they are holding: a
-# MAC they already know, or a board in front of them showing six digits.
-# Only the second needs a device, and over a real server a device is a
-# check-in, which is why this is the one place the lane speaks something
-# other than the CLI.
+# Two of them bind a board, and which one an operator wants depends on
+# what they are holding: a MAC they already know, or a board in front of
+# them showing six digits. Only the second needs a device, and over a
+# real server a device is a check-in, which is why this is the one place
+# the lane speaks something other than the CLI. The other three write
+# the rest of the record a bind creates.
 
 
 def test_a_board_is_bound_by_the_mac_you_already_know(
@@ -706,6 +707,48 @@ def test_a_board_is_bound_by_the_mac_you_already_know(
 
     assert run("device", "show", KNOWN_MAC) == 1
     assert capsys.readouterr().out == ""
+
+
+def test_a_board_is_named_and_placed_over_the_wire(
+    deployed: Live, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The rest of the record a bind creates, over a running server.
+
+    The id is what the record exists for, so it is read before and after
+    both writes: a rename that minted a second identity would orphan
+    exactly the per-device memory the id is there to keep. The name is
+    read back exactly as it was typed, because the agent says it out
+    loud; only its FOLDED form is unique.
+    """
+    assert run("device", "bind", KNOWN_MAC, "sam") == 0
+    capsys.readouterr()
+    assert run("device", "show", KNOWN_MAC) == 0
+    minted = document(capsys.readouterr().out)["id"]
+
+    assert run("device", "rename", KNOWN_MAC, "Kitchen Speaker") == 0
+    assert capsys.readouterr().out.startswith("wrote ")
+    assert run("device", "relocate", KNOWN_MAC, "the kitchen") == 0
+    assert capsys.readouterr().out.startswith("wrote ")
+
+    assert run("device", "show", KNOWN_MAC) == 0
+    named = document(capsys.readouterr().out)
+    assert named == {
+        "id": minted,
+        "name": "Kitchen Speaker",
+        "location": "the kitchen",
+        "agents": ["sam"],
+    }
+
+    assert run("device", "clear-location", KNOWN_MAC, "--force") == 0
+    assert capsys.readouterr().out.startswith("wrote ")
+    assert run("device", "show", KNOWN_MAC) == 0
+    cleared = document(capsys.readouterr().out)
+    assert cleared["location"] is None
+    assert cleared["id"] == minted
+    assert cleared["name"] == "Kitchen Speaker"
+
+    assert run("device", "delete", KNOWN_MAC) == 0
+    capsys.readouterr()
 
 
 def test_a_board_is_onboarded_by_the_code_on_its_screen(
@@ -801,7 +844,7 @@ def test_an_agent_is_renamed_with_its_binding_over_the_wire(
     assert "You are standing in." in capsys.readouterr().out
 
     assert run("device", "show", RENAMED_MAC) == 0
-    assert document(capsys.readouterr().out) == {"agents": ["stand-in"]}
+    assert document(capsys.readouterr().out)["agents"] == ["stand-in"]
 
     # And nothing answers to the name it had, which is the half a
     # delete-and-create workaround could not reach without unbinding
