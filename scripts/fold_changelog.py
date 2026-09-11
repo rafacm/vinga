@@ -52,6 +52,16 @@ and not yet whole. A failure at either step puts back what was already
 taken, from text held in memory, and a restore that itself fails says
 so in its own sentence rather than hiding inside the first.
 
+Line endings are content, and nothing in this repository forces them
+to be one thing, so nothing here reads or writes through Python's
+universal-newline translation. An entry keeps the fragment's own
+endings because moving it verbatim means moving those bytes too; what
+the fold adds around it (a dated heading, a class heading, a blank
+line) is written in the changelog's own ending. A fragment and a
+changelog that disagree therefore produce a section that disagrees
+with itself, which is the honest outcome: the alternative is rewriting
+an entry nobody asked to have rewritten.
+
 The post-conditions are deliberately not global. Settled history is
 not canonical (one section orders Fixed before Changed, another
 carries two Added headings), so a global rule would have to reject the
@@ -195,6 +205,32 @@ def fragment_paths(root: Path) -> list[Path]:
     return [path for path in listed if path.name != NOT_A_FRAGMENT]
 
 
+def text_of(path: Path) -> str:
+    """One file's text with its line endings left alone.
+
+    `read_text` translates every CRLF to a bare LF on the way in, and
+    this script's two loudest promises are that an entry is moved byte
+    for byte and that the changelog outside the touched sections is
+    byte-identical. Under translation a CRLF fragment arrived as LF and
+    was folded as LF, and a CRLF changelog was rewritten whole while
+    the post-condition compared two already-normalized strings and saw
+    nothing wrong. So nothing here reads through the translation, and
+    nothing writes through it either.
+    """
+    with path.open(encoding="utf-8", newline="") as handle:
+        return handle.read()
+
+
+def _newline(text: str) -> str:
+    """The ending a file writes its own lines with.
+
+    What the fold adds (a heading, a blank line, a dated section) is
+    written in the changelog's ending. What it moves keeps the
+    fragment's, because moving it means moving the bytes.
+    """
+    return "\r\n" if "\r\n" in text else "\n"
+
+
 def _read(path: Path) -> str:
     """One fragment's text, refusing anything that is not a plain file.
 
@@ -205,7 +241,7 @@ def _read(path: Path) -> str:
     if path.is_symlink() or not path.is_file():
         raise Refusal(NOT_A_REGULAR_FILE)
     try:
-        return path.read_text(encoding="utf-8")
+        return text_of(path)
     except UnicodeDecodeError:
         raise Refusal(NOT_UTF8) from None
     except OSError:
@@ -223,7 +259,7 @@ def entries_of(text: str) -> list[tuple[str, str]]:
     heading: str | None = None
     body: list[str] = []
     for line in text.splitlines(keepends=True):
-        match = ENTRY_HEADING.match(line.rstrip("\n"))
+        match = ENTRY_HEADING.match(line.rstrip("\r\n"))
         if match is not None:
             if heading is not None:
                 found.append((heading, "".join(body)))
@@ -258,12 +294,14 @@ def prefix_of(text: str) -> str:
 def _trimmed(text: str) -> str:
     """One entry's lines with the blank ones at either end removed and
     a single trailing newline."""
-    lines = text.splitlines()
+    lines = text.splitlines(keepends=True)
     while lines and not lines[0].strip():
         lines.pop(0)
     while lines and not lines[-1].strip():
         lines.pop()
-    return "".join(f"{line}\n" for line in lines)
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += _newline(text)
+    return "".join(lines)
 
 
 def validate(root: Path) -> list[str]:
@@ -399,7 +437,7 @@ class Section:
     def __init__(self, heading: str, body: list[str]) -> None:
         self.heading = heading
         self.body = body
-        match = SECTION.match(heading.rstrip("\n"))
+        match = SECTION.match(heading.rstrip("\r\n"))
         title = match.group(1) if match else ""
         self.date = title if DATE.match(title) else None
 
@@ -417,7 +455,7 @@ def parse(text: str) -> tuple[str, list[Section]]:
     preamble: list[str] = []
     sections: list[Section] = []
     for line in text.splitlines(keepends=True):
-        if SECTION.match(line.rstrip("\n")):
+        if SECTION.match(line.rstrip("\r\n")):
             sections.append(Section(line, []))
         elif sections:
             sections[-1].body.append(line)
@@ -430,29 +468,37 @@ def _headings(body: list[str]) -> list[tuple[int, str]]:
     """Every `###` heading in one section body, as (index, class)."""
     found = []
     for index, line in enumerate(body):
-        match = ENTRY_HEADING.match(line.rstrip("\n"))
+        match = ENTRY_HEADING.match(line.rstrip("\r\n"))
         if match is not None:
             found.append((index, match.group(1)))
     return found
 
 
-def _created(date: str, entries: dict[str, list[str]]) -> Section:
-    """A section this run creates, canonical by construction."""
-    body: list[str] = ["\n"]
+def _created(date: str, entries: dict[str, list[str]], nl: str) -> Section:
+    """A section this run creates, canonical by construction.
+
+    What this writes (the dated heading, the class headings, the blank
+    lines between them) is in the changelog's own ending, `nl`. What it
+    places between them is each entry exactly as the fragment held it,
+    appended whole rather than rebuilt line by line, because rebuilding
+    is where a line ending gets replaced by the one the code happened
+    to be written with.
+    """
+    body: list[str] = [nl]
     for name in CLASSES:
         if name not in entries:
             continue
-        body.append(f"### {name}\n")
-        body.append("\n")
+        body.append(f"### {name}{nl}")
+        body.append(nl)
         for position, entry in enumerate(entries[name]):
             if position:
-                body.append("\n")
-            body += [f"{line}\n" for line in entry.splitlines()]
-        body.append("\n")
-    return Section(f"## {date}\n", body)
+                body.append(nl)
+            body.append(entry)
+        body.append(nl)
+    return Section(f"## {date}{nl}", body)
 
 
-def _append(section: Section, name: str, entries: list[str]) -> None:
+def _append(section: Section, name: str, entries: list[str], nl: str) -> None:
     """One class's entries appended into a section that already stands.
 
     Under the LAST heading matching the class, after its last entry,
@@ -464,8 +510,8 @@ def _append(section: Section, name: str, entries: list[str]) -> None:
     block: list[str] = []
     for position, entry in enumerate(entries):
         if position:
-            block.append("\n")
-        block += [f"{line}\n" for line in entry.splitlines()]
+            block.append(nl)
+        block.append(entry)
 
     headings = _headings(section.body)
     matching = [index for index, heading in headings if heading == name]
@@ -475,7 +521,7 @@ def _append(section: Section, name: str, entries: list[str]) -> None:
         end = following[0] if following else len(section.body)
         while end > start + 1 and not section.body[end - 1].strip():
             end -= 1
-        section.body[end:end] = ["\n", *block]
+        section.body[end:end] = [nl, *block]
         return
 
     order = CLASSES.index(name)
@@ -486,12 +532,12 @@ def _append(section: Section, name: str, entries: list[str]) -> None:
     ]
     if after:
         at = after[0]
-        section.body[at:at] = [f"### {name}\n", "\n", *block, "\n"]
+        section.body[at:at] = [f"### {name}{nl}", nl, *block, nl]
         return
     end = len(section.body)
     while end > 0 and not section.body[end - 1].strip():
         end -= 1
-    section.body[end:end] = ["\n", f"### {name}\n", "\n", *block]
+    section.body[end:end] = [nl, f"### {name}{nl}", nl, *block]
 
 
 def assemble(
@@ -504,6 +550,7 @@ def assemble(
     oldest first so the result does not depend on the order the
     fragments happened to be read in.
     """
+    nl = _newline(text)
     preamble, sections = parse(text)
     created: set[str] = set()
     appended: set[str] = set()
@@ -511,7 +558,7 @@ def assemble(
         entries = folding[date]
         standing = next((s for s in sections if s.date == date), None)
         if standing is None:
-            section = _created(date, entries)
+            section = _created(date, entries, nl)
             at = next(
                 (
                     index
@@ -527,14 +574,14 @@ def assemble(
             # rather than quietly excused from the byte-identity
             # post-condition.
             if at > 0 and sections[at - 1].body and sections[at - 1].body[-1].strip():
-                sections[at - 1].body.append("\n")
+                sections[at - 1].body.append(nl)
                 appended.add(sections[at - 1].date or "")
             sections.insert(at, section)
             created.add(date)
             continue
         for name in CLASSES:
             if name in entries:
-                _append(standing, name, entries[name])
+                _append(standing, name, entries[name], nl)
         appended.add(date)
     return preamble + "".join(s.text() for s in sections), created, appended
 
@@ -624,7 +671,7 @@ def fold(root: Path) -> int:
     if changelog.is_symlink() or not changelog.is_file():
         return _fail([UNREADABLE_CHANGELOG])
     try:
-        before = changelog.read_text(encoding="utf-8")
+        before = text_of(changelog)
     except (OSError, UnicodeDecodeError):
         return _fail([UNREADABLE_CHANGELOG])
 
@@ -681,7 +728,8 @@ def _mutate(changelog: Path, before: str, after: str, sources: dict[Path, str]) 
 
     staged = changelog.with_name(f"{changelog.name}.fold-tmp")
     try:
-        staged.write_text(after, encoding="utf-8")
+        with staged.open("w", encoding="utf-8", newline="") as out:
+            out.write(after)
         os.replace(staged, changelog)
     except OSError:
         try:
@@ -709,9 +757,11 @@ def _restore(
     """
     try:
         for path in removed:
-            path.write_text(sources[path], encoding="utf-8")
-        if before is not None and changelog.read_text(encoding="utf-8") != before:
-            changelog.write_text(before, encoding="utf-8")
+            with path.open("w", encoding="utf-8", newline="") as out:
+                out.write(sources[path])
+        if before is not None and text_of(changelog) != before:
+            with changelog.open("w", encoding="utf-8", newline="") as out:
+                out.write(before)
     except OSError:
         return [reason, NOT_RESTORED]
     return [reason]
