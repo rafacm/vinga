@@ -3451,6 +3451,26 @@ DEVICE_NAME_BLANK = (
 )
 
 
+# What a device location that holds nothing is told.
+#
+# There is one way to say a device is nowhere in particular, and it is
+# the absence of a location rather than a location that is empty. An
+# empty string would be a second spelling of the same state: the
+# repository, the CLI and the generated API contract all say clearing is
+# a DELETE that leaves NULL, and a row holding `""` would read as
+# somewhere on every surface that tests the field for a value.
+#
+# The rule is the folded form and not the length, for the reason the
+# name's is: a location of two no-break spaces is not empty to a length
+# check and is empty to every reader of it.
+DEVICE_LOCATION_BLANK = (
+    "devices: a device location has to hold something other than whitespace. To say a "
+    "device is nowhere in particular, clear it rather than writing an empty one: "
+    "`vinga-server config device clear-location <mac>`, or null in an applied "
+    "document. The value written is not quoted back"
+)
+
+
 class DeviceRecord(BaseModel):
     """One device as the configuration holds it: a stable identity, the
     name a person says out loud, where it stands, and the agents it may
@@ -3502,7 +3522,9 @@ class DeviceRecord(BaseModel):
         description=(
             "Where the device stands, free-form, or null for nowhere in particular. "
             "Not unique: two devices in one room is normal. Leave the key out and the "
-            "stored location is kept."
+            "stored location is kept. Null is the only way to say nowhere: a location "
+            "holding nothing but whitespace is refused, because it would be a second "
+            "spelling of a state that already has one."
         ),
     )
     agents: list[NonBlankStr] = Field(
@@ -3517,6 +3539,24 @@ class DeviceRecord(BaseModel):
     def _check_id(cls, value: str | None) -> str | None:
         if value is not None and not is_device_id(value):
             raise ValueError(DEVICE_ID_RULE)
+        return value
+
+    @field_validator("location")
+    @classmethod
+    def _check_location(cls, value: str | None) -> str | None:
+        """A location that folds to nothing is not a location.
+
+        Here rather than at each write for the reason the name's rule is
+        here: this is the one place every ingress passes through, so the
+        CLI, the API body, an applied document and a configuration file
+        read at boot all meet the same refusal in the same words.
+
+        `None` is untouched, which is the whole point of the rule: the
+        absence IS how a device says it is nowhere in particular, and a
+        second way to say it is what this refuses.
+        """
+        if value is not None and not fold_device_name(value):
+            raise ValueError(DEVICE_LOCATION_BLANK)
         return value
 
     @field_validator("name")
