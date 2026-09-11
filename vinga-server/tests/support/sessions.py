@@ -178,13 +178,14 @@ def device_session(
             providers=providers if providers is not None else agent_providers(config),
             fallbacks=fallbacks,
         )
+    view = devices if devices is not None else DeviceBindings.snapshot_only(generations)
     factory = bespoke_runtime_factory(
         generations,
         mcp_servers if mcp_servers is not None else McpServers({}),
         memory if memory is not None else lane_memory(),
         conversations,
         threads,
-        devices if devices is not None else DeviceBindings.snapshot_only(generations),
+        view,
     )
     session = session_module.DeviceSession(cast(Any, websocket), generations, factory)
     # White-box, deliberately, and the only four sites in this file that
@@ -208,8 +209,17 @@ def device_session(
     session._mac = normalize_mac(mac)
     session._agents = config.agents_for_device(mac)
     session._generation = generations.current()
+    # The fifth of `run`'s transcribed lines, and the newest: the record
+    # the conversation attaches to is resolved with the binding, in one
+    # snapshot, and handed to the factory beside the agents (#449). The
+    # view is asked here the way `run` asks it, so a session built by
+    # this one attaches exactly as a served one does.
     session.runtime = factory(
-        session, session._events, session._agents, session._generation
+        session,
+        session._events,
+        session._agents,
+        session._generation,
+        view.attachment_for(session._mac).record,
     )
     return session
 

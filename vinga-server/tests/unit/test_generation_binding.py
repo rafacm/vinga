@@ -23,7 +23,7 @@ import pytest
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID, config_with, world
 from tests.support.providers import built_world
 from tests.support.stores import memory as lane_memory
-from vinga_server.device.bindings import BoundNames
+from vinga_server.device.bindings import Attachment, BoundNames
 from vinga_server.device.session import DeviceSession
 from vinga_server.registry import SessionRegistry
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
@@ -75,16 +75,18 @@ class Bound:
     """A bindings view whose answer is written down, so a device is
     driven without a database behind it.
 
-    The answer is the raw names, which is what the real view returns:
-    which of them can be served is the session's question, asked of the
-    one world it captures.
+    The answer is the raw names and no device record, which is what the
+    real view answers for a board nobody has bound a record to: which of
+    the names can be served is the session's question, asked of the one
+    world it captures, and a conversation with no record says nothing
+    about its device.
     """
 
     def __init__(self, agents: list[str]) -> None:
         self._names = tuple(agents)
 
-    async def resolve(self, mac: str) -> BoundNames:
-        return BoundNames(self._names)
+    async def attach(self, mac: str) -> Attachment:
+        return Attachment(BoundNames(self._names), None)
 
 
 class Waiting(Bound):
@@ -96,10 +98,10 @@ class Waiting(Bound):
         self.asked = asyncio.Event()
         self.answer = asyncio.Event()
 
-    async def resolve(self, mac: str) -> BoundNames:
+    async def attach(self, mac: str) -> Attachment:
         self.asked.set()
         await self.answer.wait()
-        return await super().resolve(mac)
+        return await super().attach(mac)
 
 
 def connection(

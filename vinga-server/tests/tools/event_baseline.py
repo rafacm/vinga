@@ -177,7 +177,7 @@ from vinga_server.conversations import store as store_module
 from vinga_server.conversations import threads
 from vinga_server.conversations.records import Acknowledgement, ToolInvocation, TurnRecord
 from vinga_server.conversations.store import ConversationStore
-from vinga_server.device.bindings import BoundNames, DeviceBindings
+from vinga_server.device.bindings import Attachment, BoundNames, DeviceBindings
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import SessionEvents
 from vinga_server.events.catalog import CHANNELS
@@ -442,8 +442,8 @@ class ScriptedBindings:
     def __init__(self, bound: BoundNames) -> None:
         self._bound = bound
 
-    async def resolve(self, mac: str) -> BoundNames:
-        return self._bound
+    async def attach(self, mac: str) -> Attachment:
+        return Attachment(self._bound, None)
 
 
 class Failing:

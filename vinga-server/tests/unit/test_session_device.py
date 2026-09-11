@@ -321,6 +321,64 @@ async def test_a_renamed_device_is_renamed_for_the_next_reply() -> None:
     assert after == before
 
 
+async def test_a_re_bound_board_does_not_rename_a_conversation_in_flight() -> None:
+    """The failure the stable identity exists to prevent, from the
+    session's side.
+
+    A conversation attaches to the record standing at its MAC when it
+    connects. An operator then deletes that device and binds the same
+    board again, which mints a second record at the same address, and
+    names it. The conversation still talking is addressed by the
+    identity it attached to, so it is told nothing about its device
+    rather than told another record's name: the device it was speaking
+    through is gone, and the honest reply is silence about it.
+    """
+    a_named_board()
+
+    config = base_config()
+    llm = RecordingLlm()
+    scripts = {"poet": llm}
+    generations = world(config, providers=agent_providers(config, cast(Any, scripts)))
+    bindings = DeviceBindings(generations, read_engine(DatabaseConfig()))
+    try:
+        session = session_for(
+            config,
+            POET_MAC,
+            cast(Any, scripts),
+            generations=generations,
+            devices=bindings,
+        )
+
+        await run_reply(session, "hello")
+        with store_at() as store:
+            store.delete_device(POET_MAC)
+            store.bind_device(POET_MAC, ["poet"])
+            store.rename_device(POET_MAC, "Hallway Speaker")
+        await run_reply(session, "and now")
+
+        # And a conversation opening now attaches to the record that is
+        # there now, which is what makes this a rule about one
+        # conversation rather than about the deployment.
+        fresh = RecordingLlm()
+        opened = session_for(
+            config,
+            POET_MAC,
+            cast(Any, {"poet": fresh}),
+            generations=world(
+                config, providers=agent_providers(config, cast(Any, {"poet": fresh}))
+            ),
+            devices=bindings,
+        )
+        await run_reply(opened, "hello")
+    finally:
+        bindings.dispose()
+
+    assert llm.systems[0] == f"POET\n\n{device_introduction(NAME, None)}"
+    assert llm.systems[1] == "POET"
+    assert "Hallway Speaker" not in llm.systems[1]
+    assert fresh.systems == [f"POET\n\n{device_introduction('Hallway Speaker', None)}"]
+
+
 async def test_the_record_is_read_once_a_round_and_off_the_event_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -329,13 +387,13 @@ async def test_the_record_is_read_once_a_round_and_off_the_event_loop(
     and a second read per round would double what a reply pays for
     knowing where it is."""
     ran: list[int] = []
-    real = DeviceBindings.record_for
+    real = DeviceBindings.record_now
 
-    def record_for(self: DeviceBindings, mac: str) -> Any:
+    def record_now(self: DeviceBindings, attached: Any) -> Any:
         ran.append(threading.get_ident())
-        return real(self, mac)
+        return real(self, attached)
 
-    monkeypatch.setattr(DeviceBindings, "record_for", record_for)
+    monkeypatch.setattr(DeviceBindings, "record_now", record_now)
     script = ScriptedLlm([[call("ghost_tool")], "Answered anyway."])
     session = session_for(named_config(), POET_MAC, {"poet": script})
 
@@ -464,7 +522,7 @@ async def test_neither_field_reaches_the_capture_manifest(tmp_path: Path) -> Non
         # The record really is reachable from this session, so the
         # absence below is about what the capture writes rather than
         # about a session that knows nothing.
-        assert bindings.record_for(DEVICE_MAC) is not None
+        assert bindings.attachment_for(DEVICE_MAC).record is not None
     finally:
         await websocket.close()
         await task

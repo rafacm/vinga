@@ -256,37 +256,64 @@ class LiveBinding:
 
 @dataclass(frozen=True)
 class LiveDevice:
-    """What a running server re-reads about the device a conversation is
-    speaking through: the record behind the MAC, minus the binding.
+    """One device record as a live read answers it: the row, whole.
 
     A value beside `LiveBinding` rather than a field on it, because the
     two are read by different callers on different clocks. The binding
-    is resolved once, at the OTA check-in and at the connect, and
-    decides whether a board is served at all; this is read on every
+    decides whether a board is served at all and is resolved once, at
+    the OTA check-in and at the connect; this is read again on every
     round of every reply, because a device that was moved between two
     replies has moved for the second of them.
+
+    `id` and `mac` are the two ways to address the row and they are not
+    interchangeable, which is the whole reason #449 minted an id. `mac`
+    is where a board is standing right now: it is what a device presents
+    on the wire, so it is how a connect FINDS its record, and it is also
+    what an operator can delete and re-create under a running
+    conversation and what a board swap moves to another record. `id` is
+    which record this is, for as long as it exists, so it is what every
+    read after the connect addresses. A conversation attaches to a
+    record once and re-reads THAT record, never "whatever stands at this
+    MAC now".
+
+    `id` is None only where the answer came from a snapshot that never
+    minted one, which is a configuration composed in Python rather than
+    read from a store.
 
     `name` is the row's own, never absent and never adjusted: a row
     whose name says nothing is not answered as a record at all, so there
     is no "called nothing" here. `location` is nullable because a device
-    nobody has placed is an ordinary device. `id` is the record's
-    identity, which is what makes these facts belong to a row rather
-    than to a MAC and what a board swap keeps; it is None only where the
-    answer came from a snapshot that never minted one, which is a
-    configuration composed in Python rather than read from a store.
+    nobody has placed is an ordinary device.
 
-    `named` is the one derived field, and it is here rather than at a
-    reader because the rule it applies is this module's: binding a board
-    creates its record and calls it `Device <mac>` until somebody names
-    it, so a name equal to that default is a placeholder the server
-    minted and not a name anybody says out loud. Readers that want the
-    row say `name`; readers deciding whether to SAY it ask this first.
+    `named` is derived rather than stored, and it is here rather than at
+    a reader because the rule is this module's: binding a board creates
+    its record and calls it `Device <mac>` until somebody names it, and
+    that spelling is refused to every other writer (`DEVICE_NAME_RESERVED`),
+    so a name in that shape is a placeholder this server minted rather
+    than a name anybody says out loud. Readers that want the row say
+    `name`; readers deciding whether to SAY it ask this first.
     """
 
     id: str | None
+    mac: str
     name: str
     location: str | None
     named: bool = True
+
+
+@dataclass(frozen=True)
+class LiveAttachment:
+    """Everything one connect learns about a device, from one snapshot.
+
+    Two answers rather than two reads, for the reason `LiveBinding`
+    holds two rows: which agents a board may reach and which record its
+    conversation attaches to are one question asked at one instant, and
+    reading them apart would let a write between them attach a
+    conversation to a record its binding never came from.
+    """
+
+    binding: LiveBinding
+    device: LiveDevice | None
 
 
 # What a refusal about these two rows names. Not a single row's
@@ -1118,42 +1145,41 @@ def _live_binding(connection: Connection, mac: str) -> LiveBinding:
     )
 
 
-def read_live_device(engine: Engine, mac: str) -> LiveDevice | None:
-    """One device's record as the rows hold it now, for the reply being
-    assembled, or None where that MAC has no row.
+def read_live_attachment(engine: Engine, mac: str) -> LiveAttachment:
+    """What a connect resolves about one board: its binding, the default
+    agent behind it, and the record its conversation will attach to, all
+    from one snapshot.
 
-    The binding's sibling: same engine, same read-only connection that
-    never migrates and never takes the advisory lock, same
-    normalization of the MAC and the same normalization of a database
-    failure. What it deliberately does not do is join the binding read,
-    and the reason is what each of them is for. A binding decides
-    whether a board is served, is asked twice per connection, and its
-    statement is pinned byte for byte
-    (`tests/unit/test_live_binding_pin.py`) because a widened select
-    there is a change to the path a board depends on to be served at
-    all. This is asked once per round by a reply that is already
-    talking, and the two answers are never needed together, so a single
-    widened statement would buy nothing and spend the pin.
+    Three statements in the one repeatable-read transaction
+    `read_live_binding` opens for two, and the first two are that
+    function's own, character for character, because they are the same
+    private read (`tests/unit/test_live_device_read.py` pins the three
+    against the constants `test_live_binding_pin.py` pins the two). The
+    binding is not widened to carry the record, and the record is not
+    widened into the binding: what a board depends on to be served at
+    all keeps the statement it was pinned with, and what a conversation
+    attaches to is a row of its own.
 
-    One statement rather than two: the whole record is three columns of
-    one row, so there is no second row a write could land between.
+    One snapshot rather than two reads, because the two answers are one
+    question. A record read a moment after a binding could belong to a
+    device the binding never spoke of: a MAC deleted and re-created in
+    between is a different record with the same address, and a
+    conversation built from the first answer and attached to the second
+    would be telling one board's agent about another board.
 
-    A name that folds to nothing is answered as no record at all. The
-    column is `NOT NULL` and every writer holds the fold's own refusal
-    in front of it, so this is a row nothing in this server wrote; the
-    honest reading of it is that this device has no name, rather than
-    telling a model it is speaking through a device called nothing.
-
-    A name equal to `Device <mac>` is answered as a record nobody has
-    named (`named=False`), because that is what the default means:
-    binding a board mints it so that no onboarding flow has to ask for
-    a name the operator does not yet have.
+    `read_live_binding` is still what the OTA endpoint asks, and
+    deliberately: a check-in decides whether to hand out a token and has
+    no conversation to attach, so the fleet's boot dependency keeps the
+    narrowest read there is.
     """
     normalized = _mac(mac)
     problem: ConfigError | None = None
     try:
         with engine.connect() as connection:
-            return _live_device(connection, normalized)
+            return LiveAttachment(
+                binding=_live_binding(connection, normalized),
+                device=_live_device(connection, normalized),
+            )
     except ConfigError:
         raise
     except SQLAlchemyError as exc:
@@ -1161,21 +1187,73 @@ def read_live_device(engine: Engine, mac: str) -> LiveDevice | None:
     raise problem
 
 
+def read_live_device_by_id(engine: Engine, device_id: str) -> LiveDevice | None:
+    """One record as it stands now, addressed by the identity a
+    conversation attached to, or None where that record is gone.
+
+    The read a reply makes on every round, and it is by id rather than
+    by MAC for the reason the id exists. A MAC is where a board is
+    standing: delete the device and bind the same board again and the
+    MAC answers a different record, and #449's M4 moves a MAC to another
+    record on purpose. A conversation that re-read by MAC would be told
+    that record's name and place, which is the failure the stable
+    identity was minted to prevent.
+
+    None is the honest answer for a record that has been deleted, and
+    what a reply does with it is what it does for a device with no
+    record at all: it stops saying what it is speaking through, rather
+    than going on saying something that is no longer true.
+
+    One statement, on the primary key, on the same read-only connection
+    that never migrates and never takes the advisory lock, with a
+    database failure normalized the way every read here normalizes one.
+
+    A name that folds to nothing is answered as no record at all. The
+    column is `NOT NULL` and every writer holds the fold's own refusal
+    in front of it, so this is a row nothing in this server wrote; the
+    honest reading of it is that this device has no name, rather than
+    telling a model it is speaking through a device called nothing.
+    """
+    problem: ConfigError | None = None
+    try:
+        with engine.connect() as connection:
+            return _device_row_read(
+                connection.execute(
+                    _DEVICE_RECORD.where(schema.devices.c.id == device_id)
+                ).one_or_none()
+            )
+    except ConfigError:
+        raise
+    except SQLAlchemyError as exc:
+        problem = _database_problem(exc)
+    raise problem
+
+
+# The record's four columns, selected the same way by both reads so
+# that the two addresses cannot come to answer different shapes.
+_DEVICE_RECORD = select(
+    schema.devices.c.id,
+    schema.devices.c.mac,
+    schema.devices.c.name,
+    schema.devices.c.location,
+)
+
+
 def _live_device(connection: Connection, mac: str) -> LiveDevice | None:
-    row = connection.execute(
-        select(
-            schema.devices.c.id,
-            schema.devices.c.name,
-            schema.devices.c.location,
-        ).where(schema.devices.c.mac == mac)
-    ).one_or_none()
+    return _device_row_read(
+        connection.execute(_DEVICE_RECORD.where(schema.devices.c.mac == mac)).one_or_none()
+    )
+
+
+def _device_row_read(row: Row | None) -> LiveDevice | None:
     if row is None or not fold_device_name(row.name or ""):
         return None
     return LiveDevice(
         id=row.id,
+        mac=row.mac,
         name=row.name,
         location=row.location,
-        named=row.name != default_device_name(mac),
+        named=row.name != default_device_name(row.mac),
     )
 
 
@@ -3598,11 +3676,13 @@ __all__ = [
     "check_transportable",
     "DomainConfig",
     "Entity",
+    "LiveAttachment",
     "LiveBinding",
     "LiveDevice",
     "Renamed",
+    "read_live_attachment",
     "read_live_binding",
-    "read_live_device",
+    "read_live_device_by_id",
     "Snapshot",
     "StoredSecret",
     "stored_secrets",

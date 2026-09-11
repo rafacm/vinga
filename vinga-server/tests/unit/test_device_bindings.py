@@ -744,7 +744,8 @@ def test_a_view_with_no_database_answers_authoritatively() -> None:
     assert snapshot_only.names_for(DEVICE_MAC).authoritative is True
 
 
-# The record the same view answers, which a reply asks per round
+# The record the same view answers: attached at the connect, re-read
+# per round by the identity rather than by the address
 
 
 def test_the_record_is_read_live_like_the_binding() -> None:
@@ -759,29 +760,77 @@ def test_the_record_is_read_live_like_the_binding() -> None:
             store.rename_device(DEVICE_MAC, "Kitchen Speaker")
             store.relocate_device(DEVICE_MAC, "the kitchen")
 
-        record = bindings.record_for(DEVICE_MAC)
-        assert record is not None
-        assert (record.name, record.location) == ("Kitchen Speaker", "the kitchen")
+        attached = bindings.attachment_for(DEVICE_MAC).record
+        assert attached is not None
+        assert (attached.name, attached.location) == ("Kitchen Speaker", "the kitchen")
 
         with store_at() as store:
             store.relocate_device(DEVICE_MAC, "the hallway")
 
-        moved = bindings.record_for(DEVICE_MAC)
+        moved = bindings.record_now(attached)
         assert moved is not None and moved.location == "the hallway"
         # And it is the same record throughout, which is what a reader
         # of these two facts is entitled to assume.
-        assert moved.id == record.id
+        assert moved.id == attached.id
     finally:
         bindings.dispose()
 
 
-def test_a_mac_with_no_row_has_no_record() -> None:
+def test_the_attachment_answers_the_binding_and_the_record_at_once() -> None:
+    """One question at one instant, which is what keeps a conversation's
+    agents and its device record describing the same device."""
+    config = booted(devices={DEVICE_MAC: ["assistant"]})
+    bindings = DeviceBindings.open(world(config))
+    try:
+        attachment = bindings.attachment_for(DEVICE_MAC)
+
+        assert attachment.names.names == ("assistant",)
+        assert attachment.record is not None
+        assert attachment.record.mac == DEVICE_MAC
+    finally:
+        bindings.dispose()
+
+
+def test_a_mac_with_no_row_attaches_to_nothing() -> None:
     """A device a default agent stands behind is served and has no
     record, and this says so rather than inventing one."""
     config = booted(devices={DEVICE_MAC: ["assistant"]}, default_agent="assistant")
     bindings = DeviceBindings.open(world(config))
     try:
-        assert bindings.record_for("11:22:33:44:55:66") is None
+        attachment = bindings.attachment_for("11:22:33:44:55:66")
+
+        assert attachment.names.names == ("assistant",)
+        assert attachment.record is None
+    finally:
+        bindings.dispose()
+
+
+def test_a_re_created_device_is_not_the_record_a_conversation_attached_to() -> None:
+    """The failure the stable identity exists to prevent, at the view.
+
+    A conversation attaches to the record standing at its MAC; the
+    operator deletes that device, binds the same board again and names
+    the new record. The re-read is addressed by the identity, so the
+    conversation in flight is answered nothing rather than the new
+    record's name.
+    """
+    config = booted(devices={DEVICE_MAC: ["assistant"]})
+    bindings = DeviceBindings.open(world(config))
+    try:
+        attached = bindings.attachment_for(DEVICE_MAC).record
+        assert attached is not None
+
+        with store_at() as store:
+            store.delete_device(DEVICE_MAC)
+            store.bind_device(DEVICE_MAC, ["assistant"])
+            store.rename_device(DEVICE_MAC, "Kitchen Speaker")
+
+        assert bindings.record_now(attached) is None
+        # And a connect happening now attaches to the new record, which
+        # is what makes the two answers different questions.
+        fresh = bindings.attachment_for(DEVICE_MAC).record
+        assert fresh is not None and fresh.name == "Kitchen Speaker"
+        assert fresh.id != attached.id
     finally:
         bindings.dispose()
 
@@ -807,7 +856,9 @@ def test_a_failed_record_read_falls_back_to_the_served_world(
     bindings = DeviceBindings(world(config), _FailingEngine())
 
     with caplog.at_level(logging.WARNING):
-        record = bindings.record_for(DEVICE_MAC)
+        attachment = bindings.attachment_for(DEVICE_MAC)
+        assert attachment.record is not None
+        record = bindings.record_now(attachment.record)
 
     assert record is not None
     assert (record.name, record.location) == ("Kitchen Speaker", "the kitchen")
@@ -828,7 +879,41 @@ def test_a_device_the_served_world_never_named_has_no_record() -> None:
     )
     bindings = DeviceBindings.snapshot_only(world(config))
     try:
-        assert bindings.record_for(DEVICE_MAC) is None
+        assert bindings.attachment_for(DEVICE_MAC).record is None
+    finally:
+        bindings.dispose()
+
+
+def test_a_snapshot_that_replaced_the_record_answers_nothing() -> None:
+    """The fallback keeps the identity rule the stored read keeps. A
+    world whose record at that MAC carries a different id is a world
+    where the attached record is gone, and answering with the one
+    standing there now would be the substitution the id exists to
+    prevent.
+    """
+    def composed(identity: str, name: str) -> Config:
+        return Config(
+            providers={stage: {"mock": {"type": "mock"}} for stage in STAGES},
+            agents={"assistant": AGENT},
+            devices={
+                DEVICE_MAC: {
+                    "agents": ["assistant"],
+                    "id": identity,
+                    "name": name,
+                }
+            },
+        )
+
+    generations = world(composed("a" * 32, "Kitchen Speaker"))
+    bindings = DeviceBindings.snapshot_only(generations)
+    try:
+        attached = bindings.attachment_for(DEVICE_MAC).record
+        assert attached is not None and attached.id == "a" * 32
+        # The same board, a different record: what a delete and a
+        # re-bind leave behind, said in a composed world.
+        replaced = DeviceBindings.snapshot_only(world(composed("b" * 32, "Hallway")))
+
+        assert replaced.record_now(attached) is None
     finally:
         bindings.dispose()
 
@@ -841,17 +926,43 @@ async def test_the_record_resolves_off_the_event_loop(
     on rather than by reading the call site, the way the prompt's memory
     read is."""
     ran: list[int] = []
-    real = DeviceBindings.record_for
+    real = DeviceBindings.record_now
 
-    def record_for(self: DeviceBindings, mac: str):  # type: ignore[no-untyped-def]
+    def record_now(self: DeviceBindings, attached):  # type: ignore[no-untyped-def]
         ran.append(threading.get_ident())
-        return real(self, mac)
+        return real(self, attached)
 
-    monkeypatch.setattr(DeviceBindings, "record_for", record_for)
     config = booted(devices={DEVICE_MAC: ["assistant"]})
     bindings = DeviceBindings.open(world(config))
     try:
-        await bindings.resolve_record(DEVICE_MAC)
+        attached = bindings.attachment_for(DEVICE_MAC).record
+        assert attached is not None
+        monkeypatch.setattr(DeviceBindings, "record_now", record_now)
+        await bindings.resolve_record(attached)
+    finally:
+        bindings.dispose()
+
+    assert ran and all(where != threading.get_ident() for where in ran)
+
+
+async def test_the_attachment_resolves_off_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The connect's own read, on the same rule: the edge awaits it
+    before it builds anything, and every other conversation in this
+    process is waiting on that loop."""
+    ran: list[int] = []
+    real = DeviceBindings.attachment_for
+
+    def attachment_for(self: DeviceBindings, mac: str):  # type: ignore[no-untyped-def]
+        ran.append(threading.get_ident())
+        return real(self, mac)
+
+    monkeypatch.setattr(DeviceBindings, "attachment_for", attachment_for)
+    config = booted(devices={DEVICE_MAC: ["assistant"]})
+    bindings = DeviceBindings.open(world(config))
+    try:
+        await bindings.attach(DEVICE_MAC)
     finally:
         bindings.dispose()
 

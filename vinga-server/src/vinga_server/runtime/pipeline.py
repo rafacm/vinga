@@ -279,16 +279,17 @@ class DeviceRecords(Protocol):
     """The device record, as a reply reads it.
 
     Named here rather than imported because this is the side that says
-    what it needs: one question, asked once per round, which answers
-    None rather than raising for a MAC with no record and for a
-    database that could not be read. What answers it in a server is
-    `device.bindings.DeviceBindings`, which is also where a failed read
-    is logged and fallen back from; a runtime built without one is a
-    runtime whose replies say nothing about the device, which is what
-    every deployment sent before there was a record to read.
+    what it needs: one question, asked once per round, about the record
+    this conversation attached to at its connect rather than about a
+    MAC. It answers None rather than raising, both for a record that is
+    gone and for a database that could not be read. What answers it in a
+    server is `device.bindings.DeviceBindings`, which is also where a
+    failed read is logged and fallen back from; a runtime built without
+    one is a runtime whose replies say nothing about the device, which
+    is what every deployment sent before there was a record to read.
     """
 
-    async def resolve_record(self, mac: str) -> LiveDevice | None: ...
+    async def resolve_record(self, attached: LiveDevice) -> LiveDevice | None: ...
 
 
 def _reported(usage: Usage | None) -> tuple[int | None, int | None]:
@@ -632,6 +633,7 @@ class PipelineRuntime:
         threads: resumption.ThreadReads | None = None,
         purge: Callable[[Sequence[str]], object] | None = None,
         devices: DeviceRecords | None = None,
+        device: LiveDevice | None = None,
     ) -> None:
         self._output = output
         # The world this runtime reads its configuration out of, asked
@@ -668,6 +670,16 @@ class PipelineRuntime:
         # is stable, the location is not, and the tool that moves a
         # device is reached from inside the conversation it moves.
         self._devices = devices
+        # And the record this conversation attached to, resolved by the
+        # edge in the same snapshot the binding came from and never
+        # replaced. It is an ADDRESS and not a value: what a round
+        # renders is what the read above answers, and this is only how
+        # that read says which record it means. Keeping the connect's
+        # copy as the address is the point, since a MAC can be deleted
+        # and bound again, or moved to another record, under a
+        # conversation that is still talking. None is a board with no
+        # record, whose replies say nothing about their device.
+        self._attached = device
         # The conversation's content channel, beside the event tap and
         # separate from it on purpose: tool arguments and results never
         # rode the events, and the events are losing their text (#120).
@@ -2806,19 +2818,25 @@ class PipelineRuntime:
         return prompt.with_scopes(self._know_how, scopes, record).text
 
     async def _device_record(self) -> LiveDevice | None:
-        """What this conversation is speaking through, as the record
-        stands right now.
+        """What this conversation is speaking through, as the record it
+        attached to stands right now.
+
+        Asked about that record rather than about the MAC this session
+        is on, which is the difference between "what is my device
+        called" and "what is the device at this address called". The two
+        answers part company the moment an operator deletes a device and
+        binds the same board again, and #449's M4 parts them on purpose
+        by moving a MAC to another record.
 
         None wherever there is nothing to ask or nobody to ask: a
-        runtime composed without the view, and a session whose device
-        never identified itself, which is the same absence the memory
-        read is given None for. Off the event loop, because the view
-        reads a database and every live conversation in this process
-        shares that loop.
+        runtime composed without the view, a board that had no record at
+        its connect, and a record that has since been deleted. Off the
+        event loop, because the view reads a database and every live
+        conversation in this process shares that loop.
         """
-        if self._devices is None or self._device is None:
+        if self._devices is None or self._attached is None:
             return None
-        return await self._devices.resolve_record(self._device)
+        return await self._devices.resolve_record(self._attached)
 
     def _offered_origins(self, tools: Sequence[ToolDef]) -> dict[str, _Origin]:
         """Where each tool this reply offers came from, classified while
@@ -3189,10 +3207,16 @@ def bespoke_runtime_factory(
 
     `devices` is the live view of the device rows, closed over for the
     reason `memory` is: it is one object per server, it outlives every
-    connection, and what a reply asks it is about the device the edge
-    already handed over. None is a composition with no view, which is
-    an embedded caller and a test lane, and its replies say nothing
-    about the device.
+    connection, and what a reply asks it is about the record the edge
+    hands each conversation at its connect. None is a composition with
+    no view, which is an embedded caller and a test lane, and its
+    replies say nothing about the device.
+
+    That record is the one argument here that is neither closed over nor
+    read off the world: it belongs to one connection, and it comes in
+    beside the agents because it was resolved with them, in one snapshot
+    (#449). Everything the conversation later reads about its device is
+    addressed by the identity in it.
 
     Deliberately one function rather than a config-selectable registry:
     one runtime exists, and a selection mechanism with one option is
@@ -3204,6 +3228,7 @@ def bespoke_runtime_factory(
         events: SessionEvents,
         agents: Sequence[str],
         generation: Generation,
+        device: LiveDevice | None = None,
     ) -> SessionInput:
         return PipelineRuntime(
             output,
@@ -3220,6 +3245,7 @@ def bespoke_runtime_factory(
             threads,
             memory.purge_threads if conversations is None else None,
             devices,
+            device,
         )
 
     return build
