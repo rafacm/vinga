@@ -36,6 +36,12 @@ The corpus is chosen for the places the three can come apart:
   space mark, the en/em quad family, narrow no-break space. What `\\s`
   means to a Postgres regular expression depends on the database's
   ctype, which is why neither rendering uses it.
+- **The collation the case mapping runs under.** A bare `lower()` uses
+  the database's default collation, and under a Turkish one `lower('I')`
+  is `ı` where every other locale answers `i`. So the corpus is driven a
+  second time with a Turkish collation forced onto the input, which is
+  the case a fold naming no collation passed on the test instance and
+  failed on somebody's deployment.
 - **The sharp s.** `ß` case-FOLDS to `ss` and case-MAPS to itself. The
   fold this project uses is the mapping, so two devices called `Straße`
   and `STRASSE` are two devices, and the corpus says so rather than
@@ -164,6 +170,103 @@ def test_the_frozen_literal_agrees_with_the_live_rule(reader: Engine, name: str)
     names together.
     """
     assert fold_device_name(name) == _folded(reader, FROZEN_FOLD, name)
+
+
+# The collations the fold is proved indifferent to. Turkish is the one
+# that matters and the one the review found: it is the locale where the
+# Unicode simple mapping and the locale's disagree about the whole `i`
+# family. Azerbaijani keeps the same rule and Lithuanian has a case rule
+# of its own; `C` and US English are the controls, one ASCII-only and
+# one ordinary.
+FOREIGN_COLLATIONS = ("tr-TR-x-icu", "az-x-icu", "lt-x-icu", "C", "en-US-x-icu")
+
+# The three characters the Turkish rule moves, plus the ASCII letter it
+# moves them onto. Named separately from the corpus because the claim
+# about them is sharper: each has to fold to one answer whatever
+# collation the row carries.
+TURKISH_I = ("I", "i", "\u0130", "\u0131", "Istanbul", "\u0130stanbul")
+
+
+@pytest.mark.parametrize("name", CORPUS, ids=lambda name: repr(name))
+@pytest.mark.parametrize("collation", FOREIGN_COLLATIONS)
+def test_the_sql_rendering_is_indifferent_to_the_rows_collation(
+    reader: Engine, collation: str, name: str
+) -> None:
+    """The whole corpus again, with a foreign collation forced onto the
+    value the expression is applied to.
+
+    This is the case the fold used to fail. `device_name_fold_sql` named
+    no collation, so it lowercased under the database's default, and a
+    deployment initialized in a Turkish locale would have folded `I` to
+    `ı` while the repository's Python folded it to `i`: the repository
+    would approve a name as free, the index would refuse the insert, and
+    the operator would meet the generic sanitized database failure that
+    `store.py` promises cannot happen.
+    """
+    forced = f"{_qualified(collation)}"
+    with reader.connect() as connection:
+        folded = connection.execute(
+            text(
+                f"select {device_name_fold_sql('name')} "
+                f"from (values (:value collate {forced})) as t(name)"
+            ),
+            {"value": name},
+        ).scalar_one()
+    assert fold_device_name(name) == folded
+
+
+@pytest.mark.parametrize("name", TURKISH_I)
+@pytest.mark.parametrize("collation", FOREIGN_COLLATIONS)
+def test_the_dotted_and_dotless_i_fold_the_same_under_every_collation(
+    reader: Engine, collation: str, name: str
+) -> None:
+    """The sharp version of the case above, on the four characters the
+    Turkish rule is about, through the frozen literal as well as the
+    live rendering: an upgraded database's index and a fresh one's have
+    to agree here too."""
+    forced = _qualified(collation)
+    with reader.connect() as connection:
+        live, frozen = connection.execute(
+            text(
+                f"select {device_name_fold_sql('name')}, {FROZEN_FOLD} "
+                f"from (values (:value collate {forced})) as t(name)"
+            ),
+            {"value": name},
+        ).one()
+    assert fold_device_name(name) == live == frozen
+
+
+def test_a_bare_lower_really_does_come_apart_under_a_turkish_collation(
+    reader: Engine,
+) -> None:
+    """The control that makes the two cases above worth running.
+
+    Without it they would pass on a build whose SQL fold had quietly
+    stopped naming a collation, because every OTHER collation in the
+    list agrees with the default one this instance happens to have. What
+    this asserts is that the hazard is real on this very instance: a
+    `lower()` with no collation named answers something else here.
+    """
+    with reader.connect() as connection:
+        bare, collated = connection.execute(
+            text(
+                "select lower(name), lower(name collate pg_c_utf8) "
+                "from (values ('I' collate \"tr-TR-x-icu\")) as t(name)"
+            )
+        ).one()
+    assert bare == "\u0131"
+    assert collated == "i" == fold_device_name("I")
+
+
+def _qualified(collation: str) -> str:
+    """One collation name as a statement may spell it: quoted, always.
+
+    The ICU names carry dashes and would not parse bare, and `C` is
+    worse than that, because it parses: unquoted it folds to `c`,
+    which is not a collation this database has, so the statement
+    would fail on the name rather than on the claim.
+    """
+    return f'"{collation}"'
 
 
 def test_the_two_sql_renderings_are_the_same_expression() -> None:
