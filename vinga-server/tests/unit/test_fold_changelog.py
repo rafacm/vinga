@@ -788,19 +788,23 @@ def test_a_fragment_that_cannot_be_removed_leaves_the_tree_alone(
 
 
 @not_root
-def test_a_changelog_that_cannot_be_written_puts_the_fragments_back(
+def test_a_changelog_that_cannot_be_written_leaves_the_tree_as_it_was(
     tmp_path: Path,
 ) -> None:
-    """The rollback, exercised rather than described.
+    """The tree as it was means the tree as it was, mode included.
 
-    The fragments are already gone when the replacement fails, and what
-    has to happen is that they come back byte for byte. They can,
-    because the directory that accepted their removal is the directory
-    they are written into.
+    A fragment is a file with a mode, and the recovery sentence is a
+    claim about the tree and not only about its bytes. So the fragment
+    here is executable, and the assertion is on the mode as well as on
+    the content: a recovery that recreated the file with whatever the
+    process default happened to be would have satisfied every other
+    check in this module while quietly changing the tree.
     """
     root = repo(tmp_path)
     body = f"### Added\n\n- {SENTINEL} added.\n"
     fragment(root, "467-unwritable.md", body)
+    standing = root / "changelog.d" / "467-unwritable.md"
+    standing.chmod(0o755)
     before = (root / "CHANGELOG.md").read_text(encoding="utf-8")
     root.chmod(0o555)
     try:
@@ -811,7 +815,8 @@ def test_a_changelog_that_cannot_be_written_puts_the_fragments_back(
     assert done.returncode == 1
     assert "could not be written" in done.stderr
     assert (root / "CHANGELOG.md").read_text(encoding="utf-8") == before
-    assert (root / "changelog.d" / "467-unwritable.md").read_text(encoding="utf-8") == body
+    assert standing.read_text(encoding="utf-8") == body
+    assert standing.stat().st_mode & 0o777 == 0o755
     assert sorted(path.name for path in root.iterdir()) == [
         ".git",
         "CHANGELOG.md",
