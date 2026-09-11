@@ -67,6 +67,7 @@ from vinga_server.config.models import (
     bounded_descriptor,
     normalize_mac,
 )
+from vinga_server.config.store import LiveDevice
 from vinga_server.conversations import ConversationStore, SessionSink
 from vinga_server.device import watchdog
 from vinga_server.device.bindings import DeviceBindings
@@ -218,6 +219,13 @@ class DeviceSession:
         # for on a path that has to work without it.
         self._conversations = conversations
         self._record: SessionSink | None = None
+        # The device record this conversation attached to, from the
+        # same snapshot as the binding (#449 M2). Kept here because two
+        # things written at the open read it: the session row's name
+        # column and `session_open`'s field. What a ROUND renders is the
+        # runtime's own per-round read, not this; this is the record as
+        # it stood when somebody started talking.
+        self._device_record: LiveDevice | None = None
         self._device_facts = device_facts if device_facts is not None else DeviceFacts()
         # The recording's own decode path, built only when a capture
         # starts, so a server that is not recording pays for none of it.
@@ -430,6 +438,7 @@ class DeviceSession:
         # (#449).
         attachment = await self._bindings.attach(mac)
         bound = attachment.names
+        self._device_record = attachment.record
         # And here is the pin (#191). One generation, captured on the
         # loop the instant that await returns, and everything that
         # follows is about exactly this object: which of the bound names
@@ -806,9 +815,31 @@ class DeviceSession:
                 if generation is None
                 else lambda: self._generations.renames_for(generation)
             ),
+            device_name=self._device_name(),
         )
         self._record = SessionSink(self._conversations, self.session_id)
         self._events.attach(self._record)
+
+    def _device_name(self) -> str | None:
+        """What this session's device is called, or None where no name
+        is recorded for it.
+
+        Read once, here, from the record this conversation attached to,
+        because both surfaces written at the open want the name of that
+        instant rather than the name the device has by the time somebody
+        reads the row.
+
+        Three states answer None and every reader treats them alike. A
+        board with no record at all, which a default agent's coverage
+        makes ordinary. A record still carrying the `Device <mac>`
+        spelling this server mints and reserves, which is a placeholder
+        rather than a name: M2 refuses to say it out loud for the same
+        reason, and an analyst has no more use for a MAC repeated in a
+        second column than for the one beside it. And a read that could
+        not be made, which the view already answers as no record.
+        """
+        record = self._device_record
+        return record.name if record is not None and record.named else None
 
     def _stop_recording(self) -> None:
         """Close this session's row: its duration, what ended it, and
