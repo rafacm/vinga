@@ -125,6 +125,16 @@ people forgetting under load. The costs are named and bounded:
   that finds no fragments exits green without committing. The
   checkout uses `ref: main` rather than the triggering SHA, so a
   serialized run folds whatever is currently unfolded.
+- The checkout uses `fetch-depth: 0`, stated in the workflow beside
+  the reason: the date derivation walks first-parent history to the
+  commit that introduced each fragment, a queued fold can meet
+  fragments introduced several commits before current `main`, and
+  actions/checkout's depth-one default cannot date those. The script
+  does not trust the caller to have obeyed: a fragment whose
+  introduction commit cannot be found in the available history is a
+  fixed-message refusal (exit 1, nothing written), never a silent
+  substitution of the workflow's own date, and the refusal is tested
+  against a shallow clone of the constructed test repository.
 
 ### Fragment format
 
@@ -343,6 +353,12 @@ condensed but faithful; resolutions appended per amendment.
    temporary-repository test would still pass. Require full history,
    test the insufficient-history failure, and refuse fixed-message
    rather than silently substituting the workflow date.
+
+   *Resolution.* Adopted. The workflow section now requires
+   `fetch-depth: 0` with the reason stated in the workflow, and the
+   script refuses with a fixed message when a fragment's
+   introduction commit is not in the available history, tested
+   against a shallow clone of the constructed repository.
 
 2. **P1: A global heading-order post-condition is incompatible with
    the preserved changelog.** Existing history is not canonical:
