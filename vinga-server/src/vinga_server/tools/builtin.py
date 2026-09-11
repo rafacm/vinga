@@ -1,13 +1,14 @@
 """The tools the server implements itself.
 
-Ten of them, all bare-named because the namespace rules in `names`
-reserve those names. Eight are executed here: the memory family
+Eleven of them, all bare-named because the namespace rules in `names`
+reserve those names. Nine are executed here: the memory family
 (`remember`, `update_memory`, `forget`, `restore_memory` and `recall`)
 and the ledger's two (`set_state`, `clear_state`), against the memory
-store, and the search half of `resume_conversation`, against whatever
-the runtime injected as its way of reading stored threads. The other two
-are defined here and executed by the session, because what they do is
-end the tool loop rather than produce a result the model reads:
+store, the search half of `resume_conversation`, against whatever
+the runtime injected as its way of reading stored threads, and
+`set_device_location`, against the configuration repository. The other
+two are defined here and executed by the session, because what they do
+is end the tool loop rather than produce a result the model reads:
 `switch_agent` hands the conversation to another agent, and
 `new_conversation` and the selection half of `resume_conversation` move
 it to another thread.
@@ -18,6 +19,13 @@ the tools, and how their output reaches the model is the runtime's. The
 injected blocks carry no numbers, which is why `recall` answers with
 them: it is how the model reaches both what the prompt left out and the
 number anything it wants to change is addressed by.
+
+`set_device_location` is the one that writes something an operator can
+also write, and it writes it the way an operator's command does, through
+the configuration repository, so that the rules about what a stored
+device location may be are stated once. It reaches nothing else: the
+record it moves is the one this conversation attached to, and the module
+below never sees a database.
 
 The tools that write memory need to know which memory they are writing,
 which is what `MemoryContext` is: the session's memory address as a
@@ -42,7 +50,7 @@ model is told is what happened and what to do about it.
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from vinga_server.memory.scopes import FACT_SCOPES, MemoryScope
 from vinga_server.memory.store import MemoryStore
@@ -75,6 +83,28 @@ class MemoryContext:
 
     device: str | None
     conversation: str | None
+
+
+class DeviceRelocations(Protocol):
+    """What this module needs in order to move a device: one write.
+
+    Named on this side rather than imported, the reason `ThreadSearch`
+    is named on `source.py`'s: the caller is what says what it needs,
+    and what a tool needs of the configuration repository is one
+    sentence long. What a server hands in is
+    `device.placement.DevicePlacements`, which owns the connection, runs
+    the synchronous write off the event loop and translates the
+    repository's refusals into the sentences below.
+
+    The device is a record id and never a MAC, because a conversation
+    attached to a record and a MAC is only where a board is standing
+    (#449). Raising is how it refuses, and what it raises is already one
+    of this module's sentences: nothing the repository said travels out
+    of it, because the repository is talking to an operator at a command
+    line and this is talking to whoever is in the room.
+    """
+
+    async def relocate(self, device: str, location: str) -> str: ...
 
 
 def switch_agent_tool(agents: Sequence[str]) -> ToolDef:
@@ -449,6 +479,62 @@ def resume_conversation_tool() -> ToolDef:
         },
     )
 
+
+
+def set_device_location_tool() -> ToolDef:
+    """Say where this device stands, which is the one thing about the
+    device record a conversation may change.
+
+    The tool addresses nothing: it writes the location of the device
+    this conversation is happening on, which the runtime already knows.
+    A model that could name a device would be moving somebody else's
+    speaker, the reason the memory tools read their owner off the
+    session rather than out of their arguments.
+
+    Two things are in the description because a reader and a model both
+    have to see them. The first is the trust stance, settled by #449:
+    any voice in the room may move this device, because being in the
+    room is already what talking to it takes, and a permission that is
+    not stated in the one place the model reads is a permission nobody
+    can check. The second is the mutability split this whole record is
+    built around: a conversation may say where the device IS and may
+    not say what it is CALLED, because the name is identity an operator
+    manages and the location is context the household changes.
+
+    Offered to every agent, whether or not this server can write one,
+    for the reason the two conversation tools are: a tool that is
+    simply absent is a tool a model invents, and an agent with nowhere
+    to write this would otherwise answer "moved to the office" with
+    "all right" and change nothing, which is the one answer worse than
+    a refusal.
+    """
+    return ToolDef(
+        name=names.SET_DEVICE_LOCATION,
+        description=(
+            "Write down where this device now is, when somebody tells you it has been "
+            "moved or where it is standing. Use the words they used for the place, "
+            "such as the room or whose room it is. Every assistant on this device is "
+            "told this from then on, in this conversation and the next one, so use it "
+            "only for where the device itself is and not for where anything else is. "
+            "Anyone talking to this device may move it: being in the room is what it "
+            "takes to talk to you at all, so it is also what it takes to say where you "
+            "are standing. You cannot change what this device is CALLED, which is the "
+            "name only whoever set this server up can give it."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": (
+                        "Where this device is now, in the words the user used, such "
+                        'as "the kitchen" or "Maya\'s bedroom".'
+                    ),
+                }
+            },
+            "required": ["location"],
+        },
+    )
 
 
 # What a selection answers with, as fixed sentences. No value from a
@@ -869,6 +955,110 @@ async def clear_state(
     if not taken:
         return f"Nothing was written down under {_said(key)}"
     return f"Forgot {_said(key)}"
+
+
+# What moving a device answers with, refusals and confirmation alike.
+#
+# Every one of them is a sentence somebody in a room can act on, and
+# that is the whole of why they are here rather than passed through from
+# the repository. The repository's own sentences are written for an
+# operator at a command line: they name a command to run, a document to
+# edit or a MAC to address, and a person who has just said "you have
+# been moved to the office" can do none of those things. So a refusal is
+# translated rather than forwarded, in the same closed vocabulary the
+# rest of this module answers in, and no value the repository was handed
+# and rejected appears in any of them.
+
+# The call arrived without a place in it.
+LOCATION_NEEDS_A_PLACE = (
+    'set_device_location needs a "location": where this device is now, in the words '
+    "the user used for the place"
+)
+
+# There is no record behind this conversation's device to write to: a
+# board a default agent covers and nobody has bound, or one whose record
+# was deleted while this conversation was happening. Creating one is an
+# operator's act, deliberately (#449): a device record is what an
+# operator's configuration says exists, and a room that could mint one
+# by talking could give this server a device nobody installed.
+NO_DEVICE_RECORD = (
+    "this device has no record on this server, so there is nowhere to write down "
+    "where it is; tell the user that whoever set this server up has to add this "
+    "device before it can be given a place, and carry on"
+)
+
+# This server cannot write device records at all, which is a server
+# composed from a configuration handed to it rather than from a store.
+# Its own sentence rather than the one above, because the two are
+# different facts about the deployment and only one of them is something
+# anybody can fix while it is running.
+PLACEMENT_UNAVAILABLE = (
+    "this server cannot change what is recorded about its devices; tell the user "
+    "that, and carry on with the conversation"
+)
+
+# The value was refused. One sentence for both refusals a location can
+# meet, because they share a remedy and because the repository refuses
+# them with one type: a place that is only whitespace and a place that
+# is a URL carrying a credential are both answered by saying a room out
+# loud, and a model cannot act on the difference. Neither the value nor
+# the repository's reason is repeated.
+LOCATION_NOT_A_PLACE = (
+    "that is not something that can be written down as a place: a location is a room "
+    "or a part of the home, in the words a person would say it. Ask the user where "
+    "this device is and call set_device_location again with what they answer"
+)
+
+# Another writer holds the configuration's lock. The same shape the
+# conversation store's busy answer has, and for the same reason: the
+# call may simply be made again.
+PLACEMENT_BUSY = (
+    "where this device is could not be written down just now, because something else "
+    "is changing this server's configuration; tell the user to ask again in a moment"
+)
+
+# And anything else the repository refused, including a database that
+# would not answer. The model is told the write did not happen and
+# nothing about why, because the why is a stored value or a driver's
+# message.
+PLACEMENT_FAILED = (
+    "where this device is could not be written down; tell the user you could not "
+    "record that"
+)
+
+# What a successful move answers with. The place as the model sent it,
+# on one line, the way the memory confirmations quote what they wrote:
+# what the model does with a result is speak, and a confirmation that
+# named no place would leave it guessing whether its own words landed.
+MOVED = "This device is now recorded as being {location}"
+
+
+async def set_device_location(
+    relocations: "DeviceRelocations | None",
+    device: str | None,
+    arguments: dict[str, object],
+) -> str:
+    """Execute `set_device_location` against the record this
+    conversation attached to.
+
+    The two absences are told apart rather than merged, because they are
+    two different things to say to a room: a server that keeps no
+    writable device records will not gain one while this conversation is
+    happening, and a device with no record is one an operator can add.
+
+    The record id comes from the session for the reason `_device_of`'s
+    MAC does, and the rule is stricter here: a model that could name a
+    device would be relocating somebody else's speaker from this one's
+    microphone.
+    """
+    location = arguments.get("location")
+    if not isinstance(location, str) or not location.strip():
+        raise ValueError(LOCATION_NEEDS_A_PLACE)
+    if relocations is None:
+        raise ValueError(PLACEMENT_UNAVAILABLE)
+    if device is None:
+        raise ValueError(NO_DEVICE_RECORD)
+    return MOVED.format(location=_said(await relocations.relocate(device, location)))
 
 
 def _device_of(context: MemoryContext) -> str:

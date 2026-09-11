@@ -197,6 +197,17 @@ class BuiltinTools:
     `threads` is the search half of the resumption flow, absent in every
     deployment that has not switched resumption on and compared
     `is not None` for that reason.
+
+    `relocations` and `record` are the location tool's two halves, and
+    they are two arguments rather than one bound object because the two
+    absences mean different things to whoever is in the room: a server
+    that cannot write device records at all is one nobody will give a
+    device record to while this conversation is happening, and a device
+    with no record is one an operator can bind. `record` is the id of
+    the record this conversation attached to, fixed for the life of it,
+    which is why it is a value where `context` is a callable: a reply
+    can move a session to another conversation and it can never move it
+    to another device.
     """
 
     def __init__(
@@ -207,6 +218,8 @@ class BuiltinTools:
         context: Callable[[], builtin.MemoryContext],
         remembers: Callable[[], bool],
         threads: ThreadSearch | None = None,
+        relocations: builtin.DeviceRelocations | None = None,
+        record: str | None = None,
     ) -> None:
         self._agents = agents
         self._memory = memory
@@ -214,6 +227,8 @@ class BuiltinTools:
         self._context = context
         self._remembers = remembers
         self._threads = threads
+        self._relocations = relocations
+        self._record = record
 
     def snapshot(self, agent: str) -> Sequence[ToolDef]:
         tools: list[ToolDef] = []
@@ -234,6 +249,12 @@ class BuiltinTools:
             tools.append(builtin.clear_state_tool())
         tools.append(builtin.new_conversation_tool())
         tools.append(builtin.resume_conversation_tool())
+        # And the one that moves the device itself, offered whatever
+        # this server can write, for the reason the two above it are:
+        # an agent with no such tool answers "you have been moved to
+        # the office" with "all right" and changes nothing, which is
+        # worse than a refusal somebody hears.
+        tools.append(builtin.set_device_location_tool())
         return tools
 
     def owns(self, claim: "records.ToolInvocation") -> bool:
@@ -295,6 +316,13 @@ class BuiltinTools:
             return (
                 await builtin.clear_state(
                     self._memory, self._context(), agent, claim.arguments or {}
+                ),
+                False,
+            )
+        if claim.name == names.SET_DEVICE_LOCATION:
+            return (
+                await builtin.set_device_location(
+                    self._relocations, self._record, claim.arguments or {}
                 ),
                 False,
             )
