@@ -47,6 +47,10 @@ if TYPE_CHECKING:
     # more: `generation.py` holds the engines a world was built with, so
     # importing it here would put the provider layer back in the path
     # this deferral exists to keep clear.
+    # And the device record for the same reason again: `config.store`
+    # is where what a stored row means is decided, and it imports a
+    # database driver.
+    from vinga_server.config.store import LiveDevice
     from vinga_server.generation import Generation
     from vinga_server.providers.base import ToolDef
 
@@ -256,7 +260,18 @@ class DeviceOutput(Protocol):
 
 # How one conversation runtime is built for one connection: the device
 # to speak through, the session's observability, the agent names the
-# device is bound to, and the world to build it from.
+# device is bound to, the world to build it from, and the device record
+# the conversation attaches to.
+#
+# The record is the fifth argument for the reason the world is the
+# fourth: it is resolved once, at the connect, in the same snapshot the
+# binding came from, and everything the conversation later reads about
+# its device is addressed by the identity in it. A runtime that looked
+# the record up per round by the MAC it is talking to would be asking
+# "which record stands at this address now", and an operator who
+# deleted and re-bound a board would have moved a conversation to
+# another device's name and place. None is a board with no record to
+# attach to, and a conversation that says nothing about its device.
 #
 # The world is the fourth argument rather than something the factory
 # looks up, and that is the whole of the generational binding (#191): a
@@ -272,5 +287,6 @@ class DeviceOutput(Protocol):
 # This is the seam a second runtime plugs into, and what selection needs
 # to express is decided when there is a second one.
 RuntimeFactory = Callable[
-    [DeviceOutput, SessionEvents, Sequence[str], "Generation"], SessionInput
+    [DeviceOutput, SessionEvents, Sequence[str], "Generation", "LiveDevice | None"],
+    SessionInput,
 ]

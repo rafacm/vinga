@@ -275,26 +275,39 @@ to the model, and the clock that path runs on.
 
 ### What was built
 
-- **A second live read, beside the binding's.**
-  `config/store.py` gains `LiveDevice` (`id`, `name`, `location`) and
-  `read_live_device`, one statement on the read-only, repeatable-read,
-  never-migrated connection the binding is read on, with the same MAC
-  canonicalization and the same normalization of a database failure.
-- **The view answers it.** `device/bindings.py` gains `record_for` and
-  the `resolve_record` that awaits it off the event loop, with the
+- **Two live reads beside the binding's.** `config/store.py` gains
+  `LiveDevice` (`id`, `mac`, `name`, `location`, and the derived
+  `named`), `LiveAttachment`, and the two entry points that answer them:
+  `read_live_attachment`, which a connect asks and which sends the
+  binding's two pinned statements and the record's one in a single
+  repeatable-read transaction, and `read_live_device_by_id`, which a
+  reply asks on every round. Both run on the read-only, never-migrated
+  connection, with the same MAC canonicalization and the same
+  normalization of a database failure the binding read has.
+- **The view answers both.** `device/bindings.py` gains `attachment_for`
+  and its `attach`, and `record_now` and its `resolve_record`, with the
   fallback that module already keeps: a read that fails logs the fixed
   `device_bindings_unreadable` warning and answers from the world being
   served, so a `/data` hiccup mid-conversation does not make an agent
-  stop knowing what it is speaking through.
+  stop knowing what it is speaking through. The fallback keeps the
+  identity rule too: a served world whose record at that MAC carries
+  another id answers nothing.
+- **The record travels with the agents.** The `RuntimeFactory` seam
+  (`device/boundary.py`) takes a fifth argument, the record the
+  conversation attached to, resolved by `device/session.py` in the same
+  snapshot as the binding and never replaced for the life of the
+  conversation.
 - **The assembler carries it.** `runtime/prompt.py` gains
   `device_introduction`, one sentence, and `with_scopes` takes the
   record as a third argument. The sentence joins the device block above
   the notes; there is no second heading, per the plan.
-- **The reply reads it per round.** `runtime/pipeline.py` names a
-  `DeviceRecords` protocol (one method, answering None rather than
-  raising, the shape `resumption.ThreadReads` already uses), holds the
-  view as a collaborator, and reads the record in `_system_prompt` on
-  every round, whether or not memory is read. `app.py` passes the
+- **The reply re-reads it per round, by identity.**
+  `runtime/pipeline.py` names a `DeviceRecords` protocol (one method,
+  answering None rather than raising, the shape
+  `resumption.ThreadReads` already uses), holds the view as a
+  collaborator and the attached record as an address, and re-reads that
+  record in `_system_prompt` on every round, whether or not memory is
+  read. `app.py` passes the
   bindings view it already builds into the runtime factory, so there is
   one engine over the device rows and one place a failed read of them is
   logged.
@@ -305,21 +318,39 @@ The plan's third review finding is the whole of M2: there was no
 metadata path. `_live_binding` selects `agents` and nothing else, and
 `DeviceBindings` resolved names and nothing else.
 
-The read added is a **second statement on the same view** rather than a
-widening of the binding's. The plan says "read in the same snapshot the
-binding is resolved from", and the snapshot that can be shared is the
-view: the same engine, the same isolation, the same fallback, the same
-disposal. The statement cannot be shared, because M1 pinned
-`read_live_binding`'s SQL byte for byte off the cursor, deliberately, so
-that a widened select on the path a board depends on to be served at all
-cannot pass unnoticed. Spending that pin to save a round trip nobody
-makes would have been the wrong trade twice over: the two answers are
-never wanted together, since the binding is resolved once per connection
-by the edge and the record is read once per round by a reply already in
-flight.
+What was added is **one snapshot at the connect and an identity
+afterwards**:
 
-What a round pays is therefore one statement, asserted as one in
-`test_live_device_read.py`, started concurrently with the memory read
+1. The edge asks `attach(mac)` instead of `resolve(mac)`. One
+   transaction sends the binding's two statements, unchanged and
+   unwidened, and one more for the record behind that MAC. The two
+   answers are one question asked at one instant, which is what keeps a
+   conversation's agents and its device record describing the same
+   device.
+2. The record travels to the runtime beside the agents, and the runtime
+   keeps it as an **address**: what a round renders is what the round's
+   own read answers, and the attached copy only says which record that
+   read means.
+3. Every round re-reads **by `id`**, never by MAC. A MAC is where a
+   board is standing; an id is which record it is. The two part company
+   when an operator deletes a device and binds the same board again, and
+   M4 parts them on purpose by moving a MAC onto another record. A
+   conversation whose record is gone is told nothing about its device,
+   which is the honest answer and the one a reply for a board with no
+   record already gets.
+
+The binding's statement is not widened and the record is not folded into
+it, because M1 pinned that SQL byte for byte off the cursor so a widened
+select on the path a board depends on to be served at all cannot pass
+unnoticed. `test_live_device_read.py` asserts the attachment's first two
+statements **are** the pinned constants, imported from the pin module
+rather than copied, and that there are exactly three. The OTA endpoint
+still asks `read_live_binding`, deliberately: a check-in decides whether
+to hand out a token and has no conversation to attach, so the fleet's
+boot dependency keeps the narrowest read there is.
+
+What a round pays is one statement on the primary key, asserted as one
+in `test_live_device_read.py`, started concurrently with the memory read
 rather than after it, so a reply waits for the slower of the two rather
 than for their sum.
 
@@ -446,6 +477,51 @@ Four, each with its reason.
   included, because the fold is for uniqueness rather than for display.
   A value being set inside a sentence is the one place this module
   adjusts what it was handed, and it says so.
+
+### Review round
+
+External review of PR #465 came back mergeable after fixes, with three
+findings. Each is answered by a commit of its own; the two that changed
+behaviour are recorded here.
+
+**The per-round lookup could attach a conversation to another device's
+record.** The read was addressed by the session's MAC and threw the
+stable id away, so a MAC deleted and bound again under a running
+conversation would have handed that conversation the NEW record's name
+and location, and M4's MAC replacement would have done the converse and
+left an active conversation with no record at all. That is precisely the
+failure the stable id was minted to prevent, and the deviation note that
+substituted "the same view" for "the same snapshot" was defensible about
+the engine and the isolation and not about **which row**.
+
+The connect now asks one question: `read_live_attachment` sends the
+binding's two pinned statements and the record's one in a single
+transaction, and the record travels to the runtime beside the agents as
+the address every later read uses. Rounds re-read by `id`. The section
+above says how it is wired; the tests drive the delete-and-re-bind at
+the store, at the view and through a session, and assert the
+conversation in flight is told nothing rather than told the new name,
+while a conversation opening a moment later attaches to the record that
+is there now.
+
+**A lawful operator-chosen name was silently ignored.** Whether a person
+had named a device was inferred at read time by comparing the stored
+name with `default_device_name`, which cannot tell "nobody named this"
+from "somebody named it that": an operator who renamed a board to
+`Device aa:bb:cc:dd:ee:11` got a successful write and no effect on the
+agent.
+
+The underlying finding stood (without something here, every deployment
+the morning after M1's migration has its agents announcing a
+placeholder); the mechanism was wrong. The spelling is now **reserved at
+write time**: a written name in the `Device <mac>` shape is refused with
+a fixed sentence unless it is exactly that device's own default, which
+is what keeps an exported document idempotent when it carries a name
+nobody chose. With the spelling reserved, "equals the default" stops
+being a guess: the only writer that can produce one is this server's own
+minting. The alternative considered and rejected was a persisted
+provenance column, which is more honest still and is a schema change M1
+has already merged past.
 
 ### Verification
 

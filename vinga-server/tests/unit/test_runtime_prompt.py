@@ -35,6 +35,8 @@ def remembered(facts: str) -> PromptMemory:
     return PromptMemory(state="", agent=facts, device="")
 
 
+MAC = "aa:bb:cc:dd:ee:ff"
+
 PERSONAS = ["POET", "", "   ", "  You are a poet.  \n", "line\n\nline"]
 
 FACTS = ["", "- the user is vegetarian", "- one\n- two"]
@@ -488,14 +490,14 @@ def test_the_server_headings_name_the_prefix_and_say_who_is_talking() -> None:
 
 
 def named(name: str = "Kitchen Speaker", location: str | None = None) -> LiveDevice:
-    return LiveDevice(id="0" * 32, name=name, location=location)
+    return LiveDevice(id="0" * 32, mac=MAC, name=name, location=location)
 
 
 def unnamed(location: str | None = None) -> LiveDevice:
     """A board bound and never named: the record carries the default the
     repository minted, and `named` is how it says so."""
     return LiveDevice(
-        id="0" * 32, name="Device aa:bb:cc:dd:ee:ff", location=location, named=False
+        id="0" * 32, mac=MAC, name=f"Device {MAC}", location=location, named=False
     )
 
 

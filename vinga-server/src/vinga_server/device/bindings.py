@@ -74,10 +74,12 @@ from sqlalchemy import Engine
 
 from vinga_server.config.models import default_device_name, normalize_mac
 from vinga_server.config.store import (
+    LiveAttachment,
     LiveBinding,
     LiveDevice,
+    read_live_attachment,
     read_live_binding,
-    read_live_device,
+    read_live_device_by_id,
 )
 from vinga_server.db import read_engine
 from vinga_server.events import ServerEvents
@@ -170,6 +172,29 @@ class DeviceAgents:
 
     def __bool__(self) -> bool:
         return bool(self.agents)
+
+
+@dataclass(frozen=True)
+class Attachment:
+    """What one connect resolved about a device: the agents its binding
+    names, and the record its conversation attaches to.
+
+    Two fields because they answer two questions a connect asks at one
+    instant, and one value because asking them apart is the race this
+    type exists to close: a binding resolved from one snapshot and a
+    record read from the next can describe two different devices.
+
+    `record` is None where the board has no record to attach to, which
+    is a MAC with no row that a default agent stands behind, and where
+    the world being served has never named the device. A conversation
+    that attached to nothing says nothing about its device, for its
+    whole life: what an operator binds or names while it is talking
+    reaches the next conversation rather than this one, which is the
+    rule a live session already keeps about its agents.
+    """
+
+    names: BoundNames
+    record: LiveDevice | None
 
 
 class DeviceBindings:
@@ -273,13 +298,27 @@ class DeviceBindings:
         """
         normalized = normalize_mac(mac)
         stored, authoritative = self._stored(normalized)
+        return self._bound(normalized, stored, authoritative)
+
+    def _bound(
+        self, mac: str, stored: LiveBinding | None, authoritative: bool
+    ) -> BoundNames:
+        """The binding rule, applied to whichever of the two sources
+        answered.
+
+        Here rather than inline because two methods reach it now:
+        `names_for`, which reads two rows, and `attachment_for`, which
+        reads those two and the record in one snapshot. The rule is the
+        bound list else the default agent else nothing, and two copies
+        of it would be a device answered one way by the check-in and
+        another by the connect.
+        """
         if stored is None:
             config = self._generations.current().config
-            # The record's binding and not the record: what this view
-            # answers is which agents a board reaches, and the rest of
-            # what #449 put on a device record is nobody's business
-            # here.
-            record = config.devices.get(normalized)
+            # The record's binding and not the record: what this answers
+            # is which agents a board reaches, and the rest of what #449
+            # put on a device record is `attachment_for`'s business.
+            record = config.devices.get(mac)
             bound = () if record is None else tuple(record.agents)
             default = config.default_agent
         else:
@@ -287,8 +326,43 @@ class DeviceBindings:
         names = tuple(bound) if bound else ((default,) if default is not None else ())
         return BoundNames(names, authoritative)
 
-    async def resolve_record(self, mac: str) -> LiveDevice | None:
-        """`record_for`, awaited off the event loop.
+    async def attach(self, mac: str) -> Attachment:
+        """`attachment_for`, awaited off the event loop.
+
+        What a connect asks instead of `resolve`, and the only reason it
+        is a different question: a conversation needs the record it will
+        speak through for the rest of its life, and that record has to
+        come from the same instant the binding did.
+        """
+        return await asyncio.to_thread(self.attachment_for, mac)
+
+    def attachment_for(self, mac: str) -> Attachment:
+        """Which agents this board may reach and which record its
+        conversation attaches to, from one snapshot.
+
+        One read rather than two, because a record read a moment after
+        a binding can belong to a different device: a MAC deleted and
+        bound again in between is a new record at the same address, and
+        a conversation built from the first answer and attached to the
+        second would be told another board's name and place.
+
+        The same fallback `names_for` keeps, applied to both halves
+        together for the same reason: a world that answers the binding
+        answers the record beside it.
+        """
+        normalized = normalize_mac(mac)
+        stored, answered = self._attached(normalized)
+        if answered and stored is not None:
+            return Attachment(
+                self._bound(normalized, stored.binding, True), stored.device
+            )
+        return Attachment(
+            self._bound(normalized, None, self._engine is None),
+            _snapshot_record(self._generations.current().config, normalized),
+        )
+
+    async def resolve_record(self, attached: LiveDevice) -> LiveDevice | None:
+        """`record_now`, awaited off the event loop.
 
         What the reply path calls, and it calls it on every round: a
         device that was moved between two replies has moved for the
@@ -298,34 +372,39 @@ class DeviceBindings:
         front of every other conversation this process is holding, once
         per round rather than once per connect.
         """
-        return await asyncio.to_thread(self.record_for, mac)
+        return await asyncio.to_thread(self.record_now, attached)
 
-    def record_for(self, mac: str) -> LiveDevice | None:
-        """The record behind this MAC, from the database when it can be
-        read and from the world being served when it cannot.
+    def record_now(self, attached: LiveDevice) -> LiveDevice | None:
+        """The record a conversation attached to, as it stands now.
+
+        Addressed by the identity rather than by the MAC, which is the
+        whole of what the stable id is for: a MAC says where a board is
+        standing, and an operator can delete a device and bind the same
+        board again, or (from M4) move a MAC to another record, under a
+        conversation that is already talking. Re-reading by MAC would
+        hand that conversation whichever record now answers to the
+        address; re-reading by id hands it the record it has been
+        speaking through, or nothing.
+
+        None means that record is gone, and a reply says no more about
+        its device than one that never had a record. The alternative is
+        going on saying something that stopped being true.
 
         The same fallback `names_for` keeps, and for the same reason
         rather than for symmetry: a `/data` hiccup mid-conversation must
         not make an agent stop knowing what it is speaking through. What
-        the served world answers is what boot read, so it is right
-        until somebody writes, and a write it has not heard about is
-        staleness in one round's prompt rather than a device that
-        forgot its own name.
-
-        None means this MAC has no record: no row in the database, or
-        no entry in the world being served. It is not an error and
-        nothing says it out loud; a device bound to nothing but a
-        default agent is exactly that, and the reply is assembled as it
-        was before the record existed.
+        the served world answers is what boot read, so it is right until
+        somebody writes, and a write it has not heard about is staleness
+        in one round's prompt rather than a device that forgot its own
+        name.
         """
-        normalized = normalize_mac(mac)
-        stored, answered = self._stored_record(normalized)
+        stored, answered = self._stored_record(attached)
         if answered:
             return stored
-        return _snapshot_record(self._generations.current().config, normalized)
+        return _snapshot_reread(self._generations.current().config, attached)
 
-    def _stored_record(self, mac: str) -> tuple[LiveDevice | None, bool]:
-        """This device's record as the database holds it, and whether
+    def _stored_record(self, attached: LiveDevice) -> tuple[LiveDevice | None, bool]:
+        """The attached record as the database holds it now, and whether
         the database is what answered.
 
         The second half is the same distinction `_stored` draws and is
@@ -333,16 +412,34 @@ class DeviceBindings:
         different things from it: a binding falls back whenever it has
         no row, since a default agent stands behind every unbound
         device; a record falls back only when nothing was read, since a
-        database that answered "no row" has answered.
+        database that answered "that record is gone" has answered.
+        """
+        if self._engine is None or attached.id is None:
+            return None, False
+        problem: Exception | None = None
+        try:
+            return read_live_device_by_id(self._engine, attached.id), True
+        # Deliberately everything, the reason `_stored` gives: what is
+        # being protected is a conversation in flight, and no failure of
+        # this read is worth ending one over.
+        except Exception as exc:
+            problem = exc
+        self._warn(attached.mac, problem)
+        return None, False
+
+    def _attached(self, mac: str) -> tuple[LiveAttachment | None, bool]:
+        """Both halves as the database holds them, and whether the
+        database is what answered. `_stored`'s shape, with the record
+        beside the binding, and its `except Exception` for the same
+        reason: a conversation is being built, and a device that cannot
+        be read is served from the world this server booted with rather
+        than turned away.
         """
         if self._engine is None:
             return None, False
         problem: Exception | None = None
         try:
-            return read_live_device(self._engine, mac), True
-        # Deliberately everything, the reason `_stored` gives: what is
-        # being protected is a conversation in flight, and no failure of
-        # this read is worth ending one over.
+            return read_live_attachment(self._engine, mac), True
         except Exception as exc:
             problem = exc
         self._warn(mac, problem)
@@ -415,8 +512,8 @@ def _snapshot_record(config: "Config", mac: str) -> LiveDevice | None:
     question no writer has.
 
     `id` travels as it was found, which is None for a configuration
-    composed in Python rather than read from a store. Nothing in a
-    prompt renders it; it is what says these facts belong to a row.
+    composed in Python rather than read from a store: such a world has
+    no identities, and the re-read below addresses what it has.
 
     `named` is decided by the same comparison the stored read makes, so
     a fallback cannot say a board is named when the database would have
@@ -427,10 +524,34 @@ def _snapshot_record(config: "Config", mac: str) -> LiveDevice | None:
         return None
     return LiveDevice(
         id=record.id,
+        mac=mac,
         name=record.name,
         location=record.location,
         named=record.name != default_device_name(mac),
     )
 
 
-__all__ = ["BoundNames", "DeviceAgents", "DeviceBindings"]
+def _snapshot_reread(config: "Config", attached: LiveDevice) -> LiveDevice | None:
+    """The attached record as the world being served holds it now.
+
+    A snapshot is keyed by MAC and cannot be addressed any other way, so
+    this looks the address up and then checks the identity: a world
+    whose record at that MAC carries a different id is a world where
+    this record is gone, and answering with the one standing there now
+    would be the substitution the id-addressed read exists to prevent.
+
+    A world with no identities at all (a configuration composed in
+    Python) has nothing to check, and its MAC is the only address there
+    is. Nothing can be deleted and re-created under such a server
+    without a reload, which is the same event that would replace the
+    world this reads.
+    """
+    record = _snapshot_record(config, attached.mac)
+    if record is None:
+        return None
+    if attached.id is not None and record.id != attached.id:
+        return None
+    return record
+
+
+__all__ = ["Attachment", "BoundNames", "DeviceAgents", "DeviceBindings"]

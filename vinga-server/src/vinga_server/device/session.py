@@ -423,8 +423,13 @@ class DeviceSession:
         # a device bound while this server runs connects on its next
         # attempt; awaited off the event loop, because every other
         # conversation in this process is waiting on it. What comes back
-        # is the raw names.
-        bound = await self._bindings.resolve(mac)
+        # is the raw names and the record this conversation will attach
+        # to, from one snapshot: asking for the record afterwards would
+        # be a second question at a second instant, and a MAC deleted
+        # and bound again in between answers it with another device
+        # (#449).
+        attachment = await self._bindings.attach(mac)
+        bound = attachment.names
         # And here is the pin (#191). One generation, captured on the
         # loop the instant that await returns, and everything that
         # follows is about exactly this object: which of the bound names
@@ -463,7 +468,9 @@ class DeviceSession:
         # Where the first agent used to be activated by hand: the
         # runtime's constructor does that, and the MCP revive after it,
         # in that order, and spawns nothing.
-        self.runtime = self._runtime_factory(self, self._events, agents, generation)
+        self.runtime = self._runtime_factory(
+            self, self._events, agents, generation, attachment.record
+        )
         if self._sessions is not None:
             self._sessions.bound(self, generation)
 

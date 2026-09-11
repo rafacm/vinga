@@ -86,10 +86,15 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   on every round, beside the memory scopes and on the same live view the
   bindings are resolved through, so renaming or relocating a board
   reaches the conversation already happening rather than waiting for the
-  next one. A read that fails falls back to the world being served and
-  says so in the log, which is the rule a binding lookup already kept: a
-  storage hiccup must not make an agent stop knowing what it is speaking
-  through.
+  next one. A conversation attaches to one device record when it
+  connects, in the same snapshot its binding comes from, and every later
+  read is addressed by that record's stable id: deleting a device and
+  binding the same board again mints a new record, and the conversation
+  still talking says nothing about its device rather than taking on the
+  new one's name and place. A read that fails falls back to the world
+  being served and says so in the log, which is the rule a binding
+  lookup already kept: a storage hiccup must not make an agent stop
+  knowing what it is speaking through.
 - **Binding a board creates its record.** `device bind` and a claim by
   activation code both mint an id and take the name `Device <full mac>`,
   so no existing flow gains a mandatory argument and a board onboarded

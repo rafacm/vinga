@@ -77,6 +77,7 @@ def client_with_a_stub(
             events: SessionEvents,
             agents: Sequence[str],
             generation: Generation,
+            device: object = None,
         ) -> SessionInput:
             runtime = StubRuntime(output, events, agents)
             built.append(runtime)
