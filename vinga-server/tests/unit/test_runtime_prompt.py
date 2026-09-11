@@ -13,6 +13,7 @@ indentation), not just over a tidy one.
 
 import pytest
 
+from vinga_server.config.store import LiveDevice
 from vinga_server.memory.store import PromptMemory
 from vinga_server.runtime import prompt
 
@@ -481,3 +482,116 @@ def test_the_server_headings_name_the_prefix_and_say_who_is_talking() -> None:
         # these sit under it, and a heading costs the same budget the
         # surface beside it counts.
         assert len(heading) < len(prompt.guidance_heading("home")) + 10
+
+
+# The device the reply is speaking through, in the block its notes are in
+
+
+def named(name: str = "Kitchen Speaker", location: str | None = None) -> LiveDevice:
+    return LiveDevice(id="0" * 32, name=name, location=location)
+
+
+def test_a_named_device_is_introduced_above_its_notes() -> None:
+    """One block and one heading. The sentence says what this device is,
+    the heading introduces what somebody told it, and the two are a
+    blank line apart because they are two kinds of thing.
+    """
+    assembled = prompt.with_scopes(
+        prompt.know_how("You are the house assistant."),
+        PromptMemory(state="", agent="", device="- the speaker here is the loud one"),
+        named(location="the kitchen"),
+    )
+
+    assert assembled.text == (
+        "You are the house assistant.\n"
+        "\n"
+        "You are speaking through a device called Kitchen Speaker, which is in "
+        "the kitchen.\n"
+        "\n"
+        f"{prompt.DEVICE_HEADING}\n"
+        "- the speaker here is the loud one"
+    )
+    assert [block.provenance for block in assembled.blocks] == ["persona", "device"]
+
+
+def test_a_device_with_nothing_remembered_is_introduced_alone() -> None:
+    """No heading over a heading's worth of nothing: a deployment that
+    has never told a device anything sends the sentence and stops."""
+    assembled = prompt.with_scopes(
+        prompt.know_how("POET"), PromptMemory(state="", agent="", device=""), named()
+    )
+
+    assert assembled.text == (
+        "POET\n\nYou are speaking through a device called Kitchen Speaker."
+    )
+    assert [block.provenance for block in assembled.blocks] == ["persona", "device"]
+
+
+def test_the_whole_device_section_is_counted_under_one_token() -> None:
+    """Two numbers for one device would be an accounting a surface has
+    to explain. `device` is what the device section costs."""
+    assembled = prompt.with_scopes(
+        prompt.know_how("POET"),
+        PromptMemory(state="", agent="", device="- a note"),
+        named(location="the kitchen"),
+    )
+
+    introduction = prompt.device_introduction("Kitchen Speaker", "the kitchen")
+    assert assembled.sizes() == {
+        "persona": len("POET"),
+        "device": len(introduction)
+        + len("\n\n")
+        + len(prompt.DEVICE_HEADING)
+        + len("\n- a note"),
+    }
+    assert assembled.characters == len(assembled.text)
+
+
+def test_a_device_with_no_record_sends_what_it_always_sent() -> None:
+    """The byte-equality case for this change: nothing named, nothing
+    added, and the notes under exactly the heading they were under."""
+    scopes = PromptMemory(state="", agent="", device="- a note")
+
+    assert (
+        prompt.with_scopes(prompt.know_how("POET"), scopes, None).text
+        == prompt.with_scopes(prompt.know_how("POET"), scopes).text
+    )
+
+
+def test_the_device_block_stays_last_of_the_three() -> None:
+    """The introduction does not reorder anything: it joins the block
+    that was already last, so the ledger still outranks the facts and
+    the facts still outrank the place."""
+    assembled = prompt.with_scopes(
+        prompt.know_how("POET"),
+        PromptMemory(state="- scene: the tavern", agent="- a fact", device="- a note"),
+        named(),
+    )
+
+    assert [block.provenance for block in assembled.blocks] == [
+        "persona",
+        "state",
+        "memory",
+        "device",
+    ]
+
+
+def test_a_device_nobody_has_placed_is_not_said_to_be_nowhere() -> None:
+    """An unset location is the ordinary case. "Its location has not
+    been set" is a sentence about the configuration rather than about
+    the world, and a model reading one tends to say it out loud."""
+    for nowhere in (None, "", "   "):
+        introduction = prompt.device_introduction("Kitchen Speaker", nowhere)
+
+        assert introduction == "You are speaking through a device called Kitchen Speaker."
+
+
+def test_the_two_values_are_set_into_the_sentence_trimmed() -> None:
+    """The stored name is exactly what the operator typed, padding
+    included, because the fold is for uniqueness rather than for
+    display. Trimming is the one liberty taken, and only because they
+    are being set inside a sentence."""
+    assert prompt.device_introduction("  Kitchen Speaker \n", "  the kitchen  ") == (
+        "You are speaking through a device called Kitchen Speaker, which is in the "
+        "kitchen."
+    )

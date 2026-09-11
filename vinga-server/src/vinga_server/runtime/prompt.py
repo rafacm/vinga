@@ -19,7 +19,10 @@ already had, read on every round and appended to the cached half,
 because that read predates this module and its per-reply freshness is a
 contract today's code documents: a fact remembered in one session is
 known to a concurrent one on its next reply, and a note written in one
-round is read in the next.
+round is read in the next. What the device IS rides that same per-round
+clock and is read separately from memory: a device moved between two
+replies has moved for the second of them, and an agent that may not
+remember anything still has to know what it is speaking through.
 
 Everything here is a pure function over text. What each caller needs
 beyond the prompt itself is the accounting: which block came from
@@ -42,7 +45,11 @@ what memory holds last, which is where the remembered facts already
 were. Those last blocks are three, in the order they take precedence in
 and under headings that say so: what is currently true in this
 conversation, what the agent remembers about the user, and what is
-known about the device and its household.
+known about the device and its household. The last of the three opens
+with the device itself, the name a person calls it and where it stands,
+above the notes and under no heading of its own: they are facts about
+the one device the notes are about, and a second device section would
+leave the model choosing which to believe.
 
 One entry contributes up to three guidance blocks, and their order is
 the order the trust decisions were taken: what the operator wrote about
@@ -63,6 +70,7 @@ if TYPE_CHECKING:
     # Named for the annotation alone, the trade `tools/source.py` makes
     # for the same reason: saying which value this module renders should
     # not make the assembly import a database driver.
+    from vinga_server.config.store import LiveDevice
     from vinga_server.memory.store import PromptMemory
 
 # The heading the remembered facts are injected under, as the model
@@ -176,6 +184,40 @@ def server_instructions_heading(entry: str) -> str:
 def server_prompt_heading(entry: str) -> str:
     """The same, for one of the prompts that server publishes."""
     return f"Guidance the server behind the {entry}{names.SERVER_SEPARATOR} tools publishes:"
+
+
+def device_introduction(name: str, location: str | None) -> str:
+    """The one sentence that says what the reply is speaking through.
+
+    It sits in the device block above the notes rather than in a block
+    of its own, and that is the whole design decision: a name and a
+    location are facts about the same device the notes are about, and a
+    second heading over them would leave the model choosing which of two
+    device sections to believe.
+
+    It is a sentence rather than a bullet because it is not a
+    remembered thing. The notes under the heading are a list of what
+    somebody told this device; this is what the deployment IS, written
+    the way the persona above it is written, and an agent whose memory
+    is switched off still gets it.
+
+    The location clause is dropped rather than written as unknown. A
+    device nobody has placed is the ordinary case, "its location has not
+    been set" is a sentence about the configuration rather than about
+    the world, and a model reading it tends to say it out loud.
+
+    Both values are the operator's own text (the location is a
+    conversation's too, from #449's tool onward), and both are trimmed
+    at the ends, which is the one liberty taken with them: they are
+    being set inside a sentence, and a name stored with padding would
+    otherwise put a gap in the middle of it. Nothing else is quoted,
+    escaped or bounded here: the name is prompt text the same way an
+    agent's persona is.
+    """
+    called = f"You are speaking through a device called {name.strip()}"
+    if location is None or not location.strip():
+        return f"{called}."
+    return f"{called}, which is in {location.strip()}."
 
 
 @dataclass(frozen=True)
@@ -354,16 +396,19 @@ def _guidance_block(block: GuidanceBlock) -> Block:
     )
 
 
-def with_scopes(half: Assembled, scopes: "PromptMemory") -> Assembled:
-    """The cached know-how half with everything this round's memory
-    holds appended, which is the prompt one round is sent.
+def with_scopes(
+    half: Assembled, scopes: "PromptMemory", device: "LiveDevice | None" = None
+) -> Assembled:
+    """The cached know-how half with everything this round knows about
+    its world appended, which is the prompt one round is sent.
 
     Read per round rather than per activation, so a fact remembered in
-    one session is known to a concurrent one on its next reply, and a
-    note written in one round is read in the next. `scopes` is passed in
-    rather than read here: the read is a database round trip and belongs
-    off the event loop, and this stays a pure function of the text it is
-    handed.
+    one session is known to a concurrent one on its next reply, a note
+    written in one round is read in the next, and a device moved between
+    two replies has moved for the second of them. Both values are passed
+    in rather than read here: each read is a database round trip and
+    belongs off the event loop, and this stays a pure function of what it
+    is handed.
 
     Three blocks in one fixed order, which is also their precedence: what
     this conversation is currently doing, what the agent knows about the
@@ -372,13 +417,21 @@ def with_scopes(half: Assembled, scopes: "PromptMemory") -> Assembled:
     exactly what it sent before there were scopes, byte for byte, and one
     that uses only the ledger gets one block rather than three headings
     over two empty ones.
+
+    `device` is the record behind the MAC this conversation is on, and
+    None where there is no record or no device at all. It joins the
+    third block rather than opening a fourth: the notes there are about
+    the same device, and two device sections would leave the model
+    choosing which one to believe. It is also the one thing here that
+    does not come from memory, which is what lets an agent whose memory
+    is switched off still be told what it is speaking through.
     """
     blocks = [
         block
         for block in (
             _scope_block(STATE, STATE_HEADING, scopes.state),
             _scope_block(MEMORY, MEMORY_HEADING, scopes.agent),
-            _scope_block(DEVICE, DEVICE_HEADING, scopes.device),
+            _device_block(device, scopes.device),
         )
         if block is not None
     ]
@@ -399,6 +452,36 @@ def _scope_block(provenance: str, heading: str, rendered: str) -> Block | None:
     if not rendered:
         return None
     return Block(provenance, f"{heading}\n{rendered}")
+
+
+def _device_block(device: "LiveDevice | None", remembered: str) -> Block | None:
+    """The device's block: what this device is, then what is remembered
+    about it, or nothing at all where neither is known.
+
+    One block under one provenance, so the accounting stays what it
+    says it is: `device` is what the whole device section costs, and a
+    surface reporting it does not have to explain why one device
+    produced two numbers.
+
+    The two halves are separated by a blank line rather than joined,
+    because they are two kinds of thing: the sentence is what the
+    deployment is, the heading and its list are what somebody told it.
+    The heading stays with the notes it introduces, so a deployment that
+    remembers nothing about its devices sends the sentence alone, and a
+    deployment that has not named its devices sends exactly what it sent
+    before the record existed, byte for byte.
+    """
+    parts = [
+        part
+        for part in (
+            None if device is None else device_introduction(device.name, device.location),
+            None if not remembered else f"{DEVICE_HEADING}\n{remembered}",
+        )
+        if part
+    ]
+    if not parts:
+        return None
+    return Block(DEVICE, "\n\n".join(parts))
 
 
 def _assembled(blocks: Sequence[Block]) -> Assembled:
@@ -463,6 +546,7 @@ __all__ = [
     "GuidanceBlock",
     "ServerInstructions",
     "ServerPrompt",
+    "device_introduction",
     "fragment_provenance",
     "guidance_heading",
     "instructions_provenance",
