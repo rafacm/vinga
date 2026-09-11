@@ -278,7 +278,7 @@ restating their fixtures.
   `conversations/views.py`; adds no module and no seam.
 - [x] **[M2: the CLI in front of
   it](2026-09-11-metrics-read-surface-implementation.md#m2-the-cli-in-front-of-it)**
-  (PR TBD). `vinga metric list` and
+  (PR #469). `vinga metric list` and
   `vinga metric show <view>` in `config/cli.py`, held to
   `docs/architecture/cli-guide.md`, a client of the API like every other verb
   and with no local path, because a command that touches the record is a request

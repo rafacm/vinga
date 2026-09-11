@@ -245,7 +245,7 @@ still records #440 as open, which M3 closes.
 
 ## M2: the CLI in front of it
 
-PR TBD.
+PR #469.
 
 ### What landed
 
