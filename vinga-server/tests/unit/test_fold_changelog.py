@@ -498,6 +498,12 @@ def _symlinked_fragment(tmp_path: Path) -> Path:
     return root
 
 
+def _dotted_filename(tmp_path: Path) -> Path:
+    root = repo(tmp_path)
+    fragment(root, f".467-{SENTINEL}.md", "### Added\n\n- **A well formed entry.**\n")
+    return root
+
+
 def _not_a_repository(tmp_path: Path) -> Path:
     root = tmp_path / f"tree-{SENTINEL}"
     (root / "changelog.d").mkdir(parents=True)
@@ -516,6 +522,7 @@ REFUSALS = [
     ("conflict marker", _conflict_marker, "conflict marker"),
     ("shallow history", _shallow_history, "available history"),
     ("bad filename", _bad_filename, "<issue>-<slug>.md"),
+    ("dotted filename", _dotted_filename, "<issue>-<slug>.md"),
     ("symlinked fragment", _symlinked_fragment, "not a regular file"),
     ("git failure", _not_a_repository, "git command failed"),
 ]
@@ -681,6 +688,29 @@ def test_check_passes_a_well_formed_fragment_without_writing(tmp_path: Path) -> 
     assert done.returncode == 0, done.stderr
     assert (root / "CHANGELOG.md").read_text(encoding="utf-8") == before
     assert names(root) == ["467-well-formed.md", "README.md"]
+
+
+def test_check_refuses_a_fragment_whose_name_begins_with_a_dot(
+    tmp_path: Path,
+) -> None:
+    """The silent hole a dotfile exclusion opened.
+
+    A tracked `changelog.d/.467-entry.md` was skipped before its name
+    was ever checked, so `check` reported zero failures on the pull
+    request and the fold afterwards reported nothing to fold and exited
+    green, leaving the claimed entry out of the changelog with no run
+    going red anywhere. That is the dropped entry this whole mechanism
+    exists to prevent, arriving through another door. Only the README
+    is excluded now; everything else in the directory is a fragment and
+    is held to the name.
+    """
+    root = repo(tmp_path)
+    write(root, ".467-hidden.md", "### Added\n\n- **An entry nobody would fold.**\n")
+
+    done = run("check", str(root))
+
+    assert done.returncode == 1
+    assert "<issue>-<slug>.md" in done.stderr
 
 
 def test_check_refuses_a_malformed_fragment(tmp_path: Path) -> None:
