@@ -263,6 +263,10 @@ def open_session(
             providers=ProviderEntries(entries),
             protocol=Whole(1),
             revision=Identifier("abc1234"),
+            # The board this lane drives is bound by MAC and named by
+            # nobody, which is the state every deployment's boards are
+            # in until an operator runs `device rename`.
+            device_name=None,
             mac=DeviceId(device),
             said_client=ClientId("a-device-uuid"),
             bound_tail=AlsoBoundTo.of(()),

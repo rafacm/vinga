@@ -111,9 +111,11 @@ KIND_MEANING: dict[Kind, str] = {
         "named syntax rather than to a generic length."
     ),
     Kind.DESCRIPTOR: (
-        "A far-side string retained deliberately: what a device says about "
-        "itself at check-in, bounded and stripped of unprintables at its "
-        "decision site and bounded again at emit."
+        "A string whose shape nothing here chose, bounded and stripped of "
+        "unprintables at its decision site and bounded again at emit: what a "
+        "device says about itself at check-in, and the free-form name an "
+        "operator gives a device. The kind is the guarantee the surface "
+        "needs, not a claim about who wrote the value."
     ),
     Kind.INT: "A whole number. Booleans are refused, since `True` is an `int` to Python.",
     Kind.FLOAT: (

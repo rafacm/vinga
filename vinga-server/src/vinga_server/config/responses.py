@@ -1579,6 +1579,15 @@ class SessionDetail(BaseModel):
     device: str | None = Field(
         description="The device's MAC in canonical form, or null when none was understood."
     )
+    device_name: str | None = Field(
+        description=(
+            "What that device was called when this session opened, or null where no "
+            "name is recorded for it: a board nobody has named, a MAC a default agent "
+            "covers with no record behind it, and every session that opened before "
+            "the column existed. Dated rather than current: renaming the device or "
+            "replacing its board does not change what a recorded session says."
+        )
+    )
     client: str | None = Field(
         description="The client identifier the device announced, when it announced one."
     )

@@ -373,6 +373,7 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                 "client",
                 "conversation",
                 "device",
+                "device_name",
                 "event",
                 "protocol",
                 "providers",

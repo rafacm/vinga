@@ -63,6 +63,7 @@ from vinga_server.build_info import revision
 from vinga_server.capture import CAPTURE_RATE, CaptureStore, DeviceFacts
 from vinga_server.config.models import (
     CLIENT_ID_LIMIT,
+    DEVICE_NAME_LIMIT,
     ServerConfig,
     bounded_descriptor,
     normalize_mac,
@@ -102,6 +103,7 @@ from vinga_server.events.values import (
     ConversationId,
     Count,
     DeviceId,
+    DeviceName,
     Identifier,
     Real,
     Whole,
@@ -524,6 +526,14 @@ class DeviceSession:
             # sentence, since dropping a field would not un-render an
             # argument.
             said_client = bounded_descriptor(client_id, CLIENT_ID_LIMIT)
+            # And the operator's name for this board, bounded the same
+            # way and for the same reason: a device name is trusted and
+            # unshaped, so a newline in one would split a retained line
+            # in two. The conversation store's row beside it keeps the
+            # name as it was written, exactly as it keeps the client id
+            # header (#449).
+            named = self._device_name()
+            said_name = bounded_descriptor(named, DEVICE_NAME_LIMIT) if named else ""
             self._events.emit(
                 lambda: SessionOpen(
                     client=ClientId(said_client) if said_client else None,
@@ -541,6 +551,7 @@ class DeviceSession:
                     # here on is attributable to a build, not only the
                     # ones somebody thought to investigate.
                     revision=Identifier(revision()),
+                    device_name=DeviceName(said_name) if said_name else None,
                     mac=DeviceId(mac),
                     said_client=ClientId(said_client or "unknown"),
                     bound_tail=AlsoBoundTo.of(tuple(self._agents[1:])),
