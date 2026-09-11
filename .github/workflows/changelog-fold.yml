@@ -1,0 +1,91 @@
+name: changelog fold
+
+# The serialized half of the fragment mechanism. A branch adds
+# changelog.d/<issue>-<slug>.md and never touches CHANGELOG.md; this
+# folds the fragments into the dated section once the change is on
+# main, which is the branch nobody else writes to and therefore the
+# only place a shared file can be appended to safely.
+#
+# A workflow rather than a documented manual step, deliberately: the
+# failure being removed is silent loss that survived five merges, two
+# review rounds and a PR description, so the remedy must not depend on
+# whoever merges remembering a step. Deleting this file reverts the
+# repository to folding by hand with the same script; nothing else
+# depends on the automation.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "changelog.d/**"
+
+# Serialized without cancellation: two merges landing close together
+# must both be folded, and a queued run that finds nothing left to
+# fold exits green without committing. Cancelling the first would drop
+# its fold on the floor, which is the failure this whole mechanism
+# exists to remove.
+concurrency:
+  group: changelog-fold
+  cancel-in-progress: false
+
+# The only write this workflow needs, and nothing else.
+permissions:
+  contents: write
+
+jobs:
+  fold:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # main rather than the triggering SHA: a serialized run folds
+          # whatever is currently unfolded, which is what makes a
+          # queued second run correct instead of a race.
+          ref: main
+          # Full history, and the fold depends on it. The section date
+          # is the committer date of the commit that introduced each
+          # fragment along first-parent history, a queued fold can meet
+          # fragments introduced several commits before current main,
+          # and actions/checkout's depth-one default cannot date those.
+          # The script does not trust this to have been set: a fragment
+          # whose introduction commit is not in the available history
+          # is a refusal, never a silent substitution of today's date.
+          fetch-depth: 0
+
+      - name: Fold the fragments
+        run: python3 scripts/fold_changelog.py fold .
+
+      # The commit mechanics are fixed here rather than left to the
+      # runner. A fresh runner has no git identity, and nothing but
+      # this step confines what the bot commit can carry.
+      - name: Commit and push the fold
+        run: |
+          set -euo pipefail
+
+          # Anything dirty outside the two paths the fold is allowed to
+          # write is a fault to surface, not something to sweep into a
+          # bot commit. Hence this check, and hence `git add` naming
+          # both paths rather than `git add -A`.
+          if [ -n "$(git status --porcelain -- . ':(exclude)CHANGELOG.md' ':(exclude)changelog.d')" ]; then
+            echo "the fold left changes outside CHANGELOG.md and changelog.d"
+            exit 1
+          fi
+
+          if [ -z "$(git status --porcelain -- CHANGELOG.md changelog.d)" ]; then
+            echo "nothing to fold"
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add CHANGELOG.md changelog.d
+          git commit -m 'Fold the changelog fragments into their sections'
+
+          # A push made with the default GITHUB_TOKEN triggers no
+          # further workflow runs, so this cannot loop, and equally the
+          # fold commit itself gets no CI run. That is why the script
+          # validates the file it produces before writing a byte and is
+          # unit-tested: the commit is kept trivially verifiable by
+          # construction, and the next pull request's docs run sweeps
+          # the file again.
+          git push origin HEAD:main
