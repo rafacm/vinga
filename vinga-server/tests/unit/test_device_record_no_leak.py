@@ -43,6 +43,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.support.checkin import SYSTEM_INFO
+from tests.support.config_cli import chain
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID
 from tests.support.events import both_formats
 from tests.support.wire import connect, say_something, shake_hands
@@ -60,6 +61,9 @@ from vinga_server.ota import OTA_PATH
 # paste and an agent's worst transcription look like.
 NAME = "sk-name-3f9c21ab-never-a-real-credential"
 LOCATION = "sk-place-7d0e54bc-never-a-real-credential"
+
+# A second board, for the refusals that need one to collide with.
+OTHER_MAC = "11:22:33:44:55:66"
 
 MOCK_PROVIDERS = {
     "llm": {"mock": {"type": "mock", "reply": "heard you"}},
@@ -193,40 +197,83 @@ def store(monkeypatch: pytest.MonkeyPatch) -> Iterator[ConfigStore]:
         engine.dispose()
 
 
-def test_a_refused_name_is_not_in_the_refusal_or_its_chain(
-    store: ConfigStore, caplog: pytest.LogCaptureFixture
+# What each half's rejected value is submitted to, and what refuses it.
+#
+# One table rather than a case per path, because the claim is the same
+# claim for both trust classes and the review found it asserted at two
+# different depths: the name's walked the exception chain and the
+# location's read the sentence, so a future refusal carrying the
+# rejected location behind it would have left that one green.
+#
+# Every sentinel here is a value a substring hunt can find. A refusal
+# about a BLANK value is covered in `test_device_record.py` instead: the
+# empty string is in every sentence ever written, so hunting for it
+# would assert nothing.
+CREDENTIAL_NAME = "https://user:pw-name-1d73ae05-never-real@example.invalid/desk"
+
+CREDENTIAL_LOCATION = "https://example.invalid/room?api_key=pw-pl-60b2cd94-never-real"
+
+
+def _taken_name(store: ConfigStore) -> None:
+    store.rename_device(DEVICE_MAC, NAME)
+    store.bind_device(OTHER_MAC, ["sam"])
+    store.rename_device(OTHER_MAC, NAME.upper())
+
+
+REJECTIONS = (
+    # A name another board already answers to, folded. Both spellings
+    # are hunted for, since the refusal is about the pair and naming
+    # one of them would read as a claim about which was at fault.
+    pytest.param(_taken_name, (NAME, NAME.upper()), id="a-name-another-board-holds"),
+    # A name that is a URL carrying a credential, which is the shape a
+    # paste one argument early really has.
+    pytest.param(
+        lambda store: store.rename_device(DEVICE_MAC, CREDENTIAL_NAME),
+        (CREDENTIAL_NAME,),
+        id="a-name-carrying-a-credential",
+    ),
+    # A location submitted for a board with no record at all, which is
+    # the refusal a relocation meets first.
+    pytest.param(
+        lambda store: store.relocate_device(OTHER_MAC, LOCATION),
+        (LOCATION,),
+        id="a-location-with-no-record",
+    ),
+    # And a location that is a URL carrying a credential, which for this
+    # field is a sentence somebody said out loud into a microphone.
+    pytest.param(
+        lambda store: store.relocate_device(DEVICE_MAC, CREDENTIAL_LOCATION),
+        (CREDENTIAL_LOCATION,),
+        id="a-location-carrying-a-credential",
+    ),
+)
+
+
+@pytest.mark.parametrize(("reject", "submitted"), REJECTIONS)
+def test_a_rejected_value_is_in_neither_the_refusal_nor_its_chain(
+    store: ConfigStore,
+    caplog: pytest.LogCaptureFixture,
+    reject,
+    submitted: tuple[str, ...],
 ) -> None:
     """A value a write REJECTED is the one most likely to be a pasted
-    credential typed one argument early, so it is the one a refusal must
-    not carry, on the message and on the exception chain alike."""
+    credential typed one argument early, or a sentence a person said out
+    loud, so it is the one a refusal must not carry.
+
+    Through `chain`, which is the renderer the CLI suites already hunt
+    sentinels with: it walks `__cause__` and `__context__`, and renders
+    each exception's `repr`, its `str`, its arguments and what its own
+    attributes hold. A refusal raised inside a handler keeps the
+    exception it was handling, and a validation error holds the whole
+    rejected fragment, so the sentence alone was never the surface.
+    """
     store.set_agent("sam", {"prompt": "You are Sam."})
     store.bind_device(DEVICE_MAC, ["sam"])
-    store.bind_device("11:22:33:44:55:66", ["sam"])
-    store.rename_device(DEVICE_MAC, NAME)
 
     with caplog.at_level(logging.DEBUG), pytest.raises(Exception) as caught:  # noqa: PT011
-        store.rename_device("11:22:33:44:55:66", NAME.upper())
+        reject(store)
 
-    chain: list[BaseException] = []
-    current: BaseException | None = caught.value
-    while current is not None and current not in chain:
-        chain.append(current)
-        current = current.__cause__ or current.__context__
-    rendered = "\n".join(f"{one!r}\n{one}" for one in chain)
-    assert NAME not in rendered
-    assert NAME.upper() not in rendered
-    assert NAME not in both_formats(caplog)
-
-
-def test_a_rejected_location_is_not_in_the_refusal_either(
-    store: ConfigStore, caplog: pytest.LogCaptureFixture
-) -> None:
-    """The conversation-derived half, on the path that rejects it: a
-    relocation of a board with no record at all."""
-    store.set_agent("sam", {"prompt": "You are Sam."})
-
-    with caplog.at_level(logging.DEBUG), pytest.raises(Exception) as caught:  # noqa: PT011
-        store.relocate_device(DEVICE_MAC, LOCATION)
-
-    assert LOCATION not in str(caught.value)
-    assert LOCATION not in both_formats(caplog)
+    rendered = chain(caught.value)
+    for value in submitted:
+        assert value not in rendered
+        assert value not in both_formats(caplog)
