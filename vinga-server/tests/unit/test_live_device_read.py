@@ -173,13 +173,11 @@ def test_the_record_reads_back_by_the_identity_it_attached_to(
     store.rename_device(MAC, "Kitchen Speaker")
     store.relocate_device(MAC, "the kitchen")
 
-    assert read_live_device_by_id(lookup, record.id or "") == LiveDevice(
-        id=record.id,
-        mac=MAC,
-        name="Kitchen Speaker",
-        location="the kitchen",
-        named=True,
+    answered = read_live_device_by_id(lookup, record.id or "")
+    assert answered == LiveDevice(
+        id=record.id, mac=MAC, name="Kitchen Speaker", location="the kitchen"
     )
+    assert answered is not None and answered.named is True
 
 
 def test_a_cleared_location_reads_back_as_nowhere_in_particular(
@@ -243,6 +241,44 @@ def test_a_name_that_names_nothing_is_answered_as_no_record(
 
     assert read_live_device_by_id(lookup, record.id or "") is None
     assert read_live_attachment(lookup, MAC).device is None
+
+
+# Whether a person has named the board, which the read classifies
+
+
+def test_a_board_nobody_has_named_says_so(store: ConfigStore, lookup: Engine) -> None:
+    """Binding mints `Device <mac>` so that no onboarding flow has to
+    ask for a name the operator does not yet have, and the spelling is
+    refused to every other writer, so a name in that shape is a
+    placeholder rather than a name. Whoever decides whether to say a
+    name out loud reads this rather than re-deriving the rule."""
+    bound(store)
+
+    record = attached(lookup)
+
+    assert record.name == f"Device {MAC}" and record.named is False
+
+
+def test_a_named_board_says_so_too(store: ConfigStore, lookup: Engine) -> None:
+    bound(store)
+
+    store.rename_device(MAC, "Kitchen Speaker")
+
+    assert attached(lookup).named is True
+
+
+def test_a_board_named_back_to_its_own_default_is_unnamed_again(
+    store: ConfigStore, lookup: Engine
+) -> None:
+    """The one write that can put the reserved spelling on a row after
+    the mint, and it means what it says: the operator took the name back
+    off the board."""
+    bound(store)
+    store.rename_device(MAC, "Kitchen Speaker")
+
+    store.rename_device(MAC, f"Device {MAC}")
+
+    assert attached(lookup).named is False
 
 
 # The address a conversation must not be re-read by

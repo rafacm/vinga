@@ -72,7 +72,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import Engine
 
-from vinga_server.config.models import default_device_name, normalize_mac
+from vinga_server.config.models import normalize_mac
 from vinga_server.config.store import (
     LiveAttachment,
     LiveBinding,
@@ -515,19 +515,15 @@ def _snapshot_record(config: "Config", mac: str) -> LiveDevice | None:
     composed in Python rather than read from a store: such a world has
     no identities, and the re-read below addresses what it has.
 
-    `named` is decided by the same comparison the stored read makes, so
-    a fallback cannot say a board is named when the database would have
-    said it is still carrying the default.
+    `named` needs no deciding here: the value computes it from the name
+    it carries, so a fallback cannot say a board is named when the
+    database would have said it is still carrying the default.
     """
     record = config.devices.get(mac)
     if record is None or record.name is None:
         return None
     return LiveDevice(
-        id=record.id,
-        mac=mac,
-        name=record.name,
-        location=record.location,
-        named=record.name != default_device_name(mac),
+        id=record.id, mac=mac, name=record.name, location=record.location
     )
 
 

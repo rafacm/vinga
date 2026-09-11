@@ -540,7 +540,11 @@ untrue.
 
 `vinga device rename <mac> <name>` gives a board the name the agent says out
 loud about it. Free-form, because a slug reads badly in speech, and unique
-across the deployment once case and whitespace are folded together.
+across the deployment once case and whitespace are folded together. The
+`Device <mac>` spelling is reserved for the board whose MAC it is: an agent is
+told which device it is speaking through, so a name in that shape means nobody
+has named this board and the agent says nothing about it rather than reading a
+MAC address out loud.
 
 `vinga device relocate <mac> <location>` says where a board stands and `vinga
 device clear-location <mac>` unsets it. Free text and not unique: two devices

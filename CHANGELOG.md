@@ -28,8 +28,11 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   reads badly in speech, and unique across the deployment once case and
   whitespace are folded together, so `Kitchen Speaker` and
   `kitchen  speaker` are one name while the stored value stays exactly
-  what was typed. Refused with a sentence naming the remedy, never with a
-  database error, and quoting neither name.
+  what was typed. The `Device <mac>` spelling is reserved for the board
+  whose MAC it is, because that is what the server calls a board nobody
+  has named: taking it for another device is refused with a sentence
+  saying so. Refusals name the remedy, never come from a database error,
+  and quote neither name.
 - **`vinga-server config device relocate <mac> <location>`** and
   **`vinga-server config device clear-location <mac>`**, which say where a
   board stands and unset it. Free text and not unique: two devices in one
@@ -44,7 +47,7 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   device, and a second device section would leave the model choosing
   which one to believe. An agent whose `memory` section is switched off
   is told them too, because what a device is called is not a remembered
-  thing. A board still carrying the `Device <mac>` default is not
+  thing. A board still carrying the reserved `Device <mac>` name is not
   introduced by it, so an agent never reads a MAC address aloud when
   somebody asks which speaker it is, and a deployment that has neither
   named nor placed a device sends the prompts it sent before this
