@@ -8,30 +8,45 @@ two free-text fields as one trust class. They are two:
 - `location` is conversation-derived, because from M3 the agent writes
   it from something a person said out loud.
 
-The maintainer's decision, taken after probing what the
-content-and-telemetry contract actually forbids, is that NEITHER
-reaches a structured event, a capture manifest or a span. Events and
-the manifest keep the MAC, which is a trusted identifier, exactly as
-before. `location` cannot go there because the observability map's
+The two halves of that finding settled on different timescales, and M5
+is where they part company.
+
+**`location` is settled forever.** It reaches no structured event, no
+span and no capture file, because the observability map's
 structured-events row is metadata only and a spoken string on a dated
 event row would sit on the telemetry surface with telemetry retention
 and no per-conversation erasure, unrewritten by any later correction.
-`name` could, since far-side descriptors like `board` and `version`
-already reach `session_open` through a bound, and it does not: the MAC
-already identifies the device, so a name on every session row would
-give one fact a second home and let it go stale after a rename.
+Nothing in this milestone or any later one moves it, and the first test
+below is that claim over every surface at once.
 
-So nothing is sanitized here, and the tests assert ABSENCE rather than
-a bound. A device is configured with a credential-shaped name and a
-credential-shaped location, a session is driven through it, and neither
-sentinel appears in any event payload, in either log format, in the
-capture manifest, or in a refusal sentence.
+**`name` was settled for M1 to M4 only**, and M5 revised it, which the
+implementation doc's M2 section says to expect. The argument that kept
+it off the events was that the MAC already identifies a device, so a
+copy would be a second home for one fact. What M5 found is a reader for
+whom that is false: `deploy/postgres-init.sql` grants `vinga_ro` USAGE
+and SELECT on `record` and explicitly REVOKES both on `domain`, so an
+analyst, or a dashboard reading as that role, can never resolve a MAC
+to a name. The name is now on `session_open` and on
+`record.sessions.device_name`, bounded at its decision site the way
+`board` and the client id beside it are, and dated: nothing rewrites
+either, so a rename splits a series rather than retitling what is
+already recorded.
 
-M5 is where a device NAME reaches the recorded sessions, on the
-`record` chain and for an analyst who can never join to `domain`. That
-is a different surface with a different retention, and it does not
-weaken anything here: the assertions below are about the events, the
-logs and the capture.
+Nothing was weakened to do it. The rule that decides both halves is
+unchanged, and it is about provenance: `name` is what an operator
+wrote, `location` from M3 is what a person said out loud. The second
+test below is what keeps the revision narrow, asserting that the name
+is on `session_open` and on no other record, and
+`test_the_manifest_says_which_board_and_not_what_it_is_called` is what
+keeps the capture manifest out of it: a capture is a file on the
+operator's own disk with the domain store an SQL statement away, so it
+needs no copy of a name. Its decision track is the exception that
+proves the rule, and it is not an exception at all: that file is the
+events, so it carries what the events carry.
+
+The refusal cases at the foot of the file are untouched by any of this.
+A value a write REJECTED is nowhere on either side, whichever field it
+was submitted to.
 """
 
 import json
@@ -45,7 +60,7 @@ from fastapi.testclient import TestClient
 from tests.support.checkin import SYSTEM_INFO
 from tests.support.config_cli import chain
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID
-from tests.support.events import both_formats
+from tests.support.events import both_formats, fields_of
 from tests.support.wire import connect, say_something, shake_hands
 from vinga_server.app import create_app
 from vinga_server.config import Config
@@ -128,38 +143,85 @@ def _manifest(tmp_path: Path) -> str:
     )
 
 
-def test_a_driven_session_puts_neither_field_on_any_retained_surface(
+def _capture(tmp_path: Path) -> str:
+    """The manifest and the decision track together: the two text files
+    a capture leaves behind, the audio being the third and carrying no
+    field at all."""
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((tmp_path / "captures").iterdir())
+        if path.suffix in {".json", ".jsonl"}
+    )
+
+
+def _drive(client: TestClient) -> None:
+    """A check-in, a handshake and a turn, which is every surface this
+    file is about in one pass."""
+    checked_in = client.post(
+        OTA_PATH,
+        json=SYSTEM_INFO,
+        headers={"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID},
+    )
+    assert checked_in.status_code == 200
+    assert NAME not in checked_in.text and LOCATION not in checked_in.text
+    with connect(client) as websocket:
+        shake_hands(websocket)
+        spoken, _ = say_something(websocket)
+    assert spoken, "the turn did not happen, so nothing was asserted about it"
+
+
+def test_a_driven_session_puts_no_location_on_any_retained_surface(
     tmp_path: Path, tap: Tap, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The whole claim in one drive, because the claim is about the
-    surface rather than about one record of it: a check-in, a handshake
-    and a turn, with the sentinels asserted absent from the events the
-    tap saw, from both shipped log formats, and from the capture the
-    session wrote."""
-    with caplog.at_level(logging.DEBUG), TestClient(create_app(_config(tmp_path))) as client:
-        checked_in = client.post(
-            OTA_PATH,
-            json=SYSTEM_INFO,
-            headers={"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID},
-        )
-        assert checked_in.status_code == 200
-        with connect(client) as websocket:
-            shake_hands(websocket)
-            spoken, _ = say_something(websocket)
+    """The permanent half, over the whole surface rather than over one
+    record of it: the events the tap saw, both shipped log formats, and
+    every file the capture wrote, manifest and decision track alike.
 
-    assert spoken, "the turn did not happen, so nothing was asserted about it"
-    for sentinel in (NAME, LOCATION):
-        assert sentinel not in tap.rendered()
-        assert sentinel not in both_formats(caplog)
-        assert sentinel not in _manifest(tmp_path)
-        assert sentinel not in checked_in.text
+    Absence, not sanitization. Nothing takes a location to any of these,
+    so there is nothing to clean on the way.
+    """
+    with caplog.at_level(logging.DEBUG), TestClient(create_app(_config(tmp_path))) as client:
+        _drive(client)
+
+    assert LOCATION not in tap.rendered()
+    assert LOCATION not in both_formats(caplog)
+    assert LOCATION not in _capture(tmp_path)
 
     # The control beside the absences: the device IS identified on those
     # surfaces, by the MAC, which is a trusted identifier and stays
-    # exactly as it was. Without this the four assertions above would
-    # pass on a run that recorded nothing at all.
+    # exactly as it was. Without this they would pass on a run that
+    # recorded nothing at all.
     assert DEVICE_MAC.lower() in _manifest(tmp_path)
     assert DEVICE_MAC.lower() in tap.rendered()
+
+
+def test_the_name_is_on_session_open_and_on_no_other_record(
+    tmp_path: Path, tap: Tap, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The half M5 revised, pinned as the narrow thing it is.
+
+    One event carries the name, and it is the one an analyst and a log
+    reader both start from. Every other record of the same run carries
+    the MAC and not the name, which is what keeps this a second home for
+    one fact rather than a habit.
+    """
+    with caplog.at_level(logging.DEBUG), TestClient(create_app(_config(tmp_path))) as client:
+        _drive(client)
+
+    every = [fields_of(record) for record in caplog.records]
+    assert every, "nothing was logged, so nothing was checked"
+    carrying = {
+        str(fields.get("event"))
+        for fields in every
+        if any(isinstance(held, str) and NAME in held for held in fields.values())
+    }
+    assert carrying == {"session_open"}
+    # More than one event was written, so the set above is a selection
+    # rather than the whole of what the run produced.
+    assert {str(fields.get("event")) for fields in every} > carrying
+    # And nothing before a session: the check-in identifies the same
+    # board and has no conversation to name it for.
+    assert NAME not in tap.rendered()
 
 
 def test_the_manifest_says_which_board_and_not_what_it_is_called(
