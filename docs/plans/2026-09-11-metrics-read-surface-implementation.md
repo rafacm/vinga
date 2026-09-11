@@ -183,7 +183,7 @@ caller's.
 ### Verification
 
 - `uv run ruff check .` and `uv run mypy` clean; `uv run pytest
-  tests/unit -q -n 4 --dist loadfile` 6232 passed, 19 skipped; `uv run
+  tests/unit -q -n 4 --dist loadfile` 6237 passed, 19 skipped; `uv run
   pytest tests/integration -q` 282 passed. The lane runs `-n 4` rather
   than `-n auto` on this machine, which exceeds the compose Postgres's
   connection limit.
@@ -217,9 +217,11 @@ adopted.
   a spy that fails, so a refusal that opened anything would answer 500
   and be caught; it was written first and run against the unfixed code,
   where it failed on the unknown view answering 500.
-  The defect and the weak test were one mistake made twice: the
-  assertion in this document came first and the test was written to
-  agree with it rather than to try to break it.
+
+  The defect and the weak test are the same mistake in two places: the
+  assertion in this document came first, and the case was written to
+  agree with it rather than to try to break it. What a claim about a
+  property is worth is whatever would have caught it being false.
 
 - **P2: a valid but early `until` crashed the default-window
   calculation.** `0001-01-01` is a well-formed UTC day and passes the
