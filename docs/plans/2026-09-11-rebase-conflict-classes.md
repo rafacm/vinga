@@ -327,3 +327,74 @@ named where the rule is stated.
   `.claude/skills/implement-issue/SKILL.md`; its own changelog
   entry is the first fragment. Both workflows run (server paths via
   the census test change, docs paths via the workflow edits).
+
+## Plan review round
+
+External review: codex CLI 0.154.0, model gpt-5.6-sol, read-only
+sandbox, 2026-09-11, runtime 4m02s, reviewing commit cdb51bcd.
+Verdict as received: **ready after the P1/P2 amendments**. Findings
+condensed but faithful; resolutions appended per amendment.
+
+1. **P1: The fold workflow lacks the git history required to derive
+   fragment dates.** The workflow says only "checkout `main`";
+   existing workflows use actions/checkout's shallow default, and a
+   queued fold can meet fragments introduced several commits before
+   current `main`, which a depth-one checkout cannot date. The
+   temporary-repository test would still pass. Require full history,
+   test the insufficient-history failure, and refuse fixed-message
+   rather than silently substituting the workflow date.
+
+2. **P1: A global heading-order post-condition is incompatible with
+   the preserved changelog.** Existing history is not canonical:
+   2026-09-10 orders Fixed before Changed, and 2026-09-06 carries two
+   Added headings. A global check must reject the repository or
+   rewrite settled history. Parse legacy sections permissively and
+   keep them byte-identical; normalize and check only sections the
+   fold touches; add a fixture with the repository's own legacy
+   shapes.
+
+3. **P1: The new public-CI parser has no no-leak contract.**
+   `check_doc_links.py` treats repository text as untrusted CI-log
+   input with fixed diagnostics and a planted-sentinel suite; the
+   fold script's inputs (fragment bodies, filenames, git failures,
+   changelog content) get neither, and symlink or non-regular
+   fragment paths are not rejected before reading. Require a fixed
+   error vocabulary that reproduces none of them, symlink rejection,
+   argument-list subprocesses with captured git diagnostics, and
+   credential-sentinel assertions over both streams for every
+   refusal family.
+
+4. **P2: The PR refusal escape hatch is not operationally complete
+   or tested.** `docs.yml` uses the default `pull_request` activity
+   types, so editing the body to add the advertised phrase starts no
+   new check; the Risks section claims a test pins the phrase but
+   the Tests section names none; and a git-based diff needs history
+   the checkout does not supply. Specify the diff source and its
+   requirements, test forbidden, allowed and null-body cases, and
+   make body edits regenerate the check.
+
+5. **P2: "Merge order" does not totally order fragments introduced
+   by one commit.** Git trees encode no order between files sharing
+   an introduction commit. Define introduction-commit order with a
+   deterministic filename tie-breaker and test both cases.
+
+6. **P2: The manifest's claimed reviewability exceeds what a
+   distinct-set artifact provides.** Removing or reclassifying one
+   occurrence produces no diff when another occurrence retains the
+   old pair, and a new classification produces none when the pair
+   already exists elsewhere. State that only pair-set membership
+   changes remain reviewable, accept the invisible cases explicitly,
+   and add a test demonstrating the lossy case.
+
+7. **P2: The bot-commit workflow omits required commit and
+   write-scope mechanics.** A fresh runner needs a git author, and
+   nothing enforces the claimed path confinement. Name the fixed bot
+   identity, stage only `CHANGELOG.md` and the validated fragment
+   deletions, assert nothing else is dirty, and never use an
+   unrestricted `git add -A`.
+
+8. **P3: The promised post-merge verification record requires an
+   unnamed follow-up change.** The first live fold cannot run until
+   M2 merges, yet the implementation section and the milestone tick
+   land together. Name the post-merge documentation update, who
+   performs it, and how M2's record carries it.
