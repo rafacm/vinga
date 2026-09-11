@@ -383,7 +383,7 @@ named where the rule is stated.
 
 - [x] **[M1: the manifest stops recording
   positions](2026-09-11-rebase-conflict-classes-implementation.md#m1-the-manifest-stops-recording-positions)**
-  (PR TBD). The rendering
+  (PR #475). The rendering
   aggregates to sorted distinct `class  invocation` pairs;
   regenerated manifest committed in the same change; module
   docstring and `MANIFEST_HEADER` updated; new aggregation cases;
