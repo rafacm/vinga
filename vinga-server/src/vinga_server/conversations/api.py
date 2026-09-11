@@ -112,7 +112,11 @@ from vinga_server.config.loader import (
     StorageError,
     UnknownEntityError,
 )
-from vinga_server.config.models import DatabaseConfig, normalize_mac
+from vinga_server.config.models import (
+    DatabaseConfig,
+    normalize_mac,
+    without_url_credential,
+)
 from vinga_server.config.responses import (
     GROUPINGS,
     CloseReason,
@@ -777,6 +781,15 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         # The stored column kept its original name when the switch
         # became `telemetry` (#437); the API speaks the switch's name.
         row["telemetry"] = row.pop("metrics")
+        # The dated name column keeps what the operator wrote, and the
+        # answer over it strips a URL credential the way every stored
+        # string a read hands back is stripped (#381,
+        # `views.device_body`, which strips the very record this column
+        # was copied from): the write path refuses such a name, and
+        # this is what keeps one that arrived around that rule out of
+        # an HTTP body.
+        if row["device_name"] is not None:
+            row["device_name"] = without_url_credential(row["device_name"])
         return row | {
             "turns": _count(reader, turns, session),
             "events": _count(reader, events, session),

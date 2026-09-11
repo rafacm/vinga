@@ -57,10 +57,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.conftest import TEST_API_SECRET
 from tests.support.checkin import SYSTEM_INFO
 from tests.support.config_cli import chain
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID
 from tests.support.events import both_formats, fields_of
+from tests.support.stores import rows
 from tests.support.wire import connect, say_something, shake_hands
 from vinga_server.app import create_app
 from vinga_server.config import Config
@@ -244,6 +246,106 @@ def test_the_manifest_says_which_board_and_not_what_it_is_called(
     assert set(written["device"]) <= {"mac", "uuid", "board", "firmware", "client", "client_id"}
     assert "name" not in written["device"]
     assert "location" not in written["device"]
+
+
+# --- a stored name carrying a credential, and what the surfaces say ---
+
+
+# A name that is a URL carrying every credential shape `url_credential`
+# knows: a JWT-shaped userinfo password, a token-named query parameter
+# and an authorization-named one. The write path refuses this name (the
+# `a-name-carrying-a-credential` case below), so it is planted through
+# the configuration-file path, which no repository write guards: exactly
+# what a value that got in around the rule, or before it, looks like.
+#
+# The first secret sits inside the 64 characters `bounded_descriptor`
+# keeps, so an event that carried the name as written would carry it;
+# the other two sit past the bound, so the surface that would carry them
+# is the session-detail answer, which is not bounded at all.
+JWT_SECRET = "eyJhbGciOiJub25lIn0.eyJuZXZlciI6InJlYWwifQ.sig-1f2e3d"
+
+TOKEN_SECRET = "sk-tok-91d4e7fa-never-a-real-credential"
+
+AUTHORIZATION_SECRET = "Bearer-br-77aa02cd-never-a-real-credential"
+
+SECRET_PARTS = (JWT_SECRET, TOKEN_SECRET, AUTHORIZATION_SECRET)
+
+CREDENTIAL_URL_NAME = (
+    f"https://u:{JWT_SECRET}@example.invalid/desk"
+    f"?token={TOKEN_SECRET}&authorization={AUTHORIZATION_SECRET}"
+)
+
+# What `without_url_credential` leaves of it, which is what every
+# surface says instead: the address without the userinfo and without
+# the credential-named parameters.
+STRIPPED_NAME = "https://example.invalid/desk"
+
+BEARER = {"Authorization": f"Bearer {TEST_API_SECRET}"}
+
+
+def test_a_credential_a_stored_name_carries_reaches_no_surface_as_written(
+    tmp_path: Path, tap: Tap, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The surfaces M5 added speak the same safe projection every other
+    stored string reaches a reader through.
+
+    One rule with one home, `without_url_credential`, and this is its
+    fourth reader beside the display walk (#381), the provider build
+    (#413) and the spoken identities (#414): the session_open copy is
+    stripped at its decision site before it is bounded, so the log, the
+    event store's rows and the capture's decision track all carry the
+    projection, and the session-detail answer strips the recorded column
+    on the way out exactly as `views.device_body` strips the record it
+    was copied from. The dated column itself keeps the name as written:
+    the grant trusts `vinga_ro` with the record schema, and a row is not
+    a display.
+    """
+    config = Config(
+        server={
+            "capture": {"enabled": True, "dir": str(tmp_path / "captures")},
+            "conversations": {"enabled": True},
+        },
+        providers=MOCK_PROVIDERS,
+        agents={"assistant": MOCK_AGENT},
+        devices={DEVICE_MAC: {"name": CREDENTIAL_URL_NAME, "agents": ["assistant"]}},
+    )
+    with caplog.at_level(logging.DEBUG), TestClient(create_app(config)) as client:
+        _drive(client)
+
+    for secret in SECRET_PARTS:
+        assert secret not in tap.rendered()
+        assert secret not in both_formats(caplog)
+        assert secret not in _capture(tmp_path)
+
+    # The control beside the absences: the stripped address IS the name
+    # the surfaces speak, so a run that dropped the field could not pass.
+    assert STRIPPED_NAME in both_formats(caplog)
+
+    # The dated column keeps what the operator wrote. Storage is not a
+    # surface: `vinga_ro` is granted this schema on purpose, and the
+    # projection is applied where a reader is answered, not where a row
+    # is kept.
+    (row,) = rows("sessions")
+    assert row["device_name"] == CREDENTIAL_URL_NAME
+
+    # The event store's rows are the same events the log carried, so
+    # they hold the same projection. Serialized whole, nested values
+    # included, before the hunt.
+    opens = rows("events", session=row["session"], name="session_open")
+    assert opens, "no session_open row was recorded, so nothing was checked"
+    written = json.dumps([one["fields"] for one in opens], default=repr)
+    for secret in SECRET_PARTS:
+        assert secret not in written
+    assert STRIPPED_NAME in written
+
+    # And the HTTP answer over the column, which is where the two
+    # secrets past the event bound would surface if anywhere.
+    with TestClient(create_app(config)) as reader:
+        answered = reader.get(f"/api/sessions/{row['session']}", headers=BEARER)
+    assert answered.status_code == 200
+    for secret in SECRET_PARTS:
+        assert secret not in answered.text
+    assert answered.json()["device_name"] == STRIPPED_NAME
 
 
 # --- the refusal paths, which are the other half of the finding -------
