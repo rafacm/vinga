@@ -391,16 +391,19 @@ MEMORY_BUILTINS: set[str] = {
 
 # The builtins due in this configuration. `switch_agent` is not among
 # them: each device here is bound to a single agent, so there is
-# nowhere to switch. The two conversation tools are, because they are
-# offered whether or not a deployment can resume anything: what a server
-# that cannot answers with is a sentence the agent reads out, and a tool
-# that is simply absent is a tool a model invents (#190).
+# nowhere to switch. The two conversation tools are, and so is
+# `set_device_location`, because all three are offered whether or not a
+# deployment can act on them: what a server that cannot resume anything,
+# or cannot move its devices, answers with is a sentence the agent reads
+# out, and a tool that is simply absent is a tool a model invents (#190,
+# #449).
 # Spelled as a set the assertions below compare against, so that a
 # conditional builtin appearing where its condition does not hold fails
 # this test rather than passing under a subtraction.
 DUE_BUILTINS: set[str] = MEMORY_BUILTINS | {
     "new_conversation",
     "resume_conversation",
+    "set_device_location",
 }
 
 
