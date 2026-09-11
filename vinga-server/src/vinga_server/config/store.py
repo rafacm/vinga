@@ -75,6 +75,7 @@ from vinga_server.config.models import (
     hides_value,
     holds_control_character,
     is_default_device_name,
+    is_device_id,
     is_env_name,
     is_secret_option,
     is_valid_fragment_name,
@@ -979,8 +980,14 @@ class ConfigStore:
         A record with no such id is `UnknownEntityError`, which is what
         a conversation whose device has been deleted under it meets. The
         caller has nothing to retry and says so to whoever is in the
-        room.
+        room. A value that is not spelled like an id at all is the same
+        refusal rather than a different one: no record can hold it, so
+        the honest answer is that none does, and asking the spelling
+        first is what keeps a caller that lost its record from reaching
+        the staging below with nothing to address.
         """
+        if not is_device_id(device):
+            raise UnknownEntityError(_NO_SUCH_DEVICE_RECORD)
         return self._device_write(
             _DeviceBinding(
                 mac=_UNRESOLVED_MAC, location=_device_location(location), located=True
@@ -1037,6 +1044,12 @@ class ConfigStore:
             domain = _read_domain(connection)
             if identified is not None:
                 binding = replace(binding, mac=_mac_holding(domain, identified))
+            # Whichever way in it came, it is addressed now. The
+            # assertion is what keeps the unresolved sentinel from ever
+            # being staged as a MAC: a write that reached here with
+            # neither address would create a device whose MAC is the
+            # empty string, which is a row nothing could ever read.
+            assert binding.mac, "a device write is addressed by a MAC or by a record id"
             stored = domain.devices.get(binding.mac)
             if existing and stored is None:
                 raise UnknownEntityError(_NO_SUCH_DEVICE)
