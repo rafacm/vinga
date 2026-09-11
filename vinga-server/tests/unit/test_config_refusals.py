@@ -208,7 +208,12 @@ def test_two_spellings_of_one_stored_mac_are_two_rows_and_are_refused(
     store.bind_device("aa:bb:cc:dd:ee:ff", ["sam"])
     planted(
         store,
-        insert(schema.devices).values(mac="AA-BB-CC-DD-EE-FF", agents=["sam"]),
+        insert(schema.devices).values(
+            id="0" * 32,
+            mac="AA-BB-CC-DD-EE-FF",
+            name="Device AA-BB-CC-DD-EE-FF",
+            agents=["sam"],
+        ),
     )
 
     with pytest.raises(StorageError) as caught:

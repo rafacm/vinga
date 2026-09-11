@@ -50,6 +50,7 @@ from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
     DeviceAlreadyBoundError,
+    DeviceNameConflictError,
     StorageError,
     UnknownEntityError,
 )
@@ -60,6 +61,7 @@ from vinga_server.config.models import (
     SERVER_PROGRAM,
     AgentConfig,
     AgentDefaults,
+    DeviceRecord,
     DomainConfig,
     FieldProblem,
     McpServerConfig,
@@ -68,12 +70,15 @@ from vinga_server.config.models import (
     ProvidersConfig,
     check_mcp_entry_names,
     check_references,
+    default_device_name,
+    fold_device_name,
     hides_value,
     holds_control_character,
     is_env_name,
     is_secret_option,
     is_valid_fragment_name,
     json_pointer,
+    mint_device_id,
     normalize_device_bindings,
     normalize_mac,
     refusal_line,
@@ -180,18 +185,28 @@ class StoredSecret:
 
 @dataclass(frozen=True)
 class BoundDevice:
-    """What a device write wrote: the canonical MAC of the row, and the
-    agent names as they were stored.
+    """What a device write wrote: the record as the row now holds it.
 
-    A write normalizes both, so the request's spelling and the row's are
-    different strings, and everything said about the write afterwards
-    (the line a caller prints, and whether the change needs a restart to
-    reach the device) has to be about the row. Answering with it is what
-    keeps a caller from normalizing a second time, differently.
+    A write normalizes what it was sent, so the request's spelling and
+    the row's are different strings, and everything said about the write
+    afterwards (the line a caller prints, and whether the change needs a
+    restart to reach the device) has to be about the row. Answering with
+    it is what keeps a caller from normalizing a second time,
+    differently.
+
+    Every field of the record and not only the two a bind sends, because
+    every device write answers with one of these and the three writes
+    #449 adds are about the other fields. A rename that answered with a
+    MAC and an agent list would say nothing about what it did, and a
+    caller that went back to read the row would be reading a state the
+    next write may already have changed.
     """
 
     mac: str
     agents: tuple[str, ...]
+    id: str
+    name: str
+    location: str | None
 
 
 @dataclass(frozen=True)
@@ -273,6 +288,43 @@ ALREADY_COVERED = (
     "activation code, and it covers every device that has no binding of its own, so "
     "the code binds nothing now. Nothing was changed. To give this device an agent of "
     "its own, bind it by its MAC"
+)
+
+# What a device write refuses with when the name or the id it would
+# leave is one another record already holds.
+#
+# Neither quotes what it refused. A device name is free text an operator
+# types on a command line and pastes into a document, so it is exactly
+# the kind of value this package never echoes; an id is a stored
+# identity and naming one of the two would read as a claim about which
+# of them was at fault.
+DEVICE_NAME_TAKEN = (
+    "devices: another device already answers to that name once case and spacing are "
+    "folded together, and a name has to say which board an agent is speaking through. "
+    "Nothing was changed, and the name is not quoted back. Read what is bound with "
+    "`vinga-server config device show <mac>`, or choose another name"
+)
+
+DEVICE_ID_TAKEN = (
+    "devices: that device id already belongs to another record, and an id is what "
+    "makes one device one device across a rename and a board swap. Nothing was "
+    "changed, and the id is not quoted back"
+)
+
+DEVICE_NAME_IN_FLIGHT = (
+    "devices: one of the names this would write is the name another device still has, "
+    "so it asks for a swap or a hand-over that cannot be made inside one transaction: "
+    "the unique index over device names is checked statement by statement rather than "
+    "at commit, so the order the rows are written in would decide whether it worked. "
+    "Nothing was changed, and no name is quoted back. Do it in two steps, moving the "
+    "device that is giving the name up to a name nothing holds first"
+)
+
+DEVICE_ID_FIXED = (
+    "devices: the record stored for that device already has an id, and a write may "
+    "not give it another one: the id is what its memory and its history hang on. "
+    "Leave the id out to keep the stored one. Nothing was changed, and neither id is "
+    "quoted back"
 )
 
 # What a rename refuses with, for the two states this module can be in
@@ -432,15 +484,20 @@ class ConfigStore:
                 connection, entry, descriptor.secret_slots, ".".join(identity)
             )
 
-    def read_device(self, mac: str) -> Entity[list[str]]:
-        """One device's binding, keyed by the canonical form of its MAC,
-        so `AA-BB-...` and `aa:bb:...` read the same row."""
+    def read_device(self, mac: str) -> Entity[DeviceRecord]:
+        """One device's record, keyed by the canonical form of its MAC,
+        so `AA-BB-...` and `aa:bb:...` read the same row.
+
+        The whole record and not the binding it used to be. What a
+        caller stops having to know is that a device is four columns and
+        a JSON array: it reads a record and writes one back.
+        """
         normalized = _mac(mac)
         with self._transaction() as connection:
-            bound = _read_domain(connection).devices.get(normalized)
-            if bound is None:
+            record = _read_domain(connection).devices.get(normalized)
+            if record is None:
                 raise UnknownEntityError(_NO_SUCH_DEVICE)
-            return Entity(entry=list(bound), secrets=())
+            return Entity(entry=record, secrets=())
 
     def read_default_agent(self) -> str | None:
         """The agent an unbound device reaches, or None. Unset is a
@@ -697,8 +754,10 @@ class ConfigStore:
         _distinct_entries(changes)
         with self._transaction() as connection:
             domain = _read_domain(connection)
+            held = _names_held(domain)
             staged = _gathered(partial(_stage_change, domain), changes)
             _refuse_unresolved(domain)
+            _refuse_repeated_identities(domain, held)
             _persist(connection, staged)
         return tuple(entry.applied for entry in staged)
 
@@ -717,27 +776,24 @@ class ConfigStore:
     # Devices and the default agent
 
     def bind_device(self, mac: str, agents: Sequence[str]) -> BoundDevice:
-        """Bind one device, and answer with what was written.
+        """Bind one device, creating the record if there is none, and
+        answer with what the row now holds.
 
         The MAC and the names are normalized on the way in (canonical
         MAC spelling, surrounding whitespace off each name), so what a
         caller sent and what the row holds are different strings. The
         write is what a caller has to describe afterwards, in the line
         it prints and in whether it says a restart is needed, so the
-        canonical form travels back rather than being re-derived by
-        every caller from the request.
+        stored record travels back rather than being re-derived by every
+        caller from the request.
+
+        It creates as well as rebinds, which is the one thing about it
+        that #449 changed and did not add an argument for: a record
+        created here takes the `Device <full mac>` default name, so the
+        flow an operator reaches holding a board and nothing else gains
+        no mandatory argument. Naming it is `rename_device`.
         """
-        binding = _binding(mac, list(agents))
-        with self._transaction() as connection:
-            domain = _read_domain(connection)
-            domain.devices.update(binding)
-            _refuse_unresolved(domain)
-            for normalized, bound in binding.items():
-                _device_row(normalized, bound).write(connection)
-        # One binding in, one row out, so there is exactly one to
-        # describe.
-        written, names = next(iter(binding.items()))
-        return BoundDevice(written, tuple(names))
+        return self._device_write(_device_change(mac, list(agents)))
 
     def claim_device(self, mac: str, agents: Sequence[str]) -> BoundDevice:
         """Bind a device that nothing has configured yet, or refuse.
@@ -766,18 +822,89 @@ class ConfigStore:
         travels into an API body, a log and the stderr of whatever holds
         the code.
         """
-        binding = _binding(mac, list(agents))
-        written, names = next(iter(binding.items()))
+        return self._device_write(_device_change(mac, list(agents)), unconfigured=True)
+
+    def rename_device(self, mac: str, name: str) -> BoundDevice:
+        """Give one device another name, or refuse.
+
+        Identity that an operator manages, which is the mutability split
+        this record is built around: a conversation may say where the
+        device is, and only an operator may say what it is called.
+
+        The name is stored exactly as it was typed, spaces, punctuation
+        and case, because the agent says it out loud and a slug reads
+        badly in speech. What is unique is the FOLDED form, checked
+        against the state this write would leave, under the writer lock,
+        with the database's own functional index standing behind it.
+        """
+        return self._device_write(_DeviceBinding(mac=_mac(mac), name=_device_name(name)),
+                                  existing=True)
+
+    def relocate_device(self, mac: str, location: str) -> BoundDevice:
+        """Say where one device stands.
+
+        Free text and not unique: two devices in one room is normal, and
+        so is a room nobody has named the same way twice. The value is
+        stored as it was given.
+        """
+        return self._device_write(
+            _DeviceBinding(mac=_mac(mac), location=_device_location(location), located=True),
+            existing=True,
+        )
+
+    def clear_device_location(self, mac: str) -> BoundDevice:
+        """Back to nowhere in particular, which is an ordinary state for
+        a device rather than a degenerate one.
+
+        A verb of its own rather than an empty location, for the reason
+        `clear_default_agent` is one: there is one way to say a thing,
+        and a location that is the empty string would be a second.
+        """
+        return self._device_write(
+            _DeviceBinding(mac=_mac(mac), located=True), existing=True
+        )
+
+    def _device_write(
+        self,
+        binding: "_DeviceBinding",
+        *,
+        existing: bool = False,
+        unconfigured: bool = False,
+    ) -> BoundDevice:
+        """Every device write, run through the phases every other write
+        runs: staged into the candidate state read inside the
+        transaction, checked once against it, persisted.
+
+        One path rather than five, and the reason is what the phases
+        decide. The id is minted or adopted in staging, where the stored
+        row is in hand under the lock, and the folded-name conflict is
+        judged on the state the write would leave. A verb that assembled
+        its own row would have to restate both, and the second statement
+        is the one that drifts.
+
+        The two conditions are what tells the verbs apart. `existing`
+        refuses a MAC with no record, because renaming or relocating
+        something that is not there is a request that addressed nothing;
+        `unconfigured` is the activation code's condition, refusing a
+        device the configuration has already spoken about.
+        """
         with self._transaction() as connection:
             domain = _read_domain(connection)
-            if written in domain.devices:
-                raise DeviceAlreadyBoundError(ALREADY_BOUND)
-            if domain.default_agent is not None:
-                raise DeviceAlreadyBoundError(ALREADY_COVERED)
-            domain.devices.update(binding)
+            stored = domain.devices.get(binding.mac)
+            if existing and stored is None:
+                raise UnknownEntityError(_NO_SUCH_DEVICE)
+            if unconfigured:
+                if stored is not None:
+                    raise DeviceAlreadyBoundError(ALREADY_BOUND)
+                if domain.default_agent is not None:
+                    raise DeviceAlreadyBoundError(ALREADY_COVERED)
+            held = _names_held(domain)
+            staged = _stage_device(domain, binding)
             _refuse_unresolved(domain)
-            _device_row(written, names).write(connection)
-        return BoundDevice(written, tuple(names))
+            _refuse_repeated_identities(domain, held)
+            _persist(connection, (staged,))
+            written = domain.devices[binding.mac]
+        return _written_device(binding.mac, written)
 
     def delete_device(self, mac: str) -> str:
         """Remove one device's binding, answering with the canonical MAC
@@ -924,7 +1051,10 @@ def _live_binding(connection: Connection, mac: str) -> LiveBinding:
     if default_agent is not None:
         data["default_agent"] = default_agent
     live = _stored(DomainConfig, _LIVE_BINDING_LOCATION, data)
-    return LiveBinding(tuple(live.devices.get(mac, ())), live.default_agent)
+    record = live.devices.get(mac)
+    return LiveBinding(
+        () if record is None else tuple(record.agents), live.default_agent
+    )
 
 
 def stored_secrets(snapshot: Snapshot) -> tuple[StoredSecret, ...]:
@@ -1295,11 +1425,31 @@ class _Prepared:
 
 @dataclass(frozen=True)
 class _DeviceBinding:
-    """One device entry of an applied document, normalized: the
-    canonical MAC and the names as they will be stored."""
+    """One device entry of a document, or of one device verb's
+    arguments, normalized: the canonical MAC and whatever the caller
+    said about the record.
+
+    Everything but the MAC is optional, and `None` means "said
+    nothing" rather than "said nothing in particular". Staging resolves
+    each against the stored row, under the lock: an absent id adopts the
+    stored one or is minted, an absent name keeps the stored one or
+    takes the `Device <mac>` default, and an absent agent list leaves
+    the binding alone, which is what a rename and a relocation want.
+
+    `located` is the one flag, and it is here because a nullable field
+    cannot say this by itself: a document that does not carry the
+    `location` key says nothing about where the device is, and one
+    carrying `null` says it is nowhere in particular. The same
+    distinction `default_agent` makes between an absent key and an
+    explicit clear.
+    """
 
     mac: str
-    agents: tuple[str, ...]
+    agents: tuple[str, ...] | None = None
+    id: str | None = None
+    name: str | None = None
+    location: str | None = None
+    located: bool = False
 
 
 @dataclass(frozen=True)
@@ -1457,17 +1607,62 @@ def _stage_entity(domain: DomainConfig, prepared: _Prepared) -> _Staged:
 
 
 def _stage_device(domain: DomainConfig, binding: _DeviceBinding) -> _Staged:
-    """One device binding, staged onto the same candidate state the
+    """One device record, staged onto the same candidate state the
     entities are staged onto, so that a document binding a board to an
-    agent it also creates resolves."""
-    agents = list(binding.agents)
-    moved = domain.devices.get(binding.mac) != agents
-    domain.devices[binding.mac] = agents
+    agent it also creates resolves.
+
+    This is where the identity is decided, and it is the reason it is
+    decided here rather than in a validator. Staging runs inside the
+    transaction, under the domain writer lock, with the stored row in
+    hand:
+
+    - **A stored id wins.** A record whose MAC already has a row keeps
+      that row's id, whatever the document said, because the id is what
+      the device's memory and its history hang on. An id written for
+      such a row is refused rather than ignored: a caller that asked for
+      something this will not do should be told so.
+    - **An absent id on a MAC with no row is minted**, unless the
+      document carried one, which is what lets an exported document
+      restore a deployment with its identities intact.
+    - **An absent name keeps the stored one**, or takes the
+      `Device <full mac>` default for a record being created.
+    - **An absent location keeps the stored one.** Clearing it is the
+      `located` flag with `None`, never an absence.
+
+    What that buys is `apply`'s idempotence: the same document staged
+    twice produces the same record, `moved` is false the second time,
+    and no row is written. A random default in a parser cannot be any of
+    this.
+    """
+    stored = domain.devices.get(binding.mac)
+    if stored is not None and stored.id and binding.id and binding.id != stored.id:
+        raise ConfigError(DEVICE_ID_FIXED)
+    identity = (
+        stored.id
+        if stored is not None and stored.id
+        else (binding.id or mint_device_id())
+    )
+    name = (
+        binding.name
+        or (stored.name if stored is not None else None)
+        or default_device_name(binding.mac)
+    )
+    location = binding.location if binding.located else (
+        stored.location if stored is not None else None
+    )
+    agents = list(
+        binding.agents
+        if binding.agents is not None
+        else (stored.agents if stored is not None else ())
+    )
+    record = DeviceRecord(id=identity, name=name, location=location, agents=agents)
+    moved = stored != record
+    domain.devices[binding.mac] = record
     return _Staged(
         applied=Applied(
-            section="devices", identity=binding.mac, wrote=moved, agents=binding.agents
+            section="devices", identity=binding.mac, wrote=moved, agents=tuple(agents)
         ),
-        row=_device_row(binding.mac, agents) if moved else None,
+        row=_device_row(binding.mac, record) if moved else None,
     )
 
 
@@ -1524,21 +1719,26 @@ def _stage_rename(domain: DomainConfig, old: str, new: str) -> _Renaming:
     domain.agents[new] = domain.agents.pop(old)
     moved: list[str] = []
     rows: list[_Staged] = []
-    for mac, bound in domain.devices.items():
-        if old not in bound:
+    for mac, record in domain.devices.items():
+        if old not in record.agents:
             continue
         # Every position, not the first: a binding is a list of names,
         # and a rename that left a second mention behind would leave a
         # reference `check_references` refuses.
-        rebound = [new if name == old else name for name in bound]
-        domain.devices[mac] = rebound
+        rebound = [new if name == old else name for name in record.agents]
+        # The record moves with its binding and nothing else about it
+        # moves: an agent's name is not a device's name, and a device's
+        # id, name and location say nothing about which agent it
+        # reaches.
+        rewritten = record.model_copy(update={"agents": rebound})
+        domain.devices[mac] = rewritten
         moved.append(mac)
         rows.append(
             _Staged(
                 applied=Applied(
                     section="devices", identity=mac, wrote=True, agents=tuple(rebound)
                 ),
-                row=_device_row(mac, rebound),
+                row=_device_row(mac, rewritten),
             )
         )
     default = domain.default_agent == old
@@ -1578,11 +1778,46 @@ def _persist(connection: Connection, staged: Sequence[_Staged]) -> None:
             entry.row.write(connection)
 
 
-def _device_row(mac: str, agents: Sequence[str]) -> _Row:
-    """The row one device binding is written as. One home, because three
-    verbs write it (bind by MAC, claim by code, apply) and a second
-    spelling would be a second shape for one fact."""
-    return _Row(schema.devices, {"mac": mac}, {"agents": list(agents)})
+def _device_row(mac: str, record: DeviceRecord) -> _Row:
+    """The row one device record is written as. One home, because six
+    verbs write it (bind by MAC, claim by code, rename, relocate, clear
+    a location, apply) and the agent rename rewrites bindings through it
+    too; a second spelling would be a second shape for one fact.
+
+    Addressed by MAC and not by the id that is now the key, deliberately.
+    Every device verb arrives holding the MAC a board connects with, and
+    the id is what this repository decides, so a write addressed by id
+    could never create the row it is deciding one for.
+    """
+    return _Row(
+        schema.devices,
+        {"mac": mac},
+        {
+            "id": record.id,
+            "name": record.name,
+            "location": record.location,
+            "agents": list(record.agents),
+        },
+    )
+
+
+def _written_device(mac: str, record: DeviceRecord) -> BoundDevice:
+    """One staged record as the answer a device write gives back.
+
+    The two asserts are what the staging above guarantees and the model
+    cannot: `id` and `name` are optional on `DeviceRecord` because a
+    document may leave them out, and no record that has been through
+    `_stage_device` has either of them unset.
+    """
+    assert record.id is not None, "a staged device record has an id"
+    assert record.name is not None, "a staged device record has a name"
+    return BoundDevice(
+        mac=mac,
+        agents=tuple(record.agents),
+        id=record.id,
+        name=record.name,
+        location=record.location,
+    )
 
 
 def _default_agent_row(name: str | None) -> _Row:
@@ -1641,8 +1876,9 @@ _NOT_A_SECTION = "{section}: this section has to be a mapping of entries by name
 _NOT_A_STAGE_GROUP = "providers: each stage holds a mapping of provider entries by name"
 
 _NOT_A_BINDING = (
-    "devices: each entry is a MAC address holding the list of agent names that device "
-    "may reach. Nothing sent is quoted back"
+    "devices: each entry is a MAC address holding either the list of agent names that "
+    "device may reach or a record with an agents list in it. Nothing sent is quoted "
+    "back"
 )
 
 _NOT_AN_AGENT_NAME = (
@@ -1784,9 +2020,7 @@ def _change(named: tuple[str, str, object]) -> _Change:
     normalization its own verb runs."""
     section, identity, written = named
     if section == "devices":
-        binding = _binding(identity, _bound(written))
-        mac, agents = next(iter(binding.items()))
-        return _DeviceBinding(mac, tuple(agents))
+        return _device_change(identity, written)
     if section == "default_agent":
         if written is None:
             return _DefaultAgent(None)
@@ -1843,10 +2077,6 @@ def _addresses(change: _Change) -> tuple[str, tuple[str, ...]]:
     return ("default_agent", ())
 
 
-def _bound(written: object) -> list[str]:
-    if not isinstance(written, list) or not all(isinstance(name, str) for name in written):
-        raise ConfigError(_NOT_A_BINDING)
-    return list(written)
 
 
 def _gathered[Item, Done](
@@ -1982,8 +2212,8 @@ def _read_domain(connection: Connection) -> DomainConfig:
     return domain
 
 
-def _device(row: Row) -> tuple[str, list[object]]:
-    """One stored device row: the MAC made a MAC first, then the column
+def _device(row: Row) -> tuple[str, dict[str, object]]:
+    """One stored device row: the MAC made a MAC first, then the columns
     beside it read at the location that makes.
 
     The order is the whole of this function, and a comprehension could
@@ -2025,7 +2255,12 @@ def _device(row: Row) -> tuple[str, list[object]]:
         problem = str(exc)
     if problem is not None:
         raise StorageError(f"devices: {problem}; the row cannot be read as configuration")
-    return row.mac, _list(f"devices.{mac}", "agents", row.agents)
+    return row.mac, {
+        "id": row.id,
+        "name": row.name,
+        "location": row.location,
+        "agents": _list(f"devices.{mac}", "agents", row.agents),
+    }
 
 
 def _read_secrets(connection: Connection, keys: MultiFernet | None) -> SecretStore:
@@ -2774,16 +3009,62 @@ def _mac(mac: str) -> str:
     raise ConfigError(problem)
 
 
-def _binding(mac: str, agents: Sequence[str]) -> dict[str, list[str]]:
-    binding: dict[str, list[str]] | None = None
+def _device_change(mac: str, written: object) -> _DeviceBinding:
+    """One device entry, taken as far as it goes without the store: the
+    MAC made canonical and the value read as a record.
+
+    The value-shape union is absorbed by `normalize_device_bindings`,
+    which is the one home for it, so a bare agent list and a record with
+    an agents list in it arrive here as one thing. What this adds is the
+    repository's refusal shape around it and the separation of an absent
+    `location` from an explicit null, which the parsed model can only
+    say through `model_fields_set`.
+
+    Nothing here mints and nothing here defaults. Both are questions
+    about the stored row, and the stored row is read under the lock.
+    """
+    if written is not None and not isinstance(written, list | Mapping):
+        raise ConfigError(_NOT_A_BINDING)
+    normalized: object = None
     problem: str | None = None
     try:
-        binding = normalize_device_bindings({mac: list(agents)})
+        normalized = normalize_device_bindings({mac: written})
     except ValueError as exc:
         problem = str(exc)
-    if binding is None:
+    if problem is not None:
         raise ConfigError(problem)
-    return {key: [str(agent).strip() for agent in bound] for key, bound in binding.items()}
+    assert isinstance(normalized, dict)
+    key, value = next(iter(normalized.items()))
+    if not isinstance(value, Mapping):
+        raise ConfigError(_NOT_A_BINDING)
+    record = _load(DeviceRecord, f"devices.{key}", dict(value))
+    return _DeviceBinding(
+        mac=key,
+        # Trimmed here for the reason the binding always was: `sam` and
+        # ` sam ` are the one name they will become.
+        agents=tuple(name.strip() for name in record.agents),
+        id=record.id,
+        name=record.name,
+        location=record.location,
+        located="location" in record.model_fields_set,
+    )
+
+
+def _device_name(name: str) -> str:
+    """One name a rename was given, held to the model's own rule rather
+    than to a second copy of it."""
+    return _load(DeviceRecord, "devices", {"agents": [], "name": name}).name or name
+
+
+def _device_location(location: str) -> str:
+    """One location a relocation was given.
+
+    Free text, unlike a name: it is not unique, it addresses nothing,
+    and there is no rule to hold it to beyond being a string. Named
+    anyway, so the two writes read alike at their call sites and so
+    that a rule this gains later has a place to be.
+    """
+    return location
 
 
 def _readable(location: str, section: str, fragment: object) -> dict[str, object]:
@@ -3089,6 +3370,60 @@ def _refuse_unresolved(domain: DomainConfig) -> None:
             "the change was refused; it would leave these references unresolved:\n"
             + "\n".join(f"  - {problem}" for problem in problems)
         )
+
+
+def _names_held(domain: DomainConfig) -> dict[str, str]:
+    """Which device holds each folded name in the state a write FOUND,
+    read before anything is staged onto it.
+
+    Kept because staging mutates the snapshot in place, and the check
+    below needs both states: what the write would leave, and what it
+    started from.
+    """
+    return {
+        fold_device_name(record.name or ""): mac
+        for mac, record in domain.devices.items()
+    }
+
+
+def _refuse_repeated_identities(domain: DomainConfig, held: Mapping[str, str]) -> None:
+    """No two device records holding one folded name, and none holding
+    one id, in the state this write would leave.
+
+    Here rather than at the CLI, because the API, `import`, the pending
+    claim and every other repository caller bypass CLI logic entirely,
+    and letting the unique index catch a collision would answer with the
+    generic sanitized database failure rather than a refusal an operator
+    can act on. The index stays as the invariant behind this, which is
+    what keeps the promise true for a writer that never came through
+    here at all.
+
+    Against the finished candidate state rather than entry by entry, for
+    the reason `_refuse_unresolved` is asked once: a document that swaps
+    two devices' names passes through a state in which both hold one
+    name, and refusing that would refuse a document whose end state is
+    fine.
+
+    Called from the two paths that can change either, which is the
+    device writes and `apply`. An entity write and an agent rename move
+    neither, and a call there would be a check with nothing to find.
+    """
+    folded = [fold_device_name(record.name or "") for record in domain.devices.values()]
+    if len(set(folded)) != len(folded):
+        raise DeviceNameConflictError(DEVICE_NAME_TAKEN)
+    identities = [record.id for record in domain.devices.values() if record.id]
+    if len(set(identities)) != len(identities):
+        raise DeviceNameConflictError(DEVICE_ID_TAKEN)
+    # And no name taken from a device that is only giving it up inside
+    # the same transaction. The end state is fine and the WAY THERE is
+    # not: a unique index is checked statement by statement, so whether
+    # a swap worked would depend on the order `_persist` happened to
+    # write two rows in. Refused with a sentence rather than left to
+    # the index, which would answer with the generic sanitized database
+    # failure and a 500.
+    for mac, record in domain.devices.items():
+        if held.get(fold_device_name(record.name or ""), mac) != mac:
+            raise DeviceNameConflictError(DEVICE_NAME_IN_FLIGHT)
 
 
 __all__ = [

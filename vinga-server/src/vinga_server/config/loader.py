@@ -237,6 +237,25 @@ class AgentRenameConflictError(ConfigError):
     """
 
 
+class DeviceNameConflictError(ConfigError):
+    """Two device records would hold one name once case and spacing are
+    folded together, so nothing was written.
+
+    Its own type for `AgentRenameConflictError`'s reason, and it is the
+    same shape of fact: the request named a lawful name and asked for a
+    lawful act, and what refused it is what another row already holds.
+    A caller answering with a status code has to tell it from a
+    malformed request, because retrying will not help and choosing
+    another name will.
+
+    A device name is what an agent says out loud about the board it is
+    speaking through, so two boards answering to one name is not a
+    tidiness rule: it is the difference between an instruction that
+    reaches a speaker and one that reaches whichever speaker was
+    written last.
+    """
+
+
 class DatabaseBusyError(ConfigError):
     """A lock this call needed did not arrive inside the lock timeout,
     because another connection was holding it. Nothing was changed, and

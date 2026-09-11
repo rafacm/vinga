@@ -35,6 +35,7 @@ from tests.support.events import fields_of, only
 from vinga_server import logs
 from vinga_server.config import Config
 from vinga_server.config.cli import DISPATCHED
+from vinga_server.config.models import DeviceRecord
 from vinga_server.onboarding import (
     ACTIVATION_TIMEOUT_MS,
     CODE_DIGITS,
@@ -172,7 +173,7 @@ def test_a_device_bound_to_an_agent_this_server_has_not_loaded_gets_no_code(
     # What a binding written after boot looks like from in here: the
     # database says the device is bound, and the snapshot this server
     # loaded has no such agent.
-    config.devices[NORMALIZED] = ["written-since-boot"]
+    config.devices[NORMALIZED] = DeviceRecord(agents=["written-since-boot"])
 
     with entered_client(config) as client, caplog.at_level(logging.WARNING):
         body = check_in(client)
@@ -186,7 +187,7 @@ def test_a_device_bound_to_an_agent_this_server_has_not_loaded_gets_no_code(
 
 def test_a_bound_but_unloaded_device_keeps_being_told_to_wait() -> None:
     config = unbound_config()
-    config.devices[NORMALIZED] = ["written-since-boot"]
+    config.devices[NORMALIZED] = DeviceRecord(agents=["written-since-boot"])
 
     with entered_client(config) as client:
         assert activate(client).status_code == 202

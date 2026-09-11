@@ -22,7 +22,7 @@ opens with. Both importing suites keep their own spelling by alias.
 
 import contextlib
 import struct
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -131,6 +131,18 @@ CONVERSATIONS_MANIFEST: dict[str, Any] = {
     "agents": ["sam"],
     "providers": {"llm": {"name": "claude", "type": "anthropic"}},
 }
+
+
+def bindings(devices: Mapping[str, Any]) -> dict[str, list[str]]:
+    """The agent list of every device in a snapshot, by MAC.
+
+    A suite whose subject is which board reaches which agent says that
+    and not the whole record. #449 gave a device an id nobody wrote and
+    a default name nobody typed, so an equality against the section
+    itself would pin both of them in every suite that only ever cared
+    about the binding.
+    """
+    return {mac: list(record.agents) for mac, record in devices.items()}
 
 
 def rows(table: str, **where: Any) -> list[dict[str, Any]]:
