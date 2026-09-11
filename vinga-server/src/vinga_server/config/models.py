@@ -3226,6 +3226,47 @@ _SIMPLE_LOWER = {"\u0130": "i"}
 
 _DEVICE_NAME_RUN = re.compile(f"[{DEVICE_NAME_WHITESPACE}]+")
 
+# The collation the SQL rendering lowercases under, and the whole reason
+# it names one at all.
+#
+# A bare `lower()` uses the collation of its argument, which is the
+# database's default, which is whatever locale the instance was
+# initialized in. Under a Turkish one `lower('I')` is `ı` and under
+# every other one it is `i`, so the folded form of a name would be a
+# property of how somebody ran `initdb` years ago. That is not a
+# theoretical divergence: it was measured against this project's own
+# image, where `lower('I' collate "tr-TR-x-icu")` really does answer
+# `ı`. The consequence is the one `store.py` promises cannot happen: the
+# repository approves a name its own Python fold says is free, and the
+# index then refuses the insert, which leaves an operator with the
+# generic sanitized database failure and a 500.
+#
+# `pg_c_utf8` is Postgres 17's built-in collation provider at locale
+# C.UTF-8, and platform independence is the whole reason that provider
+# exists: its case mapping comes from the Unicode character database
+# rather than from the host's libc or ICU. It applies the SIMPLE
+# mapping, which is exactly what `fold_device_name` applies below, and
+# it applies no context-sensitive rule, which is exactly why that
+# function lowers character by character. Both halves were measured
+# rather than read: `lower('İ' collate pg_c_utf8)` is one character and
+# `lower('ΑΣ' collate pg_c_utf8)` is `ασ`.
+#
+# It raises this server's Postgres floor to 17, which is the version
+# every deployment artifact here already pins (`docker-compose.yml`,
+# `deploy/docker-compose.production.yml`, `deploy/k8s/`). An older
+# instance refuses the migration that creates the index, naming the
+# collation, rather than building an index that means something else.
+#
+# What is left is a residual rather than a hole, and it is worth stating
+# because it cannot be closed from here: Python's Unicode version and
+# the database's are not the same number, so a character assigned by one
+# and not the other folds differently until both catch up. It is bounded
+# to newly assigned characters, the corpus test catches it for every
+# character the corpus names, and `pg_c_utf8` carries a collation
+# version Postgres itself checks, so a major upgrade that moves it says
+# so.
+DEVICE_NAME_COLLATION = "pg_c_utf8"
+
 
 def fold_device_name(name: str) -> str:
     """One device name reduced to the form two names collide on.
@@ -3245,7 +3286,9 @@ def fold_device_name(name: str) -> str:
 
     `device_name_fold_sql` is the other rendering, and the two are
     proved equal against Postgres over a shared corpus rather than
-    asserted to be one implementation, which they cannot be.
+    asserted to be one implementation, which they cannot be. That
+    equality is a property of the collation the other rendering names,
+    not of `lower()` in general: see `DEVICE_NAME_COLLATION`.
     """
     lowered = "".join(_SIMPLE_LOWER.get(character, character.lower()) for character in name)
     return _DEVICE_NAME_RUN.sub(" ", lowered).strip(" ")
@@ -3265,7 +3308,7 @@ def device_name_fold_sql(column: str) -> str:
     rather than a silent one.
     """
     return (
-        f"btrim(regexp_replace(lower({column}), "
+        f"btrim(regexp_replace(lower({column} collate {DEVICE_NAME_COLLATION}), "
         f"'[{DEVICE_NAME_WHITESPACE}]+', ' ', 'g'), ' ')"
     )
 
