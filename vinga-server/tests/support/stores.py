@@ -160,6 +160,12 @@ def bindings(devices: Mapping[str, Any]) -> dict[str, list[str]]:
 CONVERSATION = "3b1e5c7a9d2f4068a1b3c5d7e9f02468"
 
 
+# The device a planted session ran on unless the case is about the
+# device. One board rather than none, so a case that says nothing about
+# devices still plants a row a per-device view can group.
+DEVICE = "aa:bb:cc:dd:ee:ff"
+
+
 def plant_session(
     connection: Any,
     session: str,
@@ -167,11 +173,19 @@ def plant_session(
     *,
     metrics: bool = True,
     agent: str | None = "sam",
+    device: str | None = DEVICE,
 ) -> None:
+    """One session row.
+
+    `device` is the board it ran on, and `None` is the state the schema
+    documents: a session rejected before a device was understood. That
+    is not a hypothetical here, it is what the per-device views have to
+    group as one row rather than lose.
+    """
     connection.execute(
         record_schema.sessions.insert().values(
             session=session,
-            device="aa:bb:cc:dd:ee:ff",
+            device=device,
             agent=agent,
             started_at=started_at,
             metrics=metrics,
