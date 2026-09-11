@@ -185,13 +185,84 @@ Four, each with its reason.
   substituted for a placeholder by `Recorded.rendered`, so the line stays
   pinned and only the digits do not.
 
+### Review round
+
+External review of PR #462 came back mergeable after fixes, with seven
+findings. Each is answered by a commit of its own; the three that
+changed behaviour rather than prose are recorded here.
+
+**The SQL fold changed with the database locale.** Both renderings used
+a bare `lower()`, which lowercases under the collation of its argument,
+which is the database's default, which is whatever locale somebody ran
+`initdb` in. Under a Turkish one `lower('I')` is `ı` where every other
+locale answers `i`, so the repository would approve a name its own
+Python fold called free and the index would then refuse the insert,
+producing exactly the sanitized database failure `store.py` promises
+cannot happen. The corpus proved agreement only for the collation the
+test instance happens to have.
+
+Both renderings now lowercase under `pg_c_utf8`, Postgres 17's built-in
+collation provider at locale C.UTF-8, whose case mapping comes from the
+Unicode character database rather than from the host's libc or ICU. It
+applies the simple mapping and no context-sensitive rule, which is what
+the Python rendering applies and why that one lowers character by
+character. It sets this server's Postgres floor at 17, which every
+deployment artifact here already pins. The corpus is driven a second
+time with a foreign collation forced onto the value, over Turkish,
+Azerbaijani, Lithuanian, C and US English, beside a control asserting
+that on this very instance a bare `lower()` really does answer `ı`.
+
+This is the third instance of one hazard, and naming it is the point:
+Python's whole-string `.lower()`, `\s` in a Postgres regular expression
+and now `lower()` itself are all resolved against something outside the
+expression. What fixed each of them was the same move, which is to say
+what is meant rather than to name a default.
+
+**Both free-text fields bypassed the URL-credential refusal.** A device
+name and a device location are stored exactly as written and read back
+on every surface, which makes them the same hazard a provider's
+`base_url` is, and neither was checked. The display stripped the
+credential on the way out, so a name stored with one and re-applied from
+an export would have come back as a different name and the apply would
+have reported a write: the lossiness contradicted the idempotence this
+milestone proved.
+
+Refused at the repository boundary, on what a caller submitted and never
+on what a row holds, which is the rule `_check_addressable` already
+follows. `url_credential` is the detection, shared with the provider and
+MCP walks; the sentence is the repository's own, because the remedy
+those two give is to name an environment variable and a room is not an
+address with a variable behind it.
+
+**An empty location was a second way to say nowhere.** `location`
+accepted any string, so a `PUT` and an applied document could both
+persist `""` while the repository, the CLI and the generated API
+contract all say a device is nowhere in particular when the field is
+NULL, reached by a DELETE. Refused on the model, which is the one place
+every ingress passes through, and on the FOLDED form rather than the
+length, for the reason the name's rule is: a location of two no-break
+spaces is not empty to a length check.
+
+The remaining four were a documentation claim, two test weaknesses and
+the PR number. The documentation one is the one most worth naming: six
+pages and the descriptor the domain reference is generated from said
+that per-device memory and recorded history already hang on the new id.
+They do not. Memory is keyed by the MAC until M4 moves it, and history
+deliberately stays under the MAC it was written with, because a dated
+row says which board was connected at the time. The id is now described
+as what it is in M1, a stable record identity, with the reason it exists
+said as a reason rather than as a state.
+
 ### Verification
 
 - `uv run ruff check .`, `uv run mypy`, `uv run pytest tests/unit -q`,
+  the same lane distributed a file at a time the way CI runs it,
   `uv run pytest tests/integration -q`, and the three generated-document
   drift checks, all from `vinga-server/`.
 - The fold's two renderings are proved equal against the running
   Postgres over a 32-case corpus, driven three ways: the live Python
   rendering, the live SQL rendering, and the migration's frozen literal.
+  The same corpus is driven again under five collations forced onto the
+  value, one of which is the Turkish one that broke the first version.
 - The migration is proved on rows in `tests/integration/`, on three
   boards of one fleet sharing a vendor OUI.
