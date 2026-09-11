@@ -235,9 +235,11 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   regeneration command are unchanged, and every guard failure still
   names the offending sites with their positions; what the artifact
   gives up is per-site review granularity, which is priced rather than
-  hidden: only membership of the pair set is reviewable in it now, so a
-  site that leaves or changes class while a sibling keeps the old pair
-  shows no diff, and a test pins exactly that.
+  hidden: only membership of the pair set is reviewable in it now. A
+  site that leaves while a sibling keeps its pair shows no diff, and a
+  site that changes class keeps the old line standing on the sibling's
+  strength while its new class's line appears, unless that pair too
+  already exists; a test pins exactly that.
 - **`memory.facts.owner` says that a board swap moves a device's notes**
   (#449, M4), through migration `2004_a_swap_moves_memory` on the memory
   chain. The comment is committed DDL and had said since the schema was
