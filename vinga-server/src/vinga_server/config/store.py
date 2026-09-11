@@ -242,6 +242,38 @@ class Renamed:
 
 
 @dataclass(frozen=True)
+class Replaced:
+    """What a board swap wrote: the record as the row now holds it, the
+    address it used to stand at, and what moved with it.
+
+    Beside `BoundDevice` and `Renamed` for their reason, and closer to
+    the second: what a caller says afterwards is about the transaction
+    rather than about the request, and one of these facts cannot be
+    recovered by reading the store again. How many remembered facts
+    moved is a fact about the state the swap FOUND, and after the commit
+    that state is gone.
+
+    `old` is the address the record answered at until this write and
+    `mac` the one it answers at now. Both are here because the act is
+    about the pair: a caller that reported only the destination would be
+    describing a bind, and the whole of what this verb claims is that
+    the record on the other end is the one that was already there.
+
+    `id` is the proof of that claim rather than decoration. It is the
+    same id before and after, which is what the column was minted for,
+    and a swap that had created a record would answer with another one.
+    """
+
+    id: str
+    old: str
+    mac: str
+    name: str
+    location: str | None
+    agents: tuple[str, ...]
+    facts: int
+
+
+@dataclass(frozen=True)
 class LiveBinding:
     """What a running server re-reads about one device: its binding, and
     the default agent standing behind it.
@@ -425,6 +457,32 @@ DEVICE_NAME_IN_FLIGHT = (
     "at commit, so the order the rows are written in would decide whether it worked. "
     "Nothing was changed, and no name is quoted back. Do it in two steps, moving the "
     "device that is giving the name up to a name nothing holds first"
+)
+
+# What a board swap refuses with, for the two states this module can be
+# in before it writes. The third and the fourth are somebody else's
+# sentence: a source MAC with no record answers with the devices
+# setting's own missing line, and a destination that already holds
+# remembered facts answers with the memory store's, which says what is
+# filed there and how to read it.
+#
+# Neither quotes an address back, which is the rule every refusal in
+# this file keeps, and it costs nothing here: a caller that sent two
+# MACs is holding both of them.
+DEVICE_MAC_TAKEN = (
+    "devices: another device record already answers at that address, and a board swap "
+    "may not merge two records into one: the two say different things about a name, a "
+    "place, a binding and what has been remembered, and nothing could tell them apart "
+    "afterwards. Nothing was changed, and neither address is quoted back. Remove the "
+    "record that is there with `vinga-server config device delete <mac>`, or swap onto "
+    "an address nothing is bound to"
+)
+
+SAME_MAC = (
+    "devices: the new address is the one the device already answers at, so there is no "
+    "board to swap. Nothing was changed, and the address is not quoted back. A MAC is "
+    "compared in its canonical form, which is what every path here stores, so a "
+    "spelling that differs only in case or in its separators is the same address"
 )
 
 DEVICE_ID_FIXED = (
@@ -865,7 +923,8 @@ class ConfigStore:
             held = _names_held(domain)
             staged = _gathered(partial(_stage_change, domain), changes)
             _refuse_unresolved(domain)
-            _refuse_repeated_identities(domain, held)
+            _refuse_repeated_identities(domain)
+            _refuse_names_in_flight(domain, held)
             _persist(connection, staged)
         return tuple(entry.applied for entry in staged)
 
@@ -1009,6 +1068,101 @@ class ConfigStore:
             _DeviceBinding(mac=_mac(mac), located=True), existing=True
         )
 
+    def replace_device(self, mac: str, to: str) -> Replaced:
+        """Put one device record on another board: rewrite the MAC it
+        answers at, keeping the record, and move what that board
+        remembered in the same transaction.
+
+        The act the delete-and-bind workaround cannot make, and the one
+        the stable id was minted for. A board dies, or is swapped for a
+        better one, and everything a household established about the
+        thing in the corner of the room (what it is called, where it
+        stands, which agents it reaches, what it has been told) is a
+        property of the RECORD rather than of the hardware. Deleted and
+        bound again, the operator gets a new id, an unnamed device in
+        nowhere in particular and a memory that stayed behind at an
+        address no board is standing at.
+
+        The phases every write here runs. Both addresses are made
+        canonical outside the lock, so nothing a caller got wrong costs
+        one; the move is staged into the candidate domain state inside
+        it; the state the swap would leave is checked once; and the one
+        row that moved is written.
+
+        Then the memory schema, and only it, which is what makes this
+        cheaper than it looks. `rename_owner` already takes a
+        `MemoryScope`, so a device's facts move through the same verb an
+        agent's do, with `MemoryScope.DEVICE` and the two MACs: no uuid
+        enters the memory schema and there is no cross-chain data
+        migration. It takes the memory chain's key 3 as its own first
+        statement, and this transaction is holding the domain chain's
+        key 1, which is the ascending order `db.advisory_key` states.
+        The record chain's key 2 is not taken at all, and that is a
+        decision rather than an omission: see below.
+
+        **The history is deliberately untouched**, which is
+        `rename_agent`'s own rule read one column across. `sessions.device`
+        says which board was physically connected when the session
+        happened, and a swap made afterwards does not falsify it; a
+        dated row is evidence rather than a reference. So no `record`
+        row is rewritten, nothing is published to a writer in flight,
+        and this transaction never reaches the conversation record at
+        all.
+
+        Reversible by construction, for the reason the agent rename is:
+        `replace_device(new, old)` puts everything back, with
+        information the operator has in the shell history of the command
+        they just typed. What keeps that true is that both destinations
+        are refused when occupied. A device record already answering at
+        the new address is a conflict and not a merge, and so is a board
+        at that address the deployment already remembers things about.
+
+        A conversation in flight follows the record rather than the
+        address, and nothing here has to arrange it: it attached to an
+        id at its connect and re-reads that id every round (#449, M2),
+        and the tool that may move it writes by id too (M3). What the
+        board on the other end of that conversation is is a separate
+        question, and the honest answer is that a swap does not reach
+        through the wire: the old board goes on talking until it stops,
+        and the new one reaches the record at its next check-in.
+        """
+        # Preparation, outside the lock. Both are addresses into the
+        # store rather than values being chosen, so both go through the
+        # canonical spelling every device path here stores.
+        source = _mac(mac)
+        destination = _mac(to)
+        if source == destination:
+            raise ConfigError(SAME_MAC)
+        with self._transaction() as connection:
+            domain = _read_domain(connection)
+            stored = domain.devices.get(source)
+            if stored is None:
+                raise UnknownEntityError(_NO_SUCH_DEVICE)
+            if destination in domain.devices:
+                raise DeviceNameConflictError(DEVICE_MAC_TAKEN)
+            record = _swapped_record(stored, source, destination)
+            del domain.devices[source]
+            domain.devices[destination] = record
+            _refuse_unresolved(domain)
+            # The end state's uniqueness and not the in-flight check
+            # beside it, and the difference is what a swap moves. That
+            # one asks whether a name is being taken from a device that
+            # is only giving it up in the same transaction, and it
+            # answers by MAC, so a record that changed MAC would trip it
+            # on its own unchanged name. The hazard it exists for cannot
+            # arise here either: it is about the ORDER two rows are
+            # written in, and this writes one.
+            _refuse_repeated_identities(domain)
+            _swap_device_row(connection, source, destination, record)
+            # Key 3, taken inside `rename_owner` as its own first
+            # statement, so the ascending order is a property of that
+            # function rather than of this call site; what this site
+            # owes it is the sequence.
+            facts = agent_memory.rename_owner(
+                connection, MemoryScope.DEVICE, source, destination
+            )
+        return _replaced_device(record, source, destination, facts)
+
     def _device_write(
         self,
         binding: "_DeviceBinding",
@@ -1063,7 +1217,8 @@ class ConfigStore:
             held = _names_held(domain)
             staged = _stage_device(domain, binding)
             _refuse_unresolved(domain)
-            _refuse_repeated_identities(domain, held)
+            _refuse_repeated_identities(domain)
+            _refuse_names_in_flight(domain, held)
             _persist(connection, (staged,))
             written = domain.devices[binding.mac]
         return _written_device(binding.mac, written)
@@ -2097,6 +2252,83 @@ def _device_row(mac: str, record: DeviceRecord) -> _Row:
             "location": record.location,
             "agents": list(record.agents),
         },
+    )
+
+
+def _swapped_record(record: DeviceRecord, old: str, new: str) -> DeviceRecord:
+    """One record as it reads on the other board: everything it held,
+    with the placeholder name moved onto the new address.
+
+    The id, the location and the bindings travel verbatim, because none
+    of them is about the hardware. A name an operator chose travels
+    verbatim too, for the same reason and more strongly: it is what the
+    agent says out loud, and a board being replaced does not change what
+    the thing in the room is called.
+
+    The one name that MOVES is the one nobody chose. `Device <mac>` is
+    what this server calls a board until somebody names it, the spelling
+    is reserved to the device whose own MAC it is
+    (`_refuse_reserved_name`), and it is how every reader tells "nobody
+    has named this" from a name. Left behind after a swap it would be
+    all three things wrong at once: a placeholder naming a board that is
+    gone, a value no writer could write back, and therefore an exported
+    document its own store would refuse on apply. So the placeholder is
+    re-derived, and a record nobody has named is still a record nobody
+    has named.
+
+    It cannot collide, and the check that would catch it runs anyway:
+    the only row that may hold `Device <new mac>` is the record at that
+    address, and this write has already refused one.
+    """
+    if record.name == default_device_name(old):
+        return record.model_copy(update={"name": default_device_name(new)})
+    return record
+
+
+def _swap_device_row(
+    connection: Connection, old: str, new: str, record: DeviceRecord
+) -> None:
+    """The device row at its new address.
+
+    An UPDATE of the two columns that moved rather than a delete and an
+    insert, which is `_rename_agent_row`'s reason one table across: the
+    rest of the body travels verbatim, and so does any column this table
+    gains later, which a rewrite naming the columns it knew about would
+    silently drop. The row is known to be there, because the transaction
+    refused a missing source before it staged anything.
+
+    Not `_device_row`, and this is the one device write that is not.
+    That one is addressed BY the MAC and cannot express a write that
+    moves it: an upsert keyed on the value being changed would insert a
+    second record rather than move this one.
+    """
+    connection.execute(
+        update(schema.devices)
+        .where(schema.devices.c.mac == old)
+        .values(mac=new, name=record.name)
+    )
+
+
+def _replaced_device(
+    record: DeviceRecord, old: str, new: str, facts: int
+) -> Replaced:
+    """One swapped record as the answer the write gives back.
+
+    The two asserts are `_written_device`'s and they hold for its
+    reason: `id` and `name` are optional on `DeviceRecord` because a
+    document may leave them out, and a record that came out of the store
+    has both.
+    """
+    assert record.id is not None, "a stored device record has an id"
+    assert record.name is not None, "a stored device record has a name"
+    return Replaced(
+        id=record.id,
+        old=old,
+        mac=new,
+        name=record.name,
+        location=record.location,
+        agents=tuple(record.agents),
+        facts=facts,
     )
 
 
@@ -3765,7 +3997,7 @@ def _names_held(domain: DomainConfig) -> dict[str, str]:
     }
 
 
-def _refuse_repeated_identities(domain: DomainConfig, held: Mapping[str, str]) -> None:
+def _refuse_repeated_identities(domain: DomainConfig) -> None:
     """No two device records holding one folded name, and none holding
     one id, in the state this write would leave.
 
@@ -3783,9 +4015,10 @@ def _refuse_repeated_identities(domain: DomainConfig, held: Mapping[str, str]) -
     name, and refusing that would refuse a document whose end state is
     fine.
 
-    Called from the two paths that can change either, which is the
-    device writes and `apply`. An entity write and an agent rename move
-    neither, and a call there would be a check with nothing to find.
+    Called from the three paths that can change either, which is the
+    device writes, `apply` and the board swap. An entity write and an
+    agent rename move neither, and a call there would be a check with
+    nothing to find.
     """
     folded = [fold_device_name(record.name or "") for record in domain.devices.values()]
     if len(set(folded)) != len(folded):
@@ -3793,13 +4026,28 @@ def _refuse_repeated_identities(domain: DomainConfig, held: Mapping[str, str]) -
     identities = [record.id for record in domain.devices.values() if record.id]
     if len(set(identities)) != len(identities):
         raise DeviceNameConflictError(DEVICE_ID_TAKEN)
-    # And no name taken from a device that is only giving it up inside
-    # the same transaction. The end state is fine and the WAY THERE is
-    # not: a unique index is checked statement by statement, so whether
-    # a swap worked would depend on the order `_persist` happened to
-    # write two rows in. Refused with a sentence rather than left to
-    # the index, which would answer with the generic sanitized database
-    # failure and a 500.
+
+
+def _refuse_names_in_flight(domain: DomainConfig, held: Mapping[str, str]) -> None:
+    """And no name taken from a device that is only giving it up inside
+    the same transaction.
+
+    The check above is about the state a write would LEAVE; this one is
+    about the way there. The end state can be fine while the route is
+    not: a unique index is checked statement by statement rather than at
+    commit, and a functional index cannot be deferred in Postgres, so
+    whether a document that swapped two names worked would depend on the
+    order `_persist` happened to write two rows in. Refused with a
+    sentence naming the remedy rather than left to the index, which
+    would answer with the generic sanitized database failure and a 500.
+
+    A pair rather than one function because the two are asked by
+    different writers. What this one compares is which MAC holds a name,
+    so a write that moves a RECORD from one MAC to another would trip it
+    on a name that never moved at all, and the board swap therefore asks
+    only the end-state check. It can, because the hazard here is about
+    the order of two row writes and a swap writes one.
+    """
     for mac, record in domain.devices.items():
         if held.get(fold_device_name(record.name or ""), mac) != mac:
             raise DeviceNameConflictError(DEVICE_NAME_IN_FLIGHT)
@@ -3821,6 +4069,7 @@ __all__ = [
     "LiveBinding",
     "LiveDevice",
     "Renamed",
+    "Replaced",
     "read_live_attachment",
     "read_live_binding",
     "read_live_device_by_id",
