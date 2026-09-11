@@ -50,7 +50,11 @@ from vinga_server.db import DOMAIN_CHAIN, open_database, read_engine, write_engi
 # stamped at, and the whole of what this release upgrades from.
 BASELINE = "3001_postgres_domain"
 
-HEAD = "3002_drop_max_tokens_secrets"
+# The head this database ends up at, which is the chain's head and not
+# the revision under test: `open_database` brings a chain all the way
+# up, so a migration added after `3002` moves this line even though the
+# subject of this file does not move.
+HEAD = "3003_device_record"
 
 STAGE = "llm"
 NAME = "claude"
@@ -127,31 +131,40 @@ def seeded(at_the_baseline: DatabaseConfig, keys: MultiFernet) -> DatabaseConfig
     credential stored in the slot that stays, and a credential stored in
     the slot that goes.
 
-    The entry and the surviving credential are written through the
-    repository, because that is how they got there. The withdrawn one is
-    written into the column directly, because the repository this commit
-    ships refuses the slot: what is being reproduced is a row an older
-    build wrote, and only the row is old.
+    Written into the columns directly rather than through the
+    repository, and both halves of that are deliberate. The withdrawn
+    slot is one the repository now refuses, so only a raw write can
+    reproduce the row an older build left. And the repository cannot be
+    used against this database AT ALL: it reads the whole domain half
+    before it writes anything, and a schema stamped at `3001` is missing
+    the device columns `3003` added, so a `set_provider` here would fail
+    on a table this file has nothing to say about. What is being
+    reproduced is a database an older build left behind, and a
+    repository from this build is not an older build.
     """
     settings = at_the_baseline
     engine = write_engine(settings, DOMAIN_CHAIN)
     try:
-        store = ConfigStore(engine, keys)
-        store.set_provider(STAGE, NAME, {"type": "anthropic", "model": "claude-sonnet-5"})
-        store.set_secret(KEPT, KEPT_VALUE)
         with engine.begin() as connection:
             connection.execute(
                 text(
-                    "update domain.providers "
-                    "set secrets = (secrets::jsonb || cast(:added as jsonb))::json "
-                    "where stage = :stage and name = :name"
+                    "insert into domain.providers (stage, name, body, secrets) "
+                    "values (:stage, :name, :body, cast(:secrets as json))"
                 ),
                 {
-                    "added": json.dumps(
-                        {WITHDRAWN.slot: encrypt(WITHDRAWN, WITHDRAWN_VALUE, keys)}
-                    ),
                     "stage": STAGE,
                     "name": NAME,
+                    "body": json.dumps(
+                        {"type": "anthropic", "model": "claude-sonnet-5"}
+                    ),
+                    "secrets": json.dumps(
+                        {
+                            KEPT.slot: encrypt(KEPT, KEPT_VALUE, keys),
+                            WITHDRAWN.slot: encrypt(
+                                WITHDRAWN, WITHDRAWN_VALUE, keys
+                            ),
+                        }
+                    ),
                 },
             )
     finally:
