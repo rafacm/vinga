@@ -619,9 +619,17 @@ can act on none of it.
 | This server cannot write device records at all | `PLACEMENT_UNAVAILABLE`: tell the user that, and carry on |
 | The repository refused the value (a URL carrying a credential) | `LOCATION_NOT_A_PLACE`: ask the user where the device is and call it again |
 | Another writer holds the domain lock | `PLACEMENT_BUSY`: ask again in a moment |
-| Anything else, including a database that would not answer | `PLACEMENT_FAILED`: you could not record that |
+| The database could not be read or written, or anything else failed | `PLACEMENT_FAILED`: you could not record that |
 
-Two of those are worth reading twice. The first is that the two
+The last two rows are told apart by the ORDER of the arms that catch
+them and by nothing else, because a storage failure and a refused value
+are both `ConfigError`s. Getting that wrong was a real bug in this
+milestone for as long as it took to notice the class hierarchy: a
+database that would not answer told a room that the place it had named
+was not a place, which is wrong about the world and something nobody
+can act on. There is a test that fails when the arms are reordered.
+
+Two more are worth reading twice. The first is that the two
 absences are two sentences: a server with no writable records will not
 gain one while this conversation is happening, and a device with no
 record is one an operator can bind, and a room can act on the
@@ -665,6 +673,16 @@ configuration.
 
 Asserted by the thread the repository call ran on rather than by
 reading the call site.
+
+The two bounds around it line up, and it is worth writing down which
+way: a builtin may take `DEFAULT_TOOL_TIMEOUT_S` (15 s) and a contended
+write gives up at `LOCK_TIMEOUT_MS` (10 s), so contention always
+refuses as something to retry rather than timing out. Past that bound
+the tool loop answers that the tool did not answer in time, which is
+what it says rather than that nothing was written: `asyncio.to_thread`
+cannot be cancelled, so a write that overran would still land. That is
+true of every tool this server dispatches and the sentence is already
+honest about it.
 
 ### Deviations from the plan
 
@@ -730,6 +748,7 @@ Two.
 - Every new pin was watched failing before its claim was made, one
   mutation per claim: the tool out of `ORDERED_TOOL_NAMES`, the write
   addressed by MAC, the write run inline, the repository's own sentence
-  forwarded, the two absences merged into one sentence, the refusal
-  raised inside its handler, the confirmation left unnormalized, and the
-  location written to a log line.
+  forwarded, the two absences merged into one sentence, the storage arm
+  removed so a failed database read as a bad place, the refusal raised
+  inside its handler, the confirmation left unnormalized, the id's
+  spelling left unasked, and the location written to a log line.

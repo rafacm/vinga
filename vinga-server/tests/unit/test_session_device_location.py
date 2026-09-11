@@ -50,6 +50,7 @@ from tests.support.providers import ScriptedLlm
 from tests.support.registry import AGENT, STAGES, store_at
 from tests.support.sessions import agent_providers, call, run_reply, session_for
 from tests.support.stores import holding_the_write_lock, the_lock_held
+from vinga_server.config.loader import StorageError
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database, read_engine
@@ -512,6 +513,29 @@ async def test_a_refusal_carries_nothing_of_the_one_it_translates() -> None:
     assert CREDENTIAL not in chain(caught.value)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+
+
+async def test_a_database_that_will_not_answer_is_not_a_place_problem() -> None:
+    """A storage failure and a value the repository refused are both
+    `ConfigError`s, and only the order of the arms that catch them tells
+    them apart.
+
+    What it costs to get that wrong is a room being told the place it
+    named is not a place, which is wrong about the world and something
+    nobody can act on: saying it differently will not fix a database.
+    """
+    minted = a_named_board()
+
+    with placements() as writing, pytest.MonkeyPatch.context() as patching:
+        patching.setattr(
+            ConfigStore,
+            "relocate_device_by_id",
+            lambda *args: (_ for _ in ()).throw(StorageError("the database said no")),
+        )
+        with pytest.raises(ValueError) as caught:  # noqa: PT011
+            await writing.relocate(minted, OFFICE)
+
+    assert str(caught.value) == builtin.PLACEMENT_FAILED
 
 
 async def test_a_contended_database_is_answered_as_something_to_retry(
