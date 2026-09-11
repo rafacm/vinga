@@ -503,7 +503,7 @@ async def _build_composition(
     # describes some other server, or none. Its conversations are told
     # they cannot move their device rather than left to answer "all
     # right" and change nothing.
-    relocations = (
+    device_access = (
         DevicePlacements(ConfigStore(store.engine, store.keys))
         if seed.from_store
         else None
@@ -543,7 +543,7 @@ async def _build_composition(
         conversations,
         None if conversations is None else threads.Reads(database),
         bindings,
-        relocations,
+        device_access,
     )
     # What a device says about itself at OTA check-in, kept for the
     # session that follows: a capture manifest needs the firmware

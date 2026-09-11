@@ -166,7 +166,7 @@ def _submissions() -> Iterator[list[str]]:
 
 @contextlib.contextmanager
 def a_session(
-    script: ScriptedLlm, mac: str = POET_MAC, relocations: Any = None
+    script: ScriptedLlm, mac: str = POET_MAC, device_access: Any = None
 ) -> Iterator[DeviceSession]:
     """A session wired the way `app.py` wires one: a live view with a
     real engine over the device rows, and, unless a case is about its
@@ -182,7 +182,7 @@ def a_session(
             cast(Any, scripts),
             generations=generations,
             devices=bindings,
-            relocations=relocations,
+            device_access=device_access,
         )
     finally:
         bindings.dispose()
@@ -200,7 +200,7 @@ async def test_a_place_the_agent_is_told_is_written_to_the_record() -> None:
         [[call("set_device_location", location=OFFICE)], "I have noted that."]
     )
 
-    with placements() as writing, a_session(script, relocations=writing) as session:
+    with placements() as writing, a_session(script, device_access=writing) as session:
         assert await run_reply(session, "you are in the office now") == [
             "I have noted that."
         ]
@@ -232,7 +232,7 @@ async def test_the_confirmation_names_the_place_on_one_line() -> None:
         [[call("set_device_location", location="  the   office ")], "Noted."]
     )
 
-    with placements() as writing, a_session(script, relocations=writing) as session:
+    with placements() as writing, a_session(script, device_access=writing) as session:
         await run_reply(session, "you are in the office")
 
     (answer,) = said(script)
@@ -256,7 +256,7 @@ async def test_the_write_addresses_the_record_the_conversation_attached_to() -> 
         [[call("set_device_location", location=OFFICE)], "I could not."]
     )
 
-    with placements() as writing, a_session(script, relocations=writing) as session:
+    with placements() as writing, a_session(script, device_access=writing) as session:
         with store_at() as store:
             store.delete_device(POET_MAC)
             store.bind_device(POET_MAC, ["poet"])
@@ -281,7 +281,7 @@ async def test_the_write_runs_off_the_event_loop() -> None:
     script = ScriptedLlm([[call("set_device_location", location=OFFICE)], "Noted."])
     with pytest.MonkeyPatch.context() as patching:
         patching.setattr(ConfigStore, "relocate_device_by_id", relocate)
-        with placements() as writing, a_session(script, relocations=writing) as session:
+        with placements() as writing, a_session(script, device_access=writing) as session:
             await run_reply(session, "you are in the office now")
 
     assert ran and all(where != threading.get_ident() for where in ran)
@@ -367,7 +367,7 @@ async def test_two_places_in_one_round_land_in_the_model_s_order() -> None:
         ]
     )
 
-    with placements() as writing, a_session(script, relocations=writing) as session:
+    with placements() as writing, a_session(script, device_access=writing) as session:
         async with the_first_write_held_until_a_second_finishes() as overlapped:
             await run_reply(session, "you are in the office, no, the landing")
 
@@ -412,7 +412,7 @@ async def test_a_place_a_room_said_reaches_no_event_and_no_log(
     )
 
     with caplog.at_level(logging.DEBUG):
-        with placements() as writing, a_session(script, relocations=writing) as session:
+        with placements() as writing, a_session(script, device_access=writing) as session:
             await run_reply(session, "you have moved")
 
     # It was written, so this is a claim about a value that really
@@ -443,7 +443,7 @@ async def test_a_device_a_default_agent_covers_is_refused_a_place() -> None:
     )
 
     with placements() as writing:
-        with a_session(script, mac=UNBOUND_MAC, relocations=writing) as session:
+        with a_session(script, mac=UNBOUND_MAC, device_access=writing) as session:
             assert await run_reply(session, "you are in the office now") == [
                 "I cannot record that."
             ]
@@ -491,7 +491,7 @@ async def test_a_call_with_no_place_at_all_never_reaches_the_repository() -> Non
     script = ScriptedLlm([[call("set_device_location")], "Where am I?"])
 
     with _submissions() as submitted:
-        with placements() as writing, a_session(script, relocations=writing) as session:
+        with placements() as writing, a_session(script, device_access=writing) as session:
             await run_reply(session, "you have moved")
 
     (answer,) = said(script)
@@ -552,7 +552,7 @@ async def test_a_place_the_repository_refuses_is_answered_as_a_place_problem(
     )
 
     with caplog.at_level(logging.DEBUG):
-        with placements() as writing, a_session(script, relocations=writing) as session:
+        with placements() as writing, a_session(script, device_access=writing) as session:
             await run_reply(session, "you have moved")
 
     (answer,) = said(script)
@@ -626,7 +626,7 @@ async def test_a_contended_database_is_answered_as_something_to_retry(
     )
 
     with holding_the_write_lock(monkeypatch):
-        with placements() as writing, a_session(script, relocations=writing) as session:
+        with placements() as writing, a_session(script, device_access=writing) as session:
             with the_lock_held():
                 assert await run_reply(session, "you are in the office now") == [
                     "Ask me again in a moment."
