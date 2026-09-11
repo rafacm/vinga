@@ -109,3 +109,18 @@ Not verified here: nothing in this milestone needs a device, and the
 generated-document drift checks that CI's integration job runs were not
 run separately, because this change renders no document under
 `docs/reference/`.
+
+### PR review round
+
+External review of PR #475 (codex CLI 0.154.0, gpt-5.6-sol,
+read-only sandbox, 2026-09-11, runtime 2m43s, diff
+origin/main...aab26155). Verdict: mergeable after the listed fixes.
+
+1. **P2: the changelog overstated the lossy reclassification
+   behavior**, saying a class change beside a surviving sibling shows
+   no diff, when reclassification adds the new class's line and only
+   the removal half is invisible. Fixed in `ac7cef48`: the entry now
+   distinguishes the two, matching the plan's amended wording and
+   what the test pins.
+2. **P3: the implementation doc still said PR TBD** while the plan's
+   tick carried #475. Fixed in `ecf7c1e9`.
