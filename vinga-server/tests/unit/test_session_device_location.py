@@ -300,8 +300,9 @@ async def the_first_write_parked() -> Any:
 
 
 async def test_two_places_in_one_round_land_in_the_model_s_order() -> None:
-    """"You have been moved to the office, no, the landing" is one thing
-    a person says, and what has to be true afterwards is the landing.
+    """A person really does say "you have been moved to the office, no,
+    the landing" in one breath, and what has to be true afterwards is
+    the landing.
 
     Run concurrently, the two writes take the domain writer lock in
     whatever order the pool hands the connections out, and the office
