@@ -1,0 +1,639 @@
+#!/usr/bin/env python3
+"""Changelog fragments: fold them, check them, guard the file they replace.
+
+Usage:
+  fold_changelog.py fold <repo-root>
+  fold_changelog.py check <repo-root>
+  fold_changelog.py guard            # changed files on stdin, body in PR_BODY
+
+A branch never edits `CHANGELOG.md`. It writes one
+`changelog.d/<issue>-<slug>.md` holding `### <Class>` headings from the
+closed Keep a Changelog six and the entry text exactly as it should
+read in the changelog. Two branches adding two files cannot conflict,
+which is the conflict class this removes; `changelog.d/README.md`
+states the contract for whoever writes one.
+
+- `fold` moves every fragment's entries into the dated section of
+  `CHANGELOG.md` and deletes the fragments. The section is the
+  committer date of the commit that brought the fragment onto `main`,
+  read along first-parent history and rendered in that commit's own
+  recorded offset, so a merge just before midnight and a fold just
+  after agree. Fragments are ordered by their introduction commit's
+  position in that history, with the filename as the tie-breaker for
+  fragments one commit brought in together. Nothing is written unless
+  the post-conditions below hold, and a run that finds no fragments is
+  a no-op.
+- `check` validates fragments without writing: filenames, headings
+  against the six, non-empty bodies, no date header.
+- `guard` reads a changed-file list on stdin and the pull request body
+  from `PR_BODY` (absent and empty both meaning no body), and refuses
+  a list that touches `CHANGELOG.md` unless the body carries the
+  literal escape phrase.
+
+Exit codes follow `check_doc_links.py`: 0 success, 1 a failure the
+caller has to act on, 2 a bad invocation.
+
+What the fold promises, checked on the assembled text before any byte
+reaches the disk:
+
+- every fragment's entry appears verbatim exactly once;
+- no conflict marker appears anywhere in the file;
+- the file outside the sections this run touched is byte-identical;
+- a section this run created is canonical, one heading per class in
+  Keep a Changelog order, and a section it appended into keeps its
+  standing shape, its headings still present and still in the order
+  they were in.
+
+The post-conditions are deliberately not global. Settled history is
+not canonical (one section orders Fixed before Changed, another
+carries two Added headings), so a global rule would have to reject the
+repository or rewrite what is deliberately kept. Legacy sections are
+parsed permissively and never validated, normalized or rewritten.
+
+Output discipline, inherited wholesale from `check_doc_links.py`,
+because every input here is repository-derived text landing in a
+public CI log: fragment bodies, fragment filenames, changelog content
+and git's own diagnostics. Every message is a fixed sentence of this
+module's own, carrying at most a count. No fragment text, no heading,
+no filename, no git output, no exception text and no traceback is ever
+reproduced. Fragment paths that are symlinks or otherwise not regular
+files are refused before anything reads them, git runs as an
+argument-list subprocess with both streams captured and neither
+re-emitted, and the argument parser answers a bad invocation in this
+module's words rather than by repeating what was typed.
+"""
+
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+# The closed six, in Keep a Changelog order. The order is the artifact:
+# a section this script creates is written in it, and a heading this
+# script has to insert is placed by it.
+CLASSES = ("Added", "Changed", "Deprecated", "Removed", "Fixed", "Security")
+
+FRAGMENT_DIR = "changelog.d"
+CHANGELOG = "CHANGELOG.md"
+
+# The one file in the directory that is not a fragment, excluded by
+# name so the contract can live where the fragments do.
+NOT_A_FRAGMENT = "README.md"
+
+# `<issue>-<slug>.md`: the issue number (or the pull request number
+# where no issue exists), a dash, and a lowercase-and-dashes slug.
+FRAGMENT_NAME = re.compile(r"^[0-9]+-[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
+
+SECTION = re.compile(r"^##[ \t]+(.+?)[ \t]*$")
+ENTRY_HEADING = re.compile(r"^###[ \t]+(.+?)[ \t]*$")
+DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+# What a fragment may not carry: the dated section header and the
+# document title. The date is derived from the commit, so a fragment
+# stating one is stating something it cannot know.
+TOP_HEADING = re.compile(r"^#{1,2}[ \t]")
+
+# The phrase that says a pull request means to correct history rather
+# than to have forgotten the fragment. Pinned here, quoted in the
+# refusal, and named by the test that holds it.
+ESCAPE_PHRASE = "Corrects CHANGELOG history"
+
+# The environment variable the workflow passes the pull request body
+# in. An environment value rather than an interpolation into a shell
+# script: a body is attacker-controlled text.
+BODY_VARIABLE = "PR_BODY"
+
+
+class Refusal(Exception):
+    """A failure the caller has to act on, carrying a fixed sentence.
+
+    Every refusal leaves through this one door, and its message is
+    always assembled from literals of this module. That is what keeps
+    a fragment body, a filename or a git diagnostic from reaching a CI
+    log through the tool that found it wrong.
+    """
+
+
+NOT_A_REGULAR_FILE = "a path under changelog.d is not a regular file"
+NOT_UTF8 = "a fragment is not valid UTF-8"
+BAD_NAME = "a fragment is not named <issue>-<slug>.md"
+UNKNOWN_HEADING = "a fragment names a heading outside the Keep a Changelog six"
+NO_HEADING = "a fragment carries no class heading"
+EMPTY_BODY = "a fragment has a class heading with no entry text"
+DATE_HEADING = "a fragment carries a date or top-level heading"
+NO_INTRODUCTION = "a fragment's introduction commit is not in the available history"
+GIT_FAILED = "a git command failed"
+UNREADABLE_CHANGELOG = "CHANGELOG.md is missing or not valid UTF-8"
+NOT_ONCE = "an entry would not appear exactly once in the changelog"
+CONFLICT_MARKER = "the changelog would carry a conflict marker"
+OUTSIDE_CHANGED = "the changelog outside the folded sections would change"
+MALFORMED_SECTION = "a folded section would not be well formed"
+
+
+def _fail(reasons: list[str]) -> int:
+    """Every distinct reason once, with the count of what hit it."""
+    for reason in sorted(set(reasons)):
+        print(f"{reason} ({reasons.count(reason)})", file=sys.stderr)
+    return 1
+
+
+# Fragments
+
+
+def fragment_paths(root: Path) -> list[Path]:
+    """Every fragment file, in filename order.
+
+    The README is excluded by name, and a dotfile is skipped rather
+    than refused: a checkout is allowed to carry the operating
+    system's own droppings, and they are not tracked.
+    """
+    directory = root / FRAGMENT_DIR
+    if not directory.is_dir():
+        return []
+    found = []
+    for path in sorted(directory.iterdir(), key=lambda p: p.name):
+        if path.name.startswith(".") or path.name == NOT_A_FRAGMENT:
+            continue
+        found.append(path)
+    return found
+
+
+def _read(path: Path) -> str:
+    """One fragment's text, refusing anything that is not a plain file.
+
+    The symlink check comes before the read, not after: following a
+    link out of the checkout would fold text nobody reviewed into the
+    changelog, and `is_file()` alone follows it.
+    """
+    if path.is_symlink() or not path.is_file():
+        raise Refusal(NOT_A_REGULAR_FILE)
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        raise Refusal(NOT_UTF8) from None
+    except OSError:
+        raise Refusal(NOT_A_REGULAR_FILE) from None
+
+
+def entries_of(text: str) -> list[tuple[str, str]]:
+    """One fragment as the (class, entry text) pairs it declares.
+
+    The entry text is what sits between one `###` heading and the
+    next, with blank lines at either end trimmed and nothing else
+    touched: what the fold moves is these bytes.
+    """
+    found: list[tuple[str, str]] = []
+    heading: str | None = None
+    body: list[str] = []
+    for line in text.splitlines(keepends=True):
+        match = ENTRY_HEADING.match(line.rstrip("\n"))
+        if match is not None:
+            if heading is not None:
+                found.append((heading, "".join(body)))
+            heading = match.group(1)
+            body = []
+            continue
+        if heading is not None:
+            body.append(line)
+    if heading is not None:
+        found.append((heading, "".join(body)))
+    return [(name, _trimmed(text)) for name, text in found]
+
+
+def _trimmed(text: str) -> str:
+    """One entry's lines with the blank ones at either end removed and
+    a single trailing newline."""
+    lines = text.splitlines()
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return "".join(f"{line}\n" for line in lines)
+
+
+def validate(root: Path) -> list[str]:
+    """Every fragment held to the contract, without writing anything."""
+    reasons: list[str] = []
+    for path in fragment_paths(root):
+        try:
+            if not FRAGMENT_NAME.match(path.name):
+                reasons.append(BAD_NAME)
+            text = _read(path)
+        except Refusal as refusal:
+            reasons.append(str(refusal))
+            continue
+        if any(TOP_HEADING.match(line.rstrip()) for line in text.splitlines()):
+            reasons.append(DATE_HEADING)
+        declared = entries_of(text)
+        if not declared:
+            reasons.append(NO_HEADING)
+        for name, body in declared:
+            if name not in CLASSES:
+                reasons.append(UNKNOWN_HEADING)
+            if not body.strip():
+                reasons.append(EMPTY_BODY)
+    return reasons
+
+
+# Dates and order, from git
+
+
+def _git(root: Path, *args: str) -> str:
+    """One git command, as an argument list, with both streams taken.
+
+    Neither stream is ever re-emitted: git repeats paths and refs back
+    in its diagnostics, and this script's whole output contract is
+    that repository-derived text does not reach the log through it.
+    """
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(root), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        raise Refusal(GIT_FAILED) from None
+    if done.returncode != 0:
+        raise Refusal(GIT_FAILED)
+    return done.stdout
+
+
+def _first_parent(root: Path) -> dict[str, int]:
+    """Every commit on first-parent history, newest first, by position.
+
+    The position is the total order the fold needs: a fragment
+    introduced earlier folds before one introduced later, and the
+    filename breaks the tie for two fragments one commit brought in,
+    since a git tree encodes no order between the files of one commit.
+    """
+    listed = _git(root, "rev-list", "--first-parent", "HEAD").split()
+    return {sha: index for index, sha in enumerate(listed)}
+
+
+def _roots(root: Path) -> set[str]:
+    """The commits that have no parent in the available history.
+
+    In a shallow clone the graft boundary is one of these and appears
+    to add every file in the tree, so a fragment dated from it would
+    be dated from a truncation rather than from a merge.
+    """
+    return set(_git(root, "rev-list", "--max-parents=0", "HEAD").split())
+
+
+def _is_shallow(root: Path) -> bool:
+    return _git(root, "rev-parse", "--is-shallow-repository").strip() == "true"
+
+
+def introduction(
+    root: Path, path: Path, history: dict[str, int], truncated: bool
+) -> tuple[str, int]:
+    """The date one fragment folds into, and its place in merge order.
+
+    The introduction commit is the oldest first-parent commit that
+    added the file, and the date is its committer date in its own
+    recorded offset. A fragment whose introduction cannot be found in
+    the available history is refused rather than dated from today: a
+    fold that guessed would put an entry under a day nothing landed
+    on, and the guess would be invisible.
+    """
+    relative = path.relative_to(root).as_posix()
+    listed = _git(
+        root,
+        "log",
+        "--first-parent",
+        "--diff-filter=A",
+        "--format=%H %cI",
+        "--",
+        relative,
+    ).splitlines()
+    if not listed:
+        raise Refusal(NO_INTRODUCTION)
+    sha, _, stamp = listed[-1].partition(" ")
+    if sha not in history:
+        raise Refusal(NO_INTRODUCTION)
+    if truncated and sha in _roots(root):
+        raise Refusal(NO_INTRODUCTION)
+    day = stamp[:10]
+    if not DATE.match(day):
+        raise Refusal(NO_INTRODUCTION)
+    return day, history[sha]
+
+
+# The changelog, parsed permissively
+
+
+class Section:
+    """One dated section: its heading line and everything under it.
+
+    Held as raw lines so that a section nothing touches reassembles
+    byte for byte, which is the post-condition the whole fold is
+    checked against.
+    """
+
+    def __init__(self, heading: str, body: list[str]) -> None:
+        self.heading = heading
+        self.body = body
+        match = SECTION.match(heading.rstrip("\n"))
+        title = match.group(1) if match else ""
+        self.date = title if DATE.match(title) else None
+
+    def text(self) -> str:
+        return self.heading + "".join(self.body)
+
+
+def parse(text: str) -> tuple[str, list[Section]]:
+    """The changelog as its preamble and its dated sections.
+
+    Permissive by design: a `##` heading opens a section whatever it
+    says, and nothing below it is read except the `###` headings the
+    fold has to place an entry against.
+    """
+    preamble: list[str] = []
+    sections: list[Section] = []
+    for line in text.splitlines(keepends=True):
+        if SECTION.match(line.rstrip("\n")):
+            sections.append(Section(line, []))
+        elif sections:
+            sections[-1].body.append(line)
+        else:
+            preamble.append(line)
+    return "".join(preamble), sections
+
+
+def _headings(body: list[str]) -> list[tuple[int, str]]:
+    """Every `###` heading in one section body, as (index, class)."""
+    found = []
+    for index, line in enumerate(body):
+        match = ENTRY_HEADING.match(line.rstrip("\n"))
+        if match is not None:
+            found.append((index, match.group(1)))
+    return found
+
+
+def _created(date: str, entries: dict[str, list[str]]) -> Section:
+    """A section this run creates, canonical by construction."""
+    body: list[str] = ["\n"]
+    for name in CLASSES:
+        if name not in entries:
+            continue
+        body.append(f"### {name}\n")
+        body.append("\n")
+        for position, entry in enumerate(entries[name]):
+            if position:
+                body.append("\n")
+            body += [f"{line}\n" for line in entry.splitlines()]
+        body.append("\n")
+    return Section(f"## {date}\n", body)
+
+
+def _append(section: Section, name: str, entries: list[str]) -> None:
+    """One class's entries appended into a section that already stands.
+
+    Under the LAST heading matching the class, after its last entry,
+    because a section may legitimately carry two headings of one class
+    and the later one is where a reader looks. A class the section has
+    no heading for gets one, placed in Keep a Changelog order relative
+    to the headings that are there, whatever else the section holds.
+    """
+    block: list[str] = []
+    for position, entry in enumerate(entries):
+        if position:
+            block.append("\n")
+        block += [f"{line}\n" for line in entry.splitlines()]
+
+    headings = _headings(section.body)
+    matching = [index for index, heading in headings if heading == name]
+    if matching:
+        start = matching[-1]
+        following = [index for index, _ in headings if index > start]
+        end = following[0] if following else len(section.body)
+        while end > start + 1 and not section.body[end - 1].strip():
+            end -= 1
+        section.body[end:end] = ["\n", *block]
+        return
+
+    order = CLASSES.index(name)
+    after = [
+        index
+        for index, heading in headings
+        if heading in CLASSES and CLASSES.index(heading) > order
+    ]
+    if after:
+        at = after[0]
+        section.body[at:at] = [f"### {name}\n", "\n", *block, "\n"]
+        return
+    end = len(section.body)
+    while end > 0 and not section.body[end - 1].strip():
+        end -= 1
+    section.body[end:end] = ["\n", f"### {name}\n", "\n", *block]
+
+
+def assemble(
+    text: str, folding: dict[str, dict[str, list[str]]]
+) -> tuple[str, set[str], set[str]]:
+    """The changelog with every fragment's entries in place.
+
+    Returns the new text, the dates whose sections were created, and
+    the dates whose sections were appended into. Dates are handled
+    oldest first so the result does not depend on the order the
+    fragments happened to be read in.
+    """
+    preamble, sections = parse(text)
+    created: set[str] = set()
+    appended: set[str] = set()
+    for date in sorted(folding):
+        entries = folding[date]
+        standing = next((s for s in sections if s.date == date), None)
+        if standing is None:
+            section = _created(date, entries)
+            at = next(
+                (
+                    index
+                    for index, other in enumerate(sections)
+                    if other.date is not None and other.date < date
+                ),
+                len(sections),
+            )
+            # A new section needs a blank line in front of its heading,
+            # and the only place the file may not already have one is
+            # after its last section. Topping that up is a change to a
+            # standing section, so the date is recorded as touched
+            # rather than quietly excused from the byte-identity
+            # post-condition.
+            if at > 0 and sections[at - 1].body and sections[at - 1].body[-1].strip():
+                sections[at - 1].body.append("\n")
+                appended.add(sections[at - 1].date or "")
+            sections.insert(at, section)
+            created.add(date)
+            continue
+        for name in CLASSES:
+            if name in entries:
+                _append(standing, name, entries[name])
+        appended.add(date)
+    return preamble + "".join(s.text() for s in sections), created, appended
+
+
+# What the fold refuses to write
+
+CONFLICT = ("<<<<<<<", ">>>>>>>", "|||||||")
+
+
+def _has_conflict_marker(text: str) -> bool:
+    for line in text.splitlines():
+        if line.startswith(CONFLICT) or line.rstrip() == "=======":
+            return True
+    return False
+
+
+def post_conditions(
+    before: str,
+    after: str,
+    folding: dict[str, dict[str, list[str]]],
+    created: set[str],
+    appended: set[str],
+) -> list[str]:
+    """Everything that must hold before a byte is written."""
+    reasons: list[str] = []
+    for entries in folding.values():
+        for group in entries.values():
+            for entry in group:
+                if after.count(entry) != 1:
+                    reasons.append(NOT_ONCE)
+    if _has_conflict_marker(after):
+        reasons.append(CONFLICT_MARKER)
+
+    old_preamble, old_sections = parse(before)
+    new_preamble, new_sections = parse(after)
+    touched = created | appended
+    old_kept = [(s.date, s.text()) for s in old_sections if s.date not in touched]
+    new_kept = [(s.date, s.text()) for s in new_sections if s.date not in touched]
+    if old_preamble != new_preamble or old_kept != new_kept:
+        reasons.append(OUTSIDE_CHANGED)
+
+    standing = {s.date: s for s in old_sections}
+    for section in new_sections:
+        if section.date in created:
+            names = [name for _, name in _headings(section.body)]
+            wanted = [name for name in CLASSES if name in folding[section.date]]
+            if names != wanted:
+                reasons.append(MALFORMED_SECTION)
+        elif section.date in appended and section.date in standing:
+            was = [name for _, name in _headings(standing[section.date].body)]
+            now = [name for _, name in _headings(section.body)]
+            if not _keeps(was, now):
+                reasons.append(MALFORMED_SECTION)
+            elif any(name not in CLASSES for name in now if name not in was):
+                reasons.append(MALFORMED_SECTION)
+    return reasons
+
+
+def _keeps(was: list[str], now: list[str]) -> bool:
+    """Whether the standing headings are still there, in order.
+
+    A subsequence test rather than a prefix test: an inserted heading
+    may land anywhere among them, and what the section is held to is
+    that nothing it had was removed or reordered.
+    """
+    remaining = iter(now)
+    return all(any(name == seen for seen in remaining) for name in was)
+
+
+# The verbs
+
+
+def fold(root: Path) -> int:
+    paths = fragment_paths(root)
+    if not paths:
+        print("no fragments to fold")
+        return 0
+    reasons = validate(root)
+    if reasons:
+        return _fail(reasons)
+
+    changelog = root / CHANGELOG
+    try:
+        before = changelog.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return _fail([UNREADABLE_CHANGELOG])
+
+    history = _first_parent(root)
+    truncated = _is_shallow(root)
+    ordered = []
+    for path in paths:
+        date, position = introduction(root, path, history, truncated)
+        ordered.append((-position, path.name, date, path))
+    ordered.sort(key=lambda row: (row[0], row[1]))
+
+    folding: dict[str, dict[str, list[str]]] = {}
+    for _, _, date, path in ordered:
+        for name, entry in entries_of(_read(path)):
+            folding.setdefault(date, {}).setdefault(name, []).append(entry)
+
+    after, created, appended = assemble(before, folding)
+    reasons = post_conditions(before, after, folding, created, appended)
+    if reasons:
+        return _fail(reasons)
+
+    changelog.write_text(after, encoding="utf-8")
+    for path in paths:
+        path.unlink()
+    print(f"folded {len(paths)} fragments into {len(created) + len(appended)} sections")
+    return 0
+
+
+def check(root: Path) -> int:
+    reasons = validate(root)
+    if reasons:
+        return _fail(reasons)
+    print(f"checked {len(fragment_paths(root))} fragments, 0 failures")
+    return 0
+
+
+def guard(changed: list[str], body: str) -> int:
+    if CHANGELOG not in changed:
+        print("the changed files do not touch CHANGELOG.md")
+        return 0
+    if ESCAPE_PHRASE in body:
+        print("the pull request body declares a correction of history")
+        return 0
+    print(
+        "this pull request changes CHANGELOG.md, which a branch may not do. "
+        "Write changelog.d/<issue>-<slug>.md instead; a genuine correction "
+        f"of history says '{ESCAPE_PHRASE}' in the pull request body.",
+        file=sys.stderr,
+    )
+    return 1
+
+
+USAGE = "usage: fold_changelog.py {fold|check} <repo-root> | fold_changelog.py guard"
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) < 2:
+        print(USAGE, file=sys.stderr)
+        return 2
+    verb = argv[1]
+    if verb == "guard":
+        if len(argv) != 2:
+            print(USAGE, file=sys.stderr)
+            return 2
+        changed = [line.strip() for line in sys.stdin.read().splitlines() if line.strip()]
+        return guard(changed, os.environ.get(BODY_VARIABLE) or "")
+    if verb not in ("fold", "check") or len(argv) != 3:
+        print(USAGE, file=sys.stderr)
+        return 2
+    root = Path(argv[2])
+    if not root.is_dir():
+        print("the given repo-root is not a directory", file=sys.stderr)
+        return 2
+    root = root.resolve()
+    try:
+        return fold(root) if verb == "fold" else check(root)
+    except Refusal as refusal:
+        return _fail([str(refusal)])
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
