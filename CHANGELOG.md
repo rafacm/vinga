@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-09-11
+
+### Added
+
+- **A device is a record, not a binding** (#449, M1). `devices.<mac>` used
+  to hold a list of agent names and now holds four things: a
+  server-minted uuid-hex `id`, a `name`, a `location` and the `agents`
+  list it always had. The id is the device's identity and the MAC is only
+  its address, which is the distinction the record exists for: a board can
+  be replaced, and what the household told the device it stands in cannot
+  be re-learned, so per-device memory hangs on the id rather than on the
+  hardware. The id is minted by the server when a record is created,
+  travels in an exported configuration document, and is never chosen by an
+  operator.
+- **`vinga-server config device rename <mac> <name>`**, which gives a board
+  the name the agent says out loud about it. Free-form, because a slug
+  reads badly in speech, and unique across the deployment once case and
+  whitespace are folded together, so `Kitchen Speaker` and
+  `kitchen  speaker` are one name while the stored value stays exactly
+  what was typed. Refused with a sentence naming the remedy, never with a
+  database error, and quoting neither name.
+- **`vinga-server config device relocate <mac> <location>`** and
+  **`vinga-server config device clear-location <mac>`**, which say where a
+  board stands and unset it. Free text and not unique: two devices in one
+  room is normal. The location is the half of the record a conversation
+  will be allowed to change; the name is the half only an operator writes.
+- The same three acts over the API: `POST /devices/{mac}/rename`,
+  `PUT /devices/{mac}/location` and its `DELETE`.
+
+### Changed
+
+- **Binding a board creates its record.** `device bind` and a claim by
+  activation code both mint an id and take the name `Device <full mac>`,
+  so no existing flow gains a mandatory argument and a board onboarded
+  before anybody has thought of a name still has a record. Naming it
+  afterwards is `device rename`.
+- **A device reads and writes as a record.** `device show`, the device
+  listing, the whole-configuration document and the export all carry the
+  four fields, and an applied document takes them back. A bare agent list
+  is still accepted as shorthand for a record naming only those agents,
+  so every configuration written before this one still imports.
+- **The upgrade is stop-then-migrate.** Migration `3003_device_record`
+  mints an id for every device row a deployment already had and backfills
+  the name `Device <full mac>`, full rather than truncated because the
+  leading octets are the vendor OUI and a fleet shares them. A writer from
+  the previous image is refused by the new constraints rather than
+  silently accepted, which is the one-replica topology decision (#316)
+  holding rather than a gap.
+
 ## 2026-09-10
 
 ### Added

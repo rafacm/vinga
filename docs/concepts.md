@@ -129,9 +129,28 @@ session or after a switch.
 What the server knows about a device comes from three sources, kept
 distinct on purpose:
 
-- **Identity and declaration.** The `Device-Id` on the wire is what
-  bindings key on, and the operator's configuration says what was
-  *declared* for it: which agents, which default. The
+- **Identity and declaration.** The stored record is
+  `devices.<mac>`, keyed by the `Device-Id` the board presents on the
+  wire, and it holds four things: a server-minted **id**, a **name**, a
+  **location** and the agents it may reach.
+
+  The id is the device's identity and the MAC is only its address. A
+  board can be replaced; what the household told the device it stands
+  in cannot be re-learned, so the id is what per-device memory hangs
+  on and it survives a rename and a board swap. It is minted by the
+  server when the record is created, travels in an exported
+  configuration document, and is never chosen by an operator.
+
+  The name and the location are two different things, and the
+  difference is who may write them. The **name** is identity an
+  operator manages: free-form, because the agent says it out loud and
+  a slug reads badly in speech, and unique across the deployment once
+  case and whitespace are folded together. The **location** is context
+  a conversation may change, free text, and deliberately not unique,
+  because two devices in one room is normal. Binding a board creates
+  its record and calls it `Device <mac>` until somebody names it, so
+  no onboarding flow asks for a name the operator does not yet have.
+  The
   [configuration reference](reference/domain-config.md) documents the
   fields.
 - **Observed facts**: what the device itself reports, arriving in
@@ -146,9 +165,11 @@ distinct on purpose:
   and the discovery race included, is described on the wire in
   [the Xiaozhi notes](xiaozhi-notes.md#the-device-to-server-protocol).
   How long each fact survives differs by fact, and is a property of the
-  server rather than of the domain: what matters here is that none of it lands in a durable,
-  queryable per-device record. That record is **decided direction**
-  (issue #96).
+  server rather than of the domain: what matters here is that none of
+  these observed facts lands in the stored record above, which holds
+  what an operator and a conversation put there and nothing a board
+  reports about itself. A durable, queryable record of the observed
+  facts is **decided direction** (issue #96).
 - **Hardware facts from the board catalog**: what the model implies
   but the wire never says: microphone count, echo cancellation,
   display, button layout. Keyed by the reported board model; the
@@ -191,8 +212,8 @@ carried it through the server's own text are recorded in
 A binding connects a device to the agents reachable from it, with one
 designated default. Bindings are many-to-many: one agent can serve
 several devices (the same home agent in every room), and one device can
-reach several agents. Today the binding is the device's agent list in
-the domain configuration, and the first entry is the default. A device
+reach several agents. Today the binding is the `agents` list on the
+device's own record, and the first entry is the default. A device
 with no binding reaches the deployment's `default_agent` when one is
 set, and is turned away otherwise, so the devices map doubles as an
 allowlist.

@@ -28,6 +28,16 @@
 #   vinga-server config provider set llm claude -f examples/llm-anthropic.yaml
 #   vinga-server config agent set sam -f examples/agent.yaml
 #   vinga-server config device bind aa:bb:cc:dd:ee:ff sam
+#   vinga-server config device rename aa:bb:cc:dd:ee:ff "Kitchen speaker"
+#   vinga-server config device relocate aa:bb:cc:dd:ee:ff "the kitchen"
+#
+# A device is a record rather than a binding: binding a board creates
+# one, with the server-minted id its memory and its history hang on and
+# the name `Device <mac>` until somebody gives it a better one. The name
+# is what the agent says out loud about the board it is speaking
+# through, so it is free-form and unique only once case and spacing are
+# folded together; the location is free text and not unique, because two
+# devices in one room is normal.
 #
 # Those commands write through the configuration API described under
 # server.api below, so they need a running server, and an empty database
