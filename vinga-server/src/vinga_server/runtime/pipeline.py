@@ -51,10 +51,11 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Protocol
 
 from vinga_server.audio.resample import Resampler
 from vinga_server.config import Config
+from vinga_server.config.store import LiveDevice
 from vinga_server.conversations.records import (
     Acknowledgement,
     MilestoneRecord,
@@ -100,7 +101,7 @@ from vinga_server.events.values import (
 )
 from vinga_server.filler import FallbackClip, FillerClips
 from vinga_server.generation import Generation, Generations
-from vinga_server.memory.store import MemoryStore
+from vinga_server.memory.store import NOTHING_REMEMBERED, MemoryStore
 from vinga_server.providers import (
     AgentProviders,
     LlmEvent,
@@ -272,6 +273,22 @@ RESUME_ACKNOWLEDGEMENT_S = 2.0
 # reason the firmware has no member for, which is `other` like any
 # other unknown: the two facts stay distinguishable on the line.
 DEVICE_ABORT_REASONS = frozenset({"wake_word_detected"})
+
+
+class DeviceRecords(Protocol):
+    """The device record, as a reply reads it.
+
+    Named here rather than imported because this is the side that says
+    what it needs: one question, asked once per round, which answers
+    None rather than raising for a MAC with no record and for a
+    database that could not be read. What answers it in a server is
+    `device.bindings.DeviceBindings`, which is also where a failed read
+    is logged and fallen back from; a runtime built without one is a
+    runtime whose replies say nothing about the device, which is what
+    every deployment sent before there was a record to read.
+    """
+
+    async def resolve_record(self, mac: str) -> LiveDevice | None: ...
 
 
 def _reported(usage: Usage | None) -> tuple[int | None, int | None]:
@@ -614,6 +631,7 @@ class PipelineRuntime:
         recorder: TurnRecorder | None = None,
         threads: resumption.ThreadReads | None = None,
         purge: Callable[[Sequence[str]], object] | None = None,
+        devices: DeviceRecords | None = None,
     ) -> None:
         self._output = output
         # The world this runtime reads its configuration out of, asked
@@ -643,6 +661,13 @@ class PipelineRuntime:
         self._agent_providers = agent_providers
         self._mcp_servers = mcp_servers
         self._memory = memory
+        # How a reply asks what device it is speaking through, and None
+        # for a runtime composed without one, which sends the prompts it
+        # sent before a device had a name. Asked per round beside the
+        # memory read rather than captured at the activation: the name
+        # is stable, the location is not, and the tool that moves a
+        # device is reached from inside the conversation it moves.
+        self._devices = devices
         # The conversation's content channel, beside the event tap and
         # separate from it on purpose: tool arguments and results never
         # rode the events, and the events are losing their text (#120).
@@ -2724,7 +2749,8 @@ class PipelineRuntime:
 
     async def _system_prompt(self) -> str:
         """The prompt this round is sent: the half cached at activation,
-        plus everything memory holds for it right now.
+        plus everything memory holds for it and everything the device
+        record says, both as they stand right now.
 
         The half is not rebuilt here. What this adds is the scope blocks,
         which keep the clock the memory block has always had: read on
@@ -2741,24 +2767,58 @@ class PipelineRuntime:
         flight. It is resolved before the request is built, which is what
         lets the assembler stay a pure function of the text it is handed.
 
-        An agent whose memory section is off is sent the half alone, and
-        the read does not happen: there is no block to assemble, and a
-        round trip whose answer is thrown away is a cost every round of
-        every reply would pay for nothing. The answer is this reply's
-        rather than the world's, so the blocks and the offered tools
-        cannot disagree inside one reply.
+        An agent whose memory section is off is read nothing of memory,
+        and that read does not happen: there is no block to assemble
+        from it, and a round trip whose answer is thrown away is a cost
+        every round of every reply would pay for nothing. The answer is
+        this reply's rather than the world's, so the blocks and the
+        offered tools cannot disagree inside one reply.
+
+        The device record is not on that switch. What a device is
+        called is not a remembered thing, and an agent that may not
+        remember anything still has to know what it is speaking
+        through, so the record is read whether or not memory is. It is
+        read here rather than at the activation for the reason the
+        scopes are: a device relocated between two replies has moved for
+        the second of them, and the activation may be an hour of
+        conversation behind.
+
+        The two reads are started together, because they are two round
+        trips to two schemas and a reply should wait for one of them
+        rather than for both in a row: this runs inside the turnaround
+        a person is listening to.
         """
         assert self._know_how is not None and self._agent is not None
         assert self._conversation is not None
         if not self._remembering_now():
-            return self._know_how.text
-        scopes = await asyncio.to_thread(
-            self._memory.read_for_prompt,
-            self._agent,
-            self._device,
-            self._conversation,
+            return prompt.with_scopes(
+                self._know_how, NOTHING_REMEMBERED, await self._device_record()
+            ).text
+        scopes, record = await asyncio.gather(
+            asyncio.to_thread(
+                self._memory.read_for_prompt,
+                self._agent,
+                self._device,
+                self._conversation,
+            ),
+            self._device_record(),
         )
-        return prompt.with_scopes(self._know_how, scopes).text
+        return prompt.with_scopes(self._know_how, scopes, record).text
+
+    async def _device_record(self) -> LiveDevice | None:
+        """What this conversation is speaking through, as the record
+        stands right now.
+
+        None wherever there is nothing to ask or nobody to ask: a
+        runtime composed without the view, and a session whose device
+        never identified itself, which is the same absence the memory
+        read is given None for. Off the event loop, because the view
+        reads a database and every live conversation in this process
+        shares that loop.
+        """
+        if self._devices is None or self._device is None:
+            return None
+        return await self._devices.resolve_record(self._device)
 
     def _offered_origins(self, tools: Sequence[ToolDef]) -> dict[str, _Origin]:
         """Where each tool this reply offers came from, classified while
@@ -3077,6 +3137,7 @@ def bespoke_runtime_factory(
     memory: MemoryStore,
     conversations: TurnStore | None = None,
     threads: resumption.ThreadReads | None = None,
+    devices: DeviceRecords | None = None,
 ) -> RuntimeFactory:
     """The composition root's half of the seam: everything this runtime
     needs that outlives one connection, closed over once at startup.
@@ -3126,6 +3187,13 @@ def bespoke_runtime_factory(
     long-running recording-off process bounded without waiting for a
     reboot.
 
+    `devices` is the live view of the device rows, closed over for the
+    reason `memory` is: it is one object per server, it outlives every
+    connection, and what a reply asks it is about the device the edge
+    already handed over. None is a composition with no view, which is
+    an embedded caller and a test lane, and its replies say nothing
+    about the device.
+
     Deliberately one function rather than a config-selectable registry:
     one runtime exists, and a selection mechanism with one option is
     surface without a reader. This is the seam a second runtime plugs
@@ -3151,6 +3219,7 @@ def bespoke_runtime_factory(
             None if conversations is None else SessionTurns(conversations, events.session_id),
             threads,
             memory.purge_threads if conversations is None else None,
+            devices,
         )
 
     return build
