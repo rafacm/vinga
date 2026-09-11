@@ -2152,6 +2152,195 @@ class ThreadErasure(BaseModel):
     )
 
 
+# What the metrics namespace answers
+#
+# The third reading of the same rows, and the one that answers about
+# days rather than about a session or a thread: the named aggregates
+# `conversations/views.py` declares, served to the readers who are not
+# SQL clients. An analyst with psql reads the views directly and needs
+# none of this.
+#
+# Here for the reason the shapes above are here: the CLI is the client
+# and renders an answer by validating it against the shape the API said
+# it would send, and a CLI that imported the routes to find out would
+# import FastAPI, SQLAlchemy and the whole store with it.
+#
+# Nothing here restates a view. What a view is, column by column, is
+# declared once in `conversations/views.py`, and these shapes carry that
+# declaration through to a caller rather than describing it a second
+# time: a column is a row of the matrix, and the caveats are the prose
+# the registry declares.
+
+
+# How a window may be grouped, which is a closed set the request is held
+# to and the document publishes. One home for both: the route refuses
+# anything that is not in this tuple and the shape below is typed from
+# it, so a grouping cannot be servable without being documented.
+#
+# One token today. The per-device breakdown is a sibling view per
+# declaration and arrives with the migration that adds them (#440 M3);
+# until those relations exist there is nothing a second token could be
+# answered from, and a vocabulary that always refused would be worse
+# than one that grew.
+GROUPINGS = ("all",)
+
+Grouping = Literal[*GROUPINGS]
+
+
+class MetricCaveats(BaseModel):
+    """One headed group of the statements that hold for every view.
+
+    Served rather than summarized. What a number cannot be made to say
+    is the half a reader is most likely to be missing, so it travels
+    with the numbers instead of living only on a documentation page
+    nobody opened.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    heading: str = Field(
+        description="What this group of statements is about, as the reference heads it."
+    )
+    notes: list[str] = Field(
+        description=(
+            "The statements themselves, in the order they are declared, as Markdown "
+            "with the emphasis the reference renders: the lead of each one is what a "
+            "reader skims for."
+        )
+    )
+
+
+class MetricColumn(BaseModel):
+    """One output column of one view, as the registry declares it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(description="The column's name, which is its key in every row below.")
+    type: str = Field(description="Its SQL type, as the view produces it.")
+    meaning: str = Field(description="What the value is, for whoever is about to quote it.")
+    units: str = Field(
+        description=(
+            "The unit of the value and not its SQL type: `milliseconds`, `turns`, "
+            "`failures per turn`. A column whose value has no unit says `none`, so a "
+            "blank is always a defect rather than sometimes a truth."
+        )
+    )
+    nullable: bool = Field(
+        description=(
+            "Whether the column can be null, which is never the same fact as zero: a "
+            "rate with no denominator is null, and so is a measurement nobody "
+            "recorded."
+        )
+    )
+    formula: str = Field(description="How the view computes it.")
+    key: bool = Field(
+        description=(
+            "Whether this column is part of what makes a row one row. The key "
+            "columns are what a page is ordered on: the day descending, then the "
+            "rest ascending with nulls last, which is total and therefore "
+            "reproducible."
+        )
+    )
+
+
+class MetricView(BaseModel):
+    """One named aggregate: what it answers, what it cannot say, and the
+    shape of a row of it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    view: str = Field(
+        description=(
+            "The word a request spells this view by, which is the last segment of "
+            "its own path. Derived from the relation's name, so the set that can be "
+            "asked for and the set that is declared are one set."
+        )
+    )
+    relation: str = Field(
+        description=(
+            "The schema-qualified view this reads, for a client that has a Postgres "
+            "connection and would rather select from it: the analyst role is granted "
+            "on the whole `record` schema, and nothing here is served that a SQL "
+            "client could not read itself."
+        )
+    )
+    question: str = Field(description="The question this view exists to answer.")
+    denominator: str = Field(
+        description=(
+            "What its numbers are counted against, which is a column of the view "
+            "rather than a number to go and find elsewhere."
+        )
+    )
+    telemetry_off: str = Field(
+        description=(
+            "What telemetry storage being off does to this view in particular, which "
+            "is not the same thing for all of them: the latency view produces no row "
+            "at all for such a turn, while the event-rate view keeps its "
+            "denominators and loses its numerators."
+        )
+    )
+    columns: list[MetricColumn] = Field(
+        description="Its columns, in the order a row carries them."
+    )
+
+
+class MetricViews(BaseModel):
+    """The views this deployment serves, and what holds for all of
+    them."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[MetricView] = Field(
+        description=(
+            "Every view, in declaration order: how slow, how much, the rates that "
+            "need both, and the baseline underneath them."
+        )
+    )
+    common: list[MetricCaveats] = Field(
+        description=(
+            "The statements that hold for every view rather than for one column: how "
+            "to read a number, and what a number here cannot be made to say."
+        )
+    )
+
+
+class MetricRows(BaseModel):
+    """One view over one window: the rows, and everything needed to read
+    them."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    view: MetricView = Field(
+        description=(
+            "Which view answered, whole, so a client renders a row without a second "
+            "request and without a table of column names of its own."
+        )
+    )
+    common: list[MetricCaveats] = Field(
+        description="The same statements the listing carries, beside the numbers they qualify."
+    )
+    since: str = Field(
+        description=(
+            "The first UTC day of the window, as `YYYY-MM-DD` and inclusive. The day "
+            "that was asked for, or the default when none was."
+        )
+    )
+    until: str = Field(
+        description="The last UTC day of the window, in the same form and also inclusive."
+    )
+    group: Grouping = Field(description="How the rows were grouped.")
+    rows: list[dict[str, Any]] = Field(
+        description=(
+            "The rows, keyed by the column names above and carrying exactly those "
+            "keys. Ordered by the day descending and then by the remaining key "
+            "columns ascending with nulls last, which is total. A `date` is written "
+            "as `YYYY-MM-DD`. An empty list is an ordinary answer: a window with "
+            "nothing in it and a deployment that never recorded are the same answer, "
+            "and neither is a refusal."
+        )
+    )
+
+
 # What the memory namespace answers
 #
 # One scope-addressed surface over the three memories: the agents' own
