@@ -797,6 +797,8 @@ Commands:
                    reach a conversation at
   session          the sessions this server recorded, and erasing them
   conversation     the conversations this server recorded, and erasing them
+  metric           the aggregates over the record: what each answers, and one
+                   over days
   memory           what is remembered about a person, a place and a conversation
   events           what the running server is saying right now, as it says it
   apply            install the stored configuration on the running server,
@@ -2490,6 +2492,78 @@ Arguments:
   CONVERSATION  the conversation's uuid hex, as a listing prints it  [required]
 
 Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+### `vinga metric`
+
+```
+Usage: vinga metric [OPTIONS] COMMAND [ARGS]...
+
+  the aggregates over the record: what each answers, and one over days
+
+Options:
+  -h, --help  Show this message and exit.
+
+Commands:
+  list  the aggregates this server serves, each with the question it answers,
+        its denominator, what telemetry storage being off does to it and the
+        columns a row of it carries, and what holds for all of them
+  show  one aggregate over a window of whole UTC days, newest day first; bound
+        it with --since and --until, both of them inside the window, and the
+        answer says which two days it used
+```
+
+### `vinga metric list`
+
+```
+Usage: vinga metric list [OPTIONS]
+
+  the aggregates this server serves, each with the question it answers, its
+  denominator, what telemetry storage being off does to it and the columns a row
+  of it carries, and what holds for all of them
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+### `vinga metric show`
+
+```
+Usage: vinga metric show [OPTIONS] {VIEW}
+
+  one aggregate over a window of whole UTC days, newest day first; bound it with
+  --since and --until, both of them inside the window, and the answer says which
+  two days it used
+
+Arguments:
+  VIEW  which aggregate, by the word metric list prints for it  [required]
+
+Options:
+  --since DAY    the first UTC day of the window, as YYYY-MM-DD and inside it
+                 (default: the API's own, 30 days before the last)
+  --until DAY    the last UTC day of the window, as YYYY-MM-DD and inside it
+                 (default: the API's own, the server's current UTC day)
+  --group HOW    how to break the rows down, from the set the API publishes
+                 (default: the API's own, ungrouped)
   --config PATH  path to the YAML config file naming server.port and
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
