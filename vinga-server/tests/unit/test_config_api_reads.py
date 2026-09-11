@@ -237,9 +237,10 @@ def test_the_listings_are_keyed_by_identity(client: TestClient, store: ConfigSto
     assert providers["asr"] == {}
     assert set(client.get("/mcp-servers").json()) == {"weather"}
     assert client.get("/agents").json()["sam"]["entity"]["prompt"] == "You are Sam."
-    assert client.get("/devices").json() == {
-        "aa:bb:cc:dd:ee:ff": {"entity": {"agents": ["sam"]}, "secrets": {}}
-    }
+    listed = client.get("/devices").json()
+    assert set(listed) == {"aa:bb:cc:dd:ee:ff"}
+    assert listed["aa:bb:cc:dd:ee:ff"]["secrets"] == {}
+    assert listed["aa:bb:cc:dd:ee:ff"]["entity"]["agents"] == ["sam"]
 
 
 def test_a_fragment_reads_as_the_body_a_write_of_it_carries(
@@ -309,7 +310,7 @@ def test_the_whole_configuration_reads_in_one_request(
 
     assert body["config"]["agents"]["sam"]["prompt"] == "You are Sam."
     assert body["config"]["agent_defaults"] == {"llm": "claude"}
-    assert body["config"]["devices"] == {"aa:bb:cc:dd:ee:ff": ["sam"]}
+    assert body["config"]["devices"]["aa:bb:cc:dd:ee:ff"]["agents"] == ["sam"]
     assert body["config"]["default_agent"] == "sam"
     assert body["secrets"] == [
         {

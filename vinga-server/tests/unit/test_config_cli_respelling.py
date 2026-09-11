@@ -58,6 +58,7 @@ what this table must never grow.
 """
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -299,6 +300,16 @@ STEPS: tuple[Step, ...] = (
 )
 
 
+# The one value in this transcript nothing here chose. #449 gave every
+# device record a minted uuid hex, so `device show` prints a different
+# one on every run; a committed transcript holding one would be a
+# transcript that never passes twice. Substituted rather than dropped,
+# so the LINE is still pinned and only the digits are not.
+MINTED = re.compile(r"\b[0-9a-f]{32}\b")
+
+MINTED_HERE = "<minted>"
+
+
 @dataclass
 class Recorded:
     """One run of the whole transcript."""
@@ -316,7 +327,7 @@ class Recorded:
         ]
 
     def rendered(self) -> str:
-        return "\n".join(self.parts).rstrip("\n") + "\n"
+        return MINTED.sub(MINTED_HERE, "\n".join(self.parts).rstrip("\n") + "\n")
 
 
 def _argv(step: Step, code: str) -> tuple[str, ...]:

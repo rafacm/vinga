@@ -1367,6 +1367,47 @@ class DefaultAgentName(BaseModel):
     )
 
 
+class DeviceRename(BaseModel):
+    """What a device rename carries: the name the device is to have.
+
+    A body rather than a second path segment, for `AgentRename`'s
+    reason: the device is addressed by the MAC a board connects with,
+    which is the identity the act is performed on, and the name is what
+    the request carries.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    to: str = Field(
+        description=(
+            "What this device is to be called. Free-form, because the agent says it "
+            "out loud and a slug reads badly in speech. Names are unique once case "
+            "and spacing are folded together, so `Kitchen Speaker` and "
+            "`kitchen  speaker` are the same name; the stored value is exactly what "
+            "was sent."
+        )
+    )
+
+
+class DeviceLocation(BaseModel):
+    """What a relocation carries: where the device stands.
+
+    Not unique and not validated beyond being a string: two devices in
+    one room is normal, and so is a room nobody names the same way
+    twice. Clearing it is the DELETE, not an empty string here, so
+    there is one way to say a device is nowhere in particular.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    location: str = Field(
+        description=(
+            "Where the device stands, free-form, as a person would say it. To unset "
+            "it, DELETE this resource."
+        )
+    )
+
+
 class AgentRename(BaseModel):
     """What a rename carries: the name the agent is to have.
 

@@ -24,6 +24,7 @@ gets, and every value that reaches a line goes through the display door
 on its way to the terminal.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -69,7 +70,7 @@ agent_defaults: llm=brain
 agents:
   sam: llm=brain prompt_includes=[household]
 devices:
-  aa:bb:cc:dd:ee:ff -> sam
+  aa:bb:cc:dd:ee:ff Device aa:bb:cc:dd:ee:ff -> sam
 default_agent: sam
 """
 
@@ -206,9 +207,32 @@ agents:
       - turn_on
 devices:
   aa:bb:cc:dd:ee:ff:
-  - sam
+    id: __DEVICE_ID__
+    name: Device aa:bb:cc:dd:ee:ff
+    location: null
+    agents:
+    - sam
 default_agent: sam
 """
+
+# The one value in that document nothing here chose. A device id is
+# minted by the repository when the record is created, so it is
+# different on every run and cannot be a byte in a pin; what CAN be
+# pinned is that it is one, which is what `_settled` asserts before it
+# puts the value back into the template.
+DEVICE_ID = re.compile(r"^    id: ([0-9a-f]{32})$", re.MULTILINE)
+
+
+def _settled(printed: str) -> str:
+    """The pinned document, with the minted id this run produced in it.
+
+    The whole rendering is still compared byte for byte. What moves is
+    which bytes the id line is expected to hold, and the shape of the
+    value it holds is asserted here rather than left out of the pin.
+    """
+    found = DEVICE_ID.search(printed)
+    assert found is not None, printed
+    return DOCUMENT.replace("__DEVICE_ID__", found.group(1))
 
 # What `show` writes under it: every stored credential named by its
 # location, masked, and marked where it displaces a reference the entity
@@ -285,7 +309,7 @@ def test_show_prints_the_document_and_names_what_is_stored_beside_it(
     assert run("show") == 0
 
     printed = capsys.readouterr()
-    assert printed.out == DOCUMENT + SHOWN_SECRETS
+    assert printed.out == _settled(printed.out) + SHOWN_SECRETS
     assert printed.err == ""
 
 
@@ -301,7 +325,7 @@ def test_export_prints_the_same_document_as_one_that_can_be_applied(
     assert run("export") == 0
 
     printed = capsys.readouterr()
-    assert printed.out == cli.EXPORT_HEADER + DOCUMENT + EXPORTED_SECRETS
+    assert printed.out == cli.EXPORT_HEADER + _settled(printed.out) + EXPORTED_SECRETS
     assert printed.err == ""
 
 
@@ -338,7 +362,14 @@ def document(secrets: object = (), **sections: object) -> dict[str, object]:
             "prompt_fragments": {"household": {"text": "The bins go out."}},
             "agent_defaults": {"llm": "brain"},
             "agents": {"sam": {"llm": "brain"}},
-            "devices": {"aa:bb:cc:dd:ee:ff": ["sam"]},
+            "devices": {
+                "aa:bb:cc:dd:ee:ff": {
+                    "id": "0" * 32,
+                    "name": "Device aa:bb:cc:dd:ee:ff",
+                    "location": None,
+                    "agents": ["sam"],
+                }
+            },
             "default_agent": "sam",
         }
         | sections,
@@ -389,12 +420,15 @@ BAD_SECTIONS = [
     pytest.param(document(mcp_servers={"house": ANSWERED}), id="an-mcp-server-is-a-scalar"),
     pytest.param(document(prompt_fragments={"household": ANSWERED}), id="a-fragment-is-a-scalar"),
     pytest.param(document(agents={"sam": [ANSWERED]}), id="an-agent-is-a-list"),
-    # And a binding that is not the agents it reaches, which is the one
-    # section whose entries are a list rather than a body.
-    pytest.param(document(devices={"aa:bb:cc:dd:ee:ff": ANSWERED}), id="a-binding-is-a-scalar"),
+    # And a device that is not a record. The bare agent list is still
+    # accepted by a WRITE, where it is shorthand for a record naming
+    # only those agents, and it is not what a read answers with: a
+    # document whose devices section holds one did not come from this
+    # API.
+    pytest.param(document(devices={"aa:bb:cc:dd:ee:ff": ANSWERED}), id="a-device-is-a-scalar"),
     pytest.param(
-        document(devices={"aa:bb:cc:dd:ee:ff": {"agent": ANSWERED}}),
-        id="a-binding-is-a-mapping",
+        document(devices={"aa:bb:cc:dd:ee:ff": ["sam"]}),
+        id="a-device-is-the-write-shorthand",
     ),
 ]
 
@@ -763,7 +797,9 @@ def test_no_value_on_a_line_can_steer_the_terminal(
         prompt_fragments={STEERING: {"text": STEERING}},
         agent_defaults={STEERING: STEERING},
         agents={STEERING: {STEERING: [STEERING]}},
-        devices={STEERING: [STEERING]},
+        devices={
+            STEERING: {"name": STEERING, "location": STEERING, "agents": [STEERING]}
+        },
         default_agent=STEERING,
         secrets=[
             {
@@ -783,7 +819,7 @@ def test_no_value_on_a_line_can_steer_the_terminal(
     # And the whole of each line arrived: name, suffix and slots on one,
     # the binding on the next, the inlined pairs on a third.
     assert "    ?[31mred (?[31mred)  [secrets: ?[31mred]" in printed
-    assert "  ?[31mred -> ?[31mred" in printed
+    assert "  ?[31mred ?[31mred, in ?[31mred -> ?[31mred" in printed
     assert "  ?[31mred: ?[31mred=[?[31mred]" in printed
     assert "default_agent: ?[31mred" in printed
 

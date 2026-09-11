@@ -158,6 +158,11 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         "/devices/pending": ["get"],
         "/devices/pending/{code}": ["post"],
         "/devices/{mac}": ["delete", "get", "put"],
+        # The two halves of the record beside the binding: identity an
+        # operator manages, and where a conversation may say the board
+        # stands.
+        "/devices/{mac}/rename": ["post"],
+        "/devices/{mac}/location": ["delete", "put"],
         "/default-agent": ["delete", "get", "put"],
         # The whole domain half in one request, which is a write of the
         # configuration rather than a runtime action: it lands in the
@@ -281,6 +286,8 @@ def test_a_write_declares_the_entity_schema_it_takes() -> None:
         ("/devices/pending/{code}", "post", "DeviceBinding"),
         ("/default-agent", "put", "DefaultAgentName"),
         ("/agents/{name}/rename", "post", "AgentRename"),
+        ("/devices/{mac}/rename", "post", "DeviceRename"),
+        ("/devices/{mac}/location", "put", "DeviceLocation"),
         # The one body that is the whole configuration rather than one
         # entry of it: a partial `DomainConfig`, whose every field has a
         # default, so the schema of the document is the schema of a

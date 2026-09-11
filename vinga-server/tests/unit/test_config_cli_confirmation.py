@@ -77,6 +77,12 @@ def intended() -> set[tuple[str, ...]]:
     return {
         *((kind.name, "delete") for kind in entities.ENTITIES if kind.has_delete),
         ("device", "delete"),
+        # And the device's other removal, which is the same shape as
+        # `default-agent clear` beside it: undoing it means typing the
+        # old location back, and the operator may never have typed it in
+        # the first place, since a conversation is what says where a
+        # board stands.
+        ("device", "clear-location"),
         ("provider", "secret", "clear"),
         ("mcp-server", "secret", "clear"),
         ("default-agent", "clear"),
@@ -104,7 +110,7 @@ def test_the_table_marks_exactly_the_destructive_commands() -> None:
     marked = {row.words for row in cli.COMMANDS if row.destroys}
 
     assert marked == intended()
-    assert len(marked) == 12
+    assert len(marked) == 13
 
 
 def test_a_replacement_write_is_not_destructive() -> None:
