@@ -63,6 +63,7 @@ from vinga_server.config.models import (
     PROVIDER_STAGES,
     AgentConfig,
     AgentDefaults,
+    DeviceRecord,
     FillerConfig,
     McpServerConfig,
     PromptFragmentConfig,
@@ -107,7 +108,7 @@ def agent_defaults(read: Entity[AgentDefaults]) -> dict[str, object]:
     return entity("agent-defaults", read)
 
 
-def device(read: Entity[list[str]]) -> dict[str, object]:
+def device(read: Entity[DeviceRecord]) -> dict[str, object]:
     return _envelope(device_body(read.entry), read.secrets)
 
 
@@ -177,8 +178,14 @@ def config(snapshot: Snapshot) -> dict[str, object]:
             # only by the write, so a planted one never reaches a view
             # at all. A strip here would be unreachable code. The names
             # it is bound to are ordinary agent names and are not.
+            # The record form and not the bare agent list the section
+            # used to hold, because the document is what `import`
+            # applies and the id has to survive that round trip: an
+            # exported document restoring a deployment carries the
+            # identities its memory hangs on.
             "devices": {
-                mac: _bound(bound) for mac, bound in sorted(domain.devices.items())
+                mac: device_body(record)
+                for mac, record in sorted(domain.devices.items())
             },
             "default_agent": (
                 None
@@ -255,8 +262,8 @@ def agents(snapshot: Snapshot) -> dict[str, object]:
 
 def devices(snapshot: Snapshot) -> dict[str, object]:
     return {
-        mac: _envelope(device_body(bound), ())
-        for mac, bound in sorted(snapshot.domain.devices.items())
+        mac: _envelope(device_body(record), ())
+        for mac, record in sorted(snapshot.domain.devices.items())
     }
 
 
@@ -569,10 +576,29 @@ def _recorded_pair(key: object, value: object) -> object:
     return recorded_option(value)
 
 
-def device_body(agents: Sequence[str]) -> dict[str, object]:
-    """A binding is a list of agent names, in the shape a write of one
-    takes, so what a read shows is what a write accepts back."""
-    return {"agents": _bound(agents)}
+def device_body(record: DeviceRecord) -> dict[str, object]:
+    """One device record in the shape a write of one takes, so what a
+    read shows is what a write accepts back.
+
+    Every field, a null location included. A device that is nowhere in
+    particular is an ordinary device, and a key that vanished when it
+    held nothing would read as a device whose location nobody had
+    thought to ask about.
+
+    The two free-text fields go through the same URL-credential strip
+    every other stored string this module hands back goes through. They
+    are not identities and the rule was never about identities: it is
+    about a stored string reaching a caller, and a device name is a
+    place a paste lands exactly as a binding's agent name is.
+    """
+    return {
+        "id": record.id,
+        "name": None if record.name is None else without_url_credential(record.name),
+        "location": (
+            None if record.location is None else without_url_credential(record.location)
+        ),
+        "agents": _bound(record.agents),
+    }
 
 
 def _bound(agents: Sequence[str]) -> list[str]:

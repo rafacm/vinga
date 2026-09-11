@@ -2417,6 +2417,264 @@
         }
       }
     },
+    "/devices/{mac}/rename": {
+      "post": {
+        "summary": "Rename Device",
+        "description": "Give one device another name, which is what an agent says out\nloud about the board it is speaking through.\n\nIdentity an operator manages. The other half of the record, the\nlocation, is the half a conversation may change, and that split\nis the point of two verbs rather than one write of a whole\nrecord.\n\nA POST because it addresses the device by the MAC it has and\ncarries the name it is to have, exactly as an agent's rename\ndoes. Refused 404 for a MAC with no record, because renaming\nsomething that is not there addressed nothing; 409 when another\ndevice already answers to that name once case and spacing are\nfolded together; 422 for a name holding nothing but whitespace.\nNo refusal quotes the name.",
+        "operationId": "rename_device_devices__mac__rename_post",
+        "parameters": [
+          {
+            "name": "mac",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mac"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceRename"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing of that identity exists.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/devices/{mac}/location": {
+      "put": {
+        "summary": "Write Device Location",
+        "description": "Say where one device stands.\n\nFree text and not unique: two devices in one room is normal.\nRefused 404 for a MAC with no record, because a location is a\nfield of a device record and not a thing on its own.",
+        "operationId": "write_device_location_devices__mac__location_put",
+        "parameters": [
+          {
+            "name": "mac",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mac"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceLocation"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing of that identity exists.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove Device Location",
+        "description": "Back to nowhere in particular, which is an ordinary state for\na device. Idempotent, like the CLI: a device that had no\nlocation still has none afterwards.",
+        "operationId": "remove_device_location_devices__mac__location_delete",
+        "parameters": [
+          {
+            "name": "mac",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mac"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing of that identity exists.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/apply": {
       "post": {
         "summary": "Apply Document",
@@ -8214,6 +8472,38 @@
         "title": "DeviceBinding",
         "type": "object"
       },
+      "DeviceRename": {
+        "additionalProperties": false,
+        "description": "What a device rename carries: the name the device is to have.\n\nA body rather than a second path segment, for `AgentRename`'s\nreason: the device is addressed by the MAC a board connects with,\nwhich is the identity the act is performed on, and the name is what\nthe request carries.",
+        "properties": {
+          "to": {
+            "description": "What this device is to be called. Free-form, because the agent says it out loud and a slug reads badly in speech. Names are unique once case and spacing are folded together, so `Kitchen Speaker` and `kitchen  speaker` are the same name; the stored value is exactly what was sent.",
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "title": "DeviceRename",
+        "type": "object"
+      },
+      "DeviceLocation": {
+        "additionalProperties": false,
+        "description": "What a relocation carries: where the device stands.\n\nNot unique and not validated beyond being a string: two devices in\none room is normal, and so is a room nobody names the same way\ntwice. Clearing it is the DELETE, not an empty string here, so\nthere is one way to say a device is nowhere in particular.",
+        "properties": {
+          "location": {
+            "description": "Where the device stands, free-form, as a person would say it. To unset it, DELETE this resource.",
+            "title": "Location",
+            "type": "string"
+          }
+        },
+        "required": [
+          "location"
+        ],
+        "title": "DeviceLocation",
+        "type": "object"
+      },
       "DefaultAgentName": {
         "additionalProperties": false,
         "description": "What a default-agent write carries. Clearing it is the DELETE,\nnot a null here: one way to say a thing.",
@@ -8293,6 +8583,65 @@
           "key"
         ],
         "title": "MemoryStateKey",
+        "type": "object"
+      },
+      "DeviceRecord": {
+        "additionalProperties": false,
+        "description": "One device as the configuration holds it: a stable identity, the\nname a person says out loud, where it stands, and the agents it may\nreach.\n\nThree of the four are optional here and only one of them is\noptional in the database, which is deliberate rather than lax.\nAbsence in a document means \"the repository decides\", and the\nrepository is where it can be decided: it holds the domain writer\nlock and can see the stored row, so an absent id adopts the stored\none or is minted, and an absent name keeps the stored one or takes\nthe `Device <mac>` default. A required `name` here would put a\nmandatory argument on `bind` and on the pending claim, which is the\nflow an operator reaches holding a board and nothing else.\n\n`location` distinguishes absence from null, through\n`model_fields_set`: a document that does not carry the key says\nnothing about where the device is, and a document carrying `null`\nsays it is nowhere in particular. The same distinction\n`default_agent` makes, for the same reason.\n\nThe MAC is not here. The configuration's devices map is keyed by\nMAC and stays keyed by it: keying by name would make a rename read\nto the differ as a removal plus an addition, so an apply would drop\nthe record and mint a fresh id, orphaning exactly the per-device\nmemory the stable id exists to keep.",
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The device's stable identity, 32 lowercase hex digits. Minted by the server when the record is created and unchanged by a rename, a move or a board swap. Leave it out and the stored one is kept.",
+            "title": "Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What this device is called, free-form, spoken aloud by the agent. Names are unique once case and spacing are folded together. Leave it out and the stored name is kept, or `Device <mac>` is taken for a new record.",
+            "title": "Name"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Where the device stands, free-form, or null for nowhere in particular. Not unique: two devices in one room is normal. Leave the key out and the stored location is kept.",
+            "title": "Location"
+          },
+          "agents": {
+            "description": "The agents this device may reach, by name. The first is the agent a conversation starts on and the rest are the ones it may be switched to.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "Agents",
+            "type": "array"
+          }
+        },
+        "required": [
+          "agents"
+        ],
+        "title": "DeviceRecord",
         "type": "object"
       },
       "ProvidersConfig": {
@@ -8394,13 +8743,9 @@
           },
           "devices": {
             "additionalProperties": {
-              "items": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "type": "array"
+              "$ref": "#/components/schemas/DeviceRecord"
             },
-            "description": "Which agents each device may talk to, keyed by MAC address as the Device-Id header sends it. The first name in a list is the agent a conversation starts on and the rest are the ones it may be switched to.",
+            "description": "The devices this deployment serves, keyed by MAC address as the Device-Id header sends it. Each entry is a record: a server-minted id that survives a rename and a board swap, the name the agent says out loud, where the device stands, and the agents it may talk to. A bare list of agent names is accepted as shorthand for a record naming only those agents.",
             "title": "Devices",
             "type": "object"
           },

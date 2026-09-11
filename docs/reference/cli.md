@@ -777,7 +777,8 @@ Commands:
   prompt-fragment  read and write prompt_fragments.<name>
   agent            read and write agents.<name>
   agent-defaults   read and write agent_defaults
-  device           read and write devices.<mac>, which agents a board reaches
+  device           read and write devices.<mac>: a board's name, place and
+                   agents
   default-agent    the agent an unbound device reaches
   info             what deployment this is: the API this CLI reached, the
                    running server's version and revision, the URL to type into a
@@ -1843,16 +1844,23 @@ Options:
 ```
 Usage: vinga device [OPTIONS] COMMAND [ARGS]...
 
-  read and write devices.<mac>, which agents a board reaches
+  read and write devices.<mac>: a board's name, place and agents
 
 Options:
   -h, --help  Show this message and exit.
 
 Commands:
-  bind     bind a device by the MAC you already know, to one or more agents
-  show     print devices.<mac>: the agents that board is bound to
-  delete   delete devices.<mac>, so the board it names reaches the default agent
-  pending  the boards waiting to be claimed, and claiming one
+  bind            bind a device by the MAC you already know, to one or more
+                  agents
+  show            print devices.<mac>: that board's id, name, place and agents
+  delete          delete devices.<mac>, so the board it names reaches the
+                  default agent
+  rename          give one device another name, which is what an agent says out
+                  loud about the board it is speaking through; refused if
+                  another device answers to it
+  relocate        say where one board stands, free-form and not unique
+  clear-location  unset where one board stands, leaving it nowhere in particular
+  pending         the boards waiting to be claimed, and claiming one
 ```
 
 ### `vinga device bind`
@@ -1884,7 +1892,7 @@ Options:
 ```
 Usage: vinga device show [OPTIONS] {MAC}
 
-  print devices.<mac>: the agents that board is bound to
+  print devices.<mac>: that board's id, name, place and agents
 
 Arguments:
   MAC  [required]
@@ -1908,6 +1916,81 @@ Options:
 Usage: vinga device delete [OPTIONS] {MAC}
 
   delete devices.<mac>, so the board it names reaches the default agent
+
+Arguments:
+  MAC  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+### `vinga device rename`
+
+```
+Usage: vinga device rename [OPTIONS] {MAC} {NAME}
+
+  give one device another name, which is what an agent says out loud about the
+  board it is speaking through; refused if another device answers to it
+
+Arguments:
+  MAC   [required]
+  NAME  the name to give it, free-form and spoken aloud by the agent, which no
+        other device may already answer to once case and spacing are folded
+        together  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+### `vinga device relocate`
+
+```
+Usage: vinga device relocate [OPTIONS] {MAC} {LOCATION}
+
+  say where one board stands, free-form and not unique
+
+Arguments:
+  MAC       [required]
+  LOCATION  where the board stands, free-form, as a person would say it
+            [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+### `vinga device clear-location`
+
+```
+Usage: vinga device clear-location [OPTIONS] {MAC}
+
+  unset where one board stands, leaving it nowhere in particular
 
 Arguments:
   MAC  [required]

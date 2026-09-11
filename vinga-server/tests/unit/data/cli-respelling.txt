@@ -217,6 +217,9 @@ The binding applies at the device's next OTA check or connection, but this serve
 == device-show
 exit 0
 -- stdout
+id: <minted>
+name: Device aa:bb:cc:dd:ee:ff
+location: null
 agents:
 - sam
 
