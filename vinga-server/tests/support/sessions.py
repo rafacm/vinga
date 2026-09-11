@@ -125,6 +125,7 @@ def device_session(
     threads: Any = None,
     fallbacks: dict[str, Any] | None = None,
     devices: Any = None,
+    relocations: Any = None,
 ) -> session_module.DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one: the agents resolved from the binding, then the
@@ -170,7 +171,14 @@ def device_session(
     one: over the world being served, which answers from the device
     records that world holds. A suite about a record changing under a
     running conversation hands in a view with an engine behind it,
-    which is the other shape `app.py` builds."""
+    which is the other shape `app.py` builds.
+
+    `relocations` is the other direction through those rows, what the
+    location tool writes through, and None is what `app.py` composes for
+    a server whose world came from a configuration it was handed rather
+    than from a store: the tool is still offered and answers that this
+    server cannot move its devices. A suite about the tool hands in a
+    `DevicePlacements` over the lane's own database."""
     if generations is None:
         generations = world(
             config,
@@ -186,6 +194,7 @@ def device_session(
         conversations,
         threads,
         view,
+        relocations,
     )
     session = session_module.DeviceSession(cast(Any, websocket), generations, factory)
     # White-box, deliberately, and the only four sites in this file that
@@ -238,6 +247,7 @@ def session_for(
     threads: Any = None,
     fallbacks: dict[str, Any] | None = None,
     devices: Any = None,
+    relocations: Any = None,
 ) -> DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one, with the named agents' LLMs replaced by
@@ -256,6 +266,7 @@ def session_for(
         threads,
         fallbacks,
         devices,
+        relocations,
     )
 
 
