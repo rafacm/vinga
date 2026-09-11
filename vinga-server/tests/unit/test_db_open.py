@@ -55,11 +55,16 @@ EXPECTED_COLUMNS = {
     "prompt_fragments": {"name", "body"},
     "agent_defaults": {"id", "body"},
     "agents": {"name", "body"},
+    # The one table with no body at all, and the one whose columns are
+    # what #449 reshaped: the record's identity, the MAC a board
+    # connects with, what an operator calls it, where it stands, and
+    # the agents it reaches.
+    "devices": {"id", "mac", "name", "location", "agents"},
 }
 
 # The head of the packaged domain chain, which is one revision. A new
 # migration moves this line, deliberately.
-HEAD = "3002_drop_max_tokens_secrets"
+HEAD = "3003_device_record"
 
 SCHEMA = DOMAIN_CHAIN.schema
 

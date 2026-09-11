@@ -31,12 +31,15 @@ already-dumped string a second time, storing a quoted literal that no
 `json_extract` can see into and that reads back as a string rather
 than an object; `Text` is what `model_validate_json` is handed.
 
-`devices` and `domain_settings` are already at this shape and do not
-move. Neither has an entity model to validate a body through: a device
-row is a bare list of agent names and a setting row is a scalar, both
-read as JSON values rather than as a dumped model, and the device
-lookup path selects `devices.c.agents` by name on a connection that
-never migrates.
+`devices` and `domain_settings` hold no body, and neither is an
+omission. A setting row is a scalar read as a JSON value rather than as
+a dumped model. A device row is columns all the way, and #449 is the
+change that made it so: `id` and `mac` are identity, `name` needs SQL
+because its uniqueness is a functional index over a fold, and
+`location` has nowhere else to go on a table that has never had a body.
+The device lookup path selects `devices.c.agents` by MAC on a
+connection that never migrates, which is why `mac` stayed unique and
+selectable when it stopped being the key.
 
 Referential integrity lives in the repository rather than in database
 foreign keys: validation is single-sourced in the model/repository
@@ -55,10 +58,14 @@ from sqlalchemy import (
     JSON,
     CheckConstraint,
     Column,
+    Index,
     MetaData,
     Table,
     Text,
+    text,
 )
+
+from vinga_server.config.models import device_name_fold_sql
 
 # Named constraints and indexes, so a later migration can address them.
 # A constraint Postgres named for itself is one a migration has to look
@@ -142,15 +149,56 @@ agents = Table(
     Column("body", Text, nullable=False),
 )
 
+# The name of the functional unique index below, written down because
+# it is not a name any convention above can produce: the conventions key
+# off a column and this index is over an expression.
+DEVICE_NAME_INDEX = "uq_devices_folded_name"
+
 # An entity table rather than bare binding rows, so the per-device
 # runtime field (#92 stage 1) is an additive column on a row that
 # already exists rather than a reshaping. Nothing runtime-shaped is
 # built here.
+#
+# Four of these five are columns rather than a body, and each earned one
+# by the rule this file states. `id` and `mac` are identity, and both
+# have to be selectable and unique. `name` needs SQL, because uniqueness
+# folds case and whitespace and the fold is enforced by the index below
+# rather than by a promise in the repository. `agents` predates the body
+# convention and is read as a JSON value rather than as a dumped model,
+# which is what the file's opening paragraph says about this table.
+#
+# `location` is the one that did not earn a column and has one anyway,
+# and the reason is that there is no body here to put it in: this table
+# has never had one, and inventing a body for a single nullable string
+# would be a second shape for one row.
+#
+# Devices get no `Identity()` row id at all, unlike the recorded
+# sessions and conversations that share the uuid-hex convention. These
+# rows are read whole and assembled in Python, so a cursor id would be a
+# column with no reader.
 devices = Table(
     "devices",
     metadata,
-    Column("mac", Text, primary_key=True),
+    # An application-minted uuid hex, so the identity travels through
+    # export, import and apply. The MAC used to be the key and is not:
+    # a board can be replaced, and what a device remembers has to
+    # survive that, which is the whole warrant for the column.
+    Column("id", Text, primary_key=True),
+    # Still unique and still selectable, deliberately: `_live_binding`
+    # selects `agents` by MAC on the connection that never migrates, and
+    # that statement is pinned byte for byte
+    # (`tests/unit/test_live_binding_pin.py`).
+    Column("mac", Text, nullable=False, unique=True),
+    Column("name", Text, nullable=False),
+    Column("location", Text),
     Column("agents", JSON, nullable=False),
+    # Unique on the FOLDED name and not on the name, so `Kitchen
+    # Speaker` and `kitchen  speaker` are one name while the row keeps
+    # exactly what the operator typed. The repository checks the same
+    # fold under the writer lock and answers with a refusal an operator
+    # can act on; this index is the invariant standing behind it, which
+    # is what makes the promise true for a writer that never asked.
+    Index(DEVICE_NAME_INDEX, text(device_name_fold_sql("name")), unique=True),
 )
 
 # Domain-level scalars, default_agent being the only one today. A
