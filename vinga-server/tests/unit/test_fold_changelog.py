@@ -211,6 +211,43 @@ def test_a_new_day_creates_its_section_in_the_commits_own_offset(
     )
 
 
+def test_a_reused_filename_is_dated_from_the_file_that_is_there(
+    tmp_path: Path,
+) -> None:
+    """Folding deletes fragments, so a later change may reuse a path
+    the repository has folded before, by design or by accident.
+
+    The date has to come from the commit that introduced the file
+    standing in the tree now, not from the first time that name ever
+    existed. Reading the oldest addition filed the second entry under
+    the first one's day, which is a section it did not land on.
+    """
+    root = repo(tmp_path)
+    fragment(
+        root,
+        "467-reused.md",
+        "### Added\n\n- **The first incarnation.**\n",
+        when="2026-09-11T10:00:00+00:00",
+    )
+    assert run("fold", str(root)).returncode == 0
+    land(root, when="2026-09-11T10:30:00+00:00")
+
+    fragment(
+        root,
+        "467-reused.md",
+        "### Added\n\n- **The second incarnation.**\n",
+        when="2026-09-12T10:00:00+00:00",
+    )
+
+    done = run("fold", str(root))
+
+    assert done.returncode == 0, done.stderr
+    text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "**The second incarnation.**" in section(text, "2026-09-12")
+    assert "**The first incarnation.**" in section(text, "2026-09-11")
+    assert "**The second incarnation.**" not in section(text, "2026-09-11")
+
+
 def test_a_created_section_lands_between_the_days_around_it(tmp_path: Path) -> None:
     """Date position, not file position: a day older than the newest
     section and newer than the oldest goes between them."""
