@@ -1,5 +1,5 @@
-"""The conversation store on the gated /api: two namespaces over one set
-of rows.
+"""The conversation store on the gated /api: three namespaces over one
+set of rows.
 
 `/sessions` answers connection episodes and `/conversations` answers
 durable threads, and they are two readings of the same turns rather than
@@ -7,6 +7,15 @@ two stores: a turn names both, so one session's turns can belong to
 several threads and one thread's turns can come from several sessions.
 Three reads and two erasures each, with the erasures asymmetric on
 purpose (see `threads.erase_conversations`).
+
+`/metrics` is the third reading and answers about days rather than
+about either: the named aggregates `views.py` declares, served over a
+window of whole UTC days to the readers who are not SQL clients. An
+analyst with a Postgres connection reads the views directly and needs
+none of it. It erases nothing and addresses nothing by an id; what a
+request names is which question and over which days, and the question
+is named by a word that resolves through a closed mapping derived from
+the declarations, because a relation name cannot be a bound parameter.
 
 The route functions live here and are registered by `config/api.py`'s
 `_application()`, which is the application `document()` renders and the
@@ -76,10 +85,21 @@ counts this answers with are as true as the rest of them.
 import datetime as dt
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
+from dataclasses import asdict
 from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import Depends, FastAPI, Query, Request
-from sqlalchemy import ColumnElement, Connection, Table, func, select
+from fastapi import Depends, FastAPI, Path, Query, Request
+from sqlalchemy import (
+    ColumnElement,
+    Connection,
+    Date,
+    Table,
+    TableClause,
+    column,
+    func,
+    select,
+    table,
+)
 
 from vinga_server import paging
 from vinga_server.config.loader import (
@@ -90,6 +110,7 @@ from vinga_server.config.loader import (
 )
 from vinga_server.config.models import DatabaseConfig, normalize_mac
 from vinga_server.config.responses import (
+    GROUPINGS,
     CloseReason,
     ConversationDetail,
     ConversationList,
@@ -97,6 +118,11 @@ from vinga_server.config.responses import (
     ConversationTurn,
     ConversationTurns,
     Erasure,
+    MetricCaveats,
+    MetricColumn,
+    MetricRows,
+    MetricView,
+    MetricViews,
     SessionDetail,
     SessionList,
     SessionSummary,
@@ -107,14 +133,16 @@ from vinga_server.config.responses import (
     ToolSource,
     TurnLeg,
 )
-from vinga_server.conversations import store, threads
+from vinga_server.conversations import docgen, store, threads
 from vinga_server.conversations.schema import (
+    SCHEMA,
     events,
     sessions,
     tool_invocations,
     turns,
 )
 from vinga_server.conversations.store import CONVERSATIONS_CHAIN
+from vinga_server.conversations.views import ALIASES, COMMON, DAY, VIEWS, View
 from vinga_server.db import is_busy, read_engine, write_engine
 from vinga_server.memory.store import Purged, purge
 from vinga_server.paging import LIMIT_DEFAULT, LIMIT_MAX, MAX_ROW_ID
@@ -178,6 +206,49 @@ _BEFORE_REFUSED = (
     "the sessions that began strictly before it. What was sent is not quoted back"
 )
 
+# How wide a window this surface will answer at once, in days and
+# inclusive of both ends. One leap year, which is the longest a whole
+# year can be, so "the last year" is always askable in one request and
+# nothing beyond it is.
+#
+# A wider window is refused rather than narrowed: an answer trimmed to
+# fit would be less than what was asked for while saying it is what was
+# asked for, and nothing in the response could tell a caller otherwise.
+WINDOW_MAX_DAYS = 366
+
+# How far back a window reaches when only its end was given. The day
+# named and the thirty before it, which is a month of daily rows.
+WINDOW_DEFAULT_DAYS = 30
+
+_SINCE_REFUSED = (
+    "since has to be a calendar day in UTC, written as YYYY-MM-DD, and the window "
+    "begins on it rather than after it. What was sent is not quoted back"
+)
+
+_UNTIL_REFUSED = (
+    "until has to be a calendar day in UTC, written as YYYY-MM-DD, and the window "
+    "ends on it rather than before it. What was sent is not quoted back"
+)
+
+# The rule about the pair, which is neither argument's own: both of them
+# parsed and still not a window anybody may be answered.
+_WINDOW_REFUSED = (
+    f"since and until are whole UTC days and the window includes both of them, so "
+    f"since is not after until and the two span at most {WINDOW_MAX_DAYS} days, which "
+    f"is one leap year. A wider window is refused rather than narrowed, because an "
+    f"answer trimmed to fit would be less than what was asked for while saying it is "
+    f"what was asked for. What was sent is not quoted back"
+)
+
+# Built from the closed set rather than spelling it, so the sentence a
+# caller is refused with and the vocabulary the routes accept are the
+# same tuple.
+_GROUP_REFUSED = (
+    "group names how the rows are grouped. The groupings this API serves are: "
+    + ", ".join(GROUPINGS)
+    + f". It defaults to {GROUPINGS[0]}. What was sent is not quoted back"
+)
+
 # What a purge with no selector is told. A refusal rather than a
 # deletion of everything, because a query string that lost its arguments
 # to a shell, a proxy or a typo would otherwise erase the whole store,
@@ -227,6 +298,17 @@ _UNKNOWN_CONVERSATION = (
     "every turn to an erasure was deleted with them."
 )
 
+# And the third, which is about a word rather than about an id. The
+# aliases are a closed vocabulary this document publishes, so what a
+# caller needs is where the list is rather than what it sent; and what
+# it sent is precisely what must not be repeated, since this is the one
+# request-controlled value that selects a database relation.
+_UNKNOWN_VIEW = (
+    "no metrics view of that name is served. The views are listed by GET /metrics, "
+    "each with the question it answers and the columns it hands back, and the name is "
+    "the last segment of one of their paths."
+)
+
 # What each refusal means here, where the shared sentence would not be
 # true. 404 is two cases and the status alone cannot tell them apart;
 # 422 is never about addressing, since the only things these routes
@@ -270,6 +352,21 @@ THREAD_PROBLEMS_INSTEAD: dict[int, str] = {
     500: (
         "The conversation store cannot be read or written, or the request failed for "
         "a reason that is not the caller's. The details are in the server's log."
+    ),
+}
+
+# And the aggregates', which share no sentence with either: nothing
+# here is addressed by an id, nothing here writes, and the only 404 is
+# about a word the document publishes.
+METRICS_PROBLEMS_INSTEAD: dict[int, str] = {
+    404: "No metrics view of that name is served. GET /metrics lists the ones that are.",
+    422: (
+        "One of the query arguments could not be read: a day, the window the two of "
+        "them name, or the grouping. Nothing sent is quoted back."
+    ),
+    500: (
+        "The conversation store cannot be read, or the request failed for a reason "
+        "that is not the caller's. The details are in the server's log."
     ),
 }
 
@@ -402,6 +499,56 @@ BeforeQuery = Annotated[
 ]
 
 
+ViewPath = Annotated[
+    str,
+    Path(
+        description=(
+            "Which view to read, by the word it is spelled with: the last segment of "
+            "one of the paths `GET /metrics` lists. It resolves through a closed "
+            "mapping derived from the declarations, so a name nothing answers to is "
+            "refused rather than looked for, and no part of it reaches the database."
+        )
+    ),
+]
+
+SinceQuery = Annotated[
+    str | None,
+    Query(
+        description=(
+            "The first UTC day of the window, written as YYYY-MM-DD. The window "
+            f"begins on it rather than after it. Absent means {WINDOW_DEFAULT_DAYS} "
+            "days before `until`, so the default window is that day and the "
+            f"{WINDOW_DEFAULT_DAYS} before it. Anything else is refused."
+        )
+    ),
+]
+
+UntilQuery = Annotated[
+    str | None,
+    Query(
+        description=(
+            "The last UTC day of the window, written as YYYY-MM-DD. The window ends "
+            "on it rather than before it. Absent means the current UTC day, which is "
+            "the server's day and not the caller's. The two days may span at most "
+            f"{WINDOW_MAX_DAYS}, one leap year, and a wider window is refused rather "
+            "than narrowed."
+        )
+    ),
+]
+
+GroupQuery = Annotated[
+    str | None,
+    Query(
+        description=(
+            "How the rows are grouped, one of: "
+            + ", ".join(f"`{grouping}`" for grouping in GROUPINGS)
+            + f". Defaults to `{GROUPINGS[0]}`, which groups by the view's own "
+            "dimensions and nothing else. Anything else is refused."
+        )
+    ),
+]
+
+
 def reader(database: DatabaseConfig) -> Callable[[], Iterator[Connection]]:
     """Per-request access to the store: open a connection, yield it,
     dispose the engine.
@@ -494,8 +641,8 @@ ReaderDep = Annotated[Connection, Depends(_reader)]
 
 
 def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]]) -> None:
-    """The three reads and the two erasures, registered on the
-    application that is both mounted and rendered.
+    """The store's reads, its two erasures and the aggregates over it,
+    registered on the application that is both mounted and rendered.
 
     `problems` is `config/api.py`'s own describer, passed in rather than
     imported: that module imports this one to register these routes, and
@@ -774,6 +921,74 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         }
 
 
+    # The third reading of the same rows, and the one that answers
+    # about days rather than about a session or a thread. No erasure
+    # here and nothing addressed by an id: a view is a question, and
+    # what a request names is which question and over which days.
+
+    @api.get(
+        "/metrics",
+        response_model=MetricViews,
+        response_description=(
+            "The views this deployment serves, each with the question it answers, the "
+            "denominator its numbers are counted against, what telemetry-off does to "
+            "it and the columns a row of it carries, and the statements that hold for "
+            "all of them beside them."
+        ),
+        responses=problems(401, instead=METRICS_PROBLEMS_INSTEAD),
+    )
+    def read_metrics() -> dict[str, Any]:
+        """The named aggregates this deployment serves, and what holds
+        for all of them.
+
+        The registry rather than the store: this opens no connection and
+        answers the same thing on a deployment that never recorded,
+        because what it describes is what the schema declares rather
+        than what anybody wrote to it. A client discovers the vocabulary
+        here and then reads numbers at the path each view names.
+        """
+        return {"items": [_described(view) for view in VIEWS], "common": _caveats()}
+
+    @api.get(
+        "/metrics/{view}",
+        response_model=MetricRows,
+        response_description=docgen.views_description(),
+        responses=problems(401, 404, 422, 500, instead=METRICS_PROBLEMS_INSTEAD),
+    )
+    def read_metric(
+        view: ViewPath,
+        reader: ReaderDep,
+        since: SinceQuery = None,
+        until: UntilQuery = None,
+        group: GroupQuery = None,
+    ) -> dict[str, Any]:
+        """One view over one window of whole UTC days, newest day first.
+
+        The window includes both of the days it names, and the answer
+        repeats the two it used, so a caller that sent neither can read
+        the default off what came back rather than recomputing the
+        server's own day.
+
+        An empty list is an ordinary answer here. A window with nothing
+        in it, a deployment that has switched recording off since, and
+        one that never recorded at all are the same answer, for the
+        reason this module states about empty shapes: the schema is
+        migrated at every boot, and an empty list is the honest answer
+        to a question about empty tables.
+        """
+        named = _view(view)
+        grouping = _grouping(group)
+        since_day, until_day = _window(since, until)
+        return {
+            "view": _described(named),
+            "common": _caveats(),
+            "since": since_day.isoformat(),
+            "until": until_day.isoformat(),
+            "group": grouping,
+            "rows": _aggregated(reader, named, since_day, until_day),
+        }
+
+
 def _erased(
     erase: Callable[[], AbstractContextManager[Connection]],
     session: str | None = None,
@@ -879,6 +1094,168 @@ def _thread_erasure(connection: Connection, conversation: str) -> threads.Erased
     if not taken.threads:
         raise UnknownEntityError(_UNKNOWN_CONVERSATION)
     return taken
+
+
+def _view(alias: str) -> View:
+    """The view a request named, or the refusal that says where the list
+    of them is.
+
+    This is the whole of the request-controlled selection of a database
+    relation, and it is a lookup in a closed mapping rather than a value
+    that travels: a relation name cannot be a bound parameter, so a
+    caller's bytes are a key here and nothing else. What is found is a
+    declaration this repository wrote; what is not found never reaches
+    the query builder, the connection or the log.
+
+    The mapping is derived from the registry rather than written beside
+    it, which is what stops the set that can be asked for drifting from
+    the set that is declared.
+    """
+    found = ALIASES.get(alias)
+    if found is None:
+        raise UnknownEntityError(_UNKNOWN_VIEW)
+    return found
+
+
+def _grouping(value: str | None) -> str:
+    """The grouping, held to the closed set the document publishes.
+
+    Refused rather than ignored: a grouping nothing serves is a caller
+    asking for a breakdown, and answering it with the ungrouped rows
+    would be answering a different question in a shape it could not tell
+    apart.
+    """
+    if value is None:
+        return GROUPINGS[0]
+    if value not in GROUPINGS:
+        raise ConfigError(_GROUP_REFUSED)
+    return value
+
+
+def _window(since: str | None, until: str | None) -> tuple[dt.date, dt.date]:
+    """The two days a request meant, defaults filled in and the pair's
+    own rule enforced.
+
+    The end defaults to the server's current UTC day rather than the
+    caller's, which is the same rule the views are cut on: a day is a
+    UTC day, and a window that moved with whoever was asking would
+    answer two callers differently about the same rows.
+    """
+    last = dt.datetime.now(dt.UTC).date() if until is None else _utc_day(until, _UNTIL_REFUSED)
+    first = (
+        last - dt.timedelta(days=WINDOW_DEFAULT_DAYS)
+        if since is None
+        else _utc_day(since, _SINCE_REFUSED)
+    )
+    # Both ends count, so a window of one day spans one day.
+    if first > last or (last - first).days + 1 > WINDOW_MAX_DAYS:
+        raise ConfigError(_WINDOW_REFUSED)
+    return first, last
+
+
+def _utc_day(value: str, refusal: str) -> dt.date:
+    """One calendar day, or the fixed sentence its argument is refused
+    with.
+
+    `fromisoformat` also takes `20260815` and `2026-W33-1`, which are
+    days nobody means to type here and which would make the accepted
+    spelling wider than the one documented. Held to the extended form
+    before it is parsed, and the refusal is built here and raised
+    outside the arm, because `fromisoformat` puts the string it could
+    not read into its own message.
+    """
+    problem: ConfigError | None = None
+    day = dt.date.min
+    if len(value) != 10 or value[4] != "-" or value[7] != "-":
+        problem = ConfigError(refusal)
+    try:
+        day = dt.date.fromisoformat(value) if problem is None else day
+    except ValueError:
+        problem = ConfigError(refusal)
+    if problem is not None:
+        raise problem
+    return day
+
+
+def _described(view: View) -> dict[str, Any]:
+    """One view as the transport carries it: the declaration, passed
+    through.
+
+    Every value here is `views.py`'s, field for field, so the shape a
+    client reads and the shape the reference renders are two views of
+    one declaration rather than two descriptions of one view. The
+    column matrix is copied by `asdict` for exactly that reason, and
+    the two field sets are held equal by the pin in
+    `test_api_openapi.py`.
+    """
+    return {
+        "view": view.alias,
+        "relation": view.qualified,
+        "question": view.question,
+        "denominator": view.denominator,
+        "telemetry_off": view.telemetry_off,
+        "columns": [asdict(declared) for declared in view.columns],
+    }
+
+
+def _caveats() -> list[dict[str, Any]]:
+    """What holds for every view, as the registry declares it.
+
+    Served with the numbers rather than left on a documentation page,
+    because what a number here cannot be made to say is the half a
+    reader is most likely to be missing at the moment they quote one.
+    """
+    return [{"heading": group.heading, "notes": list(group.notes)} for group in COMMON]
+
+
+def _aggregated(
+    reader: Connection, view: View, since: dt.date, until: dt.date
+) -> list[dict[str, Any]]:
+    """One view's rows over one window, in the total order the
+    declaration defines.
+
+    The day descending, because a reader of a trend wants the newest
+    first, and then the view's other key columns ascending with nulls
+    last. Those columns are what a row is unique by, so the order is
+    total and the same request answers the same page twice; nulls last
+    because a null key is usage nobody could attribute, which belongs
+    under the named groups rather than above them.
+    """
+    relation = _relation(view)
+    day = relation.c[DAY]
+    order: list[ColumnElement[Any]] = [day.desc()]
+    order += [
+        relation.c[key.name].asc().nulls_last() for key in view.keys if key.name != DAY
+    ]
+    found = _rows(
+        reader, select(relation).where(day >= since, day <= until).order_by(*order)
+    )
+    for row in found:
+        # A date out of the driver, an ISO day on the wire: the same
+        # spelling the request wrote it in, which is what lets an
+        # answer's `day` be sent back as a `since`.
+        row[DAY] = row[DAY].isoformat()
+    return found
+
+
+def _relation(view: View) -> TableClause:
+    """The view, as something a query can be built against.
+
+    A textual table rather than a `Table` in the metadata, for the
+    reason `views.py` gives about autogenerate: a view declared as a
+    table is a table Alembic would propose dropping. The name and the
+    columns are the declaration's, so nothing a request sent is in the
+    statement at all, and only the day is given a type, which is the one
+    column this query compares against a value.
+    """
+    return table(
+        view.name,
+        *(
+            column(declared.name, Date()) if declared.name == DAY else column(declared.name)
+            for declared in view.columns
+        ),
+        schema=SCHEMA,
+    )
 
 
 def _rows(reader: Connection, query: Any) -> list[dict[str, Any]]:
@@ -1030,23 +1407,9 @@ def _before(value: str | None) -> str | None:
     """
     if value is None:
         return None
-    problem: ConfigError | None = None
-    day = dt.date.min
-    # `fromisoformat` also takes `20260815` and `2026-W33-1`, which are
-    # days nobody means to type here and which would make the accepted
-    # spelling wider than the one documented. Held to the extended form
-    # before it is parsed.
-    if len(value) != 10 or value[4] != "-" or value[7] != "-":
-        problem = ConfigError(_BEFORE_REFUSED)
-    try:
-        day = dt.date.fromisoformat(value) if problem is None else day
-    except ValueError:
-        # Built here and raised outside the arm: `fromisoformat` puts
-        # the string it could not read into its own message.
-        problem = ConfigError(_BEFORE_REFUSED)
-    if problem is not None:
-        raise problem
-    return dt.datetime.combine(day, dt.time.min, tzinfo=dt.UTC).isoformat()
+    return dt.datetime.combine(
+        _utc_day(value, _BEFORE_REFUSED), dt.time.min, tzinfo=dt.UTC
+    ).isoformat()
 
 
 def _device(value: str | None) -> str | None:
@@ -1076,6 +1439,8 @@ def _device(value: str | None) -> str | None:
 __all__ = [
     "LIMIT_DEFAULT",
     "LIMIT_MAX",
+    "WINDOW_DEFAULT_DAYS",
+    "WINDOW_MAX_DAYS",
     "CloseReason",
     "ConversationDetail",
     "ConversationList",
@@ -1083,6 +1448,11 @@ __all__ = [
     "ConversationTurn",
     "ConversationTurns",
     "Erasure",
+    "MetricCaveats",
+    "MetricColumn",
+    "MetricRows",
+    "MetricView",
+    "MetricViews",
     "SessionDetail",
     "SessionList",
     "SessionSummary",
