@@ -496,9 +496,7 @@ def named(name: str = "Kitchen Speaker", location: str | None = None) -> LiveDev
 def unnamed(location: str | None = None) -> LiveDevice:
     """A board bound and never named: the record carries the default the
     repository minted, and `named` is how it says so."""
-    return LiveDevice(
-        id="0" * 32, mac=MAC, name=f"Device {MAC}", location=location, named=False
-    )
+    return LiveDevice(id="0" * 32, mac=MAC, name=f"Device {MAC}", location=location)
 
 
 def test_a_named_device_is_introduced_above_its_notes() -> None:

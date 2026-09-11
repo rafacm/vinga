@@ -3177,6 +3177,37 @@ def default_device_name(mac: str) -> str:
     return f"Device {mac}"
 
 
+# What a written name has to look like to be the default one, as the
+# fold sees it. The fold lowercases and collapses whitespace, so this
+# catches `DEVICE  AA:BB:CC:DD:EE:FF` as readily as the minted spelling
+# and cannot be evaded by capitalizing it: a name that folds onto a
+# default is a name the unique index would collide with anyway.
+_DEFAULT_DEVICE_NAME_RE = re.compile(rf"^device {_MAC_RE.pattern[1:-1]}$")
+
+
+def is_default_device_name(name: str) -> bool:
+    """Whether a name is the shape the server mints rather than one a
+    person chose.
+
+    The spelling is reserved: every writer that submits a name is
+    refused this shape unless it is the device's own default
+    (`store.DEVICE_NAME_RESERVED`), so the only names in it are the ones
+    this server minted when a board was bound and the ones an exported
+    document carries back. That is what makes this a sound reading of
+    "nobody has named this device" rather than a guess about who wrote
+    it, and the reason it is worth knowing is that the agent says a name
+    out loud: told that its device is called `Device aa:bb:cc:dd:ee:ff`,
+    a model reads a MAC address to whoever asked which speaker it is.
+
+    Asked of what a row holds as well as of what a caller sent, which is
+    the one place this differs from the refusals around it: a row
+    written before the spelling was reserved still reads, still exports
+    and is still renameable, and what it gets is the treatment every
+    other unnamed board gets.
+    """
+    return _DEFAULT_DEVICE_NAME_RE.match(fold_device_name(name)) is not None
+
+
 # The characters the device-name fold treats as whitespace, written out
 # rather than left to a regex shorthand.
 #
@@ -3504,7 +3535,11 @@ class DeviceRecord(BaseModel):
         description=(
             "What this device is called, free-form, spoken aloud by the agent. Names "
             "are unique once case and spacing are folded together. Leave it out and "
-            "the stored name is kept, or `Device <mac>` is taken for a new record."
+            "the stored name is kept, or `Device <mac>` is taken for a new record. "
+            "That spelling is reserved: a name of the form `Device <mac>` is refused "
+            "for any device whose own MAC it is not, because it is what the server "
+            "calls a board nobody has named and an agent is told the name rather than "
+            "made to read a MAC address out loud."
         ),
     )
     location: str | None = Field(

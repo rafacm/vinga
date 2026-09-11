@@ -74,6 +74,7 @@ from vinga_server.config.models import (
     fold_device_name,
     hides_value,
     holds_control_character,
+    is_default_device_name,
     is_env_name,
     is_secret_option,
     is_valid_fragment_name,
@@ -285,20 +286,25 @@ class LiveDevice:
     is no "called nothing" here. `location` is nullable because a device
     nobody has placed is an ordinary device.
 
-    `named` is derived rather than stored, and it is here rather than at
-    a reader because the rule is this module's: binding a board creates
-    its record and calls it `Device <mac>` until somebody names it, and
-    that spelling is refused to every other writer (`DEVICE_NAME_RESERVED`),
-    so a name in that shape is a placeholder this server minted rather
-    than a name anybody says out loud. Readers that want the row say
-    `name`; readers deciding whether to SAY it ask this first.
+    `named` is derived rather than stored, and it is a property rather
+    than a field so that there is one answer computed in one place
+    whichever read built the value. The rule is the configuration's:
+    binding a board creates its record and calls it `Device <mac>` until
+    somebody names it, and that spelling is refused to every writer
+    whose own default it is not (`DEVICE_NAME_RESERVED`), so a name in
+    that shape is a placeholder this server minted rather than a name
+    anybody says out loud. Readers that want the row say `name`;
+    readers deciding whether to SAY it ask this first.
     """
 
     id: str | None
     mac: str
     name: str
     location: str | None
-    named: bool = True
+
+    @property
+    def named(self) -> bool:
+        return not is_default_device_name(self.name)
 
 
 @dataclass(frozen=True)
@@ -396,6 +402,17 @@ DEVICE_TEXT_CREDENTIAL = (
     "credential, either before its host or as a query parameter. Nothing was "
     "changed, and the value is not quoted back: write a {what} there rather than an "
     "address"
+)
+
+DEVICE_NAME_RESERVED = (
+    "devices: names of the form `Device <mac>` are reserved for a board nobody has "
+    "named yet, which is what the server calls a device the moment it is bound, so a "
+    "write may not take that spelling for a device whose own MAC it is not. It is "
+    "reserved rather than merely discouraged because the agent is told which device "
+    "it is speaking through and says the name out loud: reading a MAC address back to "
+    "somebody who asked which speaker they are talking to is what a placeholder is "
+    "there to prevent. Nothing was changed, and the name is not quoted back. Choose a "
+    "name a person would say"
 )
 
 DEVICE_NAME_IN_FLIGHT = (
@@ -925,8 +942,11 @@ class ConfigStore:
         against the state this write would leave, under the writer lock,
         with the database's own functional index standing behind it.
         """
-        return self._device_write(_DeviceBinding(mac=_mac(mac), name=_device_name(name)),
-                                  existing=True)
+        canonical = _mac(mac)
+        return self._device_write(
+            _DeviceBinding(mac=canonical, name=_device_name(canonical, name)),
+            existing=True,
+        )
 
     def relocate_device(self, mac: str, location: str) -> BoundDevice:
         """Say where one device stands.
@@ -1248,13 +1268,7 @@ def _live_device(connection: Connection, mac: str) -> LiveDevice | None:
 def _device_row_read(row: Row | None) -> LiveDevice | None:
     if row is None or not fold_device_name(row.name or ""):
         return None
-    return LiveDevice(
-        id=row.id,
-        mac=row.mac,
-        name=row.name,
-        location=row.location,
-        named=row.name != default_device_name(row.mac),
-    )
+    return LiveDevice(id=row.id, mac=row.mac, name=row.name, location=row.location)
 
 
 def stored_secrets(snapshot: Snapshot) -> tuple[StoredSecret, ...]:
@@ -3233,6 +3247,29 @@ def _refuse_device_credential(what: str, value: str | None) -> None:
         raise ConfigError(DEVICE_TEXT_CREDENTIAL.format(what=what))
 
 
+def _refuse_reserved_name(mac: str, name: str | None) -> None:
+    """One submitted device name, refused if it takes the spelling the
+    server mints for a board nobody has named.
+
+    Asked of what a caller SENT and never of what a row holds, the rule
+    `_refuse_device_credential` follows and for the same reason: a name
+    written before this existed still reads and is still renameable.
+
+    A device's OWN default passes, and that exemption is what keeps an
+    export idempotent: a document exported from a store where a board
+    has never been named carries `Device <its mac>`, and applying it
+    back has to write the record it came from rather than refuse it. It
+    is also the honest way to spell "take the name back off this
+    device", which is otherwise not sayable at all.
+
+    The value is not passed to the sentence, the rule this file keeps
+    about every device name: a name is free text an operator types on a
+    command line.
+    """
+    if name is not None and is_default_device_name(name) and name != default_device_name(mac):
+        raise ConfigError(DEVICE_NAME_RESERVED)
+
+
 def _device_change(mac: str, written: object) -> _DeviceBinding:
     """One device entry, taken as far as it goes without the store: the
     MAC made canonical and the value read as a record.
@@ -3266,6 +3303,7 @@ def _device_change(mac: str, written: object) -> _DeviceBinding:
     # one: an absent name is the stored name, and a stored name is not
     # something this document submitted.
     _refuse_device_credential("name", record.name)
+    _refuse_reserved_name(key, record.name)
     if "location" in record.model_fields_set:
         _refuse_device_credential("location", record.location)
     return _DeviceBinding(
@@ -3280,12 +3318,14 @@ def _device_change(mac: str, written: object) -> _DeviceBinding:
     )
 
 
-def _device_name(name: str) -> str:
+def _device_name(mac: str, name: str) -> str:
     """One name a rename was given, held to the model's own rule rather
-    than to a second copy of it, and then to the rule about what a
-    stored string may carry."""
+    than to a second copy of it, then to the rule about what a stored
+    string may carry, and then to the one about the spelling the server
+    mints for itself."""
     checked = _load(DeviceRecord, "devices", {"agents": [], "name": name}).name or name
     _refuse_device_credential("name", checked)
+    _refuse_reserved_name(mac, checked)
     return checked
 
 

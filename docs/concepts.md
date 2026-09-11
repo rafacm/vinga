@@ -166,9 +166,10 @@ distinct on purpose:
   an agent can say which speaker it is and where it stands, and a board
   renamed or moved mid-conversation is renamed or moved for the very
   next thing that is said. A board still called `Device <mac>` is not
-  introduced by that placeholder, so an agent says nothing about a
-  device nobody has named or placed rather than reading a MAC address
-  aloud.
+  introduced by that name, so an agent says nothing about a device
+  nobody has named or placed rather than reading a MAC address aloud.
+  The spelling is reserved for the board whose MAC it is, which is what
+  makes it mean "nobody has named this" wherever it is read.
   The
   [configuration reference](reference/domain-config.md) documents the
   fields.

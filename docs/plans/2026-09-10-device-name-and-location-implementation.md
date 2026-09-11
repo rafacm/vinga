@@ -423,25 +423,34 @@ Four, each with its reason.
    The consequence is worth having on its own: a deployment with notes
    and no named device sends exactly the text it sent before this
    milestone, byte for byte.
-3. **A board still carrying the `Device <mac>` default is not
-   introduced by it.** The plan says the name joins the block and does
-   not distinguish a name from the placeholder M1 mints, and the
-   integration lane is what showed the difference matters: two
-   end-to-end tests whose mock model echoes the prompt started reading
-   `You are speaking through a device called Device aa:bb:cc:dd:ee:11`
-   back, on deployments that have named nothing. That is what every
-   deployment looks like the morning after the migration, since the
-   backfill gives every existing row the same default, and a model told
-   that string is its device's name will read a MAC address aloud when
-   somebody asks which speaker it is. The decision is made where the
-   rule lives: `LiveDevice.named` is the repository's answer to whether
-   a person chose the name, computed against `default_device_name` in
-   both the stored read and the snapshot fallback, and the assembler
-   asks it rather than re-deriving the default. A board nobody named
-   but somebody moved still says where it is. Both integration tests
-   pass unedited with the rule in place, which is the evidence that the
-   milestone leaves a deployment that has named nothing exactly where
-   it was.
+3. **A board still carrying the `Device <mac>` name is not introduced
+   by it, and that spelling is reserved at write time.** The plan says
+   the name joins the block and does not distinguish a name from the
+   placeholder M1 mints, and the integration lane is what showed the
+   difference matters: two end-to-end tests whose mock model echoes the
+   prompt started reading `You are speaking through a device called
+   Device aa:bb:cc:dd:ee:11` back, on deployments that have named
+   nothing. That is what every deployment looks like the morning after
+   the migration, since the backfill gives every existing row the same
+   default, and a model told that string is its device's name will read
+   a MAC address aloud when somebody asks which speaker it is.
+
+   The first attempt inferred authorship at read time by comparing the
+   stored name with `default_device_name`, which the PR review round
+   caught: a comparison cannot tell "nobody named this" from "somebody
+   named it that", and an operator who typed that name got a successful
+   write and no effect. So the spelling is **refused to every writer
+   whose own default it is not** (`DEVICE_NAME_RESERVED`), on what a
+   caller submitted and never on what a row holds, beside the
+   credential refusal M1 put there. With the shape reserved,
+   `LiveDevice.named` is a property over the name rather than a guess:
+   the only writer that can produce one is this server's own minting.
+   A device's own default passes, which is what keeps an exported
+   document applicable and is the honest way to spell "take the name
+   back off this board". A board nobody named but somebody moved still
+   says where it is. Both integration tests pass unedited, which is the
+   evidence that the milestone leaves a deployment that has named
+   nothing exactly where it was.
 4. **`LiveDevice.id` is read and carried and rendered nowhere.** The
    plan names the read as answering `{id, name, location}`, and it does.
    Nothing in a prompt says an id out loud; what it is for is that these

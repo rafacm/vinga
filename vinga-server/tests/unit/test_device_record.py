@@ -54,6 +54,7 @@ from vinga_server.config.store import (
     DEVICE_ID_FIXED,
     DEVICE_ID_TAKEN,
     DEVICE_NAME_IN_FLIGHT,
+    DEVICE_NAME_RESERVED,
     DEVICE_NAME_TAKEN,
     DEVICE_TEXT_CREDENTIAL,
     ConfigStore,
@@ -396,6 +397,114 @@ def test_the_default_names_of_two_boards_do_not_collide(store: ConfigStore) -> N
     second = store.bind_device(OTHER_MAC, ["sam"])
 
     assert fold_device_name(first.name) != fold_device_name(second.name)
+
+
+# --- the spelling the server keeps for itself ---------------------------
+
+# `Device <mac>` is what a bind mints so that no onboarding flow has to
+# ask for a name the operator does not yet have, and the agent is told
+# the name and says it out loud. So the shape is refused to every writer
+# whose own default it is not: a board called `Device aa:bb:cc:dd:ee:ff`
+# is one nobody has named, rather than one somebody named that, and the
+# refusal is what makes that reading sound instead of a guess.
+
+
+def test_a_device_may_not_take_another_boards_default_name(
+    store: ConfigStore,
+) -> None:
+    _agents(store)
+    store.bind_device(MAC, ["sam"])
+    store.bind_device(OTHER_MAC, ["sam"])
+
+    with pytest.raises(ConfigError) as caught:
+        store.rename_device(OTHER_MAC, DEFAULT_NAME)
+
+    assert str(caught.value) == DEVICE_NAME_RESERVED
+    assert _record(store, OTHER_MAC).name == DEFAULT_NAME.replace(MAC, OTHER_MAC)
+
+
+def test_the_shape_is_reserved_however_it_is_spelled(store: ConfigStore) -> None:
+    """The fold is what the refusal reads, so capitalizing the word or
+    padding it does not get a placeholder past: those names fold onto
+    the default and would collide with it in the index anyway."""
+    _agents(store)
+    store.bind_device(MAC, ["sam"])
+    store.bind_device(OTHER_MAC, ["sam"])
+
+    with pytest.raises(ConfigError) as caught:
+        store.rename_device(OTHER_MAC, f"  DEVICE   {MAC.upper()} ")
+
+    assert str(caught.value) == DEVICE_NAME_RESERVED
+
+
+def test_the_reserved_refusal_quotes_neither_the_name_nor_the_mac(
+    store: ConfigStore,
+) -> None:
+    _agents(store)
+    store.bind_device(MAC, ["sam"])
+    store.bind_device(OTHER_MAC, ["sam"])
+
+    with pytest.raises(ConfigError) as caught:
+        store.rename_device(OTHER_MAC, DEFAULT_NAME)
+
+    assert MAC not in str(caught.value) and OTHER_MAC not in str(caught.value)
+
+
+def test_a_document_may_not_name_a_device_after_another_board(
+    store: ConfigStore,
+) -> None:
+    """The ingress the CLI does not go through, held to the same rule:
+    an applied document is a writer like any other."""
+    _agents(store)
+    store.bind_device(OTHER_MAC, ["sam"])
+
+    with pytest.raises(ConfigError) as caught:
+        store.apply(_document(agents=["sam"], name=DEFAULT_NAME.replace(MAC, OTHER_MAC)))
+
+    # Wrapped in the sentence an apply refuses a whole document with,
+    # which is the shape every repository refusal takes on that path.
+    assert DEVICE_NAME_RESERVED in str(caught.value)
+
+
+def test_a_device_may_be_named_back_to_its_own_default(store: ConfigStore) -> None:
+    """The exemption, and it is two things at once: the honest way to
+    say "take the name back off this board", and what keeps an exported
+    document applicable, since an export of a board nobody has named
+    carries exactly this string."""
+    _agents(store)
+    store.bind_device(MAC, ["sam"])
+    store.rename_device(MAC, "Kitchen Speaker")
+
+    store.rename_device(MAC, DEFAULT_NAME)
+
+    assert _record(store).name == DEFAULT_NAME
+
+
+def test_a_document_carrying_the_minted_name_applies_and_writes_nothing(
+    store: ConfigStore,
+) -> None:
+    """What an export of an unnamed board is, applied back: the
+    reservation must not make a round trip refuse the document it
+    produced."""
+    _agents(store)
+    store.bind_device(MAC, ["sam"])
+    minted = _record(store)
+
+    applied = store.apply(_document(agents=["sam"], id=minted.id, name=DEFAULT_NAME))
+
+    assert [entry.wrote for entry in applied] == [False]
+    assert _record(store) == minted
+
+
+def test_binding_a_board_still_mints_the_reserved_name(store: ConfigStore) -> None:
+    """The one writer the reservation is not about. Binding names no
+    device: the server does, and what it writes is the placeholder every
+    other writer is refused."""
+    _agents(store)
+
+    store.bind_device(MAC, ["sam"])
+
+    assert _record(store).name == DEFAULT_NAME
 
 
 # --- what a stored string may carry ------------------------------------
