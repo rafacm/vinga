@@ -152,6 +152,39 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   connection reads the views directly, and the spelling it shares with a
   Prometheus scrape path is a coincidence.
 
+- **`vinga metric list` and `vinga metric show <view>`** (#440, milestone
+  2), which put the named aggregates in front of the readers who are not
+  SQL clients. `metric list` prints the vocabulary: each view with the
+  question it answers, its denominator, what telemetry storage being off
+  does to that view in particular, the columns a row of it carries with
+  the unit of each, and the relation to select from if a Postgres
+  connection is what you have. `metric show` prints one of them over a
+  window of whole UTC days, newest day first, bounded by `--since` and
+  `--until`, both of which are inside the window; the answer states the
+  two days it used, so a caller that named neither reads its defaults
+  off what came back. `--group` names how the rows are broken down, from
+  the set the API publishes. The noun is singular because `show`
+  addresses one entry, and the verbs are the core set: `metric latency`
+  reads shorter and is a noun in the verb slot, which the CLI guide
+  rejects.
+
+- **What a number cannot be made to say is printed beside it.** Both
+  verbs carry the statements the view registry declares, from the same
+  home the committed reference and the API contract read: a rate whose
+  denominator is zero is null and never zero, a rate read outside the
+  events' own retention window is a floor rather than a measurement, and
+  a missing measurement has more than one cause that the store writes
+  identically. A null cell prints the placeholder every other listing
+  here uses, so a day nothing could have happened on never reads as a
+  day nothing went wrong on.
+
+- **An empty window is an ordinary answer.** A window with nothing in it
+  and a deployment that has never recorded anything print the same
+  sentence and leave through zero, rather than a refusal or an empty
+  table under a heading. Both verbs are requests to the API like every
+  other command in this grammar: there is no local-database path to the
+  record and there is not going to be one.
+
 ### Changed
 
 - **`memory.facts.owner` says that a board swap moves a device's notes**
