@@ -100,6 +100,8 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+
+
 - **An interruption arriving at the playback onset is transcribed
   rather than dropped** (#80). The barge-in gate ladder had one rung
   that dropped an utterance on acoustics alone: anything the endpointer

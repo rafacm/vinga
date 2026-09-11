@@ -29,14 +29,17 @@ contract as implemented:
 | parameter | accepts | default | bound |
 | --- | --- | --- | --- |
 | `since` | a UTC day, `YYYY-MM-DD`, the window begins on it | 30 days before `until` | with `until`, at most 366 days |
-| `until` | a UTC day, `YYYY-MM-DD`, the window ends on it | the server's current UTC day | not before `since` |
+| `until` | a UTC day, `YYYY-MM-DD`, the window ends on it | the server's current UTC day | not before `since`; with no `since`, not inside the calendar's first 30 days |
 | `group` | a word from a closed set, `all` today | `all` | closed set |
 
 Both ends are included, so a window of one day spans one day and the
 default window is 31 days: the day named and the 30 before it. The cap
 is 366, one leap year, and a wider window is **refused rather than
 narrowed**: an answer trimmed to fit would be less than what was asked
-for while nothing in it said so. The two days the answer used are
+for while nothing in it said so. The floor is stated beside it: an
+`until` with fewer than thirty days of calendar behind it is refused
+with a sentence saying to name a `since`, because the window that would
+be implied begins before `0001-01-01`. The two days the answer used are
 repeated in the body, so a caller that sent neither reads the defaults
 off what came back instead of recomputing the server's own day.
 
@@ -217,6 +220,21 @@ adopted.
   The defect and the weak test were one mistake made twice: the
   assertion in this document came first and the test was written to
   agree with it rather than to try to break it.
+
+- **P2: a valid but early `until` crashed the default-window
+  calculation.** `0001-01-01` is a well-formed UTC day and passes the
+  day rule, so it is not a malformed value at all; subtracting the
+  default thirty days from it raises `OverflowError`, which answered
+  500 about a request nothing was wrong with. The malformed-day cases
+  could not have caught it, because the value is a boundary rather than
+  a mistake. Fixed by checking the room behind `until` rather than
+  catching the arithmetic, with a sentence that names the calendar's own
+  first day, quotes nothing the caller sent, and says to name a `since`
+  instead. The bound is stated with the 366-day cap on the parameter's
+  description, in the changelog and in the table above, and the cases
+  cover the boundary with an explicit `since` (an ordinary window), with
+  none (refused), and at the calendar's far end, which needs no room
+  ahead of it because the window is always put behind `until`.
 
 ### Not done here
 
