@@ -36,6 +36,7 @@ from vinga_server.capture import CAPTURE_RATE, CaptureStore
 from vinga_server.config import entities
 from vinga_server.config import store as config_store
 from vinga_server.config.models import DatabaseConfig
+from vinga_server.conversations import schema as record_schema
 from vinga_server.conversations import threads
 from vinga_server.conversations.records import StoredTurn
 from vinga_server.conversations.store import open_conversations
@@ -131,6 +132,70 @@ CONVERSATIONS_MANIFEST: dict[str, Any] = {
     "agents": ["sam"],
     "providers": {"llm": {"name": "claude", "type": "anthropic"}},
 }
+
+
+# What a suite plants when it is asserting about the views rather than
+# about a conversation. The named aggregates are cut on exact days and
+# on event mixes that do not occur to order (three failures in one turn,
+# an event on the far side of midnight, a session with the telemetry
+# switch off), so a suite that drove a conversation could not write the
+# arithmetic down in advance. Two suites plant now, the views' own and
+# the read surface over them, which is what puts these here.
+
+# One thread for every planted turn, in the shape the runtime mints.
+# Nothing here reads it: the views aggregate by day and agent, and the
+# column is not null, so it has to be some thread.
+CONVERSATION = "3b1e5c7a9d2f4068a1b3c5d7e9f02468"
+
+
+def plant_session(
+    connection: Any,
+    session: str,
+    started_at: str,
+    *,
+    metrics: bool = True,
+    agent: str | None = "sam",
+) -> None:
+    connection.execute(
+        record_schema.sessions.insert().values(
+            session=session,
+            device="aa:bb:cc:dd:ee:ff",
+            agent=agent,
+            started_at=started_at,
+            metrics=metrics,
+            text=True,
+            dropped=0,
+        )
+    )
+
+
+def plant_turn(
+    connection: Any, session: str, t_ms: int, *, agent: str | None = "sam", **measured
+) -> int:
+    """One turn, with whatever measured columns the case is about.
+
+    `agent` is the turn's own rather than the session's, which is the
+    distinction the token view turns on: a handover leaves the session
+    agent alone and splits the reply across `legs`.
+    """
+    return connection.execute(
+        record_schema.turns.insert().values(
+            session=session,
+            conversation=CONVERSATION,
+            t_ms=t_ms,
+            agent=agent,
+            tool_calls=0,
+            **measured,
+        )
+    ).inserted_primary_key[0]
+
+
+def plant_event(connection: Any, session: str, t_ms: int, name: str) -> None:
+    connection.execute(
+        record_schema.events.insert().values(
+            session=session, t_ms=t_ms, name=name, level=20, fields={}
+        )
+    )
 
 
 def rows(table: str, **where: Any) -> list[dict[str, Any]]:
