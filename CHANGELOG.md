@@ -19,7 +19,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   default to the current UTC day and the thirty before it, and may span
   at most 366, one leap year; a wider window is refused rather than
   narrowed, because an answer trimmed to fit would be less than what was
-  asked for while saying it is what was asked for. Rows come newest day
+  asked for while saying it is what was asked for, and an `until` inside
+  the first thirty days of the calendar is refused rather than answered
+  from a day that does not exist. Rows come newest day
   first and then by the columns a row of that view is unique by, which
   is a total order. An empty window is an ordinary empty list, and so is
   a deployment that never recorded: the schema is migrated at every boot

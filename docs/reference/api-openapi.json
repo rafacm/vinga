@@ -3801,10 +3801,10 @@
                   "type": "null"
                 }
               ],
-              "description": "The last UTC day of the window, written as YYYY-MM-DD. The window ends on it rather than before it. Absent means the current UTC day, which is the server's day and not the caller's. The two days may span at most 366, one leap year, and a wider window is refused rather than narrowed.",
+              "description": "The last UTC day of the window, written as YYYY-MM-DD. The window ends on it rather than before it. Absent means the current UTC day, which is the server's day and not the caller's. The two days may span at most 366, one leap year, and a wider window is refused rather than narrowed. Sent without a `since`, it also has to leave the default window room behind it: a day inside the first 30 of the calendar, which begins at 0001-01-01, is refused rather than answered from a day that does not exist, and naming a `since` asks about it.",
               "title": "Until"
             },
-            "description": "The last UTC day of the window, written as YYYY-MM-DD. The window ends on it rather than before it. Absent means the current UTC day, which is the server's day and not the caller's. The two days may span at most 366, one leap year, and a wider window is refused rather than narrowed."
+            "description": "The last UTC day of the window, written as YYYY-MM-DD. The window ends on it rather than before it. Absent means the current UTC day, which is the server's day and not the caller's. The two days may span at most 366, one leap year, and a wider window is refused rather than narrowed. Sent without a `since`, it also has to leave the default window room behind it: a day inside the first 30 of the calendar, which begins at 0001-01-01, is refused rather than answered from a day that does not exist, and naming a `since` asks about it."
           },
           {
             "name": "group",

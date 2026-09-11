@@ -242,6 +242,58 @@ def test_a_window_at_the_cap_is_answered_and_one_past_it_is_refused(
     assert "refused rather than narrowed" in sentence
 
 
+@pytest.mark.parametrize("until", ["0001-01-01", "0001-01-30"])
+def test_a_day_with_no_room_for_the_default_window_is_refused(
+    client: TestClient, until: str
+) -> None:
+    """The other end of the window rule, and the one that is not about
+    the caller being wrong.
+
+    `0001-01-01` is a well-formed UTC day and passes the day rule, so it
+    is not a malformed value at all: it is the first day this calendar
+    has, and the window that would be put behind it by default begins
+    before the calendar does. That has to be a stated refusal rather
+    than an arithmetic failure answering 500 about a request nothing was
+    wrong with.
+    """
+    response = client.get("/metrics/sessions", params={"until": until})
+
+    assert response.status_code == 422
+    sentence = refused(response.json(), 422)
+    assert "until" in sentence
+    # The calendar's own first day, which is a constant of the calendar
+    # and not anything the caller sent.
+    assert dt.date.min.isoformat() in sentence
+    if until != dt.date.min.isoformat():
+        assert until not in sentence
+    # And what to send instead, since the request is well formed.
+    assert "since" in sentence
+
+
+def test_the_first_day_of_the_calendar_is_answerable_when_since_says_so(
+    client: TestClient, store: Any
+) -> None:
+    """The same days, with a `since` in hand, are an ordinary window: it
+    is the implied one that had nowhere to begin, and naming it is what
+    the refusal above tells a caller to do."""
+    answered = _get(client, "/metrics/sessions", since="0001-01-01", until="0001-01-30")
+
+    assert (answered["since"], answered["until"]) == ("0001-01-01", "0001-01-30")
+    assert answered["rows"] == []
+
+
+def test_the_last_day_of_the_calendar_needs_no_room_ahead_of_it(
+    client: TestClient, store: Any
+) -> None:
+    """The far end, which has no rule of its own: the window is put
+    behind `until`, never in front of it, so the last day the calendar
+    has is an ordinary one to ask about."""
+    answered = _get(client, "/metrics/sessions", until="9999-12-31")
+
+    assert answered["until"] == "9999-12-31"
+    assert answered["since"] == "9999-12-01"
+
+
 def test_a_window_that_ends_before_it_begins_is_refused(client: TestClient) -> None:
     """Neither argument is wrong on its own, so the refusal is about the
     pair and names both of them."""
