@@ -222,6 +222,22 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The command-spellings manifest records what the tree quotes, not
+  where** (#467, M1). `vinga-server/tests/unit/command-spellings.txt`
+  held one line per match, each opening with a `path:line`, so any edit
+  that shifted a line anywhere in the repository restaged all 1,706 of
+  them and two branches almost always met on it during a rebase, where a
+  textual merge produces a state no generator wrote. It now holds the
+  distinct `class  invocation` pairs, sorted by class and then by
+  invocation: 442 lines that move only when a spelling enters the tree,
+  leaves it, or is given another class, and then by one line each, which
+  git merges without a conflict. The census, the guards and the
+  regeneration command are unchanged, and every guard failure still
+  names the offending sites with their positions; what the artifact
+  gives up is per-site review granularity, which is priced rather than
+  hidden: only membership of the pair set is reviewable in it now, so a
+  site that leaves or changes class while a sibling keeps the old pair
+  shows no diff, and a test pins exactly that.
 - **`memory.facts.owner` says that a board swap moves a device's notes**
   (#449, M4), through migration `2004_a_swap_moves_memory` on the memory
   chain. The comment is committed DDL and had said since the schema was
