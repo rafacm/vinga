@@ -96,12 +96,15 @@ def recorded(
     device: str = DEVICE_MAC.lower(),
     started_at: str = "2026-08-15T10:00:00+00:00",
     agent: str = "sam",
+    device_name: str | None = None,
 ) -> None:
     """One recorded session, written the way the server writes one."""
     store = ConversationStore(DatabaseConfig(), now=lambda: NOW, retention_days=0)
     store.start()
     try:
-        store.open_session(session, 100.0, manifest(device, started_at, agent))
+        store.open_session(
+            session, 100.0, manifest(device, started_at, agent), device_name=device_name
+        )
         store.record_event(session, "heard", logging.INFO, {"duration_s": 1.0}, 101.0)
         store.record_turn(
             session,
@@ -225,6 +228,30 @@ def test_show_prints_the_detail_block(run, capsys) -> None:
     assert "  close_reason: client\n" in printed
 
 
+def test_show_names_the_device_the_session_was_opened_on(run, capsys) -> None:
+    """The changelog's parity claim, held at the block: the same
+    `device_name` the API answers is a line beside the MAC, dated the
+    way the column is, so a rename after the fact changes nothing
+    here."""
+    recorded("alpha", device_name="Kitchen Speaker")
+
+    code, printed, err = out(run, capsys, "session", "show", "alpha")
+
+    assert (code, err) == (0, "")
+    assert f"  device: {DEVICE_MAC.lower()}\n  device_name: Kitchen Speaker\n" in printed
+
+
+def test_show_of_a_nameless_device_prints_the_placeholder(run, capsys) -> None:
+    """A board nobody named records null, and null in a block is the
+    fixed placeholder rather than a vanished line."""
+    recorded("alpha")
+
+    code, printed, err = out(run, capsys, "session", "show", "alpha")
+
+    assert (code, err) == (0, "")
+    assert "  device_name: -\n" in printed
+
+
 def test_show_of_an_unknown_session_is_the_apis_own_sentence(run, capsys) -> None:
     """One vocabulary whichever way an operator reached the command: the
     refusal is the server's, passed through, and it names no id."""
@@ -276,7 +303,7 @@ def test_planted_control_content_cannot_steer_a_terminal(run, capsys, verb: str)
     assert "\r" not in printed
     # One line per row or per field, and the count is the renderer's
     # alone: nothing an utterance carries adds a line.
-    assert len(printed.splitlines()) == (2 if verb == "list" else 17)
+    assert len(printed.splitlines()) == (2 if verb == "list" else 18)
     assert "?" in printed
 
 

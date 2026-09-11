@@ -2919,6 +2919,11 @@ def _session_block(session: Mapping[str, Any]) -> str:
     lines = [
         f"session: {_cell(session['session'])}",
         f"  device: {_cell(session['device'])}",
+        # The dated name beside the MAC, already stripped by the API's
+        # answer and bounded here like every other cell: the changelog
+        # promises the block and `GET /api/sessions/{session}` answer
+        # the same field.
+        f"  device_name: {_cell(session['device_name'])}",
         f"  client: {_cell(session['client'])}",
         f"  agent: {_cell(session['agent'])}",
         f"  agents: {_names(session['agents'] or ()) or NOTHING_THERE}",
