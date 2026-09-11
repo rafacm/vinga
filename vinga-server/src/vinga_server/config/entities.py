@@ -765,7 +765,18 @@ SETTINGS: tuple[Setting, ...] = (
         notes=(
             "A MAC is stored in its canonical form (lowercase, colon separated), so "
             "`AA-BB-CC-DD-EE-FF` and `aa:bb:cc:dd:ee:ff` are the same device.",
-            f"`{PROGRAM} device delete <mac>` removes a binding.",
+            "Binding a board creates its record, with a server-minted id and the "
+            "name `Device <mac>`, so onboarding asks for no name the operator does "
+            "not have yet. The id is what per-device memory hangs on and it "
+            "survives a rename and a board swap.",
+            f"`{PROGRAM} device rename <mac> <name>` gives a board the name the "
+            "agent says out loud about it. Free-form, because a slug reads badly "
+            "in speech, and unique across the deployment once case and whitespace "
+            "are folded together.",
+            f"`{PROGRAM} device relocate <mac> <location>` says where a board "
+            "stands and `{0} device clear-location <mac>` unsets it. Free text and "
+            "not unique: two devices in one room is normal.".format(PROGRAM),
+            f"`{PROGRAM} device delete <mac>` removes the record.",
         ),
         route="/devices",
         addressing=("mac",),
