@@ -2565,6 +2565,8 @@ Options:
   --group HOW    how to break the rows down, from the set the API publishes
                  (default: the API's own, the view's own dimensions and no
                  further)
+  --device MAC   only the rows of this board, by MAC, which needs a --group that
+                 breaks the rows down by device (default: every board)
   --config PATH  path to the YAML config file naming server.port and
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
