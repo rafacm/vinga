@@ -767,8 +767,15 @@ SETTINGS: tuple[Setting, ...] = (
             "`AA-BB-CC-DD-EE-FF` and `aa:bb:cc:dd:ee:ff` are the same device.",
             "Binding a board creates its record, with a server-minted id and the "
             "name `Device <mac>`, so onboarding asks for no name the operator does "
-            "not have yet. The id is what per-device memory hangs on and it "
-            "survives a rename and a board swap.",
+            "not have yet. The id is the record's stable identity: it does not "
+            "change when the name, the location or the agents do.",
+            "What a device remembers is keyed by its MAC today, and replacing a "
+            "board is not an operation this server has yet. It is the point of the "
+            "id: the replacement will rewrite the MAC on the record that already "
+            "exists and move that board's notes onto the new one in the same "
+            "transaction. Recorded sessions keep the MAC they were written with, "
+            "deliberately, because a dated row says which board was connected at "
+            "the time and a later swap does not make that untrue.",
             f"`{PROGRAM} device rename <mac> <name>` gives a board the name the "
             "agent says out loud about it. Free-form, because a slug reads badly "
             "in speech, and unique across the deployment once case and whitespace "

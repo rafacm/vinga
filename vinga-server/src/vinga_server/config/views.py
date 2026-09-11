@@ -181,8 +181,9 @@ def config(snapshot: Snapshot) -> dict[str, object]:
             # The record form and not the bare agent list the section
             # used to hold, because the document is what `import`
             # applies and the id has to survive that round trip: an
-            # exported document restoring a deployment carries the
-            # identities its memory hangs on.
+            # export is how a deployment is rebuilt, and one that
+            # dropped the identities would rebuild it as a set of
+            # different devices.
             "devices": {
                 mac: device_body(record)
                 for mac, record in sorted(domain.devices.items())

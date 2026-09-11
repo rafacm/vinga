@@ -180,9 +180,13 @@ devices = Table(
     "devices",
     metadata,
     # An application-minted uuid hex, so the identity travels through
-    # export, import and apply. The MAC used to be the key and is not:
-    # a board can be replaced, and what a device remembers has to
-    # survive that, which is the whole warrant for the column.
+    # export, import and apply. The MAC used to be the key and is not,
+    # because a board can be replaced and its record should not have to
+    # be: a row identified by the hardware cannot outlive it. Moving
+    # what that board remembered onto the new MAC is the operation this
+    # column is here to make possible, and it is not built yet (#449
+    # M4); what the column buys today is a record whose identity does
+    # not move when its name, its place or its bindings do.
     Column("id", Text, primary_key=True),
     # Still unique and still selectable, deliberately: `_live_binding`
     # selects `agents` by MAC on the connection that never migrates, and
