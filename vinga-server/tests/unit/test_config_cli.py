@@ -47,7 +47,7 @@ from tests.support.config_cli import logged as _logged
 from tests.support.config_cli import showing as _showing
 from tests.support.notices import CHECK_IN, RELOAD, boundaries
 from vinga_server.config import cli
-from vinga_server.config.models import NOT_A_MAC, DatabaseConfig
+from vinga_server.config.models import NOT_A_MAC, DatabaseConfig, is_device_id
 from vinga_server.config.responses import Applies
 from vinga_server.db import open_database, schema
 
@@ -1292,7 +1292,32 @@ def test_a_malformed_pair_carries_no_parser_exception(
 # `test_config_cli_rendering.py` injects one, and the live lane has a
 # real one.
 
+# An id an operator would never choose and a document carries anyway:
+# this is the shape an export has, and restoring a deployment from one
+# is the whole reason the field is in the document rather than minted
+# out of reach.
+CARRIED_ID = "4b17c0e9a6d24f8ea1c35b0f9d27e614"
+
 DOCUMENT = """\
+providers:
+  llm:
+    claude: {type: anthropic, model: m}
+agents:
+  sam: {prompt: You are Sam., llm: claude}
+devices:
+  AA-BB-CC-DD-EE-FF:
+    id: 4b17c0e9a6d24f8ea1c35b0f9d27e614
+    name: Kitchen Speaker
+    location: the kitchen
+    agents: [sam]
+default_agent: sam
+"""
+
+# The same deployment written the way every configuration before #449
+# wrote it: a device is a bare list of agent names. It is shorthand for
+# a record naming only those agents, and what the import has to do with
+# it is mint the two fields it does not carry.
+SHORTHAND = """\
 providers:
   llm:
     claude: {type: anthropic, model: m}
@@ -1329,8 +1354,43 @@ def test_import_writes_a_whole_deployment_from_one_file(
     assert run("show") == 0
     shown = _document(capsys.readouterr().out)
     assert shown["agents"]["sam"]["prompt"] == "You are Sam."
-    assert shown["devices"]["aa:bb:cc:dd:ee:ff"]["agents"] == ["sam"]
+    # The whole record and not the binding in it. An assertion over
+    # `agents` alone would pass on an import that dropped the id, the
+    # name and the location the document carried, which is exactly what
+    # restoring a deployment from an export must not do.
+    assert shown["devices"] == {
+        "aa:bb:cc:dd:ee:ff": {
+            "id": CARRIED_ID,
+            "name": "Kitchen Speaker",
+            "location": "the kitchen",
+            "agents": ["sam"],
+        }
+    }
     assert shown["default_agent"] == "sam"
+
+
+def test_import_mints_what_the_legacy_shorthand_does_not_carry(
+    run, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other half of the compatibility claim.
+
+    A bare agent list is what every configuration written before the
+    device record uses, and importing one has to produce a whole record:
+    an id that was minted rather than left empty, and the
+    `Device <full mac>` name nobody typed.
+    """
+    document = tmp_path / "legacy.yaml"
+    document.write_text(SHORTHAND, encoding="utf-8")
+
+    assert run("import", "-f", str(document)) == 0
+    capsys.readouterr()
+
+    assert run("show") == 0
+    device = _document(capsys.readouterr().out)["devices"]["aa:bb:cc:dd:ee:ff"]
+    assert is_device_id(device["id"])
+    assert device["name"] == "Device aa:bb:cc:dd:ee:ff"
+    assert device["location"] is None
+    assert device["agents"] == ["sam"]
 
 
 def test_import_reads_a_document_from_stdin(
