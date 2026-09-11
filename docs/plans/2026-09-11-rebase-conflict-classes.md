@@ -86,7 +86,9 @@ changes are reviewable. A site removal or reclassification is
 invisible when another site retains the old pair, and a new
 classification is invisible when its pair already exists elsewhere;
 a test demonstrates exactly this lossy case (two files carrying one
-pair, one of them moving class, manifest unchanged) so no later
+pair: one site leaving renders the manifest byte-identical, and one
+site moving class leaves the old pair standing on the sibling's
+strength while the new class's line appears) so no later
 documentation quietly recovers the stronger claim.
 
 Not committing the manifest at all (the issue's second option) is
