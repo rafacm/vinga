@@ -337,12 +337,20 @@ def introduction(
 ) -> tuple[str, int]:
     """The date one fragment folds into, and its place in merge order.
 
-    The introduction commit is the oldest first-parent commit that
+    The introduction commit is the NEWEST first-parent commit that
     added the file, and the date is its committer date in its own
-    recorded offset. A fragment whose introduction cannot be found in
-    the available history is refused rather than dated from today: a
-    fold that guessed would put an entry under a day nothing landed
-    on, and the guess would be invisible.
+    recorded offset. Newest, because a fold deletes the fragments it
+    reads, so a path this repository has folded before can validly be
+    used again: `467-a-thing.md` may name two different changes a
+    month apart. What the fold has to date is the file standing in the
+    tree now, and that is the most recent addition. Reading the oldest
+    filed the second entry under the first one's day, a section it did
+    not land on and where nobody would look for it.
+
+    A fragment whose introduction cannot be found in the available
+    history is refused rather than dated from today: a fold that
+    guessed would put an entry under a day nothing landed on, and the
+    guess would be invisible.
     """
     relative = path.relative_to(root).as_posix()
     listed = _git(
@@ -356,7 +364,7 @@ def introduction(
     ).splitlines()
     if not listed:
         raise Refusal(NO_INTRODUCTION)
-    sha, _, stamp = listed[-1].partition(" ")
+    sha, _, stamp = listed[0].partition(" ")
     if sha not in history:
         raise Refusal(NO_INTRODUCTION)
     if truncated and sha in _roots(root):
