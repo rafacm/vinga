@@ -665,21 +665,40 @@ def test_an_unknown_view_is_told_where_the_list_of_them_is(run, store, capsys) -
     assert "latency" not in err
 
 
-def test_an_unknown_grouping_is_refused_without_quoting_it(run, store, capsys, caplog) -> None:
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        SENTINEL,
+        # And control characters, the way the view above gets them: a
+        # CRLF that would append a log line, a NUL, and a CSI sequence
+        # that would steer the terminal a refusal is read on. The
+        # grouping travels as a query argument, so it reaches the API
+        # percent-encoded and meets the API's own refusal.
+        "device\r\nlevel=CRITICAL",
+        "device\x00all",
+        "device\x1b[31mall",
+    ],
+)
+def test_an_unknown_grouping_is_refused_without_quoting_it(
+    run, store, capsys, caplog, hostile
+) -> None:
     """Refused rather than ignored: a caller asking for a breakdown and
     quietly answered with the ungrouped rows could not tell the two
     apart. The vocabulary is the API's closed set, said in the API's own
-    sentence, so this client keeps no copy of it to fall out of step."""
+    sentence, so this client keeps no copy of it to fall out of step.
+    Hunted through both streams and both shipped log formats, the way
+    every refusal in this file is."""
     with caplog.at_level(logging.DEBUG):
         code, printed, err = out(
-            run, capsys, "metric", "show", "sessions", "--group", SENTINEL
+            run, capsys, "metric", "show", "sessions", "--group", hostile
         )
 
     assert code == 1
     assert "group" in err
     assert printed == ""
     for where in (printed, err, leaked(caplog)):
-        assert SENTINEL not in where
+        assert hostile not in where
+        assert "\x1b" not in where and "\x00" not in where and "\x07" not in where
 
 
 @pytest.mark.parametrize("flag", ["--since", "--until"])
