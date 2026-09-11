@@ -647,11 +647,23 @@ def open_conversations(settings: DatabaseConfig) -> Engine:
 @dataclass(frozen=True)
 class Open:
     """A session began. Its own marker: the session row is committed at
-    once, so a page opened mid conversation finds the session."""
+    once, so a page opened mid conversation finds the session.
+
+    `device_name` travels beside the manifest rather than inside it,
+    and that is the whole of the difference between the two consumers
+    of one open. The manifest is what the capture writes beside its
+    audio and what this store builds its row from, and it carries what
+    a device says about itself; the name is what an OPERATOR called the
+    board, and it is on this row for the analyst who is granted
+    `record` and revoked on `domain`. A capture is a file on the
+    operator's own disk with the domain store an SQL statement away, so
+    it needs no copy, and #449's no-leak suite pins that it has none.
+    """
 
     session: str
     opened_at: float
     manifest: dict[str, Any]
+    device_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -967,12 +979,21 @@ class ConversationStore:
         opened_at: float,
         manifest: dict[str, Any],
         renames: "Callable[[], Sequence[tuple[str, str]]] | None" = None,
+        device_name: str | None = None,
     ) -> None:
         """Begin one session's record. A control record: never dropped.
 
         `opened_at` is the session loop's clock reading at open, which is
         what every offset below is measured from and what aligns a row
         with the capture triplet of the same name.
+
+        `device_name` is what the board was called at this instant, or
+        None where no name is recorded for it: a board nobody named, and
+        a MAC a default agent covers with no record behind it. It is
+        taken here and never again, which is what makes the column a
+        dated one: a rename or a board swap afterwards moves the device
+        record and leaves every session this deployment already had
+        saying what was true when it opened.
 
         `renames` is what this session's world has not heard: the renames
         published since the generation this conversation bound was
@@ -1008,7 +1029,9 @@ class ConversationStore:
             for old, new in () if renames is None else renames():
                 _compose(moved, old, new)
             self._renames[session_id] = moved
-            self._queue.put_nowait(Open(session_id, opened_at, dict(manifest)))
+            self._queue.put_nowait(
+                Open(session_id, opened_at, dict(manifest), device_name)
+            )
 
     def record_event(
         self, session_id: str, name: str, level: int, fields: dict[str, Any], at: float
@@ -1717,6 +1740,9 @@ class ConversationStore:
         return {
             "session": opening.session,
             "device": device.get("mac"),
+            # Off the open rather than out of the manifest, because the
+            # capture reads that and has no copy of this one.
+            "device_name": opening.device_name,
             "client": device.get("client"),
             "agent": manifest.get("agent"),
             "agents": manifest.get("agents"),
