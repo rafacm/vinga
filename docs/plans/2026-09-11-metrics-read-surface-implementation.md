@@ -242,3 +242,165 @@ adopted.
 
 M2's CLI and M3's device dimension, as planned. The observability map
 still records #440 as open, which M3 closes.
+
+## M2: the CLI in front of it
+
+PR TBD.
+
+### What landed
+
+`vinga metric list` and `vinga metric show <view>` in
+`config/cli.py`, through the `Act`, transport, validation and
+registration machinery that module already has. Two rows in
+`COMMANDS`, one group in `GROUPS`, two acts, one declaration
+function, four new fields on `Invocation` and two renderers. No new
+module, which is what the plan's module layout says, and no seam.
+
+The grammar as registered, and what holds it there:
+
+| the line | why it is that shape |
+| --- | --- |
+| `vinga metric list` | the noun is this repository's own word for the surface, reserved for it by #437's rename; `list` is a core-set verb |
+| `vinga metric show <view>` | singular because `show` addresses one entry; the view is the whole address, in the route's own parameter name |
+| `--since DAY`, `--until DAY` | neither addresses a view: they bound the answer, the way `--limit` bounds a session listing |
+| `--group HOW` | the same, and its vocabulary is the API's closed set rather than a copy here |
+
+`metric latency` was excluded though it reads better: a noun in the
+verb slot reads as a possessive and hides what the command does, and
+`agent preview` is this repository's precedent for not granting that
+exception to the first command that asks for it. The plural spelling
+was excluded by the plan's review round, which is where the singular
+rule was applied to this noun.
+
+Neither verb has a local path. `config/cli.py` states the rule ("a
+command that touches the record is a request like every other, and
+there is no second way in") and the acts carry it: two `GET`s and
+nothing else. The plan's first draft promised a break-glass and the
+review round took it out.
+
+**What the two verbs print.** `metric list` is a block per view: the
+alias, the question, the denominator sentence, the view's own
+telemetry-off sentence, its columns with the unit of each where it has
+one, and the relation to select from. `metric show` is the view's alias
+and question, the window it was answered over stated once, a borderless
+table, and the caveats under it. A null cell is the placeholder `-` that
+every other listing here prints, never a zero. An empty window prints
+one sentence and leaves through zero, and so does a deployment that
+never recorded: the same answer for the reason `conversations/api.py`
+gives about empty shapes.
+
+The table has prose above it and below it, which the pending and session
+listings do not, and that is deliberate rather than overlooked. The
+guide's borderless table is defended by one entry per line, which holds:
+a row is a line, and `grep` still picks the day out of it. What does not
+hold is `wc -l` as a row count, and it would not have held for a header
+block alone; the whole of what a number here cannot say is worth more
+than a count somebody can take with `grep -c`. Everything printed is
+about the artifact rather than about the run, which is why it is on
+stdout: the export's own header and footer are the precedent, and the
+rule is that a document explaining itself is still the document.
+
+**The declared limitations reach the CLI through the answer.** M1 made
+`views.COMMON` the one home and gave it two consumers, the committed
+reference and the OpenAPI descriptions; this is the third, and it reads
+them the way a client must, out of the body both routes serve rather
+than by importing the registry. `config/cli.py` could import
+`conversations.views` today (it already imports `config.docgen` for its
+widths), and taking that shortcut would have made the CLI a second
+reader of the server's own module rather than a client of the API,
+which `test_cli_import_weight.py` exists to prevent. Every view's own
+telemetry-off sentence travels the same way, per view, so the surface
+does not flatten a behaviour that is not uniform.
+
+### Deviations from the plan
+
+**`--group` is registered here rather than in M3.** The plan's M3 bullet
+says "`group=device` on the API and its CLI flag", which reads as the
+flag arriving with the token. It arrives now, for a reason the M1
+deviation makes: the grouping vocabulary is one tuple, `GROUPINGS`, and
+M1 built the refusal sentence, the parameter description and the
+document's enum from it so they move together. With the flag already
+here, M3 appends a token to that tuple and changes nothing else on
+either surface; with the flag deferred, M3 would have to add both and
+the CLI could not exercise the API's grouping refusal at all until it
+did. The cost is a flag with one legal value for one milestone, which is
+a published parameter of the API today.
+
+**The caveats are printed on both verbs rather than on one.** The plan
+says the CLI's "output or help" is the third consumer and does not say
+where. The API serves them in both bodies, so both renderings print
+them: a reader who ran `metric list` to find out what the numbers are is
+reading exactly the material `list` is for, and a reader about to quote
+one off `show` is at the moment they are most likely to be missing it.
+
+**Markdown markers are removed for a terminal.** The statements are
+declared as Markdown because two of the three surfaces that render them
+are: the committed reference and the API's contract. A terminal is the
+third and is not one, so `**` and backticks come out and nothing else
+does. The words, their order and their punctuation are the registry's,
+and the removal happens after `printable` has already turned every
+character a terminal would obey into a question mark, so it cannot hide
+anything. A paragraph is then wrapped at `docgen.PROSE_WIDTH`, the width
+every other piece of generated prose here is written to, which keeps the
+answer the same bytes through a pipe and onto a screen.
+
+### Discoveries
+
+**A path carrying an encoded newline never reaches the route.** A view
+spelled `sessions\r\nlevel=CRITICAL` is percent-encoded by the client
+and then fails to match the sub-application's mount, so what answers is
+Starlette's own `application/json` 404 rather than the API's
+`application/problem+json` one. The client suppresses it, exactly as
+`_refusal` is written to: three things have to agree before a body's
+words are relayed, and a media type that is not
+`application/problem+json` is the first of them. The value still leaves
+no trace, which is the property; which of two fixed sentences a caller
+meets depends on how far the value got, so the no-leak case asserts the
+property over every hostile value and a separate case asserts the API's
+own sentence on an ordinary unknown word.
+
+**The test client's vendored `httpx2` logger is not the CLI's to
+quiet.** `config/cli.py` quiets `httpx` and `httpcore` around every
+request, and `tests/support/config_cli.logged` deliberately reads every
+record, so a no-leak sweep driven through `TestClient` finds the request
+line its own vendored client wrote. This suite filters to
+`vinga_server` channels and says why, which is the shape
+`test_config_cli_sessions.py` already uses for the same reason.
+
+### Both installed lanes had to gain a case
+
+`tests/integration/test_cli_live.py` and
+`tests/integration/test_cli_wheel.py` derive their coverage from
+`cli.COMMANDS` rather than from a list beside it, so the two new rows
+turned three cases red before a line was written for them: the live
+lane's completeness claim, the wheel lane's, and the closure that says
+every family of the grammar has a refusal whose sentence has been seen
+to cross a connection. All three are what those tests exist to catch.
+
+The wheel lane's case is the one worth reading. The declared statements
+live on a module of the serve tier, so a client that imported the
+registry to print them would be a client the bare wheel cannot run, and
+it would fail there and in no other lane.
+
+### Verification
+
+- `uv run ruff check .` and `uv run mypy` clean; `uv run pytest
+  tests/unit -q -n 4 --dist loadfile` and `uv run pytest
+  tests/integration -q` green.
+- One integration case,
+  `test_smoke_seeds.py::test_a_seeding_script_reports_a_server_that_will_not_start`,
+  failed once under a lane sharing the machine with a parallel unit run
+  and passed on its own immediately afterwards. It touches nothing this
+  milestone changed.
+- The CLI reference regenerated through `vinga-server config
+  cli-reference` and diffed the way CI diffs it, and the spelling census
+  regenerated rather than edited.
+- Each new pin was run against a deliberately broken renderer before it
+  was trusted, and the ten breakages and what each one fails are
+  recorded in the commit that adds the cases.
+
+### Not done here
+
+M3's device dimension, as planned: the four sibling views, `group=device`
+as a token the API answers, and the `device` and `name` columns. The
+observability map still records #440 as open, which M3 closes.

@@ -276,7 +276,9 @@ restating their fixtures.
   `config/api_descriptions/api.md` describes the namespace; `CHANGELOG.md` gets
   its entry. Design footprint: deepens `conversations/api.py` and
   `conversations/views.py`; adds no module and no seam.
-- [ ] **M2: the CLI in front of it.** `vinga metric list` and
+- [x] **[M2: the CLI in front of
+  it](2026-09-11-metrics-read-surface-implementation.md#m2-the-cli-in-front-of-it)**
+  (PR TBD). `vinga metric list` and
   `vinga metric show <view>` in `config/cli.py`, held to
   `docs/architecture/cli-guide.md`, a client of the API like every other verb
   and with no local path, because a command that touches the record is a request
