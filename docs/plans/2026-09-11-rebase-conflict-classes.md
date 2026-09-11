@@ -234,9 +234,23 @@ named where the rule is stated.
   git, merges entries into `CHANGELOG.md` in class order, deletes
   the fragments, and refuses (exit 1, nothing written) unless its
   own post-conditions hold: every fragment's entry present verbatim
-  exactly once, headings in order, no conflict markers, the file
-  outside the touched sections byte-identical. `check` validates
-  fragments without writing. What its callers stop having to know:
+  exactly once, no conflict markers anywhere in the file, the file
+  outside the touched sections byte-identical, and the touched
+  sections well-formed under the rules below. The post-conditions
+  are deliberately not global, because settled history is not
+  canonical (2026-09-10 orders Fixed before Changed; 2026-09-06
+  carries two Added headings) and a global rule would either reject
+  the repository or rewrite what the issue says stays. Legacy
+  sections are parsed permissively and never validated, normalized
+  or rewritten. A section the fold creates is canonical: one
+  heading per class, Keep a Changelog order. A section the fold
+  appends into is left as it stands, each entry appended after the
+  last entry under the last heading matching its class, and a
+  missing class heading inserted in Keep a Changelog order relative
+  to the canonical classes present, whatever else the section
+  holds; a fixture carries the repository's own duplicate-heading
+  and out-of-order legacy shapes and proves them byte-preserved.
+  `check` validates fragments without writing. What its callers stop having to know:
   the fold workflow and anyone folding by hand stop knowing Keep a
   Changelog ordering, section insertion, date derivation and the
   verbatim-move contract; they run one command and read its exit
@@ -368,6 +382,13 @@ condensed but faithful; resolutions appended per amendment.
    keep them byte-identical; normalize and check only sections the
    fold touches; add a fixture with the repository's own legacy
    shapes.
+
+   *Resolution.* Adopted. The fold's post-conditions are scoped:
+   legacy sections parse permissively and stay byte-identical,
+   created sections are canonical, appended-into sections keep
+   their standing shape with entries appended under the last
+   matching heading, and the fixture carries the repository's own
+   duplicate-heading and out-of-order shapes.
 
 3. **P1: The new public-CI parser has no no-leak contract.**
    `check_doc_links.py` treats repository text as untrusted CI-log
