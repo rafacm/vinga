@@ -71,6 +71,15 @@ EMPTY_UNTIL = "2025-01-31"
 # planted wherever a refusal might carry it back out.
 SENTINEL = "sk-test-91c4a7de-never-a-real-credential"
 
+# Two boards of one fleet, and the second in the spelling a person
+# types it in: upper case and dash-separated, which the API normalizes
+# before it matches.
+BOARD_A = "a4:cf:12:00:00:01"
+
+BOARD_B = "a4:cf:12:00:00:02"
+
+BOARD_B_AS_TYPED = "A4-CF-12-00-00-02"
+
 # Everything a terminal reads as an instruction rather than as text,
 # planted in an agent name because an agent name is an operator's text
 # and two of these views carry it in a cell.
@@ -97,17 +106,29 @@ def store() -> Any:
         engine.dispose()
 
 
-def a_day(store: Any, day: str, *, agent: str = "sam", session: str | None = None) -> None:
+def a_day(
+    store: Any,
+    day: str,
+    *,
+    agent: str = "sam",
+    session: str | None = None,
+    device: str | None = BOARD_A,
+) -> None:
     """One session opened at noon on a named UTC day, with a measured
     turn and one counted event on it.
 
     Noon rather than midnight so the day a row lands on is the day that
     was asked for whichever way a reader's own timezone leans, which is
     the property the views are cut on.
+
+    `device` is the board it ran on, which the per-device breakdown
+    groups by.
     """
     named = session if session is not None else day
     with store.begin() as connection:
-        plant_session(connection, named, f"{day}T12:00:00+00:00", agent=agent)
+        plant_session(
+            connection, named, f"{day}T12:00:00+00:00", agent=agent, device=device
+        )
         plant_turn(
             connection, named, 0, agent=agent, asr_ms=120, input_tokens=7, output_tokens=3
         )
@@ -197,12 +218,13 @@ def test_the_noun_is_singular_and_carries_two_core_set_verbs() -> None:
 
 def test_the_view_leads_as_a_positional_and_the_window_follows_as_flags() -> None:
     """The address first, in the route's own parameter name, and the
-    three things that bound the answer as flags behind it.
+    four things that bound the answer as flags behind it.
 
-    `--since`, `--until` and `--group` address no view: two say which
-    days to answer about and one says how to break the rows down, which
-    is exactly what `--device` and `--limit` are to a session listing.
-    A positional would make the line read as a four-part address.
+    `--since`, `--until`, `--group` and `--device` address no view: two
+    say which days to answer about, one says how to break the rows down
+    and one narrows that breakdown to a board, which is exactly what
+    `--device` and `--limit` are to a session listing. A positional
+    would make the line read as a five-part address.
     """
     shown = leaf(("metric", "show"))
     arguments = [
@@ -219,7 +241,7 @@ def test_the_view_leads_as_a_positional_and_the_window_follows_as_flags() -> Non
 
     assert [parameter.name for parameter in arguments] == ["view"]
     assert arguments[0].required
-    assert {"--since", "--until", "--group"} <= options
+    assert {"--since", "--until", "--group", "--device"} <= options
 
     listed = leaf(("metric", "list"))
     assert not [
@@ -313,6 +335,11 @@ def test_only_the_bounds_that_were_written_travel(run, capsys) -> None:
 
     assert run("metric", "show", "sessions", "--until", UNTIL) == 0
     assert dict(seen[-1].params.multi_items()) == {"until": UNTIL}
+
+    assert (
+        run("metric", "show", "sessions", "--group", "device", "--device", BOARD_A) == 0
+    )
+    assert dict(seen[-1].params.multi_items()) == {"group": "device", "device": BOARD_A}
 
 
 def test_both_verbs_are_requests_with_no_second_way_in() -> None:
@@ -699,6 +726,130 @@ def test_an_unknown_grouping_is_refused_without_quoting_it(
     for where in (printed, err, leaked(caplog)):
         assert hostile not in where
         assert "\x1b" not in where and "\x00" not in where and "\x07" not in where
+
+
+def test_the_device_breakdown_prints_a_board_per_row(run, store, capsys) -> None:
+    """The grouping end to end: the flag goes out on the request, the
+    API answers from the per-device sibling, and what comes back is
+    rendered from the columns that answer carried rather than from a
+    table of names this client keeps.
+
+    Two boards on one day, and the ungrouped answer beside it, which is
+    what says the flag did something: one row of two sessions becomes
+    two rows of one. The label is null in every row of this release and
+    prints the placeholder every other null cell here prints, never a
+    blank and never a zero.
+    """
+    a_day(store, DAY, session="a", device=BOARD_A)
+    a_day(store, DAY, session="b", device=BOARD_B)
+
+    code, printed, err = out(
+        run,
+        capsys,
+        "metric",
+        "show",
+        "sessions",
+        "--since",
+        SINCE,
+        "--until",
+        UNTIL,
+        "--group",
+        "device",
+    )
+
+    assert (code, err) == (0, "")
+    [heading] = [line for line in printed.splitlines() if line.startswith("DAY")]
+    assert heading.split()[:3] == ["DAY", "DEVICE", "NAME"]
+    rows = [line.split() for line in printed.splitlines() if line.startswith(DAY)]
+    assert [(row[1], row[2]) for row in rows] == [
+        (BOARD_A, cli.NOTHING_THERE),
+        (BOARD_B, cli.NOTHING_THERE),
+    ]
+
+    code, ungrouped, err = out(
+        run, capsys, "metric", "show", "sessions", "--since", SINCE, "--until", UNTIL
+    )
+    assert (code, err) == (0, "")
+    [heading] = [line for line in ungrouped.splitlines() if line.startswith("DAY")]
+    assert "DEVICE" not in heading.split()
+    assert len([line for line in ungrouped.splitlines() if line.startswith(DAY)]) == 1
+
+
+def test_the_device_flag_narrows_the_breakdown_to_one_board(run, store, capsys) -> None:
+    """The filter, in the spelling a person types rather than the one
+    the record stores: the API normalizes it, so the row that comes back
+    is the board that was meant."""
+    a_day(store, DAY, session="a", device=BOARD_A)
+    a_day(store, DAY, session="b", device=BOARD_B)
+
+    code, printed, err = out(
+        run,
+        capsys,
+        "metric",
+        "show",
+        "sessions",
+        "--since",
+        SINCE,
+        "--until",
+        UNTIL,
+        "--group",
+        "device",
+        "--device",
+        BOARD_B_AS_TYPED,
+    )
+
+    assert (code, err) == (0, "")
+    rows = [line.split() for line in printed.splitlines() if line.startswith(DAY)]
+    assert [row[1] for row in rows] == [BOARD_B]
+
+
+def test_a_device_without_a_breakdown_is_refused_without_quoting_it(
+    run, store, capsys, caplog
+) -> None:
+    """The pair rule, relayed rather than enforced here: which groupings
+    admit a filter is the API's rule and its own fixed sentence, and a
+    second copy in this client would be a second sentence per refusal.
+
+    The board is a MAC of a real fleet, so a refusal that echoed it
+    would be putting a device identifier in a terminal and a log for a
+    request that did nothing.
+    """
+    with caplog.at_level(logging.DEBUG):
+        code, printed, err = out(
+            run, capsys, "metric", "show", "sessions", "--device", BOARD_A
+        )
+
+    assert code == 1
+    assert "device" in err
+    assert printed == ""
+    for where in (printed, err, leaked(caplog)):
+        assert BOARD_A not in where
+
+
+def test_a_device_that_is_not_a_mac_is_refused_without_quoting_it(
+    run, store, capsys, caplog
+) -> None:
+    """The same rule the session listing's own filter is held to, and
+    the same sentence: a value matched literally would answer an empty
+    table and call it the truth."""
+    with caplog.at_level(logging.DEBUG):
+        code, printed, err = out(
+            run,
+            capsys,
+            "metric",
+            "show",
+            "sessions",
+            "--group",
+            "device",
+            "--device",
+            SENTINEL,
+        )
+
+    assert code == 1
+    assert "MAC" in err
+    assert printed == ""
+    for where in (printed, err, leaked(caplog)):
+        assert SENTINEL not in where
 
 
 @pytest.mark.parametrize("flag", ["--since", "--until"])

@@ -1131,6 +1131,10 @@ class Invocation:
     # same reason. The set it is held to is the API's closed vocabulary,
     # published in the document and refused there; a copy of it here
     # would be a second set to keep in step with the first.
+    #
+    # Which board a per-device answer is narrowed to rides `mac`, the
+    # field every other `--device` on this grammar already uses, because
+    # it is the same board `device show` addresses.
     view: str = ""
     since: str = ""
     until: str = ""
@@ -6286,13 +6290,20 @@ def _metric_path(args: Invocation) -> str:
 def _metric_window(args: Invocation) -> dict[str, str]:
     """What bounds the answer. The rule the session filters follow: only
     what was written, so the API's own defaults are the defaults, said
-    once and read back off the answer rather than computed here."""
+    once and read back off the answer rather than computed here.
+
+    The device is one of them and is not held to anything here: which
+    groupings admit a filter, and what a MAC has to be, are the API's
+    rules and its own fixed sentences, and a second vocabulary in front
+    of them would be a second sentence per refusal.
+    """
     return {
         name: value
         for name, value in (
             ("since", args.since),
             ("until", args.until),
             ("group", args.group),
+            ("device", args.mac),
         )
         if value
     }
@@ -7377,6 +7388,11 @@ METRIC_GROUP_HELP = (
     "own, the view's own dimensions and no further)"
 )
 
+METRIC_DEVICE_HELP = (
+    "only the rows of this board, by MAC, which needs a --group that breaks the rows "
+    "down by device (default: every board)"
+)
+
 # The two that follow `schema provider`. A provider type is addressed by
 # its stage and its name together everywhere else in this command group,
 # and its options are addressed the same way for the same reason: one
@@ -8115,10 +8131,10 @@ def _over_a_window(row: Command) -> Callable[..., None]:
 
     The view is a positional because it is the address the route is
     written in, and it leads for the reason every address here leads.
-    The three that follow are flags because none of them addresses a
-    view: two say which days to answer about and one says how to break
-    the rows down, which is what `--device` and `--limit` are to a
-    session listing.
+    The four that follow are flags because none of them addresses a
+    view: two say which days to answer about, one says how to break the
+    rows down and one narrows the breakdown to a board, which is what
+    `--device` and `--limit` are to a session listing.
     """
 
     def run(
@@ -8132,6 +8148,9 @@ def _over_a_window(row: Command) -> Callable[..., None]:
         ] = None,
         group: Annotated[
             str | None, typer.Option("--group", metavar="HOW", help=METRIC_GROUP_HELP)
+        ] = None,
+        device: Annotated[
+            str | None, typer.Option("--device", metavar="MAC", help=METRIC_DEVICE_HELP)
         ] = None,
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
@@ -8150,6 +8169,7 @@ def _over_a_window(row: Command) -> Callable[..., None]:
                 since=since or "",
                 until=until or "",
                 group=group or "",
+                mac=device or "",
             )
         )
 
