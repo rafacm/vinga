@@ -72,6 +72,17 @@ by reader question. A milestone whose behavior change stales no
 documentation says so explicitly rather than leaving the footprint
 implied.
 
+Each plan also carries one required "Local baseline" line, answering
+for the whole plan: *not applicable* (no conversational capability
+changes), *outside* (a capability the local baseline does not grow
+to include, with the reason), or *joins* (citing the recorded
+decision, and updating `docs/architecture/product-promises.md` in
+the same change). The baseline is the enumerated list in the
+promises page and its rule is the enumerated-baseline record in
+`docs/adr/`; the line exists so the membership decision cannot be
+skipped silently, and "not applicable" is the one-line answer for
+most plans.
+
 ### The standing review lenses
 
 The external reviews of the 2026-08-14 batch applied the same
