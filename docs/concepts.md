@@ -526,14 +526,14 @@ is told about them. As **prompt content**, it goes wherever the rest of
 the prompt goes: what a conversation is keeping, what the agent
 remembers and what the device's notes hold are read into every reply,
 and `recall` answers with more of them on demand, so all of it follows
-the active LLM provider's egress exactly as the transcript and the
+the active LLM provider's reach exactly as the transcript and the
 persona do. An agent on a cloud model sends what it remembered along
 with what was just said. The device scope is the half worth saying
 plainly: a note about the room or the household reaches the provider of
 *every* agent bound to that device that may remember, not only the one
 that was told it.
-`server.local_only` is the existing guard and it is the same one: a
-provider that sends session data off the host cannot be booted under it.
+`server.data_boundary` is the existing guard and it is the same one: a
+provider whose reach exceeds the declared boundary cannot be booted.
 
 **Conversation state shares its conversation's lifetime, exactly.** It
 is keyed by the thread rather than by the connection, so it survives a

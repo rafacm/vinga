@@ -25,8 +25,8 @@ any vocabulary has been introduced.
 
 [`plantuml/vinga-architecture-overview.png`](plantuml/vinga-architecture-overview.png):
 the same boxes drawn for a different question. Every provider is
-coloured by its declared `egress` class, which is the thing
-`server.local_only` is checked against at boot, so this is the
+coloured by its declared `reach`, which is the thing
+`server.data_boundary` is checked against at boot, so this is the
 picture to read before answering "if I configure it this way, what
 goes over the internet".
 

@@ -98,13 +98,13 @@ each agent picks one provider per stage. The v1 set:
 "Anywhere" is a `base_url`: those three types speak a dialect rather
 than name a vendor, so each reaches a self-hosted server implementing
 the same endpoint. That is what keeps a fully local pipeline available
-through them, and it is why they cannot declare their own egress.
+through them, and it is why they cannot declare their own reach.
 
 Model weights are never shipped: faster-whisper models and Piper voices
 download at server startup into a local cache (`download_dir` on the
 provider entry). A fully local, keyless pipeline is Silero +
 faster-whisper + Ollama (through `openai_compatible`) + Piper, and
-`server.local_only: true` makes the server refuse to boot anything
+`server.data_boundary: host` makes the server refuse to boot anything
 else (see Security below).
 
 The Install column is a checkout's, since a deployment installs nothing:
@@ -301,8 +301,8 @@ have answered would drop a barge-in it could have confirmed.
 `openai` TTS type open, with the same consequences: the host rather
 than the spelling decides whether an entry counts as OpenAI, a
 `base_url` that is not a URL fails the boot, and the endpoint rather
-than the type decides egress, so an entry under `server.local_only`
-carries its own `egress: false`.
+than the type decides how far the audio travels, so an entry under a
+declared `server.data_boundary` carries its own `reach`.
 
 Only OpenAI's own host *requires* a key. A keyless self-hosted server
 can leave `api_key_env` out, but a gateway or hosted endpoint that
@@ -312,7 +312,7 @@ authenticates still names its variable there and the key is sent, so
 **It sends the microphone audio wherever `base_url` points**, which by
 default is OpenAI, and that is a stronger claim than the TTS types
 make: what leaves is what was said in the room, not what the assistant
-answered. See Security below for how `server.local_only` treats it.
+answered. See Security below for how `server.data_boundary` treats it.
 
 ### Choosing a voice
 
@@ -436,9 +436,9 @@ a wide margin; see Choosing a voice above for the comparison and what
 the numbers mean. An idle conversation pays nothing extra to resume.
 
 **It sends your replies to ElevenLabs**, which is what the reply text
-is: the API is billed by character. The type is marked as egress
-accordingly, so `server.local_only: true` refuses to boot it (see
-Security below). Nothing else in the pipeline moves: VAD, ASR and the
+is: the API is billed by character. The type is marked `reach:
+internet` accordingly, so a `server.data_boundary` of `host` or
+`network` refuses to boot it (see Security below). Nothing else in the pipeline moves: VAD, ASR and the
 LLM stay wherever you configured them.
 
 ### OpenAI
@@ -478,9 +478,10 @@ local pipeline stays available through the same dialect, and a keyless
 one of those can leave `api_key_env` out; an endpoint that
 authenticates still names its variable there, since only OpenAI's own
 host makes a key mandatory. It is also what decides whether this type sends
-anything off your host, which is why it cannot declare its own egress:
-under `server.local_only` the entry carries its own `egress: false` to
-assert the endpoint is local, exactly as `openai_compatible` does.
+anything off your host, which is why it cannot declare its own reach:
+under a declared `server.data_boundary` the entry carries its own
+`reach` to say where the endpoint is, exactly as `openai_compatible`
+does.
 
 Whether an entry counts as OpenAI is decided by the host, so every
 spelling of it (a trailing slash, an explicit port, a different case)
@@ -540,7 +541,8 @@ one key is worth something. If what you want is the best voice per
 millisecond, ElevenLabs is the better buy.
 
 **It sends your replies wherever `base_url` points**, which by default
-is OpenAI. See Security below for how `server.local_only` treats it.
+is OpenAI. See Security below for how `server.data_boundary` treats
+it.
 
 ## Tools
 
@@ -593,7 +595,7 @@ moved its HTTP story to streamable HTTP and left SSE deprecated, so a
 third transport here would be permanent maintenance for a shrinking
 population, bought straight after this server paid to leave one
 deprecated client behind. The bridge is one line of configuration and
-everything else about the entry, secrets, egress, grants, the timeout,
+everything else about the entry, secrets, reach, grants, the timeout,
 is the same as any other stdio server's.
 
 **Per-tool grants.** An `mcp` entry is either the entry name on its own,
@@ -1241,7 +1243,7 @@ the new one; one that a conversation is still speaking through is
 released when that conversation ends, so applying a change to a local
 model briefly holds two of it. The `providers` section names the entries
 built, reused and retired. An entry that will not build, or that
-`server.local_only` forbids, refuses the apply with nothing changed.
+`server.data_boundary` forbids, refuses the apply with nothing changed.
 
 **The agent set moves with the rest.** An agent the store has added is
 built with everything else the apply builds and is servable the instant
@@ -1271,7 +1273,7 @@ masking with.
 
 **Nothing is half applied.** The whole new world is composed, validated
 and built before anything running is touched, so an unset `$VAR`, a
-credential that will not decrypt, an entry `server.local_only` forbids,
+credential that will not decrypt, an entry `server.data_boundary` forbids,
 or a stored configuration that will not compose into something this
 server can serve refuses the apply and leaves it exactly as it was. A
 server that merely will not connect is not that: it applies, shows
@@ -1942,7 +1944,7 @@ database of its own, which `VINGA_DB_NAME` is enough to give it.
 ## Security
 
 **Which hosts a configuration reaches.** Worth reading before deploying
-anywhere with an egress allowlist, because a blocked host does not
+anywhere with an outbound allowlist, because a blocked host does not
 announce itself: the server boots healthy, other stages keep working,
 and the blocked stage waits out its `timeout_s` while the device plays
 silence.
@@ -1962,7 +1964,7 @@ silence.
 
 The two local engines are the only entries that reach anything at
 startup and then stop, which is why a deployment that has been running
-for months can still be broken by an egress rule: nothing re-reaches
+for months can still be broken by an outbound rule: nothing re-reaches
 those hosts until the volume is cleared.
 
 **Devices authenticate, by default.** The OTA endpoint issues each device
@@ -2054,37 +2056,57 @@ first and would answer a request the token gate never saw.
 server keeps
 [the first-class local deployment](../docs/architecture/product-promises.md#a-fully-local-deployment-is-first-class),
 which is where the commitment itself is written down.
-Every provider type declares
-whether it sends session data (audio, transcripts, replies) off the
-host, and with `server.local_only: true` the server refuses to boot any
-provider that does, naming the stage and provider. The local engines
-(Silero, faster-whisper, Piper) pass; an `anthropic` or `elevenlabs`
-entry fails. The three `base_url` types, `openai_compatible` for the
-LLM stage and `openai` for both ASR and TTS, can each point at
-localhost or at a cloud vendor, so under `local_only` they must carry
-your own declaration:
+Every provider type declares how far session data (audio, transcripts,
+replies) given to it travels: `host` for something that stays on this
+machine, `network` for something that stays on your own network,
+`internet` for anything else. `server.data_boundary` declares the
+outermost reach you allow, and the server refuses to boot any provider
+that exceeds it, naming the stage and provider. Under `host` the local
+engines (Silero, faster-whisper, Piper) pass and an `anthropic` or
+`elevenlabs` entry fails; under `network` a model server on your LAN
+passes too. The key is absent by default, which declares no boundary
+and refuses nothing on distance.
+
+The three `base_url` types, `openai_compatible` for the LLM stage and
+`openai` for both ASR and TTS, can each point at this machine, at a
+server on your network, or at a cloud vendor, so under any declared
+boundary they must carry your own declaration:
 
 ```bash
 vinga-server config provider set llm local -f - <<'YAML'
 type: openai_compatible
 base_url: http://localhost:11434/v1
 model: qwen3:8b
-# Your assertion that this endpoint stays on this host.
-egress: false
+# Your assertion about where this endpoint is.
+reach: host
 YAML
 ```
+
+That is also why declaring `internet` is a real choice rather than a
+way of switching the mechanism off: it forbids nothing, and it still
+refuses an entry that will not say where it goes.
 
 MCP servers sit inside the same boundary, because tool arguments carry
 conversation-derived data. No transport can know where they end up (a
 stdio command may proxy anywhere, a URL may name localhost), so under
-`local_only` every MCP server an agent references must carry the same
-`egress: false` declaration, asserting that whatever its command or URL
-reaches stays on your own network.
+any declared boundary every MCP server an agent references must carry
+its own `reach`, most often `reach: network`, asserting that whatever
+its command or URL reaches stays on your own network.
 
-The checks run at boot, never at request time: a local_only server that
-starts is a local_only server, and a config edit that would break the
-promise stops the server from coming up instead of quietly shipping
-audio to a vendor.
+The checks run at boot, never at request time: a server that starts
+inside its boundary stays inside it, and a config edit that would break
+the promise stops the server from coming up instead of quietly shipping
+audio to a vendor. Declarations are enforced and behaviour is not
+verified: this is not a network sandbox, and it proves nothing about
+what a remote endpoint does with what it was sent.
+
+**Upgrading from `server.local_only`.** The old key is gone with no
+alias and is refused at parse, so a file carrying
+`server.local_only: true` must become `server.data_boundary: host`
+before the new image starts. Stored provider and MCP entries are
+migrated for you on the first boot: a provider's `egress: false`
+becomes `reach: host`, an MCP entry's becomes `reach: network`, and
+`egress: true` becomes `reach: internet` on both.
 
 **Memory is stored on the host and read out to the model.** What an
 agent remembers, what a device's notes hold and what a conversation is
@@ -2093,16 +2115,16 @@ database it already owns, they travel in the same `pg_dump` as
 everything else, and no other server is told about them. But they are
 injected into the system prompt on every reply, and `recall` answers a
 model with more of them on demand, which makes them prompt content: they
-follow the active LLM provider's egress like the transcript and the
+follow the active LLM provider's reach like the transcript and the
 persona do, so an agent on a cloud model sends what it remembered along
 with what was just said. The device scope is worth stating on its own: a
 note about the room or the household is shared by every agent bound to
 that board that may remember, so it reaches every one of their providers
 rather than only the provider of the agent that was told it. An agent
 whose `memory` section is off is read none of it and sends none of it,
-which is the one lever that narrows this. `server.local_only` is the
-guard, and it is the same guard: a provider that sends session data off
-the host cannot be booted under it, and memory rides the boundary that
+which is the one lever that narrows this. `server.data_boundary` is the
+guard, and it is the same guard: a provider whose reach exceeds the
+declared boundary cannot be booted, and memory rides the boundary that
 draws.
 
 ## Listening and barge-in

@@ -196,9 +196,9 @@ providers:
       # Untested here, which was walked on macOS.
       base_url: http://host.docker.internal:11434/v1
       model: llama3.1:8b
-      # openai_compatible cannot know its own egress, since base_url
-      # decides it. False asserts this endpoint stays on this machine.
-      egress: false
+      # openai_compatible cannot know its own reach, since base_url
+      # decides it. `host` asserts this endpoint is on this machine.
+      reach: host
   asr:
     # Transcription, on this machine. The weights download on the
     # first apply, which is what makes that one slow.
