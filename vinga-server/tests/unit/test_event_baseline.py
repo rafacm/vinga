@@ -868,7 +868,7 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     "vinga_server.capture:CaptureStore.open #4": (
         ("CaptureStarted", ("event", "path", "session")),
     ),
-    "vinga_server.capture:CaptureStore._abandoned #1": (
+    "vinga_server.capture:_abandoned #1": (
         ("CaptureUploadAbandoned", ("event", "reason", "session")),
     ),
     "vinga_server.capture_upload:CaptureUpload._deliver #1": (

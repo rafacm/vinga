@@ -35,7 +35,7 @@ from tests.support.events import both_formats, fields_of
 from tests.support.stores import CAPTURE_MANIFEST, tone
 from tests.support.stores import store as capture_store
 from tests.support.uploads import ApiError, Recorder, exporting, fake_sdk
-from vinga_server.capture import CaptureStore, SessionCapture
+from vinga_server.capture import CaptureStore, SessionCapture, sweep_upload_staging
 from vinga_server.capture_upload import (
     _QUIETING,
     ATTACH_KEY,
@@ -982,17 +982,6 @@ async def test_every_job_of_a_full_drain_is_accounted_for(
 # --- the sweep ---------------------------------------------------------
 
 
-def a_leftover(directory: Path, session: str, *, aged: bool = True) -> Path:
-    """One job on disk as a previous run would have left it."""
-    job = staging_root(directory) / session
-    job.mkdir(parents=True)
-    (job / AUDIO_NAME).write_bytes(b"RIFF")
-    (job / MANIFEST_NAME).write_text("{}")
-    if aged:
-        __import__("os").utime(job, (0, 0))
-    return job
-
-
 def test_a_restart_says_what_it_found_staged_and_removes_it(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -1004,7 +993,7 @@ def test_a_restart_says_what_it_found_staged_and_removes_it(
     a_leftover(store.directory, "s1")
     a_leftover(store.directory, "s2")
 
-    store.startup()
+    sweep_upload_staging(store.directory)
 
     assert reasons(caplog) == [
         CaptureUploadFailure.ABANDONED,
@@ -1025,7 +1014,7 @@ def test_a_boot_with_no_uploader_still_sweeps(
     a_leftover(store.directory, "s1")
 
     assert store._uploads is None
-    store.startup()
+    sweep_upload_staging(store.directory)
 
     assert reasons(caplog) == [CaptureUploadFailure.ABANDONED]
     assert staged(store.directory) == []
@@ -1043,7 +1032,7 @@ def test_a_job_younger_than_this_process_is_left_alone(
     store.directory.mkdir(parents=True, exist_ok=True)
     a_leftover(store.directory, "s1", aged=False)
 
-    store.startup()
+    sweep_upload_staging(store.directory)
 
     assert reasons(caplog) == []
     assert staged(store.directory) == ["s1"]
@@ -1059,7 +1048,7 @@ def test_a_staging_that_never_committed_goes_without_a_word(
     store.directory.mkdir(parents=True, exist_ok=True)
     a_leftover(store.directory, ".s1.building")
 
-    store.startup()
+    sweep_upload_staging(store.directory)
 
     assert reasons(caplog) == []
     assert staged(store.directory) == []
@@ -1073,9 +1062,126 @@ def test_a_directory_with_nothing_staged_sweeps_nothing(
     caplog.set_level(logging.DEBUG)
     store = capture_store(tmp_path)
 
-    store.startup()
+    sweep_upload_staging(store.directory)
 
     assert reasons(caplog) == []
+
+
+def a_leftover(directory: Path, session: str, *, aged: bool = True) -> Path:
+    """One job on disk as a previous run would have left it."""
+    job = staging_root(directory) / session
+    job.mkdir(parents=True, exist_ok=True)
+    (job / AUDIO_NAME).write_bytes(b"RIFF")
+    (job / MANIFEST_NAME).write_text("{}")
+    if aged:
+        __import__("os").utime(job, (0, 0))
+    return job
+
+
+# --- the sweep, from a boot -------------------------------------------
+#
+# The round's third finding, and the reason these are composition-level
+# rather than more calls to the function: what it caught is not the
+# sweep's own behaviour but WHERE it was called from. A store is built
+# only where capture is enabled, and the uploader's builder runs ahead of
+# it and can refuse, so each of these four configurations reached
+# neither and left staged room audio on disk. A case that called the
+# function directly would have passed against every one of them.
+
+BOOTS = (
+    pytest.param(
+        {"capture": {"enabled": True}, "telemetry": {"enabled": True}},
+        False,
+        id="attachment-off",
+    ),
+    pytest.param(
+        {
+            "capture": {"enabled": False},
+            "telemetry": {"enabled": True, "attach_captures": True},
+        },
+        False,
+        id="capture-disabled",
+    ),
+    pytest.param(
+        {
+            "capture": {"enabled": True},
+            "telemetry": {"enabled": True, "attach_captures": True},
+            "local_only": True,
+        },
+        True,
+        id="local-only",
+    ),
+    pytest.param(
+        {
+            "capture": {"enabled": True},
+            "telemetry": {"enabled": True, "attach_captures": True},
+        },
+        True,
+        id="extra-absent",
+    ),
+)
+
+
+@pytest.mark.parametrize(("server", "refuses"), BOOTS)
+def test_every_boot_with_a_capture_section_sweeps_what_was_left(
+    server: dict[str, Any],
+    refuses: bool,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Four boots, each with a job a previous run left staged, and each
+    of them says so and removes it.
+
+    Two boot and two refuse, and the refusals are the point: `local_only`
+    exits above the capture section entirely, at the exporter, and the
+    missing extra exits above the store. A sweep that ran from either of
+    those would never run at all.
+    """
+    import vinga_server.capture_upload as module
+    from tests.support.apps import entered_client
+    from tests.support.configs import config_with_agent
+    from vinga_server.app import StartupFailed
+
+    caplog.set_level(logging.DEBUG)
+    captures = tmp_path / "captures"
+    a_leftover(captures, "s1")
+    if server is BOOTS[3].values[0]:
+        monkeypatch.setattr(module, "_import_sdk", lambda: None)
+    section = dict(server["capture"])
+    section["dir"] = str(captures)
+    config = config_with_agent(server={**server, "capture": section})
+
+    if refuses:
+        with pytest.raises(StartupFailed):
+            with entered_client(config):
+                pass
+    else:
+        with entered_client(config):
+            pass
+
+    assert reasons(caplog) == [CaptureUploadFailure.ABANDONED]
+    assert staged(captures) == []
+
+
+def test_a_boot_with_no_capture_section_leaves_the_directory_alone(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The one configuration that touches nothing, which is stated in the
+    flag's own reference prose: removing the section parks the sweep with
+    the rest of the capture machinery."""
+    from tests.support.apps import entered_client
+    from tests.support.configs import config_with_agent
+
+    caplog.set_level(logging.DEBUG)
+    captures = tmp_path / "captures"
+    a_leftover(captures, "s1")
+
+    with entered_client(config_with_agent()):
+        pass
+
+    assert reasons(caplog) == []
+    assert staged(captures) == ["s1"]
 
 
 # --- what may never leak ----------------------------------------------

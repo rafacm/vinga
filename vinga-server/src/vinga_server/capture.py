@@ -444,6 +444,67 @@ class SessionCapture:
             self._on_close = None
 
 
+def sweep_upload_staging(directory: Path) -> None:
+    """Say what a previous run left staged for upload, and remove it.
+
+    A function over a directory rather than a method on the store, and
+    the round's third finding is what made it one. A store is only built
+    where capture is ENABLED, and the uploader's builder runs ahead of it
+    and can refuse; between them, every configuration this sweep exists
+    for reached neither. A `local_only` boot and an extra-less boot
+    refuse before any store is constructed, and a configured-but-disabled
+    capture constructs no store at all, so staged room audio stayed on
+    disk in exactly the four configurations an operator chose to stop
+    exporting in. It answers to the capture SECTION now: the section
+    names a directory, the directory is swept, and whether anything is
+    being recorded into it is a separate question asked afterwards.
+
+    Removing the section parks this with the rest of the capture
+    machinery, which is the one configuration that leaves the directory
+    untouched and is stated in the flag's own reference prose.
+
+    One sanitized event per job before its links go, because a restart
+    must not be the thing that silently discards the only record that an
+    upload never happened. Nothing is retried: a retry store would be a
+    durability promise this flag does not make, and the event is the
+    honest ledger.
+
+    A job younger than this process is skipped. Sequential lifespans in
+    one process share a staging directory, and a prior lifespan's worker
+    may still hold a job in flight; adopting it would mean deleting a
+    pair out from under an upload that is happening.
+    """
+    root = staging_root(directory)
+    try:
+        jobs = sorted(path for path in root.iterdir() if path.is_dir())
+    except OSError:
+        return
+    for job in jobs:
+        try:
+            if job.stat().st_mtime >= _PROCESS_STARTED:
+                continue
+        except OSError:
+            continue
+        # A name beginning with a dot is a staging that never committed,
+        # so there was never a job to abandon: the links go without a
+        # word.
+        if not job.name.startswith(BUILDING_PREFIX):
+            _abandoned(job.name)
+        with contextlib.suppress(OSError):
+            shutil.rmtree(job)
+
+
+def _abandoned(session: str) -> None:
+    """One leftover job, said before its links go.
+
+    A function of its own rather than a thunk inside the loop above, for
+    the reason the loop cannot: a lambda built in a loop reads whatever
+    the variable holds when it is called, and a parameter is the honest
+    way to hand it one value.
+    """
+    events.emit(lambda: CaptureUploadAbandoned(session=SessionId(session)))
+
+
 class CaptureStore:
     """The capture directory: what may be started, and what is kept.
 
@@ -532,60 +593,6 @@ class CaptureStore:
                 )
             )
         return removed
-
-    def startup(self) -> None:
-        """Say what a previous run left staged for upload, and remove
-        it.
-
-        This store's own rather than the uploader's, and that is the
-        whole of why it is here: a next boot with the flag off, capture
-        off, `local_only` on or the extra gone builds no uploader at
-        all, and staged room audio would then persist silently in
-        exactly the configurations an operator chose to stop exporting
-        in. So it runs whenever a capture directory is opened, with an
-        uploader or without one. A boot with no capture section builds
-        no store either, and leaves the directory untouched: removing
-        the section parks this with the rest of the capture machinery.
-
-        One sanitized event per job before its links go, because a
-        restart must not be the thing that silently discards the only
-        record that an upload never happened. Nothing is retried: a
-        retry store would be a durability promise this flag does not
-        make, and the event is the honest ledger.
-
-        A job younger than this process is skipped. Sequential lifespans
-        in one process share a staging directory, and a prior lifespan's
-        worker may still hold a job in flight; adopting it would mean
-        deleting a pair out from under an upload that is happening.
-        """
-        root = staging_root(self.directory)
-        try:
-            jobs = sorted(path for path in root.iterdir() if path.is_dir())
-        except OSError:
-            return
-        for job in jobs:
-            try:
-                if job.stat().st_mtime >= _PROCESS_STARTED:
-                    continue
-            except OSError:
-                continue
-            # A name beginning with a dot is a staging that never
-            # committed, so there was never a job to abandon: the links
-            # go without a word.
-            if not job.name.startswith(BUILDING_PREFIX):
-                self._abandoned(job.name)
-            with contextlib.suppress(OSError):
-                shutil.rmtree(job)
-
-    def _abandoned(self, session: str) -> None:
-        """One leftover job, said before its links go.
-
-        A method rather than an inline thunk, for the reason the loop
-        above cannot: a lambda built inside a loop reads whatever the
-        variable holds when it is called, and a parameter is the honest
-        way to hand it one value.
-        """
-        events.emit(lambda: CaptureUploadAbandoned(session=SessionId(session)))
 
     def finished(self, session_id: str) -> None:
         """A capture closed. It stops being protected, whatever is going

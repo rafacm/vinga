@@ -170,7 +170,7 @@ from tests.support.wire import (
 from vinga_server import onboarding
 from vinga_server.app import create_app
 from vinga_server.build_info import CONTAINER_ENV
-from vinga_server.capture import CaptureStore, SessionCapture
+from vinga_server.capture import CaptureStore, SessionCapture, sweep_upload_staging
 from vinga_server.capture_upload import CaptureUpload
 from vinga_server.config import Config
 from vinga_server.config.api import build_api
@@ -1591,7 +1591,7 @@ def drive_capture_upload_abandoned(directory: Path) -> None:
     staged = store.directory / "upload-staging" / "s1"
     assert staged.is_dir()
     os.utime(staged, (0, 0))
-    store.startup()
+    sweep_upload_staging(store.directory)
 
 
 def api_raising(directory: Path, exc: Exception) -> FastAPI:
@@ -2085,7 +2085,7 @@ SERVER_DRIVERS: tuple[Driver, ...] = (
     ),
     Driver((CAPTURE, "CaptureStore.open", 4), drive_capture_started, "capture_started"),
     Driver(
-        (CAPTURE, "CaptureStore._abandoned", 1),
+        (CAPTURE, "_abandoned", 1),
         drive_capture_upload_abandoned,
         "capture_upload_failed",
     ),
