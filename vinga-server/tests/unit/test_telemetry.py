@@ -28,6 +28,7 @@ lane's business.
 
 import logging
 import sys
+import threading
 import time
 from collections.abc import Iterator
 
@@ -74,6 +75,7 @@ from vinga_server.telemetry import (
     SUPPORTED_PROTOCOL,
     TELEMETRY_KEY,
     UNSUPPORTED_PROTOCOL,
+    Telemetry,
     build_telemetry,
 )
 
@@ -660,6 +662,156 @@ def test_the_resource_is_server_owned_only(monkeypatch: pytest.MonkeyPatch) -> N
     resource = named(finished(telemetry, memory), "session").resource
     assert resource.attributes["service.name"] == SERVICE
     assert set(resource.attributes) == {"service.name", "service.version"}
+
+
+# --- the trace a closed session can still be named by ------------------
+#
+# The one read surface the exporter offers anything but the composition,
+# and the whole of #67's correlation: a reader that has a session id and
+# wants the trace its recording belongs beside. The media API takes the
+# OTel trace id and nothing else (no session-id path exists), so what is
+# retained is that id, spelled for the wire, and retained PAST the close
+# that pops the span, because the capture triplet is only final after
+# the session closed.
+
+
+def a_session(telemetry: Telemetry, session: str) -> str:
+    """One whole session, opened and closed, and the id it was given."""
+    clock = Clock()
+    events = session_events(clock, telemetry, session=session)
+    open_session(events)
+    clock.tick(1.0)
+    close_session(events)
+    return session
+
+
+def test_a_trace_is_readable_after_the_close_that_popped_its_span() -> None:
+    """The retention's point. The span map is popped at
+    `session_closed`, and the uploader asks its question afterwards: the
+    capture's WAV and manifest are only final after that close.
+
+    The id is the exporter's own spelling for the wire, which is what
+    the media API takes: thirty-two lowercase hex characters.
+    """
+    from opentelemetry.trace import format_trace_id
+
+    telemetry, memory = exporting()
+    a_session(telemetry, SESSION)
+
+    span = named(finished(telemetry, memory), "session")
+    trace = telemetry.trace_of(SESSION)
+
+    assert trace == format_trace_id(span.context.trace_id)
+    assert trace is not None
+    assert len(trace) == 32 and trace == trace.lower()
+    assert int(trace, 16) == span.context.trace_id
+
+
+def test_a_session_the_exporter_never_saw_has_no_trace() -> None:
+    """Absent rather than invented, which is what makes the uploader's
+    `no_trace` failure a real answer: telemetry that never saw a session
+    has nothing to name it by."""
+    telemetry, _ = exporting()
+    a_session(telemetry, SESSION)
+
+    assert telemetry.trace_of("ffffffffffffffffffffffffffffffff") is None
+
+
+def test_the_retention_keeps_the_last_sessions_and_evicts_the_oldest() -> None:
+    """Bounded and oldest-first, the `PENDING_CAPTURES` posture: a map
+    that grew with every session a process ever ran would be a slow leak
+    in the one object a server holds for its whole life.
+
+    The boundary is asserted on both sides of itself, so a bound that
+    kept one too few or one too many fails rather than passing on a
+    range.
+    """
+    from vinga_server.telemetry import RETAINED_TRACES
+
+    telemetry, _ = exporting()
+    ids = [f"{index:032x}" for index in range(RETAINED_TRACES + 1)]
+    for one in ids:
+        a_session(telemetry, one)
+
+    assert telemetry.trace_of(ids[0]) is None, "the oldest survived its eviction"
+    assert telemetry.trace_of(ids[1]) is not None
+    assert telemetry.trace_of(ids[-1]) is not None
+    assert len({telemetry.trace_of(one) for one in ids[1:]}) == RETAINED_TRACES
+
+
+def test_a_trace_is_readable_from_a_thread_that_is_not_the_session_loop() -> None:
+    """The reader is the uploader's worker thread and the writer is the
+    session loop, which is why the map has a lock of its own rather than
+    riding the loop's single-threadedness the way the span map does.
+
+    Driven as contention rather than as a sequence: sessions open while
+    a thread of its own reads, and every answer it got has to be either
+    nothing yet or exactly the id that session's span carries.
+    """
+    from opentelemetry.trace import format_trace_id
+
+    telemetry, memory = exporting()
+    driven = 40
+    ids = [f"{index:032x}" for index in range(driven)]
+    stop = threading.Event()
+    read: list[tuple[str, str | None]] = []
+    failed: list[BaseException] = []
+
+    def reading() -> None:
+        try:
+            while not stop.is_set():
+                for one in ids:
+                    read.append((one, telemetry.trace_of(one)))
+        except BaseException as raised:  # noqa: BLE001 - reported, not swallowed
+            failed.append(raised)
+
+    reader = threading.Thread(target=reading, name="a-reader", daemon=True)
+    reader.start()
+    try:
+        for one in ids:
+            a_session(telemetry, one)
+    finally:
+        stop.set()
+        reader.join(10.0)
+
+    assert not reader.is_alive()
+    assert failed == []
+    spans = {
+        span.attributes["vinga.session.id"]: format_trace_id(span.context.trace_id)
+        for span in finished(telemetry, memory)
+    }
+    assert len(spans) == driven
+    wrong = [(one, answer) for one, answer in read if answer not in (None, spans[one])]
+    assert wrong == []
+    assert any(answer is not None for _, answer in read), "the reader read nothing at all"
+
+
+def test_a_read_waits_for_the_write_it_overlaps() -> None:
+    """The synchronization itself, stated as the property a reader
+    depends on: while the session loop is recording, a reader on another
+    thread waits rather than reading a map mid-move.
+
+    The lock is reached for by name because that is the claim: a read
+    that took no lock would answer instantly here and the case would
+    fail, which is the only way to falsify a guard the GIL hides.
+    """
+    telemetry, _ = exporting()
+    a_session(telemetry, SESSION)
+    answered = threading.Event()
+    answer: list[str | None] = []
+
+    def reading() -> None:
+        answer.append(telemetry.trace_of(SESSION))
+        answered.set()
+
+    with telemetry._retained_lock:
+        reader = threading.Thread(target=reading, name="a-reader", daemon=True)
+        reader.start()
+        assert not answered.wait(0.2), "a read answered while the map was held"
+
+    assert answered.wait(10.0), "a read never answered once the map was free"
+    reader.join(10.0)
+    assert answer == [telemetry.trace_of(SESSION)]
 
 
 # --- no leak -----------------------------------------------------------

@@ -219,11 +219,18 @@ def named(spans: list[Any], name: str) -> Any:
 # --- the emissions a trace is built out of ----------------------------
 
 
-def session_events(clock: Clock, telemetry: Telemetry) -> SessionEvents:
+def session_events(
+    clock: Clock, telemetry: Telemetry, session: str = SESSION
+) -> SessionEvents:
     """One session's emitter with the exporter's tap on it, and nothing
     else attached: the log tap is always there, and a suite that wants
-    the records reads `caplog`."""
-    events = SessionEvents(SESSION, clock=clock)
+    the records reads `caplog`.
+
+    `session` is the one identity a caller may choose, because the
+    retention the exporter keeps per session is a claim about several
+    sessions at once and a fixed id could not state it.
+    """
+    events = SessionEvents(session, clock=clock)
     events.opened_at = clock()
     events.attach(telemetry.session_tap())
     return events

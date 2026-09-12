@@ -797,6 +797,14 @@ PLAYBACK_ATTRIBUTES = {
 # leak, so the hold is bounded and the oldest entry goes first.
 PENDING_CAPTURES = 64
 
+# How many sessions' trace ids are kept for a reader to ask about after
+# the fact, oldest evicted first. The same bound and the same posture as
+# the hold above, for the same reason: a map that grew with every
+# session a process ever ran would be a slow leak in the one object a
+# server holds for its whole life, and what a late reader wants is the
+# session that just closed rather than one from last week.
+RETAINED_TRACES = 64
+
 
 def build_telemetry(
     config: TelemetryConfig | None,
@@ -1292,8 +1300,9 @@ class Telemetry:
     """One server's exporter, as the thing its callers hold.
 
     Built by `build_telemetry` and released by the lifespan. What a
-    caller may do with it is ask for a tap and close it; everything else
-    it knows is what its callers stop having to.
+    caller may do with it is ask for a tap, ask which trace a session
+    was exported under, and close it; everything else it knows is what
+    its callers stop having to.
     """
 
     def __init__(
@@ -1307,10 +1316,22 @@ class Telemetry:
         # span the root of a trace of its own, and the link that puts
         # such a root beside the session it belongs to.
         from opentelemetry.context import Context
-        from opentelemetry.trace import Link, Status, StatusCode, set_span_in_context
+        from opentelemetry.trace import (
+            Link,
+            Status,
+            StatusCode,
+            format_trace_id,
+            set_span_in_context,
+        )
 
         self._root = Context
         self._link = Link
+        # How a trace id is written for anything outside this process,
+        # taken from the SDK rather than spelled here: the thirty-two
+        # lowercase hex characters an OTLP request carries are the same
+        # characters a backend's API takes back, and two spellings of
+        # one identifier is the drift `trace_of` exists to avoid.
+        self._spelled = format_trace_id
         # What makes a stage span a CHILD of the turn it happened in,
         # where the turn is itself the root of a trace of its own. A
         # stage span is not linked the way a turn is: an ASR call is
@@ -1367,6 +1388,19 @@ class Telemetry:
         # received it and not the session span that eventually claims
         # it.
         self._pending: dict[str, list[tuple[int, Emission]]] = {}
+        # The trace each session got, by session id, oldest first and
+        # bounded, and NOT popped when the span is: what wants it asks
+        # after the session closed, because the artifacts it is about
+        # are only final by then.
+        #
+        # The one piece of this object's state with a lock of its own.
+        # Everything else here is written and read on the session loop,
+        # which is why the span map needs none; this is written there
+        # and READ from another thread entirely, so the two operations
+        # a write is (record, then evict) are held together rather than
+        # left to the interpreter's own atomicity to imply.
+        self._retained: dict[str, str] = {}
+        self._retained_lock = threading.Lock()
         # Whether emissions are still accepted. Flipped by the lifespan
         # before it detaches anything, so a session still talking while
         # the server tears down cannot open a span nothing will close.
@@ -1407,6 +1441,31 @@ class Telemetry:
         session id it is about.
         """
         return _Tap(self._server_event)
+
+    def trace_of(self, session: str) -> str | None:
+        """The trace one session's spans were exported under, or None
+        where this exporter never saw that session.
+
+        The whole of the correlation surface, and deliberately one
+        method: what a reader outside this module may know about the
+        trace is the identifier a backend takes back, spelled the way
+        the wire spells it, and nothing about spans, contexts or the
+        SDK's own types.
+
+        Answerable AFTER the session closed, which is the point. The
+        span map is popped at `session_closed` and the artifacts a
+        reader wants to name the trace beside (the capture's WAV and its
+        manifest) are only final after that close, so an id that lived
+        as long as the span would never be readable at the moment it is
+        wanted. The retention is bounded (`RETAINED_TRACES`) and oldest
+        first, so the answer for a session long gone is None, which is a
+        reader's cue that the correlation cannot be established rather
+        than an invitation to invent one.
+
+        Safe to call from any thread.
+        """
+        with self._retained_lock:
+            return self._retained.get(session)
 
     def stop_accepting(self) -> None:
         """Take no more emissions.
@@ -1652,8 +1711,24 @@ class Telemetry:
             providers=held,
             agent=talking,
         )
+        self._retain(session, span)
         for at, waiting in self._pending.pop(session, []):
             self._span_event(session, waiting, at)
+
+    def _retain(self, session: str, span: Any) -> None:
+        """Remember which trace this session's spans went out under, for
+        whoever asks after it is over.
+
+        Written at the open rather than at the close, because that is
+        where the id exists and because a session that never closes
+        (a process that lost it) is one a reader may still ask about.
+        """
+        with self._retained_lock:
+            self._retained[session] = self._spelled(span.get_span_context().trace_id)
+            while len(self._retained) > RETAINED_TRACES:
+                # Oldest first, the hold's own rule: what a late reader
+                # wants is a session that has just ended.
+                self._retained.pop(next(iter(self._retained)))
 
     def _close_session(self, session: str, emission: Emission) -> None:
         trace = self._sessions.pop(session, None)
