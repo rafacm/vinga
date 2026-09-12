@@ -181,17 +181,34 @@ vocabulary for one reader's benefit, and stays rejected.
 deletes whole triplets oldest-first (`capture.py:472-514`), so the
 files the uploader wants can be unlinked mid-upload by a later
 session under budget pressure. The uploader therefore stages before
-it queues: inside `finished()`'s callback, on the close path, it
-hardlinks the three files into a staging directory beside the
-capture dir (`<capture.dir>/upload-staging/`), which is the same
-filesystem by construction and costs no copy and no measurable
-close-path time. Uploads read the staged links and unlink them when
-done; boot sweeps the staging directory of leftovers older than the
-process (the memory boot-sweep precedent), so a crash cannot
-accumulate them. The staged bytes count toward the same disk the
-budget watches, and the budget cannot see them; the honest answer is
-the sweep plus the bounded queue below, and the limitation is stated
-in the flag's reference prose rather than hidden.
+it queues: inside the `session_closed` hook, it hardlinks exactly
+two files, the WAV and the manifest, into a staging directory
+beside the capture dir (`<capture.dir>/upload-staging/`), the same
+filesystem by construction, no copy, no measurable close-path time.
+The JSONL decision track stays local: the issue authorizes the WAV
+and the manifest, the JSONL is a third content-bearing artifact it
+never names, and the wire test asserts exactly two attachments with
+their MIME types (a finalized WAV header, a manifest whose
+`complete` is true) and that no request ever carries the JSONL.
+
+Staging is transactional: the two links land under a temporary name
+and are committed together, a partial staging rolls back to zero
+links with the failure event, and a job the queue rejects
+(overflow) has its links removed at the rejection, in the same
+breath as the `dropped` event. Shutdown abandons whatever is
+queued: the worker's bounded join expires, and what remains staged
+is handled at the next boot, where the sweep emits one sanitized
+`capture_upload_failed` (reason `abandoned`) per leftover job
+before removing its links, so a restart cannot silently discard the
+only record that an upload never happened; nothing is persisted for
+retry, deliberately, because a retry store would be a durability
+promise this flag does not make and the failure event is the honest
+ledger. Tests assert the staging directory's exact contents after
+partial staging, overflow, a timed-out upload and a restart. The
+staged bytes count toward the same disk the budget watches and the
+budget cannot see them; that limitation is bounded by the queue
+depth and the sweep, and stated in the flag's reference prose
+rather than hidden.
 
 ### The uploader runs where telemetry's shutdown runs
 
@@ -283,7 +300,7 @@ The catalog-first discipline (#66 M1): `capture_uploaded`
 the far side that could carry a credential) and
 `capture_upload_failed` (session, plus a reason from a closed set:
 `unreachable`, `refused`, `too_large`, `no_trace`, `dropped`,
-`staging_lost`; never the exception's words, classes rendered per
+`staging_lost`, `abandoned`; never the exception's words, classes rendered per
 the no-leak lens). Both join `events/catalog.py`, the generated
 events reference, and the exporter's APPROVED table by derivation.
 They are the field-test trail: a capture that silently failed to
@@ -370,7 +387,7 @@ variant case, and the workflow's per-image import checks.
   the tier-closure and wheel suites gain the `langfuse` rows; an
   end-to-end case with capture on and a fake Langfuse media
   endpoint (an in-process HTTP stub, the `Receiver` precedent)
-  proving the staged triplet uploads after the real close ordering
+  proving the staged pair uploads after the real close ordering
   and the staging directory empties.
 - **Live, recorded not asserted**: the two walkthroughs (M1 traces,
   M3 attachment playable in the UI) land in the implementation doc
@@ -517,6 +534,13 @@ condensed but faithful; resolutions appended per amendment.
    before cleanup); assert directory contents after partial
    staging, overflow, timeout and restart.
 
+   *Resolution.* Adopted. Staging is transactional with rollback,
+   rejected jobs clean their links with the `dropped` event, the
+   boot sweep emits one `abandoned` failure per leftover before
+   cleaning (no retry store, deliberately, with the reason stated),
+   and the tests assert the directory's exact contents across all
+   four states.
+
 7. **P2: The plan expands egress from two attachments to the full
    triplet.** The settled scope is WAV plus manifest; the staging
    hardlinks all three and the test says "staged triplet uploads".
@@ -524,6 +548,12 @@ condensed but faithful; resolutions appended per amendment.
    two files; the wire test asserts exactly two attachments, MIME
    types, a finalized WAV header, a final manifest, and no JSONL
    request.
+
+   *Resolution.* Adopted. The staging and the upload carry exactly
+   the WAV and the manifest, the JSONL stays local with the reason
+   stated, and the wire test asserts two attachments, the MIME
+   types, the finalized header, the complete manifest and the
+   absence of any JSONL request.
 
 8. **P2: Missing credentials cannot reliably be deferred with
    construction in the builder.** If the pinned SDK validates
