@@ -106,6 +106,14 @@ MS = 1_000_000
 # backend reads by name arriving without anybody having chosen it.
 GROUPING = {SESSION_ID_ALIAS}
 
+# What a stage reports having been GIVEN, under the conventions'
+# namespace with vinga's own unit in the name. Subtracted by name in the
+# closed-set assertions below for the same reason the grouping alias is:
+# a usage key is a fact somebody chose to export, and the point of those
+# assertions is that nothing arrives under a foreign name by accident.
+ASR_USED = {"gen_ai.usage.input_seconds"}
+TTS_USED = {"gen_ai.usage.input_characters"}
+
 
 @pytest.fixture(autouse=True)
 def _no_lease_outlives_its_case() -> Iterator[None]:
@@ -286,6 +294,7 @@ def test_a_transcription_names_the_ear_that_ran_it() -> None:
         "gen_ai.provider.name",
         "gen_ai.request.model",
         *GROUPING,
+        *ASR_USED,
     }
 
 
@@ -787,7 +796,97 @@ def test_a_stream_names_the_voice_that_produced_it() -> None:
         "gen_ai.provider.name",
         "gen_ai.request.model",
         *GROUPING,
+        *TTS_USED,
     }
+
+
+# --- what each stage was given, in the unit it is billed in -----------
+
+
+def test_a_transcription_reports_the_audio_it_was_given_as_input_usage() -> None:
+    """`gen_ai.usage.input_seconds`, beside the two token counts a round
+    already reports and read the same way.
+
+    The direction is the model's, exactly as the conventions read the
+    token halves: an ear is GIVEN the audio and produces a transcript,
+    so the seconds are input. It is not cosmetic. A backend prices the
+    keys `input`, `output` and `total`, so a number under any other name
+    has no rate beside it and an ASR stage stays unpriceable however
+    carefully it is measured.
+
+    The unit is in the name because the conventions have no word for it:
+    calling seconds of audio tokens would be false in the way this
+    module refuses to be false elsewhere.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.3)
+    hear(events, duration_s=0.9, asr_ms=300)
+    finish_reply(events)
+    close_session(events)
+
+    asr = named(finished(telemetry, memory), ASR_SPAN).attributes
+    assert asr["gen_ai.usage.input_seconds"] == pytest.approx(0.9)
+    # One measurement, two readers: the stage's own vinga name and the
+    # conventions' usage name, which is the SESSION_ID_ALIAS shape
+    # rather than a second fact.
+    assert asr["vinga.asr.duration_s"] == pytest.approx(0.9)
+    assert "gen_ai.usage.output_seconds" not in asr
+
+
+def test_a_stream_reports_the_sentence_it_was_given_as_input_usage() -> None:
+    """`gen_ai.usage.input_characters` on the synthesis span, in the
+    same direction and for the same reason.
+
+    A voice is GIVEN the sentence and produces the audio, so the
+    characters are input, and the plan's first draft called them output
+    in the same sentence that said the voice was given them.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.9)
+    synthesize(events, index=0, characters=42, stream_ms=900, first_chunk_ms=120)
+    finish_reply(events)
+    close_session(events)
+
+    tts = named(finished(telemetry, memory), TTS_SPAN).attributes
+    assert tts["gen_ai.usage.input_characters"] == 42
+    assert "gen_ai.usage.output_characters" not in tts
+    # A size and never a byte of the sentence, which is what the count
+    # is for: nothing on this span holds prose.
+    assert not any(isinstance(held, str) and " " in held for held in tts.values())
+
+
+def test_a_stage_that_measured_nothing_reports_no_usage_rather_than_zero() -> None:
+    """A failed transcription carries no `duration_s` in its payload at
+    all, that field being rendered into the sentence and never carried,
+    so the span says nothing about how much audio was given rather than
+    saying none was.
+
+    Zero is a claim the event did not make, and on a priced stage it is
+    also a claim about money: a cost of zero seconds read as a fact is
+    an ASR call that looks free, where an absent measurement looks like
+    what it is.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(1.5)
+    provider_failed(events, stage="asr", duration_ms=1500)
+    finish_reply(events, outcome=ReplyOutcome.FAILED, sentences=0)
+    close_session(events)
+
+    asr = named(finished(telemetry, memory), ASR_SPAN).attributes
+    assert "gen_ai.usage.input_seconds" not in asr
+    assert "vinga.asr.duration_s" not in asr
+    # The span itself is real, so this is an absence beside the thing
+    # the case is about rather than a case that asserted nothing.
+    assert asr["vinga.asr.outcome"] == "provider_failed"
 
 
 # --- playback, the one interval with two ends -------------------------
@@ -1285,10 +1384,12 @@ def test_an_asr_outcome_that_names_no_ear_keeps_the_session_s_own() -> None:
         assert carried["vinga.provider.asr.type"] == "faster_whisper"
         assert carried["vinga.provider.asr.model"] == "small"
         # And nothing claiming to be the call's own identity, which is
-        # the claim the outcome declined to make.
-        assert {
-            key for key in carried if not key.startswith("vinga.")
-        } == GROUPING
+        # the claim the outcome declined to make. What a stage was GIVEN
+        # is not such a claim: an outcome that measured the audio says
+        # how much there was whether or not it can name the ear.
+        assert {key for key in carried if not key.startswith("vinga.")} == (
+            GROUPING | ASR_USED
+        )
 
 
 # --- the gate's rejection, driven through the real runtime ------------
