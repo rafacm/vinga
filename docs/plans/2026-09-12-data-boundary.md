@@ -243,15 +243,26 @@ in tests), and the one behavior addition (the `network` tier and
 its rank rule) sits in the renamed module where the review can see
 it whole. The documentation footprint lands in the same milestone:
 the server README's Security block and per-type mentions, the
-promise page's citation line, the observability map's four
-refused-under rows, `docs/concepts.md` and `docs/system-overview.md`,
-the diagram source and its committed SVG (re-rendered through
-plantuml; if no local renderer exists the SVG change is stated as
-unverifiable-locally on the PR rather than hand-edited), both
-example configs and the seven per-type example YAMLs plus
-`examples/README.md`, and the four generated references through
-their generators. Historical records (the 2026-08-05 feature doc,
-the plans corpus, `CHANGELOG.md`) keep their spellings. The
+promise page (per finding 9 below), the observability map's
+four refused-under rows, `docs/concepts.md` and
+`docs/system-overview.md`, the diagram source, BOTH diagram
+READMEs and the committed SVG (re-rendered through plantuml; if no
+local renderer exists the SVG change is stated as
+unverifiable-locally on the PR rather than hand-edited), the root
+README including its `egress: false` import example (~:188-201),
+both example configs and the EIGHT affected example YAMLs (the
+seven per-type files plus `examples/presets/local-stack.yaml`)
+with `examples/README.md`, the four generated references through
+their generators, and the source-prose and helper tail the review
+enumerated: `config/api_descriptions/reload-refused.md`,
+`config/boot.py`, `config/api.py`, `tools/mcp/registry.py`,
+`capture.py`, `tests/integration/test_cli_wheel.py` and the shared
+provider/MCP test helpers. The final grep is run against an
+EXPLICIT allowlist recorded in the implementation doc: `egress`
+and `local_only` may remain only in `docs/plans/`,
+`docs/features/`, `CHANGELOG.md` and the word "regression"; any
+other hit is a missed site, and the allowlisted remainder is
+listed by file. Historical records keep their spellings. The
 `cli-respelling.txt` fixture regenerates through its own harness.
 
 ## Module layout
@@ -490,6 +501,15 @@ per amendment.
    explicitly: historical plans, feature records and changelog may
    keep the words; live docs, examples, source prose, shared
    fixtures and wheel tests may not.
+
+   *Resolution.* Adopted. The milestone inventory now carries
+   every named file (root README example, the preset as the
+   eighth YAML, both diagram READMEs, the five source-prose
+   files, the wheel test and shared helpers), and the final grep
+   allowlist is explicit: old spellings may survive only in
+   `docs/plans/`, `docs/features/`, `CHANGELOG.md` and the word
+   "regression", with the remainder listed by file in the
+   implementation doc.
 
 9. **P2: Updating only the promise's citation leaves its
    mechanism false.** The promise page also says every provider
