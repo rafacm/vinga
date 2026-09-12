@@ -28,7 +28,7 @@ from typing import Any
 import pytest
 
 from tests.support.stores import CONVERSATIONS_MANIFEST as MANIFEST
-from tests.support.stores import rows
+from tests.support.stores import nowhere, rows
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import threads
 from vinga_server.conversations.records import (
@@ -643,3 +643,170 @@ def read_backlog(conversation: str) -> threads.Backlog | None:
             return threads.backlog(connection, conversation)
     finally:
         engine.dispose()
+
+
+# The transcript projection, which is the export's whole read surface
+
+
+def read_transcript(
+    session: str, after: int | None = None, limit: int = 256
+) -> list[dict[str, Any]]:
+    engine = open_conversations(DatabaseConfig())
+    try:
+        with engine.connect() as connection:
+            return threads.transcript_rows(connection, session, after, limit)
+    finally:
+        engine.dispose()
+
+
+def a_spoken_turn(
+    conversation: str, heard: str, reply: str = "Done.", **overrides: Any
+) -> TurnRecord:
+    fields: dict[str, Any] = {
+        "at": 101.0,
+        "conversation": conversation,
+        "agent": "sam",
+        "heard": heard,
+        "reply": reply,
+    }
+    fields.update(overrides)
+    return TurnRecord(**fields)
+
+
+def test_the_transcript_projection_is_exactly_the_authorized_columns(stores) -> None:
+    """The whole of what an export may read, named rather than inherited
+    from the table: a projection that selected the row would carry every
+    column `turns` grows next, which is how a surface acquires content
+    nobody authorized it to send."""
+    store = stores()
+    store.start()
+    store.open_session("alpha", 100.0, MANIFEST)
+    store.record_turn("alpha", a_spoken_turn(thread("projection"), "lights on"))
+    store.stop()
+
+    (row,) = read_transcript("alpha")
+
+    assert sorted(row) == ["agent", "heard", "id", "legs", "reply", "t_ms"]
+    assert row["heard"] == "lights on"
+    assert row["reply"] == "Done."
+    assert row["agent"] == "sam"
+
+
+def test_the_transcript_projection_reads_only_the_named_session(stores) -> None:
+    """Which is what makes a resumed conversation export its own turns
+    and no others: the thread spans both sessions and each session's
+    read answers its own rows."""
+    resumed = thread("resumed")
+    store = stores()
+    store.start()
+    store.open_session("first", 100.0, MANIFEST)
+    store.record_turn("first", a_spoken_turn(resumed, "the first session"))
+    store.close_session("first", duration_s=1.0, reason="idle")
+    store.open_session("second", 200.0, MANIFEST)
+    store.record_turn("second", a_spoken_turn(resumed, "the second session"))
+    store.stop()
+
+    assert [row["heard"] for row in read_transcript("first")] == ["the first session"]
+    assert [row["heard"] for row in read_transcript("second")] == [
+        "the second session"
+    ]
+
+
+def test_the_transcript_projection_pages_without_repeating_or_skipping(stores) -> None:
+    """Keyset paging on the identity column, which is what bounds an
+    arbitrarily long session's read: each page continues from the last
+    id of the one before it, and the pages joined are the session."""
+    spine = thread("paged")
+    store = stores()
+    store.start()
+    store.open_session("alpha", 100.0, MANIFEST)
+    for index in range(7):
+        store.record_turn("alpha", a_spoken_turn(spine, f"utterance {index}"))
+    store.stop()
+
+    pages: list[list[dict[str, Any]]] = []
+    cursor: int | None = None
+    while True:
+        page = read_transcript("alpha", after=cursor, limit=3)
+        if not page:
+            break
+        pages.append(page)
+        cursor = page[-1]["id"]
+
+    assert [len(page) for page in pages] == [3, 3, 1]
+    heard = [row["heard"] for page in pages for row in page]
+    assert heard == [f"utterance {index}" for index in range(7)]
+
+
+def test_the_transcript_projection_is_ordered_by_id(stores) -> None:
+    """Ascending, which is the order the export's ordinal is derived
+    from and the order a reader meets a conversation in."""
+    spine = thread("ordered")
+    store = stores()
+    store.start()
+    store.open_session("alpha", 100.0, MANIFEST)
+    for index in range(5):
+        store.record_turn("alpha", a_spoken_turn(spine, f"utterance {index}"))
+    store.stop()
+
+    found = read_transcript("alpha")
+
+    assert [row["id"] for row in found] == sorted(row["id"] for row in found)
+
+
+def test_the_transcript_projection_selects_no_tool_invocation(stores) -> None:
+    """Proved rather than trusted, on a row family that has them: a
+    turn's tool arguments and results are content the export is not
+    authorized to carry, and the projection is where that is decided."""
+    spine = thread("tools")
+    store = stores()
+    store.start()
+    store.open_session("alpha", 100.0, MANIFEST)
+    store.record_turn(
+        "alpha",
+        a_spoken_turn(
+            spine,
+            "remember the code",
+            tools=(
+                ToolInvocation(
+                    position=0,
+                    source="builtin",
+                    name="remember",
+                    arguments={"fact": "sentinel-in-the-arguments"},
+                    result="sentinel-in-the-result",
+                ),
+            ),
+        ),
+    )
+    store.stop()
+
+    (row,) = read_transcript("alpha")
+
+    assert "tools" not in row
+    assert "sentinel-in-the-arguments" not in repr(row)
+    assert "sentinel-in-the-result" not in repr(row)
+    assert rows("tool_invocations"), "the row family never had an invocation"
+
+
+def test_the_read_seam_answers_the_transcript_projection(stores) -> None:
+    """`Reads` is the door the export comes in through, because its
+    caller holds no transaction and may not be given one."""
+    spine = thread("seam")
+    store = stores()
+    store.start()
+    store.open_session("alpha", 100.0, MANIFEST)
+    store.record_turn("alpha", a_spoken_turn(spine, "through the seam"))
+    store.stop()
+
+    found = threads.Reads(DatabaseConfig()).transcript_rows("alpha")
+
+    assert not isinstance(found, threads.Unreadable)
+    assert [row["heard"] for row in found] == ["through the seam"]
+
+
+def test_the_read_seam_answers_unreadable_rather_than_raising() -> None:
+    """A database this cannot reach is a fact with no words in it, which
+    is the closed set's `unreadable` and never a driver's DSN."""
+    found = threads.Reads(nowhere()).transcript_rows("alpha")
+
+    assert isinstance(found, threads.Unreadable)
