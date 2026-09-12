@@ -123,6 +123,7 @@ from vinga_server.events.values import (
     Suppression,
     ToolOutcome,
     ToolSource,
+    TranscriptExportFailure,
     UnnamedToolSource,
     Whole,
 )
@@ -157,6 +158,7 @@ ASR_CHANNEL = "vinga_server.providers.openai_asr"
 PROVIDERS_CHANNEL = "vinga_server.providers.world"
 REGISTRY_CHANNEL = "vinga_server.registry"
 MCP_CHANNEL = "vinga_server.tools.mcp"
+TRANSCRIPT_EXPORT_CHANNEL = "vinga_server.transcript_export"
 WS_CHANNEL = "vinga_server.ws"
 
 SERVER_CHANNELS: tuple[str, ...] = (
@@ -174,6 +176,7 @@ SERVER_CHANNELS: tuple[str, ...] = (
     PROVIDERS_CHANNEL,
     REGISTRY_CHANNEL,
     MCP_CHANNEL,
+    TRANSCRIPT_EXPORT_CHANNEL,
     WS_CHANNEL,
 )
 
@@ -3667,6 +3670,86 @@ class CaptureUploadAbandoned(Variant):
     reason: CaptureUploadFailure = value(fixed=CaptureUploadFailure.ABANDONED)
 
 
+# --- transcript_export.py: what was said, onto the trace ---------------
+#
+# The vocabulary of the third rung of the disclosure ladder (#495): a
+# closed session's turns read back out of the conversation store and
+# written onto its trace as one observation each, behind a flag of its
+# own. Two events, and between them the whole ledger, for the reason the
+# pair above has one: a transcript that silently failed to export would
+# leave a reader looking at a trace with the stage timings, none of the
+# words, and no way to learn that any were meant to be there.
+#
+# A sibling pair rather than a widening of the capture pair, and that is
+# a finding rather than a preference. Those two are generically shaped
+# and worded for a recording throughout, in their class names, both
+# templates, `audio_bytes` and `manifest_bytes` and the members of their
+# closed set; widening them would trade two honest sentences for one
+# vague one. What generalizes is the machinery, which already does: both
+# pairs reach the trace through the same after-the-close fold.
+#
+# What neither of these may carry is as much of the declaration as what
+# they do. No URL and no far-side identifier, for the reasons the
+# capture pair's note gives. No delivered-count on the failure: a
+# partially delivered export is visible where the reader already is, as
+# the highest exported turn index beside the failure event, and a count
+# in the sentence would be this server claiming to know what the far
+# side kept. And no exception message ever: the reason is chosen where
+# the failure is decided, from the closed set.
+
+
+@dataclass(frozen=True)
+class TranscriptsExported(Variant):
+    """A closed session's turns are on its trace."""
+
+    CHANNEL: ClassVar[str] = TRANSCRIPT_EXPORT_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "session %s: %d turn transcripts exported to its trace in %d ms"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "turns", "elapsed_ms")
+
+    session: SessionId = value()
+    turns: Count = value(
+        note=(
+            "How many turns went, which is what a reader compares "
+            "against what the session's own record holds. Turns rather "
+            "than spans because they are the same number: one turn is "
+            "one observation."
+        )
+    )
+    elapsed_ms: Whole = value(
+        note=(
+            "How long the whole export took, measured off the audio "
+            "path: this happens on a worker of its own after the "
+            "session closed, so it is a fact about the store, the "
+            "backend and the link to it rather than about any reply's "
+            "latency."
+        )
+    )
+
+
+@dataclass(frozen=True)
+class TranscriptExportFailed(Variant):
+    """A closed session's turns did not reach its trace."""
+
+    CHANNEL: ClassVar[str] = TRANSCRIPT_EXPORT_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = "session %s: transcripts not exported to its trace (%s)"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "reason")
+
+    session: SessionId = value()
+    reason: TranscriptExportFailure = value(
+        note=(
+            "Which of the five ways this ends badly it was. Never the "
+            "far side's words and never a count of what did get "
+            "through: what an operator acts on is the class of the "
+            "failure, and what a reader needs about a truncated export "
+            "is already on the trace beside this."
+        )
+    )
+
+
 # --- app.py: what the composition root says about capture -------------
 
 
@@ -4101,6 +4184,34 @@ CAPTURE_UPLOAD_FAILED = declare(
     variants=(CaptureUploadFailed, CaptureUploadAbandoned),
 )
 
+TRANSCRIPTS_EXPORTED = declare(
+    "transcripts_exported",
+    note=(
+        "A closed session's turns are on its trace in the telemetry "
+        "backend, one observation each, carrying what was heard and what "
+        "was replied. How many and how long it took, and deliberately "
+        "nothing the far side minted: what a reader needs is that it "
+        "happened and how much went, and the trace it is on is the one "
+        "already named by the session."
+    ),
+    variants=(TranscriptsExported,),
+)
+
+TRANSCRIPT_EXPORT_FAILED = declare(
+    "transcript_export_failed",
+    note=(
+        "A closed session's turns are not on its trace, and why, from a "
+        "closed set of five reasons. The other half of the ledger: an "
+        "export that silently failed would leave a reader with a trace, "
+        "the stage timings, none of the words, and no way to learn that "
+        "any were meant to be there. It carries no count of what did get "
+        "through, because an export truncated part way is visible where "
+        "the reader already is, as the highest exported turn index beside "
+        "this event on the same trace."
+    ),
+    variants=(TranscriptExportFailed,),
+)
+
 CAPTURE_ENABLED = declare(
     "capture_enabled",
     note=(
@@ -4334,7 +4445,10 @@ __all__ = [
     "SpeakingStarted",
     "TOOL_ARGUMENTS_COERCED",
     "TOOL_CALL",
+    "TRANSCRIPT_EXPORT_CHANNEL",
     "ToolArgumentsCoerced",
+    "TranscriptExportFailed",
+    "TranscriptsExported",
     "UnnamedSentenceWithheld",
     "UnnamedToolCall",
     "Variant",
