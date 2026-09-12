@@ -343,13 +343,19 @@ proves rather than assumes.
 ### The span shape, and the two vocabulary rules it extends
 
 One span per turn, named `transcript`, written by a new
-`Telemetry.export_transcript(session, turns) -> bool` beside
-`reference_media` and shaped by it: children of the retained session
-span via `_continuing`, written after the session's own spans have
-ended and exported, `False` when the exporter never saw the session,
-the retention evicted it, or `stop_accepting` has run, and a `False`
-reported as `transcript_export_failed` with reason `no_trace`, never
-a silent success. Each span carries the session id under both
+`Telemetry.export_transcript(session, context, turns)` beside
+`reference_media` and shaped by it: children of the session span
+named by the PASSED context via `_continuing`, written after the
+session's own spans have ended and exported. The context boundary
+is explicit: admission (`session_closed`) obtains the opaque
+retained context through a narrow `Telemetry.retained_context(
+session)` read, a `None` there is `transcript_export_failed` with
+reason `no_trace` decided at admission and never at export, and an
+admitted job exports against its captured context however the
+retention has moved since. `export_transcript`'s own failure
+contract covers only what it owns: stopped acceptance and span
+construction answer as a job-level `dropped` (shutdown territory),
+and delivery answers `delivered` or `undelivered` per page. Each span carries the session id under both
 spellings (grouping), `vinga.turn.index` (the issue's "turn index":
 a session-local ordinal, 1-based, derived from the projection's
 `id`-ascending ordering, so any session's first exported turn is
@@ -502,7 +508,8 @@ promise-side half this completes, and the amendment cites it.
   stack, and knows nothing of writer acknowledgements, read seams,
   retained trace contexts or span vocabulary. Deletion test: argued
   under "a sibling module" above.
-- `telemetry.py`: `export_transcript(session, turns)` beside
+- `telemetry.py`: `retained_context(session)` and
+  `export_transcript(session, context, turns)` beside
   `reference_media`, sharing `_continuing`; the two new names join
   `AFTER_THE_CLOSE`; the vocabulary-exception note widens by one
   sentence.
@@ -562,10 +569,13 @@ promise-side half this completes, and the amendment cites it.
   request, both log formats, event payloads and exception chains,
   which is what proves the projection rather than trusting it;
   session id positional, bounded by `SessionId`.
-- **Unit, telemetry (M2)**: `export_transcript` `True`/`False`
-  contract (never-seen, evicted, stopped); the two new events
-  folding through `AFTER_THE_CLOSE` from the retention, pinned the
-  way the capture pair's fold is.
+- **Unit, telemetry (M2)**: `retained_context` answers the context
+  after the close and `None` for a never-seen or evicted session;
+  a job admitted with a captured context exports correctly after
+  the retention has evicted that session (eviction pressure
+  between admission and export); `export_transcript` under stopped
+  acceptance; the two new events folding through `AFTER_THE_CLOSE`
+  from the retention, pinned the way the capture pair's fold is.
 - **Unit, store (M2)**: the close acknowledgement settles `True`
   after commit and `False` on drop and on a stopped store; ordering
   (an acknowledged close implies the session's earlier turns
@@ -858,6 +868,15 @@ condensed but faithful; resolutions appended per amendment.
    `no_trace` is decided there; admitted jobs pass the opaque
    context to `export_transcript(session, context, turns)`, whose
    failure contract covers only stopped acceptance and delivery.
+
+   *Resolution.* Adopted. The boundary is now explicit everywhere
+   the body spoke: admission reads `Telemetry.retained_context(
+   session)`, `None` there is `no_trace` decided at admission, the
+   job carries the opaque context, `export_transcript(session,
+   context, turns)` parents on the passed context and fails only
+   on stopped acceptance (job-level `dropped`) or delivery
+   (`undelivered`), and the telemetry tests now drive
+   post-eviction export success and admission-time `None`.
 
 3. **P2: The retention amendment incorrectly promises the capture
    uploader the new guarantee.** `max_sessions + 64` protects live
