@@ -73,22 +73,25 @@ git grep -nIw -E 'egress|local_only' -- . ':!docs/plans' ':!docs/features' ':!CH
 ```
 
 Word-boundary matching (`-w`), so "regression" cannot match and the
-rule is mechanical. Forty-two lines remain, in six files, and every
-one of them is a place where the withdrawn word is what the line is
-about:
+rule is mechanical. Fifty-one lines remain, in seven files, counted at
+this milestone's last commit, and every one of them is a place where
+the withdrawn word is what the line is about:
 
 | File | Lines | Why it stays |
 | --- | --- | --- |
+| `changelog.d/493-data-boundary.md` | 3, 4 | The release note, and the plan's allowlist already exempts `CHANGELOG.md`, which this file becomes byte for byte when the fold runs on `main`. Naming the old spelling is the whole job of the entry: an operator reads it to learn what to change their file to. |
 | `vinga-server/README.md` | 2103, 2105, 2107, 2109 | The upgrade note the plan asks for: a file is the operator's to edit, so the old spelling has to be named to say what it becomes. |
 | `vinga-server/src/vinga_server/boundary.py` | 11, 20, 24, 242 | The module docstring's history paragraph, which the plan asks to keep with the rename recorded, and the note on the deleted MCP guard. |
 | `vinga-server/src/vinga_server/config/models.py` | 2255, 2261, 2263 | `REPLACED_PROVIDER_KEY`, its refusal sentence, and the comment saying why the rejection lives at the `ProviderConfig` boundary. The constant IS the string `"egress"`. |
-| `vinga-server/src/vinga_server/db/migrations/versions/3004_reach_replaces_egress.py` | 1, 7, 19, 21, 22, 26, 36, 62 | The migration's docstring and its `OLD` constant. It translates the key, so it names it. |
-| `vinga-server/tests/integration/test_reach_upgrade.py` | 6, 49, 65, 66, 67, 72, 73, 74, 185, 191, 209, 275, 278 | The pre-upgrade row bodies and the assertions that no row keeps the key. |
-| `vinga-server/tests/unit/test_providers_boundary.py` | 134, 444, 451, 458, 465, 473, 476, 481, 495, 497 | The three old-spelling refusal cases and one comment. |
+| `vinga-server/src/vinga_server/db/migrations/versions/3004_reach_replaces_egress.py` | 1, 7, 19, 21, 22, 26, 35, 58, 84 | The migration's docstring, its `OLD` constant, and the arm that tells JSON null from every other value. It translates the key, so it names it. |
+| `vinga-server/tests/integration/test_reach_upgrade.py` | 6, 49, 65, 66, 67, 72, 73, 74, 80, 185, 198, 249, 255, 273, 339, 342, 369 | The pre-upgrade row bodies, including the malformed shapes, and the assertions that no row keeps the key. |
+| `vinga-server/tests/unit/test_providers_boundary.py` | 133, 443, 450, 457, 461, 484, 500, 504, 525, 531, 558, 566 | The old-spelling refusal cases, at the write path and at the model, and one comment. |
 
 Nothing else in the tree carries either token. `docs/reference/` is
 generated and came out clean by construction; the committed SVG was
-re-rendered and carries neither word.
+re-rendered and carries neither word. This document and the plan beside
+it are excluded by the command, which is the plan's own rule and the
+reason the numbers above do not move when this section is edited.
 
 ### Discoveries
 
