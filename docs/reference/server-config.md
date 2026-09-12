@@ -311,11 +311,14 @@ other one in this file. `enabled` above sends metadata; `attach_captures`
 sends a recording of a room. It is its own decision for that reason and
 defaults off.
 
-The rule that refuses it with `enabled` off is deliberately NOT here, and the
-reason is the attachment's decision order: capture resolves first, and the
-flag on with capture off is a no-op rather than a misconfiguration. A rule on
-this model could not see `server.capture`, so it refused an operator
-mid-toggle at load. It lives on `ServerConfig`, which can see all three keys.
+The rule that refuses it with `enabled` off is deliberately NOT a validator,
+here or on `ServerConfig`, and the reason is the attachment's boot ordering.
+It has to see `server.capture`, because the flag on with capture off is a
+no-op rather than a misconfiguration; and it has to fire AFTER the staging
+sweep, because staged room audio waiting to leave is exactly what a refusing
+configuration leaves behind and a validator raises while the file is still
+being parsed. So it is `build_capture_upload`'s, beside the two refusals that
+were always the builder's.
 
 | Key | Type | Default | Constraints | Description |
 | --- | --- | --- | --- | --- |
@@ -335,9 +338,6 @@ is listed here in the words the model's own validator raises.
 - conversations.resumption is on with conversations.text off; a thread cannot
   be rebuilt from text that was never stored, so switch conversations.text on
   or conversations.resumption off
-- telemetry.attach_captures is on with telemetry.enabled off; an attachment is
-  named by the trace its session was exported under, and there is no trace to
-  name, so switch telemetry.enabled on or telemetry.attach_captures off
 - server.ota_path is null and server.onboarding.enabled is false, so no device
   could fetch its configuration from this server at all. Keep one of the two:
   an ota_path for the boards already provisioned with it, or onboarding

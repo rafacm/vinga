@@ -809,12 +809,15 @@ class TelemetryConfig(BaseModel):
     `attach_captures` sends a recording of a room. It is its own
     decision for that reason and defaults off.
 
-    The rule that refuses it with `enabled` off is deliberately NOT
-    here, and the reason is the attachment's decision order: capture
-    resolves first, and the flag on with capture off is a no-op rather
-    than a misconfiguration. A rule on this model could not see
-    `server.capture`, so it refused an operator mid-toggle at load.
-    It lives on `ServerConfig`, which can see all three keys.
+    The rule that refuses it with `enabled` off is deliberately NOT a
+    validator, here or on `ServerConfig`, and the reason is the
+    attachment's boot ordering. It has to see `server.capture`, because
+    the flag on with capture off is a no-op rather than a
+    misconfiguration; and it has to fire AFTER the staging sweep, because
+    staged room audio waiting to leave is exactly what a refusing
+    configuration leaves behind and a validator raises while the file is
+    still being parsed. So it is `build_capture_upload`'s, beside the
+    two refusals that were always the builder's.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -881,17 +884,6 @@ RESUMPTION_NEEDS_TEXT = (
     "conversations.resumption is on with conversations.text off; a thread cannot be "
     "rebuilt from text that was never stored, so switch conversations.text on or "
     "conversations.resumption off"
-)
-
-# And what an attachment with nothing to attach to is refused with,
-# beside them and in the same shape (#67). An attachment names the trace
-# a session was exported under; with no exporter there is no trace, and
-# an upload nobody can find from a trace would recreate exactly the gap
-# attaching exists to close.
-ATTACHMENT_NEEDS_TELEMETRY = (
-    "telemetry.attach_captures is on with telemetry.enabled off; an attachment is "
-    "named by the trace its session was exported under, and there is no trace to "
-    "name, so switch telemetry.enabled on or telemetry.attach_captures off"
 )
 
 # And what a server no device could reach its configuration on is
@@ -1404,44 +1396,6 @@ class ServerConfig(BaseModel):
             raise ValueError(NOTHING_DISCOVERABLE)
         return self
 
-    @model_validator(mode="after")
-    def _check_attachment(self) -> "ServerConfig":
-        """Refuse an attachment that could only pretend, and only once
-        there is something to attach.
-
-        Three keys across two sections, which is why the rule is here and
-        not on `TelemetryConfig` where two of them live. The attachment's
-        decision order is a contract this repository states twice, in the
-        plan and in `build_capture_upload`: capture resolves FIRST, and
-        the flag on with capture off is a no-op rather than a
-        misconfiguration, because an operator mid-toggle has not
-        misconfigured anything. A rule that read only the telemetry
-        section refused that operator's file at load, before any builder
-        could apply the no-op at all, so the short-circuit has to be part
-        of the rule.
-
-        With capture effectively on, an attachment still needs an
-        exporter: what it is named by is the trace its session was
-        exported under, and with no exporter there is no trace. The
-        pointer names the switch to turn ON, which is the
-        `ConversationsConfig` precedent's rule.
-        """
-        telemetry = self.telemetry
-        if telemetry is None or not telemetry.attach_captures:
-            return self
-        if self.capture is None or not self.capture.enabled:
-            return self
-        if not telemetry.enabled:
-            raise FieldProblemsError(
-                [
-                    FieldProblem(
-                        json_pointer(("telemetry", "enabled")),
-                        ATTACHMENT_NEEDS_TELEMETRY,
-                    )
-                ]
-            )
-        return self
-
 
 class BootRefusal(NamedTuple):
     """One combination of server-half keys that is refused at boot,
@@ -1473,9 +1427,21 @@ class BootRefusal(NamedTuple):
 
 
 # Every cross-field refusal the server half has, in the order the
-# reference publishes them: the two resumption combinations, the
-# attachment with no trace to attach to, then the server that no device
-# could reach.
+# reference publishes them: the two resumption combinations, then the
+# server that no device could reach.
+#
+# The attachment's own cross-field rule is deliberately NOT here, and
+# the reason is a boot ordering rather than a taxonomy (#67 M3, the delta
+# round). Every row here is enforced by a model validator, which is what
+# lets the page publish a sentence the server provably raises; and a
+# model validator raises while the file is being PARSED, before the
+# composition exists. The attachment's staging sweep has to run in front
+# of every refusal, because staged room audio waiting to leave is exactly
+# what a refusing configuration leaves behind, so a parse-time refusal
+# for it would be the one shape that skipped the sweep. It is
+# `build_capture_upload`'s, beside the two refusals that were always
+# the builder's, and what the reference publishes about it is the
+# `attach_captures` field's own prose.
 #
 # Below the models rather than beside the sentences above, because a row
 # names the model it is a rule of and a model has to exist before it can
@@ -1493,15 +1459,6 @@ BOOT_REFUSALS: tuple[BootRefusal, ...] = (
         validator="_check_resumption",
         sentence=RESUMPTION_NEEDS_TEXT,
         provoked_by={"enabled": True, "text": False, "resumption": True},
-    ),
-    BootRefusal(
-        model=ServerConfig,
-        validator="_check_attachment",
-        sentence=ATTACHMENT_NEEDS_TELEMETRY,
-        provoked_by={
-            "capture": {"enabled": True, "dir": "/data/captures"},
-            "telemetry": {"enabled": False, "attach_captures": True},
-        },
     ),
     BootRefusal(
         model=ServerConfig,
