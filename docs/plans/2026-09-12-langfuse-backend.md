@@ -509,7 +509,7 @@ variant case, and the workflow's per-image import checks.
   declarations as designed are recorded in the implementation doc.
   Design footprint: one narrow read surface on `Telemetry`.
   Documentation footprint: the implementation doc; fragment.
-- [ ] **M3: the uploader and the vocabulary.** `capture_upload.py` with the staging,
+- [x] **[M3: the uploader and the vocabulary](2026-09-12-langfuse-backend-implementation.md#m3-the-uploader-and-the-vocabulary)** (PR TBD). `capture_upload.py` with the staging,
   queue, worker and SDK flow; the two catalog events with their closed
   reason set, the generated events reference and the README index rows,
   the exporter's APPROVED derivation picking them up by construction;
