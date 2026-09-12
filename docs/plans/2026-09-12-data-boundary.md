@@ -287,3 +287,97 @@ the plans corpus, `CHANGELOG.md`) keep their spellings. The
   with the rank rule; no new seams; callers keep translating, not
   deciding. Documentation footprint as enumerated, each page
   through its owner.
+
+## Plan review round
+
+External review: codex CLI 0.154.0, model gpt-5.6-sol, read-only
+sandbox, 2026-09-12, runtime 7m40s, reviewing commit 1f101783.
+Verdict as received: **not ready** (the explicit-internet semantics
+and the import cycle block implementation; the P2 amendments also
+required). Findings condensed but faithful; resolutions appended
+per amendment.
+
+1. **P1: Explicit `internet` loses the declared-versus-absent
+   distinction.** Making absence identical to explicit `internet`
+   permits undeclared endpoint-dependent providers under both,
+   while the issue requires a provider that will not state its
+   reach to fail closed whenever a boundary is declared. Model the
+   field as `Reach | None = None`: `None` is no boundary (today's
+   behavior); explicit `internet` is a declared boundary under
+   which every stated reach fits but an undeclared entry still
+   refuses; test the distinction.
+
+2. **P1: The proposed enum location creates a runtime import
+   cycle.** `Reach` in `boundary.py` used by `config/models.py`
+   while the rule module imports the model types at runtime is
+   `config.models -> boundary -> config.models`. Keep `Reach` in
+   `boundary.py` and drop the runtime model imports via postponed
+   annotations plus `TYPE_CHECKING` (no pass-through enum module);
+   preserve the lightweight-import tests.
+
+3. **P2: The old provider key cannot join the existing
+   request-field reservation.** The reserved set is OpenAI chat
+   request fields enforced only by `OpenaiCompatibleOptions`;
+   other types never pass that validator, and listing `egress`
+   there would document it falsely. Reject the legacy key at the
+   common `ProviderConfig` boundary before `model_extra` becomes
+   options, fixed value-free remedy naming `reach`, tested on an
+   open-ended entry and an optionless type.
+
+4. **P2: Existing stored domain configuration has no upgrade
+   path.** Provider and MCP bodies persist as opaque text and can
+   carry `egress`; the new models would reject or misroute those
+   rows before the API is even up, and the repository already
+   proves domain migrations against pre-upgrade rows. Add a
+   forward migration (provider `egress: false/true` to
+   `reach: host/internet`; MCP to `reach: network/internet`,
+   preserving the host-versus-network distinction) with its
+   upgrade test; new writes still reject the legacy key; document
+   that a file-backed `server.local_only: true` must become
+   `server.data_boundary: host` before the new image starts.
+
+5. **P2: The MCP caller would retain part of the boundary
+   policy.** A guard reading "boundary narrower than internet" in
+   the manager duplicates the central rule. Invoke
+   `check_mcp_server` for every referenced entry, pass the
+   optional boundary through, and let `boundary.py` alone decide
+   what an absent or declared boundary means.
+
+6. **P2: The feature tests do not exercise the new `network`
+   call-site plumbing.** The nine-cell table drives only provider
+   construction; a caller still passing a boolean or the default
+   boundary would stay green. Add call-site tests for telemetry,
+   capture upload and transcript export proving `network` refuses
+   before imports, constructors or threads while an absent
+   boundary permits construction, plus a composition-root test
+   that `data_boundary` reaches each builder unchanged.
+
+7. **P2: New enum-valued inputs lack explicit no-leak tests.**
+   Invalid values for the three new fields fail in pydantic
+   validation, whose exception data can retain the input. Plant a
+   credential-shaped invalid value per field across the real file,
+   write and stored-read surfaces, assert both streams and the
+   exception chain clean, and use a credential-shaped invalid
+   class marking for the closed-set case.
+
+8. **P2: The cutover inventory omits live surfaces still
+   publishing the old vocabulary.** Root README's `egress: false`
+   import example, the `local-stack.yaml` preset (eight example
+   YAMLs, not seven), both diagram READMEs,
+   `config/api_descriptions/reload-refused.md`, `config/boot.py`,
+   `config/api.py`, `tools/mcp/registry.py`, `capture.py`,
+   `tests/integration/test_cli_wheel.py` and the shared test
+   helpers. Add them and define the final grep allowlist
+   explicitly: historical plans, feature records and changelog may
+   keep the words; live docs, examples, source prose, shared
+   fixtures and wheel tests may not.
+
+9. **P2: Updating only the promise's citation leaves its
+   mechanism false.** The promise page also says every provider
+   declares whether it sends data off the host and describes a
+   binary refusal, which stops describing three reaches. Preserve
+   the promise and the baseline list; rewrite the enforcement
+   paragraph for declared reach, ordered boundaries and
+   fail-closed endpoint-dependent types; use the precise `host`
+   spelling where the citation identifies today's fully local
+   configuration.
