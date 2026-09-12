@@ -3,8 +3,9 @@
 #   vinga provider set asr whisper -f examples/asr-faster-whisper.yaml
 #
 # The audio never leaves the host, which this type knows about itself:
-# it is what server.local_only accepts without an assertion, and it
-# rejects an `egress` key. It needs the faster-whisper extra
+# it reaches `host`, which every server.data_boundary admits without an
+# assertion, and it rejects a `reach` key. It needs the faster-whisper
+# extra
 # (`uv sync --extra faster-whisper`), which the default container image
 # carries and the slim one does not.
 

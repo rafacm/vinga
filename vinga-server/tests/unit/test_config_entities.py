@@ -153,6 +153,12 @@ def test_the_options_note_names_the_types_that_declare_a_model() -> None:
 ALLOWED_IMPORTS = frozenset(
     {
         "vinga_server",
+        # Added by #493, and a leaf: `config.models` takes the `Reach`
+        # enum from the module that enforces it, so the boundary
+        # vocabulary has one home rather than two that must agree. It
+        # weighs an enum and a dict, and imports nothing of this server
+        # at run time.
+        "vinga_server.boundary",
         "vinga_server.config",
         "vinga_server.config.entities",
         "vinga_server.config.loader",

@@ -451,7 +451,7 @@ async def test_the_cap_a_current_openai_model_asks_for_instead_travels(
             type="openai_compatible",
             base_url="https://api.openai.com/v1",
             model="gpt-5.6-terra",
-            egress=True,
+            reach="internet",
             max_completion_tokens=CONFIGURED_MAX_TOKENS,
         ),
     )
@@ -580,7 +580,7 @@ async def test_the_committed_body_of_this_type_reaches_the_endpoint_whole(
     assert await spoken(built) == []
 
     for key, value in body.items():
-        if key in ("type", "api_key_env", "egress", "base_url"):
+        if key in ("type", "api_key_env", "reach", "base_url"):
             continue
         assert sent[key] == value, key
     # Named as well as walked, so that a fixture edited down to nothing

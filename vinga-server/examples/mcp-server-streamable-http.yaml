@@ -28,10 +28,11 @@ headers:
 
 # Tool arguments carry conversation-derived data, and no transport can
 # know where they end up: a url may name localhost and it may name a
-# vendor. Under server.local_only every referenced entry must therefore
-# declare its egress; false is the operator asserting that whatever the
-# URL reaches stays on your own network, as this local endpoint does.
-egress: false
+# vendor. Under a declared server.data_boundary every referenced entry
+# must therefore declare its reach; network is the operator asserting
+# that whatever the URL reaches stays on your own network, as this local
+# endpoint does.
+reach: network
 
 # How long one call may take before the model is told it timed out. The
 # device hears silence meanwhile, so keep it short.

@@ -49,6 +49,7 @@ from tests.support.sessions import (
 )
 from tests.support.stores import CONVERSATIONS_MANIFEST as MANIFEST
 from tests.support.stores import rows
+from vinga_server.boundary import Reach
 from vinga_server.config import Config
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import schema
@@ -243,7 +244,7 @@ class ScriptedAsr(AsrProvider):
     moving the session's clock rather than by sleeping. What the record
     reports is then the interval itself and not a lower bound on it."""
 
-    egress = False
+    reach = Reach.HOST
 
     def __init__(self, clock: Clock, elapsed_s: float, text: str = "turn it on") -> None:
         self._clock = clock
@@ -685,7 +686,7 @@ class SentenceTts(TtsProvider):
     given, so the two syntheses a reply runs at once can be told apart by
     which of their waits the measurement reports."""
 
-    egress = False
+    reach = Reach.HOST
 
     def __init__(self, latencies: dict[str, float]) -> None:
         self.sample_rate = 24000

@@ -5,10 +5,10 @@
 #
 #   vinga provider set llm claude -f examples/llm-anthropic.yaml
 #
-# The conversation leaves the host for this type, which knows that about
-# itself: under server.local_only it is refused at boot, naming the
-# stage and the provider, and it rejects an `egress` key rather than
-# letting one assert otherwise.
+# The conversation reaches the internet for this type, which knows that
+# about itself: under a server.data_boundary of host or network it is
+# refused at boot, naming the stage and the provider, and it rejects a
+# `reach` key rather than letting one assert otherwise.
 
 type: anthropic
 

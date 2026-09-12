@@ -43,6 +43,7 @@ from tests.support.stores import CONVERSATIONS_MANIFEST
 from tests.support.telemetry import Clock, open_session, session_events
 from vinga_server import __version__
 from vinga_server.app import StartupFailed, create_app, startup_failure
+from vinga_server.boundary import Reach
 from vinga_server.build_info import revision
 from vinga_server.composition import Composition
 from vinga_server.config import Config
@@ -319,7 +320,7 @@ def test_the_engines_are_let_go_of_when_the_process_ends(
     closed: list[str] = []
 
     class Closing(MockTts):
-        egress = False
+        reach = Reach.HOST
 
         def __init__(self, **options: object) -> None:
             super().__init__(sample_rate=24000, ms_per_char=1.0, min_ms=20.0)
@@ -353,7 +354,7 @@ def test_a_boot_that_fails_after_the_engines_are_built_lets_go_of_them(
     closed: list[str] = []
 
     class Closing(MockTts):
-        egress = False
+        reach = Reach.HOST
 
         def __init__(self, **options: object) -> None:
             super().__init__(sample_rate=24000, ms_per_char=1.0, min_ms=20.0)

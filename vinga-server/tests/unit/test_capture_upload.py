@@ -35,6 +35,7 @@ from tests.support.events import both_formats, fields_of
 from tests.support.stores import CAPTURE_MANIFEST, tone
 from tests.support.stores import store as capture_store
 from tests.support.uploads import ApiError, Recorder, exporting, fake_sdk
+from vinga_server.boundary import Reach
 from vinga_server.capture import CaptureStore, SessionCapture, sweep_upload_staging
 from vinga_server.capture_upload import (
     _QUIETING,
@@ -238,17 +239,21 @@ def test_capture_disabled_is_the_same_no_op(caplog: pytest.LogCaptureFixture) ->
 def test_a_capture_off_deployment_never_reaches_a_refusal() -> None:
     """The decision order, which is the contract: capture resolves
     FIRST, so a capture-off deployment boots identically with or without
-    the extra, the telemetry section or local_only.
+    the extra, the telemetry section or the data boundary.
 
-    Driven with local_only on, which is the refusal that would otherwise
-    fire: a server that turned off recording and then could not boot
-    would be an operator punished for the toggle they were told to make.
+    Driven inside a declared boundary, which is the refusal that would
+    otherwise fire: a server that turned off recording and then could
+    not boot would be an operator punished for the toggle they were
+    told to make.
     """
     config = a_server(
-        capture={"enabled": False, "dir": "/tmp/vinga-captures"}, local_only=True
+        capture={"enabled": False, "dir": "/tmp/vinga-captures"}, data_boundary="network"
     )
 
-    assert build_capture_upload(config, telemetry=exporting(), local_only=True) is None
+    assert (
+        build_capture_upload(config, telemetry=exporting(), boundary=Reach.NETWORK)
+        is None
+    )
 
 
 # Every combination the decision order has to answer, and the shape of
@@ -299,19 +304,20 @@ def test_every_capture_off_shape_loads_and_builds_nothing(
 
 
 @pytest.mark.parametrize(("capture", "telemetry"), CAPTURE_OFF)
-@pytest.mark.parametrize("local_only", [False, True])
+@pytest.mark.parametrize("boundary", [None, Reach.HOST])
 def test_no_capture_off_shape_refuses_for_anything(
     capture: dict[str, Any] | None,
     telemetry: dict[str, Any],
-    local_only: bool,
+    boundary: Reach | None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """And none of them reaches a refusal, whichever refusal it would
     have been.
 
-    All three are armed at once: local_only on, no exporter handed in,
-    and the extra faked away. A capture-off deployment boots identically
-    through every one of them, which is the contract's own sentence.
+    All three are armed at once: a `host` boundary, no exporter handed
+    in, and the extra faked away. A capture-off deployment boots
+    identically through every one of them, which is the contract's own
+    sentence.
     """
     import vinga_server.capture_upload as module
 
@@ -319,11 +325,13 @@ def test_no_capture_off_shape_refuses_for_anything(
         raise AssertionError("the SDK was imported for a capture-off deployment")
 
     monkeypatch.setattr(module, "_import_sdk", never)
-    config = a_server(capture=capture, telemetry=telemetry, local_only=local_only)
-
-    assert (
-        build_capture_upload(config, telemetry=None, local_only=local_only) is None
+    config = a_server(
+        capture=capture,
+        telemetry=telemetry,
+        **({} if boundary is None else {"data_boundary": boundary.value}),
     )
+
+    assert build_capture_upload(config, telemetry=None, boundary=boundary) is None
 
 
 def test_a_capture_off_deployment_says_nothing_with_the_flag_off(
@@ -400,19 +408,37 @@ def test_no_model_refuses_the_combination_on_its_own() -> None:
     ).capture is not None
 
 
-def test_local_only_refuses_before_anything_is_built() -> None:
-    """Sending a recording to a backend is egress like any other, and
-    the refusal is the egress module's own sentence: it names the switch
-    and the key that turns it off and nothing about any endpoint."""
-    config = a_server(local_only=True)
+@pytest.mark.parametrize("boundary", [Reach.HOST, Reach.NETWORK])
+def test_a_narrow_boundary_refuses_before_anything_is_built(boundary: Reach) -> None:
+    """Sending a recording to a backend reaches the internet as far as
+    this server can tell, and the refusal is the boundary module's own
+    sentence: it names the switch and the key that widens the boundary
+    and nothing about any endpoint.
+
+    `network` is the cell the old boolean had no way to express:
+    `LANGFUSE_HOST` is a transport credential this server hands over
+    without reading, so a LAN-bounded deployment refuses the upload
+    exactly as a host-bounded one does.
+    """
+    config = a_server(data_boundary=boundary.value)
 
     with pytest.raises(ConfigError) as refusal:
-        build_capture_upload(config, telemetry=exporting(), local_only=True)
+        build_capture_upload(config, telemetry=exporting(), boundary=boundary)
 
     assert ATTACH_KEY in str(refusal.value)
-    assert "server.local_only" in str(refusal.value)
+    assert "data boundary" in str(refusal.value)
     assert refusal.value.__cause__ is None
     assert refusal.value.__context__ is None
+
+
+def test_no_boundary_and_an_internet_boundary_both_build_one() -> None:
+    """The two permissive states, which a refusal keyed on "a boundary
+    exists" would fail on the second."""
+    for boundary in (None, Reach.INTERNET):
+        assert (
+            build_capture_upload(a_server(), telemetry=exporting(), boundary=boundary)
+            is not None
+        )
 
 
 def test_the_missing_extra_refuses_with_the_command_to_type(
@@ -441,24 +467,28 @@ def test_the_missing_extra_refuses_with_the_command_to_type(
 def test_the_refusals_run_in_the_order_the_contract_states(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Egress before the import, which is what lets the egress refusal
-    honestly say nothing was constructed.
+    """The data boundary before the import, which is what lets the
+    boundary refusal honestly say nothing was constructed.
 
-    Asserted by making the import itself fail loudly: reaching it under
-    local_only would be the ordering broken, and the case would see the
-    planted failure instead of the sentence.
+    Asserted by making the import itself fail loudly: reaching it inside
+    a declared boundary would be the ordering broken, and the case would
+    see the planted failure instead of the sentence.
     """
     import vinga_server.capture_upload as module
 
     def never() -> None:
-        raise AssertionError("the SDK was imported under local_only")
+        raise AssertionError("the SDK was imported inside the data boundary")
 
     monkeypatch.setattr(module, "_import_sdk", never)
 
     with pytest.raises(ConfigError) as refusal:
-        build_capture_upload(a_server(local_only=True), telemetry=exporting(), local_only=True)
+        build_capture_upload(
+            a_server(data_boundary="network"),
+            telemetry=exporting(),
+            boundary=Reach.NETWORK,
+        )
 
-    assert "server.local_only" in str(refusal.value)
+    assert "data boundary" in str(refusal.value)
 
 
 def test_an_uploader_is_built_when_everything_is_on() -> None:
@@ -1113,8 +1143,8 @@ def test_a_boot_with_no_uploader_still_sweeps(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """The delta round's second finding, and the reason the sweep is the
-    store's: a next boot with the flag off, capture off, local_only on
-    or the extra gone builds no uploader at all."""
+    store's: a next boot with the flag off, capture off, a narrow data
+    boundary or the extra gone builds no uploader at all."""
     caplog.set_level(logging.DEBUG)
     store = capture_store(tmp_path)
     store.directory.mkdir(parents=True, exist_ok=True)
@@ -1213,10 +1243,10 @@ BOOTS = (
         {
             "capture": {"enabled": True},
             "telemetry": {"enabled": True, "export_audio": True},
-            "local_only": True,
+            "data_boundary": "host",
         },
         True,
-        id="local-only",
+        id="host-boundary",
     ),
     pytest.param(
         {
@@ -1249,7 +1279,7 @@ def test_every_boot_with_a_capture_section_sweeps_what_was_left(
     of them says so and removes it.
 
     Two boot and three refuse, and the refusals are the point:
-    `local_only` exits above the capture section entirely, at the
+    the data boundary exits above the capture section entirely, at the
     exporter, the missing extra exits above the store, and the
     attachment with no exporter to name a trace used to exit above the
     composition itself, while the file was still being parsed. A sweep

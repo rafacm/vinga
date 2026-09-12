@@ -21,6 +21,7 @@ from openai import AsyncOpenAI
 from tests.support.events import events as emitted
 from tests.support.events import fields_of
 from tests.support.llm_sdk import Falsey
+from vinga_server.boundary import Reach
 from vinga_server.config.models import ProviderConfig
 from vinga_server.events import Emission, attach_server_tap, detach_server_tap
 from vinga_server.logs import TEXT_FORMAT, JsonFormatter
@@ -271,48 +272,65 @@ async def test_a_compatible_endpoint_keeps_its_own_temperature_range() -> None:
     so guessing on a self-hosted server's behalf would reject a working
     configuration before the request is sent."""
     built = await build_asr(
-        type="openai", base_url="http://localhost:8000/v1", temperature=2.0, egress=False
+        type="openai", base_url="http://localhost:8000/v1", temperature=2.0, reach="host"
     )
     assert isinstance(built, OpenAiAsr)
 
 
-async def test_the_base_url_decides_egress_rather_than_the_type(
+async def test_the_base_url_decides_the_reach_rather_than_the_type(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A self-hosted transcription server keeps the audio on the host and
-    api.openai.com does not, so the type cannot know its own egress."""
+    api.openai.com does not, so the type cannot know its own reach."""
     monkeypatch.setenv("OPENAI_KEY", "secret")
-    assert OpenAiAsr.egress is None
+    assert OpenAiAsr.reach is None
     built = await build_asr(
         type="openai",
         api_key_env="OPENAI_KEY",
         base_url="http://localhost:8000/v1",
-        egress=False,
+        reach="host",
     )
     assert isinstance(built, OpenAiAsr)
 
 
-async def test_local_only_refuses_the_default_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_host_boundary_refuses_the_default_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("OPENAI_KEY", "secret")
-    with pytest.raises(ProviderError, match="sends session data off this host"):
+    with pytest.raises(ProviderError, match="data boundary, which is host"):
         await build_entry(
             "asr",
             "ears",
             ProviderConfig.model_validate(
-                {"type": "openai", "api_key_env": "OPENAI_KEY", "egress": True}
+                {"type": "openai", "api_key_env": "OPENAI_KEY", "reach": "internet"}
             ),
-            local_only=True,
+            Reach.HOST,
         )
 
 
-async def test_local_only_admits_a_local_endpoint_that_declares_itself() -> None:
+async def test_a_host_boundary_admits_a_local_endpoint_that_declares_itself() -> None:
     built = await build_entry(
         "asr",
         "ears",
         ProviderConfig.model_validate(
-            {"type": "openai", "base_url": "http://localhost:8000/v1", "egress": False}
+            {"type": "openai", "base_url": "http://localhost:8000/v1", "reach": "host"}
         ),
-        local_only=True,
+        Reach.HOST,
+    )
+    assert isinstance(built, OpenAiAsr)
+
+
+async def test_a_network_boundary_admits_an_endpoint_on_the_network() -> None:
+    """The tier the boolean could not say: a transcription server on the
+    LAN is not on this host and is not the internet either, and an
+    operator asserting exactly that is now telling the truth."""
+    built = await build_entry(
+        "asr",
+        "ears",
+        ProviderConfig.model_validate(
+            {"type": "openai", "base_url": "http://whisper.lan:8000/v1", "reach": "network"}
+        ),
+        Reach.NETWORK,
     )
     assert isinstance(built, OpenAiAsr)
 
@@ -811,7 +829,9 @@ async def test_the_minimum_belongs_to_the_endpoint_not_the_type(
         return handler
 
     openai = await build_asr(type="openai", api_key_env="OPENAI_KEY")
-    compatible = await build_asr(type="openai", base_url="http://localhost:8000/v1", egress=False)
+    compatible = await build_asr(
+        type="openai", base_url="http://localhost:8000/v1", reach="host"
+    )
     assert isinstance(openai, OpenAiAsr)
     assert isinstance(compatible, OpenAiAsr)
     transported(openai, watching(at_openai))
@@ -833,7 +853,7 @@ async def test_a_compatible_endpoint_receives_the_short_clip_openai_would_refuse
         seen.append(request.content)
         return httpx.Response(200, json={"text": "ja"})
 
-    built = await build_asr(type="openai", base_url="http://localhost:8000/v1", egress=False)
+    built = await build_asr(type="openai", base_url="http://localhost:8000/v1", reach="host")
     assert isinstance(built, OpenAiAsr)
     transported(built, handler)
 
@@ -853,7 +873,7 @@ async def test_empty_audio_is_never_sent_anywhere() -> None:
         calls += 1
         return httpx.Response(200, json={"text": "should not be reached"})
 
-    built = await build_asr(type="openai", base_url="http://localhost:8000/v1", egress=False)
+    built = await build_asr(type="openai", base_url="http://localhost:8000/v1", reach="host")
     assert isinstance(built, OpenAiAsr)
     transported(built, handler)
 

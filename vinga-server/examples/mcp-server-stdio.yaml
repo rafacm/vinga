@@ -35,11 +35,11 @@ env:
 
 # Tool arguments carry conversation-derived data, and no transport can
 # know where they end up: a stdio command may proxy anywhere, a url may
-# name localhost. Under server.local_only every referenced entry must
-# therefore declare its egress; false is the operator asserting that
-# whatever the command or URL reaches stays on your own network, as this
-# proxy to a Home Assistant on the LAN does.
-egress: false
+# name localhost. Under a declared server.data_boundary every referenced
+# entry must therefore declare its reach; network is the operator
+# asserting that whatever the command or URL reaches stays on your own
+# network, as this proxy to a Home Assistant on the LAN does.
+reach: network
 
 # How long one call may take before the model is told it timed out. The
 # device hears silence meanwhile, so keep it short.

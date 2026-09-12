@@ -240,7 +240,7 @@ def test_a_recorded_secret_shaped_option_fails_closed() -> None:
     for the same reason: the models refuse such a key on every path that
     validates. Built here without validation, which is what "a value
     that got in another way" means concretely."""
-    entry = ProviderConfig.model_construct(type="mock", api_key_env=None, egress=None)
+    entry = ProviderConfig.model_construct(type="mock", api_key_env=None, reach=None)
     object.__setattr__(entry, "__pydantic_extra__", {"session_token": PASTED})
 
     assert views.provider_record(entry)["session_token"] == MASK
@@ -259,7 +259,7 @@ def test_the_exempted_option_is_shown_and_recorded_as_its_value() -> None:
     sibling is asserted beside it, so this is the exemption showing
     rather than the mask having stopped working.
     """
-    entry = ProviderConfig.model_construct(type="anthropic", api_key_env=None, egress=None)
+    entry = ProviderConfig.model_construct(type="anthropic", api_key_env=None, reach=None)
     object.__setattr__(
         entry, "__pydantic_extra__", {"max_tokens": 2048, "session_token": PASTED}
     )

@@ -28,6 +28,7 @@ import httpx
 import pytest
 
 from tests.support.configs import config_with
+from vinga_server.boundary import Reach
 from vinga_server.config import Config
 from vinga_server.config.models import ProviderConfig
 from vinga_server.config.provider_options import FasterWhisperOptions
@@ -55,11 +56,11 @@ class Recording(MockTts):
 
     The marking is declared here rather than inherited, which every
     provider class has to do (#136): a subclass that said nothing would
-    be refused by the egress rule before this file could assert
+    be refused by the boundary rule before this file could assert
     anything.
     """
 
-    egress = False
+    reach = Reach.HOST
 
     def __init__(self, **options: Any) -> None:
         super().__init__(**{"sample_rate": 24000, "ms_per_char": 1.0, "min_ms": 20.0} | options)
@@ -79,7 +80,7 @@ class Refusing(MockTts):
     it.
     """
 
-    egress = False
+    reach = Reach.HOST
 
     def __init__(self, **options: Any) -> None:
         super().__init__(**{"sample_rate": 24000, "ms_per_char": 1.0, "min_ms": 20.0} | options)
@@ -118,7 +119,7 @@ class RecordingVad(MockVad):
     build is left holding: it is constructed last, so it is what the
     worker thread is inside when a caller gives up."""
 
-    egress = False
+    reach = Reach.HOST
 
     def __init__(self, **options: Any) -> None:
         super().__init__(
@@ -181,7 +182,7 @@ async def test_a_later_entrys_failure_closes_the_earlier_constructions() -> None
 
 async def test_an_egress_refusal_closes_the_object_it_just_refused() -> None:
     """The same-entry case, and the reason the check moved out of the
-    construction: the egress rule can only be applied to a built
+    construction: the boundary rule can only be applied to a built
     provider, so refusing one means letting go of one."""
     made: list[Recording] = []
 
@@ -196,7 +197,7 @@ async def test_an_egress_refusal_closes_the_object_it_just_refused() -> None:
             await build_entry(
                 "tts",
                 "voice",
-                ProviderConfig.model_validate({"type": "mock", "egress": False}),
+                ProviderConfig.model_validate({"type": "mock", "reach": "host"}),
             )
 
     assert [one.closes for one in made] == [1]

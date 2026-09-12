@@ -14,7 +14,8 @@ Nothing here asserts. A helper here hands back a started thing or a
 
 `config_granting` and `reload_config` are both "a configuration whose
 agents reach these entries", and they are kept apart because they are
-not the same configuration: the second also carries `local_only`, which
+not the same configuration: the second also carries a declared data
+boundary, which
 is the switch its own suite is about.
 
 The file is called `tools_mcp.py` rather than `mcp.py` after the
@@ -37,6 +38,7 @@ from sse_starlette.sse import AppStatus
 
 from tests.support.configs import STDIO_SERVER, world
 from tests.support.providers import built_world
+from vinga_server.boundary import Reach
 from vinga_server.config import Config, McpServerConfig
 from vinga_server.config.boot import BootConfig
 from vinga_server.config.reload import ConfigReload
@@ -120,12 +122,12 @@ def config_granting(servers: dict[str, object], grants: dict[str, list[str]]) ->
 def reload_config(
     servers: dict[str, object],
     grants: dict[str, list],
-    local_only: bool = False,
+    boundary: Reach | None = None,
 ) -> Config:
     """One agent per grant list, so a test can move an entry between
     agents as well as in and out of the configuration."""
     return Config(
-        server={"local_only": local_only},
+        server={"data_boundary": boundary},
         providers={
             stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")
         },

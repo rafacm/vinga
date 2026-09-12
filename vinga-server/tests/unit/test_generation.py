@@ -14,6 +14,7 @@ window in which the world had already gone.
 import pytest
 
 from tests.support.configs import config_with
+from vinga_server.boundary import Reach
 from vinga_server.config.secrets import SecretStore
 from vinga_server.generation import Generation, Generations
 from vinga_server.providers import Provider, ProviderWorld
@@ -128,7 +129,7 @@ def test_two_unstable_samples_are_not_one_steady_world() -> None:
 class Held(Provider):
     """One engine, and how many times it was told its world was over."""
 
-    egress = False
+    reach = Reach.HOST
 
     def __init__(self, name: str) -> None:
         self.name = name

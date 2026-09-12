@@ -29,6 +29,14 @@ import sys
 ALLOWED_IMPORTS = frozenset(
     {
         "vinga_server",
+        # The name this set gained for #493, and the reason it is safe:
+        # `boundary` declares the `Reach` enum and the rank rule read
+        # against it, weighs an enum and a dict, and imports nothing of
+        # this server at run time (its model imports are under
+        # `TYPE_CHECKING`, which is what keeps the vocabulary in one
+        # home without a cycle). It is on the rendering path because
+        # three documented fields are typed by that enum.
+        "vinga_server.boundary",
         "vinga_server.config",
         "vinga_server.config.docgen",
         "vinga_server.config.entities",

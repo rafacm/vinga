@@ -21,6 +21,7 @@ import httpx
 import pytest
 
 from tests.support.llm_sdk import Falsey
+from vinga_server.boundary import Reach
 from vinga_server.config.models import ProviderConfig
 from vinga_server.config.provider_options import ElevenlabsOptions
 from vinga_server.providers import ProviderCallError, ProviderCallTimeout, build_entry
@@ -211,10 +212,10 @@ async def test_the_type_marks_egress_and_rejects_a_declaration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("ELEVEN_KEY", "secret")
-    assert ElevenLabsTts.egress is True
+    assert ElevenLabsTts.reach is Reach.INTERNET
     with pytest.raises(ProviderError, match="decided by type"):
         await build_tts(
-            type="elevenlabs", voice_id="voice-1", api_key_env="ELEVEN_KEY", egress=False
+            type="elevenlabs", voice_id="voice-1", api_key_env="ELEVEN_KEY", reach="host"
         )
 
 

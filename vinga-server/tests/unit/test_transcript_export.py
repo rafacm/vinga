@@ -54,6 +54,7 @@ from tests.support.transcripts import (
     reading,
     settled,
 )
+from vinga_server.boundary import Reach
 from vinga_server.config import ConfigError
 from vinga_server.config.models import DatabaseConfig, ServerConfig
 from vinga_server.conversations import threads
@@ -267,18 +268,21 @@ def test_recording_nothing_with_the_flag_off_says_nothing(
 def test_a_recording_off_deployment_never_reaches_a_refusal() -> None:
     """The decision order, which is the contract: recording resolves
     FIRST, so a deployment that records nothing boots identically
-    whatever the telemetry section or local_only say.
+    whatever the telemetry section or the data boundary say.
 
-    Driven with local_only on, which is the refusal that would otherwise
-    fire: a server that turned off recording and then could not boot
-    would be an operator punished for the toggle they were told to make.
+    Driven inside a declared boundary, which is the refusal that would
+    otherwise fire: a server that turned off recording and then could
+    not boot would be an operator punished for the toggle they were
+    told to make.
     """
-    config = a_server(conversations={"enabled": False, "text": True}, local_only=True)
+    config = a_server(
+        conversations={"enabled": False, "text": True}, data_boundary="network"
+    )
     held, _ = exporting()
 
     assert (
         build_transcript_export(
-            config, telemetry=held, database=DatabaseConfig(), local_only=True
+            config, telemetry=held, database=DatabaseConfig(), boundary=Reach.NETWORK
         )
         is None
     )
@@ -308,39 +312,61 @@ def test_the_telemetry_refusal_names_both_ways_out() -> None:
     assert "telemetry.export_transcripts" in TRANSCRIPTS_NEED_TELEMETRY
 
 
-def test_local_only_refuses_before_anything_is_built() -> None:
-    """Egress is asked before any construction and any thread, which is
-    the caller's half of `check_feature`'s contract and the only way the
-    refusal can honestly say nothing was built."""
-    config = a_server(local_only=True)
+@pytest.mark.parametrize("boundary", [Reach.HOST, Reach.NETWORK])
+def test_a_narrow_boundary_refuses_before_anything_is_built(boundary: Reach) -> None:
+    """The boundary is asked before any construction and any thread,
+    which is the caller's half of `check_feature`'s contract and the
+    only way the refusal can honestly say nothing was built.
+
+    `network` is the cell the old boolean had no way to express: the
+    turns travel over the transport the traces use, whose endpoint this
+    server hands to the SDK without reading, so a LAN-bounded
+    deployment refuses the export exactly as a host-bounded one does.
+    """
+    config = a_server(data_boundary=boundary.value)
     held, _ = exporting()
 
     with pytest.raises(ConfigError) as refusal:
         build_transcript_export(
-            config, telemetry=held, database=DatabaseConfig(), local_only=True
+            config, telemetry=held, database=DatabaseConfig(), boundary=boundary
         )
 
-    assert "server.local_only is on" in str(refusal.value)
+    assert "data boundary" in str(refusal.value)
     assert TRANSCRIPTS_KEY in str(refusal.value)
     assert refusal.value.__cause__ is None
 
 
-def test_the_local_only_sentence_is_the_egress_modules_own() -> None:
+def test_the_boundary_sentence_is_the_boundary_modules_own() -> None:
     """One home for the rule, checked rather than asserted: a transcript
     rule of its own would show up here as two sentences."""
-    from vinga_server.egress import EgressRefusal, check_feature
+    from vinga_server.boundary import BoundaryRefusal, check_feature
 
-    config = a_server(local_only=True)
+    config = a_server(data_boundary="host")
     held, _ = exporting()
 
-    with pytest.raises(EgressRefusal) as direct:
-        check_feature(TRANSCRIPTS_KEY, egress=True, local_only=True)
+    with pytest.raises(BoundaryRefusal) as direct:
+        check_feature(TRANSCRIPTS_KEY, Reach.INTERNET, Reach.HOST)
     with pytest.raises(ConfigError) as boot:
         build_transcript_export(
-            config, telemetry=held, database=DatabaseConfig(), local_only=True
+            config, telemetry=held, database=DatabaseConfig(), boundary=Reach.HOST
         )
 
     assert str(boot.value) == str(direct.value)
+
+
+def test_no_boundary_and_an_internet_boundary_both_build_one() -> None:
+    """The two permissive states, which a refusal keyed on "a boundary
+    exists" would fail on the second: absent declares nothing and
+    `internet` declares the widest thing there is."""
+    held, _ = exporting()
+
+    for boundary in (None, Reach.INTERNET):
+        assert (
+            build_transcript_export(
+                a_server(), telemetry=held, database=DatabaseConfig(), boundary=boundary
+            )
+            is not None
+        )
 
 
 def test_a_configured_deployment_builds_one() -> None:

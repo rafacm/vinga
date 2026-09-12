@@ -286,7 +286,7 @@ def test_the_exempted_option_installs_under_a_type_that_declares_it(
         "type": "openai_compatible",
         "base_url": "http://localhost:11434/v1",
         "model": "qwen3:8b",
-        "egress": False,
+        "reach": "host",
         EXEMPT: CONFIGURED,
     }
 
@@ -454,7 +454,7 @@ def _addressed(spelling: str) -> dict[str, object]:
     return {
         "type": "openai_compatible",
         "model": "qwen3:8b",
-        "egress": False,
+        "reach": "host",
         "base_url": f"https://host/v1?{spelling}={SENTINEL}",
     }
 
@@ -652,7 +652,7 @@ def test_the_numeric_cap_installs_from_a_file(store: ConfigStore) -> None:
                         "type": "openai_compatible",
                         "base_url": "https://api.openai.com/v1",
                         "model": "gpt-5.6-terra",
-                        "egress": True,
+                        "reach": "internet",
                         NUMERIC: CONFIGURED,
                     }
                 }

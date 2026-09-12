@@ -31,6 +31,7 @@ from tests.support.tools_mcp import (
     stdio_entry,
 )
 from vinga_server import logs
+from vinga_server.boundary import Reach
 from vinga_server.config import Config, McpServerConfig
 from vinga_server.events import Emission, attach_server_tap, detach_server_tap
 from vinga_server.runtime.prompt import Guidance
@@ -330,13 +331,13 @@ async def test_the_instant_moves_when_the_state_does(tmp_path: Path) -> None:
 def config_with(
     servers: dict[str, object],
     agent_mcp: list[str] | None,
-    local_only: bool = False,
+    boundary: Reach | None = None,
 ) -> Config:
     agent: dict[str, object] = {"prompt": "A"}
     if agent_mcp is not None:
         agent["mcp"] = agent_mcp
     return Config(
-        server={"local_only": local_only},
+        server={"data_boundary": boundary},
         providers={
             "llm": {"mock": {"type": "mock"}},
             "asr": {"mock": {"type": "mock"}},
@@ -358,32 +359,64 @@ async def test_only_referenced_entries_are_managed() -> None:
     assert "unused" not in servers
 
 
-async def test_local_only_refuses_a_referenced_server_without_a_declaration() -> None:
-    config = config_with({"tools": entry_data()}, ["tools"], local_only=True)
+# Every boundary state an MCP entry can be judged under, and what each
+# one does with it. `check_mcp_server` is its own entry point into the
+# rule, so the provider table proves nothing about it: an
+# implementation treating every non-host reach as a refusal, or every
+# declared boundary as "host", would pass there and fail here (#493).
+MCP_CELLS = [
+    pytest.param(Reach.HOST, Reach.HOST, True, id="host-at-host"),
+    pytest.param(Reach.HOST, Reach.NETWORK, True, id="host-at-network"),
+    pytest.param(Reach.NETWORK, Reach.NETWORK, True, id="network-at-network"),
+    pytest.param(Reach.NETWORK, Reach.HOST, False, id="network-at-host"),
+    pytest.param(Reach.INTERNET, Reach.NETWORK, False, id="internet-at-network"),
+    pytest.param(Reach.INTERNET, Reach.INTERNET, True, id="internet-at-internet"),
+    pytest.param(Reach.INTERNET, None, True, id="internet-with-no-boundary"),
+]
+
+
+@pytest.mark.parametrize(("reach", "boundary", "builds"), MCP_CELLS)
+async def test_a_declared_reach_is_judged_against_the_boundary(
+    reach: Reach, boundary: Reach | None, builds: bool
+) -> None:
+    config = config_with(
+        {"tools": entry_data(reach=reach.value)}, ["tools"], boundary=boundary
+    )
+    if builds:
+        assert "tools" in McpServers.build(config)
+        return
+    with pytest.raises(McpConfigError) as excinfo:
+        McpServers.build(config)
+    assert "mcp_servers.tools" in str(excinfo.value)
+    assert "data boundary" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("boundary", [Reach.HOST, Reach.NETWORK, Reach.INTERNET])
+async def test_a_declared_boundary_refuses_an_undeclared_entry(boundary: Reach) -> None:
+    """Fail-closed at EVERY boundary value, `internet` included: an
+    entry whose transport cannot answer and whose operator did not
+    either is the hole the guarantee exists to close, and declaring the
+    widest boundary is asking for the answer rather than waiving it."""
+    config = config_with({"tools": entry_data()}, ["tools"], boundary=boundary)
     with pytest.raises(McpConfigError) as excinfo:
         McpServers.build(config)
     message = str(excinfo.value)
     assert "mcp_servers.tools" in message
-    assert '"egress: false"' in message
+    assert '"reach: host"' in message
 
 
-async def test_local_only_builds_a_server_the_operator_declared_local() -> None:
-    config = config_with({"tools": entry_data(egress=False)}, ["tools"], local_only=True)
-    servers = McpServers.build(config)
-    assert "tools" in servers
+async def test_no_boundary_builds_an_undeclared_entry() -> None:
+    """And the other half of the distinction: with no boundary declared
+    an undeclared entry boots, exactly as it did before there were
+    boundaries at all."""
+    assert "tools" in McpServers.build(config_with({"tools": entry_data()}, ["tools"]))
 
 
-async def test_local_only_refuses_a_server_declared_egress() -> None:
-    config = config_with({"tools": entry_data(egress=True)}, ["tools"], local_only=True)
-    with pytest.raises(McpConfigError, match="off this network"):
-        McpServers.build(config)
-
-
-async def test_local_only_leaves_unreferenced_entries_alone() -> None:
+async def test_a_boundary_leaves_unreferenced_entries_alone() -> None:
     config = config_with(
-        {"tools": entry_data(egress=False), "unused": entry_data()},
+        {"tools": entry_data(reach="network"), "unused": entry_data()},
         ["tools"],
-        local_only=True,
+        boundary=Reach.NETWORK,
     )
     servers = McpServers.build(config)
     assert len(servers) == 1

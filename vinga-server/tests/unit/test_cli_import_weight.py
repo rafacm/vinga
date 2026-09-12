@@ -95,6 +95,10 @@ SOURCE = Path(__file__).resolve().parents[2] / "src" / "vinga_server"
 CLI_REACH = frozenset(
     {
         "vinga_server",
+        # #493's leaf: `config.models` reads the `Reach` enum off the
+        # module that enforces it. An enum and a dict, with no runtime
+        # import back, which is what keeps it below this line.
+        "vinga_server.boundary",
         "vinga_server.broken_pipe",
         "vinga_server.config",
         "vinga_server.config.cli",

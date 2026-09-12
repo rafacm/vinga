@@ -1,7 +1,7 @@
 {
   "type": "openai_compatible",
   "api_key_env": "MY_PROVIDER_KEY",
-  "egress": false,
+  "reach": "host",
   "model": "a-model",
   "base_url": "http://127.0.0.1:8080/v1",
   "temperature": 0.7,

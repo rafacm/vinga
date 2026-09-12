@@ -17,6 +17,7 @@ import pytest
 from openai import AsyncOpenAI
 
 from tests.support.llm_sdk import Falsey
+from vinga_server.boundary import Reach
 from vinga_server.config.models import ProviderConfig
 from vinga_server.providers import ProviderCallError, ProviderCallTimeout, build_entry
 from vinga_server.providers.base import ProviderError
@@ -199,7 +200,7 @@ async def test_a_compatible_endpoint_keeps_its_own_model_rules(
     read either knob, so guessing on its behalf would reject working
     configurations before the request is sent."""
     monkeypatch.setenv("OPENAI_KEY", "secret")
-    local = {"base_url": "http://localhost:8080/v1", "egress": False}
+    local = {"base_url": "http://localhost:8080/v1", "reach": "host"}
     # Each of these is refused against OpenAI itself, three tests above.
     for extra in (
         {"model": "gpt-4o-mini-tts", "speed": 1.2},
@@ -210,38 +211,45 @@ async def test_a_compatible_endpoint_keeps_its_own_model_rules(
         assert isinstance(built, OpenAiTts)
 
 
-async def test_the_base_url_decides_egress_rather_than_the_type(
+async def test_the_base_url_decides_the_reach_rather_than_the_type(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A self-hosted speech endpoint keeps the reply text on the host and
-    api.openai.com does not, so the type cannot know its own egress and
+    api.openai.com does not, so the type cannot know its own reach and
     the entry declares it, exactly as openai_compatible does."""
     monkeypatch.setenv("OPENAI_KEY", "secret")
-    assert OpenAiTts.egress is None
+    assert OpenAiTts.reach is None
     built = await build_tts(
         type="openai",
         voice="alloy",
         api_key_env="OPENAI_KEY",
         base_url="http://localhost:8080/v1",
-        egress=False,
+        reach="host",
     )
     assert isinstance(built, OpenAiTts)
 
 
-async def test_local_only_refuses_the_default_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_host_boundary_refuses_the_default_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("OPENAI_KEY", "secret")
-    with pytest.raises(ProviderError, match="sends session data off this host"):
+    with pytest.raises(ProviderError, match="data boundary, which is host"):
         await build_entry(
             "tts",
             "voice",
             ProviderConfig.model_validate(
-                {"type": "openai", "voice": "alloy", "api_key_env": "OPENAI_KEY", "egress": True}
+                {
+                    "type": "openai",
+                    "voice": "alloy",
+                    "api_key_env": "OPENAI_KEY",
+                    "reach": "internet",
+                }
             ),
-            local_only=True,
+            Reach.HOST,
         )
 
 
-async def test_local_only_admits_a_local_endpoint_that_declares_itself() -> None:
+async def test_a_host_boundary_admits_a_local_endpoint_that_declares_itself() -> None:
     built = await build_entry(
         "tts",
         "voice",
@@ -250,10 +258,10 @@ async def test_local_only_admits_a_local_endpoint_that_declares_itself() -> None
                 "type": "openai",
                 "voice": "alloy",
                 "base_url": "http://localhost:8080/v1",
-                "egress": False,
+                "reach": "host",
             }
         ),
-        local_only=True,
+        Reach.HOST,
     )
     assert isinstance(built, OpenAiTts)
 

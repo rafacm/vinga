@@ -221,7 +221,7 @@ _LLM = "type: anthropic\nmodel: m\n"
 
 _ASR = "type: mock\n"
 
-_MCP = "transport: stdio\ncommand: uvx\negress: false\n"
+_MCP = "transport: stdio\ncommand: uvx\nreach: network\n"
 
 _FRAGMENT = "text: The bins go out on Tuesday.\n"
 
