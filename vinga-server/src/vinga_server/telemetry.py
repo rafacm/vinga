@@ -75,6 +75,7 @@ from vinga_server.events.values import (
     PROVIDER_ENTRY_OPTIONAL,
     PROVIDER_ENTRY_REQUIRED,
     Kind,
+    PromptSources,
     ProviderEntries,
 )
 from vinga_server.quieting import Lease, Quieting
@@ -175,7 +176,7 @@ SERVICE = "vinga-server"
 
 # --- the span map -----------------------------------------------------
 #
-# Thirteen event names have a shape of their own and everything else folds
+# Fourteen event names have a shape of their own and everything else folds
 # onto whichever span is open. That default is the design rather than a
 # shortcut: an exporter that enumerated the events it knew would drop
 # every variant the catalog grew after it was written, in silence, and
@@ -236,6 +237,10 @@ LLM_STAGE = "llm"
 TTS_STAGE = "tts"
 
 LLM_ROUND = "llm_round"
+# Not a lifecycle event either, and the second one whose fold changes
+# what the spans after it carry: it retains a prompt's provenance for
+# the agent it was assembled for.
+PROMPT_ASSEMBLED = "prompt_assembled"
 # One declared event name with three variants, and one fold for all
 # three: the naming policy the variants make structural is carried by
 # `source` and by which of the two name fields the payload holds, and
@@ -488,6 +493,27 @@ PROVIDER_PREFIX = "vinga.provider"
 # construction.
 PROVIDER_FACTS = (*PROVIDER_ENTRY_REQUIRED, *PROVIDER_ENTRY_OPTIONAL)
 
+# Where a prompt's provenance lands, and it lands FLATTENED for the
+# reason the provider context gives in its own comment: a JSON blob is
+# present and unqueryable, which is the same as absent for the question
+# the attribute exists to answer. That question is "how much of this
+# prompt came from where", which is a number per block a reader charts.
+#
+# One attribute per block, with the provenance token's `:` separators
+# written as `.`, so `instructions:house` becomes
+# `vinga.prompt.sources.instructions.house`: an attribute name is a
+# dotted path and a token is not. The key space is bounded by the
+# operator's own configuration rather than by anything a far side
+# sends, which is the five declared provenance forms with configured
+# names inside three of them, so the cardinality is bounded by exactly
+# what bounds the provider keys.
+#
+# `characters` goes on beside them as the total the blocks sum to:
+# without a denominator the parts answer nothing.
+PROMPT_PREFIX = "vinga.prompt.sources"
+
+PROMPT_ATTRIBUTES = {"characters": "vinga.prompt.characters"}
+
 
 def _provider_context(held: Any) -> dict[str, dict[str, dict[str, str]]]:
     """What a `session_open` payload said this conversation opened
@@ -555,6 +581,34 @@ def _provider_attribute(stage: str, fact: str) -> str:
     old spelling.
     """
     return f"{PROVIDER_PREFIX}.{stage}.{fact}"
+
+
+def _prompt_attributes(payload: dict[str, Any]) -> dict[str, Any]:
+    """One `prompt_assembled` payload as the attributes a turn span
+    carries, or nothing at all.
+
+    Through the catalog's own value type rather than by inspection
+    here, exactly as `_provider_context` is and for the same reason:
+    `PromptSources` is what makes a provenance token safe to write into
+    an attribute NAME, because it is the type that refuses a key
+    outside the declared grammar and a value that is not a character
+    count. A fold that walked the mapping itself would let a payload
+    this module did not build choose its own attribute names, which is
+    the bounded-cardinality promise broken in the one place it costs
+    most.
+
+    The sizes only, never a byte of the prompt: that is a property of
+    the event rather than of this fold, and it is what makes the whole
+    of this lawful on a metadata surface.
+    """
+    attributes = _attributes(payload, PROMPT_ATTRIBUTES)
+    try:
+        sources = PromptSources(payload.get("sources")).carried()
+    except Exception:  # noqa: BLE001 - a payload nobody declared says nothing
+        return attributes
+    for token, characters in sources.items():
+        attributes[f"{PROMPT_PREFIX}.{token.replace(':', '.')}"] = characters
+    return attributes
 
 
 def _entry_name(stage: str) -> str:
@@ -951,6 +1005,20 @@ PLAYBACK_ATTRIBUTES = {
 # span exists; a session id that never opens would otherwise be a slow
 # leak, so the hold is bounded and the oldest entry goes first.
 PENDING_CAPTURES = 64
+
+# And how many sessions may have a `prompt_assembled` waiting for their
+# `session_open`, which is not an edge case but the ordinary one:
+# `PipelineRuntime.__init__` activates the first agent and emits the
+# event, and `DeviceSession.run` builds that runtime before the hello
+# exchange and well before `session_open`. So the INITIAL agent's
+# provenance has always arrived before there was a trace to put it on,
+# and used to reach none at all.
+#
+# A sibling of the hold above rather than a reuse of it. The two are
+# cleared by different events and a shared bound would let one starve
+# the other: a deployment recording many sessions it never opens would
+# evict the prompts of the sessions that did.
+PENDING_PROMPTS = 64
 
 # How many sessions' trace ids are kept for a reader to ask about after
 # the fact, ON TOP of the deployment's own session capacity, oldest
@@ -1402,6 +1470,13 @@ class _SessionTrace:
     what lets a turn span carry the providers that turn actually ran on
     without the exporter needing a fact no event gave it.
 
+    `prompts` is the same shape of retained fact for a different
+    question: what each agent's know-how half was assembled out of, by
+    provenance. Retained rather than stamped where it arrives because
+    `prompt_assembled` is emitted once per AGENT and not once per turn,
+    so an attribute written onto whichever turn was open would describe
+    one turn per agent and leave every later one silent.
+
     `transcribed` is whether the open turn's ASR stage has already
     ended. A turn has exactly one, and the events that end one can
     arrive twice: a barge-in the gate REJECTS emits its own
@@ -1422,6 +1497,7 @@ class _SessionTrace:
     transcribed: bool = False
     identity: dict[str, Any] = field(default_factory=dict)
     providers: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
+    prompts: dict[str, dict[str, Any]] = field(default_factory=dict)
     agent: str | None = None
 
 
@@ -1617,6 +1693,16 @@ class Telemetry:
         # received it and not the session span that eventually claims
         # it.
         self._pending: dict[str, list[tuple[int, Emission]]] = {}
+        # `prompt_assembled` that arrived before its session opened, by
+        # session id, oldest first and bounded.
+        #
+        # Emissions rather than the (epoch, emission) pairs above,
+        # because this one is a SESSION event and the session clock's
+        # offset is one number for the process once it exists: the
+        # stamp resolves to the same instant whenever it is read, so
+        # holding the conversion would be holding an answer that never
+        # differs from the one the claim can compute.
+        self._prompts: dict[str, list[Emission]] = {}
         # The trace each session got, by session id, oldest first and
         # bounded, and NOT popped when the span is: what wants it asks
         # after the session closed, because the artifacts it is about
@@ -1651,6 +1737,7 @@ class Telemetry:
             NOTHING_HEARD: self._asr_span,
             TRANSCRIPTION_ABANDONED: self._asr_span,
             PROVIDER_FAILED: self._provider_failed,
+            PROMPT_ASSEMBLED: self._prompt_assembled,
             LLM_ROUND: self._llm_span,
             TOOL_CALL: self._tool_span,
             SENTENCE_SYNTHESIZED: self._tts_span,
@@ -2241,8 +2328,49 @@ class Telemetry:
             agent=talking,
         )
         self._retain(session, span, identity.get(DEVICE_NAME))
+        # Through the fold that holds them rather than beside it, so
+        # the retention rule and the span event are written once: what
+        # the claim changes is only that there is now a trace to place
+        # them on.
+        for prompt in self._prompts.pop(session, []):
+            self._prompt_assembled(session, prompt)
         for at, waiting in self._pending.pop(session, []):
             self._span_event(session, waiting, at)
+
+    def _prompt_assembled(self, session: str, emission: Emission) -> None:
+        """One agent's assembled know-how half, retained and then said.
+
+        Retained because the event is emitted once per AGENT and the
+        attribute belongs on every turn that agent speaks, which is the
+        mechanism the provider context already uses; and still a span
+        event, because when the prompt was assembled is a fact about
+        this session's timeline and the span it lands on is where a
+        reader meets it.
+
+        Held where the session has no span yet, which is the ordinary
+        case rather than a race: the first agent is activated while the
+        runtime is being constructed, and the runtime is constructed
+        before the hello exchange. `_open_session` claims what is
+        waiting for it.
+        """
+        trace = self._sessions.get(session)
+        if trace is None:
+            held = self._prompts.setdefault(session, [])
+            held.append(emission)
+            while len(self._prompts) > PENDING_PROMPTS:
+                # Oldest first, the capture hold's own rule and for the
+                # same reason: a held event whose session never opened
+                # is a session that was refused, and the hold is a
+                # buffer rather than a record.
+                self._prompts.pop(next(iter(self._prompts)))
+            return
+        payload = emission.payload
+        agent = payload.get("agent")
+        talking = agent if isinstance(agent, str) else trace.agent
+        attributes = _prompt_attributes(payload)
+        if talking is not None and attributes:
+            trace.prompts[talking] = attributes
+        self._span_event(session, emission)
 
     def _retain(self, session: str, span: Any, name: Any = None) -> None:
         """Remember which trace this session's spans went out under, for
@@ -2325,6 +2453,11 @@ class Telemetry:
                 # The agent this turn is actually being spoken by, which
                 # a handover may have changed since the session opened.
                 **_provider_attributes(trace.providers, trace.agent),
+                # And what that agent's prompt was assembled out of,
+                # from the same retained state and read by the same
+                # agent: the event said it once, and every turn the
+                # agent speaks is a turn the prompt was behind.
+                **trace.prompts.get(trace.agent or "", {}),
             },
             # The stamp the emission carries, which for `turn_started`
             # is the instant the user stopped speaking rather than the
