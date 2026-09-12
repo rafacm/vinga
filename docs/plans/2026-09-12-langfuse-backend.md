@@ -243,7 +243,19 @@ environment at construction cannot turn missing credentials into a
 boot failure; every construction exception is contained as a
 sanitized upload failure, the same fixed sentences as any other. No
 SDK symbol escapes the module and it imports clean without the
-extra.
+extra. And the SDK's own voice is contained the way the OTel
+substrate contains its SDK (`telemetry.py:31-46`, the `_QUIETING`
+lease): before the client is constructed, a quieting lease is taken
+over the `langfuse` logger namespace and the HTTP stack it drives,
+held until the worker has genuinely stopped, including past a
+bounded-shutdown expiry (a late failure after the join must still
+land in a quieted logger, the exact case the OTel lease exists
+for), and restored safely across sequential lifespans. The
+fake-import unit seam cannot certify any of that, so the
+integration suite (which has the extra) gains a real-SDK
+late-failure sentinel case: a planted credential in the SDK's
+environment, an endpoint that fails after shutdown's bound, both
+streams and both log formats asserted clean.
 
 ### Configuration, credentials and refusals
 
@@ -369,14 +381,20 @@ variant case, and the workflow's per-image import checks.
 ## Tests
 
 - **Unit, uploader**: build-nothing cases (flag off, section
-  absent); all four refusals value-free and unchained; the no-op
-  path; staging hardlinks created on `finished` and consumed;
-  queue overflow drops with the `dropped` event; `no_trace`
-  downgrade on an evicted id; sentinel plants (a credential-shaped
-  `LANGFUSE_SECRET_KEY`, a hostile manifest field, a hostile
-  session id) asserted absent from both log formats, both events'
-  payloads and exception chains for every failure family; the SDK
-  faked at the import seam the way `_import_sdk` is.
+  absent); the three refusals value-free and unchained; the no-op
+  path; the staged pair created on `session_closed` and consumed;
+  queue overflow drops with the `dropped` event; the `no_trace`
+  failure on an evicted id; sentinel plants in the two untrusted
+  input families, a credential-shaped `LANGFUSE_SECRET_KEY` and a
+  hostile manifest field, asserted absent from both log formats,
+  both events' payloads and exception chains for every failure
+  family; the session id is not a sentinel, because both new events
+  deliberately carry `session` as a declared identifier, so its
+  assertion is positional instead: it appears only in the declared
+  identifier positions and stays bounded by `SessionId`, the
+  contract the generated events reference already documents; the
+  SDK faked at the import seam the way `_import_sdk` is, with the
+  real-SDK logging case living in the integration suite.
 - **Unit, telemetry**: `trace_of` present after close, evicted
   after 64 later sessions, absent when telemetry never saw the
   session; alias attributes on the wire tables' unit pins.
@@ -578,12 +596,22 @@ condensed but faithful; resolutions appended per amendment.
    past a bounded-shutdown expiry, restore across sequential
    lifespans, and add a real-SDK late-failure sentinel test.
 
+   *Resolution.* Adopted. The worker section takes the `_QUIETING`
+   lease shape over the `langfuse` namespace and its HTTP stack
+   before construction, holds it past a bounded-shutdown expiry and
+   across lifespans, and the integration suite gains the real-SDK
+   late-failure sentinel case.
+
 10. **P2: The proposed hostile-session-id leak assertion is
     impossible.** Both new events deliberately carry `session`, and
     the policy treats a bounded session id as a trusted identifier.
     Plant secret sentinels only in credential and manifest-content
     inputs; assert session ids appear only in declared identifier
     positions and stay bounded by `SessionId`.
+
+    *Resolution.* Adopted. Sentinels plant only in credentials and
+    manifest content; the session id gets a positional assertion
+    bounded by `SessionId` instead of an absence claim.
 
 11. **P2: Configuration does not state that both transports must
     target the same project.** OTLP env and `LANGFUSE_*` env are
