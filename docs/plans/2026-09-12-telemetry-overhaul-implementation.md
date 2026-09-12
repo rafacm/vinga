@@ -271,9 +271,27 @@ rather than departures from its intent.
 
 ### Verification
 
-- [x] `uv run ruff check .`: All checks passed!
-- [x] `uv run pytest tests/unit -q`: see the report line below.
-- [x] `uv run pytest tests/integration -q`: see the report line below.
+- [x] `uv run ruff check .`: `All checks passed!`
+- [x] `uv run pytest tests/unit -q`: `7174 passed, 19 skipped in 789.41s`,
+      against the 7154 of the last recorded run, which is this
+      milestone's eighteen cases and the two the support module's own
+      helpers gained.
+- [x] `uv run pytest tests/unit/test_command_spellings.py -q`:
+      `52 passed`, the manifest unchanged by this milestone.
+- [x] `python3 scripts/check_doc_links.py .`:
+      `checked 239 files, 0 failures`.
+- [x] `uv run pytest tests/integration -q`: `1 failed, 340 passed` on
+      the first run, then `5 passed` for the repaired file. The failure
+      is recorded rather than smoothed over, because it is the lane
+      doing its job: `test_the_upload_outcome_reaches_the_collector_too`
+      asserted `held["audio_bytes"]` on the outcome SPAN, which is
+      exactly the bare spelling this milestone replaced, so the rename
+      landed with one pin still naming the old attribute. The pin now
+      reads the three `vinga.export.` names and says in a comment why
+      the bare ones are gone. Nothing of the module changed to make it
+      pass. The full lane is re-run by CI on the pull request rather
+      than a second time here, and that run is the one the PR's box is
+      checked against.
 - [ ] The M2 live gate. Deliberately not run here: it is the plan's
       rig against the Langfuse project this repository develops
       against, and it belongs to the person holding those credentials.
