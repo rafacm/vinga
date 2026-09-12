@@ -86,8 +86,8 @@ ordering the rule needs (`host < network < internet`) has no
 counterpart in the tree today (the census confirmed nothing
 compares two levels; the current rule is one corner of the
 lattice), so it is introduced explicitly as a rank table beside the
-enum rather than implied by member order, and a test pins all nine
-boundary-times-reach cells of the rule.
+enum rather than implied by member order, and the Tests section's
+rule table pins every boundary-state-times-reach cell.
 
 ### Absent means no boundary; explicit `internet` is a declaration with teeth
 
