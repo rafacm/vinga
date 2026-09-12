@@ -793,3 +793,40 @@ Findings condensed but faithful; resolutions appended per amendment.
    index 1, tested on a resumed thread's second session), and
    `vinga.turn.id` stays beside it as the store-correlation
    identity.
+
+### Delta re-review
+
+External review: codex CLI 0.154.0, model gpt-5.6-terra, read-only
+sandbox, 2026-09-12, runtime 3m05s, reviewing commit 920f8d2c.
+Verdict as received: **ready after the P1/P2 amendments**. Findings
+condensed but faithful; resolutions appended per amendment.
+
+1. **P1: Whole-session export is not bounded.** The plan calls the
+   unpaginated projection safe because "a session's turn count is
+   bounded by the session", but `max_session_s` bounds elapsed time,
+   not turns, and no turn-count or transcript-byte limit exists, so
+   the database result, in-memory span collection, protobuf payload
+   and pre-timeout work are unbounded. Say how the exporter bounds
+   rows, bytes and spans per delivery and per job (cursor/batch
+   protocol, ordering, partial-delivery outcome, oversized-session
+   tests), or name a v1 session export limit with its
+   operator-visible failure reason.
+
+2. **P2: Retained-context ownership contradicts the proposed
+   telemetry interface.** The amendment captures the context in the
+   admitted job, but the span-shape section and module layout still
+   define `export_transcript(session, turns)` looking retention up
+   at export time and answering `False` on eviction, and the tests
+   expect both eviction-pressure success and an evicted-`False`
+   contract; these cannot all hold. Admission obtains the context;
+   `no_trace` is decided there; admitted jobs pass the opaque
+   context to `export_transcript(session, context, turns)`, whose
+   failure contract covers only stopped acceptance and delivery.
+
+3. **P2: The retention amendment incorrectly promises the capture
+   uploader the new guarantee.** `max_sessions + 64` protects live
+   contexts plus 64 closed ones; capture jobs do not pin
+   `_Exported` and resolve `trace_of` later on their worker, so a
+   blocked capture worker under `max_sessions > 64` can still lose
+   older contexts. Remove the inheritance claim or pin the context
+   in capture jobs with its own test.
