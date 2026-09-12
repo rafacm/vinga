@@ -3,7 +3,8 @@
 A turn trace is worth opening because of what is INSIDE it, and what is
 inside it is four stages nobody watched while they ran: an ASR call, a
 generation per round, a synthesis stream per sentence, and the paced
-interval the frames actually went out over. Every one of them is
+interval the frames actually went out over. A tool call the model asked
+for is the fifth, built the same way. Every one of them is
 assembled retrospectively out of the event that ended it and the
 duration the pipeline had already measured, so what these cases check is
 three things at once.
@@ -26,7 +27,7 @@ with the catalog's own event names rather than with a second set of
 words.
 
 The fold's DEFAULT is not re-proved here (`test_telemetry.py` owns it);
-what is proved is that the twelve names with a shape of their own do not
+what is proved is that the thirteen names with a shape of their own do not
 also fold, and that the events beside them still do.
 """
 
@@ -58,6 +59,7 @@ from tests.support.telemetry import (
     Clock,
     Identity,
     abandon_transcription,
+    call_tool,
     close_session,
     drop_frames,
     exporting,
@@ -88,6 +90,7 @@ from vinga_server.telemetry import (
     LLM_SPAN,
     PLAYBACK_SPAN,
     SESSION_ID_ALIAS,
+    TOOL_SPAN,
     TTS_SPAN,
     TURN_SPAN,
 )
@@ -537,6 +540,155 @@ def test_a_retry_stays_a_span_event_on_the_turn() -> None:
     # And the round that eventually answered carries only its own mark,
     # so the retry is not counted twice in two places.
     assert [event.name for event in named(spans, LLM_SPAN).events] == ["first_token"]
+
+
+# --- the tool call, which stopped being a span event ------------------
+#
+# The backend this surface exists for ingests no span events at all,
+# which is what made an MCP call invisible on a trace that recorded
+# everything around it. So a `tool_call` builds a span of its own,
+# retrospectively out of `duration_ms` the way every stage span is
+# built, and the span event goes away rather than staying beside it:
+# two carriers of one fact on one trace is the locality rule broken,
+# and a backend that DOES ingest span events would show every call
+# twice.
+
+
+def test_a_tool_call_is_a_span_inside_the_turn_and_no_span_event() -> None:
+    """Both halves in one case, because the second is what makes the
+    first a replacement rather than an addition."""
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.25)
+    ended = call_tool(events, "builtin", name="remember", duration_s=0.25)
+    finish_reply(events)
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    tool, turn = named(spans, TOOL_SPAN), named(spans, TURN_SPAN)
+    assert tool.parent.span_id == turn.context.span_id
+    assert tool.end_time - tool.start_time == 250 * MS
+    assert tool.end_time == int((ended + telemetry._offset) * 1e9)
+    assert [event.name for event in turn.events] == []
+
+
+def test_a_tool_call_says_it_is_a_tool_call_in_the_conventions_words() -> None:
+    """`execute_tool` is the GenAI conventions' own name for exactly
+    this, so the span spells the fact in their vocabulary first and the
+    live gate records what a backend does with it."""
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.25)
+    call_tool(events, "builtin", name="remember")
+    finish_reply(events)
+    close_session(events)
+
+    tool = named(finished(telemetry, memory), TOOL_SPAN)
+    assert tool.attributes["gen_ai.operation.name"] == "execute_tool"
+    # And nothing else wearing a foreign prefix: a key a backend reads
+    # by name is a key this repository has to have chosen deliberately.
+    assert {
+        key for key in tool.attributes if not key.startswith("vinga.")
+    } == {"gen_ai.operation.name", "gen_ai.tool.name", *GROUPING}
+
+
+def test_a_builtin_names_its_tool_and_an_mcp_call_names_its_entry() -> None:
+    """The naming policy the three variants make structural, carried
+    onto the span by one table: a builtin's name is this server's own
+    word and is the tool's name the conventions have a key for, and the
+    entry is the operator's configured word for a far side whose own
+    tool name never reaches this surface.
+
+    One fold for all three, because `tool_call` is one declared event
+    name and the fold skips a table key the payload does not carry.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.25)
+    call_tool(events, "builtin", name="remember")
+    clock.tick(0.25)
+    call_tool(events, "mcp", name="search", is_error=True)
+    finish_reply(events)
+    close_session(events)
+
+    builtin, mcp = spans_of(TOOL_SPAN, finished(telemetry, memory))
+    assert builtin.attributes["gen_ai.tool.name"] == "remember"
+    assert builtin.attributes["vinga.tool.source"] == "builtin"
+    assert builtin.attributes["vinga.tool.is_error"] is False
+    assert "vinga.tool.entry" not in builtin.attributes
+    assert mcp.attributes["vinga.tool.entry"] == "search"
+    assert mcp.attributes["vinga.tool.source"] == "mcp"
+    assert mcp.attributes["vinga.tool.is_error"] is True
+    assert "gen_ai.tool.name" not in mcp.attributes
+
+
+def test_a_call_this_surface_may_not_name_carries_neither_name() -> None:
+    """A device tool's name is the board's vocabulary and an unknown
+    one is whatever the model invented, so the variant that may name
+    neither carries neither, and the namespace it reached into is the
+    whole of what it says."""
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.25)
+    call_tool(events, "unnamed")
+    finish_reply(events)
+    close_session(events)
+
+    tool = named(finished(telemetry, memory), TOOL_SPAN)
+    assert tool.attributes["vinga.tool.source"] == "device"
+    assert "gen_ai.tool.name" not in tool.attributes
+    assert "vinga.tool.entry" not in tool.attributes
+
+
+def test_a_tool_call_carries_the_session_context_every_span_carries() -> None:
+    """The retained identity, so a call is findable by the session and
+    the board it happened on, and the agent and thread it was asked
+    for by.
+
+    And NOT the provider entries: a tool call ran on no pipeline stage,
+    so what the session opened against says nothing about it.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.25)
+    call_tool(events, "builtin", name="remember")
+    finish_reply(events)
+    close_session(events)
+
+    tool = named(finished(telemetry, memory), TOOL_SPAN)
+    assert tool.attributes["vinga.session.id"] == SESSION
+    assert tool.attributes["vinga.device.id"] == DEVICE
+    assert tool.attributes["vinga.agent"] == AGENT
+    assert tool.attributes["vinga.conversation.id"] == CONVERSATION
+    assert [key for key in tool.attributes if key.startswith("vinga.provider.")] == []
+
+
+def test_a_tool_call_with_no_turn_open_stays_a_span_event() -> None:
+    """The fallback every stage fold keeps: a call that arrives with no
+    turn to hang inside is not dropped, it lands on the session as the
+    event it is."""
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+    open_session(events)
+
+    clock.tick(0.25)
+    call_tool(events, "builtin", name="remember")
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    assert spans_of(TOOL_SPAN, spans) == []
+    assert [event.name for event in named(spans, "session").events] == ["tool_call"]
 
 
 # --- TTS, and the name that had to be argued for ----------------------
