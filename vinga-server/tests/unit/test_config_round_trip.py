@@ -127,7 +127,7 @@ def _pipeline(client: TestClient) -> None:
         ("vad", "silero"),
     ):
         client.put(f"/providers/{stage}/{name}", json={"type": "mock"})
-    for name in ("weather", "home"):
+    for name in ("weather", "home", "search"):
         client.put(f"/mcp-servers/{name}", json={"transport": "stdio", "command": "uvx"})
     client.put("/prompt-fragments/household", json={"text": "The bins go out on Tuesday."})
     client.put(
