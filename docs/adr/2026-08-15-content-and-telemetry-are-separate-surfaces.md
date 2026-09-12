@@ -141,6 +141,55 @@ In one sentence: content may leave this deployment only through a
 switch an operator sets for that purpose, and the metadata surface
 stays metadata whatever that switch says.
 
+### Amendment: the export ladder is policy (2026-09-12)
+
+#495 added the second content escalation, a closed session's turns
+onto the trace it was exported under, and that made the shape above
+a ladder rather than an exception. Recorded here as policy rather
+than as one issue's choice, so the third and fourth escalations are
+decided against a rule instead of relitigating the first:
+
+- **Three tiers, and what each may carry.** **Metadata** leaves with
+  telemetry at all, is the prerequisite rather than a peer, and is
+  never content. **Conversation content** leaves per class behind a
+  flag of its own (`export_audio`, `export_transcripts`), each
+  defaulting off and implied by nothing above it. **Wire fidelity**,
+  the assembled prompt as a model received it and the per-request
+  audio as a provider heard it, is deliberately unspecced: each is a
+  decision of its own when something needs it. The tier table itself
+  lives in
+  [the observability map](../architecture/observability-surfaces.md#the-export-ladder),
+  where this record keeps its tables.
+- **Export follows retention.** What the local surface holds is what
+  may leave, never more: the capture directory's files for the first
+  escalation and the conversation store's rows for the second. A
+  content export is therefore bounded by the switches that decided
+  what to keep, and a deployment that stores no text exports none.
+- **Erasure does not propagate, and every flag's prose says so.**
+  What has left is the receiving deployment's, governed by its
+  policy; deleting on this side reaches this side. That is the same
+  answer the audio escalation gave and it is now the ladder's, so a
+  future tier inherits the obligation to say it rather than
+  rediscovering it.
+- **Content escalations ride content taps, and the fold stays
+  content-free.** A content flag reaches the local artifact (the
+  capture's files, the store's rows) and never the emit-to-span fold,
+  which continues to carry only what `events/catalog.py` declares. A
+  fold-time content tap is rejected policy rather than a deferral. A
+  transcript observation is a content tap's delivery vehicle, not the
+  fold gaining content.
+- **The promise side is rule 5 of the enumerated-baseline record.**
+  [That record](2026-09-12-the-local-baseline-is-enumerated.md) says
+  the boundary bounds defaults rather than capabilities, and that a
+  deliberately enabled content export is lawful when it rides a
+  content surface, declares its destination, defaults off and refuses
+  under a local boundary. This ladder is the other half of that
+  sentence: which channel content may ride and at what fidelity,
+  which is this record's subject and not that one's.
+
+In one sentence: content leaves by class, behind a flag of its own,
+bounded by what was kept and never through the metadata fold.
+
 ## Consequences
 
 - The no-leak contract on the events becomes enforceable by
