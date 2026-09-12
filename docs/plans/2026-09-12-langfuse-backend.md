@@ -127,13 +127,26 @@ than discovering it in review:
   trace (`telemetry.py:1616-1617`), and nothing anywhere retains a
   trace id.
 
-So the uploader attaches where the files become final:
-`CaptureStore.finished()` (`capture.py:516-523`), the one real
-"the triplet is finished" seam, which today only prunes. The store
-gains an optional `on_finished` callback (injected, compared
-`is not None` per the honest-seams lens), wired by composition in
-`app.py` when the uploader exists. The uploader receives the
-session id and the triplet paths.
+A fourth fact sharpens the seam further, from the review round: a
+capture also finishes early, at `max_session_s`
+(`capture.py:278-314`) and on a write failure (`capture.py:246-265`),
+both reaching `CaptureStore.finished()` while the device session
+carries on, so `finished()` alone is not a session-close signal
+either. The design therefore separates the two facts it conflated.
+`CaptureStore` keeps `finished()` as what it is (the files are
+final) and gains a session-level `session_closed(session)` call,
+invoked from the device session's own close ordering in
+`device/session.py`, immediately after `self._capture_audio.close()`
+(step 5), which is the first moment both facts hold: the session is
+over and its triplet, early-finished or just-closed, is final. That
+call is where the uploader's injected hook runs (compared
+`is not None` per the honest-seams lens, wired by composition in
+`app.py` when the uploader exists), receiving the session id and
+the file paths. An early-finished capture is therefore staged and
+enqueued only when its session closes, never at the moment its
+recording stopped, and the tests drive both early paths
+(duration-limit, write failure) to prove no upload starts before
+the session's close.
 
 The trace id crosses from telemetry through a new, deliberately
 narrow read surface: `Telemetry` records (session id, trace id) when
@@ -408,6 +421,13 @@ condensed but faithful; resolutions appended per amendment.
    session-level finalization call after `SessionCapture.close()`;
    keep early-finished paths but do not enqueue until the device
    session closes; test duration-limit and write-failure captures
+   upload never-early.
+
+   *Resolution.* Adopted. The seam section now separates the two
+   facts: `finished()` stays files-final, a new
+   `CaptureStore.session_closed(session)` runs from the device
+   session's close ordering after `SessionCapture.close()`, the
+   uploader hooks that, and both early-finish paths are tested to
    upload never-early.
 
 3. **P1: Media-to-trace correlation is assumed before it is
