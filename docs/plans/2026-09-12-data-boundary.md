@@ -120,7 +120,13 @@ Truthiness dies with the booleans: every decision site becomes a
 rank comparison or an identity test against enum members, and the
 census's list of boolean-arithmetic sites (`egress.py:62, 67, 69,
 76, 102, 109, 141, 169-171`, `views.py:546`, `manager.py:781`) is
-the checklist the implementation walks.
+the checklist the implementation walks. The MCP caller's guard
+(`manager.py:781`, today `if config.server.local_only:`) goes away
+entirely rather than learning rank: `check_mcp_server` is invoked
+for EVERY referenced entry with the optional boundary passed
+through, and `boundary.py` alone decides that an absent boundary
+permits anything and a declared one requires a declaration, which
+keeps the no-caller-decides property literal.
 
 ### Features keep a fixed `internet` reach; the LAN-collector assertion is named follow-up
 
@@ -286,9 +292,23 @@ the plans corpus, `CHANGELOG.md`) keep their spellings. The
   entry key on a knowing type refused in any mode; undeclared
   fails closed under `host` AND under `network`; `reach: internet`
   on an entry accepted and refused under both narrower boundaries.
+- No-leak for the new enum fields: a credential-shaped invalid
+  value planted in `server.data_boundary`, a provider `reach` and
+  an MCP `reach`, driven through the real file load, the write
+  path and the stored read as each applies, with both output
+  streams, the final exception and its whole chain asserted clean
+  of the value; the closed-set class-marking case uses a
+  credential-shaped invalid marking for the same reason.
 - The three old-spelling refusals above, each value-free and
   unchained, the provider-entry one proving the options layer
   refuses rather than swallows.
+- Feature call sites, one per feature: telemetry, capture upload
+  and transcript export each driven under a `network` boundary and
+  proven to refuse before any import, constructor or thread, and
+  to build with the boundary absent; plus a composition-root case
+  proving `ServerConfig.data_boundary` reaches all three builders
+  and the provider path unchanged (a caller left passing a boolean
+  or a default would go red here, which is the point).
 - The respelled sentences: the moved full-equality one-home pins,
   the fragment pins (`"reach:"` replacing `'"egress: false"'`),
   value-freedom held (a planted base_url absent from every
@@ -425,6 +445,12 @@ per amendment.
    optional boundary through, and let `boundary.py` alone decide
    what an absent or declared boundary means.
 
+   *Resolution.* Adopted. The resolve-ladder section now states
+   the guard's deletion: `check_mcp_server` runs for every
+   referenced entry with the boundary passed through, and the rule
+   module alone interprets absence, keeping no-caller-decides
+   literal.
+
 6. **P2: The feature tests do not exercise the new `network`
    call-site plumbing.** The nine-cell table drives only provider
    construction; a caller still passing a boolean or the default
@@ -434,6 +460,12 @@ per amendment.
    boundary permits construction, plus a composition-root test
    that `data_boundary` reaches each builder unchanged.
 
+   *Resolution.* Adopted. The Tests section gains the per-feature
+   call-site cases (refuse under `network` before imports,
+   constructors or threads; build with the boundary absent) and
+   the composition-root plumbing case covering all three builders
+   and the provider path.
+
 7. **P2: New enum-valued inputs lack explicit no-leak tests.**
    Invalid values for the three new fields fail in pydantic
    validation, whose exception data can retain the input. Plant a
@@ -441,6 +473,11 @@ per amendment.
    write and stored-read surfaces, assert both streams and the
    exception chain clean, and use a credential-shaped invalid
    class marking for the closed-set case.
+
+   *Resolution.* Adopted. The Tests section gains the per-field
+   credential-shaped invalid-value cases across file, write and
+   stored-read surfaces with streams and chains asserted clean,
+   and the closed-set case's marking is credential-shaped.
 
 8. **P2: The cutover inventory omits live surfaces still
    publishing the old vocabulary.** Root README's `egress: false`
