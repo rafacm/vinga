@@ -28,12 +28,14 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
-from tests.support.config_cli import runner
+from tests.support.config_cli import answering, runner
 from tests.support.configs import DEVICE_MAC
 from vinga_server import logs
 from vinga_server.config.models import DatabaseConfig
+from vinga_server.config.responses import Erasure
 from vinga_server.conversations.records import TurnRecord
 from vinga_server.conversations.store import ConversationStore
 
@@ -477,3 +479,116 @@ def test_a_refused_erasure_says_nothing_it_was_handed(
     assert SENTINEL not in by_day[2]
     assert "before has to be a calendar day" in by_day[2]
     assert SENTINEL not in _leaked(caplog)
+
+
+# What the two filtered verbs ask for
+#
+# An empty `--device` is the scripted spelling of a mistake, an unset
+# variable expanding to nothing, and it is the one this pair of verbs
+# fails in the worst direction on: read as no filter, it turns the
+# narrowest question the flag can ask into the widest one, and in front
+# of a purge that is an erasure nobody asked for.
+
+
+def sent(run) -> list[httpx.Request]:
+    """Every request these verbs send, answered in the shape each one
+    expects.
+
+    Read at the transport seam rather than off the query builder,
+    because a filter that never reached the wire would pass an
+    inspection of the function that assembled it. The erasure's counts
+    are derived from the model so the answer is the shape the document
+    declares.
+    """
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        answer: dict[str, Any] = (
+            {name: 0 for name in Erasure.model_fields}
+            if request.method == "DELETE"
+            else {"items": [], "next_cursor": None}
+        )
+        seen.append(request)
+        return httpx.Response(
+            200, json=answer, headers={"content-type": "application/json"}
+        )
+
+    answering(run, handler)
+    return seen
+
+
+def test_the_device_filter_travels_exactly_as_it_was_written(
+    run, capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both directions of the same rule, on both verbs that carry the
+    flag: an absent flag is an argument the request does not carry, so
+    the API's own defaults are the defaults; a flag that was written is
+    an argument that travels, and an empty value is written.
+    """
+    seen = sent(run)
+    through_a_pipe(monkeypatch)
+    capsys.readouterr()
+
+    assert run("session", "list") == 0
+    assert dict(seen[-1].url.params) == {}
+
+    assert run("session", "list", "--device", "") == 0
+    assert dict(seen[-1].url.params) == {"device": ""}
+
+    assert run("session", "purge", "--before", "2026-08-10") == 0
+    assert dict(seen[-1].url.params) == {"before": "2026-08-10"}
+
+    assert run("session", "purge", "--device", "", "--before", "2026-08-10") == 0
+    assert dict(seen[-1].url.params) == {"device": "", "before": "2026-08-10"}
+
+
+def test_an_explicitly_empty_device_cannot_widen_the_listing(run, capsys) -> None:
+    """The value that travelled meets the API's own MAC refusal, which
+    is the whole point of sending it: a client that dropped it would
+    answer with every board's sessions instead.
+
+    Two boards planted, and the assertion is that neither one's session
+    comes back.
+    """
+    recorded("alpha")
+    recorded("beta", SECOND, device=OTHER_DEVICE)
+
+    code, printed, err = out(run, capsys, "session", "list", "--device", "")
+
+    assert (code, printed) == (1, "")
+    assert "device has to be a MAC address" in err
+
+
+def test_an_explicitly_empty_device_cannot_widen_a_purge(
+    run, capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same mistake in front of the erasure, which is where its
+    direction matters: a dropped selector leaves `--before` alone with
+    the set, so a purge meant for one board takes that day from every
+    board, and there is no undo.
+
+    Three sessions planted, two of them old and on two boards, and the
+    assertion is that the refusal took none of them.
+    """
+    recorded("old-here", started_at="2026-08-01T10:00:00+00:00")
+    recorded(
+        "old-there",
+        SECOND,
+        device=OTHER_DEVICE,
+        started_at="2026-08-01T10:00:00+00:00",
+    )
+    recorded(
+        "new-here",
+        "3c4d5e6f708192a3b4c5d6e7f8091a2b",
+        started_at="2026-08-20T10:00:00+00:00",
+    )
+    through_a_pipe(monkeypatch)
+
+    code, printed, err = out(
+        run, capsys, "session", "purge", "--device", "", "--before", "2026-08-10"
+    )
+
+    assert (code, printed) == (1, "")
+    assert "device has to be a MAC address" in err
+    left = out(run, capsys, "session", "list")[1]
+    assert "old-here" in left and "old-there" in left and "new-here" in left

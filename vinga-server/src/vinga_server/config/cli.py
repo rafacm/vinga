@@ -5846,12 +5846,17 @@ def _session_path(args: Invocation) -> str:
 def _session_filters(args: Invocation) -> dict[str, str]:
     """What narrows a listing. Only what was written: an absent flag is
     an argument the request does not carry, so the API's own defaults
-    are the defaults, said once."""
-    return {
-        name: value
-        for name, value in (("device", args.mac), ("limit", args.limit))
-        if value
-    }
+    are the defaults, said once.
+
+    The device is kept apart from the limit on one point, the rule
+    `_metric_window` states: an explicitly empty value still travels, so
+    `--device ''` meets the API's MAC refusal rather than reading as no
+    filter and widening the listing to every board.
+    """
+    filters = {"limit": args.limit} if args.limit else {}
+    if args.mac is not None:
+        filters["device"] = args.mac
+    return filters
 
 
 def _purge_selectors(args: Invocation) -> dict[str, str]:
@@ -5859,16 +5864,21 @@ def _purge_selectors(args: Invocation) -> dict[str, str]:
     refusal for naming none of them is the API's: a purge that erased
     everything because its arguments were lost on the way is exactly
     what the endpoint refuses, and a second copy of that rule here would
-    be a second sentence for one decision."""
-    return {
+    be a second sentence for one decision.
+
+    The device travels when it was written, empty included, and here
+    that rule is load-bearing rather than tidy: a dropped `--device ''`
+    leaves `--before` alone with the set, so an erasure meant for one
+    board takes that day from every board, and there is no undo.
+    """
+    selectors = {
         name: value
-        for name, value in (
-            ("session", args.session),
-            ("device", args.mac),
-            ("before", args.before),
-        )
+        for name, value in (("session", args.session), ("before", args.before))
         if value
     }
+    if args.mac is not None:
+        selectors["device"] = args.mac
+    return selectors
 
 
 LIST_SESSIONS = Act(
@@ -8128,7 +8138,11 @@ def _filtered_sessions(row: Command) -> Callable[..., None]:
                 api_url,
                 force,
                 no_input,
-                mac=device or "",
+                # Passed through rather than defaulted, because absent
+                # and explicitly empty are different questions here:
+                # `--device ''` travels and meets the API's own MAC
+                # refusal instead of quietly widening to every board.
+                mac=device,
                 limit=limit or "",
             )
         )
@@ -8274,7 +8288,11 @@ def _selected_sessions(row: Command) -> Callable[..., None]:
                 force,
                 no_input,
                 session=session or "",
-                mac=device or "",
+                # Passed through rather than defaulted, for the reason
+                # `_purge_selectors` states: an empty value that vanished
+                # here would leave `--before` alone with the set and
+                # widen an erasure to every board.
+                mac=device,
                 before=before or "",
             )
         )
