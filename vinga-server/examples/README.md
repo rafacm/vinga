@@ -101,6 +101,7 @@ the reference it displaces.
 | `vad-silero.yaml` | `providers.vad`, the endpointer |
 | `mcp-server-stdio.yaml` | `mcp_servers`, a spawned command |
 | `mcp-server-streamable-http.yaml` | `mcp_servers`, an HTTP endpoint |
+| `mcp-server-search.yaml` | `mcp_servers`, web search tuned for speech |
 | `prompt-fragment.yaml` | `prompt_fragments`, one shared block of prompt text |
 | `agent-defaults.yaml` | `agent_defaults`, the singleton |
 | `agent.yaml` | `agents`, one agent |

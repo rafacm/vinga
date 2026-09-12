@@ -1,0 +1,99 @@
+# Web search, reached over HTTP and granted one tool. Search is the
+# capability an operator is most likely to want and the one most likely
+# to go wrong out loud, so this fragment is as much about the tuning as
+# about the fields: the defaults that suit a chat window with a screen
+# are close to the worst answer a speaker can give.
+#
+#   vinga mcp-server set search -f examples/mcp-server-search.yaml
+#
+# Hosted rather than spawned, deliberately. The published image carries
+# no npx, uvx, node or mcp-proxy, so a container cannot spawn a stdio
+# search server however keyless that server is; a stdio entry needs an
+# image carrying its runtime. An endpoint is the shape that works
+# wherever this server runs.
+
+transport: streamable_http
+
+# One vendor's hosted endpoint, and nothing here depends on it being
+# that one: any search server speaking this transport is configured the
+# same way, and what is worth copying below is the tuning rather than
+# the address.
+url: https://mcp.tavily.com/mcp/
+
+# A value of $NAME is read from that environment variable at startup,
+# and a secret-bearing key must use that form. The encrypted
+# alternative addresses the same slot by its dotted path:
+#
+#   vinga mcp-server secret set search headers.Authorization
+#
+# The whole value has to be the reference, which is a wart worth
+# knowing about here because most hosted servers authenticate with a
+# bearer token. `Bearer $SEARCH_MCP_AUTHORIZATION` is refused, so the
+# word Bearer has to live inside the variable's own value, and whatever
+# manages that credential composes the finished header. The sharp edge
+# is what happens when it is composed twice: a value that already
+# carries the prefix becomes `Bearer Bearer ...`, and the far side
+# answers 401, which reads exactly like a wrong key. Tracked as #504.
+headers:
+  Authorization: $SEARCH_MCP_AUTHORIZATION
+
+# A search server reaches the open web by definition, so there is no
+# smaller reach to declare honestly. Under a server.data_boundary of
+# host or network this entry is refused at startup, which is that
+# boundary doing its job rather than a problem to work around: a
+# deployment that promised to stay on its own network cannot also look
+# things up on the internet.
+reach: internet
+
+# The ceiling is how much silence is bearable, not how long the vendor
+# might reasonably take: the device plays nothing while a tool runs. A
+# healthy search lands in 1.5 to 2 seconds, so ten is an upper bound
+# that ends a hang, not a budget to spend.
+tool_timeout_s: 10
+
+# The tuning. Most of what makes search usable by voice is written
+# here rather than configured above, because the failure is not an
+# error: it is an agent that answers correctly, at length, with a list
+# of sources nobody can see.
+instructions: |
+  Use the search tool only for what you cannot answer from what you
+  already know: news, prices, schedules, results, anything that changed
+  recently or is specific to today. Answer everything else directly.
+
+  Do not use it for the time or the weather. The tools that answer
+  those are faster and more accurate, and if you have none of them, say
+  you do not know instead of searching.
+
+  Ask for few results and the shallow search depth. A spoken answer
+  uses one or two facts and pays for the rest in silence.
+
+  Give the answer in one or two sentences, the way you would say it to
+  someone standing in the room. Never read a URL out loud and never
+  list your sources; name who said something only when who said it is
+  the point.
+
+# A server ships text about its own tools through its handshake, and a
+# search vendor's is written for a client with a screen: it asks for
+# citations and links, which is the opposite of everything above. Off
+# here on purpose rather than by default, so that the choice is visible
+# to whoever reads this file next. The prompts channel stays off for
+# the same reason.
+use_server_instructions: false
+
+# Granting it is the other half of the job, and the tool list is where
+# that grant does its work. A search vendor publishes extract, crawl
+# and map beside the search tool, and an agent that crawls a site
+# because somebody asked it a question is a slow surprise. Name the one
+# tool rather than the server:
+#
+#   mcp:
+#     - server: search
+#       tools:
+#         - tavily_search
+#
+# Withholding is the same key seen from the other side, and it is as
+# ordinary as granting: a bedtime storyteller, or an agent a child
+# talks to, keeps its own mcp list with this entry left out, or
+# `mcp: []` to reach no tools at all. examples/agent-defaults.yaml is
+# where the deployment-wide grant lives and where that choice is
+# explained.
