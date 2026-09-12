@@ -928,6 +928,49 @@ configuration key, never stored, never rendered back, with the OTLP
 half's own attribution spelled out beside them because that one IS read
 by its SDK.
 
+### The confirmation round: the trail reaches the trace
+
+Two P2s, and the first is one this milestone should have caught itself.
+
+**The outcome events were exported nowhere.** Both name a session, both
+were in the exporter's `APPROVED` table by derivation, and the
+derivation was the whole of what made them look wired: the server fold
+answered `capture_started` and dropped every other server event, so
+neither `capture_uploaded` nor `capture_upload_failed` ever left the
+process. A reader with the trace and no audio still had no way to learn
+that any was meant to be there, which is the exact gap the vocabulary
+was declared to close. The plan's own words for it are "they are the
+field-test trail", and the trail stopped at this host's log.
+
+They arrive after the span map has let the session go, for the reason
+the whole milestone exists: the upload runs on a worker of its own once
+the session is over. So the fold answers them from the retention rather
+than from the span map, and the parentage that needs has one home now
+(`_continuing`), because two writers want it: this and the media
+reference.
+
+**A span rather than a span event**, which is a finding rather than a
+preference: M1 established that this backend ingests no span events at
+all, so an outcome recorded as one would be invisible in the one place a
+reader goes looking for it. As a span it is an observation beside the
+session's own, carrying the declaration's own fields plus the session
+under both names so the query a reader makes returns it beside the
+turns. An outcome for a session this exporter never saw writes nothing:
+the boot sweep's `abandoned` is about a session a PREVIOUS process ran,
+so there is no trace of this one's to put it on.
+
+Five cases, all watched red against the fold as it was: four unit pins
+and a wire assertion decoded from protobuf a collector received.
+
+**And the fragment said eight reasons.** It was written when the closed
+set had eight members and was not corrected when `unreferenced` made it
+nine, so the one surface an operator reads before upgrading
+under-reported what the server can say. The other counts in the tree
+were checked and are right: the catalog's note says "eight reasons are
+an attempt's own", which is the split rather than the total, and M2's
+record says "the plan's eight members", which is what the plan said on
+the day.
+
 ### The live walkthrough
 
 Self-hosted Langfuse again, the M1 stack on project
@@ -1071,9 +1114,9 @@ decodable. Nothing here asserts a pixel.
 - `uv run ruff check .`: All checks passed!
 - `uv run mypy` (strict over `src/vinga_server/events`): Success: no
   issues found in 5 source files
-- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 6995 passed, 19
-  skipped (6907 in M2, plus this milestone's eighty-eight)
-- `uv run pytest tests/integration -q`: 324 passed, against Postgres
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 6999 passed, 19
+  skipped (6907 in M2, plus this milestone's ninety-two)
+- `uv run pytest tests/integration -q`: 325 passed, against Postgres
   from the committed compose file on `VINGA_DB_PORT=55673`
 - `python3 scripts/fold_changelog.py check .`: checked 1 fragments, 0
   failures
