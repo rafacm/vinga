@@ -566,6 +566,48 @@ already carries the model identity as `gen_ai.request.model`, and an
 issue that needs the vendor's own body is a decision of its own with
 its own credential review.
 
+### What M5 stages, where it is wired, and what one observation is
+
+The plan's first footprint for M5 named `telemetry.py`, composition and
+the new module, and left out the two files where the work actually
+happens. Named now, because a milestone that does not know where it
+edits has not been designed:
+
+- **`runtime/pipeline.py`** holds both LLM call shapes and is where
+  staging happens: the reply tool loop, which calls
+  `providers.llm.stream` through the first-token watchdog, and recap
+  summarization, which calls it directly with `RECAP_INSTRUCTION`. Both
+  are staged, each labelled with its purpose, because both are things a
+  model was given and a reader asking "what did it see" wants the recap
+  round as much as the reply.
+- **`device/session.py`** is where the stage is handed over at the
+  close, beside the transcript export's own hand-over, and where the
+  runtime factory passes the collaborator in.
+- **Composition** injects the module and registers its shutdown before
+  telemetry detaches, the ordering `transcript_export.py` already
+  documents as the composition's half of the contract.
+
+**One observation is one logical round, not one provider attempt**, and
+that is a finding rather than a preference. The first-token watchdog
+retries by calling `make_stream()` a second time, and `make_stream` is
+a `functools.partial` over `system`, `working`, `tools` and `choice`
+fixed before the first attempt: the retry therefore sends
+byte-identical content. Two observations would be the same bytes twice,
+and the fact a reader actually wants about a retry (that there was one,
+and how long the first attempt waited) is already on the trace as
+`llm_retry`.
+
+The paths the tests walk, each with its stated expectation: an ordinary
+single-round reply, a reply with tool follow-up rounds, a recap, a
+watchdog retry (one observation, not two), a provider failure mid-round
+(the round is staged, because the model was given it whatever came
+back), a barge-in cancelling a reply, an ordinary close, and a shutdown
+while a delivery is in flight.
+
+The two outcome events join `AFTER_THE_CLOSE`, so they land as spans on
+the closed session's trace like the capture and transcript outcomes do,
+rather than as span events the backend ingests nowhere.
+
 ### The M5 module is its own, and the seam is one more bounded call
 
 `transcript_export.py` reads the conversation store post hoc. The LLM
@@ -597,7 +639,7 @@ a stated type, not a store row and not a provider object.
 | M3 | `events/catalog.py`, `events/assembly.py`, `runtime/pipeline.py`, `telemetry.py` | nothing | that a voice and an ear report usage the way a generator does |
 | M4a | `telemetry.py` (retention generalized), `capture_upload.py` | nothing | that a post-close job's trace context can age out under it |
 | M4b | `config/models.py`, `boundary.py`'s callers | nothing | that a collector on the LAN is reachable without declaring the internet |
-| M5 | `telemetry.py` (one method, one seam type), composition | `llm_input_export.py` | the sentence in "The M5 module is its own" above |
+| M5 | `telemetry.py` (one method, one seam type), `runtime/pipeline.py` (staging at both call shapes), `device/session.py` (hand-over, factory), composition | `llm_input_export.py` | the sentence in "The M5 module is its own" above |
 
 No milestone adds a layer that forwards its arguments, and no
 milestone's only description of itself is "beside an existing module".
@@ -708,9 +750,11 @@ What is new per milestone:
   bound's drop accounting, driven three ways: one oversized request
   against the per-request ceiling, several differently sized requests
   against the per-session budget, and more rounds than the entry cap,
-  each asserting which reason the event reports; the drain and shutdown cases in the shape
-  `transcript_export.py`'s already take; a case that the flag off
-  stages nothing at all rather than staging and discarding.
+  each asserting which reason the event reports; the drain and shutdown
+  cases in the shape `transcript_export.py`'s already take; a case that
+  the flag off stages nothing at all rather than staging and
+  discarding; and one case per path in the list above, the watchdog
+  retry included, which asserts one observation rather than two.
 
 Every new claim is written to fail first and watched failing, and the
 commit body says the check was done. Where a proof is about ordering
@@ -828,10 +872,13 @@ the manifest with its own generator when stale.
   request per round under a stated bound, `Telemetry.export_llm_input`
   and `LlmInputRound` on the #495 bounded seam, delivery post-close as
   an observation rendered through `langfuse.observation.input`, two
-  outcome events with a closed reason set, the sentinel suite, and the
-  observability map's ninth surface. Design footprint: the new module
-  with its depth sentence, one method and one seam type on
-  `Telemetry`.
+  outcome events with a closed reason set joining `AFTER_THE_CLOSE`,
+  the sentinel suite, and the observability map's ninth surface.
+  Wiring: staging at both call shapes in `runtime/pipeline.py`, the
+  hand-over and the factory argument in `device/session.py`, and the
+  shutdown registered before telemetry detaches in composition. Design
+  footprint: the new module with its depth sentence, one method and one
+  seam type on `Telemetry`.
 
 The issue's own M4 box is ticked when M4a and M4b have both merged.
 #500 lands between M3 and M4a, #496 between M4b and M5, and #501
@@ -1027,6 +1074,16 @@ Findings condensed but faithful; resolutions appended per amendment.
    observation is a logical round or a physical attempt, covering the
    ordinary, tool-follow-up, recap, retry, failed, cancelled, close and
    shutdown paths.
+
+   *Resolution.* Adopted in full, with the retry question decided by
+   reading the code rather than by preference: `make_stream` is a
+   `functools.partial` over arguments fixed before the first attempt,
+   so a retry re-sends byte-identical content and two observations
+   would be the same bytes twice. One observation is one logical round;
+   the retry is already on the trace as `llm_retry`. Both call shapes
+   are staged, the recap included, and the wiring files are named in
+   the footprint and the milestone. The two outcome events join
+   `AFTER_THE_CLOSE`. The path list is in the tests.
 
 10. **P2: backend pricing is mutable external state with no deployment
     or upgrade story.** Entering model definitions through a live MCP
