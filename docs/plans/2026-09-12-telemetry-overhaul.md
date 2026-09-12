@@ -333,6 +333,38 @@ refusal's semantics in the same diff as a retention bound, which is
 the "behavior changes sit alone in review" rule broken for the
 convenience of a checklist.
 
+### "Every span" is an enumeration, and the name rides the pinned context
+
+`vinga.device.name` on every span is not one table entry. Spans are
+built in more places than the attribute tables reach, and the ones
+outside them are exactly the ones a reader of a closed session's trace
+looks at. The enumeration, which the milestone owns and the tests
+assert one by one:
+
+| Constructor | How it gets the name today |
+| --- | --- |
+| `_open_session` | `SESSION_ATTRIBUTES` |
+| `_open_turn` and the stage spans | the retained identity (`CONTEXT_ATTRIBUTES`) |
+| the tool span M2 adds | the retained identity |
+| `reference_media` | nothing: it builds its attributes by hand |
+| `_after_the_close` | nothing: `_event_attributes` off the payload |
+| `_transcript_spans` | nothing: it builds its attributes by hand |
+
+So the name joins the retained identity rather than any one table, and
+the post-close writers read it from the pinned context they already
+hold. That is the locality answer as well as the correctness one: a
+post-close writer that went back to the configuration for a board's
+name would be reading a value that may have been renamed since the
+session ran, and the store's own session row deliberately keeps the
+name as it was written.
+
+Two details the tests pin. The name is the bounded copy the
+`session_open` payload carries, so nothing unsanitized reaches a span
+by this route. And a board nobody has named contributes NO attribute
+rather than a null one, which is the rule `_attributes` already keeps
+for an absent value and the difference between "this board has no name"
+and "this span forgot to say".
+
 ### The post-close seam is addressed by a pinned context, not by a session
 
 The pinning M4a promises cannot be a field added to a capture job. The
@@ -612,7 +644,10 @@ What is new per milestone:
   behind; a case that a `tool_call`
   produces a span and NO span event; a case that an unnamed call
   carries neither `tool` nor `entry`; a case pinning the after-close
-  attribute names, written to fail against the bare names.
+  attribute names, written to fail against the bare names; one case per
+  span constructor in the enumeration asserting the device name, plus
+  the unnamed-board case asserting the attribute is absent rather than
+  null.
 - **M3**: a catalog-drift case for the new `characters` field and its
   rendering; an emit-site case that the character count is the
   sentence's own length; usage attribute cases on both spans; a case
@@ -711,8 +746,10 @@ the manifest with its own generator when stale.
   export-ladder section rewritten to match, since that is where this
   record keeps its tables. Documentation only. Design footprint: no
   module moves. Documentation footprint as listed above.
-- [ ] **M2: trace completeness**. `vinga.device.name` on every span
-  from the retained session context; a `tool_call` fold building a
+- [ ] **M2: trace completeness**. `vinga.device.name` on every span in
+  the enumeration above, carried by the retained identity and read from
+  the pinned context by the three post-close writers that build their
+  attributes by hand; a `tool_call` fold building a
   child span of the turn span with `gen_ai.operation.name`, replacing
   the span event; prompt sources retained per agent and stamped
   flattened on every turn span with the total beside them; an
@@ -898,6 +935,17 @@ Findings condensed but faithful; resolutions appended per amendment.
    nullable name in the retained context so post-close writers do not
    re-read mutable configuration, and assert absence rather than a null
    attribute for an unnamed device.
+
+   *Resolution.* Adopted in full. The plan now carries the enumeration
+   as a table of span constructors and how each one gets the name,
+   which makes the three that build their attributes by hand
+   (`reference_media`, `_after_the_close`, `_transcript_spans`) visible
+   rather than implied. The name joins the retained identity and the
+   post-close writers read it from the pinned context, for the
+   correctness reason the review gives and for a second one: a board
+   renamed after a session ran must not change what that session's
+   spans say. The tests are one case per constructor plus the
+   absent-not-null case.
 
 7. **P2: TTS characters are classified in the wrong usage direction.**
    The plan says a voice is given text and then maps that consumed text
