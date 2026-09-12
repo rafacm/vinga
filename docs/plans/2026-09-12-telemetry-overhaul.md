@@ -301,6 +301,44 @@ which is the same shape of second spelling for one reader that
 instead of it. The gate decides, and the implementation doc records
 the answer with the observation JSON that shows it.
 
+### Model definitions are the operator's, and M3 ships the procedure
+
+Entering a price through the Langfuse MCP changes the project this
+session develops against. It does not change an operator's backend, and
+the review is right that without more, a deployment can emit correct
+usage while every cost reads zero and nothing says why.
+
+**Pricing is operator-managed, and the server never writes it.** That
+is the same answer every other question about this backend gets: vinga
+owns no retention there, holds no admin credential for it, and the OTLP
+path carries none. A server that provisioned model definitions at boot
+would be a deployment mutating a third-party system it was given
+telemetry credentials for, which is a larger claim on an operator's
+backend than anything else in this project makes.
+
+**So M3 ships the procedure rather than the effect.** A new section of
+the server README, beside the logging and capture sections that are
+already the operator-facing homes for this material, carrying:
+
+- one row per model vinga can report usage for, with its match
+  pattern, its unit, its price, the published source that price came
+  from, and the date it was read (a price is a fact with an as-of, and
+  a table without one goes quietly stale);
+- the request that enters one, and the note that the backend's own
+  settings page does the same thing;
+- what a deployment sees with none of them entered: usage present, cost
+  zero, which is correct rather than broken;
+- the models that get no price and why, so an operator does not go
+  looking for a rate that was deliberately not entered.
+
+**The acceptance criterion is qualified accordingly.** The issue asks
+that the per-session per-stage cost query return nonzero rows for
+`asr`, `llm` and `tts_stream`. It does, against a backend with the
+documented definitions entered, and the implementation doc records the
+query, the answer and the definitions it ran against. Claiming it
+unconditionally would be claiming something about every operator's
+backend from one project's settings.
+
 ### "A real list price" admits a unit conversion and nothing else
 
 The decision says model definitions are entered only where a real list
@@ -795,9 +833,9 @@ is straight-line logic one run is the honest proof and more is noise.
   the tool span in its description of what the surface holds.
   Fragment `changelog.d/502-trace-completeness.md` (### Added).
 - **M3**: `docs/reference/events.md` through its generator (the new
-  field), the observability map's row, and the implementation doc's
-  price table. Fragment `changelog.d/502-usage-accounting.md`
-  (### Added).
+  field), the observability map's row, and a new operator section of
+  `vinga-server/README.md` carrying the pricing procedure and its
+  table. Fragment `changelog.d/502-usage-accounting.md` (### Added).
 - **M4a**: none beyond the implementation doc; the mechanism is
   internal. No fragment: nothing observable changes.
 - **M4b**: `docs/reference/server-config.md` through its generator,
@@ -842,11 +880,13 @@ the manifest with its own generator when stale.
   `SentenceSynthesized` and passed at the emit site;
   `gen_ai.usage.input_characters` on the TTS span and
   `gen_ai.usage.input_seconds` on the ASR span; Langfuse model
-  definitions entered through the MCP for every model with a real list
-  price, with the prices and their sources quoted in the
-  implementation doc and the priceless ones named. Acceptance: the
-  per-session per-stage cost query returns nonzero rows for `asr`,
-  `llm` and `tts_stream`. Design footprint: one declared field through
+  definitions for every model with a real list price, entered through
+  the MCP in this project's own backend and DOCUMENTED as an operator
+  procedure in the server README (match pattern, unit, price, source,
+  as-of date, the request that enters one, and what a backend without
+  them shows). Acceptance, qualified as settled above: against a
+  backend with those definitions entered, the per-session per-stage
+  cost query returns nonzero rows for `asr`, `llm` and `tts_stream`. Design footprint: one declared field through
   the catalog's own machinery, two table entries.
 - [ ] **M4a: post-close retention and pinning**. Turn-level trace
   context captured at each turn's open into its session's retained
@@ -1095,6 +1135,17 @@ Findings condensed but faithful; resolutions appended per amendment.
     document a repeatable procedure and qualify the acceptance
     criterion, or name the provisioning mechanism, its credentials, its
     idempotency and why a server startup may mutate a backend.
+
+   *Resolution.* Adopted: operator-managed, and the server never writes
+   a price. A deployment that provisioned definitions at boot would be
+   mutating a third-party system on the strength of telemetry
+   credentials, which is a larger claim on an operator's backend than
+   anything else here makes. M3 ships the procedure instead, as a
+   server README section with a row per model (pattern, unit, price,
+   source, as-of date), the request that enters one, and what a backend
+   without them shows: usage present, cost zero, correct rather than
+   broken. The acceptance criterion is qualified to a backend with the
+   documented definitions entered.
 
 11. **P2: M4a incorrectly claims its capture fix is not observable.**
     Its purpose is to stop admitted capture jobs from becoming
