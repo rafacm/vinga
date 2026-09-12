@@ -94,8 +94,10 @@ rule table pins every boundary-state-times-reach cell.
 `server.data_boundary: Reach | None = None`. The two states the
 first draft conflated are different promises, and the review round
 put it back: ABSENT means no boundary is declared, today's
-unrestricted behavior, under which nothing refuses and an
-undeclared endpoint-dependent entry boots exactly as it does now.
+unrestricted behavior, under which boundary-based refusal is
+disarmed and an undeclared endpoint-dependent entry boots exactly
+as it does now (absent or invalid CLASS markings stay programming
+errors refused in every mode, as today).
 EXPLICIT `internet` is a declared boundary: every stated reach
 fits inside it, but the fail-closed half of the rule is now armed,
 so a `None`-marked provider or MCP entry whose operator declared
@@ -244,7 +246,10 @@ translation preserves the mechanism's own distinction: a provider
 `egress: false` becomes `reach: host` (its refusal always said
 "off this host") and `egress: true` becomes `reach: internet`; an
 MCP `egress: false` becomes `reach: network` (its wording is "off
-this network") and `egress: true` becomes `reach: internet`. New
+this network") and `egress: true` becomes `reach: internet`. An explicitly stored
+`"egress": null` (preserved by `exclude_unset=True`) migrates by
+REMOVING the key, the same meaning as absence with only input
+history lost, so no row retains the forbidden spelling. New
 writes still reject the legacy key, so this is a one-time
 stored-data translation, never an alias. The FILE key gets no
 migration, deliberately: a file is the operator's to edit, and the
@@ -302,8 +307,10 @@ listed by file. Historical records keep their spellings. The
   respelled (`reach = Reach.INTERNET` for the two cloud types,
   `Reach.HOST` for the local four and the mocks, `None` for the
   three base-url types).
-- `config/provider_options.py`: `egress` as a reserved refused
-  name; `reach` joins the non-option field list.
+- `config/provider_options.py`: its non-option-field vocabulary
+  respells for `reach`; it reserves nothing, because
+  `ProviderConfig` alone rejects the legacy key (finding 3's
+  resolution).
 - `providers/world.py`, `tools/mcp/manager.py`, `telemetry.py`,
   `capture_upload.py`, `transcript_export.py`, `app.py`,
   `config/views.py`, `config/reload.py`: call sites respelled, the
@@ -345,13 +352,17 @@ listed by file. Historical records keep their spellings. The
   the fragment pins (`"reach:"` replacing `'"egress: false"'`),
   value-freedom held (a planted base_url absent from every
   sentence).
-- MCP: the guard fires under `network` as under `host`; the
-  undeclared and declared refusals respelled.
+- MCP: the rank rule proven at its own entry point, acceptance
+  and rejection cells (`host`-at-`host` and `network`-at-`network`
+  build; `network`-at-`host` and `internet`-at-`network` refuse),
+  undeclared behavior for absent versus declared boundaries, and
+  the respelled refusal sentences.
 - The existing identity pins (`.egress is False` and kin) move to
   enum-member identity; the closed-set case (`reach = 0` on a
   class) keeps its shape.
 - The domain migration: pre-upgrade rows carrying every legacy
-  shape (provider `egress: false` and `true`, MCP both, absent)
+  shape (provider `egress: false`, `true` and explicit `null`,
+  MCP all three, and absent)
   upgraded and read back with the translated `reach` values, in
   the `test_domain_upgrade.py` house pattern; a new write carrying
   `egress` still refused after the migration exists.
@@ -565,6 +576,10 @@ appended per amendment.
    pre-upgrade-null rows to the migration test on both entry
    kinds.
 
+   *Resolution.* Adopted; the migration section states the
+   null-removal rule and the test enumerates all three stored
+   shapes per entry kind.
+
 2. **P2: The provider-options ownership is contradictory.** The
    old-spellings section gives rejection to the `ProviderConfig`
    validator while Module layout still says `provider_options.py`
@@ -572,6 +587,9 @@ appended per amendment.
    `ProviderConfig` alone rejects the legacy key before extras are
    retained; `provider_options.py` only updates its
    non-option-field vocabulary for `reach`.
+
+   *Resolution.* Adopted; the Module layout line is corrected to
+   reserve nothing and point at the validator.
 
 3. **P2: MCP tests do not prove the new tier for MCP entries.**
    The rank table drives only provider builds, and
@@ -581,14 +599,26 @@ appended per amendment.
    network-at-network, network-at-host at minimum) plus undeclared
    behavior for absent versus declared boundaries.
 
+   *Resolution.* Adopted; the MCP test bullet now carries the
+   acceptance and rejection cells at the MCP entry point and the
+   two undeclared states.
+
 4. **P3: The absent-boundary description contradicts the retained
    class-marking invariant.** "Nothing refuses" overreaches: an
    absent boundary disables boundary-based refusal, while absent
    or invalid class markings stay programming errors refused in
    every mode. Narrow the sentence.
 
+   *Resolution.* Adopted; the sentence now scopes the disarming
+   to boundary-based refusal with the class-marking invariant
+   restated beside it.
+
 5. **P3: The final grep rule is not mechanically specified.** A
    substring search matches "regression" everywhere, so "any other
    hit is a missed site" cannot be applied. Require word-boundary
    token matching for `egress` and `local_only`, then list the
    remaining historical lines explicitly.
+
+   *Resolution.* Adopted; the allowlist specifies word-boundary
+   token matching, drops "regression" as a category (it can no
+   longer match), and the remainder is listed by file and line.
