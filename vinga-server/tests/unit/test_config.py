@@ -219,6 +219,36 @@ def test_the_old_metrics_key_is_refused_at_boot() -> None:
     assert caught.value.__context__ is None
 
 
+def test_the_old_attachment_key_is_refused_at_boot() -> None:
+    # `attach_captures` was the audio export's name before #495, and the
+    # rename carries no alias and no shim, per the pre-release stance and
+    # the issue's own decision: a file still saying it fails at boot
+    # through the section's `extra="forbid"`, exactly as a misspelling
+    # would, which is what tells its operator the switch was renamed
+    # rather than silently leaving the audio where it was.
+    #
+    # The refusal names the SECTION and not the dead key, which is this
+    # repository's unrecognized-key rule rather than pydantic's: an
+    # unknown key's own spelling is input, so it is replaced by the
+    # parent it was written under. What an operator gets is the section
+    # to look at, never what they wrote in it, and nothing chained
+    # behind it holding either.
+    with pytest.raises(ConfigError) as caught:
+        load_config_from_data(
+            {
+                "server": {
+                    "telemetry": {"enabled": True, "attach_captures": PARSER_SENTINEL}
+                }
+            }
+        )
+
+    refusal = str(caught.value)
+    assert f"server.telemetry: {UNRECOGNIZED_KEY_REFUSED}" in refusal
+    assert PARSER_SENTINEL not in refusal
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
 def test_the_example_config_leaves_the_conversation_store_off() -> None:
     # Commented out in the example, so a copied file records nothing
     # until an operator uncomments the block and says enabled.
