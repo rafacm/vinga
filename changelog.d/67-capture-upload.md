@@ -27,5 +27,9 @@
   trace, no audio and no way to learn any was meant to be there.
   `capture_uploaded` carries the two sizes and how long it took, and
   never a URL or an identifier the far side minted; `capture_upload_failed`
-  carries a reason from a closed set of eight, and never the far side's
-  words.
+  carries a reason from a closed set of nine, and never the far side's
+  words. A recording whose bytes landed with nothing pointing at them is
+  one of the nine rather than a success with an asterisk. Both events go
+  to the trace as well as to the log, as an observation beside the
+  session's own, so the reader who has the trace and no audio can see
+  why.
