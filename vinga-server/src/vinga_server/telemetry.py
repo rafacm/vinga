@@ -999,6 +999,33 @@ PLAYBACK_ATTRIBUTES = {
     "conversation": "vinga.conversation.id",
 }
 
+# What an outcome that arrived after the close says on its span.
+#
+# A table of its own rather than the shared `_event_attributes`, which
+# is what these four used before and which deliberately keeps the
+# catalog's own field names. That helper is the span EVENTS', where the
+# event name is the subject and the fields beside it are plainly its
+# own; on a SPAN the fields are all there is, and a bare `elapsed_ms`
+# next to `vinga.turn.speech_ms` is an attribute belonging to nothing
+# that no prefix query returns. So the respelling is here and the span
+# events keep what they have.
+#
+# One table for all four outcomes rather than one per pair, and the
+# same attribute name for `elapsed_ms` on both: how long a delivery
+# took means the same thing whether a recording or a page of
+# transcripts went, and what tells the two apart is the span's own
+# name. `reason` and `turns` are here as well as the three the plan
+# named, because this fold iterates the TABLE: a key left out of it is
+# not exported at all, and dropping the failure's reason would cost the
+# one fact a failed export's reader is there for.
+AFTER_THE_CLOSE_ATTRIBUTES = {
+    "elapsed_ms": "vinga.export.elapsed_ms",
+    "audio_bytes": "vinga.export.audio_bytes",
+    "manifest_bytes": "vinga.export.manifest_bytes",
+    "turns": "vinga.export.turns",
+    "reason": "vinga.export.reason",
+}
+
 # How many sessions may have a `capture_started` waiting for their
 # `session_open`. The capture's event is a server-channel one and beats
 # the session's open by a handshake, so it is held and folded when the
@@ -2271,6 +2298,13 @@ class Telemetry:
         this trace has ended, so what continues it is the parent's
         identity rather than a span this process still holds.
 
+        Under `vinga.` names, off a table of this path's own. The
+        attributes here are the whole of what the span says, so a bare
+        field name would belong to nothing and would answer no prefix
+        query a reader makes; the span events keep the catalog's own
+        names, where the event name is the subject standing in front of
+        them.
+
         Nothing at all for a session this exporter never saw, or one
         that has aged out: the boot sweep's `abandoned` is about a
         session a PREVIOUS process ran, so there is no trace of this
@@ -2290,7 +2324,7 @@ class Telemetry:
             attributes={
                 **dict.fromkeys(SESSION_ID_NAMES, session),
                 **_named(exported),
-                **_event_attributes(emission.payload),
+                **_attributes(emission.payload, AFTER_THE_CLOSE_ATTRIBUTES),
             },
             start_time=at,
         )
