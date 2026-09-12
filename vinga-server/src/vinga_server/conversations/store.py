@@ -743,11 +743,19 @@ class Close:
     duration_s: float | None
     reason: str | None
     dropped: int
-    # The handle the producer kept, settled by the writer when the
-    # close's own durable transaction commits, which is the instant the
-    # barrier above becomes true. Carried on the queue item the way a
-    # turn's is, rather than looked up later, because what settles it is
-    # this item reaching the writer.
+    # The handle the producer kept, settled by the writer once BOTH of
+    # this marker's transactions are over and whatever the second one
+    # lost has been counted, which is the instant the barrier above
+    # becomes true. Not between the two halves: a close settled there
+    # would answer while this session's own queued events were still in
+    # front of a lock they can wait on and can still fail, and a reader
+    # woken by the barrier would be reading past records nothing had
+    # resolved. What it ANSWERS is the durable half's outcome, because
+    # the events half is the lossy class and a transaction that failed
+    # there is dropped and counted rather than still on its way.
+    #
+    # Carried on the queue item the way a turn's is, rather than looked
+    # up later, because what settles it is this item reaching the writer.
     acknowledgement: Acknowledgement
 
 
@@ -1411,13 +1419,25 @@ class ConversationStore:
         # a waiter woken by an acknowledgement reads the thread's row
         # next, and it may never find that row still claiming to be
         # whole. A later turn must never imply an earlier one landed.
-        self._settle(batch, landed=outcome is _Durable.COMMITTED, closing=closing)
+        self._settle(batch, landed=outcome is _Durable.COMMITTED)
         lost = self._events(session_id, batch)
         if closing is not None and lost:
             # The close row was written before this half ran, and the
             # writer is about to forget this session, so a loss here has
             # nowhere else to go.
             self._count_late_loss(session_id, lost)
+        if closing is not None:
+            # LAST, which is the whole of what the barrier promises. A
+            # marker is two transactions and the events one runs after
+            # the durable one, so a close settled between them answered
+            # `True` while this session's own queued events were still
+            # in front of a lock they can wait on and can still fail: a
+            # reader woken by the barrier would have been reading past
+            # records nothing had resolved yet. Nothing is added to what
+            # the answer MEANS, and the events half is the lossy class,
+            # so a transaction that failed there is dropped and counted
+            # rather than still in flight.
+            closing.acknowledgement.settle(outcome is _Durable.COMMITTED)
         # Committed or rolled back, this batch is written off either way.
         self._release(len(batch.events))
         # Never for a session the tombstone just removed: recreating its
@@ -1656,12 +1676,14 @@ class ConversationStore:
         each. A checkpoint answers the same way a turn does, because
         what its caller asked was the same question.
 
-        A close answers here too, and from exactly the same outcome,
-        which is what makes the barrier true rather than approximately
-        true: the close row is written by the transaction this is
-        reporting on, so a `True` here is that transaction committed,
-        and everything this writer had for this session went in front of
-        it on one queue (#495).
+        A close answers from the same outcome, and the CALLER decides
+        when (#495). On the ordinary path it is settled after the events
+        half and the late-loss accounting, because the barrier it is
+        promises that every earlier record of the queue has been
+        resolved and those records are resolved there. `closing` is
+        passed here only on the tombstone path, where there is no events
+        half to wait for: the session was deleted out from under the
+        conversation, so everything it was holding is answered at once.
         """
         for item in [*batch.turns, *batch.milestones]:
             item.acknowledgement.settle(landed)
