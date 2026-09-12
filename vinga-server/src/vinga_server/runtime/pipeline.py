@@ -3002,7 +3002,7 @@ class PipelineRuntime:
             lambda exc, elapsed: self._provider_failed("tts", tts, exc, elapsed),
             lambda elapsed_ms: self._turn.first_audio(index, elapsed_ms),
             lambda first_chunk_ms, stream_ms: self._sentence_synthesized(
-                index, tts, first_chunk_ms, stream_ms
+                index, len(sentence), tts, first_chunk_ms, stream_ms
             ),
             lambda synthesis: self._speak_and_record(synthesis, resampler, leg, spoken),
         )
@@ -3010,6 +3010,7 @@ class PipelineRuntime:
     def _sentence_synthesized(
         self,
         index: int,
+        characters: int,
         tts: TtsProvider,
         first_chunk_ms: int | None,
         stream_ms: int,
@@ -3027,6 +3028,12 @@ class PipelineRuntime:
         The voice is the one the caller synthesized through, which is
         also the one it reports a failure against, so both halves of the
         TTS stage name the same entry.
+
+        `characters` is the size of the sentence this stream spoke,
+        measured by the caller that holds it: a voice is billed on the
+        text it is given, and the length is the one thing about that
+        text a record here may carry. The measurement crosses as a
+        number, so the sentence itself stops at this method's caller.
         """
         self._events.emit(
             lambda: assembly.sentence_synthesized(
@@ -3034,6 +3041,7 @@ class PipelineRuntime:
                 self._conversation,
                 tts,
                 index,
+                characters,
                 first_chunk_ms,
                 stream_ms,
             )

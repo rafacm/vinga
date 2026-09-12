@@ -45,6 +45,7 @@ from vinga_server.events.catalog import (
     LlmRound,
     McpToolCall,
     ProviderFailed,
+    SentenceSynthesized,
     UnnamedToolCall,
     Variant,
 )
@@ -183,7 +184,7 @@ def test_no_builder_names_an_entry_without_naming_its_type(provider: Stamped) ->
         assembly.llm_rounded("poet", THREAD, "llm", provider, 2, 3, 0.5, 140, 12, 220),
         assembly.provider_failure("poet", THREAD, "llm", provider, ConnectionRefusedError(), 0.5),
         assembly.heard("poet", THREAD, provider, 1.5, 40, None, None),
-        assembly.sentence_synthesized("poet", THREAD, provider, 0, 90, 400),
+        assembly.sentence_synthesized("poet", THREAD, provider, 0, 17, 90, 400),
     ]
 
     for one in built:
@@ -361,6 +362,33 @@ def test_a_call_this_surface_may_not_name_names_only_its_namespace(
         named=Nothing(""),
         duration_s=Real(0.25),
         outcome=ToolOutcome.ANSWERED,
+    )
+
+
+def test_a_synthesized_sentence_carries_its_length_and_no_word_of_it() -> None:
+    """The size a voice is billed on, whole, and nothing beside it a
+    reader could reassemble the sentence from.
+
+    A count is what this surface may carry about text it handled, which
+    is the rule the withheld-sentence variants already keep: the number
+    says what the synthesis cost, and the shape below is the proof that
+    it is the only thing about the sentence the event knows. The builder
+    is handed the length rather than the string, so there is no text
+    here to leave out.
+    """
+    assert assembly.sentence_synthesized(
+        "poet", THREAD, CLOUD, 0, 17, 90, 400
+    ) == SentenceSynthesized(
+        agent=Identifier("poet"),
+        conversation=ConversationId(THREAD),
+        index=Count(0),
+        characters=Count(17),
+        stream_ms=Whole(400),
+        first_chunk_ms=Whole(90),
+        provider=Identifier("cloud"),
+        type=Identifier("openai"),
+        host=Identifier("api.example.com"),
+        model=Identifier("gpt-4o-mini"),
     )
 
 

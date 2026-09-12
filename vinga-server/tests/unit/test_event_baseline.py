@@ -597,6 +597,7 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             "SentenceSynthesized",
             (
                 "agent",
+                "characters",
                 "conversation",
                 "device",
                 "event",

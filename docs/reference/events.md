@@ -827,6 +827,7 @@ session %s: sentence %d synthesized in %d ms
 | `agent` | `IDENTIFIER` | yes | no |  |  |
 | `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `index` | `COUNT` | yes | no |  | Which synthesis of this reply this was, counted from zero in the order the requests were made rather than in the order they answered. |
+| `characters` | `COUNT` | yes | no |  | How long the sentence handed to the voice was, and never a byte of it. It is what a voice is billed on, so it is what makes this stage cost something a reader can add up; a count is also the only thing about spoken text this surface may carry, which is the rule the withheld-sentence variants keep for the same reason. |
 | `stream_ms` | `INT` | yes | no |  | The whole stream's lifetime, request to last chunk. It INCLUDES playback backpressure: the buffer holds one chunk, so a paced consumer is what decides when the provider is asked for the next one, and pure synthesis time is unobservable for a streaming voice. |
 | `first_chunk_ms` | `INT` | no | no |  | The provider's latency to its first audio chunk, measured producer-side: the first chunk always finds buffer room, so this one number is backpressure-free. Absent where the stream produced no audio at all. |
 | `provider` | `IDENTIFIER` | no | no |  |  |

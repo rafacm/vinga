@@ -471,6 +471,7 @@ def sentence_synthesized(
     conversation: str,
     provider: object,
     index: int,
+    characters: int,
     first_chunk_ms: int | None,
     stream_ms: int,
 ) -> Variant:
@@ -481,12 +482,18 @@ def sentence_synthesized(
     produced none at all, and the second is how long the whole stream
     lived, which for a paced consumer includes the playback it was
     feeding.
+
+    `characters` is the size of the sentence the voice was handed and
+    is a LENGTH rather than the text: the caller measures its own
+    string and passes the number, so no sentence reaches this module at
+    all.
     """
     entry, type_, host, model = _entry_fields(provider)
     return SentenceSynthesized(
         agent=Identifier(agent),
         conversation=ConversationId(conversation),
         index=Count(index),
+        characters=Count(characters),
         stream_ms=Whole(stream_ms),
         first_chunk_ms=ABSENT if first_chunk_ms is None else Whole(first_chunk_ms),
         provider=entry,

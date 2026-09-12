@@ -514,6 +514,7 @@ def synthesize(
     index: int = 0,
     stream_ms: int = 900,
     first_chunk_ms: int | None = 120,
+    characters: int = 24,
     agent: str = AGENT,
     identity: Identity | None = None,
     unbuilt: bool = False,
@@ -522,14 +523,15 @@ def synthesize(
     own assembly for the same reason `hear` is.
 
     The voice defaults to the one this agent opened against, and the two
-    overrides mean what they mean there.
+    overrides mean what they mean there. `characters` is how long the
+    sentence was, which is what the voice is billed on.
     """
     provider = FakeProvider(
         identity=None if unbuilt else (identity or entry_of(agent, "tts"))
     )
     return events.emit(
         lambda: assembly.sentence_synthesized(
-            agent, CONVERSATION, provider, index, first_chunk_ms, stream_ms
+            agent, CONVERSATION, provider, index, characters, first_chunk_ms, stream_ms
         )
     )
 
