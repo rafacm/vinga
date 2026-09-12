@@ -1105,3 +1105,72 @@ async def test_a_resumed_conversation_exports_only_this_sessions_turns(
 
     assert [turn.heard for turn in telemetry.turns] == ["the second session"]
     assert [turn.index for turn in telemetry.turns] == [1]
+
+
+@pytest.mark.asyncio
+async def test_a_shutdown_interrupts_a_job_between_its_pages(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other half of the interrupt, and the one the acknowledgement
+    wait's own slices do not cover.
+
+    A long session is many page reads and many bounded calls, and only
+    the call in flight is uninterruptible. A loop that read on would
+    spend a shutdown's whole budget on a backlog of them, blow through
+    the join, and say what became of the job after the event tap and
+    telemetry had already been torn down, which is the one moment it has
+    to speak in.
+
+    So: one page held open, a shutdown begun behind it, the page
+    released, and nothing after it read or delivered.
+    """
+    held = threading.Event()
+    entered = threading.Event()
+    blocking = Exported({SESSION: A_CONTEXT})
+    delivering = blocking.export_transcript
+
+    def hold(session: str, context: Any, turns: Any) -> Delivery:
+        answer = delivering(session, context, turns)
+        entered.set()
+        held.wait(10.0)
+        return answer
+
+    blocking.export_transcript = hold  # type: ignore[method-assign]
+    exporter, _, read = an_exporter(
+        {SESSION: [a_row(index) for index in range(1, 7)]},
+        batch_turns=2,
+        telemetry=blocking,
+        shutdown_timeout_s=5.0,
+    )
+
+    exporter.session_closed(SESSION, settled())
+    assert entered.wait(10.0), "the worker never reached a delivery"
+    stopping = asyncio.ensure_future(exporter.shutdown())
+    await asyncio.sleep(0.1)
+    held.set()
+    await stopping
+
+    assert len(blocking.pages) == 1, "a page was delivered after the stop flag"
+    assert len(read.calls) == 1, "a page was read after the stop flag"
+    assert reasons(caplog) == [TranscriptExportFailure.DROPPED], (
+        "the in-flight job was not accounted for before the shutdown returned"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_job_that_finishes_on_its_last_page_is_not_dropped(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other side of that check, so the interrupt cannot be bought
+    by reporting a failure for a job that really finished: the stop is
+    read AFTER the page that ends the session, never before it."""
+    caplog.set_level(logging.INFO)
+    exporter, telemetry, _ = an_exporter(
+        {SESSION: [a_row(1), a_row(2), a_row(3)]}, batch_turns=2
+    )
+
+    exporter.session_closed(SESSION, settled())
+    await drained(exporter, lambda: exports(caplog))
+
+    assert reasons(caplog) == []
+    assert len(telemetry.turns) == 3
