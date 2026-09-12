@@ -484,3 +484,97 @@ promise-side half this completes, and the amendment cites it.
   acknowledgement on an existing seam, one method each on
   `Telemetry` and `Reads`. Documentation footprint as listed, each
   page through its owner.
+
+## Plan review round
+
+External review: codex CLI 0.154.0, model gpt-5.6-sol, read-only
+sandbox, 2026-09-12, runtime 6m11s, reviewing commit 38c2550c.
+Verdict as received: **not ready** (the delivery design cannot
+satisfy the required unreachable-backend outcome, and the plan
+reserved permission to weaken a settled acceptance criterion).
+Findings condensed but faithful; resolutions appended per amendment.
+
+1. **P1: The OTLP queue cannot report the required
+   backend-unreachable failure.** The issue requires a warning event
+   when the backend is unreachable; the plan treats
+   `BatchSpanProcessor` enqueueing as delivery, `reference_media`
+   itself returns `True` at `span.end()` while saturation drops
+   silently, the closed set holds no unreachable member, and the
+   blackholed-endpoint integration case is missing. Define a
+   delivery mechanism producing a bounded per-job result from OTLP
+   export (queue rejection and collector failure included) without
+   blocking the session path, add the closed reason and the
+   blackhole test, or change the transport design.
+
+2. **P1: The plan explicitly permits violating the settled
+   input/output requirement.** The risk section says a failed
+   rendering moves content to metadata and amends the acceptance
+   criterion on the PR; the issue's decisions are not open to
+   amendment by this plan. Make the live walkthrough a milestone
+   gate: if either field does not render, stop and redesign, never
+   substitute or amend.
+
+3. **P2: The proposed shared session-turn query is not the query
+   the API currently owns.** The route also validates session
+   existence, parses cursor and limit, applies `id > cursor`,
+   fetches `limit + 1`, builds pagination metadata and nests tool
+   invocations; the planned `session_turns(connection, session)`
+   cannot express that contract, and the exporter needs none of it.
+   Specify a narrow row-read primitive with an explicit projection
+   and ordering; the API keeps its validation, pagination and
+   nesting; the exporter receives only the authorized transcript
+   fields.
+
+4. **P2: The legs representation is not a valid OpenTelemetry
+   attribute as written.** The column is an array of objects;
+   span attributes take primitives or homogeneous primitive arrays,
+   and the existing post-close writes are string-valued. Define an
+   exact wire encoding (canonical JSON string after allowlisting
+   `agent` and `text`), verify the rendering live, pin both the
+   protobuf value and the rendered result.
+
+5. **P2: Shutdown can tear down the worker's dependencies while a
+   30-second job is still running.** A job may wait 30 s on the
+   store acknowledgement, telemetry's shutdown allowance is five
+   seconds, exit-stack unwinding can stop the store and telemetry
+   while the daemon still waits, and an in-flight job is not queued
+   so the stated `dropped` accounting does not cover it. State exact
+   teardown ordering and an interruptible worker protocol; both
+   queued and in-flight waits terminate within the join budget and
+   emit their final outcome while the store, tap and telemetry are
+   still available; test shutdown during an acknowledgement wait.
+
+6. **P2: Fixed trace retention cannot support the configurable
+   session/backlog bound.** `max_sessions` has no upper bound,
+   telemetry retains 64 contexts oldest-evicted, so above 64 live
+   sessions, or with completed sessions queued ahead of a slow
+   worker, healthy exports become `no_trace`; the drain test never
+   requires a value above 64. Pin retained context per admitted job
+   or derive a proved retention bound from configured capacity;
+   test capacity above 64 under eviction pressure.
+
+7. **P2: Reusing `Acknowledgement` contradicts its existing
+   contract.** The class states repeatedly that it speaks for one
+   turn and nothing else; the plan uses a close acknowledgement as
+   proof that every earlier session record resolved, without naming
+   the contract revision. Introduce a documented close/barrier
+   semantics or deliberately generalize the class and its
+   docstrings; tests must distinguish close-transaction failure
+   from earlier turns dropped and counted.
+
+8. **P2: The no-leak tests do not seed the newly read out-of-scope
+   content.** The shared read includes complete rows and nested tool
+   invocations while the sentinels seed only `heard` and `reply`,
+   so tool arguments, tool results and leg token halves are
+   unproven. Use a narrow projection and plant distinct
+   credential-shaped sentinels in every excluded content-bearing
+   field the read path can encounter, asserted absent from
+   attributes, protobuf requests, both log formats, event payloads
+   and exception chains.
+
+9. **P2: A global database row ID is not the requested turn
+   index.** `turns.id` is a database-wide identity and timeline
+   cursor, so a later session begins at an arbitrary number. Export
+   an explicit session-local ordinal named as an index with its
+   base convention stated and tested; keep the row id separately
+   for store correlation.
