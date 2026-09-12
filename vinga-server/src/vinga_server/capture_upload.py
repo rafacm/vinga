@@ -114,16 +114,21 @@ NEEDS_THE_LANGFUSE_EXTRA = (
     f"install it with: uv sync --extra {LANGFUSE_EXTRA}"
 )
 
-# The environment family the SDK reads its transport and its credentials
-# out of. Read here rather than configured, and named as a family: what
-# a message may name is the variable and never its value.
+# The environment family the transport and the credentials come out of,
+# named as a family: what a message may name is the variable and never
+# its value.
 #
-# Vinga does no validation of them, deliberately. Their contract belongs
-# to the SDK, a boot check would be a second parser over another
-# library's names, and what a wrong or missing value produces is the
-# first upload's warning event rather than a refused boot. A missing key
-# reaches the far side as an unauthenticated request and comes back
-# `refused`, which is the honest report.
+# This module reads them, which is worth stating plainly because the
+# tracing client that would have read them for itself is deliberately
+# not the one used here. They stay transport credentials all the same:
+# no vinga configuration key holds one, nothing stores one, and nothing
+# this server prints renders one.
+#
+# What it does NOT do is validate them. A boot check would be a second
+# parser over the SDK's own contract, and what a wrong or missing value
+# produces is the first upload's warning event rather than a refused
+# boot: a missing key reaches the far side as an unauthenticated request
+# and comes back `refused`, which is the honest report.
 # Three variables and not a fourth. The SDK's tracing client also
 # honors `LANGFUSE_BASE_URL` ahead of `LANGFUSE_HOST`, and this module
 # deliberately does not: that client is not the one this uses, nothing

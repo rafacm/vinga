@@ -396,8 +396,10 @@ server:
   #   # it is refused at boot, since an attachment is named by a trace.
   #   #
   #   # The upload's own endpoint and credentials are LANGFUSE_HOST,
-  #   # LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY, read by the SDK and
-  #   # never keys in this file, exactly as the OTLP half is. The two
+  #   # LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY, read from the
+  #   # environment and handed to the Langfuse REST client, and never
+  #   # keys in this file: transport credentials, like the OTLP half's,
+  #   # so nothing stores them and nothing prints them back. The two
   #   # families are configured independently and must name the SAME
   #   # deployment and the SAME project: pointed at different ones both
   #   # halves succeed, and the recording lands where the trace's reader
