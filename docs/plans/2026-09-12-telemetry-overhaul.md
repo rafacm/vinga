@@ -333,6 +333,70 @@ refusal's semantics in the same diff as a retention bound, which is
 the "behavior changes sit alone in review" rule broken for the
 convenience of a checklist.
 
+### The post-close seam is addressed by a pinned context, not by a session
+
+The pinning M4a promises cannot be a field added to a capture job. The
+capture uploader does not carry a context at all: it looks its session
+up twice on its own worker, `trace_of(job.session)` before the upload
+and `reference_media(job.session, ...)` after it, and both lookups
+consult the retention at the moment they run. Pinning a context into
+the job would leave both windows exactly where they are.
+
+So the addressing changes rather than the job. `retained_context` stays
+the one admission-time pin, and the two operations take the pinned
+handle instead of a session id: `trace_of(context)` answers the spelled
+trace id and `reference_media(context, references)` writes the media
+span. The session-keyed spelling of both goes away rather than staying
+beside them, which is what makes this a deepening: after M4a there is
+one way to address a trace after its session closed, and a caller that
+did not pin at admission cannot accidentally get an answer that depends
+on when it asked. Both have exactly one production caller today
+(`capture_upload.py`) plus one test double, so the change is a
+signature and its two call sites rather than a migration.
+
+The eviction windows are then tested where they actually are: a job
+admitted before sixty-four later sessions open still resolves its trace
+id, and a job whose upload completes after that pressure still writes
+its reference. Two cases, because they are two windows, and both fail
+against today's code.
+
+### A turn's context is pinned with its session's, under a per-session cap
+
+#496 and #501 both need the trace a TURN was exported under, and a turn
+trace is a root trace of its own linked to the session, so the session's
+retained context does not address it. The contract:
+
+- **What identifies it.** The turn's session-local ordinal, which is
+  what the turn span already carries as `vinga.turn.index` and what
+  both later issues have in hand when they stage an artifact. Not a
+  span object: what crosses stays opaque, as it does today.
+- **When it is captured.** At the turn's open, the same instant the
+  session's own context is captured at `_open_session`. Not at the
+  close, because a turn that a barge-in or a failure ended early still
+  ran an ASR stage whose clip #496 wants.
+- **Who pins it.** Nobody pins a turn context separately. A session's
+  turn contexts live in that session's retained entry, and
+  `retained_context(session)` hands the whole bundle over at admission,
+  so one pin at the close carries the session and every turn under it.
+  That is what makes the retention question answerable at all: a
+  turn-keyed map of its own would need its own eviction policy and
+  would age out under exactly the pressure the session pin was built to
+  survive.
+- **The bound.** `RETAINED_TURNS` per session, oldest dropped first,
+  which is a per-session cap and NOT derived from `max_sessions`: the
+  configured capacity bounds concurrent sessions and says nothing about
+  how many turns one of them takes, and the review is right that a
+  single long session would otherwise grow without limit. Total
+  exposure is therefore the session bound times this one, and the
+  retained object is two identifiers rather than a span, so the cap can
+  be generous without being unbounded.
+- **What a session past the cap does.** Its oldest turns lose their
+  target, and the issue that wanted one says so with the closed reason
+  it already has for a missing trace (`no_trace`), per artifact. An
+  artifact with no target is reported, never attached to the session
+  trace as a consolation: a clip filed under the wrong observation is
+  worse than a clip that says it could not be filed.
+
 ### M4b is one key on the telemetry section, asserting every destination
 
 The three questions #493's implementation doc left open are answered
@@ -554,10 +618,14 @@ What is new per milestone:
   sentence's own length; usage attribute cases on both spans; a case
   that an absent measurement contributes no attribute rather than a
   zero.
-- **M4a**: the eviction-pressure cases the #495 plan already
-  established, extended to a capture job: a job admitted before
-  sixty-four later sessions open still attaches, which fails against
-  today's code.
+- **M4a**: the two eviction windows as two cases, a job admitted
+  before sixty-four later sessions open still resolving its trace id
+  and a job whose upload completes after that pressure still writing
+  its reference, both of which fail against today's code; a
+  many-turns-in-one-session case driving past `RETAINED_TURNS` and
+  asserting that the oldest turn reports no trace while the newest
+  still resolves; and a case that a turn context is captured at the
+  turn's open rather than its close, driven by a turn a barge-in ended.
 - **M4b**: refusal and admission cases per feature at each reach, the
   absent-key case pinning that today's behavior is unchanged (which is
   the upgrade proof), a case that one asserted reach governs all three
@@ -663,12 +731,14 @@ the manifest with its own generator when stale.
   `llm` and `tts_stream`. Design footprint: one declared field through
   the catalog's own machinery, two table entries.
 - [ ] **M4a: post-close retention and pinning**. Turn-level trace
-  context retained beside the session-level one, bounded and derived
-  from the configured capacity the way #495 derived the session bound;
-  capture-upload jobs pinning their context at admission the way
-  transcript-export jobs do, closing the exposure #495's plan named
-  and declined. Design footprint: the retention generalized in place,
-  a second caller on an existing seam.
+  context captured at each turn's open into its session's retained
+  entry, under the per-session `RETAINED_TURNS` cap settled above;
+  `trace_of` and `reference_media` re-addressed from a session id to
+  the pinned context, their session-keyed spellings removed, and the
+  capture uploader pinning at admission the way the transcript exporter
+  does, which closes the exposure #495's plan named and declined.
+  Design footprint: the retention deepened in place and one addressing
+  mode instead of two, with the two call sites the change reaches.
 - [ ] **M4b: the operator's collector reach**. The reach assertion
   #493's implementation doc named, in the shape settled under "M4b is
   one key on the telemetry section": `server.telemetry.reach` in the
@@ -791,6 +861,16 @@ Findings condensed but faithful; resolutions appended per amendment.
    before the upload lookup and between upload completion and reference
    writing.
 
+   *Resolution.* Adopted, and confirmed against the code: the two
+   lookups are `capture_upload.py` lines 733 and 752, and neither takes
+   a context. The addressing changes rather than the job.
+   `retained_context` stays the one admission-time pin and both
+   operations take the pinned handle, with the session-keyed spellings
+   removed rather than left beside them, so after M4a there is one way
+   to address a trace after its session closed. Both have one
+   production caller and one test double, so the change is a signature
+   and its call sites. The two windows are two test cases.
+
 5. **P2: turn-trace retention has no implementable bound or addressing
    contract.** M4a promises a bound "derived from the configured
    capacity", but session capacity bounds concurrent sessions and not
@@ -799,6 +879,16 @@ Findings condensed but faithful; resolutions appended per amendment.
    captured, who pins it, and the bound, plus what happens when one
    live session exceeds it and how #496 and #501 avoid losing an
    artifact's target. Add pressure tests for many turns in one session.
+
+   *Resolution.* Adopted. The contract is written out: a turn is
+   addressed by its session-local ordinal, its context is captured at
+   the turn's open, it lives in its session's retained entry so the one
+   pin at the close carries every turn under it, and the bound is a
+   per-session `RETAINED_TURNS` cap rather than anything derived from
+   `max_sessions`, which the review is right cannot bound turns. A
+   session past the cap loses its oldest targets and the artifact says
+   `no_trace` rather than being filed under the session trace. The
+   many-turns case is in the test list.
 
 6. **P2: "device name on every span" omits existing manually
    constructed spans.** `reference_media`, `_transcript_spans` and the
