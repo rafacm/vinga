@@ -803,6 +803,13 @@ class TelemetryConfig(BaseModel):
     span content is derived from the event catalog, which is the surface
     the no-leak rules already hold: timings, closed reasons and
     server-minted identifiers, never transcripts and never audio.
+
+    Two fields since #67, and the second is a different kind of switch
+    from every other one in this file. `enabled` above sends metadata;
+    `attach_captures` sends a recording of a room. It is its own
+    decision for that reason and defaults off, and it is refused at boot
+    with `enabled` off, because what an attachment names is the trace a
+    session was exported under and there is no trace to name.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -820,6 +827,58 @@ class TelemetryConfig(BaseModel):
         ),
     )
 
+    attach_captures: bool = Field(
+        default=False,
+        description=(
+            "Whether a closed session's recording is uploaded to the telemetry "
+            "backend and attached to the trace that session was exported under. "
+            "Off by default, and it is its own decision: capture being on and "
+            "telemetry being on do not imply this. **This sends room audio off "
+            "this host.** What goes is exactly two files, the session's stereo WAV "
+            "and its JSON manifest; the decision track beside them stays local. "
+            "Needs `enabled` above, since an attachment names a trace, and it is "
+            "refused at boot without it. With `server.capture` absent or off it is "
+            "a no-op rather than a misconfiguration: nothing is recorded, so "
+            "nothing is uploaded, and the server says so once at startup. "
+            "Retention is the backend's, not this server's. Once a recording is "
+            "uploaded, how long it is kept, who may play it and how it is deleted "
+            "are that deployment's policy, configured there; a backend with no "
+            "policy configured retains indefinitely. "
+            "The two transports are configured independently and must point at the "
+            "same deployment and the same project: the traces go over "
+            "`OTEL_EXPORTER_OTLP_*` and the upload over `LANGFUSE_HOST`, "
+            "`LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`, which the SDK reads "
+            "and this file deliberately does not. Pointed at different projects "
+            "both halves succeed and the recording lands where the trace's reader "
+            "will never look. "
+            "Turning it on needs the `langfuse` extra, which both published images "
+            "carry, and the boot is refused if it is missing. Under `local_only` "
+            "it is refused too. The upload runs on a worker of its own after the "
+            "session closed, never on the audio path, and every failure is a "
+            "warning event (`capture_upload_failed`) rather than a failed session. "
+            "While a recording waits for its worker it is hard-linked into "
+            "`upload-staging/` under the capture directory, which the capture "
+            "budget does not see: it is bounded by the queue depth and swept at "
+            "the next startup."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _check_attachment(self) -> "TelemetryConfig":
+        """Refuse an attachment that could only pretend.
+
+        The `ConversationsConfig` shape, and it applies here for the
+        same reason: both keys are in one model, so the refusal is the
+        model's own rather than a check some builder remembers to make.
+        The pointer names the switch to turn ON, which is that
+        precedent's rule too.
+        """
+        if self.attach_captures and not self.enabled:
+            raise FieldProblemsError(
+                [FieldProblem(json_pointer(("enabled",)), ATTACHMENT_NEEDS_TELEMETRY)]
+            )
+        return self
+
 
 # What a resumption that could not work is refused with. Fixed sentences
 # naming the two keys and the two ways out, and no value: every word of
@@ -833,6 +892,17 @@ RESUMPTION_NEEDS_TEXT = (
     "conversations.resumption is on with conversations.text off; a thread cannot be "
     "rebuilt from text that was never stored, so switch conversations.text on or "
     "conversations.resumption off"
+)
+
+# And what an attachment with nothing to attach to is refused with,
+# beside them and in the same shape (#67). An attachment names the trace
+# a session was exported under; with no exporter there is no trace, and
+# an upload nobody can find from a trace would recreate exactly the gap
+# attaching exists to close.
+ATTACHMENT_NEEDS_TELEMETRY = (
+    "telemetry.attach_captures is on with telemetry.enabled off; an attachment is "
+    "named by the trace its session was exported under, and there is no trace to "
+    "name, so switch telemetry.enabled on or telemetry.attach_captures off"
 )
 
 # And what a server no device could reach its configuration on is
@@ -1376,8 +1446,9 @@ class BootRefusal(NamedTuple):
 
 
 # Every cross-field refusal the server half has, in the order the
-# reference publishes them: the two resumption combinations, then the
-# server that no device could reach.
+# reference publishes them: the two resumption combinations, the
+# attachment with no trace to attach to, then the server that no device
+# could reach.
 #
 # Below the models rather than beside the sentences above, because a row
 # names the model it is a rule of and a model has to exist before it can
@@ -1395,6 +1466,12 @@ BOOT_REFUSALS: tuple[BootRefusal, ...] = (
         validator="_check_resumption",
         sentence=RESUMPTION_NEEDS_TEXT,
         provoked_by={"enabled": True, "text": False, "resumption": True},
+    ),
+    BootRefusal(
+        model=TelemetryConfig,
+        validator="_check_attachment",
+        sentence=ATTACHMENT_NEEDS_TELEMETRY,
+        provoked_by={"enabled": False, "attach_captures": True},
     ),
     BootRefusal(
         model=ServerConfig,
