@@ -124,6 +124,36 @@ otel = [
     "opentelemetry-sdk>=1.44.0",
     "opentelemetry-exporter-otlp-proto-http>=1.44.0",
 ]
+# The optional capture uploader (#67), which is the fifth door and the
+# fourth with a lane of its own.
+#
+# One distribution, and it is not a second exporter: what vinga uses out
+# of it is the media half of its REST client, which is the only
+# published way to put a closed session's WAV and manifest beside the
+# trace the `otel` extra above already exported. Its own tracing client
+# is deliberately not constructed, because it owns a tracer provider,
+# background consumer threads and an `atexit` hook, and this server
+# already has an exporter of its own and a shutdown that must stay
+# bounded.
+#
+# It rides both published images, exactly as `otel` does: an
+# observability extra that only one variant carried would make
+# `server.telemetry.attach_captures` a flag that works or refuses
+# depending on which image an operator happened to pull.
+#
+# It joins the `dev` group below for the reason `otel` does: the staging,
+# the queue and the failure classification are vinga logic that every
+# unit lane runs, and the distribution is small, pure Python and MIT.
+# Its closure overlaps `otel`'s almost entirely, since it depends on the
+# same OpenTelemetry API, SDK and HTTP exporter.
+#
+# The lower bound is a current release rather than the oldest that
+# works, for the same reason: `filterwarnings` is `error`, so a
+# deprecation warning out of the SDK fails every lane, and pinning
+# forward is what keeps the allowlist empty. 4.15.1 is what the import,
+# the client construction and the media round trip were checked against
+# under that filter.
+langfuse = ["langfuse>=4.15.1"]
 # Local ASR (MIT). Model weights download from Hugging Face at startup.
 faster-whisper = ["faster-whisper>=1.2"]
 # Local TTS. piper-tts is GPL-3.0, which is why it is an optional extra
@@ -141,20 +171,22 @@ vinga = "vinga_server.config.cli:main"
 
 [dependency-groups]
 # What a checkout gets. `uv sync` installs the default groups and the
-# project, but not its extras, so all three shipped extras are named
+# project, but not its extras, so all four shipped extras are named
 # here: that is the whole of what keeps the contributor door one command
 # and keeps AGENTS.md's Commands section true without an edit.
 #
 # `otel` is among them because the span mapping is vinga logic that the
-# unit lanes drive against the SDK's in-memory exporter. The two engine
-# extras stay out, for weight and for licensing.
+# unit lanes drive against the SDK's in-memory exporter, and `langfuse`
+# for the same reason: the uploader lanes need the real client to
+# construct. The two engine extras stay out, for weight and for
+# licensing.
 #
 # This is the one place a mistake is invisible to every other lane,
 # because every other lane names its tier explicitly. The sync-then-run
 # smoke in `tests/integration/test_tier_closure.py` is its guard, and it
 # is named as such.
 dev = [
-    "vinga-server[serve,sim,otel]",
+    "vinga-server[serve,sim,otel,langfuse]",
     "httpx2>=2.9.1",
     # PEP 508 marker evaluation, for the tier lane's closure: it walks
     # `uv.lock` and has to decide which dependencies this platform
