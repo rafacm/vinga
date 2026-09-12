@@ -49,6 +49,7 @@ from vinga_server.conversations.schema import sessions as sessions_table
 from vinga_server.conversations.store import (
     TURN_WRITE_ATTEMPTS,
     ConversationStore,
+    Half,
     open_conversations,
 )
 
@@ -779,3 +780,52 @@ def test_a_close_for_a_session_the_writer_never_opened_is_acknowledged_false(
     assert store.close_session("ghost", duration_s=1.0, reason="idle").wait(
         TIMEOUT_S
     ) is False
+
+
+def test_a_close_stays_unsettled_while_the_event_half_is_blocked(stores) -> None:
+    """The barrier's own words, held to: every earlier record of the
+    queue resolved, landed or dropped-and-counted.
+
+    A marker is TWO transactions, and the events one runs after the
+    durable one. Settling the close between them answered `True` while
+    this session's own queued events were still in front of a lock they
+    can wait ten seconds on and can still fail, so a reader woken by the
+    barrier was reading past records that had not been resolved at all.
+
+    The gate stands in front of the EVENTS half here rather than the
+    durable one, which is exactly the interval the finding is about.
+    """
+    gate = Gate(Half.EVENTS)
+    store = stores(gate=gate)
+    store.start()
+    store.open_session("alpha", 100.0, MANIFEST)
+    store.record_event("alpha", "heard", logging.INFO, {"duration_s": 1.0}, 101.0)
+
+    closed = store.close_session("alpha", duration_s=1.0, reason="idle")
+    gate.wait()
+    assert closed.wait(0.05) is False, (
+        "the close answered while its session's events were still unresolved"
+    )
+
+    gate.open_forever()
+    assert closed.wait(TIMEOUT_S) is True
+    assert len(rows("events")) == 1
+
+
+def test_a_close_whose_event_half_failed_still_answers_true(stores) -> None:
+    """And the limit that travels with it: the event half is the lossy
+    class, so a transaction that failed there is a record DROPPED AND
+    COUNTED rather than one still on its way. The barrier says nothing
+    is in flight, never that everything was stored, and the count lands
+    on the session row the durable half already wrote.
+    """
+    store, _ = recording(
+        stores, lambda count: RuntimeError("no") if count == 2 else None
+    )
+    store.record_event("alpha", "heard", logging.INFO, {"duration_s": 1.0}, 101.0)
+
+    assert store.close_session("alpha", duration_s=1.0, reason="idle").wait(
+        TIMEOUT_S
+    ) is True
+
+    assert rows("events") == []
