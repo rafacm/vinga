@@ -122,8 +122,9 @@ without renaming every span event's attributes at the same time. It is
 a table of its own for the after-close path, in the shape of the
 tables that already exist (`SESSION_ATTRIBUTES` and its siblings).
 
-**`prompt_assembled` is emitted once per agent, not once per turn.**
-Its docstring says "assembled and cached", and it is emitted where the
+**`prompt_assembled` is emitted once per agent, not once per turn,
+and the first one is emitted before the session span exists.** Its
+docstring says "assembled and cached", and it is emitted where the
 know-how half is built rather than per round. So an attribute written
 only onto the turn span that happens to be open when the event arrives
 would appear on one turn per agent per session and be absent from
@@ -132,6 +133,32 @@ wants answered. M2 retains the sources per agent in the session's
 trace state and stamps them on every turn span that agent speaks,
 which is exactly the mechanism `_provider_context` already uses for
 the provider quartet.
+
+The ordering is worse than that, which the plan review found and the
+code confirms. `PipelineRuntime.__init__` calls
+`_activate_agent(self._agents[0])`, which emits `prompt_assembled` for
+the initial agent, and `DeviceSession.run` constructs the runtime
+before the hello exchange and well before it emits `session_open`.
+`_span_event` returns without writing when `self._sessions` has no
+entry for a session, so today the initial agent's `prompt_assembled`
+reaches no trace at all: not as an attribute, not even as the span
+event it is supposed to be. That is an existing gap this milestone
+closes rather than a new problem it creates, and the ordinary case is
+the one it affects, since most sessions have exactly one agent.
+
+So the fold holds what it cannot yet place. A `prompt_assembled` whose
+session has no span is kept in a bounded pending map, oldest evicted
+first, exactly as `capture_started` already is and for the same reason
+(a held event whose session never opens is a refused session, and the
+hold is a buffer rather than a record); `_open_session` claims what is
+waiting for it and folds it into the retained per-agent sources before
+the session span is even handed back. The constant is
+`PENDING_PROMPTS`, a sibling of `PENDING_CAPTURES` rather than a reuse
+of it, because the two holds are cleared by different events and a
+shared bound would make one starve the other. Moving the emission
+after `session_open` was the alternative and is rejected: the event's
+position in the log is a fact about when the prompt was assembled, and
+the exporter is the surface with the ordering problem.
 
 ## Open questions, resolved
 
@@ -466,7 +493,12 @@ What is new per milestone:
 
 - **M2**: one case per new attribute asserting the exact name and
   value on the exact span; a case that a second turn by the same agent
-  still carries the retained prompt sources; a case that a `tool_call`
+  still carries the retained prompt sources; a case driving the
+  PRODUCTION ordering, a `prompt_assembled` emitted before
+  `session_open` and claimed by it, which fails against today's code
+  because the event is dropped; a case that the pending hold evicts
+  oldest-first and that a session that never opens leaves nothing
+  behind; a case that a `tool_call`
   produces a span and NO span event; a case that an unnamed call
   carries neither `tool` nor `entry`; a case pinning the after-close
   attribute names, written to fail against the bare names.
@@ -659,6 +691,18 @@ Findings condensed but faithful; resolutions appended per amendment.
    or that the event moves after `session_open`, and test with the
    production ordering rather than a synthetic event after an open
    trace.
+
+   *Resolution.* Adopted, first branch, and confirmed against the code
+   before adopting: `PipelineRuntime.__init__` line 851 emits through
+   `_activate_agent`, and `DeviceSession.run` constructs the runtime at
+   line 497 against a `session_open` emitted at line 565. The premise
+   section now records the ordering and the consequence, that the
+   initial agent's provenance reaches no trace at all today. The fold
+   holds a pre-open `prompt_assembled` in a bounded `PENDING_PROMPTS`
+   map claimed by `_open_session`, the shape `capture_started` already
+   has; moving the emission is rejected, because where the event sits
+   in the log is a fact about when the prompt was assembled. The test
+   list gains the production-ordering case and the eviction case.
 
 3. **P1: M4b leaves its central configuration decision unresolved.**
    The plan names "where the key lives, whether it is one key or three,
