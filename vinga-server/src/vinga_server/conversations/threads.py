@@ -611,6 +611,69 @@ def dialogue(
     ]
 
 
+# The columns a transcript export is authorized to read, and the whole
+# of them (#495).
+#
+# Written out as a projection rather than selected as a row, which is
+# the difference between a claim and a check: `select(turns)` would
+# carry every column the table grows, and the ones it carries today
+# already include content this surface is not authorized to send (a
+# turn's tool invocations hang off it, and the token halves inside
+# `legs` are metadata the generations already spell). A reader that
+# names its columns cannot acquire one by somebody else's migration.
+TRANSCRIPT_COLUMNS = (
+    turns.c.id,
+    turns.c.t_ms,
+    turns.c.agent,
+    turns.c.heard,
+    turns.c.reply,
+    turns.c.legs,
+)
+
+
+def transcript_rows(
+    connection: Any, session: str, after: int | None = None, limit: int = 256
+) -> list[dict[str, Any]]:
+    """One page of a session's turns, as the transcript projection,
+    oldest first (#495).
+
+    Not the API route's query and deliberately not a shared home for it.
+    That route validates the session exists, parses a cursor and a
+    limit, fetches one row past the page to build its pagination
+    metadata and nests each turn's tool invocations; this reader wants
+    none of that and must not have the last of it, because tool
+    arguments and results are content beyond what an export is
+    authorized to carry. Two readers asking two questions are two
+    queries.
+
+    By SESSION, which is what makes a resumed conversation's earlier
+    turns stay where they were: `turns.session` records which session a
+    turn was spoken in, so a thread that spans two sessions exports each
+    session's own turns when that session closes, under whatever the
+    flag said then.
+
+    Keyset paging on the identity column, the schema's own cursor
+    idiom: `id > after`, ordered by `id`, `limit` rows. Nothing bounds a
+    session's turn count (`max_session_s` bounds elapsed time, not
+    turns), so the page is what bounds the database result, and the
+    caller carries its ordinal across pages rather than asking for one
+    here: an ordinal is a fact about a reading, and this function
+    answers one page of it.
+    """
+    criteria: list[ColumnElement[bool]] = [turns.c.session == session]
+    if after is not None:
+        criteria.append(turns.c.id > after)
+    return [
+        dict(row)
+        for row in connection.execute(
+            select(*TRANSCRIPT_COLUMNS)
+            .where(*criteria)
+            .order_by(turns.c.id)
+            .limit(limit)
+        ).mappings()
+    ]
+
+
 def candidates(connection: Any, agent: str, description: str) -> Candidates:
     """The threads of one agent a spoken description might have meant.
 
@@ -891,6 +954,23 @@ class Reads:
     def backlog(self, conversation: str) -> "Backlog | None | Unreadable":
         """One thread, whole, or None where there is no such thread."""
         return self._read(lambda connection: backlog(connection, conversation))
+
+    def transcript_rows(
+        self, session: str, after: int | None = None, limit: int = 256
+    ) -> "list[dict[str, Any]] | Unreadable":
+        """One page of a closed session's turns, as the transcript
+        projection (#495).
+
+        Here for the reason the two above are: its caller is outside a
+        request and holds no transaction, and it must not be handed
+        one. The transcript exporter's worker is that caller, and the
+        `Unreadable` this answers is the one its closed set spells
+        `unreadable`; a raise would carry a DSN out of a driver and
+        onto a surface whose whole point is that nothing gets past it.
+        """
+        return self._read(
+            lambda connection: transcript_rows(connection, session, after, limit)
+        )
 
     def _read(self, ask: Callable[[Any], Any]) -> Any:
         # Null until there is one, so the disposal below knows whether
@@ -1393,6 +1473,7 @@ __all__ = [
     "RESUME_CANDIDATES",
     "SUMMARY_COLUMNS",
     "TITLE_CHARACTERS",
+    "TRANSCRIPT_COLUMNS",
     "Backlog",
     "Candidate",
     "Candidates",
@@ -1418,4 +1499,5 @@ __all__ = [
     "prune",
     "selected",
     "title_of",
+    "transcript_rows",
 ]
