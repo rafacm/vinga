@@ -332,6 +332,55 @@ async def test_the_uploaded_pair_is_referenced_on_the_session_trace(
     assert held["session.id"] == attributes(session_span)["session.id"]
 
 
+async def test_the_upload_outcome_reaches_the_collector_too(
+    serve, simulate, tmp_path: Path, media: Media, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The trail the milestone promised, off the wire.
+
+    A recording that silently failed to attach would leave a reader with
+    a trace, no audio and no way to learn any was meant to be there, and
+    the events that close that gap are no use to that reader while they
+    stay in this process's JSON log. So the outcome is on the trace too,
+    as an observation beside the session's own: a span rather than a span
+    event, because the backend this surface exists for ingests no span
+    events at all.
+    """
+    captures = tmp_path / "captures"
+    monkeypatch.setenv(LANGFUSE_HOST_ENV, media.url)
+    monkeypatch.setenv(LANGFUSE_PUBLIC_KEY_ENV, "pk-lf-test")
+    monkeypatch.setenv(LANGFUSE_SECRET_KEY_ENV, "sk-lf-test")
+    collector = Receiver()
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.endpoint)
+
+    try:
+        async with serve(attaching(captures)) as port:
+            await simulate(port, DEVICE_MAC)
+            manifest = await a_finished_capture(captures)
+            await uploaded(media, 2)
+        spans = collector.spans()
+    finally:
+        collector.close()
+
+    assert spans, "nothing reached the collector at all"
+    outcome = named(spans, "capture_uploaded")
+    session_span = named(spans, "session")
+    held = attributes(outcome)
+    # On the session's own trace, so a reader who opened the session
+    # finds it rather than having to know it exists.
+    assert outcome.trace_id == session_span.trace_id
+    assert outcome.parent_span_id == session_span.span_id
+    assert held["session.id"] == attributes(session_span)["session.id"]
+    # And it carries what the declaration declares: the two sizes
+    # exactly, which is what a reader compares against what the backend
+    # holds, and how long it took.
+    assert held["audio_bytes"] == manifest.with_suffix(".wav").stat().st_size
+    assert held["manifest_bytes"] == manifest.stat().st_size
+    assert held["elapsed_ms"] >= 0
+    # No failure went out beside it, which is what makes the success
+    # reading a reading rather than a coincidence.
+    assert [span for span in spans if span.name == "capture_upload_failed"] == []
+
+
 # --- the hostile backend ----------------------------------------------
 
 

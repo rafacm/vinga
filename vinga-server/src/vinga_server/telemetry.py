@@ -187,6 +187,13 @@ TURN_STARTED = "turn_started"
 REPLY_FINISHED = "reply_finished"
 CAPTURE_STARTED = "capture_started"
 
+# And the two that arrive after it closed: a recording's trip to the
+# backend happens on a worker of its own, off the session's loop and
+# after the span map has let the session go (#67).
+CAPTURE_UPLOADED = "capture_uploaded"
+CAPTURE_UPLOAD_FAILED = "capture_upload_failed"
+AFTER_THE_CLOSE = frozenset({CAPTURE_UPLOADED, CAPTURE_UPLOAD_FAILED})
+
 # Not a lifecycle event, and the only span event that changes what the
 # spans after it carry: it moves which agent a turn is stamped from.
 HANDOVER = "handover"
@@ -1447,19 +1454,9 @@ class Telemetry:
             exported = self._retained.get(session)
         if exported is None:
             return False
-        parent = self._within(
-            self._orphan(
-                self._identity(
-                    trace_id=exported.trace_id,
-                    span_id=exported.span_id,
-                    is_remote=True,
-                    trace_flags=self._sampled,
-                )
-            )
-        )
         span = self._tracer.start_span(
             CAPTURE_SPAN,
-            context=parent,
+            context=self._continuing(exported),
             attributes={
                 **dict.fromkeys(SESSION_ID_NAMES, session),
                 **{
@@ -1471,6 +1468,26 @@ class Telemetry:
         )
         span.end()
         return True
+
+    def _continuing(self, exported: _Exported) -> Any:
+        """The context a span written after a session closed belongs in.
+
+        Every span of that trace has ended, so what continues it is the
+        session span's identity rather than a span this process still
+        holds. One home for it because two writers need it now, the
+        media reference and the upload outcomes, and a second spelling
+        of a parentage is a second trace waiting to happen.
+        """
+        return self._within(
+            self._orphan(
+                self._identity(
+                    trace_id=exported.trace_id,
+                    span_id=exported.span_id,
+                    is_remote=True,
+                    trace_flags=self._sampled,
+                )
+            )
+        )
 
     def stop_accepting(self) -> None:
         """Take no more emissions.
@@ -1664,16 +1681,20 @@ class Telemetry:
         """One server-scoped event, folded where it belongs.
 
         Only the events that name a session have a destination in a
-        trace, and `capture_started` is the one that does today. One
-        that arrives before its session's span exists is held: the
-        capture opens during the handshake, a handshake ahead of
-        `session_open`, so the ordering is the ordinary case rather than
-        a race.
+        trace, and three do. `capture_started` arrives BEFORE its
+        session's span exists, because a capture opens during the
+        handshake and the handshake is ahead of `session_open`, so one
+        that finds no span is held rather than dropped: the ordering is
+        the ordinary case rather than a race. The two upload outcomes
+        arrive AFTER the span has ended, because a recording's trip to
+        the backend runs on a worker of its own once the session is
+        over, so those find the retention instead.
         """
         if not self._accepting:
             return
         payload = emission.payload
-        if payload.get(EVENT_FIELD) != CAPTURE_STARTED:
+        name = payload.get(EVENT_FIELD)
+        if name != CAPTURE_STARTED and name not in AFTER_THE_CLOSE:
             return
         session = payload.get(SESSION_FIELD)
         if not isinstance(session, str):
@@ -1682,6 +1703,9 @@ class Telemetry:
         if session in self._sessions:
             self._span_event(session, emission, at)
             return
+        if name in AFTER_THE_CLOSE:
+            self._after_the_close(session, emission, at)
+            return
         held = self._pending.setdefault(session, [])
         held.append((at, emission))
         while len(self._pending) > PENDING_CAPTURES:
@@ -1689,6 +1713,48 @@ class Telemetry:
             # session that was refused after its capture started, and
             # the hold is a buffer rather than a record.
             self._pending.pop(next(iter(self._pending)))
+
+    def _after_the_close(self, session: str, emission: Emission, at: int) -> None:
+        """One outcome of a recording's trip to the backend, on the
+        trace that session was exported under.
+
+        A SPAN rather than a span event, and that is a finding rather
+        than a preference: #67's first walkthrough established that the
+        backend this surface exists for ingests no span events at all,
+        so an outcome recorded as one would be invisible in the one
+        place a reader goes looking for it. As a span it is an
+        observation beside the session's own, which is what the
+        milestone promised: a trace whose reader can see that a
+        recording is there, or that it is not and why.
+
+        Parented into the retained context the way a media reference is,
+        for the same reason and by the same mechanism: every span of
+        this trace has ended, so what continues it is the parent's
+        identity rather than a span this process still holds.
+
+        Nothing at all for a session this exporter never saw, or one
+        that has aged out: the boot sweep's `abandoned` is about a
+        session a PREVIOUS process ran, so there is no trace of this
+        process's to put it on, and inventing one would be worse than
+        the JSON log it is already in.
+        """
+        name = emission.payload.get(EVENT_FIELD)
+        if not isinstance(name, str) or name not in APPROVED:
+            return
+        with self._retained_lock:
+            exported = self._retained.get(session)
+        if exported is None:
+            return
+        span = self._tracer.start_span(
+            name,
+            context=self._continuing(exported),
+            attributes={
+                **dict.fromkeys(SESSION_ID_NAMES, session),
+                **_event_attributes(emission.payload),
+            },
+            start_time=at,
+        )
+        span.end(end_time=at)
 
     def _open_session(self, session: str, emission: Emission) -> None:
         if session in self._sessions:
