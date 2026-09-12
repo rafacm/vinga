@@ -632,3 +632,282 @@ Re-verified after the round, same Postgres:
 - `python3 scripts/check_doc_links.py .`: checked 232 files, 0 failures
 - `uv run pytest tests/unit/test_command_spellings.py -q`: 52 passed
 - The three thread-driving cases, fifty consecutive runs: zero failures.
+
+## M3: the uploader and the vocabulary
+
+The milestone both review rounds hardened, and the one surface in this
+server that deliberately sends content off the host. It landed as
+planned with two deviations of substance, both recorded below: which
+half of the Langfuse SDK the upload goes through, and what the
+attachment can honestly be said to do in the UI.
+
+### The module, and what its callers stop knowing
+
+`src/vinga_server/capture_upload.py`. The composition asks
+`build_capture_upload(config.server, telemetry=..., local_only=...)`
+for one object or for nothing, hands it to the capture store, and puts
+its `shutdown` on the exit stack. It knows nothing of hardlinks,
+queues, media APIs or presigned URLs.
+
+**The decision order is the contract**, and the review's first finding
+is what fixed it:
+
+1. **Capture first.** `server.capture` absent, or present with
+   `enabled` off, answers None and none of the checks below run, so a
+   capture-off deployment boots identically with or without the extra,
+   the telemetry section or `local_only`. It is said out loud exactly
+   when there is something to say: with the flag on and nothing being
+   recorded, one value-free info line naming the two keys. With the
+   flag off as well there is no no-op to explain and nothing is said.
+2. **The flag.** Off, or no telemetry section, answers None silently.
+3. **Telemetry.** The cross-field refusal turned out to belong to
+   `TelemetryConfig` itself rather than to the builder: both keys are
+   in one model, which is exactly the `ConversationsConfig` shape the
+   plan named as the preferred branch. It is `_check_attachment`, it
+   joins `BOOT_REFUSALS`, and the generated reference publishes its
+   sentence. What is left in the builder is the assertion that keeps
+   the function total for a composition built by hand.
+4. **Egress**, through `check_feature(ATTACH_KEY, egress=True, ...)`,
+   before any import, any construction and any thread.
+5. **The extra**, imported there and not at module scope.
+
+Each refusal is a `ConfigError` with a fixed value-free sentence,
+raised outside the handler that read it so nothing is chained.
+
+### The seam, which is two halves
+
+`CaptureStore` gained `session_closed(session)` beside `finished()`,
+and the staging moved into `finished()` itself, ahead of the prune on
+the line below it. That is the delta round's first finding and it is
+not a refinement: `finished()` is where a capture's files become final
+AND where they become prune candidates, so any later moment is one a
+capture can already have been unlinked in. The device session's close
+ordering calls `session_closed` last, after `self._capture_audio.close()`,
+which is the only signal that the conversation is over rather than that
+a recording's files are final.
+
+A capture whose manifest says `complete: false` is never staged and its
+session records `incomplete` when it closes. Staging is a per-job
+subdirectory under `<capture.dir>/upload-staging/`, built under a
+dotted name and committed by one rename, so a directory that appears
+there has both its links in it.
+
+The sweep is `CaptureStore.startup()`, called by the composition
+whenever a capture directory is opened, with an uploader or without
+one. It says one `capture_upload_failed` with reason `abandoned` per
+leftover job before removing it, and skips any job younger than the
+process, which is what keeps sequential lifespans in one process from
+adopting each other's work in flight. A boot with no capture section
+builds no store and leaves the directory untouched.
+
+### The worker
+
+A daemon thread of its own, started at the first job rather than at
+build, over a `queue.Queue` bounded at `server.limits.max_sessions`.
+A job the bound turns away has its links removed in the same breath as
+its `dropped` event. The request timeout is 30 s, the ceiling is two
+retries with a doubling wait, and the classification reads a status
+code rather than a message.
+
+The quieting lease moved out of `telemetry.py` into `quieting.py` in
+its own commit, with the namespaces as its argument: the reference
+counting and the one-snapshot rule are the part that must not be
+written twice, and getting them wrong leaves a server either
+permanently silent or loudly printing somebody's endpoint. The
+uploader's instance covers `langfuse`, `httpx`, `httpcore` and
+`backoff`. The HTTP stack is the half that matters: `httpx` logs a
+request line carrying its URL, and the URL of an upload's second
+request is a presigned one, which is a credential in a query string.
+The lease is taken by the worker before it does anything at all and
+given back from its own `finally`, so it outlives a bounded shutdown's
+expiry.
+
+### Deviations from the plan
+
+1. **The upload goes through the SDK's generated REST client, not its
+   tracing client, and vinga reads the three `LANGFUSE_*` variables
+   itself.** The plan's words are that the credentials are "read by the
+   SDK"; `Langfuse()` does read them, and it also constructs a tracer
+   provider, a span processor, one or more background consumer threads,
+   a process-global singleton keyed by public key, an `os.register_at_fork`
+   handler and an `atexit.register(self.shutdown)`, and it does all of
+   that with `tracing_enabled=False` as well. An `atexit` hook that can
+   wait on a wedged upload is exactly the hazard the plan's own worker
+   design rejects `asyncio.to_thread` for, and a second tracer provider
+   is a second exporter beside the one #66 owns. So the upload uses
+   `langfuse.api.client.LangfuseAPI`, whose media half is the three
+   calls M1's walkthrough discovered, and which constructs one
+   `httpx.Client` and nothing else. The cost is that this module reads
+   `LANGFUSE_HOST` (or `LANGFUSE_BASE_URL`), `LANGFUSE_PUBLIC_KEY` and
+   `LANGFUSE_SECRET_KEY` with `os.environ.get`. The substance of the
+   plan's position is kept: they are not configuration keys, they are
+   never printed, they are not validated (a missing key goes to the far
+   side as an unauthenticated request and comes back `refused`), and a
+   missing endpoint is an upload failure rather than a boot refusal.
+   There is deliberately no default endpoint, and specifically not the
+   SDK's own, which is a vendor's hosted cloud.
+2. **The presigned PUT is made with `httpx` directly.** The plan says
+   layer 2 reuses httpx "for nothing". What it reuses it for is the one
+   request the generated client does not make: the media API hands back
+   a presigned URL on a storage host, and the SDK's own uploader PUTs to
+   it with its own httpx client for the same reason. One client is
+   constructed, handed to `LangfuseAPI` and used for the PUT, so there
+   is one HTTP stack and one timeout.
+3. **`_Sdk` is public as `Sdk`.** It is the module's test seam, the
+   shape `build_telemetry(exporter=...)` established, and a support
+   module reaching an underscore name would have been the review flag
+   the design guide names.
+4. **The failure classification reads the exception's CLASS as well as
+   its status code.** The generated client raises a typed error
+   carrying no status code at all for each status it names (401, 403,
+   404, 405), so a classification that read the code alone reported
+   every rejected credential as an endpoint nobody could reach. Found
+   while writing the integration lane, and the unit case for `refused`
+   plants an error with no code because of it.
+5. **A session id that cannot be a directory name is refused on the
+   module's own logger rather than as an event.** That event carries a
+   `SessionId`, and an id this refuses is by definition not one, so
+   there is no lawful event to say it with. The ids this server mints
+   are hex, so nothing real reaches it; the guard exists because a
+   separator arriving as a session id is the one way a name could reach
+   outside the staging root.
+6. **`too_large` has a server-side ceiling as well as a far-side one.**
+   `MAX_ATTACHMENT_BYTES` is 512 MB, past which this server does not
+   ask. The default per-session capture bound is about 57 MB of stereo
+   16 kHz, and an operator may raise it.
+
+### Tests
+
+`tests/unit/test_capture_upload.py`, forty-eight cases, with the far
+side faked at `Sdk` and nothing else faked: real hardlinks on a real
+filesystem, the real bounded queue, the real daemon worker, the real
+retries and the real classification. `tests/support/uploads.py` holds
+the seam and the recorder behind it.
+
+Six properties were watched red against a deliberately broken tree, and
+**two of those mutations survived the first version of their case**,
+which is the part worth recording:
+
+- The prune-survival case first drove a storm over a single recording,
+  and `prune()` never drops the newest finished capture, so the storm
+  bit nothing and the REFUTED design (staging at the session's close)
+  passed it. With a second, later recording in the directory the storm
+  really unlinks the early-finished triplet, the case asserts that it
+  did, and the refuted design fails.
+- The lease case first observed the namespace at the client's
+  construction, which passed a mutation that took the lease one line in
+  front of that constructor. It observes at the first thing the worker
+  does for a job now, which kills it.
+
+The four that failed their case first time: the sweep adopting a job
+younger than the process, a dropped job keeping its links, an
+incomplete capture being staged anyway, and a refusal being retried.
+The two concurrency cases (the full backlog and the max-sessions drain
+with the backlog already occupied) were run six times over.
+
+`tests/integration/test_capture_upload.py` carries the three claims the
+unit lane cannot make: the whole path against a media endpoint on a
+socket in this process, driven by a real device conversation through
+the real close ordering; the blackhole, with the three latencies
+asserted separately; and the real-SDK late-failure sentinel, with a
+credential in the SDK's environment and an endpoint that fails after
+the bounded shutdown has given up.
+
+`tests/integration/test_tier_closure.py` gains the fifth tier's own
+environment, its closure comparison, a bite, the serve-half negatives,
+the positive import, the overlap with `[otel]` written down, and the
+extra-less refusal boot in the one environment it is reachable in:
+`[serve,otel]`, because a `[serve]` install asked for telemetry refuses
+for the OTEL extra first.
+
+The catalog vocabulary is M2's recorded design unchanged, landed here
+with its three drivers. The baseline was watched red on exactly the
+assertion M2 recorded before the drivers existed.
+
+### The live walkthrough
+
+Self-hosted Langfuse again, the M1 stack on project
+`vinga-67-langfuse`, the same `LANGFUSE_INIT_*` provisioning and the
+same remapped ports, plus `LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT` so the
+presigned URLs point at a MinIO the host can reach. The server ran with
+capture on, telemetry on and `attach_captures` on, both variable
+families pointed at the one deployment and the one project, which is
+the invariant the review's finding 11 asked to be held rather than
+assumed.
+
+```
+docker compose -p vinga-67-langfuse up -d --wait
+curl -s http://localhost:53010/api/public/health
+#  {"status":"OK","version":"4.35.0"}
+
+VINGA_DB_PORT=55673 docker compose -p vinga-67m3 up -d postgres --wait
+
+LANGFUSE_HOST=http://localhost:53010 \
+LANGFUSE_PUBLIC_KEY=$PK LANGFUSE_SECRET_KEY=$SK \
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:53010/api/public/otel \
+OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic <base64 pk:sk>" \
+  <one recorded simulator conversation>
+#  capture bc873d61af0e4a34b6107a8a4ebfeba5, staging empty afterwards
+```
+
+What the instance then held, read through its own APIs:
+
+```
+GET /api/public/v2/observations?sessionId=bc873d61af0e4a34b6107a8a4ebfeba5
+  6 observations: session (root, trace 346ac4a7...),
+                  turn (root, trace 4f3f0417...), asr, llm, tts_stream, playback
+
+select m.id, tm.trace_id, tm.field, m.content_type, m.content_length,
+       m.upload_http_status from trace_media tm join media m ...
+  jFz9MlxuwO_R1n_1oz5H_B | 346ac4a7... | metadata | application/json |   1258 | 200
+  HApOlHzawOpXJvESB25s6X | 346ac4a7... | metadata | audio/wav        | 173464 | 200
+
+GET /api/public/media/HApOlHzawOpXJvESB25s6X
+  {"contentType": "audio/wav", "contentLength": 173464,
+   "uploadedAt": "...", "url": "http://localhost:59090/langfuse/media/vinga-67/...",
+   "urlExpiry": "..."}
+```
+
+The downloaded WAV is byte-identical to the capture on disk, and opens
+as a two-channel 16 kHz file of 43355 frames, 2.71 s, which is the
+duration the manifest states. The manifest downloaded through the same
+API has `complete: true` and the same eleven top-level keys the local
+one has. Both attachments are against the SESSION trace, which is the
+trace `trace_of` retains and the one the session grouping keys on.
+
+Torn down afterwards with `docker compose -p vinga-67-langfuse down -v`
+and `docker compose -p vinga-67m3 down -v`. Nothing Langfuse-shaped is
+committed.
+
+**What stays unasserted, deliberately.** The acceptance criterion says
+the attached WAV is "playable in the UI". What was verified is that the
+media record exists, is associated with the trace, and is downloadable
+and decodable through the public media API. Whether the Langfuse UI
+renders a player for a media record that no reference token points at
+was NOT verified: M1's walkthrough established that what makes a media
+record render inline is a
+`@@@langfuseMedia:type=...|id=...|source=bytes@@@` token placed in a
+trace's or observation's input, output or metadata, and this milestone
+cannot write one, because by the time a capture is final the span it
+would go on has been ended and exported. The honest claim is therefore
+that the recording is attached to the trace and retrievable from it,
+and that inline rendering is a question for a follow-up that would have
+to hold a span open or patch one.
+
+### Verification
+
+- `uv run ruff check .`: All checks passed!
+- `uv run mypy` (strict over `src/vinga_server/events`): Success: no
+  issues found in 5 source files
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 6965 passed, 19
+  skipped (6907 in M2, plus this milestone's fifty-eight)
+- `uv run pytest tests/integration -q`: 323 passed, against Postgres
+  from the committed compose file on `VINGA_DB_PORT=55673`
+- `python3 scripts/fold_changelog.py check .`: checked 2 fragments, 0
+  failures
+- `python3 scripts/check_doc_links.py .`: checked 232 files, 0 failures
+- `uv run pytest tests/unit/test_command_spellings.py -q`: 52 passed
+- Both generated documents regenerated and unchanged after the commits
+  that changed them (`config reference server`, `events reference`)
+- The live walkthrough above, recorded rather than asserted, with the
+  UI-playability claim left unmade for the reason stated
