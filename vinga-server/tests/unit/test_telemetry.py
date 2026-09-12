@@ -814,6 +814,61 @@ def test_a_read_waits_for_the_write_it_overlaps() -> None:
     assert answer == [telemetry.trace_of(SESSION)]
 
 
+def test_an_open_at_the_bound_waits_for_the_map_it_has_to_move() -> None:
+    """The other half of the same lock, and the half the reader's case
+    cannot reach: the WRITE, at the one moment it is compound.
+
+    A record under the bound is a single assignment and proves nothing
+    about atomicity, so the map is filled to exactly `RETAINED_TRACES`
+    first: the next open has to insert AND evict, which is the pair the
+    lock is held across. Held from here, the open itself must not get
+    through, and when it does the map has moved exactly once: the
+    newcomer in, the oldest out, and everything between them untouched.
+
+    A `_retain` that took no lock would finish the open while this
+    thread still holds it, which is what makes this the writer-side
+    falsification the reader's case is missing.
+    """
+    from vinga_server.telemetry import RETAINED_TRACES
+
+    telemetry, _ = exporting()
+    ids = [f"{index:032x}" for index in range(RETAINED_TRACES)]
+    for one in ids:
+        a_session(telemetry, one)
+    newcomer = f"{RETAINED_TRACES:032x}"
+    opened = threading.Event()
+    failed: list[BaseException] = []
+
+    def opening() -> None:
+        try:
+            clock = Clock()
+            events = session_events(clock, telemetry, session=newcomer)
+            open_session(events)
+            clock.tick(1.0)
+            close_session(events)
+        except BaseException as raised:  # noqa: BLE001 - reported, not swallowed
+            failed.append(raised)
+        finally:
+            opened.set()
+
+    with telemetry._retained_lock:
+        writer = threading.Thread(target=opening, name="a-session", daemon=True)
+        writer.start()
+        assert not opened.wait(0.2), "a session recorded its trace while the map was held"
+        # And nothing of it landed, which is the other half of "the two
+        # operations are one": the map is exactly as it was.
+        assert telemetry._retained.get(newcomer) is None
+        assert telemetry._retained.get(ids[0]) is not None
+
+    assert opened.wait(10.0), "the open never finished once the map was free"
+    writer.join(10.0)
+    assert not writer.is_alive()
+    assert failed == []
+    assert telemetry.trace_of(newcomer) is not None, "the newcomer was not recorded"
+    assert telemetry.trace_of(ids[0]) is None, "the oldest was not the one evicted"
+    assert [one for one in ids[1:] if telemetry.trace_of(one) is None] == []
+
+
 # --- no leak -----------------------------------------------------------
 
 # A value shaped like a collector credential, planted in every place one
