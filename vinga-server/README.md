@@ -2760,9 +2760,32 @@ deployment that provisioned prices at boot would be mutating a
 third-party system on the strength of telemetry credentials, which is a
 larger claim on your infrastructure than anything else here makes.
 
+### The generation stage usually needs nothing
+
+A backend ships managed definitions for well-known vendor models, so
+the `llm` stage is normally priced the moment its spans arrive. On the
+project this section was written against, `gpt-4o-mini` came back with
+`costDetails` filled in from input and output token counts with no
+definition entered by hand at all.
+
+To check yours, hold one conversation with telemetry on, open the `llm`
+observation of any turn, and look at whether it has a cost beside its
+token counts. If it has, there is nothing to do for this stage, and a
+definition of your own would only shadow one the backend maintains.
+
+If it has not, the model is one the backend does not know: a
+self-hosted model, a model behind a compatible endpoint, or a vendor
+model under a name your deployment renamed. Then it needs a definition
+like the ones below, with one difference: a generation reports tokens
+in BOTH directions, so it takes `inputPrice` and `outputPrice` rather
+than an input rate alone, `unit` is `TOKENS`, and the two rates are
+whatever that model's own published price list says per token. This
+page does not name them, because a price nobody has read is not a price.
+
 ### The definitions worth entering
 
-Prices as published on <https://developers.openai.com/api/docs/pricing>,
+These are the stages a backend has no managed definition for, because
+the units are vinga's own. Prices as published on <https://developers.openai.com/api/docs/pricing>,
 read 2026-09-12. A price is a fact with an as-of date; re-read it before
 trusting a cost report made long after this one.
 
@@ -2823,13 +2846,13 @@ no price beside it, however carefully it was measured.
 
 ### With none of them entered
 
-Usage is present on every span and every cost reads zero. That is
-correct rather than broken: the server measured what it was given and
-the backend was never told what a second of audio is worth. Enter the
-definitions before the run whose cost you want to read, because whether
-a backend goes back and prices traces it has already taken in is that
-backend's own behaviour and not something this server can promise on
-its behalf.
+Usage is present on every span, and every cost the backend cannot price
+on its own reads zero. That is correct rather than broken: the server
+measured what it was given and the backend was never told what a
+millisecond of audio is worth. Enter the definitions before the run
+whose cost you want to read, because whether a backend goes back and
+prices traces it has already taken in is that backend's own behaviour
+and not something this server can promise on its behalf.
 
 ### The models that deliberately get none
 
@@ -2838,7 +2861,7 @@ is a number a report adds up.
 
 - **`gpt-4o-transcribe` and `gpt-4o-mini-transcribe`** are billed per
   audio token ($2.50 and $1.25 per 1M input tokens). The `asr` span
-  carries seconds, and converting would take a tokens-per-second
+  carries milliseconds, and converting would take a tokens-per-second
   assumption. Their transcriptions show usage and no cost.
 - **`gpt-4o-mini-tts`** is billed per audio output token ($12.00 per 1M),
   and the `tts_stream` span carries the characters the voice was given.
@@ -2847,7 +2870,9 @@ is a number a report adds up.
   there is no list price to enter at all.
 - **Piper and faster-whisper** run in this process. There is no rate
   because there is no vendor, which is a true answer rather than a gap:
-  what a local voice costs is the machine it runs on.
+  what a local voice costs is the machine it runs on. They also report
+  no usage: a local engine does not count what it was sent, and this
+  server will not count it on the engine's behalf.
 
 ## The conversation store
 
