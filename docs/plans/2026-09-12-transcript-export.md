@@ -216,6 +216,26 @@ the close acknowledgement; read the session's turns through the
 store's read seam; ask `Telemetry` to write the spans; emit the
 outcome event.
 
+Teardown is ordered and the worker is interruptible, because a job
+may lawfully sit 30 s in an acknowledgement wait while the process
+shuts down. The composition pushes the exporter's shutdown onto the
+exit stack LAST, so it unwinds FIRST, while the store, the event
+tap and telemetry are all still up; its join budget is the 5 s
+shutdown posture. Inside that budget the worker is interrupted, not
+merely joined: `shutdown` sets a stop flag, the acknowledgement
+wait polls in `POLL_S` slices watching it (the `capture_upload`
+pattern), and a stopped worker emits the final outcome for its
+IN-FLIGHT job as well as for everything still queued, all as
+`dropped`, whose definition is widened accordingly: the queue bound
+turned the job away, or shutdown ended it before completion,
+queued or in flight. Only the bounded export call itself is not
+interruptible mid-request; its own 30 s ceiling is why the join can
+expire, and a late `undelivered` after the join lands in a logger
+the worker's own quieting lease still covers, the #67 M3 rule. The
+test drives shutdown DURING an acknowledgement wait, not merely
+with work queued, and asserts the in-flight job's `dropped` event
+was emitted while the tap was still attached.
+
 ### What a resumed conversation exports: this session's turns, by the store's own membership
 
 The presumption in the issue, proven by schema: `turns.session`
@@ -454,7 +474,9 @@ promise-side half this completes, and the amendment cites it.
   (`max_sessions` concurrent closes with the backlog occupied,
   every job accounted for as exported or dropped-with-event); the
   close ordering (nothing enqueued before `session_closed`, session
-  close latency bounded when the worker is wedged); sentinel plants
+  close latency bounded when the worker is wedged); shutdown during
+  an acknowledgement wait (the in-flight job's `dropped` emitted
+  within the join budget, tap still attached); sentinel plants
   (credential-shaped text as `heard`/`reply`) asserted absent from
   both log formats, both events' payloads and exception chains for
   every failure family, and present only in the span attributes;
@@ -636,6 +658,15 @@ Findings condensed but faithful; resolutions appended per amendment.
    queued and in-flight waits terminate within the join budget and
    emit their final outcome while the store, tap and telemetry are
    still available; test shutdown during an acknowledgement wait.
+
+   *Resolution.* Adopted. The worker section now states the
+   ordering (the exporter's shutdown pushed last so it unwinds
+   first, before the store, tap and telemetry go down) and the
+   interruptible protocol (a stop flag polled in `POLL_S` slices
+   inside the acknowledgement wait; the in-flight job and the
+   queued ones all emit `dropped`, whose definition widened to
+   cover shutdown ending a job in flight); the
+   shutdown-during-wait case joins the Tests section.
 
 6. **P2: Fixed trace retention cannot support the configurable
    session/backlog bound.** `max_sessions` has no upper bound,
