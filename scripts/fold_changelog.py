@@ -841,6 +841,26 @@ def guard(changed: list[str], body: str) -> int:
 USAGE = "usage: fold_changelog.py {fold|check} <repo-root> | fold_changelog.py guard"
 
 
+def checkout(argument: str) -> Path | None:
+    """The checkout the caller named, or None when it is not one.
+
+    Both halves of this belong inside the handler that turns a failure
+    into a fixed sentence, which is why they are behind a name rather
+    than sitting above the `try` in `main`. Resolving a path is a
+    filesystem walk and not a string operation: a directory that
+    answered `is_dir` a moment ago can be a symlink loop by the time it
+    is walked, and the walk then raises rather than answering. What it
+    raises carries the path it was given, so letting it out would
+    reprint the caller's own argument as a traceback, which the output
+    contract forbids for rejected input exactly as it does for
+    accepted input.
+    """
+    root = Path(argument)
+    if not root.is_dir():
+        return None
+    return root.resolve()
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print(USAGE, file=sys.stderr)
@@ -855,22 +875,23 @@ def main(argv: list[str]) -> int:
     if verb not in ("fold", "check") or len(argv) != 3:
         print(USAGE, file=sys.stderr)
         return 2
-    root = Path(argv[2])
-    if not root.is_dir():
-        print("the given repo-root is not a directory", file=sys.stderr)
-        return 2
-    root = root.resolve()
     try:
+        root = checkout(argv[2])
+        if root is None:
+            print("the given repo-root is not a directory", file=sys.stderr)
+            return 2
         return fold(root) if verb == "fold" else check(root)
     except Refusal as refusal:
         return _fail([str(refusal)])
-    except OSError:
+    except (OSError, RuntimeError):
         # The backstop, and it exists because the thing it catches is
-        # the thing this script must never do: an unhandled OSError
+        # the thing this script must never do: an unhandled error
         # prints a traceback, and a traceback carries repository paths
-        # into a public CI log. Every filesystem call above is guarded
-        # by name; this catches the one somebody adds later without
-        # remembering to.
+        # into a public CI log. Every filesystem call is guarded by
+        # name; this catches the one somebody adds later without
+        # remembering to. `RuntimeError` sits beside `OSError` because
+        # resolving a path answers a symlink loop with that one, and
+        # the message it carries is the path.
         return _fail([FILESYSTEM])
 
 

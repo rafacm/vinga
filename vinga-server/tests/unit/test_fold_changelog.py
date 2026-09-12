@@ -15,6 +15,7 @@ fragment, in that commit's own recorded offset, and the first-parent
 position that orders two fragments.
 """
 
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -931,6 +932,72 @@ def test_check_refuses_a_malformed_fragment(tmp_path: Path) -> None:
     assert done.returncode == 1
     assert "outside the Keep a Changelog six" in done.stderr
     assert SENTINEL not in done.stdout + done.stderr
+
+
+def _script_module():
+    """The script imported as a module.
+
+    Every other case here drives the real command, which is the right
+    altitude for a tool whose output contract is about what a CI log
+    sees. This one cannot: the failure it covers is a race between two
+    filesystem calls, and there is no way to lose that race on purpose
+    from outside the process. So the module is imported and the one
+    call that can raise is driven directly, and the streams are still
+    read whole.
+    """
+    spec = importlib.util.spec_from_file_location("fold_changelog", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_a_root_that_stops_resolving_says_one_fixed_sentence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Resolving a path is a filesystem walk, not a string operation.
+
+    A directory that answered `is_dir` can be a symlink loop by the
+    time it is walked, and the walk then raises rather than answering.
+    Raising from outside the fixed-diagnostic handler printed a library
+    traceback carrying the path somebody typed, and the contract is
+    that no input value reaches the log through this script, the
+    rejected ones included.
+    """
+    root = repo(tmp_path)
+    module = _script_module()
+
+    def a_loop(self: Path, *args: object, **kwargs: object) -> Path:
+        raise RuntimeError(f"Symlink loop from {self}")
+
+    monkeypatch.setattr(module.Path, "resolve", a_loop)
+    code = module.main(["fold_changelog.py", "fold", str(root)])
+    monkeypatch.undo()
+
+    printed = capsys.readouterr()
+    assert code == 1
+    assert printed.err.strip() == f"{module.FILESYSTEM} (1)"
+    for stream in (printed.out, printed.err):
+        assert str(root) not in stream
+        assert "Symlink loop" not in stream
+        assert "Traceback" not in stream
+
+
+def test_a_root_that_is_a_symlink_loop_names_no_path(tmp_path: Path) -> None:
+    """And the same shape when the loop is there before the run rather
+    than arriving during it, which is the half a real filesystem can
+    reach: `is_dir` answers no and the refusal quotes nothing."""
+    loop = tmp_path / "loop"
+    other = tmp_path / "other"
+    loop.symlink_to(other)
+    other.symlink_to(loop)
+
+    done = run("fold", str(loop))
+
+    assert done.returncode == 2
+    assert done.stdout == ""
+    assert len(done.stderr.strip().splitlines()) == 1
+    assert str(loop) not in done.stderr
+    assert "Traceback" not in done.stderr
 
 
 def test_a_bad_invocation_is_a_sentence_and_exit_two() -> None:
