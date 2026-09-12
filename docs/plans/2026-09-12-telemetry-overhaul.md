@@ -476,10 +476,36 @@ against today's code.
 trace is a root trace of its own linked to the session, so the session's
 retained context does not address it. The contract:
 
-- **What identifies it.** The turn's session-local ordinal, which is
-  what the turn span already carries as `vinga.turn.index` and what
-  both later issues have in hand when they stage an artifact. Not a
-  span object: what crosses stays opaque, as it does today.
+- **What identifies it: unsettled, and M4a settles it with evidence.**
+  This plan first said "the session-local ordinal the turn span
+  already carries as `vinga.turn.index`", and that is false. `grep`
+  says `TURN_INDEX` and `TURN_ID` are written in exactly one place,
+  the transcript observation built from a store row; `TURN_ATTRIBUTES`
+  carries `speech_ms` and `barge_in` and no ordinal, and
+  `turn_started` carries no store turn id, so at `_open_turn` the
+  exporter knows no name for the turn that a post-close reader of the
+  store could match. Whatever crosses stays opaque as it does today;
+  what is open is the KEY, and it is load-bearing for three consumers
+  (#506's re-parenting, #496's clips, #501's reply audio), so M4a
+  proves one rather than assuming it:
+  - **Candidate A, the store's own turn id reaches the exporter**, as
+    one declared field on an event. Robust by construction, since both
+    sides then name the same row. It costs a catalog change, lawful
+    because a store-minted row id is a server-minted identifier and
+    therefore metadata, and it is the answer if B does not hold.
+  - **Candidate B, the per-session `t_ms` offset both sides already
+    carry.** The transcript observation writes `vinga.turn.t_ms` from
+    the store row, and the exporter knows a turn's start instant at
+    `_open_turn`. Free if the two derive from the same clock and the
+    same instant; worthless if they can differ by a millisecond. M4a
+    verifies that against a real multi-turn session and records what
+    it found, with the comparison, before building on it.
+  What M4a must NOT do is key on an ordinal counted independently on
+  each side. The transcript export's ordinal counts the turns it
+  actually wrote, so a session holding a turn with no stored text
+  shifts every later number on one side and not the other, which is a
+  join that works in every test with complete turns and misfiles
+  artifacts in the field.
 - **When it is captured.** At the turn's open, the same instant the
   session's own context is captured at `_open_session`. Not at the
   close, because a turn that a barge-in or a failure ended early still
@@ -960,6 +986,19 @@ the manifest with its own generator when stale.
 The issue's own M4 box is ticked when M4a and M4b have both merged.
 #500 lands between M3 and M4a, #496 between M4b and M5, and #501
 between #496 and M5, each under its own plan.
+
+[#506](https://github.com/rafacm/vinga/issues/506) joins that sequence
+between M4a and M4b (decided 2026-09-12, after it was filed from a
+cloudlab run). Exported transcripts land on the session trace as
+siblings of the `session` span, so a turn trace carries the stage
+timings and not a word of what was said, and nothing on either names
+the other. Its own second option is this milestone's mechanism
+exactly: parent each transcript to its turn's retained context. So it
+is small once M4a exists and impossible before it, which is why it
+sits directly behind it rather than being folded into it, the house
+rule being that a behavior change sits alone in review. It is also
+M4a's first consumer, which makes it the proof that the retention and
+the join key work before #496 and #501 depend on them.
 
 ## Plan review round
 
