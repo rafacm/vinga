@@ -707,6 +707,36 @@ def test_a_trace_is_readable_after_the_close_that_popped_its_span() -> None:
     assert int(trace, 16) == span.context.trace_id
 
 
+def test_a_session_that_is_still_open_is_already_answerable() -> None:
+    """Recorded at the OPEN, which is where the id exists and which no
+    case that closes first can tell apart from recording at the close.
+
+    Two claims in one drive, because separating them would leave the
+    join untested: an unclosed session already answers with a canonical
+    id, and that same id is the one the span it belongs to goes out
+    under once the session does close.
+    """
+    from opentelemetry.trace import INVALID_TRACE_ID, format_trace_id
+
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry, session=SESSION)
+
+    open_session(events)
+    while_open = telemetry.trace_of(SESSION)
+
+    assert while_open is not None, "an open session has no trace to be named by"
+    assert len(while_open) == 32 and while_open == while_open.lower()
+    assert int(while_open, 16) != INVALID_TRACE_ID
+
+    clock.tick(1.0)
+    close_session(events)
+    span = named(finished(telemetry, memory), "session")
+
+    assert while_open == format_trace_id(span.context.trace_id)
+    assert telemetry.trace_of(SESSION) == while_open
+
+
 def test_a_session_the_exporter_never_saw_has_no_trace() -> None:
     """Absent rather than invented, which is what makes the uploader's
     `no_trace` failure a real answer: telemetry that never saw a session
