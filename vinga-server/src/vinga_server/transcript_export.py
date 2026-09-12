@@ -532,12 +532,24 @@ class TranscriptExport:
         failure event on the same trace, and where the transcript stops
         is the highest index they can see, which is why no count rides
         the event.
+
+        A shutdown ends it too, and the stop flag is read at both edges
+        of the loop rather than at the top alone. Only the bounded call
+        in flight is uninterruptible; a long session is many reads and
+        many calls, and a loop that read on through a shutdown would
+        spend the whole join budget on them and then say what became of
+        the job after the tap it speaks through had come off. The flag is
+        read AFTER the page that ends the session, never before it, so a
+        job that really finished is never reported as dropped for having
+        finished late.
         """
         if not self._recorded(job):
             return self._unrecorded(), 0
         cursor: int | None = None
         ordinal = 0
         while True:
+            if self._stopping.is_set():
+                return TranscriptExportFailure.DROPPED, ordinal
             page = self._reads.transcript_rows(
                 job.session, after=cursor, limit=self._batch_turns
             )
@@ -559,6 +571,8 @@ class TranscriptExport:
                 # the page after it would be a round trip to learn what
                 # this one already said.
                 return None, ordinal
+            if self._stopping.is_set():
+                return TranscriptExportFailure.DROPPED, ordinal
 
     def _recorded(self, job: _Job) -> bool:
         """Whether the store says this session's record is settled,
