@@ -21,7 +21,9 @@ the LAN declares `reach: network` honestly instead of stretching
 is most of why this lands now rather than after a beta.
 
 Local baseline: not applicable. No capability changes; the promise
-page's citation updates exactly as
+itself and the enumerated list stand untouched, its enforcement
+paragraph is rewritten to describe the mechanism truthfully (per
+the review round), and the citation updates exactly as
 [the enumerated-baseline record](../adr/2026-09-12-the-local-baseline-is-enumerated.md)
 anticipated in its consequences ("updates a citation rather than a
 promise", naming this issue).
@@ -49,6 +51,25 @@ promise", naming this issue).
   key, never a value.
 - Not named privacy, deliberately: the key names its mechanism, the
   documentation tells the umbrella story.
+
+### The promise page's enforcement paragraph is rewritten, not respelled
+
+The citation line changes as the baseline record anticipated, and
+the review round showed that alone leaves the page lying: the
+enforcement paragraph says every provider declares "whether it
+sends session data off the host" and describes a binary refusal,
+which stops being true of three reaches. The paragraph is
+rewritten in place: every provider declares its reach (`host`,
+`network`, `internet`), the operator declares the outermost reach
+session data may have, a build whose reach exceeds the boundary
+refuses at startup, an endpoint-dependent type that will not state
+its reach fails closed whenever a boundary is declared, and the
+two recorded limits (declarations not behavior; not a network
+sandbox) stay word-for-word. Where the citation identifies today's
+fully local configuration it says the precise `host` boundary
+(`server.data_boundary: host`). The promise's own sentence and the
+enumerated capability list do not change; the page still changes
+only by recorded decision, and this issue is that record.
 
 ## Open questions, resolved
 
@@ -520,3 +541,9 @@ per amendment.
    fail-closed endpoint-dependent types; use the precise `host`
    spelling where the citation identifies today's fully local
    configuration.
+
+   *Resolution.* Adopted. A new section scopes the promise-page
+   change: the enforcement paragraph is rewritten for reach and
+   ordered boundaries with the fail-closed rule and both limits
+   kept word-for-word, the citation spells `host`, and the
+   promise sentence and enumerated list stand untouched.
