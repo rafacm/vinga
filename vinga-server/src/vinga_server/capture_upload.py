@@ -498,7 +498,16 @@ class CaptureUpload:
         still open.
         """
         if not self._named(session):
-            self._failed(session, CaptureUploadFailure.STAGING_LOST)
+            # Not a `capture_upload_failed`, and that is forced rather
+            # than chosen: that event carries a `SessionId`, and an id
+            # this turns away is by definition not one, so there is no
+            # lawful event to say it with. Value-free, because the one
+            # thing that could be named here is the string being
+            # refused.
+            logger.warning(
+                "a session id this server did not mint reached the capture "
+                "staging, so nothing was staged for it"
+            )
             return
         if not _complete(manifest):
             self._incomplete.add(session)
