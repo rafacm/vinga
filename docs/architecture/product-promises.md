@@ -63,30 +63,56 @@ Evidence and tradeoffs:
 
 ## A fully local deployment is first-class
 
-Every core conversational capability is reachable with local
-providers; a cloud provider is an upgrade, never a requirement. A
-`server.local_only: true` server that starts can hold a complete
-conversation, the way the original all-local chain (Silero,
-faster-whisper, Ollama, Piper) did from the beginning.
+The local baseline is enumerated. A server whose declared data
+boundary is local (today spelled `server.local_only: true`) and that
+starts can hold a complete conversation with local providers, the way
+the original all-local chain (Silero, faster-whisper, Ollama, Piper)
+did from the beginning, and "complete" means all of:
 
-The enforcement mechanism is declared egress: every provider declares
-whether it sends session data off the host, and `local_only` refuses
-at startup to build one that does. A provider type that cannot answer
-for itself must say so explicitly (an OpenAI-compatible base URL is
-equally a vendor or an Ollama on localhost, so the configuration
-states which). The guarantee is enforced, not documented.
+- a conversation from wake through a spoken reply;
+- end-of-turn detection;
+- an interruption during playback that is heard and stops the reply,
+  promptly enough to converse;
+- agent memory;
+- tool use.
+
+A cloud provider is an upgrade, never a requirement, for everything
+on that list. The list is closed and changes only by recorded
+decision: every plan and feature doc states whether its work joins
+the baseline, stays outside it, or does not touch it, and a
+capability joins when a record says so and this page cites it in the
+same change. Quality and latency may differ by provider and by
+runtime; the baseline promises that each listed capability works
+locally, not that every implementation of it is equal. A capability
+specific to one runtime, above the baseline, is fine and expected.
+
+The enforcement mechanism is the declared data boundary: every
+provider declares whether it sends session data off the host, and a
+locally bounded server refuses at startup to build one that does. A
+provider type that cannot answer for itself must say so explicitly
+(an OpenAI-compatible base URL is equally a vendor or an Ollama on
+localhost, so the configuration states which). The guarantee is
+enforced, not documented. Two limits are part of the promise rather
+than caveats to it: the mechanism admits declarations, not behavior
+(it is not a network sandbox and proves nothing about a remote
+endpoint), and stage-by-stage provider mixing is a property of
+staged runtimes (a native speech-to-speech runtime may own several
+stages together).
 
 **Example.** An inherently-cloud runtime (a native realtime session)
 arriving as a sibling runtime is fine and expected; the local
-pipeline remains complete without it.
+pipeline remains complete, in the enumerated sense, without it.
 
-**Counterexample.** A core capability (memory, end-of-turn detection,
-barge-in quality) implemented only against a cloud API, so local
-deployments drift into the second-class configuration nobody chose to
-demote. Nobody would delete the local path; features would just stop
-landing on it. Also: assuming locality from a provider's shape, or a
-new provider type skipping the egress declaration because it is
-"obviously" local; an undeclared provider is a hole in the guarantee.
+**Counterexample.** A listed capability implemented only against a
+cloud API, so local deployments drift into the second-class
+configuration nobody chose to demote. Nobody would delete the local
+path; features would just stop landing on it. Also: assuming
+locality from a provider's shape, or a new provider type skipping
+the boundary declaration because it is "obviously" local; an
+undeclared provider is a hole in the guarantee.
+
+Evidence and reasoning:
+[the enumerated-baseline record](../adr/2026-09-12-the-local-baseline-is-enumerated.md).
 
 ## A beta database is never left behind
 
