@@ -159,9 +159,7 @@ decided against a rule instead of relitigating the first:
   decision of its own when something needs it. The tier table itself
   lives in
   [the observability map](../architecture/observability-surfaces.md#the-export-ladder),
-  where this record keeps its tables. That third tier did not survive
-  the day: the amendment below dissolves it into the content classes,
-  and the table there is now two tiers with a class table under them.
+  where this record keeps its tables.
 - **Export follows retention.** What the local surface holds is what
   may leave, never more: the capture directory's files for the first
   escalation and the conversation store's rows for the second. A
