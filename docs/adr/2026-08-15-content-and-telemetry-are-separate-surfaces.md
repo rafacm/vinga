@@ -212,12 +212,18 @@ against each other:
   the rename that gave the first two classes one vocabulary would
   have bought nothing if the third arrived in the old one.
 - **The family rule, recorded once, here.** Every content flag
-  defaults off, requires `server.telemetry.enabled`, is refused
-  under a `server.data_boundary` narrower than its reach, and
-  implies nothing about its siblings. Once, because it is one rule
-  three times over and a rule restated per flag is a rule that
-  drifts between its restatements; each artifact issue then states
-  only its own delta.
+  defaults off. Where its class has a local surface with a switch of
+  its own, that switch being off makes the flag a no-op, said once at
+  startup and never a refusal: a deployment that records no room and
+  one that stores no text each have nothing to export, which is a
+  choice rather than a misconfiguration. That arm is first, which is
+  what the two landed builders do. Otherwise the flag requires
+  `server.telemetry.enabled` and is refused under a
+  `server.data_boundary` narrower than its reach. And it implies
+  nothing about its siblings, in either direction. Once, because it
+  is one rule three times over and a rule restated per flag is a rule
+  that drifts between its restatements; each artifact issue then
+  states only its own delta.
 - **Artifacts ride their class.** #496's per-utterance clips and
   #501's per-turn reply audio are artifacts of `export_audio` rather
   than flags beside it: they are recordings, and recordings are what
@@ -259,7 +265,11 @@ against each other:
   conversation store's rows, so for them "export follows retention"
   reads off a store. This one has no store and vinga builds none: a
   session assembles a request because it is about to make it, and
-  that assembly exists locally for as long as the session does. The
+  that assembly exists locally for as long as the session does. No
+  second switch governs that surface, so the family rule's no-op arm
+  does not arise for this class: there is no second switch that could
+  be off, so the flag's only terms are the telemetry prerequisite and
+  the boundary. The
   answer in its own terms is therefore "for the session, then in a
   bounded delivery job until it is delivered or dropped, and nowhere
   after that", which is stricter than either class above it. One
