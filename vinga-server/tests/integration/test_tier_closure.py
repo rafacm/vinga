@@ -1030,6 +1030,45 @@ def test_the_langfuse_modules_import_from_the_langfuse_install(
         assert finished.returncode == 0, (module, finished.stderr)
 
 
+def test_the_attachment_refuses_from_an_install_without_its_extra(
+    serve_otel_env: Path, tmp_path: Path
+) -> None:
+    """The genuine missing-extra refusal for the fifth tier, in the one
+    environment where the distribution is genuinely missing AND the
+    refusal in front of it does not fire.
+
+    `[serve]` alone cannot answer this: asked for telemetry it refuses
+    for the OTEL extra first, which is the decision order working, so
+    the attachment's own sentence would never be reached. `[serve,otel]`
+    is telemetry that CAN build asked for an attachment that cannot.
+
+    Everything else about this refusal is pinned by unit cases that fake
+    the import failure. This is the other half: an install that never
+    had the SDK, answering the sentence rather than an ImportError
+    traceback out of somebody else's package.
+    """
+    from vinga_server.capture_upload import NEEDS_THE_LANGFUSE_EXTRA
+
+    finished = _ran(
+        serve_otel_env,
+        "vinga-server",
+        environment={
+            "VINGA_SERVER__CAPTURE__ENABLED": "true",
+            "VINGA_SERVER__CAPTURE__DIR": str(tmp_path / "captures"),
+            "VINGA_SERVER__TELEMETRY__ENABLED": "true",
+            "VINGA_SERVER__TELEMETRY__ATTACH_CAPTURES": "true",
+        },
+    )
+
+    assert finished.returncode == 1, finished.stdout + finished.stderr
+    assert finished.stderr.strip().splitlines()[-1] == NEEDS_THE_LANGFUSE_EXTRA, (
+        finished.stderr
+    )
+    assert "Traceback" not in finished.stderr
+    assert "ModuleNotFoundError" not in finished.stderr
+    assert "langfuse." not in finished.stderr
+
+
 # The contributor door
 
 

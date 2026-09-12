@@ -712,7 +712,11 @@ async def test_a_backend_that_says_no_is_not_retried(
     to become acceptable in half a second, so the retries are spent on
     the failures that could change."""
     caplog.set_level(logging.DEBUG)
-    seam, recorder = fake_sdk(asking=ApiError(status_code=401))
+    # No status code, which is the generated client's own shape for
+    # this one: it raises a typed `UnauthorizedError` carrying headers
+    # and a body and no code at all, so what says the far side answered
+    # is the class.
+    seam, recorder = fake_sdk(asking=ApiError())
     uploads, _ = an_uploader(
         tmp_path, traces={"s1": TRACE}, sdk=seam, recorder=recorder, retries=2
     )

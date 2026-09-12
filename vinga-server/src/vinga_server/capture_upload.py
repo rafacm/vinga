@@ -806,18 +806,26 @@ class CaptureUpload:
         completed IS retried, which is the one case the timeout and the
         backoff exist for.
         """
+        answered = isinstance(raised, self._sdk.error) or isinstance(
+            raised, httpx.HTTPStatusError
+        )
         status = _status_of(raised, self._sdk.error)
-        if status is None:
-            return CaptureUploadFailure.UNREACHABLE, isinstance(
-                raised, httpx.TransportError
-            )
         if status == httpx.codes.REQUEST_ENTITY_TOO_LARGE:
             return CaptureUploadFailure.TOO_LARGE, False
-        if status == httpx.codes.TOO_MANY_REQUESTS or status >= 500:
+        if status is not None and (
+            status == httpx.codes.TOO_MANY_REQUESTS or status >= 500
+        ):
             return CaptureUploadFailure.UNREACHABLE, True
-        if status >= 400:
+        if answered:
+            # The generated client raises a typed error for each of the
+            # statuses it names (401, 403, 404, 405) and those carry no
+            # status code at all, so the class is what says the far side
+            # answered. Reading the code alone would have reported every
+            # rejected credential as an endpoint nobody could reach.
             return CaptureUploadFailure.REFUSED, False
-        return CaptureUploadFailure.UNREACHABLE, False
+        return CaptureUploadFailure.UNREACHABLE, isinstance(
+            raised, httpx.TransportError
+        )
 
     def _close_client(self) -> None:
         """Let the HTTP stack go, under its own guard: this runs on a
