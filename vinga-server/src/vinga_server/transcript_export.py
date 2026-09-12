@@ -323,10 +323,15 @@ class TranscriptExport:
         self._acknowledgement_timeout_s = acknowledgement_timeout_s
         self._shutdown_timeout_s = shutdown_timeout_s
         # The worker, started at the first job rather than at build, so
-        # a server whose sessions never close pays for no thread. Under
-        # a lock because two sessions closing at once would otherwise
-        # start two.
-        self._starting = threading.Lock()
+        # a server whose sessions never close pays for no thread.
+        #
+        # The lock is admission's rather than the start's, which is one
+        # name and one scope for what used to be two: two sessions
+        # closing at once must not start two workers, AND a job must not
+        # be admitted across a shutdown that has already decided there
+        # was no worker to wait for. The teardown takes the same lock
+        # before it raises the flag.
+        self._admission = threading.Lock()
         self._worker: threading.Thread | None = None
         self._stopping = threading.Event()
         # This exporter's claim on the SDK's silence, taken by the
@@ -361,12 +366,6 @@ class TranscriptExport:
         """
         if recorded is None:
             return
-        if self._stopping.is_set():
-            # A session closing behind a shutdown, which a drain
-            # produces: no worker will start for it, so the drop is said
-            # here rather than left as a job nothing will ever answer.
-            self._failed(session, TranscriptExportFailure.DROPPED)
-            return
         context = self._telemetry.retained_context(session)
         if context is None:
             # Decided here and never at export, which is what the
@@ -375,21 +374,11 @@ class TranscriptExport:
             # time it closed, has nothing to be written onto.
             self._failed(session, TranscriptExportFailure.NO_TRACE)
             return
-        if not self._start():
-            # A process that cannot start a thread has larger problems
-            # than its transcripts, and this hook runs inside the device
-            # session's own cleanup, which is the one path in this server
-            # that always reaches its end. So it is the closed set's
-            # `dropped` exactly as a full backlog is, and the
-            # conversation closes normally.
-            self._failed(session, TranscriptExportFailure.DROPPED)
-            return
-        try:
-            self._queue.put_nowait(
-                _Job(session=session, context=context, recorded=recorded)
-            )
-        except queue.Full:
-            self._failed(session, TranscriptExportFailure.DROPPED)
+        reason = self._admit(
+            _Job(session=session, context=context, recorded=recorded)
+        )
+        if reason is not None:
+            self._failed(session, reason)
 
     # --- the way out ---------------------------------------------------
 
@@ -416,11 +405,17 @@ class TranscriptExport:
         the worker gives its lease back from its own `finally`, when the
         work is genuinely over.
         """
-        self._stopping.set()
-        worker = self._worker
+        with self._admission:
+            # Under the admission lock, which is the whole of what makes
+            # "no worker, so nothing is queued" true: raising the flag
+            # and reading the field outside it left a window in which a
+            # job was admitted behind a worker this had already decided
+            # did not exist.
+            self._stopping.set()
+            worker = self._worker
         if worker is None:
-            # Nothing ever started, so nothing is queued behind it
-            # either: `session_closed` starts the worker before it puts.
+            # Nothing ever started, and nothing can be admitted now: the
+            # flag went up under the same lock admission takes.
             return
         await asyncio.to_thread(worker.join, self._shutdown_timeout_s)
         if worker.is_alive():
@@ -435,49 +430,75 @@ class TranscriptExport:
 
     # --- the worker ----------------------------------------------------
 
-    def _start(self) -> bool:
-        """The worker, started at the first job and never again, and
-        whether there is one.
+    def _admit(self, job: _Job) -> TranscriptExportFailure | None:
+        """This job onto the backlog, or the reason it never got there.
 
-        A daemon thread of its own rather than `asyncio.to_thread`, the
-        exporter's reasoning: the default executor's threads are joined
-        by an `atexit` hook, so a wedged export on one of them would
-        hold the process open exactly as long as the far side felt like
-        holding it, which is what a bounded shutdown exists to prevent.
+        The whole of admission under ONE lock, and the same lock the
+        shutdown takes before it raises the stop flag, which is what
+        makes the two one decision rather than two that can interleave.
+        Without that the window was narrow and silent: starting the
+        worker SCHEDULES a thread before the field that publishes it is
+        assigned, and the job is queued after that, so a shutdown
+        landing between them set the flag, found no worker to join and
+        returned, the worker it could not see drained an empty queue and
+        exited, and the job was then queued behind a worker that was
+        already gone. Neither exported nor reported, which is the one
+        outcome this surface may never have, because nothing is
+        persisted and the event is the whole of the ledger.
 
-        The start is contained and the field is assigned only once it has
-        succeeded, which is two properties rather than one. Contained,
-        because `Thread.start()` raises in a process that has run out of
-        them and this runs inside a conversation's close. Assigned after,
-        because a field holding a thread that never started is one the
-        shutdown would try to join, and joining an unstarted thread
-        raises in the teardown instead.
+        The worker itself is a daemon thread rather than
+        `asyncio.to_thread`, the exporter's reasoning: the default
+        executor's threads are joined by an `atexit` hook, so a wedged
+        export on one of them would hold the process open exactly as
+        long as the far side felt like holding it, which is what a
+        bounded shutdown exists to prevent. It starts at the first job
+        and never again, so a server whose sessions never close pays for
+        no thread.
 
-        False is therefore "no worker, and none coming": the start
-        failed, or a shutdown has already been asked for. The caller
-        turns it into the job's own outcome rather than into a raise.
+        The start is contained and the field is assigned only once it
+        has succeeded, which is two properties rather than one.
+        Contained, because `Thread.start()` raises in a process that has
+        run out of them and this runs inside a conversation's close.
+        Assigned after, because a field holding a thread that never
+        started is one the shutdown would try to join, and joining an
+        unstarted thread raises in the teardown instead.
+
+        What the lock costs is a thread start and a queue put, which is
+        what a close was already paying for here; no wait and no request
+        happens under it.
         """
-        with self._starting:
+        with self._admission:
             if self._stopping.is_set():
-                return False
-            if self._worker is not None:
-                return True
-            worker = threading.Thread(
-                target=self._run, name="vinga-transcript-export", daemon=True
-            )
-            try:
-                worker.start()
-            except Exception:  # noqa: BLE001 - a close never fails for a transcript
-                # Deliberately unbound and value-free: what a failed
-                # thread creation says is about this process, and the
-                # job's own event is where the outcome belongs.
-                logger.warning(
-                    "the transcript exporter could not start a worker, so this "
-                    "session's transcripts were not exported"
+                # A session closing behind a shutdown, which a drain
+                # produces: no worker will run this, so the drop is said
+                # rather than left as a job nothing will ever answer.
+                return TranscriptExportFailure.DROPPED
+            if self._worker is None:
+                worker = threading.Thread(
+                    target=self._run, name="vinga-transcript-export", daemon=True
                 )
-                return False
-            self._worker = worker
-            return True
+                try:
+                    worker.start()
+                except Exception:  # noqa: BLE001 - a close never fails for this
+                    # Deliberately unbound and value-free: what a failed
+                    # thread creation says is about this process, and the
+                    # job's own event is where the outcome belongs. A
+                    # process that cannot start a thread has larger
+                    # problems than its transcripts, and this hook runs
+                    # inside the device session's own cleanup, which is
+                    # the one path in this server that always reaches its
+                    # end.
+                    logger.warning(
+                        "the transcript exporter could not start a worker, so "
+                        "this session's transcripts were not exported"
+                    )
+                    return TranscriptExportFailure.DROPPED
+                self._worker = worker
+            try:
+                self._queue.put_nowait(job)
+            except queue.Full:
+                return TranscriptExportFailure.DROPPED
+        return None
 
     def _run(self) -> None:
         """Every queued job, until a shutdown ends it.
