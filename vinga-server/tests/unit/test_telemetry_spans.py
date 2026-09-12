@@ -94,6 +94,9 @@ from vinga_server.telemetry import (
     TTS_SPAN,
     TURN_SPAN,
 )
+from vinga_server.telemetry import (
+    OBSERVATION_USAGE_DETAILS as USAGE_DETAILS,
+)
 
 # One nanosecond per millisecond of the durations below, so a case can
 # say what it expects in the units the events carry.
@@ -111,8 +114,8 @@ GROUPING = {SESSION_ID_ALIAS}
 # closed-set assertions below for the same reason the grouping alias is:
 # a usage key is a fact somebody chose to export, and the point of those
 # assertions is that nothing arrives under a foreign name by accident.
-ASR_USED = {"gen_ai.usage.input_milliseconds"}
-TTS_USED = {"gen_ai.usage.input_characters"}
+ASR_USED = {"gen_ai.usage.input_milliseconds", USAGE_DETAILS}
+TTS_USED = {"gen_ai.usage.input_characters", USAGE_DETAILS}
 
 
 @pytest.fixture(autouse=True)
@@ -933,6 +936,84 @@ def test_a_stream_reports_the_sentence_it_was_given_as_input_usage() -> None:
     # A size and never a byte of the sentence, which is what the count
     # is for: nothing on this span holds prose.
     assert not any(isinstance(held, str) and " " in held for held in tts.values())
+
+
+def test_each_priced_stage_spells_its_usage_for_the_backend_too() -> None:
+    """The fallback the plan named and the live gate proved necessary.
+
+    The conventions' own key arrives at the backend and is never priced:
+    a model definition prices `input`, `output` and `total`, so a
+    `gen_ai.usage.input_characters` is lifted into the observation's
+    usage under that suffix and costs nothing. So both stages carry a
+    second spelling for that one reader, canonical JSON under the key a
+    definition can price, which is the same shape as the session id's
+    grouping alias rather than a second fact.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.3)
+    hear(events, duration_s=0.9, asr_ms=300, submitted_ms=900)
+    clock.tick(0.9)
+    synthesize(events, index=0, characters=29, stream_ms=900)
+    finish_reply(events)
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    asr = named(spans, ASR_SPAN).attributes
+    tts = named(spans, TTS_SPAN).attributes
+
+    assert asr[USAGE_DETAILS] == '{"input":900}'
+    assert tts[USAGE_DETAILS] == '{"input":29}'
+    # Beside the conventions' name and never instead of it: the vinga
+    # spelling is the one a backend that has never heard of this project
+    # reads, and it stays.
+    assert asr["gen_ai.usage.input_milliseconds"] == 900
+    assert tts["gen_ai.usage.input_characters"] == 29
+
+
+def test_a_round_is_not_given_a_second_usage_spelling() -> None:
+    """Only the two stages the conventions have no vocabulary for.
+
+    A generation reports tokens under the conventions' own names, which
+    this backend already parses and already prices, so a second spelling
+    there would be one fact under two keys for no reader at all.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.8)
+    round_done(events, input_tokens=420, output_tokens=37)
+    finish_reply(events)
+    close_session(events)
+
+    llm = named(finished(telemetry, memory), LLM_SPAN).attributes
+    assert llm["gen_ai.usage.input_tokens"] == 420
+    assert USAGE_DETAILS not in llm
+
+
+def test_a_stage_with_no_usage_gets_no_priced_spelling_either() -> None:
+    """The absence rule reaches both spellings.
+
+    An ear that cannot say what it submitted leaves the conventions'
+    attribute off, and a JSON blob saying the same nothing would be the
+    one place this module invented a claim the event did not make.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.3)
+    hear(events, duration_s=0.9, asr_ms=300, submitted_ms=None)
+    finish_reply(events)
+    close_session(events)
+
+    asr = named(finished(telemetry, memory), ASR_SPAN).attributes
+    assert "gen_ai.usage.input_milliseconds" not in asr
+    assert USAGE_DETAILS not in asr
+    assert asr["vinga.asr.duration_s"] == pytest.approx(0.9)
 
 
 def test_a_stage_that_measured_nothing_reports_no_usage_rather_than_zero() -> None:

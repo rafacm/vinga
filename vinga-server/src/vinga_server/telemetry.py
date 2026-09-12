@@ -354,6 +354,29 @@ OBSERVATION_METADATA_PREFIX = "langfuse.observation.metadata."
 OBSERVATION_INPUT = "langfuse.observation.input"
 OBSERVATION_OUTPUT = "langfuse.observation.output"
 
+# The THIRD is the one this backend needs to put a price on a stage the
+# GenAI conventions have no usage vocabulary for, and it is the fallback
+# the plan named and the live gate proved necessary rather than a guess.
+#
+# What the gate found, against the real backend, on three runs: a
+# `gen_ai.usage.*` key whose suffix the backend does not know is lifted
+# into `usageDetails` under that suffix verbatim and then never priced,
+# because a model definition prices the keys `input`, `output` and
+# `total` and nothing else. So the conventions' spelling is correct,
+# readable and inert, and a second spelling for one reader is what makes
+# the number cost something. That is the same shape as the session id's
+# grouping alias: one fact, two names, decided here rather than by
+# asking every backend to learn vinga's vocabulary.
+#
+# One string holding canonical JSON, for the reason `TRANSCRIPT_LEGS`
+# gives: span attributes take primitives and never mappings. The value
+# is `{"input": N}`, the key a definition can price, with N a WHOLE
+# number: the gate found a float dropped outright on both paths, so an
+# ASR stage reporting 4.08 seconds arrived with `usageDetails: {}` and
+# no cost at all. The units the spans carry are chosen to be integral
+# for that reason.
+OBSERVATION_USAGE_DETAILS = "langfuse.observation.usage_details"
+
 # What one turn's span carries besides its text.
 #
 # `vinga.turn.index` is a session-local ordinal, 1-based, counting the
@@ -1484,6 +1507,33 @@ def _attributes(
         for name in (names,) if isinstance(names, str) else names:
             attributes[name] = held
     return attributes
+
+
+def _priceable(spoken: dict[str, Any], name: str) -> dict[str, Any]:
+    """The backend's own spelling of a usage number this stage already
+    exported under the conventions' name, or nothing at all.
+
+    Read off the attributes the stage span is ALREADY carrying rather
+    than off the payload a second time, which is what keeps the two
+    spellings one fact: a number the declared-shape gate refused cannot
+    appear here, and the key cannot drift from the table that produced
+    it.
+
+    Whole numbers only, and this is the load-bearing half. The live gate
+    found a float dropped by both ingestion paths, so a stage reporting
+    a fractional measurement arrived with an empty `usageDetails` and no
+    cost; a value that is not an integer is therefore left to the
+    conventions' attribute alone, where it is at least readable, rather
+    than being rounded into a price nobody measured.
+    """
+    held = spoken.get(name)
+    if not isinstance(held, int) or isinstance(held, bool):
+        return {}
+    return {
+        OBSERVATION_USAGE_DETAILS: json.dumps(
+            {"input": held}, sort_keys=True, separators=(",", ":")
+        )
+    }
 
 
 def _named(exported: "_Exported") -> dict[str, Any]:
@@ -2653,6 +2703,7 @@ class Telemetry:
         attributes = {
             **self._context(trace, payload, states=_speaks_for(ASR_STAGE, spoken)),
             **spoken,
+            **_priceable(spoken, ASR_USAGE),
         }
         # The one attribute on any span here that is not a payload
         # field: which of the four ends this was, which is the event's
@@ -2805,6 +2856,7 @@ class Telemetry:
             attributes={
                 **self._context(trace, payload, states=_speaks_for(TTS_STAGE, spoken)),
                 **spoken,
+                **_priceable(spoken, TTS_USAGE),
             },
             start_time=_before(end, payload.get("stream_ms")),
         )
