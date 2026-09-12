@@ -389,7 +389,8 @@ and line. Historical records keep their spellings. The
 
 ## Milestones
 
-- [ ] **M1: the vocabulary cutover.** Everything above in one
+- [x] [**M1: the vocabulary cutover**](2026-09-12-data-boundary-implementation.md#m1-the-vocabulary-cutover)
+  (PR TBD). Everything above in one
   milestone: `boundary.py` with the `Reach` enum, rank rule and
   sentences; the three config keys respelled with the old ones
   refused (options trap closed); the nine class markings; every
