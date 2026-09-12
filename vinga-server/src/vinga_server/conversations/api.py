@@ -158,6 +158,7 @@ from vinga_server.conversations.views import (
     COMMON,
     DAY,
     DEVICE,
+    NAME,
     VIEWS,
     View,
     grouped,
@@ -1387,6 +1388,17 @@ def _aggregated(
     `device` narrows to one of them and is a normalized MAC or nothing.
     It is only ever given on a view that has the column, because the
     grouping that admits it is the grouping that chose the relation.
+
+    The recorded device name is the one value in a row here that a
+    person wrote, so it leaves through `without_url_credential` like
+    every other stored string a read hands back (#381): the column
+    itself keeps what the operator typed, deliberately, because
+    `vinga_ro` is granted the record schema and a row is not a display,
+    and `read_session` above strips the same column for the same
+    reason. Projected after the ordering rather than before it, so the
+    page a caller pages through is still ordered on what the view
+    stores: two names that differ only in a credential are two rows
+    there, and re-sorting on the stripped form would move one of them.
     """
     relation = _relation(view)
     day = relation.c[DAY]
@@ -1403,6 +1415,8 @@ def _aggregated(
         # spelling the request wrote it in, which is what lets an
         # answer's `day` be sent back as a `since`.
         row[DAY] = row[DAY].isoformat()
+        if row.get(NAME) is not None:
+            row[NAME] = without_url_credential(row[NAME])
     return found
 
 

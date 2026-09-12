@@ -39,6 +39,7 @@ from urllib.parse import quote
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from tests.support.problems import paths, refused
 from tests.support.stores import plant_event, plant_session, plant_turn
@@ -56,6 +57,26 @@ TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 # Shaped like something an operator would be horrified to find quoted
 # back, and so that a substring check for it cannot match by accident.
 SENTINEL = "sk-test-4a7e2c01-never-a-real-credential"
+
+# The other two halves of a credential-bearing name, distinct from the
+# first so that an answer keeping any one of the three fails on that
+# one rather than on whichever is checked first.
+TOKEN_SENTINEL = "tok-test-5b8f3d12-never-a-real-credential"
+
+AUTHORIZATION_SENTINEL = "Bearer-br-6c9a4e23-never-a-real-credential"
+
+SECRET_PARTS = (SENTINEL, TOKEN_SENTINEL, AUTHORIZATION_SENTINEL)
+
+# A name that arrived around the write path's refusal, which is the
+# state `sessions.device_name` is documented to hold as written, and
+# what `without_url_credential` leaves of it: the address, without the
+# userinfo and without the credential-named parameters.
+CREDENTIAL_NAME = (
+    f"https://u:{SENTINEL}@example.invalid/desk"
+    f"?token={TOKEN_SENTINEL}&authorization={AUTHORIZATION_SENTINEL}"
+)
+
+STRIPPED_NAME = "https://example.invalid/desk"
 
 # The day every planted session opens on, and the window around it. A
 # fixed day rather than today's, so a case that asserts an exact row is
@@ -509,6 +530,66 @@ def test_a_renamed_board_comes_back_as_two_rows_in_name_order(
         (BOARD_A, "Kitchen Speaker", 1),
         (BOARD_A, None, 1),
     ]
+
+
+def test_a_credential_in_a_recorded_name_reaches_no_answer_as_written(
+    client: TestClient, store: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The name is the one value in one of these rows that a person
+    wrote, and the record keeps it exactly as written on purpose:
+    `vinga_ro` is granted the record schema and a row is not a display.
+    So the projection belongs where a reader is answered, which is here,
+    and it is the same `without_url_credential` the session detail
+    applies to the same column and the display walk applies to the
+    record it was copied from.
+
+    A name that arrived around the write path's refusal is the case:
+    userinfo, a `token` parameter and an `authorization` parameter, each
+    a distinct sentinel so that an answer keeping any one of them fails
+    on that one. The stripped address is asserted present beside the
+    absences, because an answer that dropped the column entirely would
+    satisfy every absence and tell a reader nothing.
+
+    All four views, because which relation answers is derived rather
+    than written per view, and the log beside the body, because a value
+    that is kept out of a response and written to a log has not been
+    kept out of anything.
+    """
+    a_day(store, DAY, session="named", device=BOARD_A, device_name=CREDENTIAL_NAME)
+
+    with caplog.at_level(logging.DEBUG):
+        for alias in ALIASES:
+            response = client.get(
+                f"/metrics/{alias}", params={"since": DAY, "until": DAY, "group": "device"}
+            )
+
+            assert response.status_code == 200, response.text
+            assert [row["name"] for row in response.json()["rows"]] == [
+                STRIPPED_NAME
+            ], alias
+            for secret in SECRET_PARTS:
+                assert secret not in response.text, alias
+
+    for secret in SECRET_PARTS:
+        assert secret not in _leaked(caplog)
+
+
+def test_the_stored_name_keeps_the_credential_the_answer_strips(
+    client: TestClient, store: Any
+) -> None:
+    """The control beside the case above, and the reason the projection
+    is at the boundary rather than in the view: storage is not a
+    surface. A rule applied to the column would rewrite what an operator
+    wrote, and the record is what an analyst reads with the grant they
+    were given."""
+    a_day(store, DAY, session="named", device=BOARD_A, device_name=CREDENTIAL_NAME)
+
+    with store.connect() as connection:
+        stored = connection.execute(
+            text("select name from record.metrics_sessions_by_device_daily")
+        ).scalar()
+
+    assert stored == CREDENTIAL_NAME
 
 
 def test_every_view_answers_the_device_grouping_with_the_device_first(

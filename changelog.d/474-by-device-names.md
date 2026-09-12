@@ -16,3 +16,9 @@
   named, comes back as. Migration `1009_views_read_the_name` replaces
   the four views in place, so nothing standing on them is dropped, and
   no other surface changes shape: `name` was always in the row contract.
+  A name reaches an HTTP answer, and the CLI rendering of one, through
+  the same URL-credential projection every other stored string a read
+  hands back goes through, so a name that arrived around the write
+  path's refusal cannot be quoted back out; the column itself keeps what
+  was written, because the read-only role is granted the record on
+  purpose and a row is not a display.
