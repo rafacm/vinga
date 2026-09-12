@@ -351,3 +351,10 @@ added for finding 1, which names `vinga provider delete` and
 `vinga mcp-server delete` as the way to reach a row that arrives as an
 invalid `reach`; `test_the_manifest_is_the_census` was red against the
 committed manifest and is green against the regenerated one.
+
+### Delta re-review, PR #499
+
+External review: codex CLI 0.154.0, model gpt-5.6-terra, read-only
+sandbox, 2026-09-12, reviewing the five fix-round commits
+(ea9927a7 through b37e13d6). Verdict as received: **no findings,
+mergeable as is**.
