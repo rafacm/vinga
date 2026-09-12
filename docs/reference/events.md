@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 75 events in 104 variants. What
+This document is that surface written down: 77 events in 106 variants. What
 was said in a conversation is in the conversation store instead, keyed by the
 same `session` ([its reference](conversations-schema.md)).
 
@@ -67,7 +67,7 @@ keeps validation a cost paid per decision rather than per frame.
 ## The channels
 
 The channel is the scope. One session channel, `vinga_server.session`, carries
-everything a conversation says about itself; the 15 server channels are each a
+everything a conversation says about itself; the 16 server channels are each a
 subsystem's own module name. An event declared on one channel and emitted from
 another is a violation even when its fields are lawful.
 
@@ -86,6 +86,7 @@ another is a violation even when its fields are lawful.
 - `vinga_server.providers.world`
 - `vinga_server.registry`
 - `vinga_server.tools.mcp`
+- `vinga_server.transcript_export`
 - `vinga_server.ws`
 
 ## What a value may be
@@ -272,6 +273,8 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `capture_over_budget` | `vinga_server.capture` | WARNING | 1 |
 | `capture_uploaded` | `vinga_server.capture_upload` | INFO | 1 |
 | `capture_upload_failed` | `vinga_server.capture`, `vinga_server.capture_upload` | WARNING | 2 |
+| `transcripts_exported` | `vinga_server.transcript_export` | INFO | 1 |
+| `transcript_export_failed` | `vinga_server.transcript_export` | WARNING | 1 |
 | `capture_enabled` | `vinga_server.app` | WARNING | 1 |
 | `capture_disabled` | `vinga_server.app` | INFO | 1 |
 | `drain_started` | `vinga_server.registry` | INFO | 1 |
@@ -2561,6 +2564,60 @@ session %s: capture staged for upload was left by a previous run and has been re
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
 | `reason` | `TOKEN` | yes | no | one of: `abandoned` |  |
+
+### `transcripts_exported`
+
+A closed session's turns are on its trace in the telemetry backend, one
+observation each, carrying what was heard and what was replied. How many and
+how long it took, and deliberately nothing the far side minted: what a reader
+needs is that it happened and how much went, and the trace it is on is the one
+already named by the session.
+
+#### Variant 1: `vinga_server.transcript_export` at INFO
+
+```text
+session %s: %d turn transcripts exported to its trace in %d ms
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `turns` (`COUNT`) | no |  |  |
+| 3 | `elapsed_ms` (`INT`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `turns` | `COUNT` | yes | no |  | How many turns went, which is what a reader compares against what the session's own record holds. Turns rather than spans because they are the same number: one turn is one observation. |
+| `elapsed_ms` | `INT` | yes | no |  | How long the whole export took, measured off the audio path: this happens on a worker of its own after the session closed, so it is a fact about the store, the backend and the link to it rather than about any reply's latency. |
+
+### `transcript_export_failed`
+
+A closed session's turns are not on its trace, and why, from a closed set of
+five reasons. The other half of the ledger: an export that silently failed
+would leave a reader with a trace, the stage timings, none of the words, and
+no way to learn that any were meant to be there. It carries no count of what
+did get through, because an export truncated part way is visible where the
+reader already is, as the highest exported turn index beside this event on the
+same trace.
+
+#### Variant 1: `vinga_server.transcript_export` at WARNING
+
+```text
+session %s: transcripts not exported to its trace (%s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `reason` (`TOKEN`) | no | one of: `dropped`, `no_trace`, `undelivered`, `unreadable`, `unrecorded` |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `dropped`, `no_trace`, `undelivered`, `unreadable`, `unrecorded` | Which of the five ways this ends badly it was. Never the far side's words and never a count of what did get through: what an operator acts on is the class of the failure, and what a reader needs about a truncated export is already on the trace beside this. |
 
 ### `capture_enabled`
 

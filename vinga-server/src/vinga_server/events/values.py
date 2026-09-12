@@ -1516,6 +1516,42 @@ AttemptedUpload = Literal[
 ]
 
 
+class TranscriptExportFailure(StrEnum):
+    """Why a closed session's transcripts are not on its trace.
+
+    The whole of what `transcript_export_failed` may say, and the reason
+    that event exists: an export that quietly failed would leave a
+    reader looking at a trace with stage timings, no words, and no way
+    to learn that any were meant to be there.
+
+    Five members, each named by what an operator would do about it, and
+    each decided at one site: the store could not be trusted to have the
+    session's turns, the store would not answer, this server had no
+    trace to name, the backend would not take the spans, or this server
+    turned the job away. No `abandoned` member, because nothing is
+    persisted: a process that dies with an export queued loses an
+    export and nothing else, and the turns stay in the store.
+    """
+
+    # The close acknowledgement answered false, so the turns may not be
+    # assumed readable: dropped, stopped or timed out, which the
+    # acknowledgement deliberately does not tell apart.
+    UNRECORDED = "unrecorded"
+    # The store's read seam answered `Unreadable`.
+    UNREADABLE = "unreadable"
+    # Nothing to name the trace by: telemetry never saw the session, or
+    # its context had aged out of the retention by the time the session
+    # closed.
+    NO_TRACE = "no_trace"
+    # The bounded export answered failure or ran out its own deadline.
+    # Deliberately not told apart further: the result is binary, and a
+    # sentence must never carry the far side's words.
+    UNDELIVERED = "undelivered"
+    # The backlog was full, so the job was never queued, or a shutdown
+    # ended it before it completed, queued or in flight.
+    DROPPED = "dropped"
+
+
 class EchoOutcome(StrEnum):
     """How the ASR prompt-echo guard's retry ended."""
 
@@ -1826,6 +1862,7 @@ __all__ = [
     "TextValue",
     "ToolOutcome",
     "ToolSource",
+    "TranscriptExportFailure",
     "UNIDENTIFIED_DEVICE",
     "UnnamedToolSource",
     "Whole",

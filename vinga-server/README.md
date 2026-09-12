@@ -2541,6 +2541,8 @@ This index is the other half: what exists, and when it fires.
 | `capture_disabled` | capture is configured but off |
 | `capture_uploaded` | a closed session's recording is beside its trace in the telemetry backend, with its sizes and how long it took |
 | `capture_upload_failed` | a recording is not beside its trace, and why, from a closed set of reasons; also what a restart says about a job it found still staged |
+| `transcripts_exported` | a closed session's turns are on its trace, one observation each, with how many went and how long it took |
+| `transcript_export_failed` | a session's turns are not on its trace, and why, from a closed set of reasons |
 | `conversations_enabled` | the conversation store opens at startup, which means this server is recording what is said to it (no session or device: it is said once, before anything connects) |
 | `conversations_dropped` | the store is behind and events for one session are being dropped, said once per session at its first drop; the total lands on that session's row |
 | `conversations_failed` | a write to the store failed and its batch was dropped, or a prune could not run |
