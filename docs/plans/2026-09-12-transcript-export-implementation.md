@@ -552,3 +552,59 @@ faithful; resolutions appended per fix.
 - `python3 scripts/check_doc_links.py .`: checked 235 files, 0 failures
 - `uv run pytest tests/unit/test_command_spellings.py -q`: 52 passed
 - Both generated documents regenerated and unchanged
+
+### Delta re-review, PR #498
+
+External re-review of the fix round: codex CLI 0.154.0, model
+gpt-5.6-terra, read-only sandbox, 2026-09-12, reviewing commit
+`a5560a85`. Verdict as received: **mergeable after the fix**. One
+finding, which the round itself introduced.
+
+1. **P1: Shutdown can silently strand a transcript job during worker
+   startup.** `Thread.start()` schedules the worker before `_worker` is
+   assigned, and the job is queued after admission returns. A shutdown
+   landing between them sets the stop flag while `_worker` is still
+   None and returns without joining; the worker it could not see drains
+   an empty queue and exits; and the job is then queued behind a worker
+   that is already gone, so it is neither exported nor reported as
+   dropped. Make worker startup and job admission atomic with respect
+   to shutdown: hold the admission lock through the worker's
+   publication and the `put_nowait`, and have shutdown take that same
+   lock before it sets `_stopping` and snapshots the worker.
+
+   *Resolution.* Adopted as prescribed. The window is one the previous
+   round opened: finding 4 moved the field's assignment after the start
+   precisely so a teardown would never join an unstarted thread, and
+   that correct change left the schedule and the publication on either
+   side of a lock the shutdown did not take. Admission is one method
+   under one lock now (`_admit`), holding it across the publication and
+   the queue put, and the shutdown takes it before raising the flag; the
+   lock's name moved with its scope, from the start's to admission's,
+   because it is one rule rather than two. What is held is a thread
+   start and a queue put, which is what a close was already paying for
+   here, and no wait and no request happens under it. The case is
+   deterministic by construction rather than by timing: it pauses inside
+   `Thread.start` itself, which is exactly the window, with the thread
+   really running and the field not yet assigned, and it leaves the
+   acknowledgement unsettled so the answer is the same whichever side of
+   the flag the worker reaches the job on. Red first: `AssertionError:
+   the job was stranded between the worker's start and its admission /
+   assert [] == [<TranscriptExportFailure.DROPPED: 'dropped'>]`, which
+   is the silence the finding names. The race case was run twenty times
+   over, zero failures, and the ten concurrency-driving cases together
+   twelve times over, zero failures.
+
+#### Re-verified after the delta round
+
+- `uv run ruff check .`: All checks passed!
+- `uv run mypy` (strict over `src/vinga_server/events`): Success: no
+  issues found in 5 source files
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 7083 passed, 19
+  skipped (7082 before the delta round, plus its one)
+- `uv run pytest tests/integration -q`: 330 passed, against Postgres
+  from the committed compose file on `VINGA_DB_PORT=55496`
+- `python3 scripts/fold_changelog.py check .`: checked 1 fragments, 0
+  failures
+- `python3 scripts/check_doc_links.py .`: checked 235 files, 0 failures
+- `uv run pytest tests/unit/test_command_spellings.py -q`: 52 passed
+- Both generated documents regenerated and unchanged
