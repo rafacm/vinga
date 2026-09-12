@@ -195,25 +195,32 @@ by the SDK, never config keys and never printed; the server-half
 is no value for vinga to read even by reference, matching the
 `VINGA_DB_PASSWORD` docstring reasoning (`models.py:598-605`).
 
-Refusals, all `ConfigError` inside `build_` functions per the #66
-shape, each with a fixed value-free sentence and no chaining:
+The order of decisions is the contract, because the issue's no-op
+and the refusals would otherwise contradict:
+`build_capture_upload(config.server, *, telemetry, local_only)`
+receives the whole server section, and its first act resolves
+capture. `server.capture` absent, or present with `enabled: false`,
+returns `None` after one value-free info line: the issue says flag
+on with capture off is a no-op, an operator mid-toggle is not a
+misconfiguration, and none of the checks below run in that case,
+so a capture-off deployment boots identically with or without the
+extra, the telemetry section or `local_only`. Only when capture and
+`attach_captures` are both effectively enabled do the refusals
+apply, all `ConfigError` inside the builder per the #66 shape, each
+with a fixed value-free sentence and no chaining, in this order:
 
-- `attach_captures` on with `server.telemetry.enabled` off (or the
-  telemetry section absent) refuses at boot: the attachment names a
-  trace, and there is no trace to name. Cross-field, in the
-  `ConversationsConfig` `model_validator` style.
-- `attach_captures` on under `server.local_only: true` refuses via
+- `server.telemetry.enabled` off (or the section absent) refuses:
+  the attachment names a trace, and there is no trace to name.
+  Cross-field, in the `ConversationsConfig` `model_validator` style
+  where the shape allows it, otherwise in the builder with the same
+  sentence discipline.
+- `server.local_only: true` refuses via
   `check_feature("server.telemetry.attach_captures", egress=True,
   local_only)` before any import, construction or thread, the
   caller-half contract `egress.py:134-139` states.
-- `attach_captures` on without the `langfuse` extra refuses with
-  the `NEEDS_THE_OTEL_EXTRA` sentence shape, naming
+- The missing `langfuse` extra refuses with the
+  `NEEDS_THE_OTEL_EXTRA` sentence shape, naming
   `uv sync --extra langfuse`, no ImportError chained.
-- `attach_captures` on with `server.capture` absent or disabled is
-  NOT a refusal: the issue says flag on with capture off is a no-op,
-  and a capture section that exists but is off is an operator
-  mid-toggle, not a misconfiguration. The no-op is logged once at
-  boot at info level, value-free.
 - Missing `LANGFUSE_*` variables are not a boot refusal either,
   deliberately, and the reason is stated: the SDK owns those
   variables and their validation, a boot check would be a second
@@ -387,6 +394,12 @@ condensed but faithful; resolutions appended per amendment.
    first: absent or disabled returns None with the informational
    no-op before any other check; the three refusals apply only when
    capture and attachment are both effectively enabled.
+
+   *Resolution.* Adopted. The refusals section now leads with the
+   decision order: the builder takes the whole server section,
+   resolves capture first, returns None with the info no-op before
+   any other check, and applies the three refusals only when
+   capture and attachment are both effectively on.
 
 2. **P1: `CaptureStore.finished()` is not a session-close seam.**
    A capture closes early at `max_session_s` and on write failure,
