@@ -888,10 +888,10 @@ the manifest with its own generator when stale.
 - [ ] **M2: trace completeness**. `vinga.device.name` on every span in
   the enumeration above, carried by the retained identity and read from
   the pinned context by the three post-close writers that build their
-  attributes by hand; a `tool_call` fold building a
-  child span of the turn span with `gen_ai.operation.name`, replacing
-  the span event; prompt sources retained per agent and stamped
-  flattened on every turn span with the total beside them; an
+  attributes by hand; a `tool_call` fold building a child span of the
+  turn span with `gen_ai.operation.name`, replacing the span event;
+  prompt sources retained per agent and stamped flattened on every turn
+  span with the total beside them; an
   after-close attribute table giving `elapsed_ms`, `audio_bytes` and
   `manifest_bytes` their `vinga.` names. Live gate recorded. Design
   footprint: four tables and one fold on the module that owns folds,
@@ -906,8 +906,9 @@ the manifest with its own generator when stale.
   as-of date, the request that enters one, and what a backend without
   them shows). Acceptance, qualified as settled above: against a
   backend with those definitions entered, the per-session per-stage
-  cost query returns nonzero rows for `asr`, `llm` and `tts_stream`. Design footprint: one declared field through
-  the catalog's own machinery, two table entries.
+  cost query returns nonzero rows for `asr`, `llm` and `tts_stream`.
+  Design footprint: one declared field through the catalog's own
+  machinery, two table entries.
 - [ ] **M4a: post-close retention and pinning**. Turn-level trace
   context captured at each turn's open into its session's retained
   entry, under the per-session `RETAINED_TURNS` cap settled above;
