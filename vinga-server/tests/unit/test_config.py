@@ -244,6 +244,7 @@ def test_the_old_attachment_key_is_refused_at_boot() -> None:
 
     refusal = str(caught.value)
     assert f"server.telemetry: {UNRECOGNIZED_KEY_REFUSED}" in refusal
+    assert "attach_captures" not in refusal
     assert PARSER_SENTINEL not in refusal
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
