@@ -54,14 +54,15 @@ repository follows.
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, auto
 from typing import Any
 
 from vinga_server.build_info import revision
@@ -187,12 +188,24 @@ TURN_STARTED = "turn_started"
 REPLY_FINISHED = "reply_finished"
 CAPTURE_STARTED = "capture_started"
 
-# And the two that arrive after it closed: a recording's trip to the
+# And the four that arrive after it closed: a recording's trip to the
 # backend happens on a worker of its own, off the session's loop and
-# after the span map has let the session go (#67).
+# after the span map has let the session go (#67), and a transcript
+# export reads the store on a worker of its own for the same reason
+# (#495). Both pairs reach the trace through one mechanism, which is
+# what "the machinery generalizes and the sentences do not" means here.
 CAPTURE_UPLOADED = "capture_uploaded"
 CAPTURE_UPLOAD_FAILED = "capture_upload_failed"
-AFTER_THE_CLOSE = frozenset({CAPTURE_UPLOADED, CAPTURE_UPLOAD_FAILED})
+TRANSCRIPTS_EXPORTED = "transcripts_exported"
+TRANSCRIPT_EXPORT_FAILED = "transcript_export_failed"
+AFTER_THE_CLOSE = frozenset(
+    {
+        CAPTURE_UPLOADED,
+        CAPTURE_UPLOAD_FAILED,
+        TRANSCRIPTS_EXPORTED,
+        TRANSCRIPT_EXPORT_FAILED,
+    }
+)
 
 # Not a lifecycle event, and the only span event that changes what the
 # spans after it carry: it moves which agent a turn is stamped from.
@@ -238,10 +251,12 @@ SPEAKING_FINISHED = "speaking_finished"
 # refused to be false when it named `stream_ms`. The provider's own
 # latency, the number that is backpressure-free, is the attribute.
 SESSION_SPAN = "session"
-# The one span this module makes that is not a stage of a conversation:
-# the reference that makes an uploaded recording playable, put on the
-# trace after the session closed (#67).
+# The two spans this module makes that are not a stage of a
+# conversation: the reference that makes an uploaded recording playable
+# (#67), and one turn's transcript (#495), both put on the trace after
+# the session closed.
 CAPTURE_SPAN = "capture"
+TRANSCRIPT_SPAN = "transcript"
 TURN_SPAN = "turn"
 ASR_SPAN = "asr"
 LLM_SPAN = "llm"
@@ -291,24 +306,69 @@ VINGA_SESSION_ID = "vinga.session.id"
 # operators read, and the generic alias behind it.
 SESSION_ID_NAMES = (VINGA_SESSION_ID, SESSION_ID_ALIAS)
 
-# Where a backend-minted media reference goes, and it is the one thing
-# this module writes whose value is not derived from an event (#67).
+# The three fields the backend renders an observation's own input,
+# output and metadata from, and the two things this module writes into
+# them whose value is not derived from an event.
 #
-# That is a real exception to this file's own rule and it is worth being
-# exact about. A reference is not a fact about the conversation: it is a
-# token the BACKEND minted for bytes an operator already authorized to
-# leave, and its only content is an opaque identifier in that backend's
-# own namespace. It is written on no session unless
-# `server.telemetry.export_audio` is on, so a deployment that exports
-# traces and no audio never sees one.
+# Those are real exceptions to this file's own rule (nothing it writes
+# may say a fact `catalog.py` does not declare), and they are worth
+# being exact about, because they are the whole of the exception list.
 #
-# Two spellings for one token, because Langfuse resolves a reference
+# The FIRST is a backend-minted media reference (#67). It is not a fact
+# about the conversation: it is a token the BACKEND minted for bytes an
+# operator already authorized to leave, and its only content is an
+# opaque identifier in that backend's own namespace. It is written on
+# no session unless `server.telemetry.export_audio` is on, so a
+# deployment that exports traces and no audio never sees one. Two
+# spellings for one token, because Langfuse resolves a reference
 # wherever it finds one and the two render differently: the metadata key
 # is what a reader filters and reads, and the output field is what the
 # trace view puts a player in. Both were confirmed live to arrive with
 # the token intact.
-MEDIA_METADATA_PREFIX = "langfuse.observation.metadata."
-MEDIA_OUTPUT = "langfuse.observation.output"
+#
+# The SECOND is a turn's own text (#495), and it is the one place in
+# this module where conversation CONTENT is written onto a span. It is
+# lawful for exactly the reason the media token is: it is written on no
+# session unless `server.telemetry.export_transcripts` is on, it is read
+# from the conversation store rather than from an emission, and the
+# emit-to-span fold it does not go through stays content-free. The
+# fields are the backend's own rendered input and output, confirmed
+# live before the exporter was built around them (#495 M2's gate).
+OBSERVATION_METADATA_PREFIX = "langfuse.observation.metadata."
+OBSERVATION_INPUT = "langfuse.observation.input"
+OBSERVATION_OUTPUT = "langfuse.observation.output"
+
+# What one turn's span carries besides its text.
+#
+# `vinga.turn.index` is a session-local ordinal, 1-based, counting the
+# turns this export actually wrote in `id`-ascending order, so any
+# session's first exported turn is index 1 however many turns the
+# THREAD holds. `vinga.turn.id` is beside it and is the store's own
+# database-wide identity, which is what correlates an observation back
+# to the row it came from and to the API's cursor; the two are
+# deliberately separate facts rather than one spelled twice.
+TURN_INDEX = "vinga.turn.index"
+TURN_ID = "vinga.turn.id"
+TURN_T_MS = "vinga.turn.t_ms"
+TURN_AGENT = "vinga.agent"
+
+# And where a split reply's per-leg attribution goes, under the exact
+# wire encoding the plan fixed: ONE string attribute holding canonical
+# JSON (sorted keys, no extra whitespace) of the legs in order.
+#
+# A string because OTel span attributes take primitives or homogeneous
+# primitive arrays and never mappings, and because every post-close
+# write this module makes is string-valued. The live gate recorded what
+# the backend does with it: the string is parsed back into a structured
+# `metadata.legs` on the observation, so a reader meets the legs as
+# objects rather than as a quoted blob.
+TRANSCRIPT_LEGS = f"{OBSERVATION_METADATA_PREFIX}legs"
+
+# What a leg may say, allowlisted rather than copied. The token halves
+# the column also holds are metadata the generation spans already
+# carry, and content plus its attribution is the whole of what this
+# observation adds.
+LEG_FIELDS = ("agent", "text")
 
 # Which payload fields become attributes on which span, and under what
 # name. Written out rather than derived from the payload, so an event
@@ -829,11 +889,29 @@ PLAYBACK_ATTRIBUTES = {
 PENDING_CAPTURES = 64
 
 # How many sessions' trace ids are kept for a reader to ask about after
-# the fact, oldest evicted first. The same bound and the same posture as
-# the hold above, for the same reason: a map that grew with every
-# session a process ever ran would be a slow leak in the one object a
-# server holds for its whole life, and what a late reader wants is the
-# session that just closed rather than one from last week.
+# the fact, ON TOP of the deployment's own session capacity, oldest
+# evicted first. The same posture as the hold above, for the same
+# reason: a map that grew with every session a process ever ran would be
+# a slow leak in the one object a server holds for its whole life, and
+# what a late reader wants is the session that just closed rather than
+# one from last week.
+#
+# Slack rather than the whole bound since #495, and the difference is a
+# correctness one rather than a tuning one. This map is written at a
+# session's OPEN, `server.limits.max_sessions` has no upper bound, and a
+# fixed sixty-four would therefore evict a LIVE session's context as
+# soon as sixty-five sessions were talking at once: a healthy deployment
+# would answer `no_trace` for a session that had not even closed. So the
+# bound is the configured capacity plus this, computed in
+# `build_telemetry` from what the composition was given, which by
+# construction means no live session's context is evicted by concurrent
+# opens and the after-close window keeps the depth it always had.
+#
+# It narrows the capture uploader's own exposure incidentally and is
+# claimed to do no more: a capture job does not pin a context and
+# resolves `trace_of` later on its own worker, so a blocked capture
+# worker under `max_sessions > 64` can still find older contexts gone.
+# Closing that is the capture uploader's follow-up.
 RETAINED_TRACES = 64
 
 
@@ -842,6 +920,8 @@ def build_telemetry(
     *,
     local_only: bool = False,
     exporter: Any | None = None,
+    transcripts: Any | None = None,
+    max_sessions: int = 0,
     queue_size: int = QUEUE_SIZE,
     batch_size: int = BATCH_SIZE,
     schedule_delay_ms: int = SCHEDULE_DELAY_MS,
@@ -878,14 +958,25 @@ def build_telemetry(
        operator as a library traceback with the value in it, and as an
        exception type outside `BOOT_FAILURES`.
 
-    `exporter`, `queue_size`, `batch_size`, `schedule_delay_ms` and
-    `shutdown_timeout_s` are the test seam and nothing else: a lane
-    drives the fold through the SDK's in-memory exporter, or fills a
-    deliberately tiny queue behind a blocking one to prove a saturated
-    exporter costs a reply nothing, or shortens the wait so a case about
-    what happens AFTER the timeout does not take five seconds to reach
-    it. A caller that passes none of them gets the real transport
-    reading its own environment and the real bound.
+    `max_sessions` is the deployment's configured session capacity, and
+    it is the one argument here that is neither a refusal nor a seam:
+    the trace retention has to be at least that deep or a live session's
+    context is evicted by the sessions talking beside it (#495). The
+    formula is here rather than at the call site because it is this
+    module's fact; what the composition knows is its own capacity.
+
+    `exporter`, `transcripts`, `queue_size`, `batch_size`,
+    `schedule_delay_ms` and `shutdown_timeout_s` are the test seam and
+    nothing else: a lane drives the fold through the SDK's in-memory
+    exporter, or fills a deliberately tiny queue behind a blocking one
+    to prove a saturated exporter costs a reply nothing, or shortens the
+    wait so a case about what happens AFTER the timeout does not take
+    five seconds to reach it. `transcripts` is the second of those and
+    stands in for the DEDICATED exporter instance a transcript export
+    delivers through, which is a different object from `exporter` on
+    purpose: one is a batch queue that drops, and the other is a bounded
+    call that answers. A caller that passes none of them gets the real
+    transport reading its own environment and the real bound.
     """
     if config is None or not config.enabled:
         return None
@@ -924,7 +1015,12 @@ def build_telemetry(
         quieted.release()
         raise ConfigError(CANNOT_BUILD_EXPORTER)
     return Telemetry(
-        provider=provider, quieted=quieted, shutdown_timeout_s=shutdown_timeout_s
+        provider=provider,
+        quieted=quieted,
+        sdk=sdk,
+        transcripts=transcripts,
+        retained=RETAINED_TRACES + max(0, max_sessions),
+        shutdown_timeout_s=shutdown_timeout_s,
     )
 
 
@@ -1010,17 +1106,23 @@ def _egress_refusal(local_only: bool) -> str | None:
 
 @dataclass(frozen=True)
 class _Sdk:
-    """The four names this module needs out of the SDK, resolved once.
+    """The names this module needs out of the SDK, resolved once.
 
     The registry's `_resolved` pattern: the import happens when an
     exporter is built and not before, so this module imports clean in an
     install that has none of it, and nothing outside this function ever
     sees an OpenTelemetry symbol.
+
+    `result` is the enumeration a bounded export answers with, and it is
+    here rather than imported where it is read for the same reason every
+    other name is: a module that imports it at the top stops importing
+    in an install without the extra.
     """
 
     provider: Any
     processor: Any
     resource: Any
+    result: Any
     name_key: str
     version_key: str
 
@@ -1038,13 +1140,17 @@ def _import_sdk() -> _Sdk | None:
             Resource,
         )
         from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+        from opentelemetry.sdk.trace.export import (
+            BatchSpanProcessor,
+            SpanExportResult,
+        )
     except ImportError:
         return None
     return _Sdk(
         provider=TracerProvider,
         processor=BatchSpanProcessor,
         resource=Resource,
+        result=SpanExportResult,
         name_key=SERVICE_NAME,
         version_key=SERVICE_VERSION,
     )
@@ -1213,6 +1319,52 @@ class _SessionTrace:
 
 
 @dataclass(frozen=True)
+class TranscriptTurn:
+    """One stored turn on its way onto a trace (#495).
+
+    The seam between the transcript exporter and this module, stated as
+    a type rather than implied by a mapping both sides index: what
+    crosses is exactly these seven facts, so a projection that grew a
+    column cannot reach a span by accident and this module never learns
+    that a database is behind it.
+
+    `index` is the exporter's session-local ordinal and `id` is the
+    store's own row identity; `legs` is the column as the store holds
+    it, allowlisted and encoded HERE, because what a span may carry is
+    this module's question.
+    """
+
+    index: int
+    id: int
+    t_ms: int
+    agent: str | None
+    heard: str | None
+    reply: str | None
+    legs: Any = None
+
+
+class Delivery(Enum):
+    """What became of one bounded transcript export.
+
+    Three answers, and the caller turns each into a word of its own
+    closed set. They are this module's own vocabulary rather than the
+    event's, because what this knows is whether a batch of spans
+    reached the far side; which reason an operator reads is the
+    exporter's to decide.
+    """
+
+    # The far side took the batch.
+    DELIVERED = auto()
+    # It did not, and trying again inside this call already happened:
+    # the exporter's own bounded retry is the whole retry policy.
+    UNDELIVERED = auto()
+    # Nothing was even attempted, because this exporter has stopped
+    # accepting or the spans could not be built. Shutdown territory,
+    # which is why it is not a delivery answer at all.
+    STOPPED = auto()
+
+
+@dataclass(frozen=True)
 class _Exported:
     """Which trace a session's spans went out under, and which span was
     its root.
@@ -1243,6 +1395,9 @@ class Telemetry:
         self,
         provider: Any,
         quieted: Lease,
+        sdk: "_Sdk",
+        transcripts: Any | None = None,
+        retained: int = RETAINED_TRACES,
         shutdown_timeout_s: float = SHUTDOWN_TIMEOUT_S,
     ) -> None:
         # The two API names a span needs, bound once here rather than
@@ -1291,7 +1446,17 @@ class Telemetry:
         self._failed = Status(StatusCode.ERROR)
         self._provider = provider
         self._tracer = provider.get_tracer(SERVICE)
+        self._sdk = sdk
         self._quieted = quieted
+        # The transcript export's own half, all of it lazy, because a
+        # deployment that exports no transcripts must pay for none of
+        # it: no second provider, no second exporter, no second socket.
+        # Built on the WORKER's thread at its first job, which is where
+        # the only user of it runs and where a construction failure is a
+        # contained delivery failure rather than a boot event.
+        self._transcripts = transcripts
+        self._private: Any | None = None
+        self._transcript_lock = threading.Lock()
         self._shutdown_timeout_s = shutdown_timeout_s
         # The release runs once, on a thread of its own, and this is
         # what says whether it has been started and whether it is over.
@@ -1349,6 +1514,9 @@ class Telemetry:
         # left to the interpreter's own atomicity to imply.
         self._retained: dict[str, _Exported] = {}
         self._retained_lock = threading.Lock()
+        # How many of them, which is the configured session capacity
+        # plus this module's own slack: see `RETAINED_TRACES`.
+        self._retention = max(1, retained)
         # Whether emissions are still accepted. Flipped by the lifespan
         # before it detaches anything, so a session still talking while
         # the server tears down cannot open a span nothing will close.
@@ -1460,14 +1628,159 @@ class Telemetry:
             attributes={
                 **dict.fromkeys(SESSION_ID_NAMES, session),
                 **{
-                    f"{MEDIA_METADATA_PREFIX}{name}": token
+                    f"{OBSERVATION_METADATA_PREFIX}{name}": token
                     for name, token in references.items()
                 },
-                MEDIA_OUTPUT: "\n".join(references.values()),
+                OBSERVATION_OUTPUT: "\n".join(references.values()),
             },
         )
         span.end()
         return True
+
+    def retained_context(self, session: str) -> Any | None:
+        """The opaque context a span written after this session closed
+        belongs in, or None where this exporter has nothing for it
+        (#495).
+
+        The narrow read the transcript exporter admits a job on, and it
+        is deliberately opaque: what crosses is a handle, never a trace
+        id, a span id or an SDK type, so a caller that holds one can put
+        a span in the right trace and can learn nothing else from it.
+
+        Asked at ADMISSION and not at export, which is the whole reason
+        it exists rather than being folded into the write below. The
+        retention is bounded and oldest-evicted, so a job queued behind
+        a slow worker could otherwise watch its own context age out
+        between the close that made it and the worker that reached it,
+        and a healthy export would report that the session had no trace.
+        Captured into the job, `no_trace` is an answer about the moment
+        the session closed, which is the moment it is about.
+
+        Safe to call from any thread: it touches the span map not at all
+        and the retention under its lock.
+        """
+        with self._retained_lock:
+            return self._retained.get(session)
+
+    def export_transcript(
+        self, session: str, context: Any, turns: "Sequence[TranscriptTurn]"
+    ) -> Delivery:
+        """One page of a closed session's turns, as spans in the trace
+        that session was exported under, delivered and answered for
+        (#495).
+
+        One span per turn, named `transcript`, a child of the session
+        span by the passed context. It carries the session under both
+        spellings so the query a reader already makes returns it beside
+        the turns, the turn's ordinal and the store's own row id, the
+        turn's offset and the agent it opened with, and the text in the
+        two fields the backend renders as an observation's input and
+        output. Where a handover split the reply, the per-leg
+        attribution rides one canonical-JSON string attribute.
+
+        The spans do NOT ride the shared batch queue, and that is the
+        design rather than an optimization: that queue drops on
+        saturation and swallows a collector failure, so a transcript
+        that never arrived would be indistinguishable from one that did,
+        and the whole point of this surface is that a reader can tell.
+        They are built on a private tracer bound to the same resource,
+        collected in memory, and handed to a dedicated exporter instance
+        of the same class the batch queue uses, reading the same
+        `OTEL_EXPORTER_OTLP_*` environment: one transport vocabulary and
+        one credential family, and an answer.
+
+        The call's bound is that exporter's own deadline, which covers
+        its internal retries and is the whole retry policy here: a
+        backend that is down stays down for longer than a worker should
+        wait, and the failure event is the honest report.
+
+        Timestamped at export time, and ordered by the ordinal rather
+        than by a synthetic conversation clock: a span claiming to have
+        happened at the turn's `t_ms` would be the one dishonest fact on
+        a surface whose value is being checkable against the store.
+
+        Answers `STOPPED` where nothing was attempted (this exporter has
+        stopped accepting, or the spans would not build), and otherwise
+        whether the far side took the batch. It never raises, because
+        its caller is a worker whose failures are events.
+
+        Safe to call from any thread, which is why it exists in this
+        shape: it runs on the transcript exporter's own worker.
+        """
+        if not self._accepting:
+            return Delivery.STOPPED
+        try:
+            spans = self._transcript_spans(session, context, turns)
+        except Exception:  # noqa: BLE001 - a worker never dies of a page
+            # Deliberately unbound and deliberately silent, the rule
+            # this module applies to every containment: what is never
+            # looked at cannot leak by accident later.
+            return Delivery.STOPPED
+        if not spans:
+            return Delivery.DELIVERED
+        return self._deliver(spans)
+
+    def _transcript_spans(
+        self, session: str, context: Any, turns: "Sequence[TranscriptTurn]"
+    ) -> list[Any]:
+        """This page's turns as finished spans, held here rather than
+        queued anywhere.
+
+        The private provider is built once and lazily, on the thread
+        that first needs it, and has NO span processor at all, which is
+        the whole trick: a provider with nothing attached still builds
+        and ends real spans, and an ended span is exactly what an
+        exporter takes. So the page exists as a list this function
+        returns, and there is no second queue anywhere to drop it,
+        flush it or export it behind this caller's back.
+
+        Bound to the same resource as the shared provider, spelled the
+        same way from the same two facts, because a transcript is the
+        same service's span and a second service name would put it in a
+        row of its own in every backend.
+        """
+        with self._transcript_lock:
+            if self._private is None:
+                self._private = self._sdk.provider(
+                    resource=self._sdk.resource(
+                        attributes={
+                            self._sdk.name_key: SERVICE,
+                            self._sdk.version_key: revision(),
+                        }
+                    )
+                )
+            tracer = self._private.get_tracer(SERVICE)
+        spans = []
+        for turn in turns:
+            span = tracer.start_span(
+                TRANSCRIPT_SPAN,
+                context=self._continuing(context),
+                attributes=_transcript_attributes(session, turn),
+            )
+            span.end()
+            spans.append(span)
+        return spans
+
+    def _deliver(self, spans: list[Any]) -> Delivery:
+        """The bounded call itself, and the one place this module asks a
+        transport for an answer.
+
+        The instance is constructed here, at the first page that needs
+        it, on the caller's thread: a construction that fails is a
+        delivery that failed, never a boot that refused, which is the
+        same posture the uploader's client takes. Every exception is
+        contained, and none of it is looked at: what a failing export
+        holds is the endpoint and its credentials.
+        """
+        try:
+            if self._transcripts is None:
+                self._transcripts = _otlp_exporter()
+            answer = self._transcripts.export(spans)
+        except Exception:  # noqa: BLE001 - a failure here is an event, not a raise
+            return Delivery.UNDELIVERED
+        if answer is self._sdk.result.SUCCESS:
+            return Delivery.DELIVERED
+        return Delivery.UNDELIVERED
 
     def _continuing(self, exported: _Exported) -> Any:
         """The context a span written after a session closed belongs in.
@@ -1647,9 +1960,27 @@ class Telemetry:
             # what a failing export was holding is the endpoint.
             pass
         finally:
+            self._close_transcripts()
             self._quieted.release()
             if self._finished is not None:
                 self._finished.set()
+
+    def _close_transcripts(self) -> None:
+        """Let the transcript export's own half go, if it was ever built.
+
+        Both halves under one guard, on a path that is already finishing
+        however it ended. Nothing waits on it: the transcript exporter's
+        own shutdown is pushed LAST onto the composition's exit stack
+        and therefore unwinds FIRST, so by the time this runs its worker
+        has finished or has been left behind with a lease of its own.
+        """
+        provider, self._private = self._private, None
+        transports, self._transcripts = self._transcripts, None
+        for closing in (provider, transports):
+            if closing is None:
+                continue
+            with contextlib.suppress(Exception):
+                closing.shutdown()
 
     # --- the fold -----------------------------------------------------
 
@@ -1801,7 +2132,7 @@ class Telemetry:
                 trace_id=context.trace_id,
                 span_id=context.span_id,
             )
-            while len(self._retained) > RETAINED_TRACES:
+            while len(self._retained) > self._retention:
                 # Oldest first, the hold's own rule: what a late reader
                 # wants is a session that has just ended.
                 self._retained.pop(next(iter(self._retained)))
@@ -2171,6 +2502,70 @@ class Telemetry:
         if self._offset is None:
             self._offset = time.time() - session_clock()
         return _epoch_ns(emission.at, self._offset)
+
+
+def _transcript_attributes(session: str, turn: TranscriptTurn) -> dict[str, Any]:
+    """One turn's span attributes, written out here rather than folded
+    from a payload (#495).
+
+    Not through `_attributes` and its tables, and the difference is the
+    point: those tables fold a DECLARED event's fields through the
+    catalog's own value gate, and a transcript is not an event. What it
+    is, is a projection of the conversation store read post hoc, so what
+    a span may carry is decided here, field by field, from a type whose
+    seven members are the whole of what crossed the seam.
+
+    An absent half contributes no attribute rather than a null: a turn
+    recorded before the text switch went on has nothing to say, and an
+    attribute saying `None` would be a claim the store did not make.
+    """
+    attributes: dict[str, Any] = {
+        **dict.fromkeys(SESSION_ID_NAMES, session),
+        TURN_INDEX: turn.index,
+        TURN_ID: turn.id,
+        TURN_T_MS: turn.t_ms,
+    }
+    if turn.agent is not None:
+        attributes[TURN_AGENT] = turn.agent
+    if turn.heard is not None:
+        attributes[OBSERVATION_INPUT] = turn.heard
+    if turn.reply is not None:
+        attributes[OBSERVATION_OUTPUT] = turn.reply
+    legs = _legs(turn.legs)
+    if legs is not None:
+        attributes[TRANSCRIPT_LEGS] = legs
+    return attributes
+
+
+def _legs(held: Any) -> str | None:
+    """A split reply's per-leg attribution as one canonical JSON string,
+    or nothing at all (#495).
+
+    Allowlisted rather than serialized: each leg contributes its agent
+    and its text and nothing else, so the token halves the column also
+    holds cannot reach a span through here even if the column grows a
+    field. Canonical means sorted keys and no extra whitespace, which is
+    what makes the exact string pinnable by a unit case and identical
+    from one run to the next.
+
+    Nothing for a turn no handover split, which is most turns: the reply
+    column is the whole of those, and an empty array would be an
+    attribute saying nothing.
+    """
+    if not isinstance(held, list) or not held:
+        return None
+    legs = [
+        {
+            field: leg[field]
+            for field in LEG_FIELDS
+            if isinstance(leg.get(field), str)
+        }
+        for leg in held
+        if isinstance(leg, dict)
+    ]
+    if not legs:
+        return None
+    return json.dumps(legs, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 def _event_attributes(payload: dict[str, Any]) -> dict[str, Any]:
