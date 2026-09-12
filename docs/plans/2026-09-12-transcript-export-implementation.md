@@ -449,3 +449,106 @@ session scratchpad.
   unchanged afterwards (`config reference server`, `events reference`)
 - The rendering gate and the live walkthrough above, recorded rather
   than asserted
+
+### PR review round, PR #498
+
+External review of the PR diff: codex CLI 0.154.0, model gpt-5.6-sol,
+read-only sandbox, 2026-09-12, runtime 6m33s, reviewing commit
+`b43a436b`. Verdict as received: **mergeable after the listed fixes**.
+Four findings, all genuine, one commit each. Findings condensed but
+faithful; resolutions appended per fix.
+
+1. **P1: Production telemetry ignores the configured session
+   capacity.** `build_telemetry` derives the retention bound from
+   `max_sessions`, and the composition never passed it, so every
+   production server retained the bare sixty-four of slack: a
+   deployment above that capacity can evict a LIVE session's context
+   and report `no_trace` for a healthy export. Pass
+   `max_sessions=config.server.limits.max_sessions` and add a
+   composition-level regression above capacity 64.
+
+   *Resolution.* Adopted as prescribed. The seam was tested and the
+   wiring was not, which is this repository's own "two structures that
+   must agree" trap caught one level up: the derivation was correct and
+   inert. The regression is at the composition rather than at the
+   builder, driven at the size the derivation exists for, and it reads
+   the retention through the exporter the app actually built. Red first:
+   `AssertionError: 40 live sessions lost the trace they opened under`.
+
+2. **P1: Shutdown does not interrupt an in-flight multi-page export.**
+   The stop flag was read inside the acknowledgement wait and nowhere
+   else, so the page loop read and delivered every remaining page of a
+   long session through a shutdown, spending the join budget on them
+   and emitting the outcome after the event tap and telemetry had been
+   torn down. Check `_stopping` before every page read and immediately
+   after each delivery, returning `dropped`.
+
+   *Resolution.* Adopted as prescribed, with the ORDER of the two checks
+   at the bottom of the loop as the part that needed deciding: the short
+   page that ends the session returns first, so a job that really
+   finished is never reported as dropped for having finished late. A
+   second case pins that side, because an interrupt bought by failing
+   healthy jobs is not an interrupt. Red first, with one page held open
+   and a shutdown begun behind it: `AssertionError: a page was delivered
+   after the stop flag / assert 3 == 1`. The nine concurrency-driving
+   cases were run twenty times over, zero failures.
+
+3. **P2: The close acknowledgement settles before all earlier records
+   are resolved.** A marker is two transactions and the close was
+   settled between them, so the barrier answered `True` while this
+   session's own queued events were still in front of a lock they can
+   wait on and can still fail. Defer the close acknowledgement until the
+   event transaction and the late-loss accounting finish, and add a
+   gated test proving it stays unsettled while the event half is
+   blocked.
+
+   *Resolution.* Adopted as prescribed. **One premise corrected, and it
+   does not change the fix.** The finding describes "the database's
+   serialized write transactions and 10-second busy timeout", which is
+   SQLite's vocabulary; this tree is on Postgres, where the number is
+   `LOCK_TIMEOUT_MS = 10_000`, a per-acquisition `lock_timeout` on the
+   chain's advisory gate (`db/__init__.py`), and the serialization is
+   one writer thread over one queue rather than anything the database
+   does. The window, the ten seconds a lock wait can take and the
+   failure that can follow are all real under that mechanism, so the
+   hole is real and the substance of the fix stands unchanged. What the
+   close ANSWERS did not move either: the durable half's outcome. The
+   events half is the lossy class, so a transaction that failed there is
+   a record dropped and counted rather than one still on its way, which
+   is what the barrier's stated limit already covers, and a second case
+   pins that side so the deferral cannot quietly become a stricter
+   promise. Red first, with the gate standing in front of the EVENTS
+   half: `AssertionError: the close answered while its session's events
+   were still unresolved / assert True is False`. The eight close cases
+   were run twenty times over, zero failures.
+
+4. **P2: Worker creation failure escapes onto the session close path.**
+   `_worker` was assigned before `Thread.start()` and the start was
+   uncontained, so a process out of threads sent the error up through
+   `session_closed` into the device session's cleanup, and a later
+   shutdown would try to join a thread that never ran. Start a local
+   thread inside an unbound exception boundary, assign after success,
+   and have admission emit `dropped` when startup fails.
+
+   *Resolution.* Adopted as prescribed. `_start` answers whether there
+   is a worker, admission turns a False into the job's own outcome, and
+   the field is assigned only once the start has succeeded, which is
+   what keeps the teardown harmless as well. Red first, both cases, with
+   `Thread.start` refusing this module's own worker: `RuntimeError:
+   can't start new thread`, out of `session_closed` in the first and out
+   of the teardown in the second.
+
+#### Re-verified after the round
+
+- `uv run ruff check .`: All checks passed!
+- `uv run mypy` (strict over `src/vinga_server/events`): Success: no
+  issues found in 5 source files
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 7082 passed, 19
+  skipped (7075 before the round, plus its seven)
+- `uv run pytest tests/integration -q`: 330 passed, against Postgres
+  from the committed compose file on `VINGA_DB_PORT=55496`
+- `python3 scripts/fold_changelog.py check .`: checked 1 fragments, 0
+  failures (the M1 fragment folded on `main` in the meantime)
+- `python3 scripts/check_doc_links.py .`: checked 235 files, 0 failures
+- `uv run pytest tests/unit/test_command_spellings.py -q`: 52 passed
+- Both generated documents regenerated and unchanged
