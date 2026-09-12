@@ -2733,14 +2733,14 @@ unit that stage is actually billed in:
 | Generation | `llm` | `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens`, as the endpoint reported them |
 | Synthesis | `tts_stream` | `gen_ai.usage.input_characters`, the length of the sentence the voice was handed |
 
-All three are input, read from the model's side the way the
-OpenTelemetry GenAI conventions read the token halves: an ear is given
-the audio and produces a transcript, a voice is given the sentence and
-produces the audio. Those conventions name token counts and nothing
-else, so the two units they have no word for are stated in the
-attribute name rather than reported as tokens they are not. A stage
-that measured nothing reports no usage rather than a zero: an absent
-measurement and a free call are different facts.
+The seconds and the characters are both INPUT, read from the model's
+side the way the OpenTelemetry GenAI conventions read the token halves:
+an ear is given the audio and produces a transcript, a voice is given
+the sentence and produces the audio. Those conventions name token
+counts and nothing else, so the two units they have no word for state
+that unit in the attribute name rather than being reported as tokens
+they are not. A stage that measured nothing reports no usage rather
+than a zero: an absent measurement and a free call are different facts.
 
 Usage is not a cost. A backend turns one into the other with a model
 definition, which is a match pattern, a unit and a price per unit, and
