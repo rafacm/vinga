@@ -9,7 +9,7 @@ local engines optional (#11).
 named rate, which is exactly what this stage's interface passes along,
 so the default `pcm_24000` matches the device output rate and the
 session's resampler has nothing to do. The API bills by character and
-the request carries the reply text, so the type marks egress.
+the request carries the reply text, so the type reaches the internet.
 
 What this type accepts is declared once, as `ElevenlabsOptions` in
 `config/provider_options.py`, and reaches the builder below already
@@ -25,6 +25,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 
+from vinga_server.boundary import Reach
 from vinga_server.config.models import ProviderConfig
 from vinga_server.config.provider_options import ElevenlabsOptions
 from vinga_server.providers.base import ProviderCallError, ProviderError, TtsProvider
@@ -43,14 +44,14 @@ LABEL = "elevenlabs"
 
 API_BASE_URL = "https://api.elevenlabs.io"
 
-# The one host this type reaches, and the one an egress allowlist is
+# The one host this type reaches, and the one an outbound allowlist is
 # most likely to be missing: no other provider type shares it.
 API_HOST = "api.elevenlabs.io"
 
 
 class ElevenLabsTts(TtsProvider):
     # The reply text goes to the vendor's API to be spoken.
-    egress = True
+    reach = Reach.INTERNET
 
     def __init__(
         self,

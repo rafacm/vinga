@@ -1117,7 +1117,7 @@ class PipelineRuntime:
         traceback under "reply failed", with none of the fields every
         other conversation record is queried by: no `event`, no
         `session`, no provider, and above all no host, which is the one
-        an egress policy is diagnosed from. The reply still ends the
+        an outbound policy is diagnosed from. The reply still ends the
         same way, and the traceback is still logged where it was; this
         adds the structured half the observability ADR says is the
         surface (#53)."""
@@ -2443,7 +2443,7 @@ class PipelineRuntime:
         where it could not be had.
 
         The agent's own provider rather than a summarizer of its own, so
-        a recap adds no egress surface a deployment did not already
+        a recap adds no outbound surface a deployment did not already
         configure, and a fixed instruction with the thread as its turns,
         so nothing a room said decides what is asked. Bounded by its own
         timeout, because the user is waiting through silence for it.

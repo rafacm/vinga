@@ -17,6 +17,8 @@ from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Literal, Protocol, TypeVar, runtime_checkable
 
+from vinga_server.boundary import Reach
+
 
 class ProviderError(Exception):
     """A provider that cannot be built as configured: an unknown type,
@@ -138,7 +140,7 @@ class ProviderIdentity:
 
     `host` is the one field the provider itself has to supply, since
     only it knows whether its `base_url` points at a vendor or at
-    localhost, and it is the actionable half for anyone with an egress
+    localhost, and it is the actionable half for anyone with an outbound
     allowlist: it turns "TTS is broken" into "TTS cannot reach
     api.elevenlabs.io". It is None for an engine that runs in this
     process and reaches nothing.
@@ -159,20 +161,24 @@ class ProviderIdentity:
 
 
 class Provider:
-    """What every stage's provider type has in common: the egress
+    """What every stage's provider type has in common: the reach
     marking, the host it reaches, and the identity it is stamped with.
 
-    `egress` declares whether providers of this type send session data
-    (audio, transcripts, replies) off the host. True marks a cloud
-    provider, False one that keeps everything on the machine, and None a
-    type whose configuration decides (an openai_compatible base_url can
-    name localhost or a vendor), which under `server.local_only` demands
-    an explicit `egress` declaration on the provider entry (#30).
+    `reach` declares how far session data (audio, transcripts, replies)
+    given to providers of this type travels. `Reach.INTERNET` marks a
+    cloud provider, `Reach.HOST` one that keeps everything on the
+    machine, and None a type whose configuration decides (an
+    openai_compatible base_url can name this machine, a server on the
+    operator's network or a vendor), which under a declared
+    `server.data_boundary` demands an explicit `reach` declaration on
+    the provider entry (#30, #493). `Reach.NETWORK` is available to a
+    type that knows it stays on the network and cannot stay on the
+    host, and no packaged type is one yet.
 
     There is no default. Every concrete type declares its own marking in
     its own class body, and one that declared none, or declared
-    something that is not one of the three, is refused when it is built,
-    in any mode (`vinga_server.egress`). Inheriting a parent's marking
+    something outside the closed set, is refused when it is built, in
+    any mode (`vinga_server.boundary`). Inheriting a parent's marking
     does not count either: a subclass of a cloud provider says so
     itself, so the answer is always written where the type is (#136).
     The abstract stage bases below stay undeclared, since nothing builds
@@ -194,7 +200,7 @@ class Provider:
     fixture) keeps None, and the events that describe it simply carry
     fewer fields rather than inventing any."""
 
-    egress: ClassVar[bool | None]
+    reach: ClassVar[Reach | None]
     host: str | None = None
     model: str | None = None
     identity: ProviderIdentity | None = None

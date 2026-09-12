@@ -10,6 +10,7 @@ instead of signal energy.
 
 from pysilero_vad import SileroVoiceActivityDetector
 
+from vinga_server.boundary import Reach
 from vinga_server.config.models import ProviderConfig
 from vinga_server.providers.base import Endpointer, VadProvider
 from vinga_server.providers.registry import OptionsReader
@@ -113,7 +114,7 @@ class SileroVad(VadProvider):
     """
 
     # Inference runs on the host; the model ships with the package.
-    egress = False
+    reach = Reach.HOST
 
     def __init__(
         self, threshold: float, trailing_silence_ms: float, max_utterance_ms: float

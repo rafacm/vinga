@@ -5,9 +5,9 @@ app, for three reasons. The committed OpenAPI document is then exactly
 the admin surface, with the device endpoints structurally absent from
 it, while the main app keeps publishing no schema at all. The token
 gate is a property of the mount instead of something each new route
-decorator could forget. And `local_only` stays one sentence in
+decorator could forget. And the data boundary stays one sentence in
 `app.py`: this is control plane, it accepts inbound requests and sends
-nothing anywhere, so it needs no egress declaration.
+nothing anywhere, so it needs no reach declaration.
 
 Nothing here decides anything about the configuration. The repository
 (`store.py`) validates fragments, checks references, decides what

@@ -10,7 +10,7 @@ several self-hosted speech servers implement `/v1/audio/speech`, so
 pointing this type at one keeps a fully local pipeline available
 through the same dialect. It defaults to OpenAI itself, and it is what
 decides whether this provider sends anything off the host, which is
-why the type cannot declare its own egress.
+why the type cannot declare its own reach.
 
 `response_format="pcm"` is the only format this stage can pass through,
 and the API defines it as signed 16-bit little-endian mono at 24 kHz
@@ -19,7 +19,8 @@ devices are spoken at. It is not an option for that reason: the other
 formats are containers that would have to be decoded just to be
 re-encoded, costing a dependency and latency.
 
-The request carries the reply text, so the type marks egress.
+The request carries the reply text, so wherever the base_url points is
+where the reply text goes.
 """
 
 from collections.abc import AsyncIterator
@@ -73,9 +74,9 @@ _PROSE_STEERED_PREFIX = "gpt-4o"
 class OpenAiTts(TtsProvider):
     # The base_url decides: a self-hosted speech server on localhost
     # keeps the reply text on the host, api.openai.com does not. Under
-    # server.local_only the entry therefore needs its own explicit
-    # `egress` declaration, exactly as openai_compatible does.
-    egress = None
+    # a declared server.data_boundary the entry therefore needs its own
+    # explicit `reach` declaration, exactly as openai_compatible does.
+    reach = None
 
     sample_rate = SAMPLE_RATE
 

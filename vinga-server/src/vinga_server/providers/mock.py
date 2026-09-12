@@ -13,6 +13,7 @@ import struct
 from collections.abc import AsyncIterator, Sequence
 
 from vinga_server.audio import rms
+from vinga_server.boundary import Reach
 from vinga_server.config.models import ProviderConfig
 from vinga_server.providers.base import (
     AsrProvider,
@@ -105,7 +106,7 @@ class MockVad(VadProvider):
     """Energy endpointing with the M3 thresholds, as a provider."""
 
     # The mocks are network-free by construction.
-    egress = False
+    reach = Reach.HOST
 
     def __init__(
         self, threshold: float, trailing_silence_ms: float, max_utterance_ms: float
@@ -127,7 +128,7 @@ class MockAsr(AsrProvider):
     An `{ms}` in the text becomes the utterance duration, so a test can
     see how much audio actually reached the pipeline."""
 
-    egress = False
+    reach = Reach.HOST
 
     def __init__(self, text: str) -> None:
         self._text = text
@@ -177,7 +178,7 @@ class MockLlm(LlmProvider):
     flow an ordinary one, in a lane where every utterance transcribes
     the same."""
 
-    egress = False
+    reach = Reach.HOST
 
     def __init__(
         self,
@@ -269,7 +270,7 @@ class MockTts(TtsProvider):
     frequency is an option, which is how two mock "voices" are told
     apart in received audio."""
 
-    egress = False
+    reach = Reach.HOST
 
     def __init__(
         self, sample_rate: int, ms_per_char: float, min_ms: float, tone_hz: float = TONE_HZ

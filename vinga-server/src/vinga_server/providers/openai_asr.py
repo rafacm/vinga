@@ -13,7 +13,7 @@ self-hosted servers implement `/v1/audio/transcriptions`, so pointing
 this type at one keeps a fully local pipeline available through the
 same dialect. It defaults to OpenAI itself, and it is what decides
 whether this provider sends anything off the host, which is why the
-type cannot declare its own egress.
+type cannot declare its own reach.
 
 **This provider does not stream, and does not need to.** #11 asks a
 network provider to stream or to justify not streaming. The stage's
@@ -164,9 +164,10 @@ def wav_bytes(pcm: bytes, sample_rate: int) -> bytes:
 class OpenAiAsr(AsrProvider):
     # The base_url decides: a self-hosted transcription server on
     # localhost keeps the audio on the host, api.openai.com does not.
-    # Under server.local_only the entry therefore needs its own explicit
-    # `egress` declaration, exactly as openai_compatible does.
-    egress = None
+    # Under a declared server.data_boundary the entry therefore needs
+    # its own explicit `reach` declaration, exactly as openai_compatible
+    # does.
+    reach = None
 
     def __init__(
         self,

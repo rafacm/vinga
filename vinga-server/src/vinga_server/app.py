@@ -73,8 +73,8 @@ events = ServerEvents(__name__)
 # else.
 #
 # `McpConfigError` is here because it is a boot refusal like the others
-# and was reaching the operator like a bug: an entry missing its egress
-# declaration under `server.local_only`, or naming an environment
+# and was reaching the operator like a bug: an entry missing its reach
+# declaration under `server.data_boundary`, or naming an environment
 # variable nothing sets, answered with uvicorn's traceback and exit code
 # 3 rather than the sentence and exit code 1 its message was written for.
 # It is a `ValueError` rather than a `ConfigError` and stays one, since
@@ -263,7 +263,7 @@ async def _build_composition(
     # which is the whole of where it has to be: a staged pair is room
     # audio waiting to leave, and the configurations it waits in are
     # exactly the ones that refuse or build nothing. An exporter refused
-    # under `local_only` exits above the capture section entirely, an
+    # by the data boundary exits above the capture section entirely, an
     # attachment refused for its missing extra exits above the store, and
     # a configured-but-disabled capture builds no store at all. It
     # answers to the capture SECTION, because the section is what names
@@ -289,7 +289,7 @@ async def _build_composition(
     # holds comes off with the session, and the exporter outlives it.
     telemetry = build_telemetry(
         config.server.telemetry,
-        local_only=config.server.local_only,
+        boundary=config.server.data_boundary,
         # What this deployment's own capacity is, which the retention
         # bound is derived FROM (#495). Derived means handed over: a
         # builder computing the right number from a default nobody
@@ -587,7 +587,7 @@ async def _build_composition(
     # it is a no-op and none of its refusals apply, which is the issue's
     # own rule.
     capture_upload = build_capture_upload(
-        config.server, telemetry=telemetry, local_only=config.server.local_only
+        config.server, telemetry=telemetry, boundary=config.server.data_boundary
     )
     if capture_upload is not None:
         stack.push_async_callback(capture_upload.shutdown)
@@ -609,7 +609,7 @@ async def _build_composition(
         config.server,
         telemetry=telemetry,
         database=database,
-        local_only=config.server.local_only,
+        boundary=config.server.data_boundary,
     )
     if transcripts is not None:
         stack.push_async_callback(transcripts.shutdown)
@@ -956,7 +956,7 @@ def config_diff_reader(
     answers is not a reload that would apply: the reload has a second
     phase this has no part of, which builds a manager per referenced
     entry and refuses on an environment reference nothing sets, a
-    credential a transport cannot use, or an entry `server.local_only`
+    credential a transport cannot use, or an entry `server.data_boundary`
     forbids. None of those is a comparison question, and none of them is
     answered here.
 
@@ -1312,7 +1312,7 @@ def create_app(
     # Mounted last, so the device-facing routes are what this app is
     # and the configuration API is one gated object hanging off it. It
     # is control plane: it accepts inbound requests and sends nothing
-    # anywhere, so server.local_only has nothing to say about it.
+    # anywhere, so server.data_boundary has nothing to say about it.
     mount_api(app, api)
 
     # What the lifespan builds from. The mounted application is on it

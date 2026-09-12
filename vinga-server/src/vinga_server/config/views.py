@@ -543,8 +543,8 @@ def provider_record(entry: ProviderConfig) -> dict[str, object]:
     data: dict[str, object] = {"type": entry.type}
     if entry.api_key_env is not None:
         data["api_key_env"] = mask(entry.api_key_env)
-    if entry.egress is not None:
-        data["egress"] = entry.egress
+    if entry.reach is not None:
+        data["reach"] = entry.reach.value
     return _shown_mapping(data, entry.options.items(), _recorded_pair)
 
 

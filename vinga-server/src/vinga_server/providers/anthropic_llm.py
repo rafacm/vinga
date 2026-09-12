@@ -10,6 +10,7 @@ from typing import Any
 
 from anthropic import AsyncAnthropic
 
+from vinga_server.boundary import Reach
 from vinga_server.config.models import ProviderConfig
 from vinga_server.providers.base import (
     LlmEvent,
@@ -92,7 +93,7 @@ def anthropic_tools(tools: Sequence[ToolDef]) -> list[dict[str, Any]]:
 
 class AnthropicLlm(LlmProvider):
     # Every request carries the conversation to the vendor's API.
-    egress = True
+    reach = Reach.INTERNET
     host = API_HOST
 
     def __init__(

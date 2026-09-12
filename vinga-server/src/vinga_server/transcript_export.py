@@ -16,7 +16,8 @@ and the second that sends content off this host.** `enabled` sends
 metadata, `export_audio` sends a recording of a room, and this sends
 what was said. It is behind a flag of its own that neither
 `server.telemetry.enabled` nor `server.conversations.text` implies, the
-flag's description says so in those words, and `server.local_only`
+flag's description says so in those words, and a narrower
+`server.data_boundary`
 refuses to build it.
 
 **It never touches the audio path.** Its one hook runs on the session
@@ -69,11 +70,11 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from vinga_server.boundary import BoundaryRefusal, Reach, check_feature
 from vinga_server.config import ConfigError
 from vinga_server.config.models import DatabaseConfig, ServerConfig
 from vinga_server.conversations.records import Acknowledgement
 from vinga_server.conversations.threads import Reads, Unreadable
-from vinga_server.egress import EgressRefusal, check_feature
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import TranscriptExportFailed, TranscriptsExported
 from vinga_server.events.values import (
@@ -134,7 +135,7 @@ def build_transcript_export(
     *,
     telemetry: Telemetry | None,
     database: DatabaseConfig,
-    local_only: bool = False,
+    boundary: Reach | None = None,
     batch_turns: int = TRANSCRIPT_BATCH_TURNS,
     acknowledgement_timeout_s: float = ACKNOWLEDGEMENT_TIMEOUT_S,
     shutdown_timeout_s: float = SHUTDOWN_TIMEOUT_S,
@@ -148,7 +149,7 @@ def build_transcript_export(
     1. **Recording first.** With `server.conversations` absent, off, or
        storing no text, this answers None and none of the checks below
        run, so a deployment that records nothing boots identically
-       whatever the telemetry section or `local_only` say. The flag on
+       whatever the telemetry section or the data boundary say. The flag on
        with nothing recorded is a no-op rather than a misconfiguration,
        which is the issue's own rule: an operator mid-toggle is not
        misconfigured. It is said out loud exactly when there is
@@ -167,8 +168,9 @@ def build_transcript_export(
        file is being PARSED, which is in front of everything a
        composition does, and the recording-first no-op above could then
        never run.
-    4. **Egress.** Asked of `egress.py` before any construction and any
-       thread, so under `server.local_only` nothing is built.
+    4. **The data boundary.** Asked of `boundary.py` before any
+       construction and any thread, so under a boundary narrower than
+       the internet nothing is built.
 
     There is no extra step and no credential step, which is the whole of
     what this surface costs less than the capture uploader: a transcript
@@ -211,7 +213,7 @@ def build_transcript_export(
         # to every session it was ever given.
         raise ConfigError(TRANSCRIPTS_NEED_AN_EXPORTER)
 
-    refusal = _egress_refusal(local_only)
+    refusal = _boundary_refusal(boundary)
     if refusal is not None:
         raise ConfigError(refusal)
 
@@ -252,18 +254,22 @@ TRANSCRIPTS_NEED_AN_EXPORTER = (
 )
 
 
-def _egress_refusal(local_only: bool) -> str | None:
-    """What the egress rule says about a transcript export, or nothing.
+def _boundary_refusal(boundary: Reach | None) -> str | None:
+    """What the data boundary says about a transcript export, or nothing.
 
     Asked before any construction and any thread, which is the caller's
     half of `check_feature`'s contract and the only way the refusal can
-    honestly say nothing was built. The sentence is the egress module's
-    own, and only the sentence crosses back: the exception type belongs
-    to whichever surface asked, which here is `ConfigError`.
+    honestly say nothing was built. The sentence is the boundary
+    module's own, and only the sentence crosses back: the exception type
+    belongs to whichever surface asked, which here is `ConfigError`.
+
+    The reach is `internet`, fixed, for the reason the exporter's is:
+    the turns travel over the transport the traces use, whose endpoint
+    this server hands to the SDK without reading.
     """
     try:
-        check_feature(TRANSCRIPTS_KEY, egress=True, local_only=local_only)
-    except EgressRefusal as refusal:
+        check_feature(TRANSCRIPTS_KEY, Reach.INTERNET, boundary)
+    except BoundaryRefusal as refusal:
         return str(refusal)
     return None
 

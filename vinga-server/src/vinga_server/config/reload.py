@@ -20,7 +20,7 @@ world after and never a mixture.
 
 Building the engines is where a preparation spends its time and its
 memory, and it is deliberately paid before anything can refuse: the
-egress rule can only be checked on a built provider, so a refused apply
+boundary rule can only be checked on a built provider, so a refused apply
 has loaded a model to find out. That is the price of the promise that a
 refusal touched nothing running, and it is paid only for what actually
 moved: an entry whose definition and stored credential are what they
@@ -121,7 +121,8 @@ LIVE_SECRETS: frozenset[EntityKind] = frozenset({"mcp_server", "provider"})
 # and the class of the failure goes to this server's log.
 _PROVIDERS_REFUSED = (
     f"{mcp.RELOAD_REFUSED} the engines the stored configuration names could not all be "
-    "built: a provider type, one of its options, its stored credential or the egress "
+    "built: a provider type, one of its options, its stored credential or the data "
+    "boundary "
     "rule refused. Which one is deliberately not said here, because a sentence about a "
     "stored value is the one thing a reload's answer never carries. A server started "
     "from this store refuses on the same state and names the location it refused on, "
@@ -254,7 +255,7 @@ class ConfigReload:
         world this server may serve, synthesizes its filled pauses and
         builds every MCP manager that world needs; any failure there (a
         stored snapshot that will not compose, an unset `$VAR`, a
-        credential that will not decrypt, an entry `server.local_only`
+        credential that will not decrypt, an entry `server.data_boundary`
         forbids) refuses with the generation
         and the managers exactly as they were. Application then swaps the
         generation and stops, starts and installs the MCP world, so what
