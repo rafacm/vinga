@@ -64,7 +64,7 @@ Evidence and tradeoffs:
 ## A fully local deployment is first-class
 
 The local baseline is enumerated. A server whose declared data
-boundary is local (today spelled `server.local_only: true`) and that
+boundary is local (today spelled `server.data_boundary: host`) and that
 starts can hold a complete conversation with local providers, the way
 the original all-local chain (Silero, faster-whisper, Ollama, Piper)
 did from the beginning, and "complete" means all of:
@@ -87,20 +87,22 @@ locally, not that every implementation of it is equal. A capability
 specific to one runtime, above the baseline, is fine and expected.
 
 The enforcement mechanism is the declared data boundary: every
-provider declares whether it sends session data off the host, and a
-locally bounded server refuses at startup to build one that does. A
-provider type that cannot answer for itself must say so explicitly
-(an OpenAI-compatible base URL is equally a vendor or an Ollama on
-localhost, so the configuration states which). The guarantee is
-enforced, not documented. Two limits are part of the promise rather
-than caveats to it: the mechanism admits declarations, not behavior
-(it is not a network sandbox and proves nothing about a remote
-endpoint), and stage-by-stage provider mixing is a property of
-staged runtimes (a native speech-to-speech runtime may own several
-stages together). The boundary constrains defaults and enforcement,
-never which capabilities exist: a content export feature is lawful
-exactly when it declares its destination, defaults off, and refuses
-under a local boundary.
+provider declares its reach (`host`, `network` or `internet`), the
+operator declares the outermost reach session data may have, and a
+build whose reach exceeds that boundary refuses at startup. A provider
+type that cannot answer for itself (an OpenAI-compatible base URL is
+equally a vendor, a model server on the network, or an Ollama on
+localhost) fails closed whenever a boundary is declared, so the
+configuration has to state which. The guarantee is enforced, not
+documented. Two limits are part of the promise rather than caveats to
+it: the mechanism admits declarations, not behavior (it is not a
+network sandbox and proves nothing about a remote endpoint), and
+stage-by-stage provider mixing is a property of staged runtimes (a
+native speech-to-speech runtime may own several stages together). The
+boundary constrains defaults and enforcement, never which capabilities
+exist: a content export feature is lawful exactly when it declares its
+destination, defaults off, and refuses under a boundary narrower than
+its reach.
 
 **Example.** An inherently-cloud runtime (a native realtime session)
 arriving as a sibling runtime is fine and expected; the local

@@ -17,7 +17,7 @@ PLANTUML_LIMIT_SIZE=16384 plantuml -tsvg -failfast2 *.puml
 
 ## The diagrams
 
-- [**architecture-overview.puml**](architecture-overview.puml): what runs where, and what leaves the host. Every provider is coloured by its `egress` class marking, which is the thing `server.local_only` is checked against at boot. Read this to answer "if I configure it this way, what goes over the internet".
+- [**architecture-overview.puml**](architecture-overview.puml): what runs where, and what leaves the host. Every provider is coloured by its `reach` class marking, which is the thing `server.data_boundary` is checked against at boot. Read this to answer "if I configure it this way, what goes over the internet".
 
 - [**conversation-turn.puml**](conversation-turn.puml): one turn as a sequence, from the OTA boot exchange through the wake word to the spoken reply. A sequence diagram because the interesting part is ordering and overlap: the tool loop's rounds, the next sentence being synthesized while the current one plays, and which listening mode re-arms the microphone.
 
@@ -25,4 +25,4 @@ PLANTUML_LIMIT_SIZE=16384 plantuml -tsvg -failfast2 *.puml
 
 ## Keeping them true
 
-These describe the code, so they go stale the way comments do. The overview names provider types and their egress markings; the turn diagram names constants (`MAX_TOOL_ROUNDS`, the pipeline and output sample rates, the frame duration) and configuration keys; the barge-in diagram names the speech floor and every structured event a branch emits. Changing any of those is the moment to change the diagram, in the same commit.
+These describe the code, so they go stale the way comments do. The overview names provider types and their reach markings; the turn diagram names constants (`MAX_TOOL_ROUNDS`, the pipeline and output sample rates, the frame duration) and configuration keys; the barge-in diagram names the speech floor and every structured event a branch emits. Changing any of those is the moment to change the diagram, in the same commit.
