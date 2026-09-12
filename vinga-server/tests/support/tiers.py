@@ -31,6 +31,14 @@ the wheel's own metadata held to the declaration. What it answers is
 triple that every consumer unpacked with two underscores in it, and a
 fourth would have renumbered every one of those reads while the
 compiler said nothing. A named field cannot be read as the wrong tier.
+
+`langfuse` is the fifth (#67), and it arrived the same way again. Its
+closure is the one that overlaps another tier's: the Langfuse
+distribution depends on the OpenTelemetry API, SDK and HTTP exporter,
+so a `[langfuse]` environment carries everything `[otel]` declares and
+more. That is a fact about the tier rather than a problem with it, and
+it is why the negative checks for this one are about the SERVE half
+alone.
 """
 
 import tomllib
@@ -92,22 +100,39 @@ OTEL_MODULES = {
 }
 
 
+# And the same map for the `langfuse` extra's one distribution.
+#
+# The name on the right is a SUBTREE, and for a different reason than
+# the one above it. `langfuse` is an ordinary package rather than a
+# namespace one, so importing the root would be a true check; what this
+# names instead is the half of the distribution this server actually
+# reaches, the generated REST client its media calls live on. A tier
+# check that imported the root would keep passing the day the client
+# moved, and the uploader would be the thing that found out.
+LANGFUSE_MODULES = {
+    "langfuse": "langfuse.api.client",
+}
+
+
 @dataclass(frozen=True)
 class Tiers:
-    """The four doors into this package, each as the set of
+    """The five doors into this package, each as the set of
     distributions its declaration names directly.
 
     A named field per tier rather than a positional tuple, which is
     what this was until the fourth arrived: a consumer read
     `client, _, _ = tiers`, so adding a tier meant editing every one of
     those reads to add an underscore, and forgetting one is a lane
-    comparing the wrong tier while every check still passes.
+    comparing the wrong tier while every check still passes. The fifth
+    landed by adding a field and nothing else, which is the evidence
+    that ruling was right.
     """
 
     client: set[str]
     serve: set[str]
     sim: set[str]
     otel: set[str]
+    langfuse: set[str]
 
 
 def requirement_names(entries: Sequence[str]) -> set[str]:
@@ -123,20 +148,20 @@ def requirement_names(entries: Sequence[str]) -> set[str]:
 
 
 def declared() -> Tiers:
-    """The four tiers' DIRECT dependencies, read off `pyproject.toml`.
+    """The five tiers' DIRECT dependencies, read off `pyproject.toml`.
 
     The independent oracle both lanes keep beside whatever they compute:
-    six names, eleven, one and two, written by hand in the declaration
-    under test, so a closure or a metadata block is checked against
-    something that came from somewhere else. Either alone would be a
-    graph agreeing with itself.
+    six names, eleven, one, two and one, written by hand in the
+    declaration under test, so a closure or a metadata block is checked
+    against something that came from somewhere else. Either alone would
+    be a graph agreeing with itself.
 
-    Three rather than two since #248, and four since #66. The two
-    `faster-whisper` and `piper` extras are deliberately not among them:
-    they are provider options a deployment chooses, installed into an
-    image that already has the server half, and no lane holds an
-    environment to either. The four here are the four DOORS into this
-    package, and each has a lane that syncs it.
+    Three rather than two since #248, four since #66 and five since #67.
+    The two `faster-whisper` and `piper` extras are deliberately not
+    among them: they are provider options a deployment chooses,
+    installed into an image that already has the server half, and no
+    lane holds an environment to either. The five here are the five
+    DOORS into this package, and each has a lane that syncs it.
     """
     project = tomllib.loads((PROJECT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     extras = project["optional-dependencies"]
@@ -145,4 +170,5 @@ def declared() -> Tiers:
         serve=requirement_names(extras["serve"]),
         sim=requirement_names(extras["sim"]),
         otel=requirement_names(extras["otel"]),
+        langfuse=requirement_names(extras["langfuse"]),
     )

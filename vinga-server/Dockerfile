@@ -73,8 +73,8 @@ ENV UV_COMPILE_BYTECODE=1 \
 # operator whose local engines had vanished, which is much too late.
 RUN set -eu; \
     case "$VINGA_VARIANT" in \
-      default) echo "--extra faster-whisper --extra piper --extra otel" > /tmp/extras ;; \
-      slim) echo "--extra otel" > /tmp/extras ;; \
+      default) echo "--extra faster-whisper --extra piper --extra otel --extra langfuse" > /tmp/extras ;; \
+      slim) echo "--extra otel --extra langfuse" > /tmp/extras ;; \
       *) echo "unknown VINGA_VARIANT '$VINGA_VARIANT'; expected default or slim" >&2; \
          exit 1 ;; \
     esac; \
