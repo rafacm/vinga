@@ -271,13 +271,23 @@ no convention-blessed spelling for "characters synthesized" or
 false in the way this module refuses to be false elsewhere
 (`stream_ms` is not named synthesis latency because it is not).
 
-M3 writes `gen_ai.usage.output_characters` on the TTS span and
+M3 writes `gen_ai.usage.input_characters` on the TTS span and
 `gen_ai.usage.input_seconds` on the ASR span: the conventions'
 namespace and direction words, with the unit stated in the name rather
-than implied. The input/output halves are read the way the conventions
-read them, from the model's point of view: a voice is given text and
-produces audio, so its billable text is output; an ear is given audio,
-so its audio is input.
+than implied. Both are INPUT, read from the model's point of view the
+way the conventions read the token halves: a voice is GIVEN the
+sentence and produces audio, and an ear is given the audio. The plan's
+first draft called the TTS characters output in the same sentence that
+said the voice was given them, which the review caught.
+
+The direction is not cosmetic, and the backend's own shape says why. A
+Langfuse model definition carries a `unit` (the enum admits `TOKENS`,
+`CHARACTERS`, `MILLISECONDS`, `SECONDS`, `REQUESTS` and `IMAGES`) and a
+`prices` map keyed by `input`, `output` and `total`, which is verified
+rather than assumed: it is the shape every definition in the project
+already has. So a usage number that lands anywhere but `input` is a
+number with no price beside it, and the direction decides whether M3's
+acceptance criterion can be met at all.
 
 Whether the backend lifts an unrecognized `gen_ai.usage.*` key into
 its own usage details is a fact about the backend and is the M3 live
@@ -650,9 +660,9 @@ What is new per milestone:
   null.
 - **M3**: a catalog-drift case for the new `characters` field and its
   rendering; an emit-site case that the character count is the
-  sentence's own length; usage attribute cases on both spans; a case
-  that an absent measurement contributes no attribute rather than a
-  zero.
+  sentence's own length; usage attribute cases on both spans,
+  asserting the input direction by name; a case that an absent
+  measurement contributes no attribute rather than a zero.
 - **M4a**: the two eviction windows as two cases, a job admitted
   before sixty-four later sessions open still resolving its trace id
   and a job whose upload completes after that pressure still writing
@@ -759,7 +769,7 @@ the manifest with its own generator when stale.
   one retained fact beside the provider context.
 - [ ] **M3: cost accounting**. `characters` declared on
   `SentenceSynthesized` and passed at the emit site;
-  `gen_ai.usage.output_characters` on the TTS span and
+  `gen_ai.usage.input_characters` on the TTS span and
   `gen_ai.usage.input_seconds` on the ASR span; Langfuse model
   definitions entered through the MCP for every model with a real list
   price, with the prices and their sources quoted in the
@@ -954,6 +964,13 @@ Findings condensed but faithful; resolutions appended per amendment.
    the interpretation used for LLM tokens and ASR audio. Use
    `gen_ai.usage.input_characters`, and make the price definition and
    the cost query use the same direction.
+
+   *Resolution.* Adopted. Both stages report `input`, and the plan says
+   why the direction is load-bearing rather than cosmetic: a Langfuse
+   model definition prices the keys `input`, `output` and `total` and
+   carries the unit beside them, so a number under any other key has no
+   price and M3's acceptance criterion could not be met. The test list
+   asserts the direction by name.
 
 8. **P2: the M5 round-count cap does not bound memory.** Each retained
    item is a whole prompt with history, tool schemas, arguments and
