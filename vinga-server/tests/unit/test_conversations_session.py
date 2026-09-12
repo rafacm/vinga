@@ -557,7 +557,7 @@ def test_a_credential_in_a_provider_url_reaches_no_record(
                     "base_url": f"https://user:{SENTINEL}@host/v1",
                     "model": "a-model",
                     "api_key_env": "VINGA_TEST_PROVIDER_KEY",
-                    "egress": True,
+                    "reach": "internet",
                 }
             },
             "asr": {"mock": {"type": "mock", "text": "hello"}},

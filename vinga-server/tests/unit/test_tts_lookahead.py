@@ -29,6 +29,7 @@ import vinga_server.device.session as session_module
 from tests.support.configs import BOTH_MAC, base_config
 from tests.support.providers import ScriptedLlm, built_world
 from tests.support.sessions import agent_providers, device_session
+from vinga_server.boundary import Reach
 from vinga_server.config import Config
 from vinga_server.providers import ToolCall, TtsProvider
 
@@ -45,7 +46,7 @@ class SlowTts(TtsProvider):
     """A provider with a real time to first byte, and a record of when
     each sentence's synthesis actually began."""
 
-    egress = False
+    reach = Reach.HOST
 
     def __init__(self, latency_s: float = SYNTHESIS_LATENCY_S) -> None:
         self.sample_rate = session_module.OUTPUT_AUDIO.sample_rate

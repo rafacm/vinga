@@ -74,7 +74,7 @@ def test_an_empty_database_becomes_a_working_configuration(
         "mcp-server", "set", "home",
         "-f",
         "-",
-        stdin="transport: stdio\ncommand: uvx\negress: false\n",
+        stdin="transport: stdio\ncommand: uvx\nreach: network\n",
     ) == 0
     assert run(
         "agent-defaults", "set",

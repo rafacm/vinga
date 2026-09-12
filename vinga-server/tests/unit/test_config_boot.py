@@ -9,6 +9,7 @@ meet is met here too, because it is the same code meeting it.
 
 import pytest
 
+from vinga_server.boundary import Reach
 from vinga_server.config import Config
 from vinga_server.config.boot import reload_domain_config
 from vinga_server.config.loader import ConfigError
@@ -75,7 +76,7 @@ def test_the_re_read_keeps_the_running_server_section(
     process's own, down to the port it is listening on. An environment
     that says otherwise is the sharpest way to show it, since that is
     what the file half is read through at boot."""
-    running = running_config( port=8123, local_only=True)
+    running = running_config( port=8123, data_boundary="host")
     seeded(pipeline)
     monkeypatch.setenv("VINGA_SERVER__PORT", "9999")
     monkeypatch.setenv("VINGA_DB_NAME", "vinga_somewhere_else_entirely")
@@ -84,7 +85,7 @@ def test_the_re_read_keeps_the_running_server_section(
 
     assert reloaded.config.server == running.server
     assert reloaded.config.server.port == 8123
-    assert reloaded.config.server.local_only is True
+    assert reloaded.config.server.data_boundary is Reach.HOST
 
 
 def test_the_re_read_validates_the_whole_snapshot() -> None:

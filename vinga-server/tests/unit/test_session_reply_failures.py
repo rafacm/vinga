@@ -58,6 +58,7 @@ from tests.support.sockets import (
     QuietSocket,
     spoken,
 )
+from vinga_server.boundary import Reach
 from vinga_server.config import Config
 from vinga_server.device.boundary import DeviceGone
 from vinga_server.events.values import ReplyOutcome
@@ -707,7 +708,7 @@ class TellableVad(VadProvider):
     runtime asks for a fresh one at every activation, and handing back
     the same object is what keeps it reachable."""
 
-    egress = False
+    reach = Reach.HOST
 
     def __init__(self) -> None:
         self.endpointer = TellableEndpointer()

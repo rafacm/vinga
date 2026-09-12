@@ -44,10 +44,11 @@ providers:
       type: openai_compatible
       base_url: http://localhost:11434/v1
       model: qwen3:8b
-      # openai_compatible cannot know its own egress, since base_url
-      # decides it. False is the operator asserting the endpoint stays
-      # on this machine, which is what server.local_only asks for.
-      egress: false
+      # openai_compatible cannot know its own reach, since base_url
+      # decides it. `host` is the operator asserting the endpoint is on
+      # this machine, which is what a server.data_boundary of host asks
+      # for.
+      reach: host
 
   asr:
     # Weights download at the first start, so that boot takes minutes

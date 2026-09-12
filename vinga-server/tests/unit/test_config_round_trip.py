@@ -235,7 +235,7 @@ LOCAL = {
     "type": "openai_compatible",
     "base_url": "http://localhost:11434/v1",
     "model": "qwen3:8b",
-    "egress": False,
+    "reach": "host",
 }
 
 # A cap that is not the builders' default, so a case asserting the value
@@ -306,7 +306,7 @@ def test_the_exempted_option_exports_as_its_value_and_imports_back(
             "type=openai_compatible",
             "base_url=http://localhost:11434/v1",
             "model=qwen3:8b",
-            "egress=false",
+            "reach=host",
             f"max_tokens={CONFIGURED}",
         )
         == 0

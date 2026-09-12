@@ -44,7 +44,7 @@ name is left alone, and the same document twice changes nothing.
   and into `vinga-server config schema`. That is the contract: which
   fields exist, what type each one is, what it defaults to.
 - The **provider-type options** (everything a provider entry carries
-  beyond `type`, `api_key_env` and `egress`) are declared type by type.
+  beyond `type`, `api_key_env` and `reach`) are declared type by type.
   A type with an option model has its options checked when the entry is
   written and refused by name, and they are documented everywhere the
   fields are: a table per type in

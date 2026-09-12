@@ -43,6 +43,7 @@ from tests.support.sessions import (
     with_device,
 )
 from tests.support.stores import StoredThreads, a_backlog, a_milestone
+from vinga_server.boundary import Reach
 from vinga_server.config import Config
 from vinga_server.conversations.records import Acknowledgement
 from vinga_server.device.boundary import DeviceGone
@@ -108,7 +109,7 @@ class RecordingTts(TtsProvider):
     becomes an assertion rather than a hope.
     """
 
-    egress = False
+    reach = Reach.HOST
 
     def __init__(self, chunks: int = 3) -> None:
         self.sample_rate = 24000

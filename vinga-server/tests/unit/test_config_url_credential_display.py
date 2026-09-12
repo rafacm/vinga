@@ -53,6 +53,7 @@ from tests.support.events import both_formats, fields_of, only
 from tests.support.problems import refused as refusal_body
 from tests.support.stores import body, planted
 from vinga_server import logs, serving
+from vinga_server.boundary import Reach
 from vinga_server.build_info import CONTAINER_ENV
 from vinga_server.config import Config, cli, entities, views
 from vinga_server.config.api import build_api
@@ -138,7 +139,7 @@ LEGACY = (
             type="openai_compatible",
             base_url=f"https://user:{SENTINEL}@{HOST}/v1",
             model="qwen3:8b",
-            egress=False,
+            reach="host",
             connection={"endpoint": f"https://{HOST}/hook?authorization={SENTINEL}&model=small"},
         ),
         shown=(f"https://{HOST}/v1", f"https://{HOST}/hook?model=small"),
@@ -150,7 +151,7 @@ LEGACY = (
             type="openai_compatible",
             base_url=f"https://{HOST}/v1?auth={SENTINEL}",
             model="qwen3:8b",
-            egress=False,
+            reach="host",
         ),
         shown=(f"https://{HOST}/v1",),
     ),
@@ -178,7 +179,7 @@ LEGACY = (
                 "type": "openai_compatible",
                 "base_url": f"https://{HOST}/v1",
                 "model": "qwen3:8b",
-                "egress": False,
+                "reach": "host",
                 f"https://{HOST}/top?auth={KEY_SENTINEL}": "ordinary",
             }
         ),
@@ -192,7 +193,7 @@ LEGACY = (
                 "type": "openai_compatible",
                 "base_url": f"https://{HOST}/v1",
                 "model": "qwen3:8b",
-                "egress": False,
+                "reach": "host",
                 "connection": {f"https://user:{KEY_SENTINEL}@{HOST}/option": "ordinary"},
             }
         ),
@@ -563,7 +564,7 @@ def test_a_string_that_is_not_a_credential_bearing_url_is_shown_as_written(
         store,
         "provider",
         ("llm", "plain"),
-        ProviderConfig.model_validate({"type": "openai_compatible", "egress": False, **untouched}),
+        ProviderConfig.model_validate({"type": "openai_compatible", "reach": "host", **untouched}),
     )
 
     entity = client.get("/providers/llm/plain").json()["entity"]
@@ -601,7 +602,7 @@ def test_two_keys_that_sanitize_alike_are_both_kept_and_told_apart(
                 "type": "openai_compatible",
                 "base_url": f"https://{HOST}/v1",
                 "model": "qwen3:8b",
-                "egress": False,
+                "reach": "host",
                 f"https://user:{KEY_SENTINEL}@{HOST}/same": "first",
                 f"https://other:{KEY_SENTINEL}@{HOST}/same": "second",
                 "connection": {
@@ -1510,13 +1511,13 @@ async def test_the_owner_refusing_after_construction_names_it_the_same_way(
     """The other half of the label, and the reason there is one string
     and not two: the checks that run once an object exists are the
     owner's rather than the constructor's, so `build_entry` composes the
-    label again for the egress rule it applies. An entry refused by one
+    label again for the boundary rule it applies. An entry refused by one
     half and an entry refused by the other are the same entry, and have
     to be named alike."""
     with caplog.at_level(logging.DEBUG), pytest.raises(ProviderError) as caught:
-        await build_entry("llm", HISTORIC, ProviderConfig(type="mock", egress=False))
+        await build_entry("llm", HISTORIC, ProviderConfig(type="mock", reach="host"))
 
-    assert f'providers.llm.{HISTORIC_SHOWN}: "egress" is decided' in str(caught.value)
+    assert f'providers.llm.{HISTORIC_SHOWN}: "reach" is decided' in str(caught.value)
     _carries_no_sentinel(chain(caught.value), *_logged(caplog))
 
 
@@ -1720,7 +1721,7 @@ async def test_a_lawful_entry_is_named_by_every_one_of_them_as_it_is_stored(
     with pytest.raises(ProviderError) as unknown:
         await build_entry("llm", LAWFUL, ProviderConfig(type="no-such-type"))
     with pytest.raises(ProviderError) as declared:
-        await build_entry("llm", LAWFUL, ProviderConfig(type="mock", egress=False))
+        await build_entry("llm", LAWFUL, ProviderConfig(type="mock", reach="host"))
     with pytest.raises(ProviderError) as unnamed:
         await build_world(world_named(LAWFUL))
     with caplog.at_level(logging.WARNING):
@@ -1743,7 +1744,7 @@ async def test_a_lawful_entry_is_named_by_every_one_of_them_as_it_is_stored(
     assert str(unknown.value).startswith(
         f"providers.llm.{LAWFUL}: names no llm provider type that exists"
     )
-    assert str(declared.value).startswith(f'providers.llm.{LAWFUL}: "egress" is decided')
+    assert str(declared.value).startswith(f'providers.llm.{LAWFUL}: "reach" is decided')
     assert str(unnamed.value).startswith(f"agents.{LAWFUL}: no llm provider is named")
     assert payload["provider"] == LAWFUL
     assert payload["model"] == "qwen3:8b"
@@ -1758,8 +1759,8 @@ async def test_a_lawful_entry_is_named_by_every_one_of_them_as_it_is_stored(
 #
 # The provider half of the build is above. The other half builds the MCP
 # entries some agent references, and it composed its two boot refusals
-# by joining `mcp_servers.` to a stored name by hand: the egress rule
-# `server.local_only` applies to every referenced entry, and whatever an
+# by joining `mcp_servers.` to a stored name by hand: the boundary rule
+# `server.data_boundary` applies to every referenced entry, and whatever an
 # entry that will not construct is reported as. #413's sweep named both
 # and left them out of its own change rather than widening into it, on
 # the reading that they were the same hole under a different noun
@@ -1799,7 +1800,9 @@ MCP_LAWFUL = "home"
 MCP_UNSET_VARIABLE = "VINGA_MCP_CREDENTIAL_TEST_TOKEN"
 
 
-def mcp_world_named(name: str, entry: dict[str, object], local_only: bool = False) -> Config:
+def mcp_world_named(
+    name: str, entry: dict[str, object], boundary: Reach | None = None
+) -> Config:
     """A one-agent configuration whose MCP entry is `name` and whose
     agent references it, composed the way a stored snapshot is.
 
@@ -1807,10 +1810,11 @@ def mcp_world_named(name: str, entry: dict[str, object], local_only: bool = Fals
     since only a referenced entry is managed. The domain half goes
     through `compose_config` like `world_named` above, which is the
     route a boot takes from the database to a `Config`; the file half
-    carries `server.local_only`, which is where a deployment writes it.
+    carries `server.data_boundary`, which is where a deployment writes
+    it.
     """
     return compose_config(
-        FileConfig(server={"local_only": local_only}),
+        FileConfig(server={"data_boundary": boundary}),
         {
             "providers": {
                 stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")
@@ -1916,7 +1920,7 @@ def test_both_mcp_build_refusals_name_the_entry_where_every_location_is(
     Asserted against `entity_location` rather than against a literal,
     which is the whole of what changed: the location is composed where
     the store composes it and where the provider build composes its
-    label, so an entry the egress rule refuses and an entry that will
+    label, so an entry the boundary rule refuses and an entry that will
     not construct are named alike and are named as any other refusal
     about that row would name it. The strip inside that helper is the
     identity function on every name this charset allows, so both
@@ -1929,7 +1933,7 @@ def test_both_mcp_build_refusals_name_the_entry_where_every_location_is(
     monkeypatch.delenv(MCP_UNSET_VARIABLE, raising=False)
     written_at = entities.entity_location(entities.descriptor("mcp-server"), MCP_LAWFUL)
     declared = mcp_world_named(
-        MCP_LAWFUL, {"transport": "stdio", "command": "uvx"}, local_only=True
+        MCP_LAWFUL, {"transport": "stdio", "command": "uvx"}, boundary=Reach.HOST
     )
     unreadable = mcp_world_named(
         MCP_LAWFUL,
@@ -1940,13 +1944,15 @@ def test_both_mcp_build_refusals_name_the_entry_where_every_location_is(
         },
     )
 
-    with pytest.raises(McpConfigError) as egress:
+    with pytest.raises(McpConfigError) as refused:
         McpServers.build(declared)
     with pytest.raises(McpConfigError) as broken:
         McpServers.build(unreadable)
 
     assert written_at == f"mcp_servers.{MCP_LAWFUL}"
-    assert str(egress.value).startswith(f"{written_at}: server.local_only is on, and whether")
+    assert str(refused.value).startswith(
+        f"{written_at}: this server declares a data boundary, and whether"
+    )
     assert str(broken.value).startswith(
         f"{written_at}: {written_at}.env.API_TOKEN: references ${MCP_UNSET_VARIABLE}"
     )
@@ -1992,7 +1998,7 @@ def test_both_mcp_build_refusals_read_the_location_helper(
 
     monkeypatch.setattr(mcp_manager, "entity_location", spying)
     declared = mcp_world_named(
-        MCP_LAWFUL, {"transport": "stdio", "command": "uvx"}, local_only=True
+        MCP_LAWFUL, {"transport": "stdio", "command": "uvx"}, boundary=Reach.HOST
     )
     unreadable = mcp_world_named(
         MCP_LAWFUL,
@@ -2003,14 +2009,16 @@ def test_both_mcp_build_refusals_read_the_location_helper(
         },
     )
 
-    with pytest.raises(McpConfigError) as egress:
+    with pytest.raises(McpConfigError) as refused:
         McpServers.build(declared)
     with pytest.raises(McpConfigError) as broken:
         McpServers.build(unreadable)
 
     assert [identity for _, identity in asked] == [(MCP_LAWFUL,), (MCP_LAWFUL,)]
     assert all(kind is entities.descriptor("mcp-server") for kind, _ in asked)
-    assert str(egress.value).startswith(f"{SPIED_LOCATION}: server.local_only is on")
+    assert str(refused.value).startswith(
+        f"{SPIED_LOCATION}: this server declares a data boundary"
+    )
     assert str(broken.value).startswith(
         f"{SPIED_LOCATION}: mcp_servers.{MCP_LAWFUL}.env.API_TOKEN: "
         f"references ${MCP_UNSET_VARIABLE}"

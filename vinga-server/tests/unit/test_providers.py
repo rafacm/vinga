@@ -129,7 +129,7 @@ async def test_a_provider_error_raised_by_a_factory_is_left_exactly_as_it_is(
 ) -> None:
     """Every existing message is composed by a factory, and tests assert
     on their wording (the missing-extra one names the extra to install,
-    the local_only one names the type). Wrapping them would rewrite all
+    the boundary one names the type). Wrapping them would rewrite all
     of it."""
     from vinga_server.providers import registry
 

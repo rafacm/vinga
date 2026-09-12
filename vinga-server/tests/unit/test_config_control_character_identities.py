@@ -452,10 +452,10 @@ async def test_the_build_names_a_stored_entry_with_the_byte_escaped(
     with caplog.at_level(logging.DEBUG), pytest.raises(ProviderError) as constructed:
         await build_entry("llm", PLANTED, ProviderConfig(type="no-such-type"))
     with caplog.at_level(logging.DEBUG), pytest.raises(ProviderError) as owned:
-        await build_entry("llm", PLANTED, ProviderConfig(type="mock", egress=False))
+        await build_entry("llm", PLANTED, ProviderConfig(type="mock", reach="host"))
 
     assert f"providers.llm.{SPOKEN}: names no llm provider type" in str(constructed.value)
-    assert f'providers.llm.{SPOKEN}: "egress" is decided' in str(owned.value)
+    assert f'providers.llm.{SPOKEN}: "reach" is decided' in str(owned.value)
     _carries_no_sentinel(chain(constructed.value), chain(owned.value), *_logged(caplog))
 
 
@@ -893,7 +893,7 @@ async def test_a_lawful_name_is_named_by_every_one_of_them_as_it_is_stored(
             "the test's database",
         )
     with pytest.raises(ProviderError) as declared:
-        await build_entry("llm", LAWFUL, ProviderConfig(type="mock", egress=False))
+        await build_entry("llm", LAWFUL, ProviderConfig(type="mock", reach="host"))
     with pytest.raises(ProviderError) as unnamed:
         await build_world(_world_named(LAWFUL))
     with caplog.at_level(logging.WARNING):
@@ -911,7 +911,7 @@ async def test_a_lawful_name_is_named_by_every_one_of_them_as_it_is_stored(
     await provider.close()
 
     assert f"agents.{LAWFUL}.llm: names no llm provider that exists" in str(composed.value)
-    assert str(declared.value).startswith(f'providers.llm.{LAWFUL}: "egress" is decided')
+    assert str(declared.value).startswith(f'providers.llm.{LAWFUL}: "reach" is decided')
     assert str(unnamed.value).startswith(f"agents.{LAWFUL}: no llm provider is named")
     assert f"providers.llm.{LAWFUL}" in only(caplog, "provider_reaches_loopback").getMessage()
     assert _world_named(LAWFUL, llm=LAWFUL).provider_for_agent(LAWFUL, "llm") == (

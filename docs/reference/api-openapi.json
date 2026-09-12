@@ -3013,7 +3013,7 @@
             }
           },
           "422": {
-            "description": "The stored configuration was refused: it does not compose into a valid snapshot, a credential stored in it will not open under the configured keys, or an engine it names could not be built (an unknown provider type or option, a model that would not load, an environment reference nothing sets, an entry `server.local_only` forbids). Nothing was swapped, stopped or started, and the running server is exactly as it was. The `detail` is fixed and names no location, which this refusal shares with the comparison read beside it and with nothing else in this API: what was refused is arbitrary stored state, and a sentence composed over it can quote a value that was written into the wrong field. A server started from this store refuses on the same state and names the location it refused on.",
+            "description": "The stored configuration was refused: it does not compose into a valid snapshot, a credential stored in it will not open under the configured keys, or an engine it names could not be built (an unknown provider type or option, a model that would not load, an environment reference nothing sets, an entry `server.data_boundary` forbids). Nothing was swapped, stopped or started, and the running server is exactly as it was. The `detail` is fixed and names no location, which this refusal shares with the comparison read beside it and with nothing else in this API: what was refused is arbitrary stored state, and a sentence composed over it can quote a value that was written into the wrong field. A server started from this store refuses on the same state and names the location it refused on.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8366,6 +8366,16 @@
         "title": "TurnLeg",
         "description": "One agent's share of a turn a handover split.\n\nThe transport shape of one entry of `turns.legs`, whose halves\nfollow different storage switches: the text is content and the token\ncounts are measurements, which is why a leg exists at all rather\nthan the turn's totals being the whole story. The totals blend\nagents that may use different models; this is where they come apart\nagain."
       },
+      "Reach": {
+        "description": "How far session data handed to something travels.\n\nOne enum for both sides of the rule, because a boundary IS a reach:\nthe outermost reach session data may have on this server. A second\nenum would be two structures required to agree.\n\n`host` is the machine this process runs on and nothing beyond it.\n`network` is whatever the machine can address without leaving the\noperator's own network, which is the honest declaration for a model\nserver on the LAN. `internet` is everything else.",
+        "enum": [
+          "host",
+          "network",
+          "internet"
+        ],
+        "title": "Reach",
+        "type": "string"
+      },
       "ProviderConfig": {
         "additionalProperties": true,
         "description": "One provider entry. Options beyond `type` are passed through to the\nprovider implementation, so extra keys are allowed here.",
@@ -8389,18 +8399,17 @@
             "description": "The name of the environment variable holding this provider's credential, never the credential itself. Left unset for a local engine or a keyless self-hosted endpoint. A credential stored with `vinga provider secret set` fills the same slot and takes precedence.",
             "title": "Api Key Env"
           },
-          "egress": {
+          "reach": {
             "anyOf": [
               {
-                "type": "boolean"
+                "$ref": "#/components/schemas/Reach"
               },
               {
                 "type": "null"
               }
             ],
             "default": null,
-            "description": "Whether this entry sends session data off the host, asserted by the operator for the types whose configuration decides it rather than their name (openai_compatible, and the openai ASR and TTS types, whose base_url may be local or a vendor). Under server.local_only such an entry must declare egress: false; a type that knows its own egress rejects the key.",
-            "title": "Egress"
+            "description": "How far session data given to this entry travels, asserted by the operator for the types whose configuration decides it rather than their name (openai_compatible, and the openai ASR and TTS types, whose base_url may name this machine, a server on your network or a vendor). `host` is an endpoint on this machine, `network` one that stays on your own network, `internet` anything else. Under a `server.data_boundary` such an entry must declare it, and a reach exceeding the boundary refuses to boot; a type that knows its own reach rejects the key."
           }
         },
         "required": [
@@ -8472,18 +8481,17 @@
             "title": "Headers",
             "type": "object"
           },
-          "egress": {
+          "reach": {
             "anyOf": [
               {
-                "type": "boolean"
+                "$ref": "#/components/schemas/Reach"
               },
               {
                 "type": "null"
               }
             ],
             "default": null,
-            "description": "Whether this server sends session data off the local network. Tool arguments carry conversation-derived data and neither transport can tell on its own, since a stdio command may proxy anywhere and a url may name localhost, so under server.local_only every referenced entry must declare it.",
-            "title": "Egress"
+            "description": "How far session data given to this server travels: `host` for a command or URL that stays on this machine, `network` for one that stays on your own network, `internet` for anything else. Tool arguments carry conversation-derived data and neither transport can tell on its own, since a stdio command may proxy anywhere and a url may name localhost, so under a declared server.data_boundary every referenced entry must declare it, and a reach exceeding the boundary refuses to boot."
           },
           "tool_timeout_s": {
             "default": 15.0,

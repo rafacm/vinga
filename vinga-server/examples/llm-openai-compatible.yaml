@@ -31,13 +31,13 @@ model: qwen3:8b
 # tool_choice.
 # top_p: 0.9
 
-# Whether an openai_compatible endpoint sends session data off the host
+# How far session data given to an openai_compatible endpoint travels
 # is decided by base_url, so the server cannot know it from the type.
-# Under server.local_only the entry must say: egress: false is the
-# operator asserting the endpoint stays on this machine. Types that know
-# their own egress (anthropic, silero, faster_whisper, piper) reject the
-# key.
-egress: false
+# Under a server.data_boundary the entry must say: host is the operator
+# asserting the endpoint is on this machine, network that it stays on
+# your own network, internet that it does not. Types that know their own
+# reach (anthropic, silero, faster_whisper, piper) reject the key.
+reach: host
 
 # An endpoint that authenticates names the variable holding its key
 # here. A keyless local runner leaves it out.

@@ -38,6 +38,7 @@ from tests.support.tools_mcp import (
     started,
 )
 from tests.support.tools_mcp import reload_config as config_with
+from vinga_server.boundary import Reach
 from vinga_server.config.boot import BootConfig
 from vinga_server.config.loader import (
     ConfigError,
@@ -537,14 +538,16 @@ async def test_a_secret_that_will_not_decrypt_changes_nothing() -> None:
         await servers.stop_all()
 
 
-async def test_an_egress_declaration_local_only_forbids_changes_nothing() -> None:
+async def test_a_reach_the_boundary_forbids_changes_nothing() -> None:
     config = config_with(
-        {"tools": entry_data(egress=False)}, {"assistant": ["tools"]}, local_only=True
+        {"tools": entry_data(reach="host")},
+        {"assistant": ["tools"]},
+        boundary=Reach.HOST,
     )
     broken = config_with(
-        {"tools": entry_data(egress=False), "extra": entry_data()},
+        {"tools": entry_data(reach="host"), "extra": entry_data()},
         {"assistant": ["tools", "extra"]},
-        local_only=True,
+        boundary=Reach.HOST,
     )
     servers = await started(config)
     reloads = Applying(servers, config)
@@ -553,7 +556,7 @@ async def test_an_egress_declaration_local_only_forbids_changes_nothing() -> Non
 
         assert "nothing was changed" in message
         assert "mcp_servers.extra" in message
-        assert "local_only" in message
+        assert "data boundary" in message
     finally:
         await servers.stop_all()
 

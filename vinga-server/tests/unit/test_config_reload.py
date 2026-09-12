@@ -46,6 +46,7 @@ from tests.support.sessions import agent_providers, call, run_reply, session_for
 from tests.support.stores import memory as lane_memory
 from tests.support.tools_mcp import reading
 from vinga_server.app import _prompt_preview, config_diff_reader, config_reloader
+from vinga_server.boundary import Reach
 from vinga_server.config import Config, cli
 from vinga_server.config.api import MOUNT_PATH
 from vinga_server.config.boot import BootConfig, load_boot_config
@@ -696,7 +697,7 @@ class Closing(MockTts):
     """A voice that remembers being closed, so a test can see a world
     let go of one."""
 
-    egress = False
+    reach = Reach.HOST
 
     def __init__(self, **options: object) -> None:
         super().__init__(sample_rate=24000, ms_per_char=1.0, min_ms=20.0)
@@ -850,7 +851,7 @@ async def test_an_entry_a_rewritten_world_still_names_is_not_retired() -> None:
 
 async def test_an_egress_refusal_leaves_the_running_engines_exactly_as_they_were() -> None:
     """The promise the double residency buys. The candidate's voice is
-    built, refused by the egress rule, and closed; what this server is
+    built, refused by the boundary rule, and closed; what this server is
     serving is the same object it was serving before the request."""
     running = voices()
     stored = served(
@@ -859,7 +860,7 @@ async def test_an_egress_refusal_leaves_the_running_engines_exactly_as_they_were
             "asr": {"mock": {"type": "mock"}},
             # A marking the type decides for itself, which is refused in
             # any mode and only once the object exists to be asked.
-            "tts": {"voice": {"type": "mock", "egress": False}},
+            "tts": {"voice": {"type": "mock", "reach": "host"}},
             "vad": {"mock": {"type": "mock"}},
         },
         agent_defaults={"llm": "mock", "asr": "mock", "vad": "mock"},

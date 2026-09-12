@@ -9,7 +9,8 @@ are themselves the proof the default path is untouched. What is pinned
 here is the sentence that says so: `build_telemetry(None)` is None.
 
 **Every refusal is a sentence, and none of them chains.** The three
-ways an enabled exporter can be wrong (`local_only`, the missing extra,
+ways an enabled exporter can be wrong (the data boundary, the missing
+extra,
 an unsupported protocol) are `ConfigError` with a message written to be
 printed as it is, and each is raised outside the handler that decided
 it, so nothing from the library underneath rides along.
@@ -62,9 +63,9 @@ from tests.support.telemetry import (
     start_turn,
     upload_emitter,
 )
+from vinga_server.boundary import BoundaryRefusal, Reach, check_feature
 from vinga_server.config import ConfigError
 from vinga_server.config.models import TelemetryConfig
-from vinga_server.egress import EgressRefusal, check_feature
 from vinga_server.events import Emission, attach_server_tap, detach_server_tap
 from vinga_server.events.values import CloseReason, ReplyOutcome
 from vinga_server.telemetry import (
@@ -156,17 +157,25 @@ def test_nothing_is_attached_when_nothing_is_built() -> None:
 # --- the refusals ------------------------------------------------------
 
 
-def test_local_only_refuses_before_anything_is_constructed(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("boundary", [Reach.HOST, Reach.NETWORK])
+def test_a_narrow_boundary_refuses_before_anything_is_constructed(
+    monkeypatch: pytest.MonkeyPatch, boundary: Reach
 ) -> None:
-    """The egress refusal, and the claim that makes it worth having:
+    """The boundary refusal, and the claim that makes it worth having:
     the exporter's constructor is never reached.
 
     Both halves are asserted, because either alone is weak. A sentence
     without the never-reached pin would pass an implementation that
     built the exporter and then threw it away, which is a socket opened
-    and a thread started under `local_only`; a never-reached pin without
-    the sentence would pass one that refused for the wrong reason.
+    and a thread started inside a declared boundary; a never-reached pin
+    without the sentence would pass one that refused for the wrong
+    reason.
+
+    Driven at BOTH narrow boundaries, and `network` is the cell the old
+    boolean had no way to express: an exporter reaches the internet as
+    far as this server can tell, so a LAN-bounded deployment refuses it
+    exactly as a host-bounded one does. An implementation that read the
+    boundary as "not host" would pass the first and fail the second.
     """
     reached = []
     monkeypatch.setattr(
@@ -178,52 +187,62 @@ def test_local_only_refuses_before_anything_is_constructed(
     )
 
     with pytest.raises(ConfigError) as refusal:
-        build_telemetry(TelemetryConfig(enabled=True), local_only=True)
+        build_telemetry(TelemetryConfig(enabled=True), boundary=boundary)
 
-    assert reached == [], "something was imported or constructed under local_only"
-    assert "server.local_only is on" in str(refusal.value)
+    assert reached == [], "something was imported or constructed inside the boundary"
+    assert "data boundary" in str(refusal.value)
     assert TELEMETRY_KEY in str(refusal.value)
 
 
-def test_the_local_only_sentence_is_the_egress_modules_own() -> None:
+def test_the_boundary_sentence_is_the_boundary_modules_own() -> None:
     """One home for the rule, checked rather than asserted: the words
-    the boot prints are the words `egress.py` composes, so a telemetry
+    the boot prints are the words `boundary.py` composes, so a telemetry
     rule of its own would show up here as two sentences."""
-    with pytest.raises(EgressRefusal) as direct:
-        check_feature(TELEMETRY_KEY, egress=True, local_only=True)
+    with pytest.raises(BoundaryRefusal) as direct:
+        check_feature(TELEMETRY_KEY, Reach.INTERNET, Reach.HOST)
     with pytest.raises(ConfigError) as boot:
-        build_telemetry(TelemetryConfig(enabled=True), local_only=True)
+        build_telemetry(TelemetryConfig(enabled=True), boundary=Reach.HOST)
 
     assert str(boot.value) == str(direct.value)
 
 
-def test_the_local_only_refusal_chains_nothing() -> None:
+def test_the_boundary_refusal_chains_nothing() -> None:
     """Raised after the `except` closed, so uvicorn renders this
     sentence and not the exception underneath it."""
     with pytest.raises(ConfigError) as refusal:
-        build_telemetry(TelemetryConfig(enabled=True), local_only=True)
+        build_telemetry(TelemetryConfig(enabled=True), boundary=Reach.HOST)
 
     assert refusal.value.__cause__ is None
     assert refusal.value.__context__ is None
 
 
-def test_the_local_only_refusal_carries_no_value() -> None:
-    """The egress sentences are value-free by rule, and this one has an
-    environment full of candidates beside it: the endpoint is never
-    read at all on this path, so there is nothing of it to print."""
+def test_the_boundary_refusal_carries_no_value() -> None:
+    """The boundary sentences carry no value read from a configuration,
+    and this one has an environment full of candidates beside it: the
+    endpoint is never read at all on this path, so there is nothing of
+    it to print."""
     with pytest.raises(ConfigError) as refusal:
-        build_telemetry(TelemetryConfig(enabled=True), local_only=True)
+        build_telemetry(TelemetryConfig(enabled=True), boundary=Reach.HOST)
 
     said = str(refusal.value)
     assert "http" not in said
     assert "OTEL" not in said
 
 
-def test_local_only_with_telemetry_off_is_not_refused() -> None:
-    """The rule is about an exporter that would exist. A local-only
+def test_an_internet_boundary_permits_the_exporter() -> None:
+    """The widest declared boundary forbids nothing, which is the half
+    of the rule a rank comparison has and a boolean cannot: an operator
+    who declares `internet` is asking every entry to state its reach,
+    not switching tracing off."""
+    telemetry, _ = exporting(boundary=Reach.INTERNET)
+    assert telemetry is not None
+
+
+def test_a_boundary_with_telemetry_off_is_not_refused() -> None:
+    """The rule is about an exporter that would exist. A bounded
     deployment with no telemetry section boots exactly as it did."""
-    assert build_telemetry(None, local_only=True) is None
-    assert build_telemetry(TelemetryConfig(enabled=False), local_only=True) is None
+    assert build_telemetry(None, boundary=Reach.HOST) is None
+    assert build_telemetry(TelemetryConfig(enabled=False), boundary=Reach.HOST) is None
 
 
 def test_the_missing_extra_refusal_names_the_extra_and_the_command(

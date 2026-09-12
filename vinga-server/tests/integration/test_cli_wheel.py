@@ -210,7 +210,7 @@ SCRATCH: dict[str, object] = {
         "transport": "stdio",
         "command": "/bin/echo",
         "args": ["scratch"],
-        "egress": False,
+        "reach": "network",
     },
     "prompt-fragment.yaml": {"text": "Scratch."},
     "agent.yaml": {"prompt": "You are scratch."},

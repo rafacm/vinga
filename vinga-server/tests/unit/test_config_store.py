@@ -16,6 +16,7 @@ from cryptography.fernet import Fernet, MultiFernet
 from sqlalchemy import insert, select, update
 
 from tests.support.stores import bindings, planted, stored_row, stored_rows
+from vinga_server.boundary import Reach
 from vinga_server.config import ConfigError
 from vinga_server.config.loader import StorageError, UnknownEntityError, compose_config
 from vinga_server.config.models import (
@@ -79,7 +80,7 @@ def _populate(store: ConfigStore) -> None:
     store.set_provider("vad", "silero", {"type": "silero"})
     store.set_mcp_server(
         "home",
-        {"transport": "stdio", "command": "uvx", "args": ["home-mcp"], "egress": False},
+        {"transport": "stdio", "command": "uvx", "args": ["home-mcp"], "reach": "network"},
     )
     store.set_agent_defaults(
         {"llm": "claude", "asr": "whisper", "tts": "voice", "vad": "silero", "mcp": ["home"]}
@@ -124,7 +125,7 @@ def test_a_configuration_round_trips_through_the_rows(store: ConfigStore) -> Non
     assert domain.providers.llm["claude"].type == "anthropic"
     assert domain.providers.llm["claude"].options == {"model": "claude-sonnet-5"}
     assert domain.mcp_servers["home"].command == "uvx"
-    assert domain.mcp_servers["home"].egress is False
+    assert domain.mcp_servers["home"].reach is Reach.NETWORK
     assert domain.mcp_servers["weather"].headers == {"Authorization": "$WEATHER_TOKEN"}
     assert domain.mcp_servers["weather"].tool_timeout_s == 5
     assert domain.agent_defaults.mcp == ["home"]
@@ -192,7 +193,7 @@ def test_a_body_written_before_the_guidance_field_loads_unchanged(
         store,
         update(schema.mcp_servers)
         .where(schema.mcp_servers.c.name == "home")
-        .values(body='{"transport": "stdio", "command": "uvx", "egress": false}'),
+        .values(body='{"transport": "stdio", "command": "uvx", "reach": "network"}'),
     )
 
     entry = store.load().domain.mcp_servers["home"]

@@ -91,7 +91,7 @@ exit 0
 -- stdout
 transport: stdio
 command: uvx
-egress: false
+reach: network
 tool_timeout_s: 15.0
 use_server_instructions: false
 
@@ -142,7 +142,7 @@ exit 0
 # `vinga-server config set mcp-server <name> -f fragment.yaml`.
 transport: stdio
 command: uvx
-egress: false
+reach: network
 tool_timeout_s: 15.0
 use_server_instructions: false
 

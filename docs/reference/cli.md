@@ -882,11 +882,11 @@ fragment fields for provider (providers.<stage>.<name>):
   api_key_env: str | null  (default: null)
     The name of the environment variable holding this provider's credential,
     never the credential itself.
-  egress: bool | null  (default: null)
-    Whether this entry sends session data off the host, asserted by the
-    operator for the types whose configuration decides it rather than their
-    name (openai_compatible, and the openai ASR and TTS types, whose base_url
-    may be local or a vendor).
+  reach: Reach | null  (default: null)
+    How far session data given to this entry travels, asserted by the operator
+    for the types whose configuration decides it rather than their name
+    (openai_compatible, and the openai ASR and TTS types, whose base_url may
+    name this machine, a server on your network or a vendor).
 
 options for llm type openai_compatible:
 
@@ -1184,8 +1184,10 @@ fragment fields for mcp server (mcp_servers.<name>):
     The endpoint a streamable_http server is reached at.
   headers: dict[str, str]  (default: {})
     Headers sent with every streamable_http request.
-  egress: bool | null  (default: null)
-    Whether this server sends session data off the local network.
+  reach: Reach | null  (default: null)
+    How far session data given to this server travels: `host` for a command or
+    URL that stays on this machine, `network` for one that stays on your own
+    network, `internet` for anything else.
   tool_timeout_s: float  (default: 15.0)
     How long one tool call on this server may take, in seconds, before the
     model is told it timed out.
