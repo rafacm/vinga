@@ -195,21 +195,38 @@ in the flag's reference prose rather than hidden.
 
 ### The uploader runs where telemetry's shutdown runs
 
-A dedicated daemon worker thread with a bounded queue (size 4;
-a fifth finished capture before the first uploads is dropped with a
-warning event, since captures are minutes long and a backlog that
-deep means the endpoint is down), the `telemetry.py:1391-1463`
+A dedicated daemon worker thread with a bounded queue (admission
+sized from `server.limits.max_sessions` at build, because a routine
+shutdown closes every live session concurrently and a healthy
+redeploy of a full server finishes that many captures at once; a
+job beyond that bound is dropped with a warning event), the
+`telemetry.py:1391-1463`
 precedent stated in the plan because the reasons are not guessable:
 a daemon thread of its own rather than `asyncio.to_thread`, because
 the default executor is joined at exit and a wedged upload would
 hold the process open; bounded joins at shutdown with a warning on
 expiry; nothing on the session-serving path ever waits on it
-(`Telemetry.flush()`'s own documented rule). Layer 2 reuses `httpx`,
+(`Telemetry.flush()`'s own documented rule). Every request the
+worker makes carries a finite timeout (30 s, the export-timeout
+posture) and a bounded retry policy (two retries with backoff, then
+the failure event), because the blackhole failure mode is a request
+that is accepted and never answered
+(`tests/integration/test_telemetry_hardening.py`'s definition): with
+no ceiling, no `capture_upload_failed` could ever fire and a bounded
+shutdown join would merely abandon the job silently. The blackhole
+test asserts the three latencies separately: the session closes
+unaffected (bounded), the failure event fires within the
+timeout-plus-retries budget, and shutdown completes within its own
+bound. Layer 2 reuses `httpx`,
 already a core dependency, for nothing: the upload goes through the
-`langfuse` SDK per the issue's settled extra decision, and the SDK
-is imported lazily inside the builder exactly as `_import_sdk()`
-gates OTel, so no symbol escapes and the module imports clean
-without the extra.
+`langfuse` SDK per the issue's settled extra decision, imported
+lazily, with client construction deferred into the worker's first
+job rather than the builder, so a pinned SDK that validates its
+environment at construction cannot turn missing credentials into a
+boot failure; every construction exception is contained as a
+sanitized upload failure, the same fixed sentences as any other. No
+SDK symbol escapes the module and it imports clean without the
+extra.
 
 ### Configuration, credentials and refusals
 
@@ -473,6 +490,11 @@ condensed but faithful; resolutions appended per amendment.
    accept-and-never-answer receiver; assert session-close latency,
    failure-event latency and shutdown latency separately.
 
+   *Resolution.* Adopted. The worker section fixes a 30 s request
+   timeout and a two-retry ceiling, and the blackhole test asserts
+   the three latencies separately against an
+   accept-and-never-answer receiver.
+
 5. **P2: Queue depth four loses captures during an ordinary
    redeploy.** Eight sessions is the default limit and shutdown
    closes them concurrently, so a healthy upgrade can enqueue eight
@@ -480,6 +502,10 @@ condensed but faithful; resolutions appended per amendment.
    admission against `server.limits.max_sessions` or make the
    staged jobs the durable queue; test a maximum-sessions
    simultaneous drain accounting for every job.
+
+   *Resolution.* Adopted. Queue admission is sized from
+   `server.limits.max_sessions` at build, and the tests gain a
+   maximum-sessions simultaneous drain accounting for every job.
 
 6. **P2: Staging cleanup and restart behavior are incomplete.**
    Nothing removes links on partial staging, on a dropped enqueue,
@@ -506,6 +532,12 @@ condensed but faithful; resolutions appended per amendment.
    client construction into the worker's first job and contain
    every construction exception as a sanitized upload failure, or
    adopt and test a fixed value-free boot refusal.
+
+   *Resolution.* Adopted, first option: client construction is
+   deferred into the worker's first job, every construction
+   exception contained as a sanitized upload failure, and the
+   pinned SDK's construction behavior is verified and recorded
+   during M3.
 
 9. **P2: Third-party logging is not contained by the design.** The
    OTel substrate quiets its SDK's logger namespace before
