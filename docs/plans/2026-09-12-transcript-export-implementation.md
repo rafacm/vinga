@@ -170,3 +170,282 @@ Verdict as received: **mergeable after the listed fix**. One finding.
    joins the case. Falsified by running the assertion against a
    constructed key-carrying refusal sentence, which fails it; the
    suite file re-run green (150 passed).
+
+## M2: the flag, the exporter, the vocabulary, the record
+
+The milestone the plan gated on a live rendering question, so the gate
+is first here too. It passed, and one of its answers changed what the
+record claims rather than what the code does.
+
+### The rendering gate
+
+Run before a line of the exporter was written, against a self-hosted
+Langfuse on a scratch directory outside the repository (project
+`vinga-495-lf`, every host port remapped, headless `LANGFUSE_INIT_*`
+provisioning with throwaway values, `/api/public/health` answering
+`{"status":"OK","version":"4.35.0"}`). One hand-made trace, two spans,
+carrying the three attributes the design rests on.
+
+```
+langfuse.observation.input             = "probe heard text 495"
+langfuse.observation.output            = "probe reply text 495"
+langfuse.observation.metadata.legs     = [{"agent":"alpha","text":"This is Alpha speaking."},
+                                          {"agent":"beta","text":"This is Beta finishing."}]
+```
+
+Read back through `GET /api/public/v2/observations?sessionId=...&fields=io,metadata`:
+
+```json
+{"id": "44b103f99433920b", "type": "SPAN",
+ "input":  "probe heard text 495",
+ "output": "probe reply text 495",
+ "metadata": {"legs": [{"agent": "alpha", "text": "This is Alpha speaking."},
+                       {"agent": "beta",  "text": "This is Beta finishing."}],
+              "attributes.vinga.turn.index": 1,
+              "attributes.vinga.turn.id": 4242}}
+```
+
+**Both halves render as the acceptance requires.** `input` and `output`
+are the observation's OWN fields rather than metadata keys, which is the
+whole of what the gate was for and the one thing the plan reserved the
+right to stop the milestone over.
+
+And one answer the plan did not ask for: the canonical JSON string is
+**parsed back into structured metadata**. The wire carries one string
+attribute, because span attributes take primitives and never mappings,
+and a reader meets `metadata.legs` as an array of objects. So the
+encoding is not a compromise a reader has to decode by hand, which is
+worth recording because it is the reason no second spelling is needed.
+
+### What landed
+
+| Piece | Where |
+| --- | --- |
+| The close barrier | `Close` carries an `Acknowledgement`, `close_session` returns it, the writer settles it from the outcome that wrote the close row, and `Acknowledgement` generalizes from "its own turn" to "its own record" with the barrier documented where the barrier is |
+| The read | `threads.transcript_rows` (six named columns, `id > after`, ordered by `id`, limited) and `Reads.transcript_rows`; `conversations/api.py` untouched |
+| The span | `Telemetry.retained_context`, `Telemetry.export_transcript`, `TranscriptTurn` as the seam type, `Delivery` as the answer, the retention bound derived from the configured capacity, and content as the second stated exception to the module's vocabulary rule |
+| The worker | `src/vinga_server/transcript_export.py`: the builder and its four-step decision order, the bounded queue, the lazy daemon worker, the interruptible acknowledgement wait, the page-read-and-deliver loop, the ordered teardown and the quieting lease |
+| The vocabulary | `TranscriptExportFailure` (five members), `TranscriptsExported` and `TranscriptExportFailed` on `vinga_server.transcript_export`, both joining `AFTER_THE_CLOSE`, with their drivers and the regenerated events reference |
+| The flag | `TelemetryConfig.export_transcripts`, both example configs, the regenerated server reference |
+| The wiring | `app.py` builds it and registers its shutdown behind every teardown it unwinds in front of; `device/session.py` forwards the acknowledgement `_stop_recording` now returns |
+| The record | the observability map's eighth surface and the export-ladder table, the content-and-telemetry ADR's third amendment, `changelog.d/495-transcript-export.md` |
+
+### Deviations from the plan
+
+1. **The bounded call's ceiling is the exporter's own deadline, not a
+   fixed 30 s.** The plan says the call's bound is "the export-timeout
+   posture (30 s)". The OTLP HTTP exporter takes its whole deadline,
+   retries included, from `OTEL_EXPORTER_OTLP_TIMEOUT` (ten seconds
+   unless an operator says otherwise), and passing a number would
+   overwrite an operator-written environment fact that this module's
+   entire discipline is not to touch. So the instance is constructed
+   with no arguments, the #66 posture, and the plan's substance holds:
+   the call IS bounded, it bounds the retries with it, and the
+   blackhole case asserts the failure event inside that bound with the
+   variable shortened from the outside rather than from the code.
+2. **The dedicated exporter is reached through `_otlp_exporter` rather
+   than through a new `_Sdk` field.** The plan says "through the
+   existing `_Sdk` seam"; `_otlp_exporter` is the existing seam for
+   constructing that exporter specifically, and it is already what the
+   egress case substitutes to prove nothing is built under
+   `local_only`. `_Sdk` gained one name, `SpanExportResult`, because
+   reading the answer needs it and no module-level import may name an
+   OpenTelemetry symbol.
+3. **The transcript spans need no span processor at all.** The plan
+   says they are "collected in memory rather than queued". A
+   `TracerProvider` with no processor still builds and ends real spans,
+   and an ended span is exactly what an exporter takes, so the page is
+   a list the builder returns. A collecting processor was written first
+   and taken out: the SDK calls a private `_on_ending` hook on every
+   processor, so a duck-typed one would have leaned on a private name
+   for nothing.
+4. **The exporter's shutdown is registered beside the uploader's
+   rather than after the composition's attribute removal.** The plan
+   says "pushed onto the exit stack LAST, so it unwinds FIRST, while
+   the store, the event tap and telemetry are all still up". The
+   clause after the comma is the property, and it holds here: the two
+   registrations that come after this one release nothing (an
+   attribute is removed, the MCP managers are stopped), so this is the
+   last TEARDOWN registered. A case drives it rather than asserting
+   it, and was watched red against the registration removed.
+5. **`Acknowledgement` gained `settled`.** Not in the plan, and found
+   by the worker that needed it: `wait` answers false for "not yet"
+   and for "no" alike, so a poller watching a stop flag in short
+   slices could not tell them apart and a record the writer had
+   already refused would cost the worker its whole thirty seconds,
+   for every session a drain closes.
+6. **The walkthrough's handover records two turns, not one split
+   reply.** The packaged mock LLM says nothing on the round it calls a
+   tool, so a successful `switch_agent` leaves the first agent with no
+   text at all: the store records the tool-only turn and the new
+   agent's reply as two rows, and the first row's `legs` carries its
+   agent and no text. That is the pipeline's own shape rather than
+   anything this milestone chose, so the live record says what it saw;
+   the two-text-leg canonical string is pinned in the unit lane
+   against the store's own column shape, and the gate above confirmed
+   that exact string rendering live.
+
+### The ordinal convention, settled
+
+The plan's two sentences about `vinga.turn.index` admit two readings
+("derived from the projection's `id`-ascending ordering" and "any
+session's first exported turn is index 1"), and they part company for a
+session whose first turn has no text at all. The second is what shipped
+and what the tests pin: the ordinal counts the turns this export
+actually WROTE, so it is 1-based, gapless, and 1 for the first
+observation a reader meets. A turn with neither text half is exported
+as no span and consumes no ordinal. Correlation back to the store is
+`vinga.turn.id`'s job, which is why the two are separate facts.
+
+### Tests
+
+`tests/unit/test_conversations_durable.py` gains six cases for the
+barrier, and they drive both sides of its stated limit: a close whose
+own transaction fails answers `False`, and a close committing after an
+earlier turn was dropped-and-counted answers `True` with the stored
+turns readable.
+
+`tests/unit/test_conversations_threads.py` gains seven for the
+projection, including a row family carrying tool arguments and a tool
+result with none of them selected, and both answers of the read seam.
+
+`tests/unit/test_telemetry_transcripts.py` is new, seventeen cases: the
+captured context surviving its own eviction, the retention derived from
+capacity with every session live, the attribute set pinned exactly, the
+exact canonical legs string, the allowlist dropping the token halves,
+the three delivery answers, and the one that is the transport half of
+the design, which is that a transcript span never reaches the shared
+batch queue.
+
+`tests/unit/test_transcript_export.py` is new, forty-three cases: the
+build-nothing set, the refusals value-free and unchained, the decision
+order driven with `local_only` on, the paging arithmetic, the five
+failure reasons each at its decision site, the drain with every job
+accounted for, the close that does not wait on a wedged worker, the
+shutdown that interrupts a job sitting in the acknowledgement wait, and
+the two sentinel families with opposite claims, the second of them
+planted in a real store and read through the real `Reads`.
+
+`tests/integration/test_transcript_export.py` is new, five cases: the
+wire claim off protobuf a collector received, the sentinel counted in
+the collector's own bytes, the flag off exporting nothing, the
+blackholed backend with three latencies asserted separately, and a real
+conversation writer parked at its gate so the barrier genuinely never
+settles.
+
+Every new case was watched red first. Four mutations were driven, each
+failing exactly the case that names it and nothing else:
+
+- the private provider replaced by the shared tracer, which fails
+  `test_a_transcript_span_never_rides_the_shared_batch_queue`;
+- the context looked up at export time instead of used, which fails
+  `test_a_context_captured_at_admission_survives_its_own_eviction`;
+- the interruptible wait replaced by one bounded `wait`, which fails
+  both shutdown cases and nothing else;
+- the ordinal reset per page, which fails the oversized-session case
+  and the drain's own count;
+- and the projection widened to `select(turns)`, which fails the
+  threads case that names its columns.
+
+No mutation survived its case. The concurrency-driving cases (the
+drain, the full backlog, the wedged close and the two shutdown cases)
+were run twenty times over, zero failures.
+
+### The live walkthrough
+
+The same stack as the gate, with the server this branch builds pointed
+at it. Recorded verbatim, the way #66's Jaeger record and #67's are.
+
+```
+# the stack, in a scratch directory outside the repository
+docker compose -p vinga-495-lf up -d --wait
+curl -s http://localhost:53010/api/public/health
+#  {"status":"OK","version":"4.35.0"}
+
+# the server's own database
+VINGA_DB_PORT=55496 docker compose -p vinga-495-m2 up -d postgres --wait
+
+# the server: conversations on, telemetry on, export_transcripts on
+VINGA_DB_PORT=55496 VINGA_API_SECRET=... \
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:53010/api/public/otel \
+OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic <base64 pk:sk>" \
+  uv run vinga-server --config config.yaml
+
+uv run vinga-server config import -f document.yaml --config config.yaml
+uv run vinga-server config apply --config config.yaml --force
+#  two agents (alpha, beta), one device bound to both, mocks throughout,
+#  alpha's LLM scripted to hand over to beta
+
+python drive.py 8495 aa:bb:cc:dd:ee:95 3
+#  turn 1: heard: tell me the secret about the kitchen light | BETA here, and I heard you.
+#  turn 2: heard: tell me the secret about the kitchen light | BETA here, and I heard you.
+#  turn 3: heard: tell me the secret about the kitchen light | BETA here, and I heard you.
+
+#  the server log, after the close:
+#  session 3a873f69...: handed over from agent alpha to beta
+#  session 3a873f69...: 4 turn transcripts exported to its trace in 66 ms
+```
+
+What the instance then held, read through its own API:
+
+```
+GET /api/public/v2/observations?sessionId=3a873f696a484c818558e5b329766f75
+
+22 observations, 4 traces
+  8f9de8cf  session, transcript x4, transcripts_exported
+  a3d6b986  turn, asr, llm, llm, playback, tts_stream     <- the handover turn
+  c8b07d73  turn, asr, llm, playback, tts_stream
+  5787f60b  turn, asr, llm, playback, tts_stream
+
+...&fields=io,metadata
+  turn index 1  id 1  agent alpha
+     input : 'tell me the secret about the kitchen light'
+     output: None
+     legs  : [{"agent": "alpha"}]
+  turn index 2  id 2  agent beta
+     input : None
+     output: 'BETA here, and I heard you.'
+  turn index 3  id 3  agent beta
+     input : 'tell me the secret about the kitchen light'
+     output: 'BETA here, and I heard you.'
+  turn index 4  id 4  agent beta
+     input : 'tell me the secret about the kitchen light'
+     output: 'BETA here, and I heard you.'
+```
+
+The acceptance this milestone owns, live: each turn's text is in the
+observation's own RENDERED input and output fields, the four
+observations are in the SESSION's trace beside the session span rather
+than in traces of their own, the ordinal runs 1 to 4 with the store's
+row ids beside it, and the handover is followable as `vinga.agent`
+moving from alpha to beta with the leg attribution rendering as
+structured metadata on the turn it happened in. The outcome event is
+there too, as an observation beside them.
+
+The thin part is recorded rather than glossed: the mock's handover
+speaks nothing for alpha, so that leg has an agent and no text. The
+gate above is where the two-text-leg rendering was confirmed.
+
+Torn down afterwards with `docker compose -p vinga-495-lf down -v` and
+`docker compose -p vinga-495-m2 down -v`, the server stopped. Nothing
+Langfuse-deployment-shaped is committed: the compose file, its override,
+the `.env`, the two configuration halves and the driver all lived in the
+session scratchpad.
+
+### Verification
+
+- `uv run ruff check .`: All checks passed!
+- `uv run mypy` (strict over `src/vinga_server/events`): Success: no
+  issues found in 5 source files
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 7075 passed, 19
+  skipped (6999 before this milestone, plus its seventy-six)
+- `uv run pytest tests/integration -q`: 330 passed, against Postgres
+  from the committed compose file on `VINGA_DB_PORT=55496`
+- `python3 scripts/fold_changelog.py check .`: checked 2 fragments, 0
+  failures
+- `python3 scripts/check_doc_links.py .`: checked 235 files, 0 failures
+- `uv run pytest tests/unit/test_command_spellings.py -q`: 52 passed
+- Both generated documents regenerated through their generators and
+  unchanged afterwards (`config reference server`, `events reference`)
+- The rendering gate and the live walkthrough above, recorded rather
+  than asserted
