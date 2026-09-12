@@ -19,32 +19,19 @@ leaving the absence to be noticed.
 | Piece | Where |
 | --- | --- |
 | The fourth amendment | `docs/adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md`: three classes under one `export_` prefix with `attach_` decommissioned, the family rule stated once, artifacts riding their class and the announced widening that follows, the superset note, the fidelity boundary of `export_llm_input` and its cost, that class's local surface with the full retention answer and the crash consequence, the wire-fidelity tier dissolved, and fine-grained control left with #393 |
-| The forward clause | the same file's third amendment, whose "Three tiers" bullet now says the third tier did not survive the day and where the decision that replaced it is |
-| The tier table | `docs/architecture/observability-surfaces.md`: two rows, metadata as the prerequisite and content by class, with the family's four shared terms in the second row's terms column |
+| The tier table | `docs/architecture/observability-surfaces.md`: two rows, metadata as the prerequisite and content by class, with the family's shared terms in the second row's terms column, the no-op arm first among them |
 | The class table | the same section: one row per class, what leaves, the flag, and whether it has landed, with `export_llm_input` marked unlanded and attributed to this plan's fifth milestone |
 | The two class properties | beside the tables: a class gaining an artifact widens an already-on flag and is announced, and a wider class may contain what a narrower one does |
 | The two falsified sentences | the same page's contents bullet ("the three tiers content may leave this deployment on") and the exported-transcripts row's "wire fidelity is a future decision of its own" |
 
 ### Deviations from the plan
 
-One, and it is an addition rather than a departure.
-
-- **The third amendment gains a forward clause.** The plan's
-  documentation footprint names a fourth amendment and the map's
-  ladder section, and says nothing about the amendment being
-  superseded. Leaving it untouched would have left a reader who
-  opened the record at its third amendment reading "Three tiers" and
-  "deliberately unspecced" as current policy, with nothing but the
-  date order to tell them otherwise, and both amendments carry the
-  same date. So the third amendment's tier bullet gains one clause
-  saying the third tier did not survive the day and that the
-  amendment below dissolves it. The decision itself is not rewritten,
-  which is the record's own rule: a record is superseded by a later
-  one, never edited into agreement.
-
-Nothing else deviated. Every item the plan's M1 lists is in the table
-above, and the section kept its `#the-export-ladder` anchor, which the
-record links and the link checker verifies.
+None. Every item the plan's M1 lists is in the table above, and the
+ladder section kept its `#the-export-ladder` anchor, which the record
+links and the link checker verifies. One addition was written and
+then taken out by the review round below, which is recorded there and
+in the discovery under it rather than as a deviation, since nothing
+of it survives in the tree.
 
 ### Resolutions the plan left to this milestone
 
@@ -52,7 +39,10 @@ None outstanding. The plan resolved the wire-fidelity question, the
 third class's local surface and retention answer, and the fidelity
 boundary in its own open-questions sections, and the amendment records
 those resolutions rather than taking them again. The one judgement
-this milestone did make on its own is the forward clause above.
+this milestone made on its own, a clause pointing forward from the
+superseded amendment, the review round rejected and this branch
+reverted; the discovery below says why it was written and which rule
+it broke.
 
 ### Discoveries
 
@@ -86,6 +76,23 @@ this milestone did make on its own is the forward clause above.
   path, and nothing is asked to respell. The row is described here
   and not reproduced, which is the trap #495's own M1 recorded:
   quoting a census row into a tracked page adds one.
+- **A superseded amendment may not be told that it was superseded.**
+  The first draft of this milestone put one clause into the third
+  amendment's tier bullet, saying its third tier had not survived the
+  day and where the decision that replaced it was. The reasoning was
+  navigational: both amendments carry the same date, so a reader who
+  opened the record at the third one would meet "Three tiers" and
+  "deliberately unspecced" with only the ordering to correct them.
+  The review round rejected it and is right. The authority taxonomy
+  says of the decisions directory that a record is superseded by a
+  later one and never edited into agreement, and a clause describing
+  what a table contains "now" is exactly such an edit however light it
+  reads. The clause is reverted whole. Current policy is the fourth
+  amendment's and the maintained map's, and the map links both
+  amendments, which is where navigation belongs: an index may point
+  at a record, a record may not be updated to point at its successor.
+  Worth knowing before the fifth amendment, because the same
+  temptation arrives with it.
 - **Dated execution records keep their spelling, and two of them
   carry the dissolved tier.** The transcript-export plan describes the
   ladder it was written against, and the folded changelog describes
@@ -114,3 +121,46 @@ this milestone did make on its own is the forward clause above.
 - [ ] Anything on a board. No protocol, no firmware-visible behavior
       and no device path moves here, so there is nothing a device
       checkpoint could falsify.
+
+### PR review round, PR #505
+
+External review: codex CLI 0.154.0, model gpt-5.6-terra, read-only
+sandbox, 2026-09-12, runtime 6m50s, reviewing origin/main...6cd4ce36.
+Verdict as received: **mergeable after the listed fixes**. Two
+findings, both adopted, each fixed in a commit of its own.
+
+1. **P2: the family rule contradicts the landed flags' no-op
+   ordering.** The rule said every content flag requires
+   `server.telemetry.enabled` and is refused under a narrower
+   `server.data_boundary`, but `build_capture_upload` returns its
+   documented no-op before either check when `server.capture` is
+   absent or off, and `build_transcript_export` does the same when
+   conversations are absent, off, or storing no text. The generated
+   field prose promises those no-ops. Fix: state the rule
+   conditionally, preserving the established no-op precedence.
+
+   *Resolution.* Adopted, and confirmed against both builders: each
+   tests its class's own switch first, logs once at startup when the
+   flag is on with nothing to export, and returns. The rule now
+   carries that arm and carries it first, in the record's family-rule
+   bullet and in the map's tier table alike, with the telemetry
+   prerequisite and the boundary refusal behind it. The reason is
+   stated rather than just the ordering: a deployment that keeps
+   nothing has nothing to export, which is a choice rather than a
+   misconfiguration. Both places also now say that the arm cannot
+   arise for `export_llm_input`, whose local surface no second switch
+   governs, since M5 is the reader most likely to infer one.
+
+2. **P2: the forward clause mutates an immutable decision record
+   while claiming not to.** The clause appended current-state text to
+   the third amendment, changing what that record says its table now
+   contains, and the authority taxonomy says a record is superseded
+   by a later one and never edited into agreement. Fix: remove it,
+   and let the fourth amendment and the maintained map carry current
+   policy.
+
+   *Resolution.* Adopted, reverted whole, and recorded as a discovery
+   above rather than as a deviation, since nothing of it survives in
+   the tree. The navigation it was reaching for exists already: the
+   map links both amendments, and an index may point at a record where
+   the record may not be updated to point at its successor.
