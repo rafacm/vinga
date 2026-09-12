@@ -564,3 +564,138 @@ the manifest with its own generator when stale.
 The issue's own M4 box is ticked when M4a and M4b have both merged.
 #500 lands between M3 and M4a, #496 between M4b and M5, and #501
 between #496 and M5, each under its own plan.
+
+## Plan review round
+
+External review: codex CLI 0.154.0, model gpt-5.6-sol, read-only
+sandbox, 2026-09-12, runtime 6m02s, reviewing commit 58ddecef.
+Verdict as received: **not ready** (the M5 fidelity seam, the initial
+provenance ordering and the M4b configuration contract each need a
+decision before implementation; the P2 amendments make the milestones
+testable and operationally honest).
+
+A note on the round itself, because it cost two runs. The first two
+attempts at this review exhausted their context reading the four large
+files the prompt named and produced no findings at all, exiting 0 with
+an empty answer. The round below ran against a prompt that pastes the
+load-bearing excerpts inline and tells the reviewer to consult the
+large files only through `grep` and a narrow window. An empty review is
+not a clean review, and a reviewer that exits 0 with nothing to say has
+not said nothing.
+
+Findings condensed but faithful; resolutions appended per amendment.
+
+1. **P1: M5 cannot provide wire-faithful requests at the proposed
+   seam.** The plan calls the export "exactly what the model saw" and
+   "byte-faithful" while staging what the caller passes to
+   `LlmProvider.stream`, which is neutral `system`, `Turn`, `ToolDef`
+   and `tool_choice` values. Both adapters then translate those into
+   different message and tool structures and add model, limits, stream
+   options and passthrough fields, so an `LlmInputRound` is not the
+   request the provider sent. Define the fidelity boundary precisely:
+   either drop the wire-fidelity language, or add a provider-side
+   snapshot after adapter translation, stating which transport fields
+   (authorization headers above all) are excluded and testing each
+   adapter's snapshot against the real SDK arguments.
+
+2. **P1: initial prompt provenance is emitted before a telemetry
+   session exists.** `PipelineRuntime.__init__` calls `_activate_agent`,
+   which emits `prompt_assembled`, and the runtime is constructed in
+   `DeviceSession.run` before the hello exchange and well before
+   `SessionOpen`. `_span_event` drops an event whose session has no
+   entry, so the initial agent's provenance, the ordinary case, cannot
+   be retained by the proposed fold. Say either that pre-open values
+   are held in a bounded pending structure claimed by `_open_session`,
+   or that the event moves after `session_open`, and test with the
+   production ordering rather than a synthetic event after an open
+   trace.
+
+3. **P1: M4b leaves its central configuration decision unresolved.**
+   The plan names "where the key lives, whether it is one key or three,
+   and what an assertion means when the trace transport and the media
+   transport point at different deployments" as M4b's territory and
+   then never answers any of it. Select the exact schema and semantics
+   before implementation: the key or keys, defaults, which transports
+   each assertion covers, behavior when `export_audio` uses a different
+   `LANGFUSE_HOST`, refusal ordering, and the value-free error text.
+
+4. **P2: capture pinning cannot use the existing retained-context seam
+   as claimed.** The opaque context can only be passed to
+   `export_transcript`. Capture upload does two later session-key
+   lookups instead, `trace_of(job.session)` before uploading and
+   `reference_media(job.session, ...)` after, and neither accepts a
+   pinned context, so pinning into `_Job` alone fixes neither eviction
+   window. Specify the API change, and force eviction independently
+   before the upload lookup and between upload completion and reference
+   writing.
+
+5. **P2: turn-trace retention has no implementable bound or addressing
+   contract.** M4a promises a bound "derived from the configured
+   capacity", but session capacity bounds concurrent sessions and not
+   turns per session, and one long session can create arbitrarily many
+   turn traces. State what identifies a turn trace, when its context is
+   captured, who pins it, and the bound, plus what happens when one
+   live session exceeds it and how #496 and #501 avoid losing an
+   artifact's target. Add pressure tests for many turns in one session.
+
+6. **P2: "device name on every span" omits existing manually
+   constructed spans.** `reference_media`, `_transcript_spans` and the
+   after-close outcome path each build their attributes separately from
+   the tables, and the promised tests would not prove the every-span
+   requirement. Enumerate every span constructor, carry the sanitized
+   nullable name in the retained context so post-close writers do not
+   re-read mutable configuration, and assert absence rather than a null
+   attribute for an unnamed device.
+
+7. **P2: TTS characters are classified in the wrong usage direction.**
+   The plan says a voice is given text and then maps that consumed text
+   to `gen_ai.usage.output_characters`. At the TTS model boundary the
+   sentence is input and the audio is output, so the spelling reverses
+   the interpretation used for LLM tokens and ASR audio. Use
+   `gen_ai.usage.input_characters`, and make the price definition and
+   the cost query use the same direction.
+
+8. **P2: the M5 round-count cap does not bound memory.** Each retained
+   item is a whole prompt with history, tool schemas, arguments and
+   results, and none of that has a stated byte ceiling, so a fixed item
+   count bounds cardinality rather than memory. Define a byte bound and
+   say whether an oversized request is dropped, truncated or replaces
+   older entries; truncation contradicts fidelity, so dropping whole
+   requests with explicit accounting is the consistent choice. Test one
+   oversized request as well as more rounds than the cap.
+
+9. **P2: M5 omits model invocations and required lifecycle wiring.**
+   The footprint names `telemetry.py`, composition and the new module,
+   but not `runtime/pipeline.py` or `device/session.py`, which hold the
+   only points where requests can be staged and post-close work
+   enqueued. There are two call shapes, the tool loop and recap
+   summarization, and the first-token watchdog can send the same
+   logical round twice. Name every wiring change, and decide whether an
+   observation is a logical round or a physical attempt, covering the
+   ordinary, tool-follow-up, recap, retry, failed, cancelled, close and
+   shutdown paths.
+
+10. **P2: backend pricing is mutable external state with no deployment
+    or upgrade story.** Entering model definitions through a live MCP
+    changes the development project and not an operator's self-hosted
+    backend, and nothing makes those definitions reproducible,
+    idempotent, versioned or discoverable, so a deployed server can emit
+    usage correctly while every cost reads zero. Say whether model
+    creation is product-managed or operator-managed, and either
+    document a repeatable procedure and qualify the acceptance
+    criterion, or name the provisioning mechanism, its credentials, its
+    idempotency and why a server startup may mutate a backend.
+
+11. **P2: M4a incorrectly claims its capture fix is not observable.**
+    Its purpose is to stop admitted capture jobs from becoming
+    `no_trace` under eviction pressure, which changes whether a
+    recording appears on the trace and which outcome event is emitted.
+    Add a `### Fixed` fragment.
+
+12. **P3: the stated M5 retention answer is factually too short.** M1
+    is to record that assembled requests exist "for the session, and
+    then nowhere", but the close hook moves staged requests into a
+    worker job, so the content outlives the session in process memory,
+    possibly past the bounded shutdown wait. Say so, and say that a
+    crash loses queued exports with no recoverable ledger, unlike
+    capture staging and transcript source rows.
