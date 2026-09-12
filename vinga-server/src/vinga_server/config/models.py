@@ -804,20 +804,26 @@ class TelemetryConfig(BaseModel):
     the no-leak rules already hold: timings, closed reasons and
     server-minted identifiers, never transcripts and never audio.
 
-    Two fields since #67, and the second is a different kind of switch
-    from every other one in this file. `enabled` above sends metadata;
-    `export_audio` sends a recording of a room. It is its own
-    decision for that reason and defaults off.
+    Three fields since #495, and this section is a DISCLOSURE LADDER
+    rather than a list of switches. `enabled` is the master switch and a
+    prerequisite rather than a peer: metadata leaves, which is why it is
+    not spelled `export_metadata`. The two below it are content
+    escalations, and each means the same thing in its own class: if this
+    content exists locally, it leaves. `export_audio` sends a recording
+    of a room, `export_transcripts` sends what was said. Each is its own
+    decision, each defaults off, and neither is implied by anything
+    above it.
 
-    The rule that refuses it with `enabled` off is deliberately NOT a
-    validator, here or on `ServerConfig`, and the reason is the
-    attachment's boot ordering. It has to see `server.capture`, because
-    the flag on with capture off is a no-op rather than a
-    misconfiguration; and it has to fire AFTER the staging sweep, because
-    staged room audio waiting to leave is exactly what a refusing
-    configuration leaves behind and a validator raises while the file is
-    still being parsed. So it is `build_capture_upload`'s, beside the
-    two refusals that were always the builder's.
+    The rules that refuse them with `enabled` off are deliberately NOT
+    validators, here or on `ServerConfig`, and the reason is boot
+    ordering. The audio one has to see `server.capture`, because the
+    flag on with capture off is a no-op rather than a misconfiguration,
+    and it has to fire AFTER the staging sweep, because staged room
+    audio waiting to leave is exactly what a refusing configuration
+    leaves behind and a validator raises while the file is still being
+    parsed. The transcript one answers to `server.conversations` for the
+    same no-op reason. So each is its builder's, beside the refusals
+    that were always the builder's.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -871,6 +877,41 @@ class TelemetryConfig(BaseModel):
             "`upload-staging/` under the capture directory, which the capture "
             "budget does not see: it is bounded by the queue depth and swept at "
             "the next startup."
+        ),
+    )
+
+    export_transcripts: bool = Field(
+        default=False,
+        description=(
+            "Whether a closed session's turns are exported to the telemetry "
+            "backend and written onto the trace that session was exported under, "
+            "one observation per turn carrying what was heard and what was "
+            "replied. Off by default, and it is its own decision: **telemetry "
+            "being on and conversation text being stored do not imply that the "
+            "text leaves.** What goes is conversation-level text only, the user's "
+            "transcript and the reply, with per-agent attribution where a handover "
+            "split the reply; the assembled model request, the tool arguments and "
+            "results, and the per-request audio never go. "
+            "**Exported text outlives erasure on this side.** Deleting a session "
+            "with `vinga session delete`, deleting its conversation, or letting "
+            "retention prune it removes it from this deployment's store and "
+            "reaches nothing that was already exported. Retention is then the "
+            "backend's, not this server's: how long the text is kept, who may "
+            "read it and how it is deleted are that deployment's policy, "
+            "configured there, and a backend with no policy configured retains "
+            "indefinitely. "
+            "It needs `enabled` above, since an observation is written onto a "
+            "trace, and it is refused at boot without it. With "
+            "`server.conversations` absent, off, or storing no text it is a no-op "
+            "rather than a misconfiguration: there is nothing recorded to export, "
+            "and the server says so once at startup. Capture is irrelevant to it "
+            "either way. Under `local_only` it is refused. "
+            "It needs no extra and no second credential: the turns travel as OTLP "
+            "spans over the same `OTEL_EXPORTER_OTLP_*` transport the traces "
+            "already use. The export runs on a worker of its own after the "
+            "session closed, never on the audio path, and every failure is a "
+            "warning event (`transcript_export_failed`) rather than a failed "
+            "session."
         ),
     )
 

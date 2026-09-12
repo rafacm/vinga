@@ -172,6 +172,16 @@ server:
   #   # pointed elsewhere both halves succeed and the recording is where
   #   # nobody looks. Needs `server.capture` on to do anything.
   #   export_audio: false
+  #   # Exporting what was said, one observation per turn on the
+  #   # session's trace, which SENDS CONVERSATION TEXT OFF THIS HOST and
+  #   # is its own decision: telemetry on and `conversations.text` on do
+  #   # not imply it. Exported text outlives erasure here: deleting a
+  #   # session or a conversation reaches nothing already exported, and
+  #   # retention is then the backend's, which retains indefinitely
+  #   # unless configured. It rides the OTEL_EXPORTER_OTLP_* transport
+  #   # above, so it needs no extra and no second credential. Needs
+  #   # `server.conversations` recording text to do anything.
+  #   export_transcripts: false
 
   # How long a shutdown waits for conversations in flight to finish
   # speaking. Set the orchestrator's grace period between SIGTERM and

@@ -414,6 +414,36 @@ server:
   #   # where the capture budget cannot see it; the queue depth bounds
   #   # it and the next startup sweeps what was left behind.
   #   export_audio: false
+  #   # EXPORTS WHAT WAS SAID to the telemetry backend, one observation
+  #   # per turn on the trace the session was exported under, carrying
+  #   # what was heard and what was replied. Off by default and its own
+  #   # decision: telemetry being on and `conversations.text` being on
+  #   # do not imply that the text leaves.
+  #   #
+  #   # Conversation-level text only. The user's transcript, the reply,
+  #   # and per-agent attribution where a handover split it; the
+  #   # assembled model request, the tool arguments and results, and the
+  #   # per-request audio never go.
+  #   #
+  #   # EXPORTED TEXT OUTLIVES ERASURE HERE. Deleting a session or a
+  #   # conversation, or letting retention prune it, removes it from
+  #   # this deployment's store and reaches nothing already exported.
+  #   # Retention is then the backend's: how long the text is kept, who
+  #   # may read it and how it is deleted are that deployment's policy,
+  #   # and a backend with no policy configured retains indefinitely.
+  #   #
+  #   # With `conversations` absent, off, or storing no text this is a
+  #   # no-op rather than a misconfiguration, said once at startup.
+  #   # `capture` is irrelevant to it either way. With `enabled` above
+  #   # off it is refused at boot, since an observation is written onto
+  #   # a trace, and under `local_only` it is refused too.
+  #   #
+  #   # It needs no extra and no second credential: the turns travel as
+  #   # OTLP spans over the same OTEL_EXPORTER_OTLP_* transport the
+  #   # traces already use. The export runs on a worker of its own after
+  #   # the session closed, never on the audio path, and a failure is a
+  #   # warning rather than a failed session.
+  #   export_transcripts: false
 
   # Whether speech that arrives while a reply is playing interrupts it.
   # On by default: a device only keeps streaming its microphone through
