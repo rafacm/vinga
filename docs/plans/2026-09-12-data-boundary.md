@@ -284,11 +284,12 @@ enumerated: `config/api_descriptions/reload-refused.md`,
 `config/boot.py`, `config/api.py`, `tools/mcp/registry.py`,
 `capture.py`, `tests/integration/test_cli_wheel.py` and the shared
 provider/MCP test helpers. The final grep is run against an
-EXPLICIT allowlist recorded in the implementation doc: `egress`
-and `local_only` may remain only in `docs/plans/`,
-`docs/features/`, `CHANGELOG.md` and the word "regression"; any
-other hit is a missed site, and the allowlisted remainder is
-listed by file. Historical records keep their spellings. The
+EXPLICIT allowlist recorded in the implementation doc, with
+word-boundary token matching so "regression" never matches at
+all: the `egress` and `local_only` tokens may remain only in
+`docs/plans/`, `docs/features/` and `CHANGELOG.md`; any other hit
+is a missed site, and the allowlisted remainder is listed by file
+and line. Historical records keep their spellings. The
 `cli-respelling.txt` fixture regenerates through its own harness.
 
 ## Module layout
