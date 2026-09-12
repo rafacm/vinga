@@ -292,16 +292,72 @@ rather than departures from its intent.
       pass. The full lane is re-run by CI on the pull request rather
       than a second time here, and that run is the one the PR's box is
       checked against.
-- [ ] The M2 live gate. Deliberately not run here: it is the plan's
-      rig against the Langfuse project this repository develops
-      against, and it belongs to the person holding those credentials.
-      What it asks is recorded in the plan: whether a turn trace
-      carries `vinga.device.name`, whether the tool call arrives as an
-      observation and under which type, whether the flattened prompt
-      sources arrive as metadata on every turn of an agent, and
-      whether the after-close spans carry the `vinga.` names. Whether
-      the backend needs `langfuse.observation.type` beside
-      `gen_ai.operation.name` is the gate's question and is not
-      guessed at here.
+- [x] The M2 live gate, run and recorded in the section below.
 - [ ] Anything on a board. No protocol, no firmware-visible behavior
       and no device path moves in this milestone.
+
+### The live gate
+
+Run 2026-09-12 against the Langfuse project this repository develops
+against, on revision `9883315f`. One real conversation on real
+providers: `openai` ASR (`whisper-1`), `openai_compatible` LLM
+(`gpt-4o-mini` on api.openai.com), `openai` TTS (`tts-1`), Silero, and
+the lane's own stdio MCP server, driven through the xiaozhi-sdk
+simulator with the question spoken by a real voice. The conversation
+held: the ear heard "Ask the tool for the secret word, then tell me
+what it is.", the model called the MCP tool, and the voice said "The
+secret word is 'rhubarb.'" Session `03552ae435e54191ab768fc90452d8f4`.
+
+The rig deviates from the plan's in one way, recorded because it is a
+trap rather than a choice: the lane synthesizes its spoken question
+with Piper, and the `piper-tts` wheel in this environment carries an
+espeak-ng data path from the machine that built it and cannot
+synthesize at all. The question was spoken by the vendor's own voice
+instead. What the gate needs is real audio of real speech, so which
+voice says it is incidental.
+
+**The tool call arrives as a TOOL observation, from the conventions'
+attribute alone.** This was the gate's open question and the answer is
+the plan's first choice: no `langfuse.observation.type` is needed and
+none is added.
+
+```json
+{"id": "62d5d8f1c05f4ba5", "name": "tool", "type": "TOOL",
+ "metadata": {"attributes.gen_ai.operation.name": "execute_tool",
+              "attributes.vinga.tool.entry": "secrets",
+              "attributes.vinga.tool.source": "mcp",
+              "attributes.vinga.tool.is_error": false,
+              "attributes.vinga.agent": "assistant"}}
+```
+
+The naming policy survives the trip: an MCP call names the entry an
+operator configured (`secrets`) and never the far side's tool name.
+
+**The flattened prompt sources arrive as metadata on the turn span**,
+one numeric field per provenance token, with the total beside them:
+`"attributes.vinga.prompt.sources.persona": 203` and
+`"attributes.vinga.prompt.characters": 203`. Numbers rather than a
+quoted blob, which is what the flattening was for.
+
+**The after-close span carries the `vinga.export.` names**:
+`"attributes.vinga.export.turns": 1` and
+`"attributes.vinga.export.elapsed_ms": 344` on `transcripts_exported`.
+
+**An unnamed board contributes no attribute rather than a null.** The
+turn span carries `attributes.vinga.device.id` and no
+`vinga.device.name` at all. Only the ABSENCE half is gated live, and
+the reason is worth recording: this lane serves from a `Config` object
+while the device record lives in the domain database, which has no
+agents in it here, so `claim_device` refuses and no board in this lane
+can have a name. The presence half stays pinned by the unit lane
+against a `session_open` payload that carries one.
+
+**One thing the gate saw that is not this milestone's**, recorded
+because it is [#506](https://github.com/rafacm/vinga/issues/506)
+confirmed from the outside: the turn's trace holds `turn`, `asr`, two
+`llm` generations, the new `tool` and `tts_stream` and `playback`,
+while `transcript` and `transcripts_exported` hang off the SESSION
+span on a different trace. A reader of the turn trace gets the timings
+and not a word of what was said, which is exactly what that issue
+reports, and what M4a plus #506 are sequenced to fix.
+
