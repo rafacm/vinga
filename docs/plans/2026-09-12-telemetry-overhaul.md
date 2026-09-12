@@ -837,7 +837,10 @@ is straight-line logic one run is the honest proof and more is noise.
   `vinga-server/README.md` carrying the pricing procedure and its
   table. Fragment `changelog.d/502-usage-accounting.md` (### Added).
 - **M4a**: none beyond the implementation doc; the mechanism is
-  internal. No fragment: nothing observable changes.
+  internal. Fragment `changelog.d/502-capture-pin.md` (### Fixed): what
+  changes for an operator is that an admitted capture job stops
+  reporting `no_trace` under eviction pressure, which is whether a
+  recording appears on its trace.
 - **M4b**: `docs/reference/server-config.md` through its generator,
   both example configs, the observability map's retention-and-access
   columns for the three exporting surfaces, and
@@ -1152,6 +1155,11 @@ Findings condensed but faithful; resolutions appended per amendment.
     `no_trace` under eviction pressure, which changes whether a
     recording appears on the trace and which outcome event is emitted.
     Add a `### Fixed` fragment.
+
+    *Resolution.* Adopted. The milestone was described as internal
+    because its mechanism is, but what it fixes is whether an
+    operator's recording appears on its trace, which is as observable
+    as this surface gets. A `### Fixed` fragment lands with it.
 
 12. **P3: the stated M5 retention answer is factually too short.** M1
     is to record that assembled requests exist "for the session, and
