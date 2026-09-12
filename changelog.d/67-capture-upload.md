@@ -18,7 +18,10 @@
   bounds it, and the next startup sweeps and reports whatever a
   previous run left behind. Retention is then the receiving
   deployment's, which is the seventh surface on the observability map
-  and an amendment to the content-and-telemetry ADR.
+  and an amendment to the content-and-telemetry ADR. Once both files
+  are up, a reference to each is written back onto the session's trace,
+  which is what makes the recording playable where the trace is read
+  rather than merely stored beside it.
 - **Two events say whether a recording reached its trace**, so a
   capture that silently failed to attach cannot leave a reader with a
   trace, no audio and no way to learn any was meant to be there.
