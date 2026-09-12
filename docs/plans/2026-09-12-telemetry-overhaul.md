@@ -1,0 +1,566 @@
+# Telemetry overhaul: a three-class export ladder, complete and priceable traces
+
+Plan for [issue #502](https://github.com/rafacm/vinga/issues/502).
+Companion implementation doc:
+`2026-09-12-telemetry-overhaul-implementation.md`, one section per
+milestone, appended in the same change that ticks the milestone
+checklist.
+
+## Goal
+
+After #66, #67 and #495 a trace backend shows a vinga session as
+grouped per-turn traces with stage timings and token counts, the
+session's recording under one flag and its turns under another. The
+2026-09-12 live trace review against Langfuse project `vinga-cloudlab`
+(every finding verified against traces from revision `9251c18`) found
+three gaps and one naming decision waiting to be taken:
+
+- **The configuration story was about to fork.** #496 and #501 each
+  proposed an `attach_`-prefixed flag of its own, which would have
+  given one disclosure ladder two prefixes and four switches for two
+  content classes.
+- **The traces are incomplete in ways the domain vocabulary already
+  answers.** A board's name never reaches a span, MCP tool calls are
+  invisible because the backend ingests no span events, the prompt's
+  provenance by block never leaves the log, and the after-close spans
+  carry three attributes under bare names that belong to nothing.
+- **Two of the three stages cannot be priced.** Only `llm` carries
+  usage the backend can cost, so the per-session cost of a
+  conversation is the generation half of it and nothing else (about
+  1.40 over the review's thirty-day window, with ASR and TTS reading
+  zero because they report no usage at all rather than because they
+  are free).
+- **The third content class had no name and no home.** "What the model
+  actually saw" was the ladder's unspecced wire-fidelity tier, and
+  both #496's audio clips and a future prompt export were being
+  designed against it separately.
+
+This plan settles the ladder as policy (M1), completes the trace
+metadata (M2), makes all three stages priceable (M3), builds the
+post-close infrastructure two later issues both need (M4), and lands
+the third content class (M5).
+
+Local baseline: not applicable. No conversational capability changes.
+M5 adds a content-export feature, lawful under rule 5 of
+[the enumerated-baseline record](../adr/2026-09-12-the-local-baseline-is-enumerated.md)
+exactly because it declares its destination, defaults off and refuses
+under a boundary narrower than its reach; M4b widens where "its reach"
+may point without touching what the boundary means. The enumerated
+list does not move.
+
+## The issue's decisions, restated
+
+These are settled on #502 and in the decisions appended to it on
+2026-09-12. They are restated so the milestones can be read against
+them, and they are not re-litigated here.
+
+- **Three content classes, one `export_` prefix.** `export_audio`
+  (all recordings), `export_transcripts` (dialogue text),
+  `export_llm_input` (the model's assembled request). The `attach_`
+  prefix proposed by #496 and #501 is decommissioned before it ever
+  shipped.
+- **Artifacts ride their class.** #496's per-utterance clips and
+  #501's per-turn reply audio are artifacts of `export_audio`, not
+  flags beside it. A version that adds an artifact to a class widens
+  what an already-on flag exports, and that is a changelog-announced
+  event stated in the flag's own documentation.
+- **The family rule is recorded once, in the ADR.** Every content flag
+  defaults off, requires `server.telemetry.enabled`, is refused under
+  a `server.data_boundary` narrower than its reach, and implies
+  nothing about its siblings. Each artifact issue then states only its
+  delta.
+- **`export_llm_input` is content-wise a superset of
+  `export_transcripts`**, because an assembled request contains the
+  dialogue as the model saw it. The ADR says so plainly; the family
+  rule that no flag implies another stays about the switches.
+- **M3 prices what is known and calculates nothing.** Spans carry raw
+  usage units; backend model definitions are entered only where a real
+  list price exists. A stage without a real rate shows usage and no
+  cost.
+- **M5 exports exactly what the model saw**, tool arguments and
+  results included. The #495 transcript exclusion of tool invocations
+  stands for transcripts; this class is the byte-faithful request,
+  which is its whole point.
+- **Fine-grained control is #393's policy layer**, deliberately not
+  deployment booleans.
+- **The sequence overrides the previously agreed queue** (#487 M1 then
+  #484): M1, M2, M3, then #500, then M4, then #496, then #501, then
+  M5. #500, #496 and #501 are their own issues with their own plans;
+  this plan owns the five milestones only, and says where each of the
+  three lands between them.
+
+## Premises checked before planning
+
+Three of the issue's own statements were checked against the merged
+code before any milestone was scoped. Two were exact; one was not, and
+the correction changes what M3 contains.
+
+**`heard.duration_s` exists. TTS characters do not.** The issue says
+M3's two facts are "both facts the catalog already measures:
+`characters` on the spoken events, `duration_s` on `heard`". The
+second is true (`catalog.py` `Heard.duration_s`, a `Real`). The first
+is not: the only `characters` fields in the catalog are on
+`prompt_assembled` and on the three `sentence_withheld` variants.
+`sentence_synthesized` carries `index`, `stream_ms`, `first_chunk_ms`
+and the provider quartet, and no size at all. So M3 is not purely an
+exporter change: it adds one declared `Count` field to
+`SentenceSynthesized` and passes the sentence's length at the emit
+site (`pipeline.py` `_speak_after` already holds the sentence;
+`_sentence_synthesized` does not receive it). The field is
+content-free by construction, being a count, and goes through the
+catalog's own declaration machinery like any other.
+
+**The after-close spans' bare names come from a shared helper.**
+`_after_the_close` builds its attributes with `_event_attributes`,
+which is also what every span EVENT uses, and which deliberately keeps
+the catalog's own field names. So the `vinga.` respelling M2 asks for
+cannot be a catalog change and cannot be a change to that helper
+without renaming every span event's attributes at the same time. It is
+a table of its own for the after-close path, in the shape of the
+tables that already exist (`SESSION_ATTRIBUTES` and its siblings).
+
+**`prompt_assembled` is emitted once per agent, not once per turn.**
+Its docstring says "assembled and cached", and it is emitted where the
+know-how half is built rather than per round. So an attribute written
+only onto the turn span that happens to be open when the event arrives
+would appear on one turn per agent per session and be absent from
+every later turn, which is not the token-provenance question anyone
+wants answered. M2 retains the sources per agent in the session's
+trace state and stamps them on every turn span that agent speaks,
+which is exactly the mechanism `_provider_context` already uses for
+the provider quartet.
+
+## Open questions, resolved
+
+### The wire-fidelity tier dissolves into the classes
+
+The ladder recorded on 2026-09-12 has three TIERS: metadata,
+conversation content, and wire fidelity ("the assembled prompt as a
+model received it and the per-request audio as a provider heard it,
+deliberately unspecced"). The ladder this issue settles has three
+CONTENT CLASSES. They are not the same three, and M1 has to say which
+survives.
+
+The tiers stay two, and wire fidelity stops being a tier. Metadata is
+the prerequisite; content leaves by class. What was the wire-fidelity
+tier turns out to be a fidelity property that cuts ACROSS the classes
+rather than a rung above them: the per-request audio a provider heard
+is an `export_audio` artifact (#496) and the assembled request is its
+own class (`export_llm_input`, M5). Keeping it as a third tier would
+mean #496's clips sat in two places on the same ladder, which is the
+"two structures that must agree" trap with a policy record playing one
+of the parts.
+
+What the amendment keeps from that tier is its caution, restated as
+the class-difference note: a higher-fidelity class may contain what a
+lower one contains, and `export_llm_input` does contain the dialogue.
+
+### The third class's local surface is the session's own working state
+
+"Export follows retention: what the local surface holds is what may
+leave, never more" is the ladder's second clause, and `export_audio`
+and `export_transcripts` each answer it by naming a local store (the
+capture directory, the conversation store). `export_llm_input` has no
+store behind it and this plan does not build one: the conversation
+record holds turns, not assembled requests, and a schema that held
+every request a session made would be a retention decision nobody has
+taken.
+
+The answer is that the session's own working state is the local
+surface. A session assembles the request because it is about to make
+it; that assembly exists locally for as long as the session does, it
+is exported once at the close, and nothing retains it afterwards. So
+the clause holds in its own terms (what leaves is what was held) and
+the retention question is answered by "for the session, and then
+nowhere", which is stricter than either class above it. M1 records
+this, because M1 gates M5 and a class whose retention answer is
+invented in its implementation milestone is the thing the ADR exists
+to prevent.
+
+### A TOOL span replaces the `tool_call` span event, it does not join it
+
+#67's first walkthrough established that Langfuse ingests no span
+events at all, which is why `_after_the_close` chose a span. The same
+finding is what makes MCP calls invisible today. M2 folds `tool_call`
+into a child span of the turn span, built retrospectively from
+`duration_ms` the way every stage span is built (`_before`).
+
+The span event goes away for this event rather than staying beside the
+span. Two carriers of one fact on one trace is the locality rule
+broken in the one module that has been most careful about it, a
+backend that DOES ingest span events would show each call twice, and
+the span carries strictly more (it has an extent). The three variants
+stay one fold: `tool_call` is one declared event name, and
+`_attributes` already skips a table key the payload does not carry, so
+one table serves `tool` (builtin), `entry` (MCP) and neither
+(unnamed).
+
+Whether the backend renders it as a TOOL observation rather than a
+plain span is a question about the backend, not about vinga, and it is
+answered by the M2 live gate rather than guessed here. The plan's
+position is to spell the fact in the conventions' own vocabulary
+first: `gen_ai.operation.name` = `execute_tool` is the GenAI
+conventions' name for exactly this, so it goes on the span and the
+gate records what the backend does with it. If the gate shows the
+backend needs its own directive, `langfuse.observation.type` is added
+beside it and the implementation doc records the finding, in the shape
+of the `session.id` alias: one fact, a second spelling for one reader,
+recorded as such.
+
+### `prompt_assembled.sources` lands flattened, not as a blob
+
+`PromptSources` is a mapping of provenance token to character count,
+and span attributes take primitives or homogeneous primitive arrays
+and never mappings. Both existing answers to that are in the module:
+`_provider_attributes` flattens into one attribute per fact, and
+`TRANSCRIPT_LEGS` encodes canonical JSON into one string.
+
+Flattening wins here for the reason the provider context gives in its
+own comment: a JSON blob is present and unqueryable, which is the same
+as absent for the question the attribute exists to answer. The
+question here is "how much of this prompt came from where", which is a
+number per block that a reader charts. The key space is bounded by the
+operator's own configuration rather than by anything a far side sends
+(the five declared provenance forms, with configured names inside
+three of them), so the attribute-key cardinality is bounded by the
+same thing that bounds the provider keys.
+
+The spelling is `vinga.prompt.sources.<token>` with the token's `:`
+separators written as `.`, so `instructions:house` becomes
+`vinga.prompt.sources.instructions.house`. `prompt_assembled.characters`
+goes on beside them as `vinga.prompt.characters`: it is the total the
+blocks sum to, it is one line, and without it the parts have no
+denominator. That is one attribute past the issue's letter and it is
+named here so the review can reject it.
+
+### The usage attributes are `gen_ai.usage.*` with vinga's own units
+
+The GenAI conventions name token counts and nothing else, so there is
+no convention-blessed spelling for "characters synthesized" or
+"seconds of audio transcribed". Calling either one tokens would be
+false in the way this module refuses to be false elsewhere
+(`stream_ms` is not named synthesis latency because it is not).
+
+M3 writes `gen_ai.usage.output_characters` on the TTS span and
+`gen_ai.usage.input_seconds` on the ASR span: the conventions'
+namespace and direction words, with the unit stated in the name rather
+than implied. The input/output halves are read the way the conventions
+read them, from the model's point of view: a voice is given text and
+produces audio, so its billable text is output; an ear is given audio,
+so its audio is input.
+
+Whether the backend lifts an unrecognized `gen_ai.usage.*` key into
+its own usage details is a fact about the backend and is the M3 live
+gate's first question. The #67 walkthrough recorded that
+`gen_ai.usage.input_tokens` and `output_tokens` arrive parsed into
+`usageDetails`; nothing recorded says what happens to a key outside
+that pair. If they are dropped, the fallback is the backend's own
+`langfuse.observation.usage_details` attribute carrying canonical JSON,
+which is the same shape of second spelling for one reader that
+`session.id` already is, added beside the conventions' name and never
+instead of it. The gate decides, and the implementation doc records
+the answer with the observation JSON that shows it.
+
+### "A real list price" admits a unit conversion and nothing else
+
+The decision says model definitions are entered only where a real list
+price exists, and never an estimated or plan-dependent rate. Two
+boundary cases come up immediately and are decided here:
+
+- **A published per-minute price entered as a per-second price is
+  admissible.** It is the same number in the unit the span reports,
+  exact and reversible, with the published figure quoted beside it in
+  the implementation doc. Nothing is estimated: 0.006 per minute is
+  0.0001 per second.
+- **A model billed in units vinga does not observe gets no price.**
+  A speech model priced per audio token, when what the span carries is
+  seconds, would need a tokens-per-second assumption, which is exactly
+  the estimate the decision refuses. That stage shows usage and no
+  cost, and the implementation doc says which models are in that
+  position and why.
+
+Credit-based and plan-dependent vendors (ElevenLabs' credits) get no
+price for the same reason. Local engines (Piper, faster-whisper) get
+none because there is no list price to enter, which is a true answer
+rather than a gap.
+
+### M4 ships as two pull requests
+
+The issue's M4 is three things: bounded turn-trace-id retention, the
+capture-job context pinning named as a follow-up in #495's plan, and
+the operator reach assertion named as a follow-up in #493's
+implementation doc. The first two are one mechanism and its second
+caller, content-free and internal. The third is a new declaration
+surface with its own territory: where the key lives, whether it is one
+key or three, and what an assertion means when the trace transport and
+the media transport point at different deployments. #493's own
+implementation doc says so in those words.
+
+So M4 delivers as M4a (retention and pinning) and M4b (the reach
+assertion), each its own branch, PR and review round, and the issue's
+M4 box is ticked when both have merged. Mixing them would put a boot
+refusal's semantics in the same diff as a retention bound, which is
+the "behavior changes sit alone in review" rule broken for the
+convenience of a checklist.
+
+### The staged LLM input is bounded per session, oldest dropped first
+
+A session's rounds are not bounded by anything the server controls
+(a long conversation with a talkative tool loop makes many), and each
+staged request is the whole assembled prompt, so an unbounded stage is
+a slow leak in the object a session holds for its life. The bound is a
+round cap per session with the oldest dropped first, which is the
+posture `PENDING_CAPTURES` and `RETAINED_TRACES` already take here and
+for the same reason. The export's own event carries how many rounds
+went and how many were dropped, so a reader with a truncated export
+learns that it is truncated from the trace rather than by counting.
+
+Per-turn delivery (export each round as its turn ends, bounding the
+stage to one turn) was considered and is rejected: the issue settles
+delivery as post-close on the #495 bounded seam, and a per-turn
+delivery would put an export on the audio path's own worker cadence,
+which is the thing every content escalation here has been careful to
+stay off.
+
+### The M5 module is its own, and the seam is one more bounded call
+
+`transcript_export.py` reads the conversation store post hoc. The LLM
+input has no store to read, so M5's module owns a live stage as well
+as a post-close delivery, which is a different responsibility on a
+different clock. It is `llm_input_export.py` beside it rather than a
+second half of the transcript exporter.
+
+Its depth sentence: a caller that holds one of these stops having to
+know that an assembled request is bounded, that it is held per session
+and dropped at the close whatever happened, that content never reaches
+the emit fold, and how a bounded OTLP delivery reports its own
+failure; it hands over what it is about to send a model, and asks
+nothing else.
+
+The `Telemetry` seam gains one method, `export_llm_input`, in the
+shape `export_transcript` already has: a private tracer, spans
+collected in memory, one bounded delivery call, a `Delivery` answer.
+The seam type is a new frozen dataclass (`LlmInputRound`) alongside
+`TranscriptTurn`, for the same reason that one exists: what crosses is
+a stated type, not a store row and not a provider object.
+
+## Module layout and design footprint
+
+| Milestone | Deepens | Adds | What a caller stops having to know |
+| --- | --- | --- | --- |
+| M1 | the content-and-telemetry record, the observability map | nothing | (documentation) |
+| M2 | `telemetry.py` (four tables, one fold, one retained fact) | nothing | that a tool call, a board's name and a prompt's provenance reach a trace at all |
+| M3 | `events/catalog.py`, `events/assembly.py`, `runtime/pipeline.py`, `telemetry.py` | nothing | that a voice and an ear report usage the way a generator does |
+| M4a | `telemetry.py` (retention generalized), `capture_upload.py` | nothing | that a post-close job's trace context can age out under it |
+| M4b | `config/models.py`, `boundary.py`'s callers | nothing | that a collector on the LAN is reachable without declaring the internet |
+| M5 | `telemetry.py` (one method, one seam type), composition | `llm_input_export.py` | the sentence in "The M5 module is its own" above |
+
+No milestone adds a layer that forwards its arguments, and no
+milestone's only description of itself is "beside an existing module".
+M2, M3 and M4a are deepenings by construction: they add facts and a
+fold to the module that already owns the fold, and the alternative
+(a second exporter that knows the same vocabulary) is the parallel
+vocabulary #66 was explicitly built to avoid.
+
+## The live gates
+
+Every milestone that changes what a trace carries is verified against
+a real backend before its PR is opened, not only against unit
+assertions about attribute dictionaries. The rig is the same each
+time and is recorded once here:
+
+- A server run locally from the milestone's worktree against the
+  development Postgres, on a configuration with real providers
+  (`openai` ASR, `openai_llm`, `openai_tts`) and
+  `server.telemetry.enabled` plus whichever export flags the gate
+  needs, with `OTEL_EXPORTER_OTLP_*` pointed at the Langfuse project
+  `vinga-cloudlab` (EU cloud) and `LANGFUSE_*` in the environment.
+  Credentials come from the shell environment and never from a
+  configuration file, which is what the telemetry surface's own rules
+  already require.
+- One conversation held through the xiaozhi-sdk device simulator, the
+  same simulator the integration and smoke lanes drive.
+- The resulting observations read back through the Langfuse MCP
+  (`listObservations`, `getObservation`, `queryMetrics`), and the
+  answers quoted into the implementation doc as JSON rather than
+  paraphrased.
+
+Per milestone the gate asks:
+
+- **M2**: does a turn trace carry `vinga.device.name`; does a tool
+  call appear as an observation at all, and under which type; do the
+  flattened prompt sources arrive as metadata on every turn of an
+  agent; do the after-close spans carry the `vinga.`-prefixed names.
+- **M3**: does an unrecognized `gen_ai.usage.*` key reach
+  `usageDetails`; do the ASR and TTS observations arrive as
+  `GENERATION`; does a model definition entered through `createModel`
+  price them; and the issue's stated acceptance, that the per-session
+  per-stage cost query returns nonzero rows for `asr`, `llm` and
+  `tts_stream`.
+- **M4a**: nothing to see in a backend beyond a capture still
+  attaching; the gate is the unit and integration pressure cases, and
+  the live run is a regression check that #67's attachment still
+  works.
+- **M4b**: a server bounded at `network` with an asserted LAN reach
+  boots and exports; the same server without the assertion still
+  refuses. Run against a local collector rather than the cloud, since
+  that is the case the key exists for.
+- **M5**: does an assembled request arrive rendered as an
+  observation's input, with tool arguments and results present, on the
+  trace the session was exported under.
+
+Unverifiable steps are stated as unverified. A gate that cannot run
+(no collector, a backend outage) leaves its PR box unchecked with the
+reason, and does not become a claim.
+
+## Tests
+
+Existing assets are reused rather than restated: the telemetry unit
+suite's fake tracer and emission drivers, the events package's
+catalog-drift and rendering pins, the capture-upload and
+transcript-export suites' worker and drain harnesses, the integration
+lane's simulator conversations, and the sentinel pattern for planted
+credential-shaped values.
+
+What is new per milestone:
+
+- **M2**: one case per new attribute asserting the exact name and
+  value on the exact span; a case that a second turn by the same agent
+  still carries the retained prompt sources; a case that a `tool_call`
+  produces a span and NO span event; a case that an unnamed call
+  carries neither `tool` nor `entry`; a case pinning the after-close
+  attribute names, written to fail against the bare names.
+- **M3**: a catalog-drift case for the new `characters` field and its
+  rendering; an emit-site case that the character count is the
+  sentence's own length; usage attribute cases on both spans; a case
+  that an absent measurement contributes no attribute rather than a
+  zero.
+- **M4a**: the eviction-pressure cases the #495 plan already
+  established, extended to a capture job: a job admitted before
+  sixty-four later sessions open still attaches, which fails against
+  today's code.
+- **M4b**: refusal and admission cases per section, including the
+  asymmetric case (trace transport asserted, media transport not).
+- **M5**: the sentinel suite over the staged content (a planted
+  credential-shaped value in a tool result must reach the export and
+  must NOT reach any log, event or span outside it, which is the
+  inverse assertion from the usual one and is stated as such); the
+  bound's drop accounting; the drain and shutdown cases in the shape
+  `transcript_export.py`'s already take; a case that the flag off
+  stages nothing at all rather than staging and discarding.
+
+Every new claim is written to fail first and watched failing, and the
+commit body says the check was done. Where a proof is about ordering
+under concurrency it is run repeatedly and the count stated; where it
+is straight-line logic one run is the honest proof and more is noise.
+
+## Risks
+
+- **The backend's usage mapping may not admit vinga's units** (M3).
+  Mitigated by the gate asking before the exporter is built around the
+  answer, and by the recorded fallback.
+- **A tool span's retrospective construction can misplace a call in
+  time** if `duration_ms` and the emission's stamp disagree. Mitigated
+  by using the same `_before` helper every stage span already uses, so
+  the failure mode is the known one rather than a new one.
+- **M5 holds content in memory for a session's life.** Mitigated by
+  the bound, by the flag defaulting off (nothing is staged when it is
+  off), and by the sentinel suite pinning that the content reaches
+  exactly one surface.
+- **M4b's key is a new declaration surface** and could grow into a
+  second boundary system. Mitigated by keeping it an assertion that
+  narrows `check_feature`'s existing argument rather than a new rule,
+  and by the plan review being asked about it specifically.
+- **The sequence interleaves three other issues.** Mitigated by
+  keeping each milestone's branch stacked on the previous milestone's
+  rather than on an interleaved issue's, and by rebasing onto `main`
+  after each merge.
+
+## Documentation footprint
+
+- **M1**: `docs/adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md`
+  (a fourth amendment), `docs/architecture/observability-surfaces.md`
+  (the export-ladder section: the tier table becomes two tiers and a
+  class table, and the class-widening rule lands beside it). No
+  changelog fragment: nothing an operator can observe changes.
+- **M2**: `docs/reference/events.md` only if the catalog moves (it
+  does not in M2); the observability map's exported-traces row gains
+  the tool span in its description of what the surface holds.
+  Fragment `changelog.d/502-trace-completeness.md` (### Added).
+- **M3**: `docs/reference/events.md` through its generator (the new
+  field), the observability map's row, and the implementation doc's
+  price table. Fragment `changelog.d/502-usage-accounting.md`
+  (### Added).
+- **M4a**: none beyond the implementation doc; the mechanism is
+  internal. No fragment: nothing observable changes.
+- **M4b**: `docs/reference/server-config.md` through its generator,
+  both example configs, the observability map's retention-and-access
+  columns for the three exporting surfaces, and
+  `vinga-server/README.md` where the boundary's refusals are
+  described. Fragment `changelog.d/502-collector-reach.md`
+  (### Added).
+- **M5**: `docs/reference/server-config.md` through its generator,
+  both example configs, the observability map (a ninth surface row and
+  the class table), the ADR's class note cited rather than restated.
+  Fragment `changelog.d/502-export-llm-input.md` (### Added).
+
+Every milestone that edits, moves or adds a document runs
+`tests/unit/test_command_spellings.py` before its PR and regenerates
+the manifest with its own generator when stale.
+
+## Milestones
+
+- [ ] **M1: the ADR amendment**. The fourth amendment to the
+  content-and-telemetry record: three content classes under one
+  `export_` prefix, the family rule stated once, artifacts riding
+  their class, class widening as a changelog-announced event, the
+  superset note about `export_llm_input`, the third class's local
+  surface and its retention answer, and the wire-fidelity tier
+  dissolved with its caution kept. The observability map's
+  export-ladder section rewritten to match, since that is where this
+  record keeps its tables. Documentation only. Design footprint: no
+  module moves. Documentation footprint as listed above.
+- [ ] **M2: trace completeness**. `vinga.device.name` on every span
+  from the retained session context; a `tool_call` fold building a
+  child span of the turn span with `gen_ai.operation.name`, replacing
+  the span event; prompt sources retained per agent and stamped
+  flattened on every turn span with the total beside them; an
+  after-close attribute table giving `elapsed_ms`, `audio_bytes` and
+  `manifest_bytes` their `vinga.` names. Live gate recorded. Design
+  footprint: four tables and one fold on the module that owns folds,
+  one retained fact beside the provider context.
+- [ ] **M3: cost accounting**. `characters` declared on
+  `SentenceSynthesized` and passed at the emit site;
+  `gen_ai.usage.output_characters` on the TTS span and
+  `gen_ai.usage.input_seconds` on the ASR span; Langfuse model
+  definitions entered through the MCP for every model with a real list
+  price, with the prices and their sources quoted in the
+  implementation doc and the priceless ones named. Acceptance: the
+  per-session per-stage cost query returns nonzero rows for `asr`,
+  `llm` and `tts_stream`. Design footprint: one declared field through
+  the catalog's own machinery, two table entries.
+- [ ] **M4a: post-close retention and pinning**. Turn-level trace
+  context retained beside the session-level one, bounded and derived
+  from the configured capacity the way #495 derived the session bound;
+  capture-upload jobs pinning their context at admission the way
+  transcript-export jobs do, closing the exposure #495's plan named
+  and declined. Design footprint: the retention generalized in place,
+  a second caller on an existing seam.
+- [ ] **M4b: the operator's collector reach**. The reach assertion
+  #493's implementation doc named: where the key lives, one key or
+  three, and `check_feature` taking the asserted reach instead of a
+  fixed `Reach.INTERNET` at its three call sites. Design footprint: an
+  argument at three existing call sites, no new rule.
+- [ ] **M5: `export_llm_input`**. The third class: the flag with its
+  prose and refusal order, `llm_input_export.py` staging the assembled
+  request per round under a stated bound, `Telemetry.export_llm_input`
+  and `LlmInputRound` on the #495 bounded seam, delivery post-close as
+  an observation rendered through `langfuse.observation.input`, two
+  outcome events with a closed reason set, the sentinel suite, and the
+  observability map's ninth surface. Design footprint: the new module
+  with its depth sentence, one method and one seam type on
+  `Telemetry`.
+
+The issue's own M4 box is ticked when M4a and M4b have both merged.
+#500 lands between M3 and M4a, #496 between M4b and M5, and #501
+between #496 and M5, each under its own plan.
