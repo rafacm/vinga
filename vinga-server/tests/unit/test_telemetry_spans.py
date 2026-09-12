@@ -27,7 +27,7 @@ with the catalog's own event names rather than with a second set of
 words.
 
 The fold's DEFAULT is not re-proved here (`test_telemetry.py` owns it);
-what is proved is that the thirteen names with a shape of their own do not
+what is proved is that the fourteen names with a shape of their own do not
 also fold, and that the events beside them still do.
 """
 

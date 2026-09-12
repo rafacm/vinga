@@ -362,11 +362,19 @@ def abandon_transcription(events: SessionEvents) -> float:
     )
 
 
-def assemble_prompt(events: SessionEvents, sources: dict[str, int]) -> float:
-    """One of the two events whose payload carries a mapping."""
+def assemble_prompt(
+    events: SessionEvents, sources: dict[str, int], agent: str = AGENT
+) -> float:
+    """One of the two events whose payload carries a mapping.
+
+    `agent` is whose know-how half was assembled, because the event is
+    emitted once per agent rather than once per turn: a case about what
+    a handover changes needs two of these and they are not the same
+    fact.
+    """
     return events.emit(
         lambda: PromptAssembled(
-            agent=Identifier(AGENT),
+            agent=Identifier(agent),
             conversation=ConversationId(CONVERSATION),
             characters=Count(sum(sources.values())),
             sources=PromptSources(dict(sources)),

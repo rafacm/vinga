@@ -41,6 +41,7 @@ from tests.support.telemetry import (
     AGENT,
     CONVERSATION,
     DEVICE,
+    OTHER_AGENT,
     SESSION,
     Clock,
     Deliveries,
@@ -82,6 +83,7 @@ from vinga_server.telemetry import (
     OTEL_NAMESPACE,
     OTLP_PROTOCOL_ENV,
     OTLP_TRACES_PROTOCOL_ENV,
+    PENDING_PROMPTS,
     SERVICE,
     SHAPES,
     SUPPORTED_PROTOCOL,
@@ -1285,6 +1287,179 @@ def test_a_board_nobody_named_says_nothing_rather_than_null() -> None:
     }
     for span in spans:
         assert "vinga.device.name" not in span.attributes, span.name
+
+
+# --- a prompt's provenance, on every turn the agent spoke --------------
+#
+# `prompt_assembled` is emitted once per AGENT and not once per turn:
+# the know-how half is assembled and cached, so an attribute written
+# only onto whichever turn span happened to be open when the event
+# arrived would appear on one turn per agent per session and be absent
+# from every later one. That is not the token-provenance question
+# anyone wants answered, so the sources are retained per agent the way
+# the provider entries already are and stamped on every turn that agent
+# speaks.
+#
+# And the ordering is worse than that, which is why the hold exists.
+# `PipelineRuntime.__init__` activates the first agent, and
+# `DeviceSession.run` builds the runtime before the hello exchange and
+# well before `session_open`, so the INITIAL agent's event has always
+# arrived before there was any trace to put it on: the ordinary case,
+# most sessions having exactly one agent.
+
+SOURCES = {"persona": 210, "instructions:house": 84}
+
+# The same mapping as the attribute names it lands under, which is the
+# whole of the flattening rule: one attribute per block, with the
+# provenance token's `:` separators written as `.` because an attribute
+# name is a dotted path and a token is not.
+FLATTENED = {
+    "vinga.prompt.sources.persona": 210,
+    "vinga.prompt.sources.instructions.house": 84,
+}
+
+
+def test_a_turn_carries_the_provenance_of_the_prompt_behind_it() -> None:
+    """Flattened, one attribute per block, with the total beside them.
+
+    A JSON blob would be present and unqueryable, which for "how much
+    of this prompt came from where" is the same as absent: the question
+    is a number per block that a reader charts. The key space is the
+    five declared provenance forms with configured names inside three
+    of them, which is the operator's own configuration and nothing a
+    far side sends.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+
+    open_session(events)
+    clock.tick(0.1)
+    assemble_prompt(events, SOURCES)
+    clock.tick(0.1)
+    start_turn(events)
+    clock.tick(1.0)
+    finish_reply(events)
+    close_session(events)
+
+    turn = named(finished(telemetry, memory), "turn")
+    for name, characters in FLATTENED.items():
+        assert turn.attributes[name] == characters, name
+    assert turn.attributes["vinga.prompt.characters"] == 294
+
+
+def test_the_second_turn_by_one_agent_carries_them_too() -> None:
+    """The claim the retention exists for. One event per agent means
+    the attribute has to outlive the turn it arrived in, or a session's
+    provenance is a fact about its first turn only."""
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+
+    open_session(events)
+    assemble_prompt(events, SOURCES)
+    for _ in range(2):
+        clock.tick(1.0)
+        start_turn(events)
+        clock.tick(1.0)
+        finish_reply(events)
+    close_session(events)
+
+    turns = [span for span in finished(telemetry, memory) if span.name == "turn"]
+    assert len(turns) == 2
+    for turn in turns:
+        assert turn.attributes["vinga.prompt.characters"] == 294
+        assert turn.attributes["vinga.prompt.sources.persona"] == 210
+
+
+def test_a_handover_switches_which_prompt_a_turn_is_stamped_from() -> None:
+    """Per agent, not per session: a device bound to two agents
+    assembles two prompts, and a turn says which one the agent speaking
+    it was given."""
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+
+    open_session(events)
+    assemble_prompt(events, SOURCES)
+    assemble_prompt(events, {"persona": 11}, agent=OTHER_AGENT)
+    clock.tick(1.0)
+    hand_over(events)
+    clock.tick(1.0)
+    start_turn(events)
+    clock.tick(1.0)
+    finish_reply(events)
+    close_session(events)
+
+    turn = named(finished(telemetry, memory), "turn")
+    assert turn.attributes["vinga.prompt.characters"] == 11
+    assert turn.attributes["vinga.prompt.sources.persona"] == 11
+    assert "vinga.prompt.sources.instructions.house" not in turn.attributes
+
+
+def test_a_prompt_assembled_before_the_session_opened_is_claimed_by_it() -> None:
+    """The production ordering, driven as production drives it.
+
+    The runtime is constructed before the hello exchange, so the first
+    agent's `prompt_assembled` reaches the exporter with no span map
+    entry for its session: it used to be dropped there, not even as the
+    span event it was supposed to be. Held instead, and claimed by the
+    open.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+
+    assemble_prompt(events, SOURCES)
+    clock.tick(0.1)
+    open_session(events)
+    clock.tick(0.1)
+    start_turn(events)
+    clock.tick(1.0)
+    finish_reply(events)
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    turn = named(spans, "turn")
+    assert turn.attributes["vinga.prompt.characters"] == 294
+    assert turn.attributes["vinga.prompt.sources.persona"] == 210
+    # And the event itself lands on the session span it was waiting
+    # for, which is the other half of what being dropped cost.
+    assert [event.name for event in named(spans, "session").events] == [
+        "prompt_assembled"
+    ]
+
+
+def test_the_hold_is_bounded_and_a_session_that_never_opens_leaves_nothing() -> None:
+    """Oldest evicted first, the posture the capture hold already
+    takes and for the same reason: a held event whose session never
+    opens is a session that was refused, and the hold is a buffer
+    rather than a record.
+
+    Driven past the bound and then read from both ends, because the
+    claim is about which one goes.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    waiting = [f"{index:032x}" for index in range(PENDING_PROMPTS + 1)]
+    for session in waiting:
+        assemble_prompt(session_events(clock, telemetry, session=session), SOURCES)
+
+    for session in (waiting[0], waiting[-1]):
+        events = session_events(clock, telemetry, session=session)
+        open_session(events)
+        clock.tick(1.0)
+        start_turn(events)
+        clock.tick(1.0)
+        finish_reply(events)
+        close_session(events)
+
+    turns = [span for span in finished(telemetry, memory) if span.name == "turn"]
+    evicted, kept = turns
+    assert evicted.attributes["vinga.session.id"] == waiting[0]
+    assert "vinga.prompt.characters" not in evicted.attributes
+    assert kept.attributes["vinga.session.id"] == waiting[-1]
+    assert kept.attributes["vinga.prompt.characters"] == 294
 
 
 # --- no leak -----------------------------------------------------------
