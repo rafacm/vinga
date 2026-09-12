@@ -1,6 +1,6 @@
 # Observability and conversation-data surfaces
 
-Where may this datum go? Six surfaces answer it, and this page is the
+Where may this datum go? Seven surfaces answer it, and this page is the
 map of them: what each carries, which need it serves, how long it is
 kept and who may read it, and what is true of it in the code today.
 [The 2026-08-15 ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)
@@ -10,7 +10,7 @@ changes when the design does.
 
 ## On this page
 
-- [The six surfaces](#the-six-surfaces): the table this page exists
+- [The seven surfaces](#the-seven-surfaces): the table this page exists
   for, one row per surface, with its current status.
 - [The invariants](#the-invariants): the four rules that decide where
   a new field goes, and that hold whatever the surfaces grow into.
@@ -21,7 +21,7 @@ changes when the design does.
   and the external practice the design was checked against, as they
   were written on the day the decision was taken.
 
-## The six surfaces
+## The seven surfaces
 
 The Serves column numbers the needs in
 [the appendix](#the-needs). The Carries column says what class of
@@ -36,6 +36,7 @@ in the row.
 | **Capture** (`vinga_server/capture.py`) | Raw audio plus the decision track, three files per session sharing one timeline | 1 (deep diagnosis) | Bounded per session and by a total budget for the directory, oldest captures pruned first | **Landed**, and off unless `server.capture.enabled` is true. The flag is the switch rather than the section, so a field round can stop recording without losing the directory and the budgets. It writes room audio to disk, which is the opposite of what the rest of the project promises, so a server that boots with it on says so once at startup, at WARNING (`capture_enabled`); a session that is being recorded then says which path it is writing to (`capture_started`) |
 | **Memory** (the `memory` schema) | Content as what an agent is told to keep, and the only surface here whose content is read back INTO a prompt. Three scopes: an agent's own facts about the person it talks to, a device's notes about the place and the household, shared by every agent bound to that board, and one conversation's ledger of what is currently true in it. Beside the active rows sits a held area: a fact an agent was asked to forget is kept until the conversation that forgot it ends, so the undo it exists for can reach it. Audio never enters it, and neither does a transcript: what lands is what a model chose to store through a tool | 2, 7 | **Facts until they are corrected**, capped per scope and pruned oldest-first at write, with no clock on them: an agent's memory is not telemetry and does not age out. **State and held facts until their thread ends**, which is the conversation record's own retention: a thread's erasure and its retention prune take both in the same transaction as its turns, and a boot sweep heals what no transaction covered. **The operator API is the deletion door**, scope-addressed under `/api/memory` with `vinga memory list`, `vinga memory set` and `vinga memory delete` in front of it: every listing shows orphaned owners, which is what a deleted agent and a deleted device record leave, a rename having moved an agent's rows with it and a board swap having moved a device's, and every deletion through it is a hard delete. No read-only SQL: `vinga_ro` is granted nothing on this schema, so the API is the surface | **Landed** (#314, scopes and editing #83). The schema is unconditional and is migrated at every boot, because an empty table is not a memory; whether a given agent reaches any of it is that agent's own `memory` section, on unless it says otherwise, and one switched off is offered no tool and injected no scope. Storage never leaves the deployment's own database; as prompt content it follows the active LLM provider's egress exactly as the transcript and the persona do, which is what `server.local_only` is the guard for, and a device note therefore reaches the provider of every sibling agent on that board that may remember |
 | **Exported traces** (`vinga_server/telemetry.py`, OTLP) | Metadata only, and not its own vocabulary: every span and every span event is derived from the structured-events row above, so this surface can hold nothing that row cannot. A session is one span, each turn a trace of its own linked to it, and inside a turn the stages that took the time: the transcription and how it ended, each generation round, each sentence's synthesis stream, and the paced playback interval. The three a provider ran carry the entry that ran them, under the OpenTelemetry GenAI attribute names for the facts those conventions have a name for. The fields are the ones in [`reference/events.md`](../reference/events.md), under attribute names this module chooses | 1, 5 | **The collector's backend owns retention, and vinga owns none of it.** This surface keeps nothing: spans are queued, batched and sent, and a full queue drops them rather than delaying a reply. How long a trace lives, who may read it and how it is deleted are the receiving backend's policy, configured there and not here. Where it goes and what credentials reach it are the standard `OTEL_EXPORTER_OTLP_*` variables, which are transport configuration and never become span content | **Landed** (#66), and off unless `server.telemetry.enabled` says otherwise. Absent by default, refused under `server.local_only` because sending to a collector is egress like any other, and refused with the extra to install when the packages are missing. It is an `EventTap` on the seam the events package already documents, which is what makes the derivation structural: no emit site moves for it, and it can say nothing `events/catalog.py` does not declare |
+| **Exported capture media** (`vinga_server/capture_upload.py`) | Content, and the only surface here that sends any off the host: one closed session's stereo WAV and its JSON manifest, attached to the trace that session was exported under. Exactly those two files. The decision track beside them is a third content-bearing artifact and stays local, and no transcript, no event payload and no identifier from the far side travels either way. What it carries is therefore the capture row above, minus the track, sent to where the exported-traces row already sends metadata | 1 (deep diagnosis, off-host) | **The backend owns retention, and vinga owns none of it.** This surface keeps nothing: a recording is hard-linked aside, uploaded, and the links removed. How long the recording then lives, who may play it and how it is deleted are the receiving deployment's policy, configured there and not here, and a deployment with no policy configured retains indefinitely, which is this project's own recorded caution about self-hosted Langfuse. Where it goes and what credentials reach it are `LANGFUSE_HOST`, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`, which the SDK reads and no vinga key holds. Erasure on this side is the operator's act on the backend; deleting a session under `/api` does not reach it | **Landed** (#67), and off unless `server.telemetry.attach_captures` says otherwise, which neither `server.capture` nor `server.telemetry.enabled` implies: room audio leaving the pod is its own decision. With capture off it is a no-op, under `server.local_only` it is refused, and without the `langfuse` extra the boot is refused. It runs on a worker of its own after a session closed, never on the audio path, and every failure is a warning event (`capture_uploaded`, `capture_upload_failed` with a reason from a closed set), because a recording that silently failed to attach would leave a reader with a trace, no audio and no way to learn any was meant to be there |
 | **Audit** | Admin and config actions, auth refusals, reload invocations | 4 | Long, append-only, narrow content | **Future.** Nothing writes one today and no issue owns it yet |
 
 ## The invariants
@@ -85,11 +86,15 @@ as the questions a placement has to answer.
   tables, so what is published is the addressed surface rather than the
   columns behind it. Nothing on this page repeats a field name or a
   column name, so none of them can go stale here.
-- Still open, each with its owner: the LLM-observability exporter over
-  the same tap and vocabulary (#67), the audit surface (no issue yet),
-  and the household-consent question #120 named and did not close. The
-  read surface over the aggregates landed with #440 and is in the
-  conversation-store row above.
+- Still open, each with its owner: the audit surface (no issue yet),
+  and the household-consent question #120 named and did not close,
+  which the seventh surface sharpens rather than answers: a household
+  that consented to being recorded for diagnosis has not thereby
+  consented to the recording leaving the house, which is why that is a
+  flag of its own. The read surface over the aggregates landed with
+  #440 and is in the conversation-store row above; the
+  LLM-observability exporter and the capture attachment landed with
+  #66 and #67 and are the fifth and seventh rows.
 
 ## Decision evidence, gathered 2026-08-15
 
