@@ -33,6 +33,7 @@ from sqlalchemy import text
 
 from vinga_server import db as db_module
 from vinga_server.capture import CAPTURE_RATE, CaptureStore
+from vinga_server.capture_upload import CaptureUpload
 from vinga_server.config import entities
 from vinga_server.config import store as config_store
 from vinga_server.config.models import DatabaseConfig
@@ -110,14 +111,16 @@ def tone(ms: int, value: int = 8000) -> bytes:
     return struct.pack("<h", value) * (CAPTURE_RATE * ms // 1000)
 
 
-def store(tmp_path: Path, **kwargs: float) -> CaptureStore:
+def store(
+    tmp_path: Path, uploads: CaptureUpload | None = None, **kwargs: float
+) -> CaptureStore:
     options: dict[str, float] = {
         "max_session_s": 900.0,
         "max_total_mb": 2000.0,
         "min_free_mb": 0.0,
     }
     options.update(kwargs)
-    return CaptureStore(tmp_path / "captures", **options)  # type: ignore[arg-type]
+    return CaptureStore(tmp_path / "captures", uploads=uploads, **options)  # type: ignore[arg-type]
 
 
 # --- the conversations database ---------------------------------------

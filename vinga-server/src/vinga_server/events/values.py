@@ -1193,7 +1193,7 @@ class DroppedFrames(EventValue):
 # hands the emitter, where `_construct` catches it and answers
 # `construction_failed` with the value nowhere in it.
 #
-# Three variants admit fewer members than their enumeration does, and
+# Four variants admit fewer members than their enumeration does, and
 # each declares the narrowing as a `Literal` alias beside the set it
 # narrows. A `Literal` names the parent's members rather than restating
 # their values, so there is nothing for the two to drift apart on. They
@@ -1450,6 +1450,62 @@ class CaptureWrite(StrEnum):
 
     AUDIO = "write audio"
     EVENT = "write an event"
+
+
+class CaptureUploadFailure(StrEnum):
+    """Why a session's recording is not beside its trace.
+
+    The whole of what `capture_upload_failed` may say, and the reason
+    the event exists: a recording that quietly failed to attach would
+    leave a reader looking at a trace with no audio and no way to learn
+    that any was meant to be there. Eight members and never a message,
+    because everything that can fail here fails near a credential, a
+    far-side response body or an operator's own path.
+
+    The five ways an upload itself ends badly are told apart by what an
+    operator would do about each: an endpoint that cannot be reached is
+    a deployment question, one that refuses is a credential or a project
+    question, a payload over the backend's ceiling is a capture-length
+    question, and the two the server decides on its own (a backlog that
+    could not admit the job, staged files that went missing under it)
+    are this server's own load and disk rather than the backend's.
+    """
+
+    # The request never got an answer: no route, no listener, or the
+    # request's own ceiling reached.
+    UNREACHABLE = "unreachable"
+    # The far side answered, and said no.
+    REFUSED = "refused"
+    # The far side's ceiling, or this server's own before it asks.
+    TOO_LARGE = "too_large"
+    # Nothing to name the trace by: telemetry never saw the session, or
+    # its id has aged out of the retention.
+    NO_TRACE = "no_trace"
+    # The backlog was full, so the job was never queued.
+    DROPPED = "dropped"
+    # The staged pair was gone when the worker reached for it.
+    STAGING_LOST = "staging_lost"
+    # A restart found the job still staged and removed it, which is the
+    # one member said by the recording surface rather than the uploader.
+    ABANDONED = "abandoned"
+    # The recording itself is not evidence: a capture that stopped on a
+    # write failure has a manifest that disowns it, and attaching one
+    # would present broken evidence as evidence.
+    INCOMPLETE = "incomplete"
+
+
+# What an upload attempt itself may report. `abandoned` is not one of
+# them: it is a restart's finding about a job no upload ever ran for,
+# said where the staging directory is swept.
+AttemptedUpload = Literal[
+    CaptureUploadFailure.UNREACHABLE,
+    CaptureUploadFailure.REFUSED,
+    CaptureUploadFailure.TOO_LARGE,
+    CaptureUploadFailure.NO_TRACE,
+    CaptureUploadFailure.DROPPED,
+    CaptureUploadFailure.STAGING_LOST,
+    CaptureUploadFailure.INCOMPLETE,
+]
 
 
 class EchoOutcome(StrEnum):

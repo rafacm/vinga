@@ -10,6 +10,7 @@ from vinga_server import __version__, logs, onboarding, ota, ws
 from vinga_server.auth import build_device_auth
 from vinga_server.build_info import revision
 from vinga_server.capture import CaptureStore, DeviceFacts
+from vinga_server.capture_upload import build_capture_upload
 from vinga_server.composition import Composition
 from vinga_server.config import Config, ConfigError
 from vinga_server.config.api import (
@@ -552,6 +553,17 @@ async def _build_composition(
     # Absent unless capture is configured and switched on, which is what
     # keeps recording something an operator has to ask for.
     capture_section = config.server.capture
+    # And where a closed session's recording goes afterwards, when a
+    # deployment asked for that (#67). Built before the store so the
+    # store can be handed it, and built from the whole server section
+    # because the first thing it resolves is capture: with capture off
+    # it is a no-op and none of its refusals apply, which is the issue's
+    # own rule.
+    capture_upload = build_capture_upload(
+        config.server, telemetry=telemetry, local_only=config.server.local_only
+    )
+    if capture_upload is not None:
+        stack.push_async_callback(capture_upload.shutdown)
     capture = (
         None
         if capture_section is None or not capture_section.enabled
@@ -560,9 +572,16 @@ async def _build_composition(
             capture_section.max_session_s,
             capture_section.max_total_mb,
             capture_section.min_free_mb,
+            uploads=capture_upload,
         )
     )
     if capture is not None:
+        # What the run before this one left staged, said and removed.
+        # The store's own and not the uploader's, so a boot that stopped
+        # exporting does not leave room audio behind in silence, and a
+        # boot with no capture section at all leaves the directory
+        # untouched because it builds no store either.
+        capture.startup()
         # Room audio is the whole of what makes this a recording, and the
         # decision track beside it is what the events already are. It
         # used to say "transcripts", which was true while the events

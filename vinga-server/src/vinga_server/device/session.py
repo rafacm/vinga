@@ -646,6 +646,16 @@ class DeviceSession:
                 self._events.detach_capture()
                 self._capture_audio.close()
                 self._capture_audio = None
+            # And last of all, the one signal that means the
+            # conversation is over rather than that a recording's files
+            # are final (#67). The store's own `finished()` fires
+            # mid-conversation for a capture that ended at its duration
+            # limit or after a write failure, so a recording queued
+            # there would be attached to a session still talking. Here
+            # the WAV header is patched, the manifest is written, and
+            # this session is done.
+            if self._captures is not None:
+                self._captures.session_closed(self.session_id)
             if self._cancelled is not None:
                 # A cleanup step was cancelled, and now that the record
                 # is complete the cancellation goes on its way: the

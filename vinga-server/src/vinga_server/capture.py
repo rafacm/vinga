@@ -41,11 +41,13 @@ import contextlib
 import json
 import shutil
 import struct
+import time
 from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO, TextIO
 
+from vinga_server.capture_upload import BUILDING_PREFIX, CaptureUpload, staging_root
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import (
     CaptureBelowFloor,
@@ -56,6 +58,7 @@ from vinga_server.events.catalog import (
     CaptureOverBudget,
     CapturePruned,
     CaptureStarted,
+    CaptureUploadAbandoned,
 )
 from vinga_server.events.values import (
     CaptureWrite,
@@ -69,6 +72,16 @@ from vinga_server.events.values import (
 )
 
 events = ServerEvents(__name__)
+
+# When this process began, which is what tells a job THIS run staged
+# from one a previous run left behind.
+#
+# Read at import rather than at the sweep, because sequential lifespans
+# in one process share it and that is the point: a prior lifespan's
+# worker may still be finishing a job the next lifespan's sweep would
+# otherwise adopt and delete underneath it. Wall clock rather than
+# monotonic, because what it is compared against is a directory's mtime.
+_PROCESS_STARTED = time.time()
 
 # The rate both channels are written at, which is the rate the input
 # side of the pipeline runs at. The reply is resampled down to it so
@@ -447,6 +460,7 @@ class CaptureStore:
         max_session_s: float,
         max_total_mb: float,
         min_free_mb: float,
+        uploads: CaptureUpload | None = None,
     ) -> None:
         self.directory = directory
         self._max_session_s = max_session_s
@@ -455,6 +469,12 @@ class CaptureStore:
         # Sessions recording right now. Pruning must not unlink a file
         # that still has a writer behind it.
         self._active: set[str] = set()
+        # Where a closed session's recording goes next, when a
+        # deployment asked for that (#67). Optional in the sense every
+        # collaborator here is: None is a deployment that did not ask,
+        # it is compared `is not None`, and nothing on this class's own
+        # paths needs it to exist.
+        self._uploads = uploads
 
     def _free_mb(self) -> float:
         return shutil.disk_usage(self.directory).free / MB
@@ -513,14 +533,96 @@ class CaptureStore:
             )
         return removed
 
+    def startup(self) -> None:
+        """Say what a previous run left staged for upload, and remove
+        it.
+
+        This store's own rather than the uploader's, and that is the
+        whole of why it is here: a next boot with the flag off, capture
+        off, `local_only` on or the extra gone builds no uploader at
+        all, and staged room audio would then persist silently in
+        exactly the configurations an operator chose to stop exporting
+        in. So it runs whenever a capture directory is opened, with an
+        uploader or without one. A boot with no capture section builds
+        no store either, and leaves the directory untouched: removing
+        the section parks this with the rest of the capture machinery.
+
+        One sanitized event per job before its links go, because a
+        restart must not be the thing that silently discards the only
+        record that an upload never happened. Nothing is retried: a
+        retry store would be a durability promise this flag does not
+        make, and the event is the honest ledger.
+
+        A job younger than this process is skipped. Sequential lifespans
+        in one process share a staging directory, and a prior lifespan's
+        worker may still hold a job in flight; adopting it would mean
+        deleting a pair out from under an upload that is happening.
+        """
+        root = staging_root(self.directory)
+        try:
+            jobs = sorted(path for path in root.iterdir() if path.is_dir())
+        except OSError:
+            return
+        for job in jobs:
+            try:
+                if job.stat().st_mtime >= _PROCESS_STARTED:
+                    continue
+            except OSError:
+                continue
+            # A name beginning with a dot is a staging that never
+            # committed, so there was never a job to abandon: the links
+            # go without a word.
+            if not job.name.startswith(BUILDING_PREFIX):
+                self._abandoned(job.name)
+            with contextlib.suppress(OSError):
+                shutil.rmtree(job)
+
+    def _abandoned(self, session: str) -> None:
+        """One leftover job, said before its links go.
+
+        A method rather than an inline thunk, for the reason the loop
+        above cannot: a lambda built inside a loop reads whatever the
+        variable holds when it is called, and a parameter is the honest
+        way to hand it one value.
+        """
+        events.emit(lambda: CaptureUploadAbandoned(session=SessionId(session)))
+
     def finished(self, session_id: str) -> None:
-        """A capture closed. It stops being protected, and the budget is
-        checked now that its final size is known: without this a single
-        session that overran would sit there until some later session
-        happened to start."""
+        """A capture closed. It stops being protected, whatever is going
+        to be uploaded is put out of the prune's reach, and the budget
+        is checked now that its final size is known: without this a
+        single session that overran would sit there until some later
+        session happened to start.
+
+        The staging is HERE and ahead of the prune, which is the one
+        ordering that works. This is where a capture's files become
+        final, and it is also where they become prune candidates, so any
+        later moment is a moment a capture can already have been unlinked
+        by a session under budget pressure. It does not enqueue: this
+        fires for a capture that ended early at its duration limit or
+        after a write failure too, while the conversation carries on.
+        """
         self._active.discard(session_id)
+        if self._uploads is not None:
+            self._uploads.stage(
+                session_id,
+                self.directory / f"{session_id}.wav",
+                self.directory / f"{session_id}.json",
+            )
         with contextlib.suppress(OSError):
             self.prune()
+
+    def session_closed(self, session_id: str) -> None:
+        """A session ended, and whatever was staged for it may go.
+
+        Called from the device session's own close ordering rather than
+        from anything here, because nothing here knows: `finished()`
+        above means the files are final, which happens mid-conversation
+        for an early-finished capture. This is the only signal that the
+        conversation is over.
+        """
+        if self._uploads is not None:
+            self._uploads.session_closed(session_id)
 
     def open(
         self, session_id: str, opened_at: float, manifest: dict[str, Any]
