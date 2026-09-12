@@ -1193,6 +1193,27 @@ def _check_protocol() -> None:
 _QUIETING = Quieting(OTEL_NAMESPACE)
 
 
+def quiet_the_sdk() -> Lease:
+    """Take a claim on the SDK's silence, and answer the claim to give
+    back.
+
+    Public because a second holder needs one, and it must be the SAME
+    claim rather than a second `Quieting` over the same namespace: the
+    logging configuration is process-wide, and two instances each
+    reference-counting their own snapshot of one global is precisely the
+    failure `quieting.py` spells out, where one holder's release
+    un-silences the library while the other is still working and the
+    other's release then silences it for the life of the process.
+
+    The holder this exists for is the transcript exporter's worker
+    (#495), which outlives this exporter's bounded shutdown by design: a
+    late export failure logs the endpoint it could not reach, and that
+    must not arrive through a namespace this exporter has already put
+    back.
+    """
+    return _QUIETING.take()
+
+
 def _epoch_ns(at: float, offset: float) -> int:
     """One monotonic reading as the epoch nanoseconds a span wants.
 
