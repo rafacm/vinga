@@ -68,19 +68,23 @@ lattice), so it is introduced explicitly as a rank table beside the
 enum rather than implied by member order, and a test pins all nine
 boundary-times-reach cells of the rule.
 
-### Unbounded is the same enum, and the key's absence means `internet`
+### Absent means no boundary; explicit `internet` is a declaration with teeth
 
-`server.data_boundary: host | network | internet`, absent meaning
-`internet`, which is today's default in the new vocabulary: session
-data may reach the internet is exactly what an undeclared boundary
-permits. This resolves the issue's absent-versus-explicit question
-with both: the third value exists and is the default, so an
-operator may spell the default explicitly, the lattice is uniform
-(one comparison, no special unbounded state), and no deployment is
-forced to add a key. Under `internet` nothing refuses, matching
-today's `local_only: false`; the MCP guard's condition (today
-`if config.server.local_only:`) becomes "a boundary narrower than
-`internet` is declared".
+`server.data_boundary: Reach | None = None`. The two states the
+first draft conflated are different promises, and the review round
+put it back: ABSENT means no boundary is declared, today's
+unrestricted behavior, under which nothing refuses and an
+undeclared endpoint-dependent entry boots exactly as it does now.
+EXPLICIT `internet` is a declared boundary: every stated reach
+fits inside it, but the fail-closed half of the rule is now armed,
+so a `None`-marked provider or MCP entry whose operator declared
+no `reach` refuses to build. That is the issue's own sentence ("a
+provider which will not state its reach while a boundary is
+declared refuses") honored at every boundary value, and it gives
+`data_boundary: internet` a real meaning: "I want every entry's
+reach stated, even though nothing is forbidden." Tests distinguish
+the two states explicitly (an undeclared `openai_compatible` entry
+boots with the key absent and refuses under explicit `internet`).
 
 ### The resolve ladder replaces the `None` conflation
 
@@ -108,8 +112,9 @@ The new resolve is explicit about its three states:
   be the mechanism teaching dishonesty from the other side, and it
   simply refuses under any narrower boundary.
 - An entry whose type cannot know and whose operator declared
-  nothing fails closed under any boundary narrower than
-  `internet`, exactly today's undeclared rule.
+  nothing fails closed whenever a boundary is declared, at any
+  value including `internet`; with no boundary declared it boots,
+  exactly today's behavior without `local_only`.
 
 Truthiness dies with the booleans: every decision site becomes a
 rank comparison or an identity test against enum members, and the
@@ -211,8 +216,8 @@ the plans corpus, `CHANGELOG.md`) keep their spellings. The
   `check_feature(label, reach, boundary)`,
   `check_mcp_server(label, entry, boundary)`; the resolve ladder
   and every sentence.
-- `config/models.py`: `data_boundary: Reach = Reach.INTERNET` on
-  the server section (absent means internet); `reach` replacing
+- `config/models.py`: `data_boundary: Reach | None = None` on
+  the server section (absent means no boundary); `reach` replacing
   `egress` on `ProviderConfig` and `McpServerConfig`; descriptions
   rewritten to the new vocabulary.
 - `providers/base.py` and the nine concrete classes: the marking
@@ -229,12 +234,14 @@ the plans corpus, `CHANGELOG.md`) keep their spellings. The
 
 ## Tests
 
-- The nine-cell rule table (three boundaries times three effective
-  reaches), each cell driven through a real provider build, watched
-  red where the old binary disagrees (the new cells:
-  `network`-reach under `network` boundary builds;
+- The rule table: three effective reaches times four boundary
+  states (absent, `host`, `network`, `internet`), plus the
+  undeclared row per boundary state, each cell driven through a
+  real provider build, watched red where the old binary disagrees
+  (the new cells: `network`-reach under `network` builds;
   `network`-reach under `host` refuses; `internet`-reach under
-  `network` refuses).
+  `network` refuses; undeclared refuses under explicit `internet`
+  and boots with the key absent).
 - The resolve ladder: marked class beats entry key everywhere;
   entry key on a knowing type refused in any mode; undeclared
   fails closed under `host` AND under `network`; `reach: internet`
@@ -306,6 +313,14 @@ per amendment.
    behavior); explicit `internet` is a declared boundary under
    which every stated reach fits but an undeclared entry still
    refuses; test the distinction.
+
+   *Resolution.* Adopted. The boundary field is `Reach | None =
+   None`; the absent-versus-explicit-`internet` semantics are
+   rewritten as the review prescribes (absent arms nothing,
+   explicit `internet` arms the fail-closed half), the resolve
+   ladder's undeclared rule now reads "whenever a boundary is
+   declared", and the rule table grows the fourth boundary state
+   with the two distinguishing cells named.
 
 2. **P1: The proposed enum location creates a runtime import
    cycle.** `Reach` in `boundary.py` used by `config/models.py`
