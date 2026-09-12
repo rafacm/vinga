@@ -56,6 +56,22 @@ treatment the nullable device already gets: `=` does not match two
 nulls, so an equality join would scatter such a group across its streams
 and return zeroes with broken rates.
 
+### The HTTP answer strips a URL credential from the name
+
+The column is documented to keep what the operator wrote: `vinga_ro` is
+granted the record schema on purpose, and a row is not a display. The
+projection therefore belongs where a reader is answered, and now that a
+metrics row carries the name, `_aggregated()` is a second such place
+beside `read_session`. Every non-null `name` leaves through
+`without_url_credential`, the same one rule that the session detail, the
+display walk and the spoken identities read from (#381, #472).
+
+Applied after the ordering rather than before it, so the page a caller
+pages through stays ordered on what the view stores: two names differing
+only in a credential are two rows there, and re-sorting on the stripped
+form would move one of them. The CLI needs no change of its own, since
+it renders the columns the answer carries.
+
 ### Migration `1009_views_read_the_name`
 
 `CREATE OR REPLACE VIEW` for the four, with the same column list in the
@@ -74,6 +90,7 @@ the 1008 definitions and comments literally.
 | Column read | `record.sessions.device_name` (nullable, dated, never rewritten) |
 | Row grain | one row per `(day, device, name)` plus whatever the mirrored view was cut by |
 | API and CLI shape | unchanged; `name` was already in the row contract, nullable |
+| HTTP projection | every non-null `name` through `without_url_credential`, after the ordering |
 
 ## Verification
 
@@ -90,11 +107,17 @@ the 1008 definitions and comments literally.
 - The upgrade suite asserts a database that stood at `1006_metrics_views`
   reaches the new head, keeps the four original views by oid, and answers
   the siblings with the recorded name.
+- A credential-bearing name planted in the record is absent from every
+  metrics answer, from the CLI's rendering of one and from both shipped
+  log formats, with the stripped address asserted present as the
+  control; the stored column still holds it as written. Both cases were
+  watched red with the projection removed.
 - The wheel migration step runs only in CI and is not verified locally.
 
 ## Files modified
 
 - `vinga-server/src/vinga_server/conversations/views.py`
+- `vinga-server/src/vinga_server/conversations/api.py`
 - `vinga-server/src/vinga_server/conversations/migrations/versions/1009_views_read_the_name.py`
 - `vinga-server/tests/support/stores.py`
 - `vinga-server/tests/unit/test_conversations_views.py`

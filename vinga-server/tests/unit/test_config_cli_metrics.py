@@ -71,6 +71,27 @@ EMPTY_UNTIL = "2025-01-31"
 # planted wherever a refusal might carry it back out.
 SENTINEL = "sk-test-91c4a7de-never-a-real-credential"
 
+# The other two halves of a credential-bearing device name, distinct
+# from the first so that a rendering keeping any one of the three fails
+# on that one rather than on whichever is checked first.
+TOKEN_SENTINEL = "tok-test-2e7b04af-never-a-real-credential"
+
+AUTHORIZATION_SENTINEL = "Bearer-br-3d18c95b-never-a-real-credential"
+
+SECRET_PARTS = (SENTINEL, TOKEN_SENTINEL, AUTHORIZATION_SENTINEL)
+
+# A name that arrived around the write path's refusal, which the record
+# keeps as written, and what the API's projection leaves of it: the
+# address, without the userinfo and without the credential-named
+# parameters. This client prints what it is answered, so what it must
+# never print is what the answer must never carry.
+CREDENTIAL_NAME = (
+    f"https://u:{SENTINEL}@example.invalid/desk"
+    f"?token={TOKEN_SENTINEL}&authorization={AUTHORIZATION_SENTINEL}"
+)
+
+STRIPPED_NAME = "https://example.invalid/desk"
+
 # Two boards of one fleet, and the second in the spelling a person
 # types it in: upper case and dash-separated, which the API normalizes
 # before it matches.
@@ -782,6 +803,47 @@ def test_the_device_breakdown_prints_a_board_per_row(run, store, capsys) -> None
     [heading] = [line for line in ungrouped.splitlines() if line.startswith("DAY")]
     assert "DEVICE" not in heading.split()
     assert len([line for line in ungrouped.splitlines() if line.startswith(DAY)]) == 1
+
+
+def test_a_credential_in_a_recorded_name_reaches_no_stream_and_no_log(
+    run, store, capsys, caplog
+) -> None:
+    """The name cell is the one thing this command prints that an
+    operator wrote, and the record keeps it as written on purpose. So
+    the value a terminal sees is the API's projection, and this is the
+    client half of that: planted through the store, read back through
+    the real request path, and hunted through stdout, stderr and both
+    shipped log formats, because a secret kept out of a table and
+    written to a log has been kept out of nothing.
+
+    The stripped address is asserted present beside the three absences,
+    the way every no-leak case here carries its control: a rendering
+    that dropped the column would satisfy every absence and say nothing
+    about whether anything was stripped.
+    """
+    a_day(store, DAY, session="named", device=BOARD_A, device_name=CREDENTIAL_NAME)
+
+    with caplog.at_level(logging.DEBUG):
+        code, printed, err = out(
+            run,
+            capsys,
+            "metric",
+            "show",
+            "sessions",
+            "--since",
+            SINCE,
+            "--until",
+            UNTIL,
+            "--group",
+            "device",
+        )
+
+    assert (code, err) == (0, "")
+    [row] = [line for line in printed.splitlines() if line.startswith(DAY)]
+    assert row.split()[2] == STRIPPED_NAME
+    for where in (printed, err, leaked(caplog)):
+        for secret in SECRET_PARTS:
+            assert secret not in where
 
 
 def test_the_device_flag_narrows_the_breakdown_to_one_board(run, store, capsys) -> None:
