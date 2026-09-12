@@ -347,11 +347,41 @@ async def test_the_gen_ai_keys_arrive_spelled_as_the_conventions_spell_them(
     assert carried["vinga.provider.llm.name"] == "mock"
     assert carried["vinga.llm.round"] == 1
     # Nothing the mock did not report, and nothing wearing a foreign
-    # prefix that was not asked for.
+    # prefix that was not asked for. The grouping alias is in the set by
+    # name, because it is the one foreign-prefixed attribute every span
+    # carries whatever its stage did (#67 M1); the case below is what
+    # holds it to its value.
     assert {key for key in carried if not key.startswith("vinga.")} == {
-        "gen_ai.provider.name"
+        "gen_ai.provider.name",
+        "session.id",
     }
     assert [event.name for event in llm.events] == ["first_token"]
+
+
+async def test_the_session_id_arrives_under_the_grouping_alias_too(
+    exporting_server, receiver: Receiver
+) -> None:
+    """The #67 M1 finding, off the wire.
+
+    A backend that groups traces into sessions keys that grouping on an
+    attribute of its own vocabulary, and `vinga.session.id` is not one:
+    against a live Langfuse the whole conversation arrived as unrelated
+    traces with an empty session until every span also spelled the
+    generic `session.id`. So what this pins is the bytes a collector
+    receives, which is the only surface that claim can be made on: both
+    names on every span, and the same value under each, since two
+    spellings are only safe while they are one fact.
+    """
+    port, stop = exporting_server
+    await one_turn(port)
+    await stop()
+
+    spans = receiver.spans()
+    assert spans, "nothing reached the collector at all"
+    for span in spans:
+        carried = attributes(span)
+        assert carried["session.id"], span.name
+        assert carried["session.id"] == carried["vinga.session.id"], span.name
 
 
 async def test_the_resource_that_arrives_is_the_servers_own(
