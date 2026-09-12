@@ -516,8 +516,10 @@ def test_an_explicitly_empty_device_cannot_widen_the_stream(run) -> None:
     sending it would turn the narrowest question this flag can ask, one
     board's traffic, into the widest one, the whole server's. What an
     empty value is answered with is the endpoint's rule and its fixed
-    sentence, said where it is read; what is asserted here is that the
-    request carries the value that reaches it.
+    sentence, said where it is read and pinned there by the API suite's
+    `test_a_filter_that_cannot_be_read_is_refused_without_being_quoted`;
+    what is asserted here is that the request carries the value that
+    reaches it.
     """
     handler = serving(event(event="heard"))
     answering(run, handler)

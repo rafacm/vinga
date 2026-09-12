@@ -233,6 +233,12 @@ def test_an_application_without_a_server_refuses_rather_than_saying_nothing() ->
     [
         ({"device": "not-a-mac"}, "MAC address"),
         ({"device": "11:22:33:44:55"}, "MAC address"),
+        # A filter that was given and is empty, which is what a client
+        # sends for `--device ''` rather than dropping it (#473). Read
+        # as no filter it would answer the whole server's traffic to a
+        # caller who asked for one board's, so it is refused like any
+        # other value that is not a MAC.
+        ({"device": ""}, "MAC address"),
         ({"session": "not-a-session"}, "uuid hex"),
         ({"session": "0" * 31}, "uuid hex"),
         ({"level": "LOUD"}, "DEBUG"),
@@ -251,7 +257,10 @@ def test_a_filter_that_cannot_be_read_is_refused_without_being_quoted(
     assert response.status_code == 422
     detail = response.json()["detail"]
     assert rule in detail
-    for sent in query.values():
+    # Only the values there is something to hunt. The empty string is a
+    # substring of every string, so the not-quoted property is vacuous
+    # for that row and what it pins is the refusal itself.
+    for sent in filter(None, query.values()):
         assert sent not in detail
         assert sent not in response.text
 
