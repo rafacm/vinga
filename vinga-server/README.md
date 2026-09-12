@@ -2810,10 +2810,11 @@ no price beside it, however carefully it was measured.
 
 Usage is present on every span and every cost reads zero. That is
 correct rather than broken: the server measured what it was given and
-the backend was never told what a second of audio is worth. Nothing is
-lost by entering the prices later, since a backend computes cost from
-the definitions in force when a trace arrives rather than retroactively,
-so enter them before the run whose cost you want to read.
+the backend was never told what a second of audio is worth. Enter the
+definitions before the run whose cost you want to read, because whether
+a backend goes back and prices traces it has already taken in is that
+backend's own behaviour and not something this server can promise on
+its behalf.
 
 ### The models that deliberately get none
 
