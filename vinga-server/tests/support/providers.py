@@ -21,6 +21,7 @@ from collections.abc import AsyncIterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from vinga_server.boundary import Reach
 from vinga_server.config import Config
 from vinga_server.config.secrets import SecretStore
 from vinga_server.providers import (
@@ -243,7 +244,7 @@ class ScriptedVad(VadProvider):
     is handed in, rather than written over the one the runtime built.
     """
 
-    egress = False
+    reach = Reach.HOST
 
     def __init__(self, speech_ms: float) -> None:
         self._speech_ms = speech_ms
@@ -273,7 +274,7 @@ class BrokenStreamingTts(TtsProvider):
     """A voice that refuses, so a reply ends between the round that
     asked for a tool and the dispatch that would have run it."""
 
-    egress = False
+    reach = Reach.HOST
 
     def __init__(self) -> None:
         self.sample_rate = 24000

@@ -81,7 +81,7 @@ class McpServers:
     def build(cls, config: Config, secrets: SecretStore | None = None) -> "McpServers":
         """Managers for the entries agents actually use, the way only
         referenced providers are built. Raises McpConfigError for an
-        entry that cannot be built, or one that server.local_only
+        entry that cannot be built, or one that server.data_boundary
         forbids, which fails the boot.
 
         `secrets` is the store a snapshot was loaded with, or None for a

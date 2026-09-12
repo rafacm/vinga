@@ -65,10 +65,10 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any
 
+from vinga_server.boundary import BoundaryRefusal, Reach, check_feature
 from vinga_server.build_info import revision
 from vinga_server.config import ConfigError
 from vinga_server.config.models import TelemetryConfig
-from vinga_server.egress import EgressRefusal, check_feature
 from vinga_server.events import Emission, EventTap, session_clock
 from vinga_server.events.catalog import carried_values, catalog, kind_of
 from vinga_server.events.values import (
@@ -918,7 +918,7 @@ RETAINED_TRACES = 64
 def build_telemetry(
     config: TelemetryConfig | None,
     *,
-    local_only: bool = False,
+    boundary: Reach | None = None,
     exporter: Any | None = None,
     transcripts: Any | None = None,
     max_sessions: int = 0,
@@ -937,12 +937,13 @@ def build_telemetry(
     The three refusals are this function's, and they run in this order,
     which is the order that makes each of them honest:
 
-    1. **Egress.** Asked of `egress.py` before any OpenTelemetry import,
-       any construction and any thread, so under `server.local_only` the
-       exporter's constructor is provably never reached. The sentence is
-       the egress module's, value-free, and it arrives here as
-       `EgressRefusal`; what leaves is `ConfigError`, raised after the
-       handler has closed so nothing is chained to it.
+    1. **The data boundary.** Asked of `boundary.py` before any
+       OpenTelemetry import, any construction and any thread, so under a
+       boundary narrower than the internet the exporter's constructor is
+       provably never reached. The sentence is the boundary module's,
+       value-free, and it arrives here as `BoundaryRefusal`; what leaves
+       is `ConfigError`, raised after the handler has closed so nothing
+       is chained to it.
     2. **The extra.** The packages are imported HERE rather than at
        module scope (the provider registry's `_resolved` pattern), which
        is what lets this module be imported by a server that has none of
@@ -981,7 +982,7 @@ def build_telemetry(
     if config is None or not config.enabled:
         return None
 
-    refusal = _egress_refusal(local_only)
+    refusal = _boundary_refusal(boundary)
     if refusal is not None:
         # Raised here rather than inside the handler that read it, so
         # nothing is chained to it: `app.lifespan` follows the same
@@ -1088,18 +1089,25 @@ def _discard(provider: Any | None) -> None:
         pass
 
 
-def _egress_refusal(local_only: bool) -> str | None:
-    """What the egress rule says about an exporter, or nothing.
+def _boundary_refusal(boundary: Reach | None) -> str | None:
+    """What the data boundary says about an exporter, or nothing.
 
     Asked before any OpenTelemetry import, any construction and any
     thread, which is what lets the refusal claim the exporter's
-    constructor was never reached. The sentence is the egress module's
+    constructor was never reached. The sentence is the boundary module's
     own, and only the sentence crosses back: the exception type belongs
     to whichever surface asked, which here is `ConfigError`.
+
+    The reach is `internet`, fixed and honest: where the collector is
+    lives in `OTEL_EXPORTER_OTLP_ENDPOINT`, which this server never
+    parses and could not vouch for if it did, and there is no telemetry
+    entry for an operator to assert a LAN collector on. The consequence
+    is stated rather than hidden: a `network`-bounded server refuses
+    tracing even toward a collector on its own network.
     """
     try:
-        check_feature(TELEMETRY_KEY, egress=True, local_only=local_only)
-    except EgressRefusal as refusal:
+        check_feature(TELEMETRY_KEY, Reach.INTERNET, boundary)
+    except BoundaryRefusal as refusal:
         return str(refusal)
     return None
 

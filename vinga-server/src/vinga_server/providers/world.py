@@ -18,7 +18,7 @@ carry it:
   without a model having been loaded.
 - One provider is constructed at a time, off the loop, and the object it
   returns transfers into this module before anything can refuse it. The
-  egress check therefore runs here, on the loop, inside the owner that
+  boundary check therefore runs here, on the loop, inside the owner that
   is already holding the object, so a refusal closes what it just built
   instead of dropping it.
 - Every exit that is not an install closes what this build constructed,
@@ -48,6 +48,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import cast
 
+from vinga_server.boundary import BoundaryRefusal, Reach, check_provider
 from vinga_server.build_info import in_container
 from vinga_server.config.entities import provider_label
 from vinga_server.config.models import (
@@ -57,7 +58,6 @@ from vinga_server.config.models import (
     spoken_identity,
 )
 from vinga_server.config.secrets import SecretStore, provider_identity
-from vinga_server.egress import EgressRefusal, check_provider
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import ProviderReachesLoopback
 from vinga_server.events.values import Identifier, LoopbackHost, ProviderEntries
@@ -230,15 +230,15 @@ async def build_entry(
     stage: str,
     name: str,
     config: ProviderConfig,
-    local_only: bool = False,
+    boundary: Reach | None = None,
     secrets: SecretStore | None = None,
 ) -> Provider:
     """Build the provider behind `providers.<stage>.<name>`, owned from
     the moment it exists.
 
     Raises `ProviderError` for an unknown type, a bad option, a missing
-    extra, an egress-marked provider under `local_only`, a class
-    carrying no egress marking of its own, or anything the provider
+    extra, a provider reaching beyond the declared `boundary`, a class
+    carrying no reach marking of its own, or anything the provider
     itself raises while constructing. Every one of them names the entry,
     and none of them leaves an object behind: a refusal after the
     construction closes what it is refusing.
@@ -274,7 +274,7 @@ async def build_entry(
     # Owned from this line. Everything below can refuse, and everything
     # below closes what it refuses.
     #
-    # The egress rule itself lives in one module that this builder and
+    # The boundary rule itself lives in one module that this builder and
     # the MCP build path both call (#30, #136); what stays here is the
     # exception type, which is this surface's contract, wrapped around
     # the module's own sentence. Recorded and raised outside the
@@ -283,8 +283,8 @@ async def build_entry(
     # would leave the refusal carrying whatever the disposal did.
     refusal: str | None = None
     try:
-        check_provider(label, config, provider, local_only)
-    except EgressRefusal as exc:
+        check_provider(label, config, provider, boundary)
+    except BoundaryRefusal as exc:
         refusal = str(exc)
     if refusal is not None:
         await disposed([provider])
@@ -451,7 +451,7 @@ async def build_world(
             )
     except BaseException:
         # Every exit that is not a return: a later entry that would not
-        # build, an egress refusal, a caller that went away. What this
+        # build, a boundary refusal, a caller that went away. What this
         # build constructed goes, exactly once; what it carried over is
         # the running world's and stays.
         await disposed(instances[identity] for identity in built)
@@ -503,7 +503,7 @@ async def _stage_engine(
         reused.append(identity)
         return carried_over
     entry = getattr(config.providers, stage)[name]
-    provider = await build_entry(stage, name, entry, config.server.local_only, secrets)
+    provider = await build_entry(stage, name, entry, config.server.data_boundary, secrets)
     # Recorded as built the moment it exists, so that a failure of the
     # next entry closes this one.
     instances[identity] = provider

@@ -16,7 +16,8 @@ derived from it, the conversation record inside the deployment's own
 database. This sends a recording of a room, which is why it is behind a
 flag of its own that neither `server.capture` nor
 `server.telemetry.enabled` implies, why the flag's description says so
-in those words, and why `server.local_only` refuses to build it.
+in those words, and why a narrower `server.data_boundary` refuses to
+build it.
 
 **It never touches the audio path.** The two halves of its hook run on
 the session loop and do nothing but a hardlink and a queue put; every
@@ -80,9 +81,9 @@ from typing import Any
 
 import httpx
 
+from vinga_server.boundary import BoundaryRefusal, Reach, check_feature
 from vinga_server.config import ConfigError
 from vinga_server.config.models import ServerConfig
-from vinga_server.egress import EgressRefusal, check_feature
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import CaptureUploaded, CaptureUploadFailed
 from vinga_server.events.values import (
@@ -270,7 +271,7 @@ def build_capture_upload(
     config: ServerConfig,
     *,
     telemetry: Telemetry | None,
-    local_only: bool = False,
+    boundary: Reach | None = None,
     timeout_s: float = REQUEST_TIMEOUT_S,
     retries: int = RETRIES,
     backoff_s: float = BACKOFF_S,
@@ -286,7 +287,7 @@ def build_capture_upload(
        `enabled` off, this answers None and none of the checks below
        run. The issue's own words are that the flag on with capture off
        is a no-op, so a capture-off deployment boots identically with or
-       without the extra, the telemetry section or `local_only`, and an
+       without the extra, the telemetry section or a boundary, and an
        operator mid-toggle is not a misconfiguration. It is said out
        loud exactly when there is something to say: with the flag on and
        nothing to record, one value-free line, because a switch that
@@ -304,9 +305,9 @@ def build_capture_upload(
        room audio waiting to leave is exactly what a refusing
        configuration leaves behind. A parse-time rule for this would
        therefore have been the one refusal shape that skipped the sweep.
-    4. **Egress.** Asked of `egress.py` before any import, any
-       construction and any thread, so under `server.local_only` the
-       SDK is provably never reached.
+    4. **The data boundary.** Asked of `boundary.py` before any import,
+       any construction and any thread, so under a boundary narrower
+       than the internet the SDK is provably never reached.
     5. **The extra.** Imported HERE rather than at module scope, the
        provider registry's `_resolved` pattern, which is what lets this
        module be imported by a server that does not have the SDK.
@@ -314,7 +315,7 @@ def build_capture_upload(
     The three refusals are `ConfigError` with a fixed value-free
     sentence, raised outside the handler that read them so nothing is
     chained: an ImportError carries its module search path, and an
-    egress refusal is somebody else's sentence.
+    boundary refusal is somebody else's sentence.
 
     `timeout_s`, `retries`, `backoff_s` and `shutdown_timeout_s` are the
     test seam and nothing else: a lane shortens the wait so a case about
@@ -344,7 +345,7 @@ def build_capture_upload(
         # for a trace id.
         raise ConfigError(ATTACHMENT_NEEDS_AN_EXPORTER)
 
-    refusal = _egress_refusal(local_only)
+    refusal = _boundary_refusal(boundary)
     if refusal is not None:
         raise ConfigError(refusal)
 
@@ -391,19 +392,24 @@ ATTACHMENT_NEEDS_AN_EXPORTER = (
 )
 
 
-def _egress_refusal(local_only: bool) -> str | None:
-    """What the egress rule says about an uploader, or nothing.
+def _boundary_refusal(boundary: Reach | None) -> str | None:
+    """What the data boundary says about an uploader, or nothing.
 
     Asked before any import, any construction and any thread, which is
     the caller's half of `check_feature`'s contract and the only way the
     refusal can honestly say nothing was built. The sentence is the
-    egress module's own, and only the sentence crosses back: the
+    boundary module's own, and only the sentence crosses back: the
     exception type belongs to whichever surface asked, which here is
     `ConfigError`.
+
+    The reach is `internet`, fixed, for the reason the exporter's is:
+    `LANGFUSE_HOST` is a transport credential this server hands over
+    without reading, so nothing here can assert an upload stays on the
+    operator's network.
     """
     try:
-        check_feature(ATTACH_KEY, egress=True, local_only=local_only)
-    except EgressRefusal as refusal:
+        check_feature(ATTACH_KEY, Reach.INTERNET, boundary)
+    except BoundaryRefusal as refusal:
         return str(refusal)
     return None
 

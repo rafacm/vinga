@@ -22,10 +22,10 @@ from typing import Any
 import mcp.types
 from mcp import ClientSession
 
+from vinga_server.boundary import BoundaryRefusal, check_mcp_server
 from vinga_server.config import Config, McpServerConfig
 from vinga_server.config.entities import descriptor, entity_location
 from vinga_server.config.secrets import SecretStore
-from vinga_server.egress import EgressRefusal, check_mcp_server
 from vinga_server.events.catalog import (  # noqa: E402
     McpCallDropped,
     McpConnected,
@@ -748,8 +748,8 @@ def _managers_for(
     """One manager per entry some agent references, built and not
     started.
 
-    Everything that can refuse a configuration happens here: the egress
-    declaration `server.local_only` requires, the `$VAR` references an
+    Everything that can refuse a configuration happens here: the reach
+    declaration `server.data_boundary` requires, the `$VAR` references an
     entry's env and headers name, and the stored credentials behind
     them. At boot that makes a bad entry a boot failure; on a reload it
     makes one a refusal that has touched nothing, which is the same
@@ -778,14 +778,17 @@ def _managers_for(
         # could carry a credential refuses the whole snapshot before
         # anything here runs (#420).
         written_at = entity_location(descriptor("mcp-server"), name)
-        if config.server.local_only:
-            # One module holds the rule for entries and providers alike
-            # (#30, #136); what stays here is this surface's own
-            # exception around the sentence it composed.
-            try:
-                check_mcp_server(written_at, entry)
-            except EgressRefusal as exc:
-                raise McpConfigError(str(exc)) from exc
+        # One module holds the rule for entries and providers alike
+        # (#30, #136); what stays here is this surface's own exception
+        # around the sentence it composed. Every referenced entry is
+        # asked, whatever the boundary is: the guard that used to stand
+        # here read the boundary and decided that an absent one meant
+        # nothing to check, which is a piece of the policy living
+        # outside the module that owns the rest of it (#493).
+        try:
+            check_mcp_server(written_at, entry, config.server.data_boundary)
+        except BoundaryRefusal as exc:
+            raise McpConfigError(str(exc)) from exc
         try:
             managers[name] = McpServerManager(
                 name, entry, secrets, configured.allowed_names(name)

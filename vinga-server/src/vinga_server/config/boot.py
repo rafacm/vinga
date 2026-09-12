@@ -73,7 +73,7 @@ def reload_domain_config(running: Config) -> BootConfig:
     written a second time: the same database, the same exhaustive
     verification of the stored secrets, the same composition and the
     same whole-snapshot validation, so entry names, references and
-    `server.local_only` declarations are judged by the code that judged
+    `server.data_boundary` declarations are judged by the code that judged
     them at startup.
 
     Step 1 is deliberately not repeated. The file half is this process's

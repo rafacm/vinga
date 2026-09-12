@@ -16,6 +16,7 @@ from pathlib import Path
 from piper import PiperVoice
 from piper.download_voices import download_voice
 
+from vinga_server.boundary import Reach
 from vinga_server.config.models import ProviderConfig
 from vinga_server.providers.base import Operations, TtsProvider
 from vinga_server.providers.registry import OptionsReader
@@ -44,7 +45,7 @@ def ensure_voice(voice: str, download_dir: Path) -> Path:
 
 class PiperTts(TtsProvider):
     # Synthesis runs on the host; only the voice downloads, at startup.
-    egress = False
+    reach = Reach.HOST
 
     def __init__(self, voice: str, download_dir: Path) -> None:
         # The syntheses running off the loop right now, so that a

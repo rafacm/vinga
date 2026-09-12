@@ -29,6 +29,7 @@ import logging
 import numpy as np
 from faster_whisper import WhisperModel
 
+from vinga_server.boundary import Reach
 from vinga_server.config.models import ProviderConfig
 from vinga_server.config.provider_options import FasterWhisperOptions
 from vinga_server.providers.base import AsrProvider, AsrResult, Operations
@@ -46,7 +47,7 @@ def pcm_to_float(pcm: bytes) -> "np.ndarray":
 
 class FasterWhisperAsr(AsrProvider):
     # Inference runs on the host; only the weights download, at startup.
-    egress = False
+    reach = Reach.HOST
 
     def __init__(
         self,

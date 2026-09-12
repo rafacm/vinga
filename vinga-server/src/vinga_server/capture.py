@@ -451,7 +451,7 @@ def sweep_upload_staging(directory: Path) -> None:
     the round's third finding is what made it one. A store is only built
     where capture is ENABLED, and the uploader's builder runs ahead of it
     and can refuse; between them, every configuration this sweep exists
-    for reached neither. A `local_only` boot and an extra-less boot
+    for reached neither. A boundary-refused boot and an extra-less boot
     refuse before any store is constructed, and a configured-but-disabled
     capture constructs no store at all, so staged room audio stayed on
     disk in exactly the four configurations an operator chose to stop
