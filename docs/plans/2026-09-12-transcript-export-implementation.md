@@ -152,3 +152,21 @@ the whole file re-run green (150 passed).
 - [ ] Anything on a board. This milestone changes no protocol, no
       firmware-visible behavior and no device path, so there is nothing
       a device checkpoint could falsify.
+
+### PR review round, PR #497
+
+External review: codex CLI 0.154.0, model gpt-5.6-sol, read-only
+sandbox, 2026-09-12, runtime 3m31s, reviewing origin/main...a8de0b83.
+Verdict as received: **mergeable after the listed fix**. One finding.
+
+1. **P2: The old-key refusal test does not pin suppression of the
+   rejected key.** The test's comment claims the refusal names only
+   the section, but the assertions only exclude the sentinel value,
+   so a refusal echoing `attach_captures` (itself rejected operator
+   input) would pass. Fix: assert the old key's spelling absent from
+   the refusal beside the value and chain assertions.
+
+   *Resolution.* Adopted; `assert "attach_captures" not in refusal`
+   joins the case. Falsified by running the assertion against a
+   constructed key-carrying refusal sentence, which fails it; the
+   suite file re-run green (150 passed).
