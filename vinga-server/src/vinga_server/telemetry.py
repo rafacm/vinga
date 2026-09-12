@@ -76,6 +76,7 @@ from vinga_server.events.values import (
     Kind,
     ProviderEntries,
 )
+from vinga_server.quieting import Lease, Quieting
 
 logger = logging.getLogger(__name__)
 
@@ -1053,122 +1054,7 @@ def _check_protocol() -> None:
     raise ConfigError(UNSUPPORTED_PROTOCOL)
 
 
-@dataclass
-class _Lease:
-    """One exporter's claim on the SDK's silence.
-
-    Handed out by `_QUIETING` below and given back exactly once, from
-    whichever thread ends up owning the release. It holds no logging
-    state of its own: what the namespace looked like is the process's
-    fact, not this exporter's, which is the whole of what this type
-    exists to stop being confused about.
-    """
-
-    quieting: "_Quieting"
-    released: bool = False
-
-    def release(self) -> None:
-        self.quieting.give_back(self)
-
-
-class _Quieting:
-    """The SDK's namespace, quieted for as long as ANY exporter holds a
-    lease on it.
-
-    Process-wide and reference counted, because the logging
-    configuration is process-wide and exporters overlap. Each one used
-    to snapshot and restore the namespace for itself, which is correct
-    for one at a time and wrong the moment two exist, and two exist
-    routinely: a wedged exporter's release outlives the bounded wait, so
-    a redeploy that builds the next one while the last is still
-    finishing had two live claims on one global.
-
-    What that cost is worth spelling out, because it is not a tidiness
-    argument. Exporter A wedges and its wait times out. B is built and
-    quietens an already-quiet namespace, so B's snapshot records
-    SILENCE. A's abandoned release finally finishes and restores the
-    ORIGINAL configuration, un-silencing the SDK while B is still
-    exporting, so B's next failure logs its credentialed endpoint into
-    the retained log. Then B's own release restores A's snapshot, which
-    was the quiet one, and the namespace is silenced for the rest of the
-    process with nothing holding it.
-
-    So the snapshot is taken once, at the first acquisition, and put
-    back once, after the last release, under one lock. A release for a
-    lease already given back is a no-op, which is what lets the build's
-    failure path and the release worker both call it without either
-    having to know whether the other did.
-    """
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._held = 0
-        # The process's own logging state, or None when nothing holds a
-        # lease. It is deliberately not on the lease: a second snapshot
-        # taken while the namespace is already quiet is a recording of
-        # this module's own doing, and restoring it is what leaves a
-        # server permanently silent.
-        self._was: tuple[int, bool] | None = None
-
-    def take(self) -> _Lease:
-        """Take the SDK's whole namespace off this server's handlers,
-        and answer the claim to give back.
-
-        Before the exporter is constructed, which is the ordering that
-        matters: construction itself can log, and what it logs about is
-        the endpoint it was given.
-
-        Two mechanisms, because one of them alone has a hole.
-        Propagation off at the namespace root means no record from any
-        `opentelemetry.*` logger reaches a handler of ours, whichever
-        module logged it. The level above CRITICAL means a child that
-        has not set its own level does not build the record at all. An
-        operator who wants the SDK's diagnostics can attach a handler to
-        `opentelemetry` itself, which is a deliberate act rather than
-        the default.
-        """
-        with self._lock:
-            if self._held == 0:
-                namespace = logging.getLogger(OTEL_NAMESPACE)
-                self._was = (namespace.level, namespace.propagate)
-                namespace.setLevel(logging.CRITICAL + 1)
-                namespace.propagate = False
-            self._held += 1
-            return _Lease(quieting=self)
-
-    def give_back(self, lease: _Lease) -> None:
-        """Drop one claim, and put the namespace back if it was the
-        last.
-
-        The whole of it under the lock, the idempotence check included,
-        so a lease released from the build's failure path and from a
-        release worker at the same moment is counted once.
-        """
-        with self._lock:
-            if lease.released:
-                return
-            lease.released = True
-            self._held -= 1
-            if self._held > 0 or self._was is None:
-                return
-            level, propagate = self._was
-            self._was = None
-            namespace = logging.getLogger(OTEL_NAMESPACE)
-            namespace.setLevel(level)
-            namespace.propagate = propagate
-
-    def held(self) -> int:
-        """How many exporters are keeping the SDK quiet right now.
-
-        Public because "is anything still holding this" is otherwise a
-        question only a leak answers, and because the overlapping-
-        lifespan case is one a test has to be able to describe.
-        """
-        with self._lock:
-            return self._held
-
-
-_QUIETING = _Quieting()
+_QUIETING = Quieting(OTEL_NAMESPACE)
 
 
 def _epoch_ns(at: float, offset: float) -> int:
@@ -1308,7 +1194,7 @@ class Telemetry:
     def __init__(
         self,
         provider: Any,
-        quieted: _Lease,
+        quieted: Lease,
         shutdown_timeout_s: float = SHUTDOWN_TIMEOUT_S,
     ) -> None:
         # The two API names a span needs, bound once here rather than
