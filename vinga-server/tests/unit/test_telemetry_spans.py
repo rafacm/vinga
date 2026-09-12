@@ -673,10 +673,16 @@ def test_a_tool_call_carries_the_session_context_every_span_carries() -> None:
     assert [key for key in tool.attributes if key.startswith("vinga.provider.")] == []
 
 
-def test_a_tool_call_with_no_turn_open_stays_a_span_event() -> None:
-    """The fallback every stage fold keeps: a call that arrives with no
-    turn to hang inside is not dropped, it lands on the session as the
-    event it is."""
+def test_a_tool_call_with_no_turn_open_is_a_span_on_the_session() -> None:
+    """A call that arrives with no turn to hang inside lands on the
+    session, and lands there as a SPAN.
+
+    The parent moves and the carrier does not, which is the whole of
+    what a missing turn changes. Answering this case with a span event
+    would be the milestone's own finding thrown away in the one place it
+    is hardest to see: the backend ingests no span events, so a call
+    recorded as one is a call that did not happen as far as any reader
+    of that backend can tell."""
     clock = Clock()
     telemetry, memory = exporting()
     events = session_events(clock, telemetry)
@@ -687,8 +693,10 @@ def test_a_tool_call_with_no_turn_open_stays_a_span_event() -> None:
     close_session(events)
 
     spans = finished(telemetry, memory)
-    assert spans_of(TOOL_SPAN, spans) == []
-    assert [event.name for event in named(spans, "session").events] == ["tool_call"]
+    (tool,) = spans_of(TOOL_SPAN, spans)
+    session = named(spans, "session")
+    assert tool.parent is session.context
+    assert [event.name for event in session.events] == []
 
 
 # --- TTS, and the name that had to be argued for ----------------------
