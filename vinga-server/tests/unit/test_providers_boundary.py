@@ -458,44 +458,113 @@ def test_the_server_section_refuses_the_replaced_key(tmp_path) -> None:
     assert excinfo.value.__cause__ is None
 
 
-def test_an_mcp_entry_refuses_the_replaced_key() -> None:
-    with pytest.raises(ValueError):
-        McpServerConfig.model_validate(
-            {"transport": "stdio", "command": "uvx", "egress": False}
-        )
+# What an operator most plausibly has in a stale `egress`, and what they
+# least want back: the key took a boolean, so a pasted string there is
+# either a typo or a credential in the wrong field, and a refusal cannot
+# tell which.
+CREDENTIAL_SHAPED_LEGACY = "sk-test-0a5e7b34-never-a-real-credential"
+
+# Both provider types, because the options layer could only ever have
+# answered the first: its reserved set is enforced by
+# `OpenaiCompatibleOptions`, which no other type passes. The refusal
+# lives at the common `ProviderConfig` boundary, and these two are how
+# that is pinned rather than assumed.
+LEGACY_PROVIDER_ENTRIES = [
+    pytest.param("openai_compatible", id="a-type-with-an-options-model"),
+    pytest.param("mock", id="a-type-with-no-options-model"),
+]
 
 
-@pytest.mark.parametrize(
-    "entry",
-    [
-        pytest.param(
-            {"type": "openai_compatible", "base_url": LOCAL_BASE_URL, "egress": False},
-            id="a-type-with-an-options-model",
-        ),
-        pytest.param({"type": "mock", "egress": False}, id="a-type-with-no-options-model"),
-    ],
-)
-def test_a_provider_entry_refuses_the_replaced_key(entry: dict[str, object]) -> None:
-    """THE trap the census exposed. `ProviderConfig` is `extra="allow"`,
-    so without this refusal a stale `egress` would flow into
-    `model_extra`, become a provider option and reach the engine as a
-    stray keyword or vanish into a builder that ignores what it does not
-    know, leaving an operator believing a declaration nothing enforces.
+@pytest.mark.parametrize("type_name", LEGACY_PROVIDER_ENTRIES)
+def test_a_provider_write_refuses_the_replaced_key_without_quoting_it(
+    store, capsys: pytest.CaptureFixture[str], type_name: str
+) -> None:
+    """THE trap the census exposed, driven through the write path an
+    operator actually reaches. `ProviderConfig` is `extra="allow"`, so
+    without this refusal a stale `egress` would flow into `model_extra`,
+    become a provider option and reach the engine as a stray keyword or
+    vanish into a builder that ignores what it does not know, leaving an
+    operator believing a declaration nothing enforces.
 
-    Driven on an open-ended type and on a type with no options model at
-    all, because the options layer could only have answered the first:
-    its reserved set is enforced by `OpenaiCompatibleOptions`, which no
-    other type passes.
+    The value is credential-shaped and the assertion is the whole
+    operator-facing surface: both streams, the sentence, and every link
+    of the cause and context chain, none of which may carry the value or
+    a traceback. Pydantic's own `ValidationError` renders the input it
+    rejected, so this is a claim about what the repository's rendering
+    does with it rather than about what pydantic holds.
     """
-    with pytest.raises(ValueError) as excinfo:
-        ProviderConfig.model_validate(entry)
+    capsys.readouterr()
+
+    with pytest.raises(ConfigError) as excinfo:
+        store.set_provider(
+            "llm", "brain", {"type": type_name, "egress": CREDENTIAL_SHAPED_LEGACY}
+        )
 
     said = str(excinfo.value)
     assert '"egress"' in said
     assert '"reach"' in said
-    # The remedy and not the value: an `egress` that held a pasted
-    # credential instead of a boolean must not come back out.
     assert "not quoted back" in said
+    _nothing_leaked(excinfo.value, capsys.readouterr())
+
+
+def test_an_mcp_write_refuses_the_replaced_key_without_quoting_it(
+    store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The same claim at the other entry kind, where the key is refused
+    by `extra="forbid"` rather than by a validator: the SECTION is
+    named, the key the caller wrote is not, and neither is what it
+    held."""
+    capsys.readouterr()
+
+    with pytest.raises(ConfigError) as excinfo:
+        store.set_mcp_server(
+            "tools",
+            {
+                "transport": "stdio",
+                "command": "uvx",
+                "egress": CREDENTIAL_SHAPED_LEGACY,
+            },
+        )
+
+    said = str(excinfo.value)
+    assert "an unrecognized key is not permitted" in said
+    assert "egress" not in said
+    _nothing_leaked(excinfo.value, capsys.readouterr())
+
+
+def _nothing_leaked(error: BaseException, streams) -> None:
+    """What a refusal about a withdrawn key may not have done: printed
+    anything, carried the value out, or brought a traceback with it.
+
+    The chain and not only the sentence, because an operator's terminal
+    renders whatever a re-raise left attached, and the value that fails
+    here fails inside pydantic, which keeps its input on the exception
+    it raises.
+    """
+    surfaces = (streams.out, streams.err, _whole_chain(error))
+    for surface in surfaces:
+        assert CREDENTIAL_SHAPED_LEGACY not in surface
+        assert "sk-test" not in surface
+        assert "Traceback" not in surface
+        assert 'File "' not in surface
+
+
+def test_a_provider_entry_refuses_the_replaced_key_at_the_model() -> None:
+    """And the model on its own, because the write path above is not the
+    only caller: a stored row read back and a file fragment reach the
+    same validator, and this is the one place the refusal is stated
+    without a store around it."""
+    with pytest.raises(ValueError) as excinfo:
+        ProviderConfig.model_validate({"type": "mock", "egress": False})
+
+    assert '"reach"' in str(excinfo.value)
+
+
+def test_an_mcp_entry_refuses_the_replaced_key_at_the_model() -> None:
+    with pytest.raises(ValueError):
+        McpServerConfig.model_validate(
+            {"transport": "stdio", "command": "uvx", "egress": False}
+        )
 
 
 def test_the_options_of_a_clean_entry_are_untouched() -> None:
