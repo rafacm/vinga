@@ -198,14 +198,29 @@ taken.
 
 The answer is that the session's own working state is the local
 surface. A session assembles the request because it is about to make
-it; that assembly exists locally for as long as the session does, it
-is exported once at the close, and nothing retains it afterwards. So
-the clause holds in its own terms (what leaves is what was held) and
-the retention question is answered by "for the session, and then
-nowhere", which is stricter than either class above it. M1 records
-this, because M1 gates M5 and a class whose retention answer is
-invented in its implementation milestone is the thing the ADR exists
-to prevent.
+it, and that assembly exists locally for as long as the session does.
+
+The retention answer has to be exact about what happens next, because
+the close does not end it: the staged requests move into a delivery job
+and live in process memory until that job delivers, is refused, or the
+worker is stopped, which can be past the bounded shutdown wait. So the
+answer M1 records is "for the session, and then in a bounded delivery
+job until it is delivered or dropped, and nowhere after that", not the
+shorter sentence this plan first drafted. It is still stricter than
+either class above it, both of which export from something durable.
+
+One consequence is stated rather than left to be discovered: a process
+that dies with requests queued loses them, with no ledger to recover
+from. That is unlike the two classes above, where the capture
+directory's files and the conversation store's rows both outlive the
+process that staged them, and it is the price of a class whose local
+surface is memory. A lost export is a missing observation, never a lost
+conversation: what the model saw is gone, what was said is in the
+store.
+
+M1 records all of this, because M1 gates M5 and a class whose retention
+answer is invented in its implementation milestone is the thing the ADR
+exists to prevent.
 
 ### A TOOL span replaces the `tool_call` span event, it does not join it
 
@@ -862,9 +877,11 @@ the manifest with its own generator when stale.
   content-and-telemetry record: three content classes under one
   `export_` prefix, the family rule stated once, artifacts riding
   their class, class widening as a changelog-announced event, the
-  superset note about `export_llm_input`, the third class's local
-  surface and its retention answer, and the wire-fidelity tier
-  dissolved with its caution kept. The observability map's
+  superset note about `export_llm_input`, the fidelity boundary of that
+  class, the third class's local surface and its full retention answer
+  (for the session, then in a bounded delivery job, then nowhere, with
+  a crash losing what was queued), and the wire-fidelity tier dissolved
+  with its caution kept. The observability map's
   export-ladder section rewritten to match, since that is where this
   record keeps its tables. Documentation only. Design footprint: no
   module moves. Documentation footprint as listed above.
@@ -1168,3 +1185,10 @@ Findings condensed but faithful; resolutions appended per amendment.
     possibly past the bounded shutdown wait. Say so, and say that a
     crash loses queued exports with no recoverable ledger, unlike
     capture staging and transcript source rows.
+
+    *Resolution.* Adopted. The retention answer is now "for the
+    session, then in a bounded delivery job until delivery or refusal,
+    and nowhere after that", and the crash consequence is stated with
+    what it costs: a lost export is a missing observation and never a
+    lost conversation, since what was said is in the store. M1 records
+    both.
