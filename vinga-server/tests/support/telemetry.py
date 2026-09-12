@@ -524,6 +524,35 @@ def synthesize(
     )
 
 
+def call_tool(
+    events: SessionEvents,
+    which: str = "builtin",
+    name: str = "remember",
+    duration_s: float = 0.25,
+    is_error: bool = False,
+) -> float:
+    """One `tool_call` in whichever of its three shapes, built through
+    the events' own assembly.
+
+    A variant per shape rather than one with a name argument, because
+    that is what the catalog declares: the naming policy is structural,
+    so a builtin names its tool, an MCP call names the entry an operator
+    configured, and the third names neither.
+    """
+    built = {
+        "builtin": lambda: assembly.builtin_tool_called(
+            AGENT, CONVERSATION, name, duration_s, is_error
+        ),
+        "mcp": lambda: assembly.mcp_tool_called(
+            AGENT, CONVERSATION, name, duration_s, is_error
+        ),
+        "unnamed": lambda: assembly.unnamed_tool_called(
+            AGENT, CONVERSATION, "device", duration_s, is_error
+        ),
+    }[which]
+    return events.emit(built)
+
+
 def start_speaking(events: SessionEvents) -> float:
     """The first frame of the reply reaching the device."""
     return events.emit(

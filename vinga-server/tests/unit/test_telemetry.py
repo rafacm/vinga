@@ -46,6 +46,7 @@ from tests.support.telemetry import (
     Deliveries,
     assemble_prompt,
     barge_in,
+    call_tool,
     capture_emitter,
     capture_started,
     capture_upload_failed,
@@ -1171,6 +1172,8 @@ def test_a_turn_and_its_stages_carry_the_board_s_name() -> None:
     hear(events)
     clock.tick(0.8)
     round_done(events, duration_ms=800)
+    clock.tick(0.2)
+    call_tool(events)
     clock.tick(0.4)
     synthesize(events, stream_ms=400)
     start_speaking(events)
@@ -1185,6 +1188,7 @@ def test_a_turn_and_its_stages_carry_the_board_s_name() -> None:
         "turn",
         "asr",
         "llm",
+        "tool",
         "tts_stream",
         "playback",
     }

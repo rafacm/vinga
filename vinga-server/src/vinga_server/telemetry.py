@@ -175,7 +175,7 @@ SERVICE = "vinga-server"
 
 # --- the span map -----------------------------------------------------
 #
-# Twelve event names have a shape of their own and everything else folds
+# Thirteen event names have a shape of their own and everything else folds
 # onto whichever span is open. That default is the design rather than a
 # shortcut: an exporter that enumerated the events it knew would drop
 # every variant the catalog grew after it was written, in silence, and
@@ -236,6 +236,11 @@ LLM_STAGE = "llm"
 TTS_STAGE = "tts"
 
 LLM_ROUND = "llm_round"
+# One declared event name with three variants, and one fold for all
+# three: the naming policy the variants make structural is carried by
+# `source` and by which of the two name fields the payload holds, and
+# `_attributes` already skips a table key a payload does not carry.
+TOOL_CALL = "tool_call"
 SENTENCE_SYNTHESIZED = "sentence_synthesized"
 SPEAKING_STARTED = "speaking_started"
 SPEAKING_FINISHED = "speaking_finished"
@@ -258,6 +263,12 @@ SESSION_SPAN = "session"
 CAPTURE_SPAN = "capture"
 TRANSCRIPT_SPAN = "transcript"
 TURN_SPAN = "turn"
+# What the model asked a tool for, inside the turn it asked in. Short
+# like the rest and deliberately not the tool's own name: a span name
+# is what a backend groups a list by, and one per configured tool would
+# make that list as long as the deployment's tool table. Which tool it
+# was is an attribute.
+TOOL_SPAN = "tool"
 ASR_SPAN = "asr"
 LLM_SPAN = "llm"
 TTS_SPAN = "tts_stream"
@@ -868,6 +879,40 @@ LLM_ATTRIBUTES = {
     "conversation": "vinga.conversation.id",
     "round": "vinga.llm.round",
     "turns": "vinga.llm.turns",
+}
+
+# The tool span, which is what a `tool_call` becomes instead of the
+# span event it used to be.
+#
+# `gen_ai.operation.name` is the conventions' own word for what this
+# span IS, and it is the one attribute here that no payload field
+# produces: the value is a constant this module names, the way the ASR
+# outcome is. The conventions have a name for a tool's name too, and a
+# builtin's `tool` is exactly that, this server's own word for a tool
+# it authors.
+#
+# `entry` is NOT that name and is deliberately not spelled as it. What
+# an MCP call may say is the entry an operator configured, never the
+# far side's own tool name, so it lands under vinga's own word for the
+# same reason the configured provider entry does on the round span:
+# a reader filtering `gen_ai.tool.name` is asking which tool ran, and
+# an entry name is the answer to a different question.
+#
+# `source` is the catalog's own closed set (`ToolSource`), not a second
+# vocabulary invented here, and `is_error` is the flag the call
+# returned rather than a span status: the call answered, and what it
+# answered with is the tool's business rather than this server's
+# failure.
+GEN_AI_OPERATION = "gen_ai.operation.name"
+EXECUTE_TOOL = "execute_tool"
+
+TOOL_ATTRIBUTES = {
+    "agent": "vinga.agent",
+    "conversation": "vinga.conversation.id",
+    "source": "vinga.tool.source",
+    "is_error": "vinga.tool.is_error",
+    "tool": "gen_ai.tool.name",
+    "entry": "vinga.tool.entry",
 }
 
 # The per-sentence TTS span. The stream's lifetime is the span's own
@@ -1607,6 +1652,7 @@ class Telemetry:
             TRANSCRIPTION_ABANDONED: self._asr_span,
             PROVIDER_FAILED: self._provider_failed,
             LLM_ROUND: self._llm_span,
+            TOOL_CALL: self._tool_span,
             SENTENCE_SYNTHESIZED: self._tts_span,
             SPEAKING_STARTED: self._open_playback,
             SPEAKING_FINISHED: self._close_playback,
@@ -2465,6 +2511,45 @@ class Telemetry:
         first_token = _after(start, payload.get("first_token_ms"))
         if first_token is not None:
             span.add_event(FIRST_TOKEN, timestamp=first_token)
+        span.end(end_time=end)
+
+    def _tool_span(self, session: str, emission: Emission) -> None:
+        """One tool call, as a child of the turn that asked for it.
+
+        A span rather than the span event it used to be, and the span
+        event goes away rather than staying beside it. #67's first
+        walkthrough established that the backend this surface exists for
+        ingests no span events at all, which is why an MCP call was
+        invisible on a trace that recorded everything around it; and two
+        carriers of one fact on one trace would be the locality rule
+        broken in the module that has been most careful about it, with a
+        backend that DOES ingest span events showing every call twice.
+
+        Built retrospectively out of `duration_ms` with the same helper
+        every stage span uses, so the failure mode where a call is
+        misplaced in time is the known one rather than a new one.
+
+        The retained identity and the event's own agent and thread, and
+        deliberately not the provider entries: a tool call ran on no
+        pipeline stage, so what the session opened against says nothing
+        about it.
+        """
+        trace = self._sessions.get(session)
+        if trace is None or trace.turn is None:
+            self._span_event(session, emission)
+            return
+        payload = emission.payload
+        end = self._at(emission)
+        span = self._tracer.start_span(
+            TOOL_SPAN,
+            context=self._within(trace.turn),
+            attributes={
+                **trace.identity,
+                GEN_AI_OPERATION: EXECUTE_TOOL,
+                **_attributes(payload, TOOL_ATTRIBUTES),
+            },
+            start_time=_before(end, payload.get("duration_ms")),
+        )
         span.end(end_time=end)
 
     def _tts_span(self, session: str, emission: Emission) -> None:
