@@ -77,6 +77,25 @@ MCP_SERVERS = {
 
 STAGE = "llm"
 
+# A value the OLD model refused too: `egress` was `bool | None`, so no
+# build of this project ever wrote one. A row can still hold one, from a
+# hand edit, a restore, or a build that is not this project's, and what
+# such a row BECOMES is the question a translation has to answer. It
+# must not become a row that boots. The old build refused it, and a
+# migration that quietly dropped the key would turn that refusal into an
+# undeclared entry, which with no boundary declared is an entry that
+# transmits. So the key is renamed and the value carried across, where
+# the model refuses it again, and the four shapes below are the ones the
+# `else` arm has to keep apart from JSON null.
+CREDENTIAL_SHAPED = "sk-test-3d70b1ce-never-a-real-credential"
+
+MALFORMED = {
+    "pasted": f'"{CREDENTIAL_SHAPED}"',
+    "numbered": "7",
+    "listed": "[false]",
+    "nested": '{"off": true}',
+}
+
 
 @pytest.fixture
 def at_the_baseline(blank_database: str) -> DatabaseConfig:
@@ -135,6 +154,51 @@ def seeded(at_the_baseline: DatabaseConfig) -> DatabaseConfig:
                         "values (:name, :body, cast(:secrets as json))"
                     ),
                     {"name": name, "body": body, "secrets": "{}"},
+                )
+    finally:
+        engine.dispose()
+    return settings
+
+
+@pytest.fixture
+def seeded_malformed(at_the_baseline: DatabaseConfig) -> DatabaseConfig:
+    """A database of its own, carrying one row per malformed shape on
+    each table.
+
+    Its own because these rows are meant to fail the snapshot load, and
+    a `load()` that refuses on the first bad row it meets would hide
+    every well-formed translation beside it.
+    """
+    settings = at_the_baseline
+    engine = write_engine(settings, DOMAIN_CHAIN)
+    try:
+        with engine.begin() as connection:
+            for name, value in MALFORMED.items():
+                connection.execute(
+                    text(
+                        "insert into domain.providers (stage, name, body, secrets) "
+                        "values (:stage, :name, :body, cast(:secrets as json))"
+                    ),
+                    {
+                        "stage": STAGE,
+                        "name": name,
+                        "body": f'{{{_PROVIDER}, "egress": {value}}}',
+                        "secrets": "{}",
+                    },
+                )
+                connection.execute(
+                    text(
+                        "insert into domain.mcp_servers (name, body, secrets) "
+                        "values (:name, :body, cast(:secrets as json))"
+                    ),
+                    {
+                        "name": name,
+                        "body": (
+                            '{"transport": "stdio", "command": "uvx", '
+                            f'"egress": {value}}}'
+                        ),
+                        "secrets": "{}",
+                    },
                 )
     finally:
         engine.dispose()
@@ -279,3 +343,74 @@ def test_a_new_write_carrying_the_old_key_is_still_refused(
             )
     finally:
         engine.dispose()
+
+
+# --- the shapes the boolean never had ----------------------------------
+
+
+def test_a_malformed_legacy_value_is_renamed_rather_than_dropped(
+    seeded_malformed: DatabaseConfig,
+) -> None:
+    """The P1 of PR #499's review. The `else` arm used to remove the key
+    for every value that was not JSON true or false, which is right for
+    null and wrong for everything else: a row the old build refused came
+    out of the migration as an undeclared entry, and an undeclared entry
+    with no boundary declared is one that boots and transmits.
+
+    So only null is dropped. Every other value is carried across under
+    the new key, unchanged, where the model refuses it exactly as the
+    old model refused it under the old key.
+    """
+    _upgrade(seeded_malformed)
+
+    for table in ("providers", "mcp_servers"):
+        bodies = _bodies(seeded_malformed, table)
+        for name, value in MALFORMED.items():
+            assert "egress" not in bodies[name], (table, name)
+            assert bodies[name]["reach"] == json.loads(value), (table, name)
+
+
+@pytest.mark.parametrize("name", sorted(MALFORMED))
+def test_the_upgraded_store_still_refuses_a_malformed_legacy_value(
+    seeded_malformed: DatabaseConfig, name: str
+) -> None:
+    """And the claim that makes the rename worth anything: a row the old
+    build would not load is a row this build will not load either, at
+    both entry kinds, read one at a time so each shape answers for
+    itself.
+
+    Value-free with it, which is why one of the shapes is a pasted
+    credential: a body holding one in the wrong field must not come back
+    out of the refusal that rejects it.
+    """
+    engine = open_database(seeded_malformed)
+    try:
+        store = ConfigStore(engine, MultiFernet([Fernet(generate_key())]))
+        with pytest.raises(ConfigError) as provider:
+            store.read_provider(STAGE, name)
+        with pytest.raises(ConfigError) as server:
+            store.read_mcp_server(name)
+        with pytest.raises(ConfigError) as snapshot:
+            store.load()
+    finally:
+        engine.dispose()
+
+    for refused in (provider, server, snapshot):
+        said = _whole_chain(refused.value)
+        assert CREDENTIAL_SHAPED not in said
+        assert "sk-test" not in said
+
+
+def _whole_chain(error: BaseException) -> str:
+    """Every sentence reachable from a refusal, cause and context
+    included: a value that leaked one link down is a value a traceback
+    renderer prints."""
+    said: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        said.append(str(current))
+        said.extend(str(argument) for argument in current.args)
+        current = current.__cause__ or current.__context__
+    return "\n".join(said)

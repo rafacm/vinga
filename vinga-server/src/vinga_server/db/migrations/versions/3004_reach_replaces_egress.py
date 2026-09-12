@@ -31,6 +31,28 @@ absence and loses only the input history that an operator once typed a
 null. That is the whole point of touching it: no row may retain the
 forbidden spelling, whatever it held.
 
+Anything else, and this is the arm that matters most while looking like
+it matters least, is RENAMED and left alone. `egress` was `bool | None`,
+so no build of this project ever wrote a string, a number, an array or
+an object there; a row can still hold one, from a hand edit, a restore,
+or a build that is not this project's. The old build refused such a
+row, and a translation that dropped the key along with null would hand
+back an undeclared entry, which with no boundary declared is an entry
+that boots and transmits. Turning a refusal into a permissive default
+is the one thing this migration must not do, so the value crosses with
+the key and the new model refuses it exactly as the old model refused
+it under the old name.
+
+Refusing it HERE, by aborting the migration, was the other shape
+offered and is the wrong one. The boot is what runs this, and the
+configuration API an operator would fix the row through is behind the
+boot, so an abort locks them out of the one door to the row that is
+stopping them. It also takes the whole deployment down over one entry
+rather than the entry itself. A row that arrives as an invalid `reach`
+refuses at the surface every other unreadable row refuses at, naming
+the entry and quoting no value, and `vinga provider delete` and
+`vinga mcp-server delete` reach it by identity without understanding it.
+
 Forward only, and nothing is lost that a downgrade would want back: an
 older build reading `reach` would refuse it for the same reason this
 one refuses `egress`, so a reversal would have to re-derive a boolean
@@ -80,7 +102,16 @@ def _translation(table: str, local: str) -> str:
         f"then (body::jsonb - '{OLD}') || '{stays}'::jsonb "
         f"when body::jsonb -> '{OLD}' = 'true'::jsonb "
         f"then (body::jsonb - '{OLD}') || '{leaves}'::jsonb "
-        f"else body::jsonb - '{OLD}' "
+        # JSON null, told from every other value rather than falling in
+        # with them: `jsonb_typeof` is what distinguishes a key set to
+        # null from a key holding something the old model refused, and
+        # the two must not share an arm.
+        f"when jsonb_typeof(body::jsonb -> '{OLD}') = 'null' "
+        f"then body::jsonb - '{OLD}' "
+        # Everything else: renamed, carried across as it stands, and
+        # refused again on the other side.
+        f"else (body::jsonb - '{OLD}') "
+        f"|| jsonb_build_object('{NEW}', body::jsonb -> '{OLD}') "
         f"end)::text "
         f"where jsonb_exists(body::jsonb, '{OLD}')"
     )
