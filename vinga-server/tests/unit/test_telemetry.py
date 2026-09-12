@@ -69,6 +69,8 @@ from tests.support.telemetry import (
     start_speaking,
     start_turn,
     synthesize,
+    transcript_emitter,
+    transcripts_exported,
     upload_emitter,
 )
 from vinga_server.boundary import BoundaryRefusal, Reach, check_feature
@@ -854,7 +856,17 @@ def test_an_upload_outcome_lands_on_the_trace_its_session_closed_in() -> None:
 
 def test_an_upload_outcome_carries_what_its_declaration_declares() -> None:
     """The catalog's fields and no others, plus the session under both
-    names so the query a reader makes finds it beside the turns."""
+    names so the query a reader makes finds it beside the turns.
+
+    Under `vinga.` names, which is what tells a reader whose facts they
+    are. These spans are the only ones this module makes whose
+    attributes used to keep the catalog's bare field names, because
+    they were built with the helper every span EVENT shares: a bare
+    `elapsed_ms` beside `vinga.turn.speech_ms` belongs to nothing, and
+    a backend that groups by prefix cannot find it. The span events
+    keep their bare names, because there the event name is the subject
+    and the fields are its own.
+    """
     telemetry, memory = exporting()
     a_session(telemetry, SESSION)
 
@@ -862,11 +874,13 @@ def test_an_upload_outcome_carries_what_its_declaration_declares() -> None:
         capture_uploaded(upload_emitter())
 
     held = dict(named(finished(telemetry, memory), "capture_uploaded").attributes or {})
-    assert held["audio_bytes"] == 173464
-    assert held["manifest_bytes"] == 1258
-    assert held["elapsed_ms"] == 412
+    assert held["vinga.export.audio_bytes"] == 173464
+    assert held["vinga.export.manifest_bytes"] == 1258
+    assert held["vinga.export.elapsed_ms"] == 412
     assert held["vinga.session.id"] == SESSION
     assert held["session.id"] == SESSION
+    # And nothing under the bare spellings they used to carry.
+    assert [key for key in held if not key.count(".")] == []
     # The sentence's own rendering is not a field, and neither is the
     # event name: it is the span's.
     assert "megabytes" not in held
@@ -885,7 +899,30 @@ def test_a_failed_upload_says_why_on_the_trace() -> None:
     held = dict(
         named(finished(telemetry, memory), "capture_upload_failed").attributes or {}
     )
-    assert held["reason"] == "unreachable"
+    assert held["vinga.export.reason"] == "unreachable"
+    assert "reason" not in held
+
+
+def test_a_transcript_export_outcome_carries_the_same_names() -> None:
+    """One table for all four after-close outcomes, not one per pair.
+
+    `elapsed_ms` means the same thing on a recording's trip and on a
+    transcript's, so it keeps one attribute name across both: the two
+    spans are told apart by their own names, which is the catalog's
+    job rather than the prefix's.
+    """
+    telemetry, memory = exporting()
+    a_session(telemetry, SESSION)
+
+    with watching_the_server(telemetry):
+        transcripts_exported(transcript_emitter())
+
+    held = dict(
+        named(finished(telemetry, memory), "transcripts_exported").attributes or {}
+    )
+    assert held["vinga.export.turns"] == 7
+    assert held["vinga.export.elapsed_ms"] == 96
+    assert [key for key in held if not key.count(".")] == []
 
 
 def test_an_outcome_for_a_session_this_exporter_never_saw_writes_nothing() -> None:

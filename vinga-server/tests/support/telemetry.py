@@ -33,6 +33,7 @@ from vinga_server.events import ServerEvents, SessionEvents, assembly
 from vinga_server.events.catalog import (
     CAPTURE_CHANNEL,
     CAPTURE_UPLOAD_CHANNEL,
+    TRANSCRIPT_EXPORT_CHANNEL,
     BargeIn,
     BargeInUnderFloor,
     BargeInWithoutTranscript,
@@ -50,6 +51,7 @@ from vinga_server.events.catalog import (
     SpeakingFinished,
     SpeakingStarted,
     TranscriptionAbandoned,
+    TranscriptsExported,
     TurnStarted,
 )
 from vinga_server.events.values import (
@@ -669,6 +671,24 @@ def capture_upload_failed(emitter: ServerEvents, session: str = SESSION) -> None
     emitter.emit(
         lambda: CaptureUploadFailed(
             session=SessionId(session), reason=CaptureUploadFailure.UNREACHABLE
+        )
+    )
+
+
+def transcript_emitter() -> ServerEvents:
+    """An emitter on the transcript exporter's own channel, for the
+    reason the two above exist: a variant handed to an emitter on
+    another channel is refused at emit."""
+    return ServerEvents(TRANSCRIPT_EXPORT_CHANNEL)
+
+
+def transcripts_exported(emitter: ServerEvents, session: str = SESSION) -> None:
+    """A closed session's turns that reached its trace, emitted the way
+    the exporter emits them: on a worker of its own, after the session
+    closed."""
+    emitter.emit(
+        lambda: TranscriptsExported(
+            session=SessionId(session), turns=Count(7), elapsed_ms=Whole(96)
         )
     )
 
