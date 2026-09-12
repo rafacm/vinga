@@ -159,7 +159,9 @@ decided against a rule instead of relitigating the first:
   decision of its own when something needs it. The tier table itself
   lives in
   [the observability map](../architecture/observability-surfaces.md#the-export-ladder),
-  where this record keeps its tables.
+  where this record keeps its tables. That third tier did not survive
+  the day: the amendment below dissolves it into the content classes,
+  and the table there is now two tiers with a class table under them.
 - **Export follows retention.** What the local surface holds is what
   may leave, never more: the capture directory's files for the first
   escalation and the conversation store's rows for the second. A
@@ -189,6 +191,106 @@ decided against a rule instead of relitigating the first:
 
 In one sentence: content leaves by class, behind a flag of its own,
 bounded by what was kept and never through the metadata fold.
+
+### Amendment: the content classes are three under one prefix (2026-09-12)
+
+#502 settles the third content class, and settling it shows that the
+tier above it was cutting on the wrong axis. The ladder recorded
+earlier the same day has three tiers, the third of them wire fidelity
+and deliberately unspecced, and #496 and #501 were each about to add
+an `attach_`-prefixed flag against it: one disclosure ladder with two
+prefixes and four switches for two classes. Decided, so that the
+escalations still to come are decided against a rule rather than
+against each other:
+
+- **Three content classes, under one `export_` prefix.**
+  `export_audio` carries all recordings, `export_transcripts` the
+  dialogue text, and `export_llm_input` the model's assembled
+  request. The `attach_` prefix #496 and #501 proposed is
+  decommissioned before it ever shipped: a ladder whose rungs are
+  spelled two ways is a ladder an operator has to learn twice, and
+  the rename that gave the first two classes one vocabulary would
+  have bought nothing if the third arrived in the old one.
+- **The family rule, recorded once, here.** Every content flag
+  defaults off, requires `server.telemetry.enabled`, is refused
+  under a `server.data_boundary` narrower than its reach, and
+  implies nothing about its siblings. Once, because it is one rule
+  three times over and a rule restated per flag is a rule that
+  drifts between its restatements; each artifact issue then states
+  only its own delta.
+- **Artifacts ride their class.** #496's per-utterance clips and
+  #501's per-turn reply audio are artifacts of `export_audio` rather
+  than flags beside it: they are recordings, and recordings are what
+  that switch already decides about. The consequence is written down
+  rather than left to be discovered. A version that adds an artifact
+  to a class widens what an already-on flag exports, so it is a
+  changelog-announced event, stated in the flag's own documentation,
+  and never a silent one.
+- **A class may contain what a narrower one contains, and
+  `export_llm_input` does.** An assembled request holds the dialogue
+  as the model saw it, so that class is content-wise a superset of
+  `export_transcripts`. The family rule that no flag implies another
+  stays about the switches: turning the third on turns neither of
+  the others on. What this record states plainly is what each class
+  CONTAINS, because an operator reading only the switches would
+  otherwise conclude that the third exports less than it does.
+- **The third class is the request as vinga assembled it.** It
+  contains the system prompt with its memory and know-how blocks,
+  the message history as the model was given it, the tool schemas
+  offered, the tool arguments the model asked for and the results it
+  was handed back, and the tool choice. It does not contain vendor
+  framing, generation parameters, the endpoint, any header, or any
+  credential. That boundary rather than the bytes on the wire, for
+  three reasons: it is the enumeration #502 itself settles, so it is
+  that decision implemented rather than a narrowing of it; it is the
+  one place where the request exists once rather than once per
+  vendor, so the class does not quietly mean different things
+  depending on which adapter a deployment runs; and a snapshot taken
+  after adapter translation would be a content surface built out of
+  an SDK's own call arguments, which is where credentials live, so
+  the no-leak contract would then rest on an exclusion list per
+  adapter, maintained forever, instead of on a seam that never sees
+  one. What that costs is stated too: a parameter that changes a
+  reply, a temperature or a token limit, is configuration rather
+  than content and is not in this class.
+- **Its local surface is the session's own working state, and its
+  retention answer is exact.** The two classes above it each export
+  from something durable, the capture directory's files and the
+  conversation store's rows, so for them "export follows retention"
+  reads off a store. This one has no store and vinga builds none: a
+  session assembles a request because it is about to make it, and
+  that assembly exists locally for as long as the session does. The
+  answer in its own terms is therefore "for the session, then in a
+  bounded delivery job until it is delivered or dropped, and nowhere
+  after that", which is stricter than either class above it. One
+  consequence is recorded rather than left to be discovered: a
+  process that dies with exports queued loses them, with no ledger
+  to recover from, unlike the capture directory's files and the
+  store's rows, which outlive the process that staged them. What
+  that costs is bounded, and the bound is why the answer is
+  acceptable: a lost export is a missing observation, never a lost
+  conversation, because what was said is in the store.
+- **The wire-fidelity tier dissolves, and the tiers are two.**
+  Metadata is the prerequisite; content leaves by class. What that
+  tier described turns out to be a fidelity property cutting ACROSS
+  the classes rather than a rung above them: the per-request audio a
+  provider heard is an `export_audio` artifact, and the assembled
+  request is a class of its own. Keeping it as a third tier would
+  have put #496's clips in two places on one ladder, which is two
+  structures that must agree with a policy record playing one of the
+  parts. The caution that tier carried survives as the superset note
+  above. The tables move with the decision and stay in
+  [the observability map](../architecture/observability-surfaces.md#the-export-ladder),
+  which is where this record keeps its tables.
+- **Fine-grained control remains #393's policy layer.** Per device
+  and per person is a policy question with a vocabulary of its own,
+  deliberately not a deployment boolean: a ladder that grew a switch
+  per board would be a policy engine spelled in configuration keys,
+  and an operator would then maintain one in each place.
+
+In one sentence: content leaves by class under one `export_` prefix,
+every class on the same four terms, and fidelity is what a class
+contains rather than a rung above it.
 
 ## Consequences
 
