@@ -326,8 +326,13 @@ ended and exported, `False` when the exporter never saw the session,
 the retention evicted it, or `stop_accepting` has run, and a `False`
 reported as `transcript_export_failed` with reason `no_trace`, never
 a silent success. Each span carries the session id under both
-spellings (grouping), `vinga.turn.id` (the schema's own monotonic
-turn identity, which is the issue's "turn index"), `vinga.turn.t_ms`
+spellings (grouping), `vinga.turn.index` (the issue's "turn index":
+a session-local ordinal, 1-based, derived from the projection's
+`id`-ascending ordering, so any session's first exported turn is
+index 1, tested on a resumed thread's second session),
+`vinga.turn.id` (the schema's database-wide identity, kept
+separately because it is what correlates the observation back to
+the store's row and the API's cursor), `vinga.turn.t_ms`
 and `vinga.agent` (the agent the turn opened with), and the content
 in the fields the backend renders: `langfuse.observation.input` for
 `heard`, `langfuse.observation.output` for `reply`. Where the
@@ -349,7 +354,8 @@ because a trail entry for an empty export would be noise a reader
 filters out, and the flag's no-op line at boot already says why
 nothing will ever export when that is config's doing.
 
-Spans are timestamped at export time and ordered by `vinga.turn.id`;
+Spans are timestamped at export time and ordered by
+`vinga.turn.index`;
 no synthetic conversation-time timestamps, because a span claiming
 to have happened at `t_ms` would be the one dishonest fact on a
 surface whose value is being checkable against the store.
@@ -780,3 +786,10 @@ Findings condensed but faithful; resolutions appended per amendment.
    an explicit session-local ordinal named as an index with its
    base convention stated and tested; keep the row id separately
    for store correlation.
+
+   *Resolution.* Adopted. The span carries `vinga.turn.index`, a
+   1-based session-local ordinal derived from the projection's
+   `id`-ascending ordering (any session's first exported turn is
+   index 1, tested on a resumed thread's second session), and
+   `vinga.turn.id` stays beside it as the store-correlation
+   identity.
