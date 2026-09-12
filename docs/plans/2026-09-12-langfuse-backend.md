@@ -359,6 +359,13 @@ events reference, and the exporter's APPROVED table by derivation.
 They are the field-test trail: a capture that silently failed to
 attach would recreate exactly the gap this issue exists to close.
 
+They land in M3 rather than M2, with the emit sites: every variant the
+catalog declares has to be produced by a driver's run
+(`tests/unit/test_event_baseline.py`), and a milestone PR merges to
+`main` on its own, so a declaration whose uploader is still being
+written would sit unproducible on `main` for a whole milestone. M2's
+record carries the declarations as designed.
+
 ### The boundary this crosses, stated rather than slipped
 
 The recorded architecture says spans carry metadata and never
@@ -417,7 +424,8 @@ variant case, and the workflow's per-image import checks.
 - `telemetry.py`: the attribute aliases (M1 findings) and the
   bounded `trace_of` retention (M2), each a few lines deep in the
   existing tables and lifecycle.
-- `events/catalog.py`: the two variants (M2).
+- `events/catalog.py`: the two events (M3, with the emit sites the
+  baseline suite holds every declaration to; M2's record says why).
 - `config/models.py`: the `attach_captures` field and cross-field
   refusal; generated server reference, both example configs.
 - `device/session.py` and `app.py`: composition wiring only.
@@ -491,15 +499,21 @@ variant case, and the workflow's per-image import checks.
   tables, no new seam. Documentation footprint: the implementation
   doc's walkthrough record; `docs/reference/events.md` untouched;
   a `changelog.d/` fragment.
-- [ ] **M2: the correlation and the vocabulary.** `trace_of` with
-  its bounded retention; the two catalog events with their closed
-  reason set; generated events reference; the exporter's APPROVED
-  derivation picks them up by construction. Design footprint: one
-  narrow read surface on `Telemetry`; catalog growth in the
-  existing shape. Documentation footprint: the generated events
-  page through its generator; fragment.
-- [ ] **M3: the uploader.** `capture_upload.py` with the staging,
-  queue, worker and SDK flow; the `attach_captures` field, refusals
+- [ ] **M2: the correlation.** `trace_of` with
+  its bounded retention, recorded at the session span's open, spelled
+  by the SDK's own `format_trace_id` and kept past the close pop. The
+  two catalog events moved to M3, where their emit sites are: the
+  baseline suite refuses a declared variant no driver's run produces,
+  and a milestone PR merges on its own, so declaring them here would
+  put an unproducible declaration on `main` for the whole of M3. The
+  declarations as designed are recorded in the implementation doc.
+  Design footprint: one narrow read surface on `Telemetry`.
+  Documentation footprint: the implementation doc; fragment.
+- [ ] **M3: the uploader and the vocabulary.** `capture_upload.py` with the staging,
+  queue, worker and SDK flow; the two catalog events with their closed
+  reason set, the generated events reference and the README index rows,
+  the exporter's APPROVED derivation picking them up by construction;
+  the `attach_captures` field, refusals
   and cross-field rule; the `[langfuse]` extra with the full pin
   list; composition wiring; the sentinel and hardening suites; the
   generated server reference and both example configs; the
