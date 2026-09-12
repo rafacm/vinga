@@ -1219,7 +1219,7 @@ jobs:
           # the extra would say so only as a refused boot in somebody's
           # cluster. Both observability extras, since an attachment that
           # worked on one variant and refused on the other would be the
-          # split `attach_captures` exists not to have. By the subtree
+          # split `export_audio` exists not to have. By the subtree
           # in both cases, for the reasons given above.
           docker run --rm --entrypoint python vinga-server:ci-amd64 \
             -c "import opentelemetry.sdk, opentelemetry.exporter.otlp.proto.http, langfuse.api.client"

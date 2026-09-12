@@ -138,7 +138,7 @@ otel = [
 #
 # It rides both published images, exactly as `otel` does: an
 # observability extra that only one variant carried would make
-# `server.telemetry.attach_captures` a flag that works or refuses
+# `server.telemetry.export_audio` a flag that works or refuses
 # depending on which image an operator happened to pull.
 #
 # It joins the `dev` group below for the reason `otel` does: the staging,
