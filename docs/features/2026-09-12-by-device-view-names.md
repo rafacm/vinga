@@ -107,6 +107,13 @@ the 1008 definitions and comments literally.
 - The upgrade suite asserts a database that stood at `1006_metrics_views`
   reaches the new head, keeps the four original views by oid, and answers
   the siblings with the recorded name.
+- A second baseline at `1008_metrics_views_by_device` asserts what the
+  1006 one cannot: the four siblings keep their oids while their
+  definitions and comments change, an analyst's view reading the label
+  is still standing and still answering, and a downgrade to 1008 puts
+  the shipped definitions and comments back. A drop-and-recreate of the
+  four fails those three and passes everything built on the 1006
+  baseline, which is the gap they were added for.
 - A credential-bearing name planted in the record is absent from every
   metrics answer, from the CLI's rendering of one and from both shipped
   log formats, with the stripped address asserted present as the

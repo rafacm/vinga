@@ -1,4 +1,4 @@
-"""The per-device views are added beside the four, not instead of them.
+"""The per-device views are added beside the four, then replaced in place.
 
 The claim this file exists for is the one nothing else can make. The
 agreement test next door compares every declaration with the live view
@@ -40,6 +40,18 @@ The downgrade is asserted for the same reason it is written: it is the
 inverse of an additive change, so it takes the four it added and leaves
 the four it found.
 
+**The second baseline.** `1009_views_read_the_name` replaces the four
+siblings rather than adding anything, and the claim it makes is the same
+one in a place the 1006 baseline cannot reach: at 1006 those four
+relations do not exist, so a 1009 that dropped and recreated its own
+targets would pass every assertion above. So there is a database
+standing at `1008_metrics_views_by_device` too, with an analyst's object
+on one of the siblings, reading the very column 1009 moves. What is
+compared there is the oid against a definition and a comment that must
+have changed: same relation, new answer. And the downgrade is run to
+1008 rather than past it, because a run that carried on to 1006 would
+drop the four and say nothing about what 1009's downgrade restored.
+
 The lane rather than the unit suite, for the reason
 `test_domain_upgrade.py` gives: the material is a database in a state no
 current build produces, and the fixture that makes one is
@@ -61,14 +73,31 @@ from vinga_server.conversations.views import BY_DEVICE_VIEWS, VIEWS
 from vinga_server.db import read_engine, write_engine
 
 # The revision a deployment carrying the four aggregate views is
-# stamped at, and the whole of what this release upgrades from.
+# stamped at, and the whole of what the sibling migration upgrades from.
 BASELINE = "1006_metrics_views"
+
+# The revision a deployment carrying the siblings is stamped at, which
+# is what `1009_views_read_the_name` replaces in place. A second
+# baseline rather than a second assertion on the first: at 1006 the
+# relations 1009 touches do not exist, so nothing read there can say
+# whether it replaced them or rebuilt them.
+SIBLING_BASELINE = "1008_metrics_views_by_device"
 
 HEAD = "1009_views_read_the_name"
 
-# What an analyst leaves standing on one of the four views. Named here
-# because two fixtures and one assertion have to spell it.
+# What an analyst leaves standing on one of the four views, and on one
+# of the four siblings. Named here because two fixtures and one
+# assertion have to spell each.
 DEPENDENT = "an_analysts_saved_query"
+
+SIBLING_DEPENDENT = "an_analysts_saved_breakdown"
+
+# The column 1009 makes the siblings read, and the literal 1008 had them
+# select instead. Named because both baselines are recognized by which
+# of the two their definitions carry.
+RECORDED_NAME = "device_name"
+
+SHIPPED_NULL = "NULL::text"
 
 
 def _alembic(connection) -> AlembicConfig:
@@ -84,10 +113,9 @@ def _alembic(connection) -> AlembicConfig:
     return config
 
 
-@pytest.fixture
-def at_the_baseline(blank_database: str) -> DatabaseConfig:
-    """A database with the conversations chain at `1006` and nothing
-    beyond it: the four views, and no sibling anywhere."""
+def _stamped(blank_database: str, revision: str) -> DatabaseConfig:
+    """A database with the conversations chain at exactly one revision
+    and nothing beyond it."""
     settings = DatabaseConfig(name=blank_database)
     engine = write_engine(settings, CONVERSATIONS_CHAIN)
     try:
@@ -95,44 +123,65 @@ def at_the_baseline(blank_database: str) -> DatabaseConfig:
             connection.execute(
                 text(f'create schema if not exists "{CONVERSATIONS_CHAIN.schema}"')
             )
-            command.upgrade(_alembic(connection), BASELINE)
+            command.upgrade(_alembic(connection), revision)
             connection.commit()
     finally:
         engine.dispose()
     return settings
 
 
+@pytest.fixture
+def at_the_baseline(blank_database: str) -> DatabaseConfig:
+    """A database with the conversations chain at `1006` and nothing
+    beyond it: the four views, and no sibling anywhere."""
+    return _stamped(blank_database, BASELINE)
+
+
+@pytest.fixture
+def at_the_siblings(blank_database: str) -> DatabaseConfig:
+    """A database with the chain at `1008`: the four views and the four
+    siblings, each selecting the literal null for its label.
+
+    This is the state every deployment carrying the siblings is in, and
+    the only state from which "replaced rather than rebuilt" is a
+    question that can be asked at all.
+    """
+    return _stamped(blank_database, SIBLING_BASELINE)
+
+
 def _relations(
     settings: DatabaseConfig, names: list[str]
-) -> dict[str, tuple[int, str] | None]:
-    """Each view's oid and its definition, or `None` where there is no
-    such view.
+) -> dict[str, tuple[int, str, str | None] | None]:
+    """Each view's oid, its definition and its comment, or `None` where
+    there is no such view.
 
     The oid is the identity every dependent object in the database
-    points at, and the definition is what the database says the view is
-    rather than what a migration file says it wrote. The pair is read in
-    one statement so the two can never be read from different states.
+    points at, the definition is what the database says the view is
+    rather than what a migration file says it wrote, and the comment is
+    what `\\d+` shows an analyst beside it. The three are read in one
+    statement so they can never be read from different states.
     """
     engine = read_engine(settings)
     try:
         with engine.connect() as connection:
-            found: dict[str, tuple[int, str] | None] = {}
+            found: dict[str, tuple[int, str, str | None] | None] = {}
             for name in names:
                 row = connection.execute(
                     text(
                         "select to_regclass(:name)::oid, "
-                        "pg_get_viewdef(to_regclass(:name), true)"
+                        "pg_get_viewdef(to_regclass(:name), true), "
+                        "obj_description(to_regclass(:name), 'pg_class')"
                     ),
                     {"name": f"record.{name}"},
                 ).one()
-                found[name] = None if row[0] is None else (row[0], row[1])
+                found[name] = None if row[0] is None else (row[0], row[1], row[2])
             return found
     finally:
         engine.dispose()
 
 
-def _plant_dependent(settings: DatabaseConfig) -> None:
-    """The analyst's own object, standing on one of the four.
+def _plant_dependent(settings: DatabaseConfig, name: str, columns: str, on: str) -> None:
+    """An analyst's own object, standing on one of the views.
 
     A view rather than anything more elaborate because the dependency is
     the subject and not the object: what `DROP VIEW ... CASCADE` takes
@@ -142,10 +191,7 @@ def _plant_dependent(settings: DatabaseConfig) -> None:
     try:
         with engine.begin() as connection:
             connection.execute(
-                text(
-                    f"create view record.{DEPENDENT} as select day, sessions "
-                    "from record.metrics_sessions_daily"
-                )
+                text(f"create view record.{name} as select {columns} from record.{on}")
             )
     finally:
         engine.dispose()
@@ -227,10 +273,12 @@ def _seed(settings: DatabaseConfig) -> None:
 
 
 @pytest.fixture
-def before(at_the_baseline: DatabaseConfig) -> dict[str, tuple[int, str] | None]:
+def before(at_the_baseline: DatabaseConfig) -> dict[str, tuple[int, str, str | None] | None]:
     """What the four views are before this release touches the database,
     with the analyst's object already standing on one of them."""
-    _plant_dependent(at_the_baseline)
+    _plant_dependent(
+        at_the_baseline, DEPENDENT, "day, sessions", "metrics_sessions_daily"
+    )
     return _relations(at_the_baseline, [view.name for view in VIEWS])
 
 
@@ -246,8 +294,40 @@ def upgraded(at_the_baseline: DatabaseConfig) -> Iterator[DatabaseConfig]:
         engine.dispose()
 
 
+@pytest.fixture
+def siblings_before(
+    at_the_siblings: DatabaseConfig,
+) -> dict[str, tuple[int, str, str | None] | None]:
+    """What the four siblings are as 1008 shipped them, with an
+    analyst's object already standing on one of them.
+
+    The oid, the definition and the comment, because 1009 replaces all
+    three surfaces of a view and the downgrade has to put back exactly
+    what it found. The dependent selects the label as well as the keys,
+    which is the column 1009 moves: an object reading it is what a
+    rebuild would take and what a replacement must not.
+    """
+    _plant_dependent(
+        at_the_siblings,
+        SIBLING_DEPENDENT,
+        "day, device, name, sessions",
+        "metrics_sessions_by_device_daily",
+    )
+    return _relations(at_the_siblings, [view.name for view in BY_DEVICE_VIEWS])
+
+
+@pytest.fixture
+def replaced(at_the_siblings: DatabaseConfig) -> Iterator[DatabaseConfig]:
+    """The 1008 database after a boot, which is what runs 1009."""
+    engine = open_conversations(at_the_siblings)
+    try:
+        yield at_the_siblings
+    finally:
+        engine.dispose()
+
+
 def test_the_baseline_really_is_the_state_this_release_upgrades_from(
-    at_the_baseline: DatabaseConfig, before: dict[str, tuple[int, str] | None]
+    at_the_baseline: DatabaseConfig, before: dict[str, tuple[int, str, str | None] | None]
 ) -> None:
     """The control the claims below rest on. Without it, a fixture that
     had quietly migrated to head would make "the four survived" true by
@@ -261,7 +341,7 @@ def test_the_baseline_really_is_the_state_this_release_upgrades_from(
 
 
 def test_the_four_views_survive_the_upgrade_unmoved(
-    before: dict[str, tuple[int, str] | None], upgraded: DatabaseConfig
+    before: dict[str, tuple[int, str, str | None] | None], upgraded: DatabaseConfig
 ) -> None:
     """The whole reason the per-device views are siblings rather than
     two more columns on these four: what selects from them is somebody
@@ -277,7 +357,7 @@ def test_the_four_views_survive_the_upgrade_unmoved(
 
 
 def test_what_an_analyst_left_standing_on_them_is_still_standing(
-    before: dict[str, tuple[int, str] | None], upgraded: DatabaseConfig
+    before: dict[str, tuple[int, str, str | None] | None], upgraded: DatabaseConfig
 ) -> None:
     """The consequence, in the form it would arrive in. A saved object
     pointing at one of the four is what `DROP VIEW ... CASCADE` takes
@@ -325,7 +405,7 @@ def test_the_upgrade_adds_the_four_siblings_and_they_answer(
 
 
 def test_the_downgrade_takes_what_it_added_and_leaves_what_it_found(
-    before: dict[str, tuple[int, str] | None], upgraded: DatabaseConfig
+    before: dict[str, tuple[int, str, str | None] | None], upgraded: DatabaseConfig
 ) -> None:
     """The inverse of an additive change. A view holds no rows, so
     dropping one loses nothing that was not derived from the tables
@@ -344,3 +424,101 @@ def test_the_downgrade_takes_what_it_added_and_leaves_what_it_found(
     assert _relations(upgraded, [view.name for view in BY_DEVICE_VIEWS]) == {
         view.name: None for view in BY_DEVICE_VIEWS
     }
+
+
+# --- the second baseline: what 1009 replaces ----------------------------
+
+
+def test_the_sibling_baseline_really_is_the_state_1009_replaces(
+    at_the_siblings: DatabaseConfig,
+    siblings_before: dict[str, tuple[int, str, str | None] | None],
+) -> None:
+    """The control the two claims below rest on, and the thing the 1006
+    baseline cannot be: at 1008 the four relations 1009 touches exist,
+    and they select the literal null the label shipped as. A fixture
+    that had quietly migrated to head would fail here rather than make
+    "replaced in place" true by comparing a view with itself."""
+    assert _version(at_the_siblings) == [SIBLING_BASELINE]
+    assert all(found is not None for found in siblings_before.values()), siblings_before
+    for name, found in siblings_before.items():
+        assert found is not None
+        assert SHIPPED_NULL in found[1], name
+        assert RECORDED_NAME not in found[1], name
+
+
+def test_the_four_siblings_are_replaced_where_they_stand(
+    siblings_before: dict[str, tuple[int, str, str | None] | None],
+    replaced: DatabaseConfig,
+) -> None:
+    """The claim `CREATE OR REPLACE` is chosen for, and the one a
+    definition check cannot make on its own.
+
+    A migration that dropped these four and created them again would
+    leave definitions matching the declarations exactly as well as these
+    do, and would have taken every dependent object with it. So what is
+    compared is the oid, which is what a dependent points at, against a
+    definition that must have changed and a comment that must have
+    changed with it: same relation, new answer.
+    """
+    assert _version(replaced) == [HEAD]
+
+    after = _relations(replaced, list(siblings_before))
+    for name, was in siblings_before.items():
+        now = after[name]
+        assert was is not None and now is not None, name
+        # The identity is the same relation, not a new one wearing the
+        # same name.
+        assert now[0] == was[0], name
+        # And the answer is a different answer: the label is read off
+        # the session now, and the comment says what a row is one row of.
+        assert now[1] != was[1], name
+        assert RECORDED_NAME in now[1], name
+        assert SHIPPED_NULL not in now[1], name
+        assert now[2] != was[2], name
+
+
+def test_what_an_analyst_left_standing_on_a_sibling_is_still_standing(
+    siblings_before: dict[str, tuple[int, str, str | None] | None],
+    replaced: DatabaseConfig,
+) -> None:
+    """The consequence, in the form it would arrive in. The planted view
+    reads the very column 1009 moves, so a migration that dropped its
+    target would have needed `CASCADE` and would have taken this
+    silently, and nothing else in this repository would have failed."""
+    _seed(replaced)
+
+    assert _answers(replaced, SIBLING_DEPENDENT) == [
+        (dt.date(2026, 5, 1), "aa:bb:cc:dd:ee:ff", SEEDED_NAME, 1)
+    ]
+
+
+def test_the_downgrade_restores_the_definitions_1008_shipped(
+    siblings_before: dict[str, tuple[int, str, str | None] | None],
+    replaced: DatabaseConfig,
+) -> None:
+    """The inverse of a replacement, which is a replacement back rather
+    than a drop: the same four relations, the definitions and the
+    comments 1008 shipped, and the label a literal null again.
+
+    Downgraded to 1008 rather than past it, because a run that carried
+    on to 1006 would drop these four and prove nothing about what 1009's
+    downgrade put back. The oids are in the comparison for the same
+    reason they are in the upgrade's: a downgrade that dropped and
+    recreated would restore the definition and lose the dependents.
+    """
+    engine = write_engine(replaced, CONVERSATIONS_CHAIN)
+    try:
+        with engine.connect() as connection:
+            command.downgrade(_alembic(connection), SIBLING_BASELINE)
+            connection.commit()
+    finally:
+        engine.dispose()
+
+    assert _version(replaced) == [SIBLING_BASELINE]
+    assert _relations(replaced, list(siblings_before)) == siblings_before
+
+    # And the relation still answers, with the label back to the null
+    # 1008 shipped rather than the name the session recorded.
+    _seed(replaced)
+    rows = _answers(replaced, "metrics_sessions_by_device_daily")
+    assert [row[2] for row in rows] == [None]
