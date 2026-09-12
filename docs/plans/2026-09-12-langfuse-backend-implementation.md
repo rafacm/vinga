@@ -584,3 +584,51 @@ has no attribute 'trace_of'`, and the synchronization case on
 - `uv run pytest tests/unit/test_command_spellings.py -q`: 52 passed
 - The five new cases watched red before the method existed, quoted
   under "Tests" above.
+
+### Fix round, PR #480
+
+External review of the PR diff came back mergeable after two P2s, both
+correct and both about the same hole: the five cases pinned what the
+retention ANSWERS and not where it is written or what the lock is for,
+so two mutations of the implementation passed the whole suite. One
+commit each, each new case watched red against the mutation the finding
+names.
+
+- **P2, the lock was pinned on the reader's side only** (`0d08845a`).
+  The existing case holds the map and watches a reader wait, which a
+  `_retain` with no lock passes untouched, and the forty-session
+  contention case never reached the sixty-four bound, so the compound
+  record-then-evict the lock is held across was driven by nothing. The
+  new case fills the map to exactly `RETAINED_TRACES`, holds the lock
+  and opens a session on a thread of its own: the open must not get
+  through, nothing of it may land while the lock is held, and once it
+  does the map has moved exactly once, newcomer in and oldest out.
+  Red against the lock taken out of `_retain` and nothing else:
+  `AssertionError: a session recorded its trace while the map was
+  held`, with the other four green, which is the finding restated by
+  the suite itself. Fifty consecutive runs of the three thread-driving
+  cases, zero failures, because one green run of a concurrency pin is
+  not evidence.
+- **P2, recording at the open was claimed and not tested**
+  (`d3154097`). Every positive case closed the session before asking,
+  so `_retain` moved to the close path would have passed while breaking
+  a stated deliverable: the open is what makes a session the process
+  never closes still answerable. The new case opens and asks
+  immediately, asserts a canonical id (thirty-two lowercase hex, not
+  the invalid one), then closes and asserts that same id is what the
+  exported span went out under. Red against the moved `_retain`:
+  `AssertionError: an open session has no trace to be named by`.
+
+Re-verified after the round, same Postgres:
+
+- `uv run ruff check .`: All checks passed!
+- `uv run mypy` (strict over `src/vinga_server/events`): Success: no
+  issues found in 5 source files
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 6918 passed, 19
+  skipped, the round's two new cases included
+- `uv run pytest tests/integration -q`: 311 passed
+- `python3 scripts/fold_changelog.py check .`: checked 1 fragments, 0
+  failures
+- `python3 scripts/check_doc_links.py .`: checked 232 files, 0 failures
+- `uv run pytest tests/unit/test_command_spellings.py -q`: 52 passed
+- The three thread-driving cases, fifty consecutive runs: zero failures.
