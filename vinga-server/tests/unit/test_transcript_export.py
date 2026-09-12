@@ -1174,3 +1174,59 @@ async def test_a_job_that_finishes_on_its_last_page_is_not_dropped(
 
     assert reasons(caplog) == []
     assert len(telemetry.turns) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_worker_that_will_not_start_is_a_dropped_job(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A process that cannot start a thread has larger problems than its
+    transcripts, and this module's job is to leave none of them on the
+    close path.
+
+    The hook runs inside the device session's own cleanup, which is the
+    one path in this server that always reaches its end: an exception
+    out of here would travel through the close of a conversation that
+    has nothing to do with it. So a start that fails is the closed set's
+    `dropped`, exactly as a full backlog is, and what the caller sees is
+    a session closing normally.
+    """
+    starting = threading.Thread.start
+
+    def refuse(self: threading.Thread) -> None:
+        if self.name == "vinga-transcript-export":
+            raise RuntimeError("can't start new thread")
+        starting(self)
+
+    monkeypatch.setattr(threading.Thread, "start", refuse)
+    exporter, telemetry, read = an_exporter({SESSION: [a_row(1)]})
+
+    exporter.session_closed(SESSION, settled())
+
+    assert reasons(caplog) == [TranscriptExportFailure.DROPPED]
+    assert read.calls == []
+    assert telemetry.pages == []
+
+
+@pytest.mark.asyncio
+async def test_a_shutdown_after_a_worker_that_never_started_is_harmless(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And the other end of it: the field is assigned only once a start
+    has succeeded, so a teardown behind a failed one has nothing to join
+    rather than a thread that was never running.
+    """
+    starting = threading.Thread.start
+
+    def refuse(self: threading.Thread) -> None:
+        if self.name == "vinga-transcript-export":
+            raise RuntimeError("can't start new thread")
+        starting(self)
+
+    monkeypatch.setattr(threading.Thread, "start", refuse)
+    exporter, _, _ = an_exporter({SESSION: [a_row(1)]})
+    exporter.session_closed(SESSION, settled())
+
+    await exporter.shutdown()
+
+    assert reasons(caplog) == [TranscriptExportFailure.DROPPED]
