@@ -940,7 +940,7 @@ the manifest with its own generator when stale.
   footprint: four tables and one fold on the module that owns folds,
   one retained fact beside the provider context.
 - [x] **[M3: cost accounting](2026-09-12-telemetry-overhaul-implementation.md#m3-cost-accounting)**
-  (PR TBD). `characters` declared on
+  (PR #510). `characters` declared on
   `SentenceSynthesized` and passed at the emit site;
   `gen_ai.usage.input_characters` on the TTS span and
   `gen_ai.usage.input_seconds` on the ASR span; Langfuse model
