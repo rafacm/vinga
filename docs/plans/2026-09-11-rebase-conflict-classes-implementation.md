@@ -481,3 +481,21 @@ quotes nothing, and the exit code stays 2.
   failures.
 - The full unit lane and the fold rehearsal were not rerun: the write
   path did not move.
+
+### The first live fold, verified
+
+PR #476 merged 2026-09-12 00:17 UTC, and the merge push ran the fold
+workflow's first live run:
+<https://github.com/rafacm/vinga/actions/runs/34661115801>, success in
+seconds. The bot commit (`fcfe8cf1`, `github-actions[bot]`) created
+`## 2026-09-12` at the head of `CHANGELOG.md` with the milestone's
+entry folded verbatim under it (42 lines in, 39 out), deleted
+`changelog.d/467-changelog-fragments.md`, and touched nothing else;
+`changelog.d/` holds only its README again, everything from
+`## 2026-09-11` down is byte-identical, and the census manifest did
+not move. That discharges the three properties only the live run
+could show: the bot push under `contents: write`, the
+GITHUB_TOKEN-triggers-nothing rule (the fold commit started no
+further runs), and the fold's own behavior against the real
+repository. The two pull-request steps had already run live on the
+PR's own docs runs, green four times.
