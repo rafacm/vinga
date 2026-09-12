@@ -296,6 +296,22 @@ rather than departures from its intent.
 - [ ] Anything on a board. No protocol, no firmware-visible behavior
       and no device path moves in this milestone.
 
+### The external review round
+
+Three findings, two P1, verdict not mergeable; the round is on the pull
+request with the resolutions as replies. What each one changed:
+
+- **The ASR usage was the utterance's length.** The first deviation
+  above, and the one commit of this milestone that changes a
+  measurement rather than a name.
+- **The live gate had not run.** It has now, by the maintainer, and it
+  is the section below. It made the fallback attribute necessary and
+  moved the ASR unit to milliseconds.
+- **The pricing procedure omitted the generation stage** while the
+  acceptance claim covered three. The gate answered it without a price:
+  the backend already knows well-known vendor models, so the section
+  says how to check and what an unknown model needs.
+
 ### The live gate
 
 Run 2026-09-12 against the Langfuse project this repository develops
@@ -510,9 +526,10 @@ Two, and both were forced by evidence the plan did not have.
 - [x] `uv run mypy` (the events package's strict lane, which this
       milestone's new field is inside): `Success: no issues found in 5
       source files`.
-- [x] `uv run pytest tests/unit -q`: `7179 passed, 19 skipped in
-      769.98s`, against the 7174 of M2's recorded run, which is this
-      milestone's five cases.
+- [x] `uv run pytest tests/unit -q`: `7188 passed, 19 skipped in
+      772.27s`, against the 7174 of M2's recorded run: five cases for
+      the milestone as first written and nine more for the review
+      round's three findings.
 - [x] `uv run pytest tests/unit/test_command_spellings.py -q`:
       `52 passed`, the manifest unchanged by this milestone's
       documentation.
@@ -523,7 +540,10 @@ Two, and both were forced by evidence the plan did not have.
       `checked 239 files, 0 failures`.
 - [x] `python3 scripts/fold_changelog.py check .`:
       `checked 2 fragments, 0 failures`.
-- [x] `uv run pytest tests/integration -q`: `341 passed in 483.49s`.
+- [x] `uv run pytest tests/integration -q`: `341 passed in 480.77s`,
+      unchanged in count, since nothing this milestone touches is
+      driven there: the lane's mock ear reports no usage, which is the
+      absence rule working.
 - [x] The M3 live gate, run by the maintainer and recorded in the
       section below with the observation JSON. It changed two things in
       this milestone's design, both of which are in the deviations
