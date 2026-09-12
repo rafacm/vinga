@@ -191,6 +191,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   unknown-key rule, which is what says the switch was renamed rather
   than quietly leaving the audio where it was.
 
+- **The local-only switch became a declared data boundary with a network tier.** `server.local_only: true` is now `server.data_boundary: host`, and `host | network | internet` is one ordered vocabulary for both sides of the rule: every provider type declares its reach, the operator declares the outermost reach session data may have, and a build whose reach exceeds the boundary refuses at startup. The `network` tier is the new one, and it exists so that a model server on your own LAN can be declared honestly instead of stretching `egress: false` to cover it. An absent `data_boundary` declares no boundary and refuses nothing on distance, which is exactly what a server without `local_only` did; a declared boundary at ANY value, `internet` included, refuses an entry whose type cannot know its own reach and whose operator declared none.
+- **The `egress` key on a provider or MCP entry became `reach`.** It takes `host`, `network` or `internet` instead of a boolean, on the types whose configuration decides (`openai_compatible`, and the `openai` ASR and TTS types). Stored entries are migrated on the first boot of this release: a provider's `egress: false` becomes `reach: host`, an MCP entry's becomes `reach: network`, `egress: true` becomes `reach: internet` on both, and an explicitly stored null is removed. **A configuration FILE is not migrated**: `server.local_only: true` must be changed to `server.data_boundary: host` before the new image starts, and an `egress` key on any entry must become `reach`. Both old spellings are refused at parse with a sentence naming the replacement; there are no aliases.
+
 ### Fixed
 
 - **An explicitly empty `--device` no longer reads as no filter** on
