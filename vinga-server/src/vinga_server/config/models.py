@@ -46,6 +46,12 @@ from pydantic_settings import (
 # agent's fragments are is this module's business, and what a prompt
 # does with them is that one's. It is a leaf import, over a module that
 # holds pure text functions and reads only `tools.names`.
+# The reach vocabulary, imported from the module that enforces it
+# rather than restated here: the boundary an operator declares and the
+# reach an entry declares are the same three values, and two enums
+# would be two structures required to agree. It is a leaf import, over
+# a module that weighs an enum and a dict (#493).
+from vinga_server.boundary import Reach
 from vinga_server.runtime.prompt import Fragment
 from vinga_server.tools import names
 
@@ -869,8 +875,9 @@ class TelemetryConfig(BaseModel):
             "different projects both halves succeed and the recording lands where "
             "the trace's reader will never look. "
             "Turning it on needs the `langfuse` extra, which both published images "
-            "carry, and the boot is refused if it is missing. Under `local_only` "
-            "it is refused too. The upload runs on a worker of its own after the "
+            "carry, and the boot is refused if it is missing. Under a "
+            "`data_boundary` narrower than `internet` it is refused too. "
+            "The upload runs on a worker of its own after the "
             "session closed, never on the audio path, and every failure is a "
             "warning event (`capture_upload_failed`) rather than a failed session. "
             "While a recording waits for its worker it is hard-linked into "
@@ -905,7 +912,8 @@ class TelemetryConfig(BaseModel):
             "`server.conversations` absent, off, or storing no text it is a no-op "
             "rather than a misconfiguration: there is nothing recorded to export, "
             "and the server says so once at startup. Capture is irrelevant to it "
-            "either way. Under `local_only` it is refused. "
+            "either way. Under a `data_boundary` narrower than `internet` it is "
+            "refused. "
             "It needs no extra and no second credential: the turns travel as OTLP "
             "spans over the same `OTEL_EXPORTER_OTLP_*` transport the traces "
             "already use. The export runs on a worker of its own after the "
@@ -1216,20 +1224,30 @@ class ServerConfig(BaseModel):
             "`enabled` off, means no exporter is built and nothing leaves this "
             "process, and absent is the default. Where the collector is and what "
             "reaches it are the standard `OTEL_EXPORTER_OTLP_*` environment "
-            "variables; this switch is the only part that is configuration. Under "
-            "`local_only` an enabled exporter is refused at boot, because sending "
-            "to a collector is egress like any other."
+            "variables; this switch is the only part that is configuration. An "
+            "exporter reaches the internet as far as this server can tell, since "
+            "nothing here knows where the collector is, so an enabled exporter is "
+            "refused at boot under any `data_boundary` narrower than `internet`."
         ),
     )
 
-    local_only: bool = Field(
-        default=False,
+    data_boundary: Reach | None = Field(
+        default=None,
         description=(
-            "Refuse to boot any provider that sends session data off this host. "
-            "Running without a cloud dependency is otherwise a documentation "
-            "property of a carefully chosen configuration; this makes it a checked "
-            "one. Boot-time, never runtime: a local_only server that starts is a "
-            "local_only server (#30)."
+            "The outermost reach session data may have on this server: `host` "
+            "keeps it on this machine, `network` lets it reach the operator's own "
+            "network, `internet` permits anything. Anything that can carry session "
+            "data declares its own reach, and a reach exceeding this refuses to "
+            "boot. Absent, the default, declares no boundary and refuses nothing "
+            "on distance. Declared at any value, including `internet`, an entry "
+            "whose type cannot know its own reach and whose operator declared none "
+            "refuses too, so `internet` means: state every entry's reach, even "
+            "though nothing is forbidden. Running without a cloud dependency is "
+            "otherwise a documentation property of a carefully chosen "
+            "configuration; this makes it a checked one. Declarations are enforced "
+            "and behaviour is not verified: this is not a network sandbox. "
+            "Boot-time, never runtime: a server that starts inside its boundary "
+            "stays inside it (#30, #493)."
         ),
     )
 
@@ -2226,6 +2244,28 @@ def is_mcp_secret_key(name: str) -> bool:
     return mcp_secret_fragment(name) is not None
 
 
+# What a provider entry written for a pre-#493 release says, and what it
+# is told. The key is refused at the `ProviderConfig` boundary every
+# provider type passes through, rather than in the options layer: the
+# reserved set there is OpenAI chat request fields enforced only by
+# `OpenaiCompatibleOptions`, which no other type passes, so a row there
+# would miss most providers and document the key falsely.
+#
+# `extra="allow"` is what makes the refusal load bearing rather than
+# cosmetic. Without it a stale `egress` would flow into `model_extra`,
+# become a provider option and reach the engine as a stray keyword or
+# vanish into a builder that ignores what it does not know, which is
+# worse than either spelling: the operator would believe a declaration
+# nothing enforces. Named in the sentence because it is a name this
+# repository chose and then withdrew; what it held is not.
+REPLACED_PROVIDER_KEY = "egress"
+REPLACED_PROVIDER_KEY_REFUSED = (
+    '"egress" was replaced by "reach", which takes host, network or internet; '
+    "remove the old key and declare the new one on the entries whose type cannot "
+    "know its own. What it held is not quoted back"
+)
+
+
 class ProviderConfig(BaseModel):
     """One provider entry. Options beyond `type` are passed through to the
     provider implementation, so extra keys are allowed here."""
@@ -2250,20 +2290,23 @@ class ProviderConfig(BaseModel):
         ),
     )
 
-    # The operator's own egress assertion, honoured only for types whose
+    # The operator's own reach assertion, honoured only for types whose
     # class-level marking is None because their configuration decides
-    # (openai_compatible, where base_url can name localhost or a cloud
-    # vendor). Declaring it on a type that knows its own egress is
-    # rejected when the provider is built.
-    egress: bool | None = Field(
+    # (openai_compatible, where base_url can name localhost, a machine on
+    # the LAN or a cloud vendor). Declaring it on a type that knows its
+    # own reach is rejected when the provider is built.
+    reach: Reach | None = Field(
         default=None,
         description=(
-            "Whether this entry sends session data off the host, asserted by the "
+            "How far session data given to this entry travels, asserted by the "
             "operator for the types whose configuration decides it rather than "
             "their name (openai_compatible, and the openai ASR and TTS types, whose "
-            "base_url may be local or a vendor). Under server.local_only such an "
-            "entry must declare egress: false; a type that knows its own egress "
-            "rejects the key."
+            "base_url may name this machine, a server on your network or a vendor). "
+            "`host` is an endpoint on this machine, `network` one that stays on "
+            "your own network, `internet` anything else. Under a "
+            "`server.data_boundary` such an entry must declare it, and a reach "
+            "exceeding the boundary refuses to boot; a type that knows its own "
+            "reach rejects the key."
         ),
     )
 
@@ -2275,6 +2318,18 @@ class ProviderConfig(BaseModel):
         check_no_inline_secrets("api_key_env", self.api_key_env, declared=True)
         for key, value in (self.model_extra or {}).items():
             check_no_inline_secrets(key, value)
+        return self
+
+    @model_validator(mode="after")
+    def _reject_the_replaced_key(self) -> "ProviderConfig":
+        # Before `model_extra` becomes `options`, which is a property
+        # nothing can read until this model exists. The pointer is the
+        # fragment rather than the key, the rule `safe_location` states:
+        # an undeclared key is a name the caller wrote, and this one is
+        # named in the sentence because it is a name this repository
+        # chose and then withdrew.
+        if REPLACED_PROVIDER_KEY in (self.model_extra or {}):
+            raise FieldProblemsError([FieldProblem("", REPLACED_PROVIDER_KEY_REFUSED)])
         return self
 
     @property
@@ -2410,20 +2465,23 @@ class McpServerConfig(BaseModel):
         ),
     )
 
-    # Whether this server sends session data off the local network. Tool
-    # arguments carry conversation-derived data, and neither transport
-    # can tell on its own: a stdio command may proxy anywhere, a url may
-    # name localhost. Under server.local_only every referenced entry
-    # must therefore declare egress: false, the operator asserting that
-    # whatever its command or URL reaches stays local (#30).
-    egress: bool | None = Field(
+    # How far session data given to this server travels. Tool arguments
+    # carry conversation-derived data, and neither transport can tell on
+    # its own: a stdio command may proxy anywhere, a url may name
+    # localhost. Under a declared server.data_boundary every referenced
+    # entry must therefore declare its reach, the operator asserting
+    # where whatever its command or URL reaches stays (#30, #493).
+    reach: Reach | None = Field(
         default=None,
         description=(
-            "Whether this server sends session data off the local network. Tool "
+            "How far session data given to this server travels: `host` for a "
+            "command or URL that stays on this machine, `network` for one that "
+            "stays on your own network, `internet` for anything else. Tool "
             "arguments carry conversation-derived data and neither transport can "
             "tell on its own, since a stdio command may proxy anywhere and a url "
-            "may name localhost, so under server.local_only every referenced entry "
-            "must declare it."
+            "may name localhost, so under a declared server.data_boundary every "
+            "referenced entry must declare it, and a reach exceeding the boundary "
+            "refuses to boot."
         ),
     )
 

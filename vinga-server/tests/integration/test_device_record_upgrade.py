@@ -45,7 +45,7 @@ from vinga_server.db import DOMAIN_CHAIN, open_database, read_engine, write_engi
 # at, and the whole of what this release upgrades from.
 BASELINE = "3002_drop_max_tokens_secrets"
 
-HEAD = "3003_device_record"
+HEAD = "3004_reach_replaces_egress"
 
 # Three boards of one fleet, sharing a vendor OUI. Sharing it is the
 # point: a backfill that named a device after the tail of its MAC would

@@ -253,17 +253,23 @@ server:
     # per turn and is bounded by max_session_s as before.
     idle_timeout_s: 120
 
-  # Refuse to boot anything that sends session data off this host.
-  # With this on, a provider entry of a cloud type (anthropic) fails at
-  # startup with an error naming the stage and provider, an
-  # openai_compatible entry is refused unless it declares egress: false,
-  # and every referenced MCP server needs the same declaration (both are
-  # documented in docs/reference/domain-config.md). Running fully local
-  # becomes a checked property of the server rather than a
-  # documentation property of a carefully chosen configuration: a
-  # local_only server that starts is a local_only server. Off by
-  # default.
-  # local_only: false
+  # The outermost reach session data may have on this server: host
+  # keeps it on this machine, network lets it reach your own network,
+  # internet permits anything. Absent, the default, declares no
+  # boundary.
+  # With one declared, everything that can carry session data has to
+  # fit inside it: a provider entry of a cloud type (anthropic) reaches
+  # the internet and fails at startup under host or network with an
+  # error naming the stage and provider, an openai_compatible entry is
+  # refused unless it declares a reach of its own, and every referenced
+  # MCP server needs the same declaration (both are documented in
+  # docs/reference/domain-config.md). Declaring internet forbids
+  # nothing and still requires every entry to say where it goes.
+  # Running fully local becomes a checked property of the server rather
+  # than a documentation property of a carefully chosen configuration.
+  # Declarations are enforced, behaviour is not verified: this is not a
+  # network sandbox.
+  # data_boundary: host
 
   # RECORDS ROOM AUDIO TO DISK when enabled. Off here, and off by
   # default: nothing below does anything until `enabled` says so.
@@ -375,8 +381,9 @@ server:
   # Turning it on needs the OpenTelemetry packages, which both published
   # images carry and a checkout gets from `uv sync`. A server told to
   # export without them refuses at startup and says which extra to
-  # install. Under `local_only` above it is refused too: sending to a
-  # collector is egress like any other.
+  # install. Under a `data_boundary` above narrower than internet it is
+  # refused too: nothing here knows where the collector is, so an
+  # exporter reaches the internet as far as this server can tell.
   # telemetry:
   #   enabled: false
   #   # ATTACHES A CLOSED SESSION'S RECORDING to the trace it was
@@ -406,7 +413,8 @@ server:
   #   # will never look.
   #   #
   #   # It needs the `langfuse` extra, which both published images
-  #   # carry, and is refused at boot without it and under `local_only`.
+  #   # carry, and is refused at boot without it and under a
+  #   # `data_boundary` narrower than internet.
   #   # The upload runs on a worker of its own after the session closed,
   #   # never on the audio path, and a failure is a warning rather than
   #   # a failed session. A recording waiting for that worker is
@@ -436,7 +444,8 @@ server:
   #   # no-op rather than a misconfiguration, said once at startup.
   #   # `capture` is irrelevant to it either way. With `enabled` above
   #   # off it is refused at boot, since an observation is written onto
-  #   # a trace, and under `local_only` it is refused too.
+  #   # a trace, and under a `data_boundary` narrower than internet it
+  #   # is refused too.
   #   #
   #   # It needs no extra and no second credential: the turns travel as
   #   # OTLP spans over the same OTEL_EXPORTER_OTLP_* transport the
