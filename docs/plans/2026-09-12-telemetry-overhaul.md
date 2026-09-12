@@ -413,9 +413,24 @@ assert one by one:
 | `_after_the_close` | nothing: `_event_attributes` off the payload |
 | `_transcript_spans` | nothing: it builds its attributes by hand |
 
-So the name joins the retained identity rather than any one table, and
-the post-close writers read it from the pinned context they already
-hold. That is the locality answer as well as the correctness one: a
+The three with nothing in the right column are the three that run after
+the close, and they share one source: the retained `_Exported` record.
+It carries a trace id and the session span's two numbers today, and M2
+adds the name to it.
+
+So the name joins the live session's retained identity, which is what
+the stage spans and the new tool span read, AND the retained `_Exported`
+record, which is what the three post-close writers read. Both, and in
+M2 rather than in M4a, because the two are different objects and the
+post-close one holds nothing of the sort today: `_SessionTrace.identity`
+lives only as long as the session, and `_Exported` carries a trace id
+and a parent's two numbers and no attributes at all. A plan that said
+"the pinned context they already hold" was describing an object that
+does not hold it. `_Exported` therefore gains the sanitized optional
+name at session open, which keeps M2 independent of M4a: M4a later
+changes how that record is ADDRESSED and not what it carries.
+
+That is the locality answer as well as the correctness one: a
 post-close writer that went back to the configuration for a board's
 name would be reading a value that may have been renamed since the
 session ran, and the store's own session row deliberately keeps the
@@ -886,9 +901,9 @@ the manifest with its own generator when stale.
   record keeps its tables. Documentation only. Design footprint: no
   module moves. Documentation footprint as listed above.
 - [ ] **M2: trace completeness**. `vinga.device.name` on every span in
-  the enumeration above, carried by the retained identity and read from
-  the pinned context by the three post-close writers that build their
-  attributes by hand; a `tool_call` fold building a child span of the
+  the enumeration above, carried by the live session's retained identity
+  for the stage spans and added to the retained `_Exported` record for
+  the three post-close writers, which hold no attributes today; a `tool_call` fold building a child span of the
   turn span with `gen_ai.operation.name`, replacing the span event;
   prompt sources retained per agent and stamped flattened on every turn
   span with the total beside them; an
@@ -1193,3 +1208,30 @@ Findings condensed but faithful; resolutions appended per amendment.
     what it costs: a lost export is a missing observation and never a
     lost conversation, since what was said is in the store. M1 records
     both.
+
+## Delta re-review round
+
+External review: codex CLI 0.154.0, model gpt-5.6-terra, read-only
+sandbox, 2026-09-12, runtime 2m41s, reviewing commit d6cf756c against
+the pre-amendment 58ddecef. Asked only whether each resolution closes
+its finding in the plan's BODY and whether the amendments introduced
+anything new. One finding; verdict **ready after the amendment**.
+
+1. **P2: M2's post-close device-name path has no retained value.** The
+   amendment says all three post-close writers read the name "from the
+   pinned context they already hold", but `_SessionTrace.identity` is
+   live-session state and `_Exported`, the retained context, holds a
+   trace id and the session span's two numbers and no attributes at
+   all. M2 also precedes M4a, so the body does not actually say how the
+   name reaches `reference_media`, `_after_the_close` or
+   `_transcript_spans`. Say that M2 adds the sanitized optional name to
+   `_Exported` at session open and that each post-close writer reads it
+   from there; M4a can then change the addressing without M2 depending
+   on a later milestone.
+
+   *Resolution.* Adopted, and confirmed against the code: `_Exported`
+   is `trace`, `trace_id` and `span_id`, and `_SessionTrace.identity`
+   is the live object's. The plan now says the name joins both records,
+   names `_Exported` as the source the three post-close writers read,
+   and says explicitly that M4a changes how that record is addressed
+   rather than what it carries, so M2 stands alone.
