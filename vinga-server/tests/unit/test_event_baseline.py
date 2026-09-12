@@ -120,10 +120,13 @@ def test_every_driver_names_a_path_of_its_own() -> None:
     inside its own ASR said nothing about the ASR at all. Ninety-nine
     again since the barge-in ladder stopped dropping an interruption for
     arriving at the playback onset (#80), which took the refractory
-    window's own path out of the gate with it."""
+    window's own path out of the gate with it. And a hundred and two
+    since a closed session's recording can be sent to the telemetry
+    backend (#67): the attachment that landed, the one that did not, and
+    the job a restart found still staged."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 99
+    assert len(set(claimed)) == len(claimed) == 102
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -864,6 +867,18 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     ),
     "vinga_server.capture:CaptureStore.open #4": (
         ("CaptureStarted", ("event", "path", "session")),
+    ),
+    "vinga_server.capture:CaptureStore._abandoned #1": (
+        ("CaptureUploadAbandoned", ("event", "reason", "session")),
+    ),
+    "vinga_server.capture_upload:CaptureUpload._deliver #1": (
+        (
+            "CaptureUploaded",
+            ("audio_bytes", "elapsed_ms", "event", "manifest_bytes", "session"),
+        ),
+    ),
+    "vinga_server.capture_upload:CaptureUpload._failed #1": (
+        ("CaptureUploadFailed", ("event", "reason", "session")),
     ),
     "vinga_server.config.api:_SanitizedErrors.__call__ #1": (
         ("ApiError", ("event",)),

@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 73 events in 101 variants. What
+This document is that surface written down: 75 events in 104 variants. What
 was said in a conversation is in the conversation store instead, keyed by the
 same `session` ([its reference](conversations-schema.md)).
 
@@ -67,13 +67,14 @@ keeps validation a cost paid per decision rather than per frame.
 ## The channels
 
 The channel is the scope. One session channel, `vinga_server.session`, carries
-everything a conversation says about itself; the 14 server channels are each a
+everything a conversation says about itself; the 15 server channels are each a
 subsystem's own module name. An event declared on one channel and emitted from
 another is a violation even when its fields are lawful.
 
 - `vinga_server.session`
 - `vinga_server.app`
 - `vinga_server.capture`
+- `vinga_server.capture_upload`
 - `vinga_server.config.api`
 - `vinga_server.conversations.store`
 - `vinga_server.device.bindings`
@@ -269,6 +270,8 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `capture_failed` | `vinga_server.capture` | WARNING | 1 |
 | `capture_pruned` | `vinga_server.capture` | INFO | 1 |
 | `capture_over_budget` | `vinga_server.capture` | WARNING | 1 |
+| `capture_uploaded` | `vinga_server.capture_upload` | INFO | 1 |
+| `capture_upload_failed` | `vinga_server.capture`, `vinga_server.capture_upload` | WARNING | 2 |
 | `capture_enabled` | `vinga_server.app` | WARNING | 1 |
 | `capture_disabled` | `vinga_server.app` | INFO | 1 |
 | `drain_started` | `vinga_server.registry` | INFO | 1 |
@@ -2486,6 +2489,76 @@ capture: %.0f MB on disk is over the %.0f MB budget and nothing more can be prun
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 | `total_mb` | `COUNT` | yes | no |  |  |
+
+### `capture_uploaded`
+
+A closed session's recording is beside its trace in the telemetry backend.
+Sizes and elapsed time, and deliberately no URL and no identifier the far side
+minted: what a reader needs is that it happened, how big it was and how long
+it took, and the trace it is beside is the one already named by the session.
+
+#### Variant 1: `vinga_server.capture_upload` at INFO
+
+```text
+session %s: capture attached to its trace, %.1f MB in %d ms
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `megabytes` (`FLOAT`) | no |  |  |
+| 3 | `elapsed_ms` (`INT`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `audio_bytes` | `COUNT` | yes | no |  | The WAV as it left, exactly, which is what a reader compares against what the backend holds. |
+| `manifest_bytes` | `COUNT` | yes | no |  | And the manifest beside it. |
+| `elapsed_ms` | `INT` | yes | no |  | How long the whole attachment took, measured off the audio path: this happens on a worker of its own after the session closed, so it is a fact about the backend and the link to it rather than about any reply's latency. |
+
+### `capture_upload_failed`
+
+A recording is not beside its trace, and why, from a closed set of eight
+reasons. The field test's whole trail: a capture that silently failed to
+attach would leave a reader with a trace, no audio, and no way to learn that
+any was meant to be there. Two variants because two subsystems answer for it:
+seven reasons are an attempt's own, said by the uploader, and `abandoned` is
+what a restart finds staged and removes, said by the recording surface that
+opens the directory whether or not an uploader was built at all.
+
+#### Variant 1: `vinga_server.capture_upload` at WARNING
+
+```text
+session %s: capture not attached to its trace (%s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `reason` (`TOKEN`) | no | one of: `dropped`, `incomplete`, `no_trace`, `refused`, `staging_lost`, `too_large`, `unreachable` |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `dropped`, `incomplete`, `no_trace`, `refused`, `staging_lost`, `too_large`, `unreachable` | Which of the ways an attempt ends badly this was. Never the far side's words: what an operator acts on is the class of the failure, and a response body near a credential is not this server's to write down. |
+
+#### Variant 2: `vinga_server.capture` at WARNING
+
+```text
+session %s: capture staged for upload was left by a previous run and has been removed
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `abandoned` |  |
 
 ### `capture_enabled`
 

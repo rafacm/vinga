@@ -62,9 +62,11 @@ from vinga_server.events.values import (
     AgentNames,
     AlsoBoundTo,
     ArgKind,
+    AttemptedUpload,
     AuthRejection,
     BoardName,
     CaptureDeclined,
+    CaptureUploadFailure,
     CaptureWrite,
     CheckInBody,
     ClassName,
@@ -143,6 +145,7 @@ SESSION_CHANNEL = "vinga_server.session"
 
 APP_CHANNEL = "vinga_server.app"
 CAPTURE_CHANNEL = "vinga_server.capture"
+CAPTURE_UPLOAD_CHANNEL = "vinga_server.capture_upload"
 CONFIG_API_CHANNEL = "vinga_server.config.api"
 CONVERSATIONS_CHANNEL = "vinga_server.conversations.store"
 BINDINGS_CHANNEL = "vinga_server.device.bindings"
@@ -159,6 +162,7 @@ WS_CHANNEL = "vinga_server.ws"
 SERVER_CHANNELS: tuple[str, ...] = (
     APP_CHANNEL,
     CAPTURE_CHANNEL,
+    CAPTURE_UPLOAD_CHANNEL,
     CONFIG_API_CHANNEL,
     CONVERSATIONS_CHANNEL,
     BINDINGS_CHANNEL,
@@ -3577,6 +3581,92 @@ class CaptureOverBudget(Variant):
     budget_mb: Real = value(carried=False)
 
 
+# --- capture_upload.py: the recording's trip to a trace ----------------
+#
+# The vocabulary of the attachment surface (#67): a closed session's WAV
+# and manifest going out to the telemetry backend the traces already go
+# to, behind a flag of its own. Two events, and between them the whole
+# ledger, because a recording that silently failed to attach would
+# recreate the gap the attachment exists to close: a trace whose reader
+# has no audio and no way to learn that any was meant to be there.
+#
+# What neither of them may carry is as much of the declaration as what
+# they do. No URL: the upload's destination is transport configuration
+# and a presigned one is a credential in a query string. No identifier
+# from the far side: an id minted over there is a fact about a store
+# this server does not own, and reading one back into the retained
+# surface is how a credential-shaped string arrives. No message from an
+# exception: the reason is chosen where the failure is classified, from
+# the closed set, like every other failure vocabulary here.
+
+
+@dataclass(frozen=True)
+class CaptureUploaded(Variant):
+    """A session's recording is beside its trace."""
+
+    CHANNEL: ClassVar[str] = CAPTURE_UPLOAD_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "session %s: capture attached to its trace, %.1f MB in %d ms"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "megabytes", "elapsed_ms")
+
+    session: SessionId = value()
+    audio_bytes: Count = value(
+        note="The WAV as it left, exactly, which is what a reader compares "
+        "against what the backend holds."
+    )
+    manifest_bytes: Count = value(note="And the manifest beside it.")
+    elapsed_ms: Whole = value(
+        note=(
+            "How long the whole attachment took, measured off the audio "
+            "path: this happens on a worker of its own after the session "
+            "closed, so it is a fact about the backend and the link to it "
+            "rather than about any reply's latency."
+        )
+    )
+    # The pair as one number, for the sentence only: a reader skimming a
+    # log wants the order of magnitude, and the exact halves are the
+    # payload's.
+    megabytes: Real = value(carried=False)
+
+
+@dataclass(frozen=True)
+class CaptureUploadFailed(Variant):
+    """A session's recording did not reach its trace."""
+
+    CHANNEL: ClassVar[str] = CAPTURE_UPLOAD_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = "session %s: capture not attached to its trace (%s)"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "reason")
+
+    session: SessionId = value()
+    reason: AttemptedUpload = value(
+        note=(
+            "Which of the ways an attempt ends badly this was. Never the "
+            "far side's words: what an operator acts on is the class of "
+            "the failure, and a response body near a credential is not "
+            "this server's to write down."
+        )
+    )
+
+
+@dataclass(frozen=True)
+class CaptureUploadAbandoned(Variant):
+    """A recording staged for upload was found by a restart."""
+
+    CHANNEL: ClassVar[str] = CAPTURE_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "session %s: capture staged for upload was left by a previous run "
+        "and has been removed"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session",)
+
+    session: SessionId = value()
+    reason: CaptureUploadFailure = value(fixed=CaptureUploadFailure.ABANDONED)
+
+
 # --- app.py: what the composition root says about capture -------------
 
 
@@ -3982,6 +4072,34 @@ CAPTURE_OVER_BUDGET = declare(
     variants=(CaptureOverBudget,),
 )
 
+CAPTURE_UPLOADED = declare(
+    "capture_uploaded",
+    note=(
+        "A closed session's recording is beside its trace in the "
+        "telemetry backend. Sizes and elapsed time, and deliberately no "
+        "URL and no identifier the far side minted: what a reader needs "
+        "is that it happened, how big it was and how long it took, and "
+        "the trace it is beside is the one already named by the session."
+    ),
+    variants=(CaptureUploaded,),
+)
+
+CAPTURE_UPLOAD_FAILED = declare(
+    "capture_upload_failed",
+    note=(
+        "A recording is not beside its trace, and why, from a closed set "
+        "of eight reasons. The field test's whole trail: a capture that "
+        "silently failed to attach would leave a reader with a trace, no "
+        "audio, and no way to learn that any was meant to be there. Two "
+        "variants because two subsystems answer for it: seven reasons are "
+        "an attempt's own, said by the uploader, and `abandoned` is what a "
+        "restart finds staged and removes, said by the recording surface "
+        "that opens the directory whether or not an uploader was built at "
+        "all."
+    ),
+    variants=(CaptureUploadFailed, CaptureUploadAbandoned),
+)
+
 CAPTURE_ENABLED = declare(
     "capture_enabled",
     note=(
@@ -4077,6 +4195,9 @@ __all__ = [
     "CAPTURE_OVER_BUDGET",
     "CAPTURE_PRUNED",
     "CAPTURE_STARTED",
+    "CAPTURE_UPLOADED",
+    "CAPTURE_UPLOAD_CHANNEL",
+    "CAPTURE_UPLOAD_FAILED",
     "CHANNELS",
     "CONFIG_API_CHANNEL",
     "CONVERSATIONS_CHANNEL",
@@ -4095,6 +4216,9 @@ __all__ = [
     "CaptureOverBudget",
     "CapturePruned",
     "CaptureStarted",
+    "CaptureUploadAbandoned",
+    "CaptureUploadFailed",
+    "CaptureUploaded",
     "CatalogError",
     "CatalogState",
     "ConversationResumed",

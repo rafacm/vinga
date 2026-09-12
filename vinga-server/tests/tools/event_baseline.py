@@ -155,6 +155,8 @@ from tests.support.tools_mcp import reload_config as mcp_config
 from tests.support.tools_mcp import running as mcp_running
 from tests.support.tools_mcp import started as mcp_started
 from tests.support.tools_mcp import stdio_entry as mcp_entry
+from tests.support.uploads import exporting as exporting_traces
+from tests.support.uploads import fake_sdk
 from tests.support.wire import (
     connect,
     device_headers,
@@ -169,6 +171,7 @@ from vinga_server import onboarding
 from vinga_server.app import create_app
 from vinga_server.build_info import CONTAINER_ENV
 from vinga_server.capture import CaptureStore, SessionCapture
+from vinga_server.capture_upload import CaptureUpload
 from vinga_server.config import Config
 from vinga_server.config.api import build_api
 from vinga_server.config.loader import ConfigError, StorageError
@@ -1520,6 +1523,77 @@ def drive_capture_started(directory: Path) -> None:
     capture.close()
 
 
+# --- the capture uploader ---------------------------------------------
+#
+# The far side is faked at the seam `capture_upload.Sdk` exists for, and
+# nothing else is: the staging, the queue, the worker, the retries and
+# the classification are the real ones, and what each driver reaches is
+# the real emit site. A trace id comes from a stand-in exporter for the
+# same reason, since what the uploader asks telemetry is one string.
+
+UPLOAD_TRACE = "0af7651916cd43dd8448eb211c80319c"
+
+
+def uploader(directory: Path, sdk: Any, traces: dict[str, str]) -> CaptureUpload:
+    """A store with an uploader behind it, over a throwaway directory."""
+    return CaptureUpload(
+        directory / "captures",
+        sdk=sdk,
+        telemetry=exporting_traces(traces),
+        backlog=4,
+        retries=0,
+        shutdown_timeout_s=10.0,
+    )
+
+
+def a_closed_capture(directory: Path, store: CaptureStore, session: str) -> None:
+    """One recording, made and closed, so its pair is final and staged."""
+    opened = time.monotonic()
+    capture = store.open(session, opened, CAPTURE_MANIFEST)
+    assert capture is not None
+    capture.microphone(tone(100), opened)
+    capture.close()
+
+
+async def drive_capture_uploaded(directory: Path) -> None:
+    """A staged pair that reaches the far side, which answers that it
+    already holds the bytes: the content-addressed case, so no presigned
+    PUT is needed and the attachment lands."""
+    sdk, _ = fake_sdk()
+    uploads = uploader(directory, sdk, {"s1": UPLOAD_TRACE})
+    store = capture_store(directory, uploads=uploads)
+    with exported("LANGFUSE_HOST", "http://localhost:53010"):
+        a_closed_capture(directory, store, "s1")
+        uploads.session_closed("s1")
+        await uploads.shutdown()
+
+
+async def drive_capture_upload_failed(directory: Path) -> None:
+    """A session the exporter never saw, so there is no trace to name
+    the attachment by and the ledger says so."""
+    sdk, _ = fake_sdk()
+    uploads = uploader(directory, sdk, {})
+    store = capture_store(directory, uploads=uploads)
+    a_closed_capture(directory, store, "s1")
+    uploads.session_closed("s1")
+    await uploads.shutdown()
+
+
+def drive_capture_upload_abandoned(directory: Path) -> None:
+    """A job a previous run left staged, found by this one's startup."""
+    sdk, _ = fake_sdk()
+    uploads = uploader(directory, sdk, {"s1": UPLOAD_TRACE})
+    store = capture_store(directory, uploads=uploads)
+    a_closed_capture(directory, store, "s1")
+    # White-box: the sweep skips a job younger than the process, which
+    # is what keeps sequential lifespans from adopting each other's work,
+    # and nothing public can make a directory older than this process.
+    staged = store.directory / "upload-staging" / "s1"
+    assert staged.is_dir()
+    os.utime(staged, (0, 0))
+    store.startup()
+
+
 def api_raising(directory: Path, exc: Exception) -> FastAPI:
     api = build_api(API_TOKEN, DatabaseConfig())
 
@@ -1974,6 +2048,7 @@ async def drive_provider_reaches_loopback(_: Path) -> None:
 
 APP = "vinga_server.app"
 CAPTURE = "vinga_server.capture"
+CAPTURE_UPLOAD = "vinga_server.capture_upload"
 CONFIG_API = "vinga_server.config.api"
 BINDINGS = "vinga_server.device.bindings"
 FILLER_BUILD = "vinga_server.filler"
@@ -2009,6 +2084,21 @@ SERVER_DRIVERS: tuple[Driver, ...] = (
         "capture_declined",
     ),
     Driver((CAPTURE, "CaptureStore.open", 4), drive_capture_started, "capture_started"),
+    Driver(
+        (CAPTURE, "CaptureStore._abandoned", 1),
+        drive_capture_upload_abandoned,
+        "capture_upload_failed",
+    ),
+    Driver(
+        (CAPTURE_UPLOAD, "CaptureUpload._deliver", 1),
+        drive_capture_uploaded,
+        "capture_uploaded",
+    ),
+    Driver(
+        (CAPTURE_UPLOAD, "CaptureUpload._failed", 1),
+        drive_capture_upload_failed,
+        "capture_upload_failed",
+    ),
     Driver((CONFIG_API, "_SanitizedErrors.__call__", 1), drive_api_error, "api_error"),
     Driver((CONFIG_API, "_refusal.handler", 1), drive_api_storage_error, "api_storage_error"),
     Driver(
