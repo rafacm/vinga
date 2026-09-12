@@ -852,6 +852,34 @@ def _as_attribute(held: Any, rule: _Rule) -> Any | None:
 # payload field may become on a span, and the stage spans are inside it
 # rather than beside it.
 
+# What a stage CONSUMED, in the unit it is actually billed in.
+#
+# The GenAI conventions name token counts and nothing else, so there is
+# no convention-blessed spelling for seconds of audio transcribed or
+# characters synthesized. Calling either one tokens would be false in
+# the way this module refuses to be false elsewhere, so the namespace
+# and the direction word are the conventions' and the unit is stated in
+# the name rather than implied.
+#
+# BOTH are input, read from the model's point of view exactly as the
+# conventions read the token halves: an ear is given the audio and
+# produces a transcript, a voice is given the sentence and produces the
+# audio. The direction is load-bearing rather than cosmetic. A backend
+# model definition prices the keys `input`, `output` and `total` and
+# carries the unit beside them, so a number under any other key has no
+# rate against it and the stage stays unpriceable however carefully it
+# was measured.
+#
+# Neither is a second measurement. The ASR seconds are the same
+# `duration_s` the stage already reports under its own vinga name, read
+# by a second vocabulary the way `SESSION_ID_NAMES` is read by two, and
+# the TTS characters are the count the catalog now declares on the
+# event. An outcome that carries no measurement contributes no
+# attribute, which is `_attributes`' own rule and the difference
+# between "nothing was measured" and "it cost nothing".
+ASR_USAGE = "gen_ai.usage.input_seconds"
+TTS_USAGE = "gen_ai.usage.input_characters"
+
 # The ASR span, whose four ends carry four overlapping field sets. One
 # table for all of them, because a field a given outcome does not carry
 # contributes nothing: `language` is only on `heard`, `error` only on the
@@ -873,7 +901,7 @@ def _as_attribute(held: Any, rule: _Rule) -> Any | None:
 ASR_ATTRIBUTES = {
     "agent": "vinga.agent",
     "conversation": "vinga.conversation.id",
-    "duration_s": "vinga.asr.duration_s",
+    "duration_s": ("vinga.asr.duration_s", ASR_USAGE),
     "language": "vinga.asr.language",
     "language_confidence": "vinga.asr.language_confidence",
     "error": "vinga.asr.error",
@@ -979,8 +1007,14 @@ TOOL_ATTRIBUTES = {
 # what makes a voice comparable across a fleet is the pair of its
 # latency and its identity, and a span that carried only the first is
 # the "TTS latency by provider" question left unanswerable.
+#
+# `characters` is the sentence's SIZE and is exported under the usage
+# name only: unlike the ASR seconds it has no vinga spelling of its own
+# to keep, because the catalog declared it for exactly this and nothing
+# read it before.
 TTS_ATTRIBUTES = {
     "index": "vinga.tts.index",
+    "characters": TTS_USAGE,
     "first_chunk_ms": "vinga.tts.first_chunk_ms",
     "agent": "vinga.agent",
     "conversation": "vinga.conversation.id",
