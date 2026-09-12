@@ -644,7 +644,7 @@ promise-side half this completes, and the amendment cites it.
   footprint: renames on existing modules, no new seam. Documentation
   footprint: the pages above, each through its owner; generated
   reference only through its generator.
-- [x] **[M2: the flag, the exporter, the vocabulary, the record](2026-09-12-transcript-export-implementation.md#m2-the-flag-the-exporter-the-vocabulary-the-record)** (PR TBD).
+- [x] **[M2: the flag, the exporter, the vocabulary, the record](2026-09-12-transcript-export-implementation.md#m2-the-flag-the-exporter-the-vocabulary-the-record)** (PR #498).
   The rendering-gate probe first, its result recorded;
   `export_transcripts` with its prose and refusal order;
   `transcript_export.py`; `threads.transcript_rows` and
