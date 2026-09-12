@@ -200,6 +200,32 @@ Three old keys, three refusal shapes, each pinned by a test:
   model, pinning that the refusal names the key and the remedy
   without echoing the value.
 
+### Stored domain rows migrate forward; the file key does not
+
+The review round surfaced the half the census could not see from
+grep: provider and MCP bodies persist in the domain store as
+opaque text, a current deployment's rows can carry `egress`, and
+the new models would refuse or misroute those rows at boot, before
+the configuration API is even reachable to fix them. The
+repository's own promise (a beta database is never left behind,
+and pre-beta upgrades are best-effort forward-only through
+reviewed migrations) has the machinery: a forward domain data
+migration translates stored keys once, and the upgrade suite
+proves it against pre-upgrade rows the way
+`tests/integration/test_domain_upgrade.py` already does. The
+translation preserves the mechanism's own distinction: a provider
+`egress: false` becomes `reach: host` (its refusal always said
+"off this host") and `egress: true` becomes `reach: internet`; an
+MCP `egress: false` becomes `reach: network` (its wording is "off
+this network") and `egress: true` becomes `reach: internet`. New
+writes still reject the legacy key, so this is a one-time
+stored-data translation, never an alias. The FILE key gets no
+migration, deliberately: a file is the operator's to edit, and the
+server README's upgrade note plus the changelog fragment state
+that `server.local_only: true` must become
+`server.data_boundary: host` before the new image starts, with the
+old key refused loudly at parse.
+
 ### One milestone, because a half-renamed vocabulary is not releasable
 
 Every merge must leave `main` releasable, and a state where half
@@ -272,6 +298,11 @@ the plans corpus, `CHANGELOG.md`) keep their spellings. The
 - The existing identity pins (`.egress is False` and kin) move to
   enum-member identity; the closed-set case (`reach = 0` on a
   class) keeps its shape.
+- The domain migration: pre-upgrade rows carrying every legacy
+  shape (provider `egress: false` and `true`, MCP both, absent)
+  upgraded and read back with the translated `reach` values, in
+  the `test_domain_upgrade.py` house pattern; a new write carrying
+  `egress` still refused after the migration exists.
 - Census, examples coverage, generated-reference drift checks and
   the `cli-respelling` round trip all green after regeneration.
 
@@ -377,6 +408,15 @@ per amendment.
    upgrade test; new writes still reject the legacy key; document
    that a file-backed `server.local_only: true` must become
    `server.data_boundary: host` before the new image starts.
+
+   *Resolution.* Adopted whole: a new section states the forward
+   migration with the reviewer's exact translation table
+   (provider false to host, MCP false to network, true to
+   internet on both, preserving the host-versus-network
+   distinction), the upgrade test joins the Tests section in the
+   house pattern, new writes keep refusing the key, and the
+   file-key manual step lands in the README upgrade note and the
+   fragment.
 
 5. **P2: The MCP caller would retain part of the boundary
    policy.** A guard reading "boundary narrower than internet" in
