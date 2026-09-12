@@ -377,29 +377,43 @@ can price two of them.
 | --- | --- |
 | `characters` on the synthesis event | `events/catalog.py`: a declared `Count` on `SentenceSynthesized`, with the note saying it is the length of the sentence handed to the voice and never a byte of it |
 | The measurement at the emit site | `events/assembly.py` `sentence_synthesized` takes the number, and `runtime/pipeline.py` passes `len(sentence)` from `_speak_after`, which is where the string already is; `_sentence_synthesized` gains the parameter and no access to the text |
-| The usage attributes | `telemetry.py`: `ASR_USAGE` and `TTS_USAGE` beside the stage tables, `duration_s` exported under its vinga name AND `gen_ai.usage.input_seconds`, and `characters` under `gen_ai.usage.input_characters` |
+| What the ear was sent | `providers/base.py`: `AsrResult.submitted_ms`, how much audio a call actually put on the wire; `providers/openai_asr.py` counts it per request, with `_retry_without_prompt` answering whether it re-sent; `events/catalog.py` declares `submitted_ms` on `heard` and `nothing_heard`, and `runtime/pipeline.py` passes it at both |
+| The usage attributes | `telemetry.py`: `ASR_USAGE` (`gen_ai.usage.input_milliseconds`, off `submitted_ms`) and `TTS_USAGE` (`gen_ai.usage.input_characters`, off `characters`) beside the stage tables; `vinga.asr.duration_s` unchanged and deliberately not the usage |
+| The spelling a backend can price | the same file: `OBSERVATION_USAGE_DETAILS` and `_priceable()`, one string of canonical JSON `{"input": N}` beside the conventions' name on both stage spans, whole numbers only |
 | The events reference | `docs/reference/events.md`, regenerated with `uv run vinga-server events reference` |
 | The operator procedure | `vinga-server/README.md`, a new "What a conversation cost" section between the capture and conversation-store ones, plus its bullet in the page index |
 | The map's row | `docs/architecture/observability-surfaces.md`: the exported-traces row says each stage reports what it was given, in its own unit, and that the cost is the backend's to compute |
 | The fragment | `changelog.d/502-usage-accounting.md` (### Added) |
-| The cases | `tests/unit/test_event_assembly.py` (the shape), `tests/unit/test_turn_lifecycle.py` (the emit site, driven through a real reply), `tests/unit/test_telemetry_spans.py` (both usage attributes and the absence), with `characters` added to `synthesize` in `tests/support/telemetry.py` and to the recorded payload in `tests/unit/test_event_baseline.py` |
+| The cases | `tests/unit/test_event_assembly.py` (the shape), `tests/unit/test_turn_lifecycle.py` (the emit site, driven through a real reply), `tests/unit/test_providers_openai_asr.py` (the floor, the retry and the ordinary call), `tests/unit/test_telemetry_spans.py` (both usage attributes, the priced spelling, and the two absences), with `characters` and `submitted_ms` added to `synthesize`, `hear` and `hear_nothing` in `tests/support/telemetry.py` and to the recorded payload in `tests/unit/test_event_baseline.py` |
 
 ### Deviations from the plan
 
-One, and it is a widening rather than a departure.
+Two, and both were forced by evidence the plan did not have.
 
-- **The ASR usage attribute rides the table entry `duration_s`
-  already has, so every ASR outcome that measured the audio reports
-  it.** The plan and the brief both say the seconds come from
-  `heard.duration_s`. `ASR_ATTRIBUTES` is one table for all four ASR
-  ends, and `_attributes` already exports one value under several
-  names, so spelling the entry as a pair gives `nothing_heard` and
-  `transcription_abandoned` the usage too. That is the honest answer
-  rather than an accident: the ear was given that many seconds of audio
-  whatever came back from it, and a vendor bills for the call that
-  returned an empty transcript. A second code path that exported the
-  seconds only for `heard` would have been a second home for one fact
-  and would have under-reported what a deployment was charged.
+- **The ASR usage is not `heard.duration_s`, and the plan said it
+  was.** The plan's own sentence is "`gen_ai.usage.input_seconds` on
+  the ASR span" from the duration the utterance carries, and the review
+  round is right that this is a wrong billing number rather than an
+  approximate one. The OpenAI adapter parts company with the utterance
+  in both directions: a clip under the endpoint's floor returns an
+  empty transcript having made no request at all, and a clip whose
+  transcript comes back as the prompt is submitted a second time by the
+  echo guard's retry. So a new declared measurement crosses the ASR
+  seam (`AsrResult.submitted_ms`), the catalog declares it, and the
+  span exports that. `vinga.asr.duration_s` is unchanged, which is the
+  deviation's own point: what the user said and what a provider was
+  billed for are two facts, and this milestone is where they separate.
+  The first draft of this milestone instead spelled the `duration_s`
+  table entry as a pair of names, which made the wrong number arrive
+  under two of them.
+- **The unit is milliseconds, not seconds.** The live gate found a
+  non-integer usage value dropped outright by the backend on both
+  ingestion paths, so a fractional measurement cannot be priced at all;
+  whole seconds are then the coarsest integer available and would
+  overstate a 0.4 second utterance by 150%. The attribute is named for
+  the unit it carries. Authorized by the plan, which says the gate
+  decides this and that the answer is recorded here with the
+  observation JSON that shows it.
 
 ### Resolutions the plan left to this milestone
 
@@ -410,10 +424,20 @@ One, and it is a widening rather than a departure.
 - **The field sits between `index` and `stream_ms`.** It is a fact
   about the sentence, so it goes with the other one, and the two
   latencies stay together after it.
-- **The TTS characters get no vinga spelling of their own.** The ASR
-  seconds keep `vinga.asr.duration_s` because that name was already
-  exported and read; the count is new and nothing read it before, so
-  one name is enough and a second would be the same fact twice.
+- **The TTS characters get no vinga spelling of their own**, and
+  neither do the ASR milliseconds. Both are new facts nothing read
+  before, so one conventions-shaped name is enough; `vinga.asr.duration_s`
+  is not a second spelling of the usage but the answer to a different
+  question, which is why it stays.
+- **The priced spelling is read off the span's attributes rather than
+  off the payload.** `_priceable()` takes the dictionary the stage
+  table already produced and looks up the key it just wrote, so a value
+  the declared-shape gate refused cannot reappear through the second
+  spelling and the two names cannot drift apart. Two structures that
+  must agree are one structure with a bug pending.
+- **A generation gets no priced spelling.** The backend parses and
+  prices `gen_ai.usage.input_tokens` and `output_tokens` already, so a
+  second key there would be one fact twice for no reader.
 - **Where the README section goes and what it is called.** "What a
   conversation cost", between "Capturing a session" and "The
   conversation store", which puts it in the run of operator sections
@@ -434,7 +458,25 @@ One, and it is a widening rather than a departure.
   watching it fail: `attributes.setdefault(ASR_USAGE, 0.0)` in the ASR
   fold makes it fail, and it passes again with the mutation reverted.
   Recorded because "written to fail first" cannot be honestly claimed
-  for it.
+  for it. The same was done for the two cases that hold the review
+  round's first finding (restoring the clip's length under the floor
+  and dropping the retry's second hearing: both failed) and for the
+  priced spelling (removing `_priceable` from the ASR fold: it failed).
+- **Four of the echo retry's five endings put the clip on the wire a
+  second time.** Only the skip above `RETRY_FLOOR_S` sends nothing; the
+  deadline timeout, the confirmed echo, the confirmed silence and the
+  recovered transcript all submitted it, the timeout included, because
+  bytes a cancelled request already wrote are bytes the far side
+  received. So the retry reports whether it SENT rather than what it
+  concluded: a caller counting by outcome would miss the two endings
+  that answer nothing at all, which are the ones a suspicious clip is
+  most likely to produce.
+- **A zero and an absence are both needed here, and they mean different
+  things.** The floor's zero is a measurement (this ear submitted
+  nothing); a local engine's absence is the lack of one. A backend
+  reading the first prices it at nothing and reading the second knows
+  not to price it, and collapsing them would lose whichever fact was
+  collapsed into the other.
 - **Three closed-set pins moved with the tables.** The two quartet
   cases and the one about an outcome that names no ear each assert the
   exact set of foreign-prefixed keys on a span, so a usage attribute is
@@ -474,29 +516,91 @@ One, and it is a widening rather than a departure.
 - [x] `python3 scripts/fold_changelog.py check .`:
       `checked 2 fragments, 0 failures`.
 - [x] `uv run pytest tests/integration -q`: `341 passed in 483.49s`.
-- [ ] The M3 live gate, which is the section below. It belongs to
-      whoever holds the backend's credentials: this milestone must not
-      create a model definition in anyone's project, and did not.
+- [x] The M3 live gate, run by the maintainer and recorded in the
+      section below with the observation JSON. It changed two things in
+      this milestone's design, both of which are in the deviations
+      above. No model definition was created, updated or deleted by
+      this milestone.
 - [ ] Anything on a board. No protocol, no firmware-visible behavior
       and no device path moves in this milestone.
 
 ### The live gate
 
-Not run here, and deliberately: the gate enters model definitions in a
-real backend and then reads a cost query back, which is a write to a
-third-party system and needs credentials this milestone declines to
-acquire. What it asks, in the plan's own order:
+Run 2026-09-12 by the maintainer against the Langfuse project this
+repository develops against, over three runs, after the milestone's
+first pull request had opened. It answered the plan's open question,
+and under it found a second thing the plan did not anticipate. Both
+changed the design, which is why this section is upstream of two of
+this milestone's commits rather than a record of them.
 
-- does an unrecognized `gen_ai.usage.*` key reach `usageDetails`, or is
-  it dropped, in which case the recorded fallback is
-  `langfuse.observation.usage_details` carrying canonical JSON beside
-  the conventions' name and never instead of it;
-- do the ASR and TTS observations arrive as `GENERATION`;
-- does a definition entered through `createModel` price them;
-- and the issue's stated acceptance, qualified as the plan settles it:
-  against a backend with the documented definitions entered, the
-  per-session per-stage cost query returns nonzero rows for `asr`,
-  `llm` and `tts_stream`.
+**An unrecognized `gen_ai.usage.*` key reaches `usageDetails` and is
+never priced.** The plan's question was whether the key is dropped. It
+is not: the suffix is lifted verbatim, which makes the attribute
+readable and inert.
 
-The four definitions to enter are the README's table, which is written
-so the gate can be run from it without reading this section.
+```json
+{"name": "tts_stream",
+ "usageDetails": {"input_characters": 29},
+ "costDetails": {},
+ "totalCost": null}
+```
+
+A model definition prices the keys `input`, `output` and `total` and no
+others, so `input_characters` has no rate against it however carefully
+the definition is written. **So the fallback the plan named is
+required**, and it is added rather than considered:
+`langfuse.observation.usage_details` carrying canonical JSON beside the
+conventions' name, never instead of it.
+
+**A non-integer usage value is dropped outright, on BOTH paths.** This
+is the finding the plan did not anticipate, and it decided a unit. An
+ASR stage reporting seconds arrived as
+`attributes.gen_ai.usage.input_seconds: 4.08` and produced
+`usageDetails: {}`; the same float sent through
+`langfuse.observation.usage_details` produced `usageDetails: {}` as
+well. Integers work on both. So a fractional measurement cannot be
+priced at all, whichever spelling carries it.
+
+**With an integer under the fallback, both stages price exactly.**
+
+```json
+{"name": "tts_stream",
+ "usageDetails": {"input": 29},
+ "costDetails": {"input": 0.000435}}
+```
+
+29 x 0.000015 is 0.000435 to the last digit, which is the arithmetic
+this milestone exists to make possible; the `asr` observation priced
+the same way.
+
+**The LLM stage was priced with no definition entered at all.**
+`gpt-4o-mini` came back with `costDetails: {"input": 0.00022335,
+"output": 0.000006}`, so the backend ships managed definitions for
+well-known vendor models. That answers finding 3 of the review round
+without inventing a price, and the README says so.
+
+**What the gate changed, and what it did not.** The ASR usage moves
+from seconds to milliseconds and the attribute is named for the unit it
+carries (`gen_ai.usage.input_milliseconds`): whole seconds are the
+coarsest integer available and would overstate a 0.4 second "ja" by
+150%, on exactly the utterances a voice assistant is made of. That is a
+deviation from the plan's `input_seconds`, authorized by the plan
+itself, which says the gate decides and this section records the answer
+with the observation JSON that shows it. What did not change is the
+conventions' attribute: it stays on both spans as the vinga-native
+spelling a backend that has never heard of this project can read.
+
+**The acceptance criterion, qualified as the plan settles it.** Against
+a backend with the documented definitions entered, the per-session
+per-stage cost query returns nonzero rows for `asr`, `llm` and
+`tts_stream`. The gate showed `llm` and `tts_stream` priced and the
+`asr` observation priced against a definition in the same shape.
+
+**Two things this milestone must not claim.** The four definitions in
+that project are the maintainer's, and two of them carried the wrong
+unit while this was written, as a direct consequence of the seconds
+finding above: correcting them is the maintainer's to do and is being
+asked for separately, so a reader of that project's settings may find
+them mid-correction. And no definition was created, updated or deleted
+by this milestone, in that project or any other: pricing is the
+operator's, which is the whole of what the plan decided here.
