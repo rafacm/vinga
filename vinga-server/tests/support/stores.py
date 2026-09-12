@@ -174,6 +174,7 @@ def plant_session(
     metrics: bool = True,
     agent: str | None = "sam",
     device: str | None = DEVICE,
+    device_name: str | None = None,
 ) -> None:
     """One session row.
 
@@ -181,11 +182,17 @@ def plant_session(
     documents: a session rejected before a device was understood. That
     is not a hypothetical here, it is what the per-device views have to
     group as one row rather than lose.
+
+    `device_name` is what that board was called when this session
+    opened, dated and never rewritten. `None` is the default because it
+    is the common state: a board nobody named, and every session that
+    opened before the column existed.
     """
     connection.execute(
         record_schema.sessions.insert().values(
             session=session,
             device=device,
+            device_name=device_name,
             agent=agent,
             started_at=started_at,
             metrics=metrics,

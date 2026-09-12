@@ -123,6 +123,7 @@ def a_day(
     session: str | None = None,
     agent: str = "sam",
     device: str | None = BOARD_A,
+    device_name: str | None = None,
 ) -> None:
     """One session opened at noon on a named UTC day, with a measured
     turn and one counted event on it.
@@ -134,11 +135,20 @@ def a_day(
     `device` is the board it ran on. `None` is the state the schema
     documents, a session rejected before a device was understood, and it
     is what the per-device rows have to carry as a group of its own.
+
+    `device_name` is what that board was called when the session opened.
+    `None` by default, which is what a board nobody named and every
+    session recorded before the column existed carry.
     """
     named = session if session is not None else day
     with store.begin() as connection:
         plant_session(
-            connection, named, f"{day}T12:00:00+00:00", agent=agent, device=device
+            connection,
+            named,
+            f"{day}T12:00:00+00:00",
+            agent=agent,
+            device=device,
+            device_name=device_name,
         )
         plant_turn(
             connection, named, 0, agent=agent, asr_ms=120, input_tokens=7, output_tokens=3
@@ -444,7 +454,7 @@ def test_the_device_grouping_answers_from_the_sibling(
     surface that had answered the grouping from the ungrouped view would
     give the same row twice and no device at all.
     """
-    a_day(store, DAY, session="a", device=BOARD_A)
+    a_day(store, DAY, session="a", device=BOARD_A, device_name="Kitchen Speaker")
     a_day(store, DAY, session="b", device=BOARD_B)
 
     ungrouped = _get(client, "/metrics/sessions", since=DAY, until=DAY)
@@ -459,16 +469,46 @@ def test_the_device_grouping_answers_from_the_sibling(
     # question and the grouping chose which relation answers it.
     assert answered["view"]["view"] == "sessions"
     assert answered["view"]["relation"].endswith("metrics_sessions_by_device_daily")
+    # The label is what each session recorded, and it is null where
+    # nothing recorded one rather than absent: a client renders a column
+    # it was told about.
     assert [(row["device"], row["name"], row["sessions"]) for row in answered["rows"]] == [
-        (BOARD_A, None, 1),
+        (BOARD_A, "Kitchen Speaker", 1),
         (BOARD_B, None, 1),
     ]
-    # The label is declared and null, not absent: a client renders a
-    # column it was told about.
     declared = {column["name"]: column for column in answered["view"]["columns"]}
     assert declared["device"]["key"] is True
-    assert declared["name"]["key"] is False
+    # A key because the name a session recorded is never rewritten, so
+    # a renamed board is two rows rather than one retitled series.
+    assert declared["name"]["key"] is True
     assert declared["name"]["nullable"] is True
+
+
+def test_a_renamed_board_comes_back_as_two_rows_in_name_order(
+    client: TestClient, store: Any
+) -> None:
+    """The page a rename produces, in the order the read surface pages
+    on.
+
+    One board, three sessions, two of them naming it and one recorded
+    before anybody did. The name is one of the keys, so the answer is
+    three rows rather than one, and the order is the day descending then
+    the device and the name ascending with nulls last: a label nobody
+    recorded belongs under the named series rather than above them.
+    Without the name in the key columns the order would not be total and
+    the same request could answer two different pages.
+    """
+    a_day(store, DAY, session="old", device=BOARD_A, device_name="Kitchen Speaker")
+    a_day(store, DAY, session="new", device=BOARD_A, device_name="Hallway Speaker")
+    a_day(store, DAY, session="never", device=BOARD_A)
+
+    answered = _get(client, "/metrics/sessions", since=DAY, until=DAY, group="device")
+
+    assert [(row["device"], row["name"], row["sessions"]) for row in answered["rows"]] == [
+        (BOARD_A, "Hallway Speaker", 1),
+        (BOARD_A, "Kitchen Speaker", 1),
+        (BOARD_A, None, 1),
+    ]
 
 
 def test_every_view_answers_the_device_grouping_with_the_device_first(

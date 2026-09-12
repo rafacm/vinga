@@ -64,7 +64,7 @@ from vinga_server.db import read_engine, write_engine
 # stamped at, and the whole of what this release upgrades from.
 BASELINE = "1006_metrics_views"
 
-HEAD = "1008_metrics_views_by_device"
+HEAD = "1009_views_read_the_name"
 
 # What an analyst leaves standing on one of the four views. Named here
 # because two fixtures and one assertion have to spell it.
@@ -180,21 +180,31 @@ def _answers(settings: DatabaseConfig, name: str) -> list[tuple]:
         engine.dispose()
 
 
+SEEDED_NAME = "Kitchen Speaker"
+
+
 def _seed(settings: DatabaseConfig) -> None:
     """One session, one turn and one event, so "still answers" is a row
-    coming back rather than an empty list coming back."""
+    coming back rather than an empty list coming back.
+
+    The session names its device, which only a database already past
+    `1007_sessions_name_the_device` can hold: this runs after the
+    upgrade, and the name is what the siblings have to read.
+    """
     engine = write_engine(settings, CONVERSATIONS_CHAIN)
     try:
         with engine.begin() as connection:
             connection.execute(
                 text(
                     "insert into record.sessions "
-                    "(session, device, agent, started_at, metrics, text, dropped) values "
-                    "(:session, :device, :agent, :started_at, true, true, 0)"
+                    "(session, device, device_name, agent, started_at, metrics, text, "
+                    "dropped) values "
+                    "(:session, :device, :device_name, :agent, :started_at, true, true, 0)"
                 ),
                 {
                     "session": "upgraded",
                     "device": "aa:bb:cc:dd:ee:ff",
+                    "device_name": SEEDED_NAME,
                     "agent": "sam",
                     "started_at": "2026-05-01T09:00:00+00:00",
                 },
@@ -307,9 +317,11 @@ def test_the_upgrade_adds_the_four_siblings_and_they_answer(
         rows = _answers(upgraded, view.name)
         assert len(rows) == 1, view.name
         # The device is the second column of every sibling and the
-        # label the third, which is the shape a caller reads.
+        # label the third, which is the shape a caller reads. The label
+        # is the name the session itself recorded, which is the whole of
+        # what an upgraded deployment gains here.
         assert rows[0][1] == "aa:bb:cc:dd:ee:ff", view.name
-        assert rows[0][2] is None, view.name
+        assert rows[0][2] == SEEDED_NAME, view.name
 
 
 def test_the_downgrade_takes_what_it_added_and_leaves_what_it_found(
