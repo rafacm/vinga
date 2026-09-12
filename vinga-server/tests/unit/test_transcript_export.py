@@ -1230,3 +1230,59 @@ async def test_a_shutdown_after_a_worker_that_never_started_is_harmless(
     await exporter.shutdown()
 
     assert reasons(caplog) == [TranscriptExportFailure.DROPPED]
+
+
+@pytest.mark.asyncio
+async def test_a_shutdown_during_worker_startup_strands_no_job(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Admission and shutdown are one decision, taken under one lock.
+
+    The interleaving this exists for is narrow and silent. Starting the
+    worker SCHEDULES a thread before the field that publishes it is
+    assigned, and the job is queued after that, so a shutdown landing in
+    between set the stop flag, found no worker to join and returned; the
+    worker it could not see drained an empty queue and exited; and the
+    job was then queued behind a worker that was already gone. Neither
+    exported nor reported, which is the one outcome this surface may
+    never have, because nothing is persisted and the event is the whole
+    of the ledger.
+
+    Driven deterministically by pausing inside `Thread.start` itself,
+    which is exactly the window: the thread is really running, the field
+    is not yet assigned, and the shutdown runs there. The
+    acknowledgement is left unsettled so the answer is the same whichever
+    side of the stop flag the worker reaches the job on: `dropped`,
+    once.
+    """
+    started = threading.Event()
+    release = threading.Event()
+    starting = threading.Thread.start
+
+    def pause(self: threading.Thread) -> None:
+        starting(self)
+        if self.name == "vinga-transcript-export":
+            started.set()
+            release.wait(10.0)
+
+    monkeypatch.setattr(threading.Thread, "start", pause)
+    exporter, _, _ = an_exporter(
+        {SESSION: [a_row(1)]}, acknowledgement_timeout_s=30.0, shutdown_timeout_s=5.0
+    )
+
+    loop = asyncio.get_running_loop()
+    admitting = loop.run_in_executor(
+        None, exporter.session_closed, SESSION, pending()
+    )
+    assert started.wait(10.0), "the worker's thread never started"
+    # Released from a thread of its own, because a shutdown that waits
+    # for admission waits on THIS loop: the release cannot be something
+    # the loop has to reach.
+    threading.Timer(0.2, release.set).start()
+
+    await exporter.shutdown()
+    await admitting
+
+    assert reasons(caplog) == [TranscriptExportFailure.DROPPED], (
+        "the job was stranded between the worker's start and its admission"
+    )
