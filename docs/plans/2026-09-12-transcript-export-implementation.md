@@ -594,6 +594,29 @@ finding, which the round itself introduced.
    over, zero failures, and the ten concurrency-driving cases together
    twelve times over, zero failures.
 
+#### One flake, found by CI and not by this machine
+
+The unit lane went red on `main`'s runner for
+`test_no_unauthorized_content_reaches_the_span_writer`, with
+`AssertionError: the planted turn never landed, assert ()`, while
+everything else passed and every local run had been green. The cause is
+this PR's own subject wearing the other hat: the sentinel cases plant a
+turn through the store and then read `turns` directly to learn the row
+id the recap has to state its coverage with, and that read had no
+acknowledgement between it and the write. The writer is a thread behind
+a queue, so the read was racing a transaction that had not committed;
+this machine won the race every time and a loaded runner did not. The
+handle was in the code and was not waited on: the line asserted the
+truthiness of the `Acknowledgement` OBJECT, which is never false, so
+the intent was written and not achieved. Reproduced deterministically
+before fixing, by parking the writer for three hundred milliseconds in
+front of its own transaction, which yields CI's message exactly and
+passes with the handle waited on. Every other write this milestone's
+tests make was audited for the same shape and each already has its
+barrier: the projection cases read after `store.stop()`, which drains
+the queue and joins the writer, and the durable and resumed cases read
+after a close acknowledgement, which is the barrier this PR built.
+
 #### Re-verified after the delta round
 
 - `uv run ruff check .`: All checks passed!

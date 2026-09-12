@@ -910,10 +910,19 @@ def a_thread(name: str) -> str:
 
 def a_planted_session(store: ConversationStore, session: str, thread: str) -> None:
     """One session's worth of rows carrying every content-bearing field
-    the family can hold, both families of sentinel among them."""
+    the family can hold, both families of sentinel among them.
+
+    Every write is WAITED ON before anything reads what it wrote, and
+    the handle is this PR's own: the writer is a thread behind a queue,
+    so a table read taken straight after a `record_turn` is a read
+    racing a write that may not have committed. The recap below needs
+    the turn's id to state its coverage, which is the read this would
+    have raced, and the export the cases then drive reads the same rows
+    through the same store.
+    """
     store.start()
     store.open_session(session, 100.0, MANIFEST)
-    assert store.record_turn(
+    landed = store.record_turn(
         session,
         TurnRecord(
             at=101.0,
@@ -941,8 +950,9 @@ def a_planted_session(store: ConversationStore, session: str, thread: str) -> No
             ),
         ),
     )
+    assert landed.wait(10.0), "the planted turn never landed"
     spoken = tuple(row["id"] for row in rows("turns", session=session))
-    assert spoken, "the planted turn never landed"
+    assert spoken, "the planted turn landed and the read could not see it"
     assert store.record_milestone(
         session,
         MilestoneRecord(
