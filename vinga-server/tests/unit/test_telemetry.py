@@ -43,6 +43,7 @@ from tests.support.telemetry import (
     DEVICE,
     SESSION,
     Clock,
+    Deliveries,
     assemble_prompt,
     barge_in,
     capture_emitter,
@@ -53,14 +54,19 @@ from tests.support.telemetry import (
     drop_frames,
     exporting,
     finish_reply,
+    finish_speaking,
     finished,
     go_idle,
     hand_over,
+    hear,
     named,
     open_session,
     released,
+    round_done,
     session_events,
+    start_speaking,
     start_turn,
+    synthesize,
     upload_emitter,
 )
 from vinga_server.boundary import BoundaryRefusal, Reach, check_feature
@@ -81,6 +87,7 @@ from vinga_server.telemetry import (
     TELEMETRY_KEY,
     UNSUPPORTED_PROTOCOL,
     Telemetry,
+    TranscriptTurn,
     build_telemetry,
 )
 
@@ -1108,6 +1115,172 @@ def test_an_open_at_the_bound_waits_for_the_map_it_has_to_move() -> None:
     assert telemetry.trace_of(newcomer) is not None, "the newcomer was not recorded"
     assert telemetry.trace_of(ids[0]) is None, "the oldest was not the one evicted"
     assert [one for one in ids[1:] if telemetry.trace_of(one) is None] == []
+
+
+# --- the board's name, on every span -----------------------------------
+#
+# "Every span" is an enumeration and not a table entry, because spans
+# are built in more places than the attribute tables reach: the session
+# span reads its own table, the turn and the stage spans read the
+# retained identity, and the three that run AFTER the close build their
+# attributes by hand and hold no attributes at all to inherit. So the
+# name joins two records, the live session's identity and the retained
+# `_Exported`, and the enumeration is asserted constructor by
+# constructor here rather than trusted.
+#
+# Read from the retained record and never from a configuration, which
+# is the second reason as well as the first: a board renamed after a
+# session ran must not change what that session's spans say.
+
+BOARD = "kitchen speaker"
+
+
+def a_named_session(telemetry: Telemetry, session: str = SESSION) -> None:
+    """One whole session on a board somebody named, opened and closed,
+    which is what puts a name in the retention."""
+    clock = Clock()
+    events = session_events(clock, telemetry, session=session)
+    open_session(events, device_name=BOARD)
+    clock.tick(1.0)
+    close_session(events)
+
+
+def test_the_session_span_carries_the_board_s_name() -> None:
+    """The first constructor in the enumeration, and the only one that
+    reads the name off the payload: `session_open` carries the bounded
+    copy, and the session span's own table exports it."""
+    telemetry, memory = exporting()
+    a_named_session(telemetry)
+
+    assert named(finished(telemetry, memory), "session").attributes[
+        "vinga.device.name"
+    ] == BOARD
+
+
+def test_a_turn_and_its_stages_carry_the_board_s_name() -> None:
+    """The constructors that read the retained identity. OTel inherits
+    nothing, so a stage span with only its stage's fields is a span
+    nobody looking for a board can find."""
+    telemetry, memory = exporting()
+    clock = Clock()
+    events = session_events(clock, telemetry)
+    open_session(events, device_name=BOARD)
+    clock.tick(1.0)
+    start_turn(events)
+    clock.tick(0.3)
+    hear(events)
+    clock.tick(0.8)
+    round_done(events, duration_ms=800)
+    clock.tick(0.4)
+    synthesize(events, stream_ms=400)
+    start_speaking(events)
+    clock.tick(0.5)
+    finish_reply(events, sentences=1)
+    finish_speaking(events, frames=12, at=clock())
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    assert {span.name for span in spans} == {
+        "session",
+        "turn",
+        "asr",
+        "llm",
+        "tts_stream",
+        "playback",
+    }
+    for span in spans:
+        assert span.attributes["vinga.device.name"] == BOARD, span.name
+
+
+def test_a_media_reference_carries_the_board_s_name() -> None:
+    """The first of the three post-close constructors, which builds its
+    attributes by hand and therefore had nothing to inherit."""
+    telemetry, memory = exporting()
+    a_named_session(telemetry)
+
+    telemetry.reference_media(SESSION, {"capture_audio": A_REFERENCE})
+
+    written = named(finished(telemetry, memory), "capture")
+    assert written.attributes["vinga.device.name"] == BOARD
+
+
+def test_an_outcome_after_the_close_carries_the_board_s_name() -> None:
+    """The second, whose attributes come off a payload that carries no
+    device at all: an upload outcome names its session and nothing
+    else, so the name can only come from the retained record."""
+    telemetry, memory = exporting()
+    a_named_session(telemetry)
+
+    with watching_the_server(telemetry):
+        capture_uploaded(upload_emitter())
+
+    written = named(finished(telemetry, memory), "capture_uploaded")
+    assert written.attributes["vinga.device.name"] == BOARD
+
+
+def test_a_transcript_span_carries_the_board_s_name() -> None:
+    """The third, which builds its attributes from a projection of the
+    conversation store and reads the name from the context the job was
+    admitted on."""
+    deliveries = Deliveries()
+    telemetry, _ = exporting(transcripts=deliveries)
+    a_named_session(telemetry)
+    context = telemetry.retained_context(SESSION)
+    assert context is not None
+
+    telemetry.export_transcript(
+        SESSION,
+        context,
+        [TranscriptTurn(index=1, id=7, t_ms=120, agent=AGENT, heard="a", reply="b")],
+    )
+
+    written = deliveries.spans()
+    assert len(written) == 1
+    assert written[0].attributes["vinga.device.name"] == BOARD
+
+
+def test_a_board_nobody_named_says_nothing_rather_than_null() -> None:
+    """Which is the state every deployment's boards are in until an
+    operator runs `device rename`, and the difference between "this
+    board has no name" and "this span forgot to say".
+
+    Every constructor in the enumeration in one case, because what is
+    being pinned is the absence rule rather than one span's behavior.
+    """
+    deliveries = Deliveries()
+    telemetry, memory = exporting(transcripts=deliveries)
+    clock = Clock()
+    events = session_events(clock, telemetry)
+    open_session(events)
+    clock.tick(1.0)
+    start_turn(events)
+    clock.tick(0.3)
+    hear(events)
+    clock.tick(0.5)
+    finish_reply(events, sentences=1)
+    close_session(events)
+    context = telemetry.retained_context(SESSION)
+    assert context is not None
+    telemetry.reference_media(SESSION, {"capture_audio": A_REFERENCE})
+    with watching_the_server(telemetry):
+        capture_uploaded(upload_emitter())
+    telemetry.export_transcript(
+        SESSION,
+        context,
+        [TranscriptTurn(index=1, id=7, t_ms=120, agent=AGENT, heard="a", reply="b")],
+    )
+
+    spans = [*finished(telemetry, memory), *deliveries.spans()]
+    assert {span.name for span in spans} == {
+        "session",
+        "turn",
+        "asr",
+        "capture",
+        "capture_uploaded",
+        "transcript",
+    }
+    for span in spans:
+        assert "vinga.device.name" not in span.attributes, span.name
 
 
 # --- no leak -----------------------------------------------------------

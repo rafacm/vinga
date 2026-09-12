@@ -383,9 +383,27 @@ LEG_FIELDS = ("agent", "text")
 # The prefix is vinga's own. The settled `gen_ai.*` correspondence sits
 # on the LLM round span below, where those attributes have a meaning;
 # nothing on these two spans is a GenAI fact.
+# What an operator calls the board, beside the MAC that identifies it.
+#
+# On EVERY span, which is an enumeration rather than a table entry: the
+# session span reads it here, the turn and the stage spans read it off
+# the retained identity below, and the three spans written after the
+# close read it off the retained `_Exported` record. A dashboard
+# grouped by a household's rooms is what this is for, and a stage span
+# that carried only a MAC is a span nobody groups.
+#
+# The bounded copy `session_open` carries and never a configuration
+# read: the value is sanitized at the decision site, and a board
+# renamed after a session ran must not change what that session's spans
+# say. A board nobody has named contributes NO attribute rather than a
+# null one, which is what `_attributes` already does for an absent
+# value.
+DEVICE_NAME = "vinga.device.name"
+
 SESSION_ATTRIBUTES = {
     SESSION_FIELD: SESSION_ID_NAMES,
     DEVICE_FIELD: "vinga.device.id",
+    "device_name": DEVICE_NAME,
     "agent": "vinga.agent",
     "conversation": "vinga.conversation.id",
     "protocol": "vinga.device.protocol",
@@ -419,7 +437,7 @@ TURN_FINISHED_ATTRIBUTES = {
 # issue asks for session-level context on EVERY span, and a stage span
 # with only its own stage's fields is a span nobody can find.
 #
-# Two facts, both fixed for the life of a session, both read off the
+# Three facts, all fixed for the life of a session, all read off the
 # validated `session_open` payload. The agent and the conversation are
 # NOT here: they move (a handover changes both) and every stage event
 # carries its own, which is the more precise answer and comes through
@@ -432,6 +450,7 @@ TURN_FINISHED_ATTRIBUTES = {
 CONTEXT_ATTRIBUTES = {
     SESSION_FIELD: SESSION_ID_NAMES,
     DEVICE_FIELD: "vinga.device.id",
+    "device_name": DEVICE_NAME,
 }
 
 # What a session opened against, as span attributes.
@@ -1279,6 +1298,20 @@ def _attributes(
     return attributes
 
 
+def _named(exported: "_Exported") -> dict[str, Any]:
+    """The board's name for a span written after its session closed, or
+    nothing at all.
+
+    One home for it because all three post-close writers need it and
+    each builds its attributes by hand: `reference_media`,
+    `_after_the_close` and `_transcript_spans` would otherwise be three
+    copies of one absence rule, and the rule is exactly the one
+    `_attributes` keeps for a live span, that an unnamed board
+    contributes no attribute rather than a null.
+    """
+    return {} if exported.name is None else {DEVICE_NAME: exported.name}
+
+
 def _before(end: int, ms: Any) -> int:
     """The instant `ms` milliseconds before `end`, or `end` itself where
     the event carried no number.
@@ -1404,11 +1437,20 @@ class _Exported:
     than the string it used to be: a reference written after the session
     closed is a child of the session span, and a child needs its parent's
     identity rather than a rendering of half of it.
+
+    And the board's name as `session_open` carried it, or nothing,
+    because the three writers that run after the close build their
+    attributes by hand and have no live session to read an identity
+    from. Here rather than looked up when one of them writes, for the
+    same reason the trace id is here: what a post-close span says is a
+    fact about the session that ran, and a board renamed since would
+    otherwise rename a conversation that is already over.
     """
 
     trace: str
     trace_id: int
     span_id: int
+    name: str | None = None
 
 
 class Telemetry:
@@ -1656,6 +1698,7 @@ class Telemetry:
             context=self._continuing(exported),
             attributes={
                 **dict.fromkeys(SESSION_ID_NAMES, session),
+                **_named(exported),
                 **{
                     f"{OBSERVATION_METADATA_PREFIX}{name}": token
                     for name, token in references.items()
@@ -1784,7 +1827,10 @@ class Telemetry:
             span = tracer.start_span(
                 TRANSCRIPT_SPAN,
                 context=self._continuing(context),
-                attributes=_transcript_attributes(session, turn),
+                attributes={
+                    **_named(context),
+                    **_transcript_attributes(session, turn),
+                },
             )
             span.end()
             spans.append(span)
@@ -2110,6 +2156,7 @@ class Telemetry:
             context=self._continuing(exported),
             attributes={
                 **dict.fromkeys(SESSION_ID_NAMES, session),
+                **_named(exported),
                 **_event_attributes(emission.payload),
             },
             start_time=at,
@@ -2127,6 +2174,11 @@ class Telemetry:
         held = _provider_context(payload.get("providers"))
         agent = payload.get("agent")
         talking = agent if isinstance(agent, str) else None
+        # Through the same gate once, and read from there twice: the
+        # live session's spans take the whole identity and the retained
+        # record takes the board's name out of it. A second read of the
+        # payload would be a second place for the name to be spelled.
+        identity = _attributes(payload, CONTEXT_ATTRIBUTES)
         span = self._tracer.start_span(
             SESSION_SPAN,
             context=self._root(),
@@ -2138,21 +2190,25 @@ class Telemetry:
         )
         self._sessions[session] = _SessionTrace(
             span=span,
-            identity=_attributes(payload, CONTEXT_ATTRIBUTES),
+            identity=identity,
             providers=held,
             agent=talking,
         )
-        self._retain(session, span)
+        self._retain(session, span, identity.get(DEVICE_NAME))
         for at, waiting in self._pending.pop(session, []):
             self._span_event(session, waiting, at)
 
-    def _retain(self, session: str, span: Any) -> None:
+    def _retain(self, session: str, span: Any, name: Any = None) -> None:
         """Remember which trace this session's spans went out under, for
         whoever asks after it is over.
 
         Written at the open rather than at the close, because that is
         where the id exists and because a session that never closes
         (a process that lost it) is one a reader may still ask about.
+
+        And what the board was called then, so that the three writers
+        that run after the close say what the session said rather than
+        what the configuration holds by the time they run.
         """
         context = span.get_span_context()
         with self._retained_lock:
@@ -2160,6 +2216,7 @@ class Telemetry:
                 trace=self._spelled(context.trace_id),
                 trace_id=context.trace_id,
                 span_id=context.span_id,
+                name=name if isinstance(name, str) else None,
             )
             while len(self._retained) > self._retention:
                 # Oldest first, the hold's own rule: what a late reader
@@ -2210,6 +2267,14 @@ class Telemetry:
             context=self._root(),
             links=[self._link(trace.span.get_span_context())],
             attributes={
+                # The session's own identity, off the retained context
+                # rather than off this payload, because `turn_started`
+                # names the session and the device and knows nothing
+                # about what the board is CALLED. The two facts it does
+                # carry arrive under the same names with the same
+                # values from its own table below, which is what makes
+                # this a widening rather than a second source.
+                **trace.identity,
                 **_attributes(emission.payload, TURN_ATTRIBUTES),
                 # The agent this turn is actually being spoken by, which
                 # a handover may have changed since the session opened.
