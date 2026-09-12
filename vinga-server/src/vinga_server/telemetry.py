@@ -2700,16 +2700,23 @@ class Telemetry:
         deliberately not the provider entries: a tool call ran on no
         pipeline stage, so what the session opened against says nothing
         about it.
+
+        The turn where there is one and the session otherwise, which is
+        the parent choice `_span_event` already makes and is the whole
+        of what a missing turn changes. It is NOT a fallback to the span
+        event: a call this exporter cannot place inside a turn is still
+        a call that ran, and answering that with the one carrier the
+        backend ingests nothing of would be this milestone's own finding
+        thrown away for the one case where it is hardest to see.
         """
         trace = self._sessions.get(session)
-        if trace is None or trace.turn is None:
-            self._span_event(session, emission)
+        if trace is None:
             return
         payload = emission.payload
         end = self._at(emission)
         span = self._tracer.start_span(
             TOOL_SPAN,
-            context=self._within(trace.turn),
+            context=self._within(trace.turn if trace.turn is not None else trace.span),
             attributes={
                 **trace.identity,
                 GEN_AI_OPERATION: EXECUTE_TOOL,
