@@ -491,12 +491,36 @@ is the rule this sentence already keeps.
 A session's rounds are not bounded by anything the server controls
 (a long conversation with a talkative tool loop makes many), and each
 staged request is the whole assembled prompt, so an unbounded stage is
-a slow leak in the object a session holds for its life. The bound is a
-round cap per session with the oldest dropped first, which is the
-posture `PENDING_CAPTURES` and `RETAINED_TRACES` already take here and
-for the same reason. The export's own event carries how many rounds
-went and how many were dropped, so a reader with a truncated export
-learns that it is truncated from the trace rather than by counting.
+a slow leak in the object a session holds for its life.
+
+A round cap alone does not bound it, which the review is right about: a
+staged request carries the history, the tool schemas, the arguments and
+the results, none of which has a size the server chose, and a
+conversation's history grows as it goes. So the bound is in BYTES, and
+there are two of them, measured on the serialized form that would
+actually be exported so that the number bounds what memory holds rather
+than a proxy for it:
+
+- **A per-request ceiling.** A single assembled request larger than it
+  is dropped whole, at staging, and counted. Not truncated: a truncated
+  request is not the request the model was given, and a class whose
+  whole point is fidelity must not quietly ship an approximation of
+  itself. Whole-request dropping keeps the export's every item exact
+  and makes the absence countable.
+- **A per-session budget.** The total the stage may hold for one
+  session. Over it, whole requests go, oldest first, which is the
+  posture `PENDING_CAPTURES` and `RETAINED_TRACES` already take here.
+
+A round cap sits behind both as a cheap guard on the number of entries,
+but it is the byte budget that does the bounding and the plan says so
+rather than implying it.
+
+The export's own event carries how many rounds went and how many were
+dropped, so a reader with a partial export learns that it is partial
+from the trace rather than by counting. The two reasons a round can be
+missing are distinguished, because they mean different things to
+whoever is reading: one request was too large to carry, or the session
+held more than the budget.
 
 Per-turn delivery (export each round as its turn ends, bounding the
 stage to one turn) was considered and is rejected: the issue settles
@@ -681,7 +705,10 @@ What is new per milestone:
   credential-shaped value in a tool result must reach the export and
   must NOT reach any log, event or span outside it, which is the
   inverse assertion from the usual one and is stated as such); the
-  bound's drop accounting; the drain and shutdown cases in the shape
+  bound's drop accounting, driven three ways: one oversized request
+  against the per-request ceiling, several differently sized requests
+  against the per-session budget, and more rounds than the entry cap,
+  each asserting which reason the event reports; the drain and shutdown cases in the shape
   `transcript_export.py`'s already take; a case that the flag off
   stages nothing at all rather than staging and discarding.
 
@@ -980,6 +1007,15 @@ Findings condensed but faithful; resolutions appended per amendment.
    older entries; truncation contradicts fidelity, so dropping whole
    requests with explicit accounting is the consistent choice. Test one
    oversized request as well as more rounds than the cap.
+
+   *Resolution.* Adopted. The bound is in bytes, measured on the
+   serialized form so the number bounds what memory holds: a
+   per-request ceiling and a per-session budget, with the round cap
+   behind them as an entry guard rather than as the bound. Oversized
+   requests are dropped whole and never truncated, for the reason the
+   review gives and because an approximate item in a fidelity class is
+   worse than a missing one. The event distinguishes the two reasons a
+   round can be absent, and the test list drives all three limits.
 
 9. **P2: M5 omits model invocations and required lifecycle wiring.**
    The footprint names `telemetry.py`, composition and the new module,
