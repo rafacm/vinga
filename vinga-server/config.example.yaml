@@ -379,6 +379,39 @@ server:
   # collector is egress like any other.
   # telemetry:
   #   enabled: false
+  #   # ATTACHES A CLOSED SESSION'S RECORDING to the trace it was
+  #   # exported under, which SENDS ROOM AUDIO OFF THIS HOST. Off by
+  #   # default and its own decision: `capture` being on and `enabled`
+  #   # above being on do not imply it. What goes is exactly two files,
+  #   # the session's stereo WAV and its JSON manifest; the decision
+  #   # track beside them never leaves.
+  #   #
+  #   # Retention is the backend's, not this server's. Once a recording
+  #   # is uploaded, how long it is kept, who may play it and how it is
+  #   # deleted are that deployment's policy, configured there. A
+  #   # backend with no policy configured retains indefinitely.
+  #   #
+  #   # With `capture` absent or off this is a no-op rather than a
+  #   # misconfiguration, said once at startup. With `enabled` above off
+  #   # it is refused at boot, since an attachment is named by a trace.
+  #   #
+  #   # The upload's own endpoint and credentials are LANGFUSE_HOST,
+  #   # LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY, read by the SDK and
+  #   # never keys in this file, exactly as the OTLP half is. The two
+  #   # families are configured independently and must name the SAME
+  #   # deployment and the SAME project: pointed at different ones both
+  #   # halves succeed, and the recording lands where the trace's reader
+  #   # will never look.
+  #   #
+  #   # It needs the `langfuse` extra, which both published images
+  #   # carry, and is refused at boot without it and under `local_only`.
+  #   # The upload runs on a worker of its own after the session closed,
+  #   # never on the audio path, and a failure is a warning rather than
+  #   # a failed session. A recording waiting for that worker is
+  #   # hard-linked into `upload-staging/` under the capture directory,
+  #   # where the capture budget cannot see it; the queue depth bounds
+  #   # it and the next startup sweeps what was left behind.
+  #   attach_captures: false
 
   # Whether speech that arrives while a reply is playing interrupts it.
   # On by default: a device only keeps streaming its microphone through

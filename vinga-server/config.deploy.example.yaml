@@ -162,6 +162,16 @@ server:
   # is in config.example.yaml.
   # telemetry:
   #   enabled: true
+  #   # Attaching a closed session's recording to its trace, which SENDS
+  #   # ROOM AUDIO OFF THIS HOST and is its own decision: capture on and
+  #   # telemetry on do not imply it. Retention is then the backend's,
+  #   # and a backend with no policy configured retains indefinitely.
+  #   # The upload reads LANGFUSE_HOST, LANGFUSE_PUBLIC_KEY and
+  #   # LANGFUSE_SECRET_KEY, which must name the same deployment and the
+  #   # same project as the OTEL_EXPORTER_OTLP_* variables above;
+  #   # pointed elsewhere both halves succeed and the recording is where
+  #   # nobody looks. Needs `server.capture` on to do anything.
+  #   attach_captures: false
 
   # How long a shutdown waits for conversations in flight to finish
   # speaking. Set the orchestrator's grace period between SIGTERM and
