@@ -381,7 +381,7 @@ can price two of them.
 | The usage attributes | `telemetry.py`: `ASR_USAGE` (`gen_ai.usage.input_milliseconds`, off `submitted_ms`) and `TTS_USAGE` (`gen_ai.usage.input_characters`, off `characters`) beside the stage tables; `vinga.asr.duration_s` unchanged and deliberately not the usage |
 | The spelling a backend can price | the same file: `OBSERVATION_USAGE_DETAILS` and `_priceable()`, one string of canonical JSON `{"input": N}` beside the conventions' name on both stage spans, whole numbers only |
 | The events reference | `docs/reference/events.md`, regenerated with `uv run vinga-server events reference` |
-| The operator procedure | `vinga-server/README.md`, a new "What a conversation cost" section between the capture and conversation-store ones, plus its bullet in the page index |
+| The operator procedure | `vinga-server/README.md`, a new "What a conversation cost" section between the capture and conversation-store ones, plus its bullet in the page index: what each stage reports, the generation stage that usually needs no definition and how to check, the four models with a published list price as pattern, unit and converted rate, the request that enters one, what a backend with none shows, and the models that deliberately get none |
 | The map's row | `docs/architecture/observability-surfaces.md`: the exported-traces row says each stage reports what it was given, in its own unit, and that the cost is the backend's to compute |
 | The fragment | `changelog.d/502-usage-accounting.md` (### Added) |
 | The cases | `tests/unit/test_event_assembly.py` (the shape), `tests/unit/test_turn_lifecycle.py` (the emit site, driven through a real reply), `tests/unit/test_providers_openai_asr.py` (the floor, the retry and the ordinary call), `tests/unit/test_telemetry_spans.py` (both usage attributes, the priced spelling, and the two absences), with `characters` and `submitted_ms` added to `synthesize`, `hear` and `hear_nothing` in `tests/support/telemetry.py` and to the recorded payload in `tests/unit/test_event_baseline.py` |
@@ -443,6 +443,14 @@ Two, and both were forced by evidence the plan did not have.
   conversation store", which puts it in the run of operator sections
   the plan names and next to the other one that talks to a telemetry
   backend.
+- **The generation stage gets a procedure and no price.** The plan
+  asks for a definition per model with a real list price, and the live
+  gate showed the backend pricing `gpt-4o-mini` with nothing entered at
+  all, so the honest procedure for this stage is how to check whether
+  yours is already known and what a model the backend does not know
+  needs (two token rates rather than one, and `TOKENS` as the unit).
+  No figure is quoted for any model whose published price this
+  milestone did not read, which is the same rule the table keeps.
 
 ### Discoveries
 
