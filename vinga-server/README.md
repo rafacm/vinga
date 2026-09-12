@@ -52,6 +52,7 @@ request to `/api` carries a bearer token.
 - [Masking reply latency](#masking-reply-latency), [When a reply fails](#when-a-reply-fails), and [When a model writes a tool call into its speech](#when-a-model-writes-a-tool-call-into-its-speech): the three things that go wrong between a model and a speaker, and what the server does about each.
 - [Limits](#limits): the bounds on a conversation, a session and a deployment, each with the number and why it is that number.
 - [Logging](#logging) and [Capturing a session](#capturing-a-session): what a running server says about itself, and how to record a conversation for study.
+- [What a conversation cost](#what-a-conversation-cost): the usage each stage reports, and the model definitions a backend needs before it can price them.
 - [The conversation store](#the-conversation-store): what is kept of a turn after it ends.
 - [Which build is running](#which-build-is-running): how to ask, and why the answer matters.
 - [Running in a container](#running-in-a-container): the image, its database, its refusals at boot, and which tag to deploy.
@@ -2720,6 +2721,117 @@ points at the interesting twenty seconds instead of ten minutes of
 scrubbing; with the conversation store on and `text: true`, the phrase
 itself is one query away, since both records carry the same session id. Copy the three files off
 after each session; a field recording is not repeatable.
+
+## What a conversation cost
+
+Every stage of a turn says what it was given, on its own span, in the
+unit that stage is actually billed in:
+
+| Stage | Span | What it reports |
+| --- | --- | --- |
+| Transcription | `asr` | `gen_ai.usage.input_seconds`, the length of the utterance the ear was handed |
+| Generation | `llm` | `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens`, as the endpoint reported them |
+| Synthesis | `tts_stream` | `gen_ai.usage.input_characters`, the length of the sentence the voice was handed |
+
+All three are input, read from the model's side the way the
+OpenTelemetry GenAI conventions read the token halves: an ear is given
+the audio and produces a transcript, a voice is given the sentence and
+produces the audio. Those conventions name token counts and nothing
+else, so the two units they have no word for are stated in the
+attribute name rather than reported as tokens they are not. A stage
+that measured nothing reports no usage rather than a zero: an absent
+measurement and a free call are different facts.
+
+Usage is not a cost. A backend turns one into the other with a model
+definition, which is a match pattern, a unit and a price per unit, and
+**those are yours to enter.** This server never writes one. It holds no
+admin credential for your backend, the OTLP path carries none, and a
+deployment that provisioned prices at boot would be mutating a
+third-party system on the strength of telemetry credentials, which is a
+larger claim on your infrastructure than anything else here makes.
+
+### The definitions worth entering
+
+Prices as published on <https://developers.openai.com/api/docs/pricing>,
+read 2026-09-12. A price is a fact with an as-of date; re-read it before
+trusting a cost report made long after this one.
+
+| Model | Match pattern | Unit | Input price | Published as |
+| --- | --- | --- | --- | --- |
+| `gpt-transcribe` | `(?i)^(gpt-transcribe)$` | `SECONDS` | `0.000075` | $0.0045 per minute |
+| `whisper-1` | `(?i)^(whisper-1)$` | `SECONDS` | `0.0001` | $0.006 per minute |
+| `tts-1` | `(?i)^(tts-1)$` | `CHARACTERS` | `0.000015` | $15.00 per 1M characters |
+| `tts-1-hd` | `(?i)^(tts-1-hd)$` | `CHARACTERS` | `0.00003` | $30.00 per 1M characters |
+
+The price column is the published one converted into the unit the span
+reports, and nothing else: 0.0045 per minute is 0.000075 per second,
+15.00 per million characters is 0.000015 per character. An exact
+conversion of a list price is still that list price. An estimate is not,
+which is why the models below get no definition at all.
+
+The match pattern is what the backend compares the span's
+`gen_ai.request.model` against, and that value is whatever your provider
+entry names as its model, so a definition only ever fires for a
+deployment that configured that model.
+
+### Entering one
+
+Against a Langfuse backend, a model definition is a `POST` to
+`/api/public/models` authenticated with the project's own key pair:
+
+```bash
+# The same three variables the recording upload already reads, and the
+# same rule: they live in the environment, never in a configuration
+# file, and this server never prints them back.
+curl -sS -X POST "$LANGFUSE_HOST/api/public/models" \
+  -u "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" \
+  -H 'content-type: application/json' \
+  -d '{
+        "modelName": "tts-1",
+        "matchPattern": "(?i)^(tts-1)$",
+        "unit": "CHARACTERS",
+        "inputPrice": 0.000015
+      }'
+```
+
+One request per row of the table above. The backend's own settings page
+does exactly the same thing through a form, which is usually the easier
+way to enter four of them and to see what a project already has; the
+request is here because a deployment that is rebuilt from files wants
+the four in a file.
+
+`unit` is a closed set (`TOKENS`, `CHARACTERS`, `MILLISECONDS`,
+`SECONDS`, `REQUESTS`, `IMAGES`) and the price keys are `inputPrice`,
+`outputPrice` and `totalPrice`. Both halves are why vinga reports its
+seconds and characters as INPUT: a usage number under any other key has
+no price beside it, however carefully it was measured.
+
+### With none of them entered
+
+Usage is present on every span and every cost reads zero. That is
+correct rather than broken: the server measured what it was given and
+the backend was never told what a second of audio is worth. Nothing is
+lost by entering the prices later, since a backend computes cost from
+the definitions in force when a trace arrives rather than retroactively,
+so enter them before the run whose cost you want to read.
+
+### The models that deliberately get none
+
+An estimate entered as a price is worse than an empty column, because it
+is a number a report adds up.
+
+- **`gpt-4o-transcribe` and `gpt-4o-mini-transcribe`** are billed per
+  audio token ($2.50 and $1.25 per 1M input tokens). The `asr` span
+  carries seconds, and converting would take a tokens-per-second
+  assumption. Their transcriptions show usage and no cost.
+- **`gpt-4o-mini-tts`** is billed per audio output token ($12.00 per 1M),
+  and the `tts_stream` span carries the characters the voice was given.
+  Same reason, same answer.
+- **ElevenLabs** bills in credits whose value depends on the plan, so
+  there is no list price to enter at all.
+- **Piper and faster-whisper** run in this process. There is no rate
+  because there is no vendor, which is a true answer rather than a gap:
+  what a local voice costs is the machine it runs on.
 
 ## The conversation store
 
