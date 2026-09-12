@@ -1,7 +1,7 @@
 """What the default install carries, and what it must not.
 
 The whole of this milestone's claim, proven in an environment rather
-than asserted about one. Five doors lead into this package and each is
+than asserted about one. Six doors lead into this package and each is
 exercised here:
 
 - the **client** door, which is `uvx --from git+...` on a laptop: the
@@ -25,6 +25,13 @@ exercised here:
   one place in this repository where the packages are genuinely absent,
   so it is where a server asked for telemetry is asked for the real
   missing-extra refusal rather than a faked one;
+- the **attachment** door, which is a deployment that wants a closed
+  session's recording beside its trace: the same project with
+  `[langfuse]`, held to its own locked closure and carrying none of the
+  server. Its missing-extra half needs an environment the otel refusal
+  does not reach, because that refusal comes first: `[serve,otel]`,
+  which is telemetry that CAN build asked for an attachment that
+  cannot;
 - the **contributor** door, which is `cd vinga-server && uv sync`: the
   project with its default groups, which must yield a runnable server
   with no new flags. It is the one door a mistake in is invisible to
@@ -81,7 +88,14 @@ from packaging.markers import Marker
 
 from tests.support.commands import BUILD_SECONDS, ran
 from tests.support.config_cli import registered
-from tests.support.tiers import OTEL_MODULES, SERVE_MODULES, SIM_MODULES, Tiers, declared
+from tests.support.tiers import (
+    LANGFUSE_MODULES,
+    OTEL_MODULES,
+    SERVE_MODULES,
+    SIM_MODULES,
+    Tiers,
+    declared,
+)
 from vinga_server.config import cli
 
 PROJECT = Path(__file__).resolve().parents[2]
@@ -299,6 +313,39 @@ def otel_env(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return _synced(tmp_path_factory.mktemp("otel") / "venv", "--extra", "otel")
 
 
+@pytest.fixture(scope="module")
+def langfuse_env(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The attachment door: the same project with `[langfuse]` and
+    nothing else.
+
+    Isolated for the reason `[otel]` is, and the isolation says more
+    here: this extra's closure CONTAINS that one, since the Langfuse
+    distribution depends on the same OpenTelemetry API, SDK and HTTP
+    exporter. Laid over `[otel]` the two would be indistinguishable, and
+    what this environment has to answer is what the extra itself
+    installs."""
+    return _synced(tmp_path_factory.mktemp("langfuse") / "venv", "--extra", "langfuse")
+
+
+@pytest.fixture(scope="module")
+def serve_otel_env(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A server that can export traces and cannot attach a recording.
+
+    The one environment the attachment's missing-extra refusal is
+    reachable in, and it exists because the refusals are ordered: a
+    `[serve]` install asked for telemetry refuses for the OTEL extra
+    first and never reaches the attachment at all. So this is the same
+    door as `serve_env` with the telemetry extra added and the
+    attachment one deliberately left out."""
+    return _synced(
+        tmp_path_factory.mktemp("serve-otel") / "venv",
+        "--extra",
+        "serve",
+        "--extra",
+        "otel",
+    )
+
+
 def _installed(python: Path) -> set[str]:
     """Every distribution the environment holds, as it reports itself."""
     finished = ran(
@@ -464,6 +511,27 @@ def test_the_client_install_carries_no_telemetry_sdk(
     assert tiers.otel & _installed(client_env) == set()
 
     for module in sorted(OTEL_MODULES.values()):
+        finished = _ran(client_env, "python", "-c", f"import {module}")
+        assert finished.returncode != 0, f"{module} is importable from the client install"
+
+
+def test_the_client_install_carries_no_capture_uploader(
+    client_env: Path, tiers: Tiers
+) -> None:
+    """And the same pair for the fifth tier.
+
+    The import half names the generated REST client rather than the
+    package root, which is the map's own reason: `langfuse` is an
+    ordinary package, so the root would import with the client gone, and
+    that client is the whole of what the uploader uses it for.
+    """
+    assert len(tiers.langfuse) == 1, tiers.langfuse
+    assert set(LANGFUSE_MODULES) == tiers.langfuse, (
+        "the import-name map has drifted from the tier"
+    )
+    assert tiers.langfuse & _installed(client_env) == set()
+
+    for module in sorted(LANGFUSE_MODULES.values()):
         finished = _ran(client_env, "python", "-c", f"import {module}")
         assert finished.returncode != 0, f"{module} is importable from the client install"
 
@@ -889,6 +957,79 @@ def test_telemetry_refuses_from_the_serve_install_without_the_extra(
     assert "opentelemetry" not in finished.stderr
 
 
+# The attachment tier
+#
+# The fifth door. Its closure CONTAINS the fourth's, because the
+# Langfuse distribution depends on the same OpenTelemetry API, SDK and
+# HTTP exporter, so the negative checks here are about the server half
+# alone and the comparison is the whole locked closure rather than a
+# name or two.
+
+
+def test_the_langfuse_install_is_exactly_the_locked_langfuse_closure(
+    langfuse_env: Path, locked: dict[str, dict[str, object]]
+) -> None:
+    """Exactly, both ways, like every other tier."""
+    expected = _tier_closure(locked, _marker_environment(langfuse_env), "langfuse")
+
+    assert _installed(langfuse_env) == expected
+
+
+def test_a_distribution_nobody_declared_would_turn_the_langfuse_lane_red(
+    langfuse_env: Path, locked: dict[str, dict[str, object]]
+) -> None:
+    """The bite, because a comparison is only worth what it rejects."""
+    expected = _tier_closure(locked, _marker_environment(langfuse_env), "langfuse")
+    installed = _installed(langfuse_env)
+
+    assert installed != expected | {"a-transitive-distribution-nobody-declared"}
+    assert installed != expected - {"langfuse"}
+    assert installed == expected
+
+
+def test_the_langfuse_install_carries_no_serve_distribution(
+    langfuse_env: Path, tiers: Tiers
+) -> None:
+    """Attaching a recording is not a way into the server half either.
+
+    The cross-tier negative that is still meaningful for this extra:
+    the OTEL one is not, since this closure contains it by
+    construction, and a check that asserted otherwise would be a check
+    of the SDK's own requirements rather than of this repository's
+    tiering.
+    """
+    assert tiers.serve & _installed(langfuse_env) == set()
+
+    for module in sorted(SERVE_MODULES.values()):
+        finished = _ran(langfuse_env, "python", "-c", f"import {module}")
+        assert finished.returncode != 0, f"{module} is importable from the langfuse install"
+
+
+def test_the_langfuse_install_carries_the_otel_tier_it_depends_on(
+    langfuse_env: Path, tiers: Tiers
+) -> None:
+    """The overlap, asserted rather than left as a remark.
+
+    It is the one fact about this tier that a reader would otherwise
+    have to take from a comment: the attachment extra installed alone
+    still brings the OpenTelemetry SDK and the HTTP exporter, because
+    the Langfuse distribution requires them. Written down so that the
+    day it stops being true, the lane says so instead of the two
+    negative checks above quietly starting to mean something else.
+    """
+    assert tiers.otel <= _installed(langfuse_env)
+
+
+def test_the_langfuse_modules_import_from_the_langfuse_install(
+    langfuse_env: Path,
+) -> None:
+    """And the positive half, asked of the interpreter: the generated
+    REST client the uploader's three media calls live on."""
+    for module in sorted(LANGFUSE_MODULES.values()):
+        finished = _ran(langfuse_env, "python", "-c", f"import {module}")
+        assert finished.returncode == 0, (module, finished.stderr)
+
+
 # The contributor door
 
 
@@ -932,7 +1073,7 @@ def test_a_plain_sync_still_yields_a_runnable_server(
     empty store SERVES, and a lane that reads an exit code from a server
     that is running waits until something kills it.
     """
-    assert tiers.serve | tiers.sim | tiers.otel <= _installed(synced), (
+    assert tiers.serve | tiers.sim | tiers.otel | tiers.langfuse <= _installed(synced), (
         "a plain `uv sync` stopped carrying a shipped extra, which no other lane names"
     )
 
@@ -961,6 +1102,7 @@ def test_the_sync_command_in_agents_md_is_the_one_that_is_proven() -> None:
     assert "[sim]" not in commands
     assert "[serve,sim]" not in commands
     assert "[serve,sim,otel]" not in commands
+    assert "[serve,sim,otel,langfuse]" not in commands
 
 
 if __name__ == "__main__":  # pragma: no cover - a hand run of one lane
