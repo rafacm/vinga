@@ -133,6 +133,25 @@ close, stopped, or timed out, all of which mean the export may not
 assume the turns are readable, and per the `Acknowledgement`
 docstring the three are deliberately not told apart.
 
+That is a contract revision, made deliberately rather than slipped:
+`Acknowledgement` today says repeatedly that it speaks for one turn
+and nothing else. The class docstring generalizes to "its own
+record", and the barrier meaning lives where the barrier is: the
+`Close` record and `close_session` document that, because one
+writer thread consumes one FIFO queue, a close acknowledgement
+settling `True` means every earlier record of the queue has been
+resolved, landed or dropped-and-counted, and nothing more. The
+"nothing more" is itself part of the contract and part of the
+design: a close can commit after an earlier turn was dropped, the
+acknowledgement still answers `True`, and the export then carries
+exactly what the store holds, which is correct because the store is
+the issue's settled source of truth, not the conversation as
+spoken. The per-turn docstring sentences that would become false
+move with the change. Tests drive both sides: the close transaction
+itself failing answers `False`, and an earlier turn
+dropped-and-counted under a committed close answers `True` with the
+export carrying the stored turns.
+
 ### The transcript travels as OTLP spans; no SDK, no extra, no staging, and delivery is a bounded call with an answer
 
 The shape #67's uploader has (staging hardlinks, a Langfuse REST
@@ -716,6 +735,16 @@ Findings condensed but faithful; resolutions appended per amendment.
    semantics or deliberately generalize the class and its
    docstrings; tests must distinguish close-transaction failure
    from earlier turns dropped and counted.
+
+   *Resolution.* Adopted, the generalization branch. The class
+   docstring moves from "its own turn" to "its own record"; the
+   barrier semantics are documented on `Close` and `close_session`
+   where the barrier is, including the stated limit that a
+   committed close after a dropped-and-counted turn answers `True`
+   and the export carries what the store holds (the store being the
+   issue's settled source of truth); both sides are driven by
+   tests, and the turn-specific docstring sentences move with the
+   change.
 
 8. **P2: The no-leak tests do not seed the newly read out-of-scope
    content.** The shared read includes complete rows and nested tool
