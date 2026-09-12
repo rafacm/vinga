@@ -928,7 +928,7 @@ the manifest with its own generator when stale.
   record keeps its tables. Documentation only. Design footprint: no
   module moves. Documentation footprint as listed above.
 - [x] **[M2: trace completeness](2026-09-12-telemetry-overhaul-implementation.md#m2-trace-completeness)**
-  (PR TBD). `vinga.device.name` on every span in
+  (PR #509). `vinga.device.name` on every span in
   the enumeration above, carried by the live session's retained identity
   for the stage spans and added to the retained `_Exported` record for
   the three post-close writers, which hold no attributes today; a `tool_call` fold building a child span of the
