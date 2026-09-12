@@ -532,7 +532,11 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
             "background when a session needs it."
         ),
         command=f"{PROGRAM} mcp-server set <name> -f fragment.yaml",
-        examples=("mcp-server-stdio.yaml", "mcp-server-streamable-http.yaml"),
+        examples=(
+            "mcp-server-stdio.yaml",
+            "mcp-server-streamable-http.yaml",
+            "mcp-server-search.yaml",
+        ),
         route="/mcp-servers",
         addressing=("name",),
         moved_key="mcp_servers",
