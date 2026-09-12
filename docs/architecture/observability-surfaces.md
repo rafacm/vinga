@@ -1,6 +1,6 @@
 # Observability and conversation-data surfaces
 
-Where may this datum go? Seven surfaces answer it, and this page is the
+Where may this datum go? Eight surfaces answer it, and this page is the
 map of them: what each carries, which need it serves, how long it is
 kept and who may read it, and what is true of it in the code today.
 [The 2026-08-15 ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)
@@ -10,8 +10,11 @@ changes when the design does.
 
 ## On this page
 
-- [The seven surfaces](#the-seven-surfaces): the table this page exists
+- [The eight surfaces](#the-eight-surfaces): the table this page exists
   for, one row per surface, with its current status.
+- [The export ladder](#the-export-ladder): the three tiers content may
+  leave this deployment on, which is the policy the surfaces above are
+  arranged by.
 - [The invariants](#the-invariants): the four rules that decide where
   a new field goes, and that hold whatever the surfaces grow into.
 - [Where each piece lands](#where-each-piece-lands): which document
@@ -21,7 +24,7 @@ changes when the design does.
   and the external practice the design was checked against, as they
   were written on the day the decision was taken.
 
-## The seven surfaces
+## The eight surfaces
 
 The Serves column numbers the needs in
 [the appendix](#the-needs). The Carries column says what class of
@@ -37,7 +40,28 @@ in the row.
 | **Memory** (the `memory` schema) | Content as what an agent is told to keep, and the only surface here whose content is read back INTO a prompt. Three scopes: an agent's own facts about the person it talks to, a device's notes about the place and the household, shared by every agent bound to that board, and one conversation's ledger of what is currently true in it. Beside the active rows sits a held area: a fact an agent was asked to forget is kept until the conversation that forgot it ends, so the undo it exists for can reach it. Audio never enters it, and neither does a transcript: what lands is what a model chose to store through a tool | 2, 7 | **Facts until they are corrected**, capped per scope and pruned oldest-first at write, with no clock on them: an agent's memory is not telemetry and does not age out. **State and held facts until their thread ends**, which is the conversation record's own retention: a thread's erasure and its retention prune take both in the same transaction as its turns, and a boot sweep heals what no transaction covered. **The operator API is the deletion door**, scope-addressed under `/api/memory` with `vinga memory list`, `vinga memory set` and `vinga memory delete` in front of it: every listing shows orphaned owners, which is what a deleted agent and a deleted device record leave, a rename having moved an agent's rows with it and a board swap having moved a device's, and every deletion through it is a hard delete. No read-only SQL: `vinga_ro` is granted nothing on this schema, so the API is the surface | **Landed** (#314, scopes and editing #83). The schema is unconditional and is migrated at every boot, because an empty table is not a memory; whether a given agent reaches any of it is that agent's own `memory` section, on unless it says otherwise, and one switched off is offered no tool and injected no scope. Storage never leaves the deployment's own database; as prompt content it follows the active LLM provider's egress exactly as the transcript and the persona do, which is what `server.local_only` is the guard for, and a device note therefore reaches the provider of every sibling agent on that board that may remember |
 | **Exported traces** (`vinga_server/telemetry.py`, OTLP) | Metadata only, and not its own vocabulary: every span and every span event is derived from the structured-events row above, so this surface can hold nothing that row cannot. A session is one span, each turn a trace of its own linked to it, and inside a turn the stages that took the time: the transcription and how it ended, each generation round, each sentence's synthesis stream, and the paced playback interval. The three a provider ran carry the entry that ran them, under the OpenTelemetry GenAI attribute names for the facts those conventions have a name for. The fields are the ones in [`reference/events.md`](../reference/events.md), under attribute names this module chooses | 1, 5 | **The collector's backend owns retention, and vinga owns none of it.** This surface keeps nothing: spans are queued, batched and sent, and a full queue drops them rather than delaying a reply. How long a trace lives, who may read it and how it is deleted are the receiving backend's policy, configured there and not here. Where it goes and what credentials reach it are the standard `OTEL_EXPORTER_OTLP_*` variables, which are transport configuration and never become span content | **Landed** (#66), and off unless `server.telemetry.enabled` says otherwise. Absent by default, refused under `server.local_only` because sending to a collector is egress like any other, and refused with the extra to install when the packages are missing. It is an `EventTap` on the seam the events package already documents, which is what makes the derivation structural: no emit site moves for it, and it can say nothing `events/catalog.py` does not declare |
 | **Exported capture media** (`vinga_server/capture_upload.py`) | Content, and the only surface here that sends any off the host: one closed session's stereo WAV and its JSON manifest, attached to the trace that session was exported under. Exactly those two files. The decision track beside them is a third content-bearing artifact and stays local, and no transcript, no event payload and no identifier from the far side travels either way. What it carries is therefore the capture row above, minus the track, sent to where the exported-traces row already sends metadata | 1 (deep diagnosis, off-host) | **The backend owns retention, and vinga owns none of it.** This surface keeps nothing: a recording is hard-linked aside, uploaded, and the links removed. How long the recording then lives, who may play it and how it is deleted are the receiving deployment's policy, configured there and not here, and a deployment with no policy configured retains indefinitely, which is this project's own recorded caution about self-hosted Langfuse. Where it goes and what credentials reach it are `LANGFUSE_HOST`, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`, which the uploader reads from the environment and hands to the Langfuse REST client; no vinga configuration key holds one, nothing stores one, and nothing this server prints renders one. Erasure on this side is the operator's act on the backend; deleting a session under `/api` does not reach it | **Landed** (#67), and off unless `server.telemetry.export_audio` says otherwise, which neither `server.capture` nor `server.telemetry.enabled` implies: room audio leaving the pod is its own decision. With capture off it is a no-op, under `server.local_only` it is refused, and without the `langfuse` extra the boot is refused. It runs on a worker of its own after a session closed, never on the audio path, and every failure is a warning event (`capture_uploaded`, `capture_upload_failed` with a reason from a closed set), because a recording that silently failed to attach would leave a reader with a trace, no audio and no way to learn any was meant to be there |
+| **Exported transcripts** (`vinga_server/transcript_export.py`) | Content, and the second surface here that sends any off the host: a closed session's turns, one observation each on the trace that session was exported under, carrying what was heard and what was replied with per-agent attribution where a handover split the reply. Conversation-level text exactly, read post hoc from the conversation store's own rows. The assembled model request, the tool arguments and results, and the per-request audio are not in it, and wire fidelity is a future decision of its own. What it carries is therefore the conversation-store row above, narrowed to its text, sent to where the exported-traces row already sends metadata | 1, 2 (off-host), 5 (evals) | **The backend owns retention, and vinga owns none of it.** This surface keeps nothing: the turns are read, exported and let go. **Exported text outlives erasure on this side**, which is the boundary an operator has to know before switching it on: deleting a session or a conversation under `/api`, or letting retention prune one, removes it from this deployment's store and reaches nothing that already left. How long the text then lives, who may read it and how it is deleted are the receiving deployment's policy, configured there, and a deployment with no policy configured retains indefinitely. Where it goes and what credentials reach it are the same `OTEL_EXPORTER_OTLP_*` variables the traces use, which are transport configuration and never become span content | **Landed** (#495), and off unless `server.telemetry.export_transcripts` says otherwise, which neither `server.telemetry.enabled` nor `server.conversations.text` implies: what a household said leaving the deployment is its own decision. With conversations absent, off, or storing no text it is a no-op, under `server.local_only` it is refused, and with telemetry off the boot is refused. It needs no extra and no second credential, because the turns travel as spans over the transport the traces already use. It runs on a worker of its own after a session closed, never on the audio path, and every failure is a warning event (`transcripts_exported`, `transcript_export_failed` with a reason from a closed set), because a transcript that silently failed to export would leave a reader with a trace, the stage timings, none of the words and no way to learn any were meant to be there |
 | **Audit** | Admin and config actions, auth refusals, reload invocations | 4 | Long, append-only, narrow content | **Future.** Nothing writes one today and no issue owns it yet |
+
+## The export ladder
+
+Three tiers decide what may leave this deployment and on what terms.
+They are policy rather than one issue's choice, recorded as the
+[2026-09-12 ladder amendment](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md#amendment-the-export-ladder-is-policy-2026-09-12)
+to the content-and-telemetry record; the table is here because this is
+where that record keeps its tables.
+
+| Tier | What leaves | On what terms | Today |
+| --- | --- | --- | --- |
+| **Metadata** | Timings, closed reasons, counts, server-minted identifiers: the structured-events vocabulary and nothing else | With telemetry at all. It is the prerequisite rather than a peer, which is why the switch is `server.telemetry.enabled` and not `export_metadata` | Landed (#66) |
+| **Conversation content** | What a session holds locally, per class: the recording of a room, and what was said in it | A flag per class, each defaulting off and implied by nothing above it (`export_audio`, `export_transcripts`). Export follows retention: what the capture directory or the conversation store holds is what may leave, never more, and what leaves outlives erasure here | Landed (#67, #495) |
+| **Wire fidelity** | The assembled prompt as a model received it, the per-request audio as a provider heard it | Undecided, deliberately: each is a decision of its own when something needs it | Unspecced |
+
+Content escalations ride content taps (the capture store's files, the
+conversation store's rows). The emit-to-span fold stays content-free at
+every tier, so a fold-time content tap is rejected policy rather than a
+deferral: a transcript observation is a content tap's delivery vehicle,
+not the fold gaining content.
 
 ## The invariants
 
@@ -93,8 +117,10 @@ as the questions a placement has to answer.
   consented to the recording leaving the house, which is why that is a
   flag of its own. The read surface over the aggregates landed with
   #440 and is in the conversation-store row above; the
-  LLM-observability exporter and the capture attachment landed with
-  #66 and #67 and are the fifth and seventh rows.
+  LLM-observability exporter, the capture attachment and the transcript
+  export landed with #66, #67 and #495 and are the fifth, seventh and
+  eighth rows. What may leave and on what terms is the export ladder
+  above, and the tiers there are the policy those three rows implement.
 
 ## Decision evidence, gathered 2026-08-15
 
