@@ -372,3 +372,110 @@ variant case, and the workflow's per-image import checks.
   new module with its depth sentence above; one injected callback
   seam on `CaptureStore`. Documentation footprint as listed, each
   page through its owner.
+
+## Plan review round
+
+External review: codex CLI 0.154.0, model gpt-5.6-sol, read-only
+sandbox, 2026-09-12, runtime 4m46s, reviewing commit 7b25e452.
+Verdict as received: **ready after the P1/P2 amendments**. Findings
+condensed but faithful; resolutions appended per amendment.
+
+1. **P1: Capture-off configurations contradict the required
+   no-op.** The plan refuses on telemetry-off, local_only and the
+   missing extra unconditionally, then calls capture-off a no-op;
+   the builder signature receives no capture state. Resolve capture
+   first: absent or disabled returns None with the informational
+   no-op before any other check; the three refusals apply only when
+   capture and attachment are both effectively enabled.
+
+2. **P1: `CaptureStore.finished()` is not a session-close seam.**
+   A capture closes early at `max_session_s` and on write failure,
+   both invoking `finished()` while the session continues; the true
+   ordering closes capture after `session_closed`. Add an explicit
+   session-level finalization call after `SessionCapture.close()`;
+   keep early-finished paths but do not enqueue until the device
+   session closes; test duration-limit and write-failure captures
+   upload never-early.
+
+3. **P1: Media-to-trace correlation is assumed before it is
+   verified.** M2 commits to retaining an OTel trace id and to a
+   session-id-only downgrade while the media walkthrough sits in
+   M3; the batch exporter can delay ingestion past the media
+   request; nothing proves the media API accepts an OTel trace id,
+   upserts an un-ingested trace, or attaches by session id at all.
+   Move media correlation into the initial live discovery; record
+   the identifier format and the arrives-before-ingestion behavior;
+   design M2 after; bound any ordering retry; a missing correlation
+   is `capture_upload_failed`, and session-only metadata is not
+   called an attachment unless proven.
+
+4. **P1: The blackholed-endpoint test cannot emit the warning it
+   claims.** A blackhole accepts and never answers; without a
+   finite request timeout and retry ceiling the media call never
+   returns and no failure event fires; a bounded join only saves
+   shutdown. Define the timeout and retry policy; verify against an
+   accept-and-never-answer receiver; assert session-close latency,
+   failure-event latency and shutdown latency separately.
+
+5. **P2: Queue depth four loses captures during an ordinary
+   redeploy.** Eight sessions is the default limit and shutdown
+   closes them concurrently, so a healthy upgrade can enqueue eight
+   finished captures and deterministically drop several. Size
+   admission against `server.limits.max_sessions` or make the
+   staged jobs the durable queue; test a maximum-sessions
+   simultaneous drain accounting for every job.
+
+6. **P2: Staging cleanup and restart behavior are incomplete.**
+   Nothing removes links on partial staging, on a dropped enqueue,
+   or on shutdown-abandoned work, and the boot sweep discards the
+   only upload-safe links without a per-capture failure record.
+   Make staging transactional with rollback; clean rejected jobs'
+   links immediately; define shutdown and restart behavior (persist
+   enough to retry, or one sanitized failure per abandoned job
+   before cleanup); assert directory contents after partial
+   staging, overflow, timeout and restart.
+
+7. **P2: The plan expands egress from two attachments to the full
+   triplet.** The settled scope is WAV plus manifest; the staging
+   hardlinks all three and the test says "staged triplet uploads".
+   The JSONL decision track stays local; stage and upload exactly
+   two files; the wire test asserts exactly two attachments, MIME
+   types, a finalized WAV header, a final manifest, and no JSONL
+   request.
+
+8. **P2: Missing credentials cannot reliably be deferred with
+   construction in the builder.** If the pinned SDK validates
+   credentials at construction, boot fails, contradicting the
+   first-upload-failure policy. Verify the SDK's behavior; defer
+   client construction into the worker's first job and contain
+   every construction exception as a sanitized upload failure, or
+   adopt and test a fixed value-free boot refusal.
+
+9. **P2: Third-party logging is not contained by the design.** The
+   OTel substrate quiets its SDK's logger namespace before
+   construction and holds the lease until outstanding work truly
+   ends; the plan names no equivalent for the Langfuse SDK and its
+   HTTP stack, and a faked import seam cannot certify real SDK
+   logging. Guard the real namespaces before construction, retain
+   past a bounded-shutdown expiry, restore across sequential
+   lifespans, and add a real-SDK late-failure sentinel test.
+
+10. **P2: The proposed hostile-session-id leak assertion is
+    impossible.** Both new events deliberately carry `session`, and
+    the policy treats a bounded session id as a trusted identifier.
+    Plant secret sentinels only in credential and manifest-content
+    inputs; assert session ids appear only in declared identifier
+    positions and stay bounded by `SessionId`.
+
+11. **P2: Configuration does not state that both transports must
+    target the same project.** OTLP env and `LANGFUSE_*` env are
+    independent; pointed at different projects, both succeed and
+    the recording does not accompany the trace. Document the
+    same-deployment-same-project invariant in both example configs
+    and the generated reference, and put it on the walkthrough
+    checklist.
+
+12. **P3: The documentation surface count is already six.** The
+    page declares six surfaces including exported traces and audit.
+    Exported capture media is the seventh; update heading, count,
+    table and the still-open owner line.
