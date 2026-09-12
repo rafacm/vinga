@@ -41,10 +41,13 @@ from tests.support.telemetry import (
     AGENT,
     CONVERSATION,
     DEVICE,
+    OTHER_AGENT,
     SESSION,
     Clock,
+    Deliveries,
     assemble_prompt,
     barge_in,
+    call_tool,
     capture_emitter,
     capture_started,
     capture_upload_failed,
@@ -53,14 +56,21 @@ from tests.support.telemetry import (
     drop_frames,
     exporting,
     finish_reply,
+    finish_speaking,
     finished,
     go_idle,
     hand_over,
+    hear,
     named,
     open_session,
     released,
+    round_done,
     session_events,
+    start_speaking,
     start_turn,
+    synthesize,
+    transcript_emitter,
+    transcripts_exported,
     upload_emitter,
 )
 from vinga_server.boundary import BoundaryRefusal, Reach, check_feature
@@ -75,12 +85,14 @@ from vinga_server.telemetry import (
     OTEL_NAMESPACE,
     OTLP_PROTOCOL_ENV,
     OTLP_TRACES_PROTOCOL_ENV,
+    PENDING_PROMPTS,
     SERVICE,
     SHAPES,
     SUPPORTED_PROTOCOL,
     TELEMETRY_KEY,
     UNSUPPORTED_PROTOCOL,
     Telemetry,
+    TranscriptTurn,
     build_telemetry,
 )
 
@@ -844,7 +856,17 @@ def test_an_upload_outcome_lands_on_the_trace_its_session_closed_in() -> None:
 
 def test_an_upload_outcome_carries_what_its_declaration_declares() -> None:
     """The catalog's fields and no others, plus the session under both
-    names so the query a reader makes finds it beside the turns."""
+    names so the query a reader makes finds it beside the turns.
+
+    Under `vinga.` names, which is what tells a reader whose facts they
+    are. These spans are the only ones this module makes whose
+    attributes used to keep the catalog's bare field names, because
+    they were built with the helper every span EVENT shares: a bare
+    `elapsed_ms` beside `vinga.turn.speech_ms` belongs to nothing, and
+    a backend that groups by prefix cannot find it. The span events
+    keep their bare names, because there the event name is the subject
+    and the fields are its own.
+    """
     telemetry, memory = exporting()
     a_session(telemetry, SESSION)
 
@@ -852,11 +874,13 @@ def test_an_upload_outcome_carries_what_its_declaration_declares() -> None:
         capture_uploaded(upload_emitter())
 
     held = dict(named(finished(telemetry, memory), "capture_uploaded").attributes or {})
-    assert held["audio_bytes"] == 173464
-    assert held["manifest_bytes"] == 1258
-    assert held["elapsed_ms"] == 412
+    assert held["vinga.export.audio_bytes"] == 173464
+    assert held["vinga.export.manifest_bytes"] == 1258
+    assert held["vinga.export.elapsed_ms"] == 412
     assert held["vinga.session.id"] == SESSION
     assert held["session.id"] == SESSION
+    # And nothing under the bare spellings they used to carry.
+    assert [key for key in held if not key.count(".")] == []
     # The sentence's own rendering is not a field, and neither is the
     # event name: it is the span's.
     assert "megabytes" not in held
@@ -875,7 +899,30 @@ def test_a_failed_upload_says_why_on_the_trace() -> None:
     held = dict(
         named(finished(telemetry, memory), "capture_upload_failed").attributes or {}
     )
-    assert held["reason"] == "unreachable"
+    assert held["vinga.export.reason"] == "unreachable"
+    assert "reason" not in held
+
+
+def test_a_transcript_export_outcome_carries_the_same_names() -> None:
+    """One table for all four after-close outcomes, not one per pair.
+
+    `elapsed_ms` means the same thing on a recording's trip and on a
+    transcript's, so it keeps one attribute name across both: the two
+    spans are told apart by their own names, which is the catalog's
+    job rather than the prefix's.
+    """
+    telemetry, memory = exporting()
+    a_session(telemetry, SESSION)
+
+    with watching_the_server(telemetry):
+        transcripts_exported(transcript_emitter())
+
+    held = dict(
+        named(finished(telemetry, memory), "transcripts_exported").attributes or {}
+    )
+    assert held["vinga.export.turns"] == 7
+    assert held["vinga.export.elapsed_ms"] == 96
+    assert [key for key in held if not key.count(".")] == []
 
 
 def test_an_outcome_for_a_session_this_exporter_never_saw_writes_nothing() -> None:
@@ -1108,6 +1155,348 @@ def test_an_open_at_the_bound_waits_for_the_map_it_has_to_move() -> None:
     assert telemetry.trace_of(newcomer) is not None, "the newcomer was not recorded"
     assert telemetry.trace_of(ids[0]) is None, "the oldest was not the one evicted"
     assert [one for one in ids[1:] if telemetry.trace_of(one) is None] == []
+
+
+# --- the board's name, on every span -----------------------------------
+#
+# "Every span" is an enumeration and not a table entry, because spans
+# are built in more places than the attribute tables reach: the session
+# span reads its own table, the turn and the stage spans read the
+# retained identity, and the three that run AFTER the close build their
+# attributes by hand and hold no attributes at all to inherit. So the
+# name joins two records, the live session's identity and the retained
+# `_Exported`, and the enumeration is asserted constructor by
+# constructor here rather than trusted.
+#
+# Read from the retained record and never from a configuration, which
+# is the second reason as well as the first: a board renamed after a
+# session ran must not change what that session's spans say.
+
+BOARD = "kitchen speaker"
+
+
+def a_named_session(telemetry: Telemetry, session: str = SESSION) -> None:
+    """One whole session on a board somebody named, opened and closed,
+    which is what puts a name in the retention."""
+    clock = Clock()
+    events = session_events(clock, telemetry, session=session)
+    open_session(events, device_name=BOARD)
+    clock.tick(1.0)
+    close_session(events)
+
+
+def test_the_session_span_carries_the_board_s_name() -> None:
+    """The first constructor in the enumeration, and the only one that
+    reads the name off the payload: `session_open` carries the bounded
+    copy, and the session span's own table exports it."""
+    telemetry, memory = exporting()
+    a_named_session(telemetry)
+
+    assert named(finished(telemetry, memory), "session").attributes[
+        "vinga.device.name"
+    ] == BOARD
+
+
+def test_a_turn_and_its_stages_carry_the_board_s_name() -> None:
+    """The constructors that read the retained identity. OTel inherits
+    nothing, so a stage span with only its stage's fields is a span
+    nobody looking for a board can find."""
+    telemetry, memory = exporting()
+    clock = Clock()
+    events = session_events(clock, telemetry)
+    open_session(events, device_name=BOARD)
+    clock.tick(1.0)
+    start_turn(events)
+    clock.tick(0.3)
+    hear(events)
+    clock.tick(0.8)
+    round_done(events, duration_ms=800)
+    clock.tick(0.2)
+    call_tool(events)
+    clock.tick(0.4)
+    synthesize(events, stream_ms=400)
+    start_speaking(events)
+    clock.tick(0.5)
+    finish_reply(events, sentences=1)
+    finish_speaking(events, frames=12, at=clock())
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    assert {span.name for span in spans} == {
+        "session",
+        "turn",
+        "asr",
+        "llm",
+        "tool",
+        "tts_stream",
+        "playback",
+    }
+    for span in spans:
+        assert span.attributes["vinga.device.name"] == BOARD, span.name
+
+
+def test_a_media_reference_carries_the_board_s_name() -> None:
+    """The first of the three post-close constructors, which builds its
+    attributes by hand and therefore had nothing to inherit."""
+    telemetry, memory = exporting()
+    a_named_session(telemetry)
+
+    telemetry.reference_media(SESSION, {"capture_audio": A_REFERENCE})
+
+    written = named(finished(telemetry, memory), "capture")
+    assert written.attributes["vinga.device.name"] == BOARD
+
+
+def test_an_outcome_after_the_close_carries_the_board_s_name() -> None:
+    """The second, whose attributes come off a payload that carries no
+    device at all: an upload outcome names its session and nothing
+    else, so the name can only come from the retained record."""
+    telemetry, memory = exporting()
+    a_named_session(telemetry)
+
+    with watching_the_server(telemetry):
+        capture_uploaded(upload_emitter())
+
+    written = named(finished(telemetry, memory), "capture_uploaded")
+    assert written.attributes["vinga.device.name"] == BOARD
+
+
+def test_a_transcript_span_carries_the_board_s_name() -> None:
+    """The third, which builds its attributes from a projection of the
+    conversation store and reads the name from the context the job was
+    admitted on."""
+    deliveries = Deliveries()
+    telemetry, _ = exporting(transcripts=deliveries)
+    a_named_session(telemetry)
+    context = telemetry.retained_context(SESSION)
+    assert context is not None
+
+    telemetry.export_transcript(
+        SESSION,
+        context,
+        [TranscriptTurn(index=1, id=7, t_ms=120, agent=AGENT, heard="a", reply="b")],
+    )
+
+    written = deliveries.spans()
+    assert len(written) == 1
+    assert written[0].attributes["vinga.device.name"] == BOARD
+
+
+def test_a_board_nobody_named_says_nothing_rather_than_null() -> None:
+    """Which is the state every deployment's boards are in until an
+    operator runs `device rename`, and the difference between "this
+    board has no name" and "this span forgot to say".
+
+    Every constructor in the enumeration in one case, because what is
+    being pinned is the absence rule rather than one span's behavior.
+    """
+    deliveries = Deliveries()
+    telemetry, memory = exporting(transcripts=deliveries)
+    clock = Clock()
+    events = session_events(clock, telemetry)
+    open_session(events)
+    clock.tick(1.0)
+    start_turn(events)
+    clock.tick(0.3)
+    hear(events)
+    clock.tick(0.5)
+    finish_reply(events, sentences=1)
+    close_session(events)
+    context = telemetry.retained_context(SESSION)
+    assert context is not None
+    telemetry.reference_media(SESSION, {"capture_audio": A_REFERENCE})
+    with watching_the_server(telemetry):
+        capture_uploaded(upload_emitter())
+    telemetry.export_transcript(
+        SESSION,
+        context,
+        [TranscriptTurn(index=1, id=7, t_ms=120, agent=AGENT, heard="a", reply="b")],
+    )
+
+    spans = [*finished(telemetry, memory), *deliveries.spans()]
+    assert {span.name for span in spans} == {
+        "session",
+        "turn",
+        "asr",
+        "capture",
+        "capture_uploaded",
+        "transcript",
+    }
+    for span in spans:
+        assert "vinga.device.name" not in span.attributes, span.name
+
+
+# --- a prompt's provenance, on every turn the agent spoke --------------
+#
+# `prompt_assembled` is emitted once per AGENT and not once per turn:
+# the know-how half is assembled and cached, so an attribute written
+# only onto whichever turn span happened to be open when the event
+# arrived would appear on one turn per agent per session and be absent
+# from every later one. That is not the token-provenance question
+# anyone wants answered, so the sources are retained per agent the way
+# the provider entries already are and stamped on every turn that agent
+# speaks.
+#
+# And the ordering is worse than that, which is why the hold exists.
+# `PipelineRuntime.__init__` activates the first agent, and
+# `DeviceSession.run` builds the runtime before the hello exchange and
+# well before `session_open`, so the INITIAL agent's event has always
+# arrived before there was any trace to put it on: the ordinary case,
+# most sessions having exactly one agent.
+
+SOURCES = {"persona": 210, "instructions:house": 84}
+
+# The same mapping as the attribute names it lands under, which is the
+# whole of the flattening rule: one attribute per block, with the
+# provenance token's `:` separators written as `.` because an attribute
+# name is a dotted path and a token is not.
+FLATTENED = {
+    "vinga.prompt.sources.persona": 210,
+    "vinga.prompt.sources.instructions.house": 84,
+}
+
+
+def test_a_turn_carries_the_provenance_of_the_prompt_behind_it() -> None:
+    """Flattened, one attribute per block, with the total beside them.
+
+    A JSON blob would be present and unqueryable, which for "how much
+    of this prompt came from where" is the same as absent: the question
+    is a number per block that a reader charts. The key space is the
+    five declared provenance forms with configured names inside three
+    of them, which is the operator's own configuration and nothing a
+    far side sends.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+
+    open_session(events)
+    clock.tick(0.1)
+    assemble_prompt(events, SOURCES)
+    clock.tick(0.1)
+    start_turn(events)
+    clock.tick(1.0)
+    finish_reply(events)
+    close_session(events)
+
+    turn = named(finished(telemetry, memory), "turn")
+    for name, characters in FLATTENED.items():
+        assert turn.attributes[name] == characters, name
+    assert turn.attributes["vinga.prompt.characters"] == 294
+
+
+def test_the_second_turn_by_one_agent_carries_them_too() -> None:
+    """The claim the retention exists for. One event per agent means
+    the attribute has to outlive the turn it arrived in, or a session's
+    provenance is a fact about its first turn only."""
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+
+    open_session(events)
+    assemble_prompt(events, SOURCES)
+    for _ in range(2):
+        clock.tick(1.0)
+        start_turn(events)
+        clock.tick(1.0)
+        finish_reply(events)
+    close_session(events)
+
+    turns = [span for span in finished(telemetry, memory) if span.name == "turn"]
+    assert len(turns) == 2
+    for turn in turns:
+        assert turn.attributes["vinga.prompt.characters"] == 294
+        assert turn.attributes["vinga.prompt.sources.persona"] == 210
+
+
+def test_a_handover_switches_which_prompt_a_turn_is_stamped_from() -> None:
+    """Per agent, not per session: a device bound to two agents
+    assembles two prompts, and a turn says which one the agent speaking
+    it was given."""
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+
+    open_session(events)
+    assemble_prompt(events, SOURCES)
+    assemble_prompt(events, {"persona": 11}, agent=OTHER_AGENT)
+    clock.tick(1.0)
+    hand_over(events)
+    clock.tick(1.0)
+    start_turn(events)
+    clock.tick(1.0)
+    finish_reply(events)
+    close_session(events)
+
+    turn = named(finished(telemetry, memory), "turn")
+    assert turn.attributes["vinga.prompt.characters"] == 11
+    assert turn.attributes["vinga.prompt.sources.persona"] == 11
+    assert "vinga.prompt.sources.instructions.house" not in turn.attributes
+
+
+def test_a_prompt_assembled_before_the_session_opened_is_claimed_by_it() -> None:
+    """The production ordering, driven as production drives it.
+
+    The runtime is constructed before the hello exchange, so the first
+    agent's `prompt_assembled` reaches the exporter with no span map
+    entry for its session: it used to be dropped there, not even as the
+    span event it was supposed to be. Held instead, and claimed by the
+    open.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+
+    assemble_prompt(events, SOURCES)
+    clock.tick(0.1)
+    open_session(events)
+    clock.tick(0.1)
+    start_turn(events)
+    clock.tick(1.0)
+    finish_reply(events)
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    turn = named(spans, "turn")
+    assert turn.attributes["vinga.prompt.characters"] == 294
+    assert turn.attributes["vinga.prompt.sources.persona"] == 210
+    # And the event itself lands on the session span it was waiting
+    # for, which is the other half of what being dropped cost.
+    assert [event.name for event in named(spans, "session").events] == [
+        "prompt_assembled"
+    ]
+
+
+def test_the_hold_is_bounded_and_a_session_that_never_opens_leaves_nothing() -> None:
+    """Oldest evicted first, the posture the capture hold already
+    takes and for the same reason: a held event whose session never
+    opens is a session that was refused, and the hold is a buffer
+    rather than a record.
+
+    Driven past the bound and then read from both ends, because the
+    claim is about which one goes.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    waiting = [f"{index:032x}" for index in range(PENDING_PROMPTS + 1)]
+    for session in waiting:
+        assemble_prompt(session_events(clock, telemetry, session=session), SOURCES)
+
+    for session in (waiting[0], waiting[-1]):
+        events = session_events(clock, telemetry, session=session)
+        open_session(events)
+        clock.tick(1.0)
+        start_turn(events)
+        clock.tick(1.0)
+        finish_reply(events)
+        close_session(events)
+
+    turns = [span for span in finished(telemetry, memory) if span.name == "turn"]
+    evicted, kept = turns
+    assert evicted.attributes["vinga.session.id"] == waiting[0]
+    assert "vinga.prompt.characters" not in evicted.attributes
+    assert kept.attributes["vinga.session.id"] == waiting[-1]
+    assert kept.attributes["vinga.prompt.characters"] == 294
 
 
 # --- no leak -----------------------------------------------------------

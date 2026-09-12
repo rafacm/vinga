@@ -33,6 +33,7 @@ from vinga_server.events import ServerEvents, SessionEvents, assembly
 from vinga_server.events.catalog import (
     CAPTURE_CHANNEL,
     CAPTURE_UPLOAD_CHANNEL,
+    TRANSCRIPT_EXPORT_CHANNEL,
     BargeIn,
     BargeInUnderFloor,
     BargeInWithoutTranscript,
@@ -50,6 +51,7 @@ from vinga_server.events.catalog import (
     SpeakingFinished,
     SpeakingStarted,
     TranscriptionAbandoned,
+    TranscriptsExported,
     TurnStarted,
 )
 from vinga_server.events.values import (
@@ -62,6 +64,7 @@ from vinga_server.events.values import (
     ConversationId,
     Count,
     DeviceId,
+    DeviceName,
     DroppedFrames,
     Flag,
     Identifier,
@@ -260,6 +263,7 @@ def open_session(
     events: SessionEvents,
     providers: dict[str, Any] | None = None,
     keep_identities: bool = False,
+    device_name: str | None = None,
 ) -> float:
     """The session's own open. `providers` is what it says the
     conversation opened against, defaulting to the two-agent world
@@ -272,6 +276,12 @@ def open_session(
     pipeline then cannot find. So a caller with a live session asks for
     its own identities to be kept and gets a `session_open` about the
     session it actually has.
+
+    `device_name` is what an operator called the board, and it defaults
+    to the state every deployment's boards are in until somebody runs
+    `device rename`: nothing at all. A case about the name passes one,
+    which is the bounded copy the payload carries rather than anything
+    a device sent.
     """
     entries = PROVIDERS if providers is None else providers
     if not keep_identities:
@@ -290,10 +300,7 @@ def open_session(
             providers=ProviderEntries(entries),
             protocol=Whole(1),
             revision=Identifier("abc1234"),
-            # The board this lane drives is bound by MAC and named by
-            # nobody, which is the state every deployment's boards are
-            # in until an operator runs `device rename`.
-            device_name=None,
+            device_name=None if device_name is None else DeviceName(device_name),
             mac=DeviceId(device),
             said_client=ClientId("a-device-uuid"),
             bound_tail=AlsoBoundTo.of(()),
@@ -357,11 +364,19 @@ def abandon_transcription(events: SessionEvents) -> float:
     )
 
 
-def assemble_prompt(events: SessionEvents, sources: dict[str, int]) -> float:
-    """One of the two events whose payload carries a mapping."""
+def assemble_prompt(
+    events: SessionEvents, sources: dict[str, int], agent: str = AGENT
+) -> float:
+    """One of the two events whose payload carries a mapping.
+
+    `agent` is whose know-how half was assembled, because the event is
+    emitted once per agent rather than once per turn: a case about what
+    a handover changes needs two of these and they are not the same
+    fact.
+    """
     return events.emit(
         lambda: PromptAssembled(
-            agent=Identifier(AGENT),
+            agent=Identifier(agent),
             conversation=ConversationId(CONVERSATION),
             characters=Count(sum(sources.values())),
             sources=PromptSources(dict(sources)),
@@ -519,6 +534,35 @@ def synthesize(
     )
 
 
+def call_tool(
+    events: SessionEvents,
+    which: str = "builtin",
+    name: str = "remember",
+    duration_s: float = 0.25,
+    is_error: bool = False,
+) -> float:
+    """One `tool_call` in whichever of its three shapes, built through
+    the events' own assembly.
+
+    A variant per shape rather than one with a name argument, because
+    that is what the catalog declares: the naming policy is structural,
+    so a builtin names its tool, an MCP call names the entry an operator
+    configured, and the third names neither.
+    """
+    built = {
+        "builtin": lambda: assembly.builtin_tool_called(
+            AGENT, CONVERSATION, name, duration_s, is_error
+        ),
+        "mcp": lambda: assembly.mcp_tool_called(
+            AGENT, CONVERSATION, name, duration_s, is_error
+        ),
+        "unnamed": lambda: assembly.unnamed_tool_called(
+            AGENT, CONVERSATION, "device", duration_s, is_error
+        ),
+    }[which]
+    return events.emit(built)
+
+
 def start_speaking(events: SessionEvents) -> float:
     """The first frame of the reply reaching the device."""
     return events.emit(
@@ -627,6 +671,24 @@ def capture_upload_failed(emitter: ServerEvents, session: str = SESSION) -> None
     emitter.emit(
         lambda: CaptureUploadFailed(
             session=SessionId(session), reason=CaptureUploadFailure.UNREACHABLE
+        )
+    )
+
+
+def transcript_emitter() -> ServerEvents:
+    """An emitter on the transcript exporter's own channel, for the
+    reason the two above exist: a variant handed to an emitter on
+    another channel is refused at emit."""
+    return ServerEvents(TRANSCRIPT_EXPORT_CHANNEL)
+
+
+def transcripts_exported(emitter: ServerEvents, session: str = SESSION) -> None:
+    """A closed session's turns that reached its trace, emitted the way
+    the exporter emits them: on a worker of its own, after the session
+    closed."""
+    emitter.emit(
+        lambda: TranscriptsExported(
+            session=SessionId(session), turns=Count(7), elapsed_ms=Whole(96)
         )
     )
 

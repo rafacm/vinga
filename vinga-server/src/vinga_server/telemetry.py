@@ -75,6 +75,7 @@ from vinga_server.events.values import (
     PROVIDER_ENTRY_OPTIONAL,
     PROVIDER_ENTRY_REQUIRED,
     Kind,
+    PromptSources,
     ProviderEntries,
 )
 from vinga_server.quieting import Lease, Quieting
@@ -175,7 +176,7 @@ SERVICE = "vinga-server"
 
 # --- the span map -----------------------------------------------------
 #
-# Twelve event names have a shape of their own and everything else folds
+# Fourteen event names have a shape of their own and everything else folds
 # onto whichever span is open. That default is the design rather than a
 # shortcut: an exporter that enumerated the events it knew would drop
 # every variant the catalog grew after it was written, in silence, and
@@ -236,6 +237,15 @@ LLM_STAGE = "llm"
 TTS_STAGE = "tts"
 
 LLM_ROUND = "llm_round"
+# Not a lifecycle event either, and the second one whose fold changes
+# what the spans after it carry: it retains a prompt's provenance for
+# the agent it was assembled for.
+PROMPT_ASSEMBLED = "prompt_assembled"
+# One declared event name with three variants, and one fold for all
+# three: the naming policy the variants make structural is carried by
+# `source` and by which of the two name fields the payload holds, and
+# `_attributes` already skips a table key a payload does not carry.
+TOOL_CALL = "tool_call"
 SENTENCE_SYNTHESIZED = "sentence_synthesized"
 SPEAKING_STARTED = "speaking_started"
 SPEAKING_FINISHED = "speaking_finished"
@@ -258,6 +268,12 @@ SESSION_SPAN = "session"
 CAPTURE_SPAN = "capture"
 TRANSCRIPT_SPAN = "transcript"
 TURN_SPAN = "turn"
+# What the model asked a tool for, inside the turn it asked in. Short
+# like the rest and deliberately not the tool's own name: a span name
+# is what a backend groups a list by, and one per configured tool would
+# make that list as long as the deployment's tool table. Which tool it
+# was is an attribute.
+TOOL_SPAN = "tool"
 ASR_SPAN = "asr"
 LLM_SPAN = "llm"
 TTS_SPAN = "tts_stream"
@@ -383,9 +399,27 @@ LEG_FIELDS = ("agent", "text")
 # The prefix is vinga's own. The settled `gen_ai.*` correspondence sits
 # on the LLM round span below, where those attributes have a meaning;
 # nothing on these two spans is a GenAI fact.
+# What an operator calls the board, beside the MAC that identifies it.
+#
+# On EVERY span, which is an enumeration rather than a table entry: the
+# session span reads it here, the turn and the stage spans read it off
+# the retained identity below, and the three spans written after the
+# close read it off the retained `_Exported` record. A dashboard
+# grouped by a household's rooms is what this is for, and a stage span
+# that carried only a MAC is a span nobody groups.
+#
+# The bounded copy `session_open` carries and never a configuration
+# read: the value is sanitized at the decision site, and a board
+# renamed after a session ran must not change what that session's spans
+# say. A board nobody has named contributes NO attribute rather than a
+# null one, which is what `_attributes` already does for an absent
+# value.
+DEVICE_NAME = "vinga.device.name"
+
 SESSION_ATTRIBUTES = {
     SESSION_FIELD: SESSION_ID_NAMES,
     DEVICE_FIELD: "vinga.device.id",
+    "device_name": DEVICE_NAME,
     "agent": "vinga.agent",
     "conversation": "vinga.conversation.id",
     "protocol": "vinga.device.protocol",
@@ -419,7 +453,7 @@ TURN_FINISHED_ATTRIBUTES = {
 # issue asks for session-level context on EVERY span, and a stage span
 # with only its own stage's fields is a span nobody can find.
 #
-# Two facts, both fixed for the life of a session, both read off the
+# Three facts, all fixed for the life of a session, all read off the
 # validated `session_open` payload. The agent and the conversation are
 # NOT here: they move (a handover changes both) and every stage event
 # carries its own, which is the more precise answer and comes through
@@ -432,6 +466,7 @@ TURN_FINISHED_ATTRIBUTES = {
 CONTEXT_ATTRIBUTES = {
     SESSION_FIELD: SESSION_ID_NAMES,
     DEVICE_FIELD: "vinga.device.id",
+    "device_name": DEVICE_NAME,
 }
 
 # What a session opened against, as span attributes.
@@ -457,6 +492,27 @@ PROVIDER_PREFIX = "vinga.provider"
 # reach a span through here, which is what makes this sanitized by
 # construction.
 PROVIDER_FACTS = (*PROVIDER_ENTRY_REQUIRED, *PROVIDER_ENTRY_OPTIONAL)
+
+# Where a prompt's provenance lands, and it lands FLATTENED for the
+# reason the provider context gives in its own comment: a JSON blob is
+# present and unqueryable, which is the same as absent for the question
+# the attribute exists to answer. That question is "how much of this
+# prompt came from where", which is a number per block a reader charts.
+#
+# One attribute per block, with the provenance token's `:` separators
+# written as `.`, so `instructions:house` becomes
+# `vinga.prompt.sources.instructions.house`: an attribute name is a
+# dotted path and a token is not. The key space is bounded by the
+# operator's own configuration rather than by anything a far side
+# sends, which is the five declared provenance forms with configured
+# names inside three of them, so the cardinality is bounded by exactly
+# what bounds the provider keys.
+#
+# `characters` goes on beside them as the total the blocks sum to:
+# without a denominator the parts answer nothing.
+PROMPT_PREFIX = "vinga.prompt.sources"
+
+PROMPT_ATTRIBUTES = {"characters": "vinga.prompt.characters"}
 
 
 def _provider_context(held: Any) -> dict[str, dict[str, dict[str, str]]]:
@@ -525,6 +581,34 @@ def _provider_attribute(stage: str, fact: str) -> str:
     old spelling.
     """
     return f"{PROVIDER_PREFIX}.{stage}.{fact}"
+
+
+def _prompt_attributes(payload: dict[str, Any]) -> dict[str, Any]:
+    """One `prompt_assembled` payload as the attributes a turn span
+    carries, or nothing at all.
+
+    Through the catalog's own value type rather than by inspection
+    here, exactly as `_provider_context` is and for the same reason:
+    `PromptSources` is what makes a provenance token safe to write into
+    an attribute NAME, because it is the type that refuses a key
+    outside the declared grammar and a value that is not a character
+    count. A fold that walked the mapping itself would let a payload
+    this module did not build choose its own attribute names, which is
+    the bounded-cardinality promise broken in the one place it costs
+    most.
+
+    The sizes only, never a byte of the prompt: that is a property of
+    the event rather than of this fold, and it is what makes the whole
+    of this lawful on a metadata surface.
+    """
+    attributes = _attributes(payload, PROMPT_ATTRIBUTES)
+    try:
+        sources = PromptSources(payload.get("sources")).carried()
+    except Exception:  # noqa: BLE001 - a payload nobody declared says nothing
+        return attributes
+    for token, characters in sources.items():
+        attributes[f"{PROMPT_PREFIX}.{token.replace(':', '.')}"] = characters
+    return attributes
 
 
 def _entry_name(stage: str) -> str:
@@ -851,6 +935,40 @@ LLM_ATTRIBUTES = {
     "turns": "vinga.llm.turns",
 }
 
+# The tool span, which is what a `tool_call` becomes instead of the
+# span event it used to be.
+#
+# `gen_ai.operation.name` is the conventions' own word for what this
+# span IS, and it is the one attribute here that no payload field
+# produces: the value is a constant this module names, the way the ASR
+# outcome is. The conventions have a name for a tool's name too, and a
+# builtin's `tool` is exactly that, this server's own word for a tool
+# it authors.
+#
+# `entry` is NOT that name and is deliberately not spelled as it. What
+# an MCP call may say is the entry an operator configured, never the
+# far side's own tool name, so it lands under vinga's own word for the
+# same reason the configured provider entry does on the round span:
+# a reader filtering `gen_ai.tool.name` is asking which tool ran, and
+# an entry name is the answer to a different question.
+#
+# `source` is the catalog's own closed set (`ToolSource`), not a second
+# vocabulary invented here, and `is_error` is the flag the call
+# returned rather than a span status: the call answered, and what it
+# answered with is the tool's business rather than this server's
+# failure.
+GEN_AI_OPERATION = "gen_ai.operation.name"
+EXECUTE_TOOL = "execute_tool"
+
+TOOL_ATTRIBUTES = {
+    "agent": "vinga.agent",
+    "conversation": "vinga.conversation.id",
+    "source": "vinga.tool.source",
+    "is_error": "vinga.tool.is_error",
+    "tool": "gen_ai.tool.name",
+    "entry": "vinga.tool.entry",
+}
+
 # The per-sentence TTS span. The stream's lifetime is the span's own
 # extent and is deliberately not repeated as an attribute; what IS an
 # attribute is the number the extent cannot state, the provider's
@@ -881,12 +999,53 @@ PLAYBACK_ATTRIBUTES = {
     "conversation": "vinga.conversation.id",
 }
 
+# What an outcome that arrived after the close says on its span.
+#
+# A table of its own rather than the shared `_event_attributes`, which
+# is what these four used before and which deliberately keeps the
+# catalog's own field names. That helper is the span EVENTS', where the
+# event name is the subject and the fields beside it are plainly its
+# own; on a SPAN the fields are all there is, and a bare `elapsed_ms`
+# next to `vinga.turn.speech_ms` is an attribute belonging to nothing
+# that no prefix query returns. So the respelling is here and the span
+# events keep what they have.
+#
+# One table for all four outcomes rather than one per pair, and the
+# same attribute name for `elapsed_ms` on both: how long a delivery
+# took means the same thing whether a recording or a page of
+# transcripts went, and what tells the two apart is the span's own
+# name. `reason` and `turns` are here as well as the three the plan
+# named, because this fold iterates the TABLE: a key left out of it is
+# not exported at all, and dropping the failure's reason would cost the
+# one fact a failed export's reader is there for.
+AFTER_THE_CLOSE_ATTRIBUTES = {
+    "elapsed_ms": "vinga.export.elapsed_ms",
+    "audio_bytes": "vinga.export.audio_bytes",
+    "manifest_bytes": "vinga.export.manifest_bytes",
+    "turns": "vinga.export.turns",
+    "reason": "vinga.export.reason",
+}
+
 # How many sessions may have a `capture_started` waiting for their
 # `session_open`. The capture's event is a server-channel one and beats
 # the session's open by a handshake, so it is held and folded when the
 # span exists; a session id that never opens would otherwise be a slow
 # leak, so the hold is bounded and the oldest entry goes first.
 PENDING_CAPTURES = 64
+
+# And how many sessions may have a `prompt_assembled` waiting for their
+# `session_open`, which is not an edge case but the ordinary one:
+# `PipelineRuntime.__init__` activates the first agent and emits the
+# event, and `DeviceSession.run` builds that runtime before the hello
+# exchange and well before `session_open`. So the INITIAL agent's
+# provenance has always arrived before there was a trace to put it on,
+# and used to reach none at all.
+#
+# A sibling of the hold above rather than a reuse of it. The two are
+# cleared by different events and a shared bound would let one starve
+# the other: a deployment recording many sessions it never opens would
+# evict the prompts of the sessions that did.
+PENDING_PROMPTS = 64
 
 # How many sessions' trace ids are kept for a reader to ask about after
 # the fact, ON TOP of the deployment's own session capacity, oldest
@@ -1279,6 +1438,20 @@ def _attributes(
     return attributes
 
 
+def _named(exported: "_Exported") -> dict[str, Any]:
+    """The board's name for a span written after its session closed, or
+    nothing at all.
+
+    One home for it because all three post-close writers need it and
+    each builds its attributes by hand: `reference_media`,
+    `_after_the_close` and `_transcript_spans` would otherwise be three
+    copies of one absence rule, and the rule is exactly the one
+    `_attributes` keeps for a live span, that an unnamed board
+    contributes no attribute rather than a null.
+    """
+    return {} if exported.name is None else {DEVICE_NAME: exported.name}
+
+
 def _before(end: int, ms: Any) -> int:
     """The instant `ms` milliseconds before `end`, or `end` itself where
     the event carried no number.
@@ -1324,6 +1497,13 @@ class _SessionTrace:
     what lets a turn span carry the providers that turn actually ran on
     without the exporter needing a fact no event gave it.
 
+    `prompts` is the same shape of retained fact for a different
+    question: what each agent's know-how half was assembled out of, by
+    provenance. Retained rather than stamped where it arrives because
+    `prompt_assembled` is emitted once per AGENT and not once per turn,
+    so an attribute written onto whichever turn was open would describe
+    one turn per agent and leave every later one silent.
+
     `transcribed` is whether the open turn's ASR stage has already
     ended. A turn has exactly one, and the events that end one can
     arrive twice: a barge-in the gate REJECTS emits its own
@@ -1344,6 +1524,7 @@ class _SessionTrace:
     transcribed: bool = False
     identity: dict[str, Any] = field(default_factory=dict)
     providers: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
+    prompts: dict[str, dict[str, Any]] = field(default_factory=dict)
     agent: str | None = None
 
 
@@ -1404,11 +1585,20 @@ class _Exported:
     than the string it used to be: a reference written after the session
     closed is a child of the session span, and a child needs its parent's
     identity rather than a rendering of half of it.
+
+    And the board's name as `session_open` carried it, or nothing,
+    because the three writers that run after the close build their
+    attributes by hand and have no live session to read an identity
+    from. Here rather than looked up when one of them writes, for the
+    same reason the trace id is here: what a post-close span says is a
+    fact about the session that ran, and a board renamed since would
+    otherwise rename a conversation that is already over.
     """
 
     trace: str
     trace_id: int
     span_id: int
+    name: str | None = None
 
 
 class Telemetry:
@@ -1530,6 +1720,16 @@ class Telemetry:
         # received it and not the session span that eventually claims
         # it.
         self._pending: dict[str, list[tuple[int, Emission]]] = {}
+        # `prompt_assembled` that arrived before its session opened, by
+        # session id, oldest first and bounded.
+        #
+        # Emissions rather than the (epoch, emission) pairs above,
+        # because this one is a SESSION event and the session clock's
+        # offset is one number for the process once it exists: the
+        # stamp resolves to the same instant whenever it is read, so
+        # holding the conversion would be holding an answer that never
+        # differs from the one the claim can compute.
+        self._prompts: dict[str, list[Emission]] = {}
         # The trace each session got, by session id, oldest first and
         # bounded, and NOT popped when the span is: what wants it asks
         # after the session closed, because the artifacts it is about
@@ -1564,7 +1764,9 @@ class Telemetry:
             NOTHING_HEARD: self._asr_span,
             TRANSCRIPTION_ABANDONED: self._asr_span,
             PROVIDER_FAILED: self._provider_failed,
+            PROMPT_ASSEMBLED: self._prompt_assembled,
             LLM_ROUND: self._llm_span,
+            TOOL_CALL: self._tool_span,
             SENTENCE_SYNTHESIZED: self._tts_span,
             SPEAKING_STARTED: self._open_playback,
             SPEAKING_FINISHED: self._close_playback,
@@ -1656,6 +1858,7 @@ class Telemetry:
             context=self._continuing(exported),
             attributes={
                 **dict.fromkeys(SESSION_ID_NAMES, session),
+                **_named(exported),
                 **{
                     f"{OBSERVATION_METADATA_PREFIX}{name}": token
                     for name, token in references.items()
@@ -1784,7 +1987,10 @@ class Telemetry:
             span = tracer.start_span(
                 TRANSCRIPT_SPAN,
                 context=self._continuing(context),
-                attributes=_transcript_attributes(session, turn),
+                attributes={
+                    **_named(context),
+                    **_transcript_attributes(session, turn),
+                },
             )
             span.end()
             spans.append(span)
@@ -2092,6 +2298,13 @@ class Telemetry:
         this trace has ended, so what continues it is the parent's
         identity rather than a span this process still holds.
 
+        Under `vinga.` names, off a table of this path's own. The
+        attributes here are the whole of what the span says, so a bare
+        field name would belong to nothing and would answer no prefix
+        query a reader makes; the span events keep the catalog's own
+        names, where the event name is the subject standing in front of
+        them.
+
         Nothing at all for a session this exporter never saw, or one
         that has aged out: the boot sweep's `abandoned` is about a
         session a PREVIOUS process ran, so there is no trace of this
@@ -2110,7 +2323,8 @@ class Telemetry:
             context=self._continuing(exported),
             attributes={
                 **dict.fromkeys(SESSION_ID_NAMES, session),
-                **_event_attributes(emission.payload),
+                **_named(exported),
+                **_attributes(emission.payload, AFTER_THE_CLOSE_ATTRIBUTES),
             },
             start_time=at,
         )
@@ -2127,6 +2341,11 @@ class Telemetry:
         held = _provider_context(payload.get("providers"))
         agent = payload.get("agent")
         talking = agent if isinstance(agent, str) else None
+        # Through the same gate once, and read from there twice: the
+        # live session's spans take the whole identity and the retained
+        # record takes the board's name out of it. A second read of the
+        # payload would be a second place for the name to be spelled.
+        identity = _attributes(payload, CONTEXT_ATTRIBUTES)
         span = self._tracer.start_span(
             SESSION_SPAN,
             context=self._root(),
@@ -2138,21 +2357,66 @@ class Telemetry:
         )
         self._sessions[session] = _SessionTrace(
             span=span,
-            identity=_attributes(payload, CONTEXT_ATTRIBUTES),
+            identity=identity,
             providers=held,
             agent=talking,
         )
-        self._retain(session, span)
+        self._retain(session, span, identity.get(DEVICE_NAME))
+        # Through the fold that holds them rather than beside it, so
+        # the retention rule and the span event are written once: what
+        # the claim changes is only that there is now a trace to place
+        # them on.
+        for prompt in self._prompts.pop(session, []):
+            self._prompt_assembled(session, prompt)
         for at, waiting in self._pending.pop(session, []):
             self._span_event(session, waiting, at)
 
-    def _retain(self, session: str, span: Any) -> None:
+    def _prompt_assembled(self, session: str, emission: Emission) -> None:
+        """One agent's assembled know-how half, retained and then said.
+
+        Retained because the event is emitted once per AGENT and the
+        attribute belongs on every turn that agent speaks, which is the
+        mechanism the provider context already uses; and still a span
+        event, because when the prompt was assembled is a fact about
+        this session's timeline and the span it lands on is where a
+        reader meets it.
+
+        Held where the session has no span yet, which is the ordinary
+        case rather than a race: the first agent is activated while the
+        runtime is being constructed, and the runtime is constructed
+        before the hello exchange. `_open_session` claims what is
+        waiting for it.
+        """
+        trace = self._sessions.get(session)
+        if trace is None:
+            held = self._prompts.setdefault(session, [])
+            held.append(emission)
+            while len(self._prompts) > PENDING_PROMPTS:
+                # Oldest first, the capture hold's own rule and for the
+                # same reason: a held event whose session never opened
+                # is a session that was refused, and the hold is a
+                # buffer rather than a record.
+                self._prompts.pop(next(iter(self._prompts)))
+            return
+        payload = emission.payload
+        agent = payload.get("agent")
+        talking = agent if isinstance(agent, str) else trace.agent
+        attributes = _prompt_attributes(payload)
+        if talking is not None and attributes:
+            trace.prompts[talking] = attributes
+        self._span_event(session, emission)
+
+    def _retain(self, session: str, span: Any, name: Any = None) -> None:
         """Remember which trace this session's spans went out under, for
         whoever asks after it is over.
 
         Written at the open rather than at the close, because that is
         where the id exists and because a session that never closes
         (a process that lost it) is one a reader may still ask about.
+
+        And what the board was called then, so that the three writers
+        that run after the close say what the session said rather than
+        what the configuration holds by the time they run.
         """
         context = span.get_span_context()
         with self._retained_lock:
@@ -2160,6 +2424,7 @@ class Telemetry:
                 trace=self._spelled(context.trace_id),
                 trace_id=context.trace_id,
                 span_id=context.span_id,
+                name=name if isinstance(name, str) else None,
             )
             while len(self._retained) > self._retention:
                 # Oldest first, the hold's own rule: what a late reader
@@ -2210,10 +2475,23 @@ class Telemetry:
             context=self._root(),
             links=[self._link(trace.span.get_span_context())],
             attributes={
+                # The session's own identity, off the retained context
+                # rather than off this payload, because `turn_started`
+                # names the session and the device and knows nothing
+                # about what the board is CALLED. The two facts it does
+                # carry arrive under the same names with the same
+                # values from its own table below, which is what makes
+                # this a widening rather than a second source.
+                **trace.identity,
                 **_attributes(emission.payload, TURN_ATTRIBUTES),
                 # The agent this turn is actually being spoken by, which
                 # a handover may have changed since the session opened.
                 **_provider_attributes(trace.providers, trace.agent),
+                # And what that agent's prompt was assembled out of,
+                # from the same retained state and read by the same
+                # agent: the event said it once, and every turn the
+                # agent speaks is a turn the prompt was behind.
+                **trace.prompts.get(trace.agent or "", {}),
             },
             # The stamp the emission carries, which for `turn_started`
             # is the instant the user stopped speaking rather than the
@@ -2400,6 +2678,45 @@ class Telemetry:
         first_token = _after(start, payload.get("first_token_ms"))
         if first_token is not None:
             span.add_event(FIRST_TOKEN, timestamp=first_token)
+        span.end(end_time=end)
+
+    def _tool_span(self, session: str, emission: Emission) -> None:
+        """One tool call, as a child of the turn that asked for it.
+
+        A span rather than the span event it used to be, and the span
+        event goes away rather than staying beside it. #67's first
+        walkthrough established that the backend this surface exists for
+        ingests no span events at all, which is why an MCP call was
+        invisible on a trace that recorded everything around it; and two
+        carriers of one fact on one trace would be the locality rule
+        broken in the module that has been most careful about it, with a
+        backend that DOES ingest span events showing every call twice.
+
+        Built retrospectively out of `duration_ms` with the same helper
+        every stage span uses, so the failure mode where a call is
+        misplaced in time is the known one rather than a new one.
+
+        The retained identity and the event's own agent and thread, and
+        deliberately not the provider entries: a tool call ran on no
+        pipeline stage, so what the session opened against says nothing
+        about it.
+        """
+        trace = self._sessions.get(session)
+        if trace is None or trace.turn is None:
+            self._span_event(session, emission)
+            return
+        payload = emission.payload
+        end = self._at(emission)
+        span = self._tracer.start_span(
+            TOOL_SPAN,
+            context=self._within(trace.turn),
+            attributes={
+                **trace.identity,
+                GEN_AI_OPERATION: EXECUTE_TOOL,
+                **_attributes(payload, TOOL_ATTRIBUTES),
+            },
+            start_time=_before(end, payload.get("duration_ms")),
+        )
         span.end(end_time=end)
 
     def _tts_span(self, session: str, emission: Emission) -> None:

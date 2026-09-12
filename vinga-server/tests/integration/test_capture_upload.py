@@ -372,10 +372,17 @@ async def test_the_upload_outcome_reaches_the_collector_too(
     assert held["session.id"] == attributes(session_span)["session.id"]
     # And it carries what the declaration declares: the two sizes
     # exactly, which is what a reader compares against what the backend
-    # holds, and how long it took.
-    assert held["audio_bytes"] == manifest.with_suffix(".wav").stat().st_size
-    assert held["manifest_bytes"] == manifest.stat().st_size
-    assert held["elapsed_ms"] >= 0
+    # holds, and how long it took. Under the `vinga.export.` names the
+    # after-close table gives them, since a span attribute is this
+    # module's word for a fact and the catalog's field name is the
+    # event's: the bare spellings this case used to assert belonged to
+    # nothing and are what #502 M2 replaced.
+    assert (
+        held["vinga.export.audio_bytes"]
+        == manifest.with_suffix(".wav").stat().st_size
+    )
+    assert held["vinga.export.manifest_bytes"] == manifest.stat().st_size
+    assert held["vinga.export.elapsed_ms"] >= 0
     # No failure went out beside it, which is what makes the success
     # reading a reading rather than a coincidence.
     assert [span for span in spans if span.name == "capture_upload_failed"] == []
