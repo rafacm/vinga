@@ -614,6 +614,36 @@ async def test_a_reply_that_never_spoke_emits_neither_half_of_the_pair() -> None
     )
 
 
+# --- what a synthesis cost, measured at the sentence -------------------
+
+
+async def test_each_stream_reports_the_length_of_its_own_sentence() -> None:
+    """`characters` is the sentence the voice was handed, not the reply
+    it came out of and not the sentence before it.
+
+    The size is what a voice is billed on, so it is the one fact this
+    surface carries about the text: a count and never a word of it. The
+    three sentences are deliberately three different lengths, because a
+    count taken from the wrong string is invisible against sentences
+    that happen to match.
+    """
+    session = talking(
+        {"poet": ScriptedLlm(["One. Two two. Three three three."])},
+        websocket=cast(Any, OrderedSocket()),
+    )
+    tap = watching(session)
+    start_reply(session, UTTERANCE)
+    await wait_for_reply(session)
+
+    counted = {
+        int(one.payload["index"]): one.payload["characters"]
+        for one in tap.of("sentence_synthesized")
+    }
+    # "One." then "Two two." then the tail the splitter flushes,
+    # "Three three three.", each measured as the voice received it.
+    assert counted == {0: 4, 1: 8, 2: 18}
+
+
 # --- the lookahead, against the window it overlaps ---------------------
 
 

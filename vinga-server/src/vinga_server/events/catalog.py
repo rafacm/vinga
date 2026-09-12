@@ -1478,6 +1478,16 @@ class SentenceSynthesized(Variant):
             "order they answered."
         )
     )
+    characters: Count = value(
+        note=(
+            "How long the sentence handed to the voice was, and never a "
+            "byte of it. It is what a voice is billed on, so it is what "
+            "makes this stage cost something a reader can add up; a "
+            "count is also the only thing about spoken text this "
+            "surface may carry, which is the rule the withheld-sentence "
+            "variants keep for the same reason."
+        )
+    )
     stream_ms: Whole = value(
         note=(
             "The whole stream's lifetime, request to last chunk. It "
