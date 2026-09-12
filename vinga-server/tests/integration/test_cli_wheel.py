@@ -107,6 +107,7 @@ from tests.support.commands import BUILD_SECONDS, ran
 from tests.support.config_cli import registered
 from tests.support.deployment import Live, check_in, serving
 from tests.support.tiers import (
+    LANGFUSE_MODULES,
     OTEL_MODULES,
     SERVE_MODULES,
     SIM_MODULES,
@@ -1146,6 +1147,50 @@ def test_the_telemetry_sdk_is_absent_from_the_bare_wheel_install(
     assert otel & set(json.loads(reported.stdout)) == set()
 
     for module in sorted(OTEL_MODULES.values()):
+        finished = _ran(installed, elsewhere, live, "python", "-c", f"import {module}")
+        assert finished.returncode != 0, f"{module} is importable from the wheel install"
+
+
+def test_the_wheel_gates_exactly_the_langfuse_tier_behind_its_extra(
+    wheel: Path,
+) -> None:
+    """The fifth requirement block, held the way the four above it are.
+
+    Its own row rather than a line in the otel one, although the two
+    closures overlap almost entirely: what a resolver is asked for is
+    `vinga-server[langfuse]`, and an extra that resolved to nothing
+    because its block was missing would be a bare install whose capture
+    attachment refuses for exactly the reason the operator just paid to
+    fix.
+    """
+    assert _requires_dist(wheel)["langfuse"] == declared().langfuse
+
+
+def test_the_langfuse_sdk_is_absent_from_the_bare_wheel_install(
+    installed: Path, elsewhere: Path, live: Live
+) -> None:
+    """The negative half of the fifth tier, from the environment the
+    artifact made, as a distribution and as the subtree this server
+    imports."""
+    langfuse = declared().langfuse
+    assert set(LANGFUSE_MODULES) == langfuse, (
+        "the import-name map has drifted from the tier"
+    )
+
+    reported = _ran(
+        installed,
+        elsewhere,
+        live,
+        "python",
+        "-c",
+        "import json,sys;from importlib.metadata import distributions;"
+        "sys.stdout.write(json.dumps(sorted("
+        "d.metadata['Name'].lower().replace('_','-') for d in distributions())))",
+    )
+    assert reported.returncode == 0, reported.stderr
+    assert langfuse & set(json.loads(reported.stdout)) == set()
+
+    for module in sorted(LANGFUSE_MODULES.values()):
         finished = _ran(installed, elsewhere, live, "python", "-c", f"import {module}")
         assert finished.returncode != 0, f"{module} is importable from the wheel install"
 
