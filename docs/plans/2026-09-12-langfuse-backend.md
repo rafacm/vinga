@@ -647,3 +647,40 @@ condensed but faithful; resolutions appended per amendment.
     *Resolution.* Adopted; the plan now says seventh everywhere and
     names the heading, count, contents link, table and owner-line
     moves.
+
+### Delta re-review
+
+External review: codex CLI 0.154.0, model gpt-5.6-terra, read-only
+sandbox, 2026-09-12, runtime 2m31s, reviewing commit 0600859b.
+Verdict as received: **ready after the P1/P2 amendments**. Findings
+condensed but faithful; resolutions appended per amendment.
+
+1. **P1: Early-finalized captures can be pruned before the new
+   `session_closed` seam stages them.** `SessionCapture.close()`
+   reaches `CaptureStore.finished()`, which immediately prunes, so
+   a duration-limit or write-failure capture becomes a prune
+   candidate while its session continues, refuting resolution 2
+   combined with 6. Stage atomically at the files-final callback
+   before pruning can see the files; retain without enqueuing until
+   `session_closed`; define the write-failure capture's
+   disposition; the early-path tests must prove both no early
+   upload and that an intervening prune cannot erase the staged
+   pair.
+
+2. **P2: The abandoned-job sweep is not reachable in valid
+   next-boot configurations.** The builder returns before all later
+   work when the uploader is off, disabled, local_only or
+   extra-less, so leftover staged room-audio links persist
+   silently. Recovery belongs to `CaptureStore` startup, whenever
+   the capture directory is opened, uploader or no uploader;
+   per-job staging so the sweep identifies one job and emits one
+   sanitized `abandoned` event; specify fresh-process versus
+   sequential-lifespan ownership.
+
+3. **P2: `max_sessions` does not bound queued jobs, and the
+   promised drain test is absent from the Tests section.** Jobs
+   from already-closed sessions can occupy the queue when a full
+   server drains. Define the queue as a bounded best-effort
+   backlog, reserve capacity for live sessions or state the drop
+   honestly, and put the max-drain-with-occupancy test in the Tests
+   section.
