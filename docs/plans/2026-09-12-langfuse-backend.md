@@ -268,7 +268,16 @@ the #66 posture and the SDK's own environment:
 by the SDK, never config keys and never printed; the server-half
 `EnvName` reference pattern is deliberately not used because there
 is no value for vinga to read even by reference, matching the
-`VINGA_DB_PASSWORD` docstring reasoning (`models.py:598-605`).
+`VINGA_DB_PASSWORD` docstring reasoning (`models.py:598-605`). The
+two transports are therefore configured independently, OTLP through
+`OTEL_EXPORTER_OTLP_*` and media through `LANGFUSE_*`, and pointed
+at different deployments or projects both succeed while the
+recording lands where the trace's reader will never look. That
+invariant, same deployment and same project for both variable
+families, is documented in the flag's generated-reference prose and
+both example configs' commented blocks, and sits on the live
+walkthrough's checklist so M3's record proves it was held rather
+than assumed.
 
 The order of decisions is the contract, because the issue's no-op
 and the refusals would otherwise contradict:
@@ -328,8 +337,11 @@ content-capable store whose retention vinga then delegates, which is
 exactly the recorded Langfuse caution ("without a configured policy
 it retains indefinitely", `observability-surfaces.md:148-153`). The
 plan treats that as a documentation obligation, not a code question:
-`docs/architecture/observability-surfaces.md` gains the uploader as
-a sixth surface row (what it carries, who reads it, what retention
+`docs/architecture/observability-surfaces.md` gains exported
+capture media as its seventh surface (the page already declares
+six, exported traces and audit among them): heading, count,
+contents link, table row and the still-open owner line at ~88-90
+all move (what it carries, who reads it, what retention
 governs it: the Langfuse deployment's own policy, named as the
 operator's to configure), and the ADR
 `2026-08-15-content-and-telemetry-are-separate-surfaces.md` gains an
@@ -455,7 +467,8 @@ variant case, and the workflow's per-image import checks.
   and cross-field rule; the `[langfuse]` extra with the full pin
   list; composition wiring; the sentinel and hardening suites; the
   generated server reference and both example configs; the
-  observability-surfaces sixth row and the ADR addendum; the live
+  observability-surfaces seventh-surface row with its count and
+  owner-line moves, and the ADR addendum; the live
   attachment walkthrough recorded; fragment. Design footprint: the
   new module with its depth sentence above; one injected callback
   seam on `CaptureStore`. Documentation footprint as listed, each
@@ -621,7 +634,16 @@ condensed but faithful; resolutions appended per amendment.
     and the generated reference, and put it on the walkthrough
     checklist.
 
+    *Resolution.* Adopted. The credentials section states the
+    invariant with its failure shape, both example configs and the
+    generated reference carry it, and it joins the walkthrough
+    checklist.
+
 12. **P3: The documentation surface count is already six.** The
     page declares six surfaces including exported traces and audit.
     Exported capture media is the seventh; update heading, count,
     table and the still-open owner line.
+
+    *Resolution.* Adopted; the plan now says seventh everywhere and
+    names the heading, count, contents link, table and owner-line
+    moves.
