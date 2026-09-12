@@ -290,8 +290,15 @@ bound stops being a constant and becomes `max_sessions` plus the
 existing 64 of slack, computed where telemetry is built, which by
 construction means no live session's context is evicted by
 concurrent opens and the after-close window keeps its current
-depth. The capture uploader reads the same retention through
-`trace_of` and gains the same guarantee without changing. Tests
+depth. The resize helps the capture
+uploader only incidentally, and the plan claims no more than that:
+capture jobs do not pin a context and resolve `trace_of` later on
+their own worker, so a blocked capture worker under
+`max_sessions > 64` can still find older contexts evicted. That is
+the existing surface's existing exposure, narrowed but not closed
+here, and closing it (pinning the context into capture jobs) is
+the capture uploader's own follow-up, out of this issue's scope.
+Tests
 drive a capacity above 64 with every session live, and eviction
 pressure (64-plus later sessions opening) between a job's admission
 and its export.
@@ -773,10 +780,11 @@ Findings condensed but faithful; resolutions appended per amendment.
    `session_closed` and later eviction cannot change it; and the
    retention bound derives from `server.limits.max_sessions` plus
    the existing 64 of slack where telemetry is built, so a live
-   session's context cannot be evicted by concurrent opens, a
-   guarantee `trace_of` and the capture uploader inherit unchanged.
-   Both tests named (capacity above 64, eviction pressure between
-   admission and export).
+   session's context cannot be evicted by concurrent opens. Both
+   tests named (capacity above 64, eviction pressure between
+   admission and export). The delta round then refuted the clause
+   claiming the capture uploader inherits the guarantee; its
+   finding 3 below records the honest statement.
 
 7. **P2: Reusing `Acknowledgement` contradicts its existing
    contract.** The class states repeatedly that it speaks for one
