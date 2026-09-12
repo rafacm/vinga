@@ -6993,16 +6993,21 @@ def _events_tail(args: Invocation) -> None:
 def _event_filters(args: Invocation) -> dict[str, str]:
     """What narrows the stream. Only what was written: an absent flag is
     an argument the request does not carry, so the API's own defaults
-    are the defaults, said once."""
-    return {
+    are the defaults, said once.
+
+    The device is kept apart from the two beside it on the one point
+    `_metric_window` states: an explicitly empty value still travels, so
+    `--device ''` meets the API's MAC refusal rather than reading as no
+    filter and widening one board's traffic to the whole server's.
+    """
+    filters = {
         name: value
-        for name, value in (
-            ("device", args.mac),
-            ("session", args.session),
-            ("level", args.level),
-        )
+        for name, value in (("session", args.session), ("level", args.level))
         if value
     }
+    if args.mac is not None:
+        filters["device"] = args.mac
+    return filters
 
 
 def _frames(lines: Iterable[str]) -> Iterator[tuple[str, Mapping[str, Any]]]:
@@ -8243,7 +8248,12 @@ def _tailed(row: Command) -> Callable[..., None]:
                 api_url,
                 force,
                 no_input,
-                mac=device or "",
+                # Passed through rather than defaulted, because absent
+                # and explicitly empty are different questions here:
+                # `--device ''` travels and meets the API's own MAC
+                # refusal instead of quietly widening a board's traffic
+                # to the whole server's.
+                mac=device,
                 session=session or "",
                 level=level or "",
                 follow=follow,

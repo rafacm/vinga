@@ -507,6 +507,27 @@ def test_an_absent_filter_is_an_argument_the_request_does_not_carry(run) -> None
     assert dict(asked.url.params) == {}
 
 
+def test_an_explicitly_empty_device_cannot_widen_the_stream(run) -> None:
+    """An empty filter is one that was written, so it travels and meets
+    the API's own MAC refusal rather than reading as no filter at all.
+
+    The ordinary spelling of the mistake is a script expanding an unset
+    variable to nothing, and a client that dropped the value before
+    sending it would turn the narrowest question this flag can ask, one
+    board's traffic, into the widest one, the whole server's. What an
+    empty value is answered with is the endpoint's rule and its fixed
+    sentence, said where it is read; what is asserted here is that the
+    request carries the value that reaches it.
+    """
+    handler = serving(event(event="heard"))
+    answering(run, handler)
+
+    assert run("events", "tail", "--device", "") == 0
+
+    [asked] = handler.asked
+    assert dict(asked.url.params) == {"device": ""}
+
+
 def test_the_stream_waits_for_the_server_and_not_for_a_clock(run) -> None:
     """The read is deliberately unbounded and the connect timeout is
     kept, which is the cli-guide's bound-every-wait practice applied to
