@@ -123,10 +123,12 @@ def test_every_driver_names_a_path_of_its_own() -> None:
     window's own path out of the gate with it. And a hundred and two
     since a closed session's recording can be sent to the telemetry
     backend (#67): the attachment that landed, the one that did not, and
-    the job a restart found still staged."""
+    the job a restart found still staged. And a hundred and four since a
+    closed session's turns can be written onto its trace (#495): the
+    export that landed and the one that did not."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 102
+    assert len(set(claimed)) == len(claimed) == 104
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -879,6 +881,12 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     ),
     "vinga_server.capture_upload:CaptureUpload._failed #1": (
         ("CaptureUploadFailed", ("event", "reason", "session")),
+    ),
+    "vinga_server.transcript_export:TranscriptExport._attempt #1": (
+        ("TranscriptsExported", ("elapsed_ms", "event", "session", "turns")),
+    ),
+    "vinga_server.transcript_export:TranscriptExport._failed #1": (
+        ("TranscriptExportFailed", ("event", "reason", "session")),
     ),
     "vinga_server.config.api:_SanitizedErrors.__call__ #1": (
         ("ApiError", ("event",)),

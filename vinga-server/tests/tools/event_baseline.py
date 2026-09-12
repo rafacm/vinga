@@ -155,6 +155,8 @@ from tests.support.tools_mcp import reload_config as mcp_config
 from tests.support.tools_mcp import running as mcp_running
 from tests.support.tools_mcp import started as mcp_started
 from tests.support.tools_mcp import stdio_entry as mcp_entry
+from tests.support.transcripts import A_CONTEXT, a_row, reading, settled
+from tests.support.transcripts import exporting as exporting_transcripts
 from tests.support.uploads import exporting as exporting_traces
 from tests.support.uploads import fake_sdk
 from tests.support.wire import (
@@ -194,6 +196,7 @@ from vinga_server.providers.openai_asr import OpenAiAsr
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
 from vinga_server.tools.mcp import McpServers
 from vinga_server.tools.mcp.reload import ReloadInProgressError
+from vinga_server.transcript_export import TranscriptExport
 
 # The channels this harness covers: what a record has to ride to be
 # captured at all.
@@ -1594,6 +1597,57 @@ def drive_capture_upload_abandoned(directory: Path) -> None:
     sweep_upload_staging(store.directory)
 
 
+# --- the transcript exporter ------------------------------------------
+#
+# Both seams are faked at the two the module declares, and nothing else
+# is: the bounded queue, the daemon worker, the acknowledgement wait,
+# the paging and the emit sites are the real ones. A store and an
+# OpenTelemetry provider would be two dependencies driven to produce one
+# sentence.
+
+
+def transcripts(contexts: dict[str, Any]) -> tuple[TranscriptExport, Any]:
+    """An exporter over one closed session, with both seams faked, and
+    the recorder behind the span writer."""
+    telemetry, recorded = exporting_transcripts(contexts)
+    reads, _ = reading({"s1": [a_row(1), a_row(2)]})
+    return (
+        TranscriptExport(
+            telemetry=telemetry,
+            reads=reads,
+            backlog=4,
+            acknowledgement_timeout_s=2.0,
+            shutdown_timeout_s=10.0,
+        ),
+        recorded,
+    )
+
+
+async def drive_transcripts_exported(directory: Path) -> None:
+    """A closed session whose turns reach its trace.
+
+    The wait before the shutdown is what makes this a driver rather than
+    a race: a shutdown INTERRUPTS this exporter, so stopping it without
+    waiting would produce the drop event whatever the driver meant to
+    produce.
+    """
+    exporter, recorded = transcripts({"s1": A_CONTEXT})
+    exporter.session_closed("s1", settled())
+    deadline = time.monotonic() + 10.0
+    while not recorded.pages and time.monotonic() < deadline:
+        await asyncio.sleep(0.01)
+    await exporter.shutdown()
+
+
+async def drive_transcript_export_failed(directory: Path) -> None:
+    """A session this exporter never saw, so there is no trace to write
+    the turns onto and the ledger says so. Decided at admission, which
+    is why this needs no wait at all."""
+    exporter, _ = transcripts({})
+    exporter.session_closed("s1", settled())
+    await exporter.shutdown()
+
+
 def api_raising(directory: Path, exc: Exception) -> FastAPI:
     api = build_api(API_TOKEN, DatabaseConfig())
 
@@ -2059,6 +2113,7 @@ REPLY = "vinga_server.ota.reply"
 ASR = "vinga_server.providers.openai_asr"
 WORLD = "vinga_server.providers.world"
 REGISTRY = "vinga_server.registry"
+TRANSCRIPT_EXPORT = "vinga_server.transcript_export"
 MANAGER = "vinga_server.tools.mcp.manager"
 MCP_REGISTRY = "vinga_server.tools.mcp.registry"
 RELOAD = "vinga_server.tools.mcp.reload"
@@ -2098,6 +2153,16 @@ SERVER_DRIVERS: tuple[Driver, ...] = (
         (CAPTURE_UPLOAD, "CaptureUpload._failed", 1),
         drive_capture_upload_failed,
         "capture_upload_failed",
+    ),
+    Driver(
+        (TRANSCRIPT_EXPORT, "TranscriptExport._attempt", 1),
+        drive_transcripts_exported,
+        "transcripts_exported",
+    ),
+    Driver(
+        (TRANSCRIPT_EXPORT, "TranscriptExport._failed", 1),
+        drive_transcript_export_failed,
+        "transcript_export_failed",
     ),
     Driver((CONFIG_API, "_SanitizedErrors.__call__", 1), drive_api_error, "api_error"),
     Driver((CONFIG_API, "_refusal.handler", 1), drive_api_storage_error, "api_storage_error"),

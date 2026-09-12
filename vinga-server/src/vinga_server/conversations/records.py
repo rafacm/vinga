@@ -229,6 +229,18 @@ class Acknowledgement:
             return False
         return self._landed
 
+    def settled(self) -> bool:
+        """Whether an answer exists yet, whatever the answer is.
+
+        Beside `wait` rather than folded into it, because `wait`
+        deliberately answers false for "not yet" and for "no" alike, and
+        a caller polling in short slices so it can watch a stop flag has
+        to tell those apart: without this, a record the writer already
+        refused costs that caller its whole bound, every time, which is
+        exactly what a shutdown produces (#495).
+        """
+        return self._done.is_set()
+
     def settle(self, landed: bool) -> None:
         """The writer's half: say what became of the record, once. A
         second call is ignored, so a batch settled by a tombstone and
