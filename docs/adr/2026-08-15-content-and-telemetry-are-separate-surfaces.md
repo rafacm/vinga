@@ -114,9 +114,13 @@ than a reading of the original text:
   span; it is content in a second content-capable store, associated
   with a span by identifier.
 - **Exporting content is a decision, so it is a switch.** The
-  operator turns on `server.telemetry.attach_captures`, which
+  operator turns on `server.telemetry.export_audio`, which
   defaults off and which neither `server.capture` nor
-  `server.telemetry.enabled` implies. Recording a room for
+  `server.telemetry.enabled` implies. The key was recorded here as
+  `attach_captures` and renamed by the transcript-export work
+  (#495), which gave the ladder's two content escalations one
+  vocabulary; the semantics this amendment records did not move with
+  the spelling. Recording a room for
   diagnosis and shipping that recording to another deployment are
   two decisions, and a flag that one implied the other would be
   this record's separation broken in the only way that matters.
