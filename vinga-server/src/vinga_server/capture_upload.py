@@ -102,7 +102,7 @@ events = ServerEvents(__name__)
 # Where the switch is written, which is what every refusal below names.
 # One spelling, because a sentence an operator is told to edit by has to
 # be the path they will find.
-ATTACH_KEY = "server.telemetry.attach_captures"
+ATTACH_KEY = "server.telemetry.export_audio"
 
 # The extra that carries the SDK, and the command that installs it. The
 # registry's sentence shape, which `telemetry.py` follows too: the
@@ -296,7 +296,7 @@ def build_capture_upload(
        and the default costs a server nothing: no import, no object, no
        thread, no callback.
     3. **Telemetry.** An attachment is named by the trace its session
-       was exported under, so `attach_captures` on with `enabled` off is
+       was exported under, so `export_audio` on with `enabled` off is
        refused. Here rather than as a model validator, and the reason is
        a boot ordering rather than a taxonomy: a validator raises while
        the file is being PARSED, before the composition exists, and the
@@ -323,7 +323,7 @@ def build_capture_upload(
     """
     capture = config.capture
     telemetry_section = config.telemetry
-    attaching = telemetry_section is not None and telemetry_section.attach_captures
+    attaching = telemetry_section is not None and telemetry_section.export_audio
     if capture is None or not capture.enabled:
         if attaching:
             logger.info(
@@ -373,12 +373,12 @@ def build_capture_upload(
 # is nonetheless here rather than on a model, for the reason the
 # builder's step 3 gives: a validator raises during the parse, in front
 # of the staging sweep that every refusal has to happen behind. What the
-# generated reference publishes about it is the `attach_captures` field's
+# generated reference publishes about it is the `export_audio` field's
 # own prose rather than a row in the cross-field section.
 ATTACHMENT_NEEDS_TELEMETRY = (
-    "telemetry.attach_captures is on with telemetry.enabled off; an attachment is "
+    "telemetry.export_audio is on with telemetry.enabled off; an attachment is "
     "named by the trace its session was exported under, and there is no trace to "
-    "name, so switch telemetry.enabled on or telemetry.attach_captures off"
+    "name, so switch telemetry.enabled on or telemetry.export_audio off"
 )
 
 # And the one refusal here that an operator cannot reach by editing a

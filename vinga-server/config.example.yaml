@@ -413,7 +413,7 @@ server:
   #   # hard-linked into `upload-staging/` under the capture directory,
   #   # where the capture budget cannot see it; the queue depth bounds
   #   # it and the next startup sweeps what was left behind.
-  #   attach_captures: false
+  #   export_audio: false
 
   # Whether speech that arrives while a reply is playing interrupts it.
   # On by default: a device only keeps streaming its microphone through

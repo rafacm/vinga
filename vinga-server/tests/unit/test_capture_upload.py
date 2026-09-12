@@ -104,7 +104,7 @@ def a_server(**server: Any) -> ServerConfig:
     return ServerConfig.model_validate(
         {
             "capture": {"enabled": True, "dir": "/tmp/vinga-captures"},
-            "telemetry": {"enabled": True, "attach_captures": True},
+            "telemetry": {"enabled": True, "export_audio": True},
             **server,
         }
     )
@@ -260,18 +260,18 @@ def test_a_capture_off_deployment_never_reaches_a_refusal() -> None:
 # that stopped at "capture off is a no-op" could not see it. Each row
 # names both switches and what the pair must do.
 CAPTURE_OFF = (
-    pytest.param(None, {"enabled": True, "attach_captures": True}, id="absent-traced"),
+    pytest.param(None, {"enabled": True, "export_audio": True}, id="absent-traced"),
     pytest.param(
         {"enabled": False, "dir": "/tmp/vinga-captures"},
-        {"enabled": True, "attach_captures": True},
+        {"enabled": True, "export_audio": True},
         id="disabled-traced",
     ),
     pytest.param(
-        None, {"enabled": False, "attach_captures": True}, id="absent-untraced"
+        None, {"enabled": False, "export_audio": True}, id="absent-untraced"
     ),
     pytest.param(
         {"enabled": False, "dir": "/tmp/vinga-captures"},
-        {"enabled": False, "attach_captures": True},
+        {"enabled": False, "export_audio": True},
         id="disabled-untraced",
     ),
 )
@@ -355,13 +355,13 @@ def test_the_attachment_is_refused_without_an_exporter() -> None:
     """
     with pytest.raises(ConfigError) as refusal:
         build_capture_upload(
-            a_server(telemetry={"enabled": False, "attach_captures": True}),
+            a_server(telemetry={"enabled": False, "export_audio": True}),
             telemetry=None,
         )
 
     assert str(refusal.value) == ATTACHMENT_NEEDS_TELEMETRY
     assert "telemetry.enabled" in ATTACHMENT_NEEDS_TELEMETRY
-    assert ATTACH_KEY.endswith("telemetry.attach_captures")
+    assert ATTACH_KEY.endswith("telemetry.export_audio")
     assert refusal.value.__cause__ is None
     assert refusal.value.__context__ is None
 
@@ -374,10 +374,10 @@ def test_the_configuration_that_is_refused_still_parses() -> None:
     whose refusal is about the attachment. The boot case below is the
     same claim from the other end.
     """
-    config = a_server(telemetry={"enabled": False, "attach_captures": True})
+    config = a_server(telemetry={"enabled": False, "export_audio": True})
 
     assert config.telemetry is not None
-    assert config.telemetry.attach_captures is True
+    assert config.telemetry.export_audio is True
     assert config.capture is not None
 
 
@@ -391,11 +391,11 @@ def test_no_model_refuses_the_combination_on_its_own() -> None:
     lane would notice."""
     from vinga_server.config.models import ServerConfig, TelemetryConfig
 
-    assert TelemetryConfig(enabled=False, attach_captures=True).attach_captures
+    assert TelemetryConfig(enabled=False, export_audio=True).export_audio
     assert ServerConfig.model_validate(
         {
             "capture": {"enabled": True, "dir": "/tmp/vinga-captures"},
-            "telemetry": {"enabled": False, "attach_captures": True},
+            "telemetry": {"enabled": False, "export_audio": True},
         }
     ).capture is not None
 
@@ -1204,7 +1204,7 @@ BOOTS = (
     pytest.param(
         {
             "capture": {"enabled": False},
-            "telemetry": {"enabled": True, "attach_captures": True},
+            "telemetry": {"enabled": True, "export_audio": True},
         },
         False,
         id="capture-disabled",
@@ -1212,7 +1212,7 @@ BOOTS = (
     pytest.param(
         {
             "capture": {"enabled": True},
-            "telemetry": {"enabled": True, "attach_captures": True},
+            "telemetry": {"enabled": True, "export_audio": True},
             "local_only": True,
         },
         True,
@@ -1221,7 +1221,7 @@ BOOTS = (
     pytest.param(
         {
             "capture": {"enabled": True},
-            "telemetry": {"enabled": True, "attach_captures": True},
+            "telemetry": {"enabled": True, "export_audio": True},
         },
         True,
         id="extra-absent",
@@ -1229,7 +1229,7 @@ BOOTS = (
     pytest.param(
         {
             "capture": {"enabled": True},
-            "telemetry": {"enabled": False, "attach_captures": True},
+            "telemetry": {"enabled": False, "export_audio": True},
         },
         True,
         id="telemetry-off",
