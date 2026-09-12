@@ -218,6 +218,7 @@ historical  vinga info
 historical  vinga list
 historical  vinga list agents
 historical  vinga mcp-server
+historical  vinga mcp-server delete
 historical  vinga mcp-server set
 historical  vinga mcp-server status
 historical  vinga memory
@@ -235,6 +236,7 @@ historical  vinga metric list
 historical  vinga metric show
 historical  vinga ota-url
 historical  vinga provider
+historical  vinga provider delete
 historical  vinga provider frobnicate
 historical  vinga provider secret
 historical  vinga provider secret frobnicate
@@ -345,6 +347,7 @@ respell  vinga export
 respell  vinga import
 respell  vinga info
 respell  vinga list
+respell  vinga mcp-server delete
 respell  vinga mcp-server secret set
 respell  vinga mcp-server secret set home
 respell  vinga mcp-server secret set weather

@@ -179,3 +179,175 @@ unrenderable; `plantuml` 1.2026.8 and a JDK were present, so both the
 SVG and the PNG were re-rendered from the edited source rather than
 hand-edited. The renderer stamps its own version into the SVG, which is
 the one hunk in that file that is not the new legend.
+
+### PR review round, PR #499
+
+External review: codex CLI 0.154.0, model gpt-5.6-sol, read-only
+sandbox, 2026-09-12, runtime 5m10s, reviewing `origin/main...404bdc9e`.
+Verdict as received: **mergeable after the listed fixes**. Findings
+condensed but faithful; one commit per finding, each watched red first.
+
+1. **P1: the migration turned a malformed legacy declaration into
+   permissive configuration.** The `else` arm removed `egress` for every
+   value that was not JSON `true` or `false`, not just the planned
+   `null`, so a stored string, number, array or object that the old
+   model refused came out as an undeclared entry, and with no boundary
+   declared that entry boots and transmits. Distinguish JSON `null`
+   explicitly; preserve any other value as an invalid `reach` so
+   sanitized model validation still refuses it, or abort the migration
+   value-free. Add malformed-value upgrade cases for both tables and
+   prove the upgraded store still refuses them.
+
+   *Resolution.* Adopted, taking the PRESERVE shape. `jsonb_typeof`
+   tells JSON null from everything else and null keeps its removal;
+   every other value is renamed and carried across, where the new model
+   refuses it exactly as the old model refused it under the old name.
+   Aborting is the wrong shape here because the boot is what runs the
+   migration and the configuration API an operator would fix the row
+   through is behind the boot: an abort locks them out of the one door
+   to the row that is stopping them, and takes the whole deployment
+   down over one entry rather than the entry itself. A row that arrives
+   as an invalid `reach` refuses at the surface every other unreadable
+   row refuses at, naming the entry and quoting no value, and
+   `vinga provider delete` and `vinga mcp-server delete` reach it by
+   identity without understanding it. Four malformed shapes on both
+   tables, one of them a pasted credential so the refusals are asserted
+   value-free through their whole chain. Red first, with the migration
+   as it was:
+
+   ```
+   FAILED test_a_malformed_legacy_value_is_renamed_rather_than_dropped
+   E   KeyError: 'reach'
+   FAILED test_the_upgraded_store_still_refuses_a_malformed_legacy_value[listed]
+   FAILED ...[nested] FAILED ...[numbered] FAILED ...[pasted]
+   E   Failed: DID NOT RAISE ConfigError
+   5 failed, 6 passed
+   ```
+
+   The second is the finding itself: the upgraded store loaded a row the
+   old build would not. Commit `ea9927a7`.
+
+2. **P2: the composition-root case never exercised the composition
+   root.** It monkeypatched the three builders and then called those
+   patched builders directly, so removing or corrupting the real calls
+   in `app._build_composition` would have left it green, contradicting
+   its own docstring. Drive `_build_composition` through the existing
+   composition harness with collaborators stubbed, then assert the three
+   captured boundary arguments; keep the provider-world case for the
+   fourth path.
+
+   *Resolution.* Adopted. The app is built and its lifespan entered
+   through `entered_app`, and what is asserted is what the composition
+   handed the builders while it ran. The stubs answer None, which is
+   what each builder answers for an absent section anyway, so nothing
+   downstream changes shape; the sentinel for "not called" is the string
+   `"unset"` rather than None, so a builder handed an explicit None is
+   told apart from one that was never reached. The boundary is `network`
+   because the mock providers reach the host and the fourth call site
+   has to get through for the composition to reach the three that are
+   the case's subject. Watched both ways, with all three
+   `boundary=config.server.data_boundary` arguments deleted from
+   `_build_composition`:
+
+   ```
+   --- OLD composition-root test against the corrupted root ---
+   1 passed
+   ```
+
+   which is the finding, and the same corruption against the new one:
+
+   ```
+   E  AssertionError: assert {'build_telem...ort': 'unset'} ==
+      {'build_telem...K: 'network'>}
+   E  {'build_transcript_export': 'unset'} != {... <Reach.NETWORK>}
+   E  {'build_capture_upload': 'unset'} != {... <Reach.NETWORK>}
+   E  {'build_telemetry': 'unset'} != {... <Reach.NETWORK>}
+   1 failed
+   ```
+
+   Commit `c4b30ac1`.
+
+3. **P2: the old-spelling cases did not prove the promised no-leak
+   behavior.** They passed `False` and validated the models directly:
+   the MCP one asserted only that some `ValueError` occurred, and the
+   provider one that the sentence contained the phrase "not quoted
+   back". Pydantic's raw validation message includes the rejected
+   input, so neither proved the operator-facing write path, the streams
+   or the exception chain clean. Submit a credential-shaped legacy value
+   through the real provider and MCP store-write paths and assert
+   stdout, stderr, the `ConfigError` and its complete cause and context
+   chain carry neither the value nor a traceback; retain both
+   provider-type variants to pin the options trap.
+
+   *Resolution.* Adopted whole. Both entry kinds go through the real
+   store write with a credential-shaped legacy value, and the assertion
+   is the whole operator-facing surface. Both provider-type variants are
+   kept, since the options layer could only ever have answered the
+   first: its reserved set is enforced by `OpenaiCompatibleOptions`,
+   which no other type passes. The model-level refusals stay as two
+   cases of their own, because a stored row read back and a file
+   fragment reach that validator without a store around them. Red by
+   making the refusal quote what the key held:
+
+   ```
+   E  assert 'sk-test-0a5...l-credential' not in 'invalid pro...-credential)'
+   FAILED ...refuses_the_replaced_key_without_quoting_it[a-type-with-an-options-model]
+   FAILED ...refuses_the_replaced_key_without_quoting_it[a-type-with-no-options-model]
+   2 failed, 68 passed
+   ```
+
+   Only the two new write-path cases go red, and the sixty-eight that
+   pass include the model-level refusals: the mutated sentence still
+   contains "egress", "reach" and "not quoted back", so every assertion
+   this replaces was satisfied by a refusal printing the credential.
+   Commit `3620308d`.
+
+4. **P2: the recorded final census was reproducibly false.** The
+   section displayed a command and a count the command does not
+   produce: it excludes `docs/plans/`, `docs/features/` and
+   `CHANGELOG.md`, and `changelog.d/493-data-boundary.md` is none of
+   those, so its two lines were found and not recorded. Either add the
+   fragment to the justified allowlist and correct the count and table,
+   or alter the command and the documented rule so the fragment is
+   deliberately excluded.
+
+   *Resolution.* Adopted, taking the ALLOWLIST shape. The fragment IS
+   `CHANGELOG.md`: the fold on `main` moves its text there byte for
+   byte, and the plan's allowlist already exempts the destination, so an
+   exclusion in the command would say the same thing less honestly.
+   Naming the old spelling is the whole job of that entry, since an
+   operator reads it to learn what to change their file to. The count
+   and the table are now what the displayed command prints, fifty-one
+   lines in seven files at this milestone's last commit, with every line
+   number checked against the command's output rather than transcribed:
+
+   ```
+   lines: 51 files: 7
+   table matches grep: True
+   ```
+
+   The three fix commits above moved the numbers in the migration and
+   both test files, which is the other half of why the old table was
+   wrong. Commit `fa8f5c5c`.
+
+### Verification after the review round
+
+Re-run whole, from `vinga-server/` unless stated, against Postgres on
+`VINGA_DB_PORT=55493` (compose project `vinga-493`, torn down after).
+
+| Command | Result |
+| --- | --- |
+| `uv run ruff check .` | `All checks passed!` |
+| `uv run mypy` (the events package) | `Success: no issues found in 5 source files` |
+| `uv run pytest tests/unit -q -n 4 --dist loadfile` | `7156 passed, 19 skipped in 204.42s` |
+| `uv run pytest tests/integration -q` | `341 passed in 490.67s` |
+| `uv run pytest tests/unit/test_command_spellings.py -q` | `52 passed in 5.83s` |
+| `python3 scripts/fold_changelog.py check .` (repo root) | `checked 1 fragments, 0 failures` |
+| `python3 scripts/check_doc_links.py .` (repo root) | `checked 237 files, 0 failures` |
+
+The census manifest moved in this round and was regenerated with the
+last documentation edit. The drift came from the migration docstring
+added for finding 1, which names `vinga provider delete` and
+`vinga mcp-server delete` as the way to reach a row that arrives as an
+invalid `reach`; `test_the_manifest_is_the_census` was red against the
+committed manifest and is green against the regenerated one.
