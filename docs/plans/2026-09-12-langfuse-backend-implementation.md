@@ -775,6 +775,60 @@ expiry.
    `MAX_ATTACHMENT_BYTES` is 512 MB, past which this server does not
    ask. The default per-session capture bound is about 57 MB of stereo
    16 kHz, and an operator may raise it.
+7. **The reference is a span rather than an ingestion request**, for the
+   reason under "Playability" below: the ingestion route refuses a trace
+   upsert on a current self-hosted deployment and names OTLP as the
+   supported path. The review round's suggested shape was the request;
+   the evidence says otherwise, and the span is cheaper on every axis.
+8. **The closed set has nine members rather than eight.**
+   `unreferenced` is the ninth, for a recording whose bytes landed with
+   nothing pointing at them.
+
+### The review round, and what it changed
+
+Five P1s, all genuine, and two of them changed a decision rather than a
+line.
+
+1. **One quieting claim for the process, not one per uploader.** The
+   uploader built a `Quieting` of its own, which is the one way to get
+   that class wrong: overlapping uploaders are routine, because a wedged
+   worker outlives its shutdown's bound and a redeploy builds the next
+   one behind it. A's release would then restore the original logging
+   while B was still uploading, putting B's presigned URL in the
+   retained log, and B's own release would restore A's already-quiet
+   snapshot and silence the namespaces permanently. The module holds one
+   instance now, and the regression case drives the overlap in order.
+2. **The cross-field refusal moved to `ServerConfig`.** On
+   `TelemetryConfig` it fired unconditionally, so a file with the
+   attachment on and capture off did not parse at all and the
+   capture-first no-op could never run. That is the decision order
+   broken where it matters most: an operator turning capture off is
+   mid-toggle, not misconfigured. The rule now resolves capture first,
+   exactly as the builder does, and the case matrix is capture absent
+   and capture disabled against the exporter on and off, with local_only
+   armed and the extra faked away at once.
+3. **The sweep answers to the capture SECTION, from in front of every
+   boot refusal.** It was `CaptureStore.startup()`, and a store is only
+   built where capture is ENABLED, with the uploader's builder ahead of
+   it and able to refuse; all four configurations the sweep exists for
+   reached neither. It is `sweep_upload_staging(directory)` now, called
+   by the composition right after the event hub, and the four boots are
+   composition-level cases with a job staged before each.
+4. **`LANGFUSE_BASE_URL` is gone.** The SDK's tracing client honors it
+   ahead of `LANGFUSE_HOST`, but that client is not the one this uses,
+   nothing here documented the alias, and a variable an operator never
+   wrote taking precedence over the one they did is a way for room audio
+   to reach a deployment nobody named.
+5. **The attachment is playable**, which is the section below.
+
+Two things the round did not ask for and the work found. Binding
+`SpanContext` to `self._context` shadowed a method of that name and
+silently stopped the exporter making stage spans; the integration lane
+caught it and twenty-seven unit cases would have. And `Receiver` with
+its two readers moved from the export suite into
+`tests/support/telemetry.py`, because a second suite needs them and
+`test_support_boundaries.py` refuses a test module that imports
+another.
 
 ### Tests
 
@@ -879,31 +933,99 @@ Torn down afterwards with `docker compose -p vinga-67-langfuse down -v`
 and `docker compose -p vinga-67m3 down -v`. Nothing Langfuse-shaped is
 committed.
 
-**What stays unasserted, deliberately.** The acceptance criterion says
-the attached WAV is "playable in the UI". What was verified is that the
-media record exists, is associated with the trace, and is downloadable
-and decodable through the public media API. Whether the Langfuse UI
-renders a player for a media record that no reference token points at
-was NOT verified: M1's walkthrough established that what makes a media
-record render inline is a
-`@@@langfuseMedia:type=...|id=...|source=bytes@@@` token placed in a
-trace's or observation's input, output or metadata, and this milestone
-cannot write one, because by the time a capture is final the span it
-would go on has been ended and exported. The honest claim is therefore
-that the recording is attached to the trace and retrievable from it,
-and that inline rendering is a question for a follow-up that would have
-to hold a span open or patch one.
+**Playability, and how it was settled.** The first version of this
+milestone uploaded the pair and stopped there, and recorded that the
+acceptance's "playable in the UI" could not be claimed: M1 established
+that what makes a media record RENDER is a reference token in a trace's
+or an observation's own field, and by the time a capture is final the
+span it would go on has been ended and exported. The review round called
+that the milestone not delivering what it was for, and it was right.
+
+The mechanism was settled by the backend rather than chosen. The
+candidate was a trace upsert through the ingestion API, and a current
+self-hosted deployment refuses it:
+
+```
+POST /api/public/ingestion  ->  207
+{"successes":[],"errors":[{"id":"e1","status":400,
+  "message":"Event type not accepted",
+  "error":"Event type \"trace-create\" is not accepted by
+   /api/public/ingestion when LANGFUSE_MIGRATION_V4_WRITE_MODE is
+   events_only. This endpoint only accepts score and log events.
+   Upgrade the client or integration to a v4-compatible SDK or OTLP
+   ingestion path. ..."}]}
+```
+
+`events_only` is the default write mode for self-hosted v4, and the
+refusal names the supported path: OTLP. Which is a path this server
+already owns, so the reference needs no second transport, no second
+credential and no second timeout, and the reviewer's instruction to
+bound an extra request with the timeout-and-retry discipline turned out
+to have nothing to bound: there is no extra request.
+
+So `Telemetry.reference_media(session, references)` writes ONE span in
+the trace the session was exported under, as a child of that session's
+span, carrying each token under its own
+`langfuse.observation.metadata.<name>` key and all of them in
+`langfuse.observation.output`. Two spellings because the backend
+resolves a reference wherever it finds one and the two render
+differently, and both were confirmed live. The retention now holds the
+session span's identity as well as its trace id, because a span written
+after every span of a trace has ended needs its parent's identity rather
+than a rendering of half of it.
+
+It answers False for a session this exporter never saw, one aged out of
+the retention, and an exporter that has stopped accepting, and the
+uploader reports a False as `capture_upload_failed` with the closed
+set's ninth member, `unreferenced`: bytes that landed with nothing
+pointing at them are the gap this surface exists to close wearing a
+success, and `capture_uploaded` would overclaim.
+
+**A note about the vocabulary rule.** `telemetry.py` says that nothing
+it writes can say a fact `catalog.py` does not declare. A media
+reference is the one exception, and the module states it as one: the
+token is not a fact about the conversation, it is an opaque identifier
+the BACKEND minted for bytes an operator already authorized to leave,
+and no session gets one unless `attach_captures` is on.
+
+**What was verified live, on the re-run.**
+
+```
+GET /api/public/v2/observations?sessionId=<session>&fields=io,metadata
+  7 observations. One of them, in the SESSION trace (1f16e6fa...) and
+  parented on the session span (64bef03c...):
+
+  output:   @@@langfuseMedia:type=audio/wav|id=QCtzrxSW5nQtsPfFuf9GD3|source=bytes@@@
+            @@@langfuseMedia:type=application/json|id=YISgYI1gwBJDV4UPrdCVvR|source=bytes@@@
+  metadata: capture_audio, capture_manifest, both carrying their token
+
+select m.id, tm.trace_id, m.content_type, m.content_length,
+       m.upload_http_status from trace_media tm join media m ...
+  YISgYI1gwBJDV4UPrdCVvR | 1f16e6fa... | application/json |   1265 | 200
+  QCtzrxSW5nQtsPfFuf9GD3 | 1f16e6fa... | audio/wav        | 173676 | 200
+
+GET /api/public/media/QCtzrxSW5nQtsPfFuf9GD3  ->  a download URL
+  the file behind it: 2 channels, 16 kHz, 43408 frames, 2.71 s, and
+  byte-identical to the capture on disk
+```
+
+So the tokens a reader meets in the trace name exactly the two records
+the upload made, and the ids in them resolve. What remains outside this
+record is the rendering itself, which is a claim about a browser: the
+token is the documented and confirmed mechanism, it is in the two fields
+the backend reads it from, and the asset it names is downloadable and
+decodable. Nothing here asserts a pixel.
 
 ### Verification
 
 - `uv run ruff check .`: All checks passed!
 - `uv run mypy` (strict over `src/vinga_server/events`): Success: no
   issues found in 5 source files
-- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 6965 passed, 19
-  skipped (6907 in M2, plus this milestone's fifty-eight)
-- `uv run pytest tests/integration -q`: 323 passed, against Postgres
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 6994 passed, 19
+  skipped (6907 in M2, plus this milestone's eighty-seven)
+- `uv run pytest tests/integration -q`: 324 passed, against Postgres
   from the committed compose file on `VINGA_DB_PORT=55673`
-- `python3 scripts/fold_changelog.py check .`: checked 2 fragments, 0
+- `python3 scripts/fold_changelog.py check .`: checked 1 fragments, 0
   failures
 - `python3 scripts/check_doc_links.py .`: checked 232 files, 0 failures
 - `uv run pytest tests/unit/test_command_spellings.py -q`: 52 passed
