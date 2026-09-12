@@ -191,6 +191,26 @@ side's words). Before constructing the instance the worker takes a
 export failure must not print an endpoint or header through a
 namespace telemetry has already un-quieted.
 
+Delivery is chunked to match: the worker's per-job loop alternates
+one page read with one bounded export call of that page's spans,
+`TRANSCRIPT_BATCH_TURNS` per request, in order, so an arbitrarily
+long session costs bounded memory and bounded per-request work
+however many pages it takes. A page's export answering failure ends
+the job with `undelivered`: the pages already delivered stand (the
+backend shows the leading turns), the failure event on the trace
+and in the log is what tells a reader the transcript is truncated
+there, and no delivered-count rides the event, per the no-carry
+discipline; the truncation is visible where the reader already is,
+as the highest exported `vinga.turn.index` beside the failure
+event. Tests drive an oversized session (three-plus pages, every
+turn present exactly once, ordinals continuous across page
+boundaries) and a mid-page failure (leading pages stand,
+`undelivered` emitted, the job ends without reading further). A
+single turn's stored text has no ceiling of its own here: bounding
+what a conversation may store is the store's question, not the
+exporter's, and the page bound is what keeps any one request
+proportionate.
+
 The blackholed-endpoint integration case is therefore the #67
 pattern verbatim: an accept-and-never-answer receiver, with three
 latencies asserted separately (the session closes unaffected within
@@ -304,9 +324,13 @@ What the exporter gets instead is its own narrow primitive:
 `threads.transcript_rows(connection, session)`, an explicit
 projection of exactly the authorized transcript fields (`id`,
 `t_ms`, `agent`, `heard`, `reply`, `legs`), ordered by `id`
-ascending, whole-session (a transcript export is not paginated; a
-session's turn count is bounded by the session), with the
-session-local ordinal derived from that ordering. `threads.Reads`,
+ascending, read in keyset pages of `TRANSCRIPT_BATCH_TURNS = 256`
+(`id > cursor`, the schema's own cursor idiom), with the
+session-local ordinal derived from that ordering and carried across
+pages. Nothing about a session bounds its turn count (`max_session_s`
+bounds elapsed time, not turns), so the page size is what bounds the
+database result, the in-memory span collection and each protobuf
+payload; the whole-session read the first draft assumed is gone. `threads.Reads`,
 the engine-per-call never-raise seam built for callers outside a
 request (`threads.py:851`), gains `transcript_rows(session)`
 delegating to it, in the same milestone as its only caller. `Reads`
@@ -482,9 +506,10 @@ promise-side half this completes, and the amendment cites it.
   `reference_media`, sharing `_continuing`; the two new names join
   `AFTER_THE_CLOSE`; the vocabulary-exception note widens by one
   sentence.
-- `conversations/threads.py`: `transcript_rows(connection, session)`
-  (the narrow projection) and `Reads.transcript_rows(session)`;
-  `conversations/api.py` is untouched.
+- `conversations/threads.py`:
+  `transcript_rows(connection, session, after, limit)` (the narrow
+  keyset projection) and `Reads.transcript_rows(session, after,
+  limit)`; `conversations/api.py` is untouched.
 - `conversations/store.py` and `records.py`: `Close` carries an
   `Acknowledgement`; `close_session` returns it; the writer settles
   it where it settles the milestone's.
@@ -502,9 +527,10 @@ promise-side half this completes, and the amendment cites it.
   old key is refused (`extra="forbid"` naming `attach_captures`);
   the reference regenerated and diffed by the standing drift check.
 - **Unit, threads (M2)**: `transcript_rows` returns exactly the
-  projection, ordered by `id`, only the named session's rows, and
-  the ordinal convention; a row family carrying tool invocations
-  proves none are selected.
+  projection, ordered by `id`, only the named session's rows,
+  keyset paging (`after`/`limit`) with no row repeated or skipped
+  across pages, and the ordinal convention; a row family carrying
+  tool invocations proves none are selected.
 - **Unit, exporter (M2)**: build-nothing cases (recording off three
   ways, flag off) and the info line's presence exactly when the
   flag is on; the two refusals value-free and unchained; the
@@ -811,6 +837,16 @@ condensed but faithful; resolutions appended per amendment.
    protocol, ordering, partial-delivery outcome, oversized-session
    tests), or name a v1 session export limit with its
    operator-visible failure reason.
+
+   *Resolution.* Adopted, the batch protocol. `transcript_rows`
+   becomes a keyset page read (`after`, `limit`), the worker
+   alternates one page read with one bounded export call at
+   `TRANSCRIPT_BATCH_TURNS = 256`, ordinals carry across pages, a
+   failed page ends the job with `undelivered` and the delivered
+   pages stand, visible as the leading turns beside the failure
+   event; the oversized-session and mid-page-failure tests are
+   named, and the per-turn text ceiling is stated as the store's
+   question, not the exporter's.
 
 2. **P2: Retained-context ownership contradicts the proposed
    telemetry interface.** The amendment captures the context in the
