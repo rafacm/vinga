@@ -20,19 +20,16 @@ deadline, and none of them is a bare `while True`.
 """
 
 import asyncio
-import gzip
-import http.server
 import math
 import struct
-import threading
 import time
-from typing import Any
 
 import pytest
 import uvicorn
 from xiaozhi_sdk import XiaoZhiWebsocket
 
 from tests.integration.conftest import booted
+from tests.support.telemetry import Receiver, attributes, named
 from vinga_server.config import Config
 
 pytestmark = pytest.mark.asyncio
@@ -55,104 +52,6 @@ SHUTDOWN_DEADLINE_S = 30.0
 # ran. Generous, because what it separates is "now" from "a day and a
 # half from now".
 NOW_ENOUGH_S = 60.0
-
-
-class Receiver:
-    """An OTLP/HTTP collector, in this process and in one thread.
-
-    It accepts exactly what the exporter sends (a POST of protobuf to
-    `/v1/traces`, gzipped or not) and keeps the bodies. Answering 200
-    with an empty `ExportTraceServiceResponse` is what an OTLP receiver
-    owes a client, and it matters here: a client that is refused retries,
-    and a retry would make the count of what arrived a function of
-    timing.
-    """
-
-    def __init__(self) -> None:
-        self.bodies: list[bytes] = []
-        received = self.bodies
-
-        class Handler(http.server.BaseHTTPRequestHandler):
-            def do_POST(self) -> None:  # noqa: N802 (the stdlib's spelling)
-                length = int(self.headers.get("content-length", 0))
-                body = self.rfile.read(length)
-                if self.headers.get("content-encoding") == "gzip":
-                    body = gzip.decompress(body)
-                if self.path.endswith("/v1/traces"):
-                    received.append(body)
-                self.send_response(200)
-                self.send_header("content-type", "application/x-protobuf")
-                self.send_header("content-length", "0")
-                self.end_headers()
-
-            def log_message(self, *args: Any) -> None:
-                """Silence: this lane's output is the test's."""
-
-        self._server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
-        self._thread.start()
-
-    @property
-    def endpoint(self) -> str:
-        host, port = self._server.server_address[:2]
-        return f"http://{host}:{port}"
-
-    def close(self) -> None:
-        self._server.shutdown()
-        self._server.server_close()
-        self._thread.join(timeout=5.0)
-
-    def spans(self) -> list[Any]:
-        """Every span in every body, decoded.
-
-        The proto package rides the exporter's own dependency, so this
-        decodes with the same definitions the server encoded with rather
-        than with a hand-written reader.
-        """
-        from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
-            ExportTraceServiceRequest,
-        )
-
-        decoded = []
-        for body in self.bodies:
-            request = ExportTraceServiceRequest()
-            request.ParseFromString(body)
-            for resource in request.resource_spans:
-                for scope in resource.scope_spans:
-                    decoded.extend(scope.spans)
-        return decoded
-
-    def resources(self) -> list[Any]:
-        from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
-            ExportTraceServiceRequest,
-        )
-
-        found = []
-        for body in self.bodies:
-            request = ExportTraceServiceRequest()
-            request.ParseFromString(body)
-            found.extend(resource.resource for resource in request.resource_spans)
-        return found
-
-
-def attributes(carrier: Any) -> dict[str, Any]:
-    """One protobuf attribute list as the plain mapping a case reads.
-
-    `AnyValue` is a union of five fields and exactly one is set, so the
-    value is whichever one the message says it is; anything else would
-    be this helper inventing a type the wire did not carry.
-    """
-    flat = {}
-    for pair in carrier.attributes:
-        which = pair.value.WhichOneof("value")
-        flat[pair.key] = getattr(pair.value, which) if which else None
-    return flat
-
-
-def named(spans: list[Any], name: str) -> Any:
-    matching = [span for span in spans if span.name == name]
-    assert len(matching) == 1, f"expected one {name} span, got {len(matching)}"
-    return matching[0]
 
 
 @pytest.fixture

@@ -216,21 +216,38 @@ def fake_sdk(
 
 
 class Traced:
-    """A telemetry exporter, as the one question the uploader asks it.
+    """A telemetry exporter, as the two questions the uploader asks it.
 
     Not a `Telemetry`, and typed as one at the call site because that is
-    what the uploader declares: what it uses is `trace_of`, and a lane
-    that had to build a real exporter to answer one string would be
-    driving OpenTelemetry to test a hardlink.
+    what the uploader declares: what it uses is `trace_of` and
+    `reference_media`, and a lane that had to build a real exporter to
+    answer one string would be driving OpenTelemetry to test a hardlink.
+
+    `referenced` is what a case reads back: the tokens the uploader asked
+    to have written onto each session's trace, which is the claim that
+    an attachment is playable rather than merely stored. `refusing` makes
+    the write fail, which is the state an exporter shutting down leaves.
     """
 
-    def __init__(self, traces: dict[str, str] | None = None) -> None:
+    def __init__(
+        self, traces: dict[str, str] | None = None, *, refusing: bool = False
+    ) -> None:
         self.traces = dict(traces or {})
+        self.refusing = refusing
+        self.referenced: list[tuple[str, dict[str, str]]] = []
 
     def trace_of(self, session: str) -> str | None:
         return self.traces.get(session)
 
+    def reference_media(self, session: str, references: dict[str, str]) -> bool:
+        if self.refusing or session not in self.traces:
+            return False
+        self.referenced.append((session, dict(references)))
+        return True
 
-def exporting(traces: dict[str, str] | None = None) -> Telemetry:
+
+def exporting(
+    traces: dict[str, str] | None = None, *, refusing: bool = False
+) -> Telemetry:
     """`Traced` under the type the uploader declares."""
-    return Traced(traces)  # type: ignore[return-value]
+    return Traced(traces, refusing=refusing)  # type: ignore[return-value]

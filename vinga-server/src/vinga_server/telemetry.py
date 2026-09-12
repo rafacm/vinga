@@ -231,6 +231,10 @@ SPEAKING_FINISHED = "speaking_finished"
 # refused to be false when it named `stream_ms`. The provider's own
 # latency, the number that is backpressure-free, is the attribute.
 SESSION_SPAN = "session"
+# The one span this module makes that is not a stage of a conversation:
+# the reference that makes an uploaded recording playable, put on the
+# trace after the session closed (#67).
+CAPTURE_SPAN = "capture"
 TURN_SPAN = "turn"
 ASR_SPAN = "asr"
 LLM_SPAN = "llm"
@@ -279,6 +283,25 @@ VINGA_SESSION_ID = "vinga.session.id"
 # because that is the one this repository's own documentation, tests and
 # operators read, and the generic alias behind it.
 SESSION_ID_NAMES = (VINGA_SESSION_ID, SESSION_ID_ALIAS)
+
+# Where a backend-minted media reference goes, and it is the one thing
+# this module writes whose value is not derived from an event (#67).
+#
+# That is a real exception to this file's own rule and it is worth being
+# exact about. A reference is not a fact about the conversation: it is a
+# token the BACKEND minted for bytes an operator already authorized to
+# leave, and its only content is an opaque identifier in that backend's
+# own namespace. It is written on no session unless
+# `server.telemetry.attach_captures` is on, so a deployment that exports
+# traces and no audio never sees one.
+#
+# Two spellings for one token, because Langfuse resolves a reference
+# wherever it finds one and the two render differently: the metadata key
+# is what a reader filters and reads, and the output field is what the
+# trace view puts a player in. Both were confirmed live to arrive with
+# the token intact.
+MEDIA_METADATA_PREFIX = "langfuse.observation.metadata."
+MEDIA_OUTPUT = "langfuse.observation.output"
 
 # Which payload fields become attributes on which span, and under what
 # name. Written out rather than derived from the payload, so an event
@@ -1182,6 +1205,24 @@ class _SessionTrace:
     agent: str | None = None
 
 
+@dataclass(frozen=True)
+class _Exported:
+    """Which trace a session's spans went out under, and which span was
+    its root.
+
+    The spelled id is what `trace_of` answers and what a backend's API
+    takes back. The two numbers are what a LATER span in that same trace
+    has to be given, which is the whole reason this is a record rather
+    than the string it used to be: a reference written after the session
+    closed is a child of the session span, and a child needs its parent's
+    identity rather than a rendering of half of it.
+    """
+
+    trace: str
+    trace_id: int
+    span_id: int
+
+
 class Telemetry:
     """One server's exporter, as the thing its callers hold.
 
@@ -1204,8 +1245,11 @@ class Telemetry:
         from opentelemetry.context import Context
         from opentelemetry.trace import (
             Link,
+            NonRecordingSpan,
+            SpanContext,
             Status,
             StatusCode,
+            TraceFlags,
             format_trace_id,
             set_span_in_context,
         )
@@ -1223,6 +1267,17 @@ class Telemetry:
         # stage span is not linked the way a turn is: an ASR call is
         # part of its turn, where a turn is only part of its session.
         self._within = set_span_in_context
+        # And what makes a span written AFTER a session closed part of
+        # that session's trace: a parent that is not a span this process
+        # still holds, only its identity. The SDK has no other way to
+        # continue a trace whose spans have all ended.
+        # NOT `self._context`, which is a method of this class: an
+        # attribute of that name shadows it, and what it builds is every
+        # stage span's parentage, so the fold silently stopped making
+        # them.
+        self._orphan = NonRecordingSpan
+        self._identity = SpanContext
+        self._sampled = TraceFlags(TraceFlags.SAMPLED)
         # The one status a span here ever sets, and it sets no
         # description with it: a description is prose, and the only
         # prose a failure has is the far side's message.
@@ -1285,7 +1340,7 @@ class Telemetry:
         # and READ from another thread entirely, so the two operations
         # a write is (record, then evict) are held together rather than
         # left to the interpreter's own atomicity to imply.
-        self._retained: dict[str, str] = {}
+        self._retained: dict[str, _Exported] = {}
         self._retained_lock = threading.Lock()
         # Whether emissions are still accepted. Flipped by the lifespan
         # before it detaches anything, so a session still talking while
@@ -1351,7 +1406,71 @@ class Telemetry:
         Safe to call from any thread.
         """
         with self._retained_lock:
-            return self._retained.get(session)
+            exported = self._retained.get(session)
+        return None if exported is None else exported.trace
+
+    def reference_media(self, session: str, references: dict[str, str]) -> bool:
+        """Put backend-minted media references on the trace this session
+        was exported under, and answer whether it was done.
+
+        The second half of an attachment, and the half that makes it
+        playable. Uploading a recording associates it with a trace; what
+        makes a backend RENDER it is a reference token placed in a
+        trace's or an observation's own field, which #67's M1 walkthrough
+        established and M3's confirmed. So this writes one span in that
+        trace carrying the tokens, as a child of the session span.
+
+        A span rather than a request, and that is forced rather than
+        chosen: the backend's ingestion route refuses a trace upsert
+        outright on a current self-hosted deployment and names the OTLP
+        path as the supported one instead. Which is the better answer
+        anyway, because it costs no second transport, no second
+        credential and no second timeout: this goes into the bounded
+        queue every other span goes into, and a saturated exporter drops
+        it rather than delaying anything.
+
+        False where nothing could be written: a session this exporter
+        never saw, one whose id has aged out of the retention, or an
+        exporter that has stopped accepting because the server is
+        shutting down. What a caller does with a False is say so, because
+        a recording that is stored and cannot be found is the gap the
+        attachment exists to close.
+
+        Safe to call from any thread, which is why it exists in this
+        shape at all: it runs on the uploader's worker. It touches the
+        span map not at all and the retention under its lock, and the
+        SDK's tracer and batch processor are themselves thread-safe.
+        """
+        if not self._accepting:
+            return False
+        with self._retained_lock:
+            exported = self._retained.get(session)
+        if exported is None:
+            return False
+        parent = self._within(
+            self._orphan(
+                self._identity(
+                    trace_id=exported.trace_id,
+                    span_id=exported.span_id,
+                    is_remote=True,
+                    trace_flags=self._sampled,
+                )
+            )
+        )
+        span = self._tracer.start_span(
+            CAPTURE_SPAN,
+            context=parent,
+            attributes={
+                **dict.fromkeys(SESSION_ID_NAMES, session),
+                **{
+                    f"{MEDIA_METADATA_PREFIX}{name}": token
+                    for name, token in references.items()
+                },
+                MEDIA_OUTPUT: "\n".join(references.values()),
+            },
+        )
+        span.end()
+        return True
 
     def stop_accepting(self) -> None:
         """Take no more emissions.
@@ -1609,8 +1728,13 @@ class Telemetry:
         where the id exists and because a session that never closes
         (a process that lost it) is one a reader may still ask about.
         """
+        context = span.get_span_context()
         with self._retained_lock:
-            self._retained[session] = self._spelled(span.get_span_context().trace_id)
+            self._retained[session] = _Exported(
+                trace=self._spelled(context.trace_id),
+                trace_id=context.trace_id,
+                span_id=context.span_id,
+            )
             while len(self._retained) > RETAINED_TRACES:
                 # Oldest first, the hold's own rule: what a late reader
                 # wants is a session that has just ended.

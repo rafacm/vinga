@@ -1458,7 +1458,7 @@ class CaptureUploadFailure(StrEnum):
     The whole of what `capture_upload_failed` may say, and the reason
     the event exists: a recording that quietly failed to attach would
     leave a reader looking at a trace with no audio and no way to learn
-    that any was meant to be there. Eight members and never a message,
+    that any was meant to be there. Nine members and never a message,
     because everything that can fail here fails near a credential, a
     far-side response body or an operator's own path.
 
@@ -1492,6 +1492,13 @@ class CaptureUploadFailure(StrEnum):
     # write failure has a manifest that disowns it, and attaching one
     # would present broken evidence as evidence.
     INCOMPLETE = "incomplete"
+    # The bytes landed and nothing points at them. An upload associates
+    # a recording with a trace; what makes a backend RENDER it is a
+    # reference written back onto that trace, and a recording stored
+    # where no reader can reach it is the gap this surface exists to
+    # close, so it is reported as a failure rather than as a success
+    # with an asterisk.
+    UNREFERENCED = "unreferenced"
 
 
 # What an upload attempt itself may report. `abandoned` is not one of
@@ -1505,6 +1512,7 @@ AttemptedUpload = Literal[
     CaptureUploadFailure.DROPPED,
     CaptureUploadFailure.STAGING_LOST,
     CaptureUploadFailure.INCOMPLETE,
+    CaptureUploadFailure.UNREFERENCED,
 ]
 
 

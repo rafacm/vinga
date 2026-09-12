@@ -227,6 +227,18 @@ MAX_ATTACHMENT_BYTES = 512 * 1024 * 1024
 # model or by one.
 MEDIA_FIELD = "metadata"
 
+# How a reference to an uploaded asset is spelled, and what each of the
+# two is called where a reader meets it.
+#
+# The spelling is the backend's, confirmed live in both milestones: an
+# upload associates a recording with a trace, and what makes the backend
+# RENDER it is a token like this one written back onto that trace. The
+# `source=bytes` half says the asset was uploaded rather than referenced
+# from somewhere else, which is what every upload here is.
+MEDIA_REFERENCE = "@@@langfuseMedia:type={kind}|id={media}|source=bytes@@@"
+AUDIO_REFERENCE = "capture_audio"
+MANIFEST_REFERENCE = "capture_manifest"
+
 # The two content types, spelled as the media API's own closed
 # enumeration spells them.
 AUDIO_TYPE = "audio/wav"
@@ -701,9 +713,17 @@ class CaptureUpload:
             return CaptureUploadFailure.STAGING_LOST
         if len(audio) + len(manifest) > MAX_ATTACHMENT_BYTES:
             return CaptureUploadFailure.TOO_LARGE
-        reason = self._send(trace, audio, manifest)
+        references, reason = self._send(trace, audio, manifest)
         if reason is not None:
             return reason
+        if not self._telemetry.reference_media(job.session, references):
+            # The bytes landed and nothing points at them, which is the
+            # gap this surface exists to close wearing a success: an
+            # upload associates a recording with a trace, and what makes
+            # it playable is the reference written back onto that trace.
+            # Reported rather than glossed, because a reader who cannot
+            # reach the audio is a reader who does not know it is there.
+            return CaptureUploadFailure.UNREFERENCED
         elapsed = int((time.monotonic() - began) * 1000)
         events.emit(
             lambda: CaptureUploaded(
@@ -716,7 +736,9 @@ class CaptureUpload:
         )
         return None
 
-    def _send(self, trace: str, audio: bytes, manifest: bytes) -> AttemptedUpload | None:
+    def _send(
+        self, trace: str, audio: bytes, manifest: bytes
+    ) -> tuple[dict[str, str], AttemptedUpload | None]:
         """Both attachments, retried as a pair, or the reason they did
         not land.
 
@@ -731,19 +753,26 @@ class CaptureUpload:
         for attempt in range(self._retries + 1):
             try:
                 client = self._media()
-                self._attach(client, trace, audio, AUDIO_TYPE)
-                self._attach(client, trace, manifest, MANIFEST_TYPE)
-                return None
+                return {
+                    AUDIO_REFERENCE: MEDIA_REFERENCE.format(
+                        kind=AUDIO_TYPE,
+                        media=self._attach(client, trace, audio, AUDIO_TYPE),
+                    ),
+                    MANIFEST_REFERENCE: MEDIA_REFERENCE.format(
+                        kind=MANIFEST_TYPE,
+                        media=self._attach(client, trace, manifest, MANIFEST_TYPE),
+                    ),
+                }, None
             except _Refused as refused:
-                return refused.reason
+                return {}, refused.reason
             except Exception as raised:  # noqa: BLE001 - every failure is an event
                 reason, again = self._classify(raised)
                 if not again:
-                    return reason
+                    return {}, reason
             if attempt < self._retries and not self._stopping.is_set():
                 time.sleep(wait)
                 wait *= 2
-        return reason
+        return {}, reason
 
     def _media(self) -> Any:
         """The SDK's REST client, constructed at the first job that
@@ -775,7 +804,7 @@ class CaptureUpload:
             )
         return self._client
 
-    def _attach(self, client: Any, trace: str, payload: bytes, kind: str) -> None:
+    def _attach(self, client: Any, trace: str, payload: bytes, kind: str) -> str:
         """One file, by the three requests the media API is.
 
         Asked for an upload URL against the trace, PUT to the presigned
@@ -794,7 +823,10 @@ class CaptureUpload:
         )
         upload_url = getattr(answer, "upload_url", None)
         if not upload_url:
-            return
+            # Bytes the backend already holds, which is what makes a
+            # retry free: there is nothing to PUT, and the id it answered
+            # with is the one a reference names.
+            return str(answer.media_id)
         assert self._http is not None
         began = time.monotonic()
         response = self._http.put(
@@ -813,6 +845,7 @@ class CaptureUpload:
             upload_http_status=response.status_code,
             upload_time_ms=int((time.monotonic() - began) * 1000),
         )
+        return str(answer.media_id)
 
     def _classify(self, raised: BaseException) -> tuple[AttemptedUpload, bool]:
         """Which of the closed set this failure is, and whether trying
