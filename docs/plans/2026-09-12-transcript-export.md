@@ -471,11 +471,13 @@ promise-side half this completes, and the amendment cites it.
 - **Whether Langfuse renders `langfuse.observation.input`/`output`
   attributes on plain OTLP spans as observation input and output.**
   #67 M1 proved the output and metadata halves live (the media
-  token probe); input is the same mechanism and the walkthrough
-  proves it before the milestone claims it. If rendering fails, the
-  content moves to the metadata field family, which the probe
-  proved, and the acceptance's "rendered input/output fields"
-  criterion is amended transparently on the PR.
+  token probe); input is the same mechanism. The live walkthrough
+  is a MILESTONE GATE, run early in M2 as a probe span before the
+  exporter is built around the shape: if either field does not
+  render as the acceptance requires, the milestone stops and the
+  attribute shape or transport is redesigned until it does. The
+  acceptance criterion is settled by the issue and is not amended,
+  and no metadata substitution is shipped in its place.
 - **Content territory widens every round** (five issues running);
   the sentinel suite is written with the exporter's first commit,
   and the review chain is priced as sol plus a terra delta minimum,
@@ -570,6 +572,12 @@ Findings condensed but faithful; resolutions appended per amendment.
    amendment by this plan. Make the live walkthrough a milestone
    gate: if either field does not render, stop and redesign, never
    substitute or amend.
+
+   *Resolution.* Adopted. The risk now states the walkthrough as a
+   milestone gate, run early in the exporter milestone as a probe
+   span before the exporter is built around the shape; a rendering
+   failure stops the milestone for redesign, the criterion is not
+   amendable by this plan, and no substitution ships.
 
 3. **P2: The proposed shared session-turn query is not the query
    the API currently owns.** The route also validates session
