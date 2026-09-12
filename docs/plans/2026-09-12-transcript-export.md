@@ -228,21 +228,33 @@ whatever the flag said then), never re-export. The test drives a
 resumed thread across two sessions and asserts the second export
 carries exactly the second session's turns.
 
-### The read surface: the session-turns query gets one home
+### The read surface: a narrow transcript projection, not the API's query
 
-`GET /api/…/sessions/{id}/turns` already reads exactly what the
-export wants, as an inline query in `conversations/api.py:847`. The
-query moves to `threads.py` as `session_turns(connection, session)`
-with the API route as its first caller (a behavior-preserving move,
-pinned by the route's existing contract tests plus a
-byte-identical-response pin), and `threads.Reads`, the
-engine-per-call never-raise seam built for callers outside a request
-(`threads.py:851`), gains a `session_turns(session)` method in the
-milestone that has a caller for it. That is the locality rule
-applied: one home for "a session's turns, oldest first", read by the
-API and the exporter from the same place. `Reads` answering
-`Unreadable` is the exporter's `unreadable` reason; a raise would
-quote a DSN, which is why the seam exists.
+The first draft moved the route's inline query
+(`conversations/api.py:847`) to `threads.py` as a shared home; the
+review round showed the two readers do not want the same query. The
+route's contract is session-existence validation, cursor and limit
+parsing, `id > cursor`, `limit + 1` pagination metadata and nested
+tool invocations; the exporter wants none of that and must not read
+it (tool arguments and results are content beyond the issue's
+authorization). Two different questions are two queries, so nothing
+moves and the API route stays untouched.
+
+What the exporter gets instead is its own narrow primitive:
+`threads.transcript_rows(connection, session)`, an explicit
+projection of exactly the authorized transcript fields (`id`,
+`t_ms`, `agent`, `heard`, `reply`, `legs`), ordered by `id`
+ascending, whole-session (a transcript export is not paginated; a
+session's turn count is bounded by the session), with the
+session-local ordinal derived from that ordering. `threads.Reads`,
+the engine-per-call never-raise seam built for callers outside a
+request (`threads.py:851`), gains `transcript_rows(session)`
+delegating to it, in the same milestone as its only caller. `Reads`
+answering `Unreadable` is the exporter's `unreadable` reason; a
+raise would quote a DSN, which is why the seam exists. By
+construction the read path never selects tool invocations or any
+other content-bearing column, which is what the sentinel suite then
+proves rather than assumes.
 
 ### The span shape, and the two vocabulary rules it extends
 
@@ -397,10 +409,9 @@ promise-side half this completes, and the amendment cites it.
   `reference_media`, sharing `_continuing`; the two new names join
   `AFTER_THE_CLOSE`; the vocabulary-exception note widens by one
   sentence.
-- `conversations/threads.py`: `session_turns(connection, session)`
-  (the moved query) and `Reads.session_turns(session)`;
-  `conversations/api.py` keeps the route and loses the inline
-  query.
+- `conversations/threads.py`: `transcript_rows(connection, session)`
+  (the narrow projection) and `Reads.transcript_rows(session)`;
+  `conversations/api.py` is untouched.
 - `conversations/store.py` and `records.py`: `Close` carries an
   `Acknowledgement`; `close_session` returns it; the writer settles
   it where it settles the milestone's.
@@ -417,10 +428,11 @@ promise-side half this completes, and the amendment cites it.
   config-example suites respelled; one new case pinning that the
   old key is refused (`extra="forbid"` naming `attach_captures`);
   the reference regenerated and diffed by the standing drift check.
-- **Unit, threads (M2)**: the moved query pinned behavior-identical
-  through the route's existing contract tests plus a response pin
-  committed green before the move and byte-unchanged after.
-- **Unit, exporter (M3)**: build-nothing cases (recording off three
+- **Unit, threads (M2)**: `transcript_rows` returns exactly the
+  projection, ordered by `id`, only the named session's rows, and
+  the ordinal convention; a row family carrying tool invocations
+  proves none are selected.
+- **Unit, exporter (M2)**: build-nothing cases (recording off three
   ways, flag off) and the info line's presence exactly when the
   flag is on; the two refusals value-free and unchained; the
   decision order (recording-off with `local_only` on boots); a
@@ -440,15 +452,15 @@ promise-side half this completes, and the amendment cites it.
   both log formats, both events' payloads and exception chains for
   every failure family, and present only in the span attributes;
   session id positional, bounded by `SessionId`.
-- **Unit, telemetry (M3)**: `export_transcript` `True`/`False`
+- **Unit, telemetry (M2)**: `export_transcript` `True`/`False`
   contract (never-seen, evicted, stopped); the two new events
   folding through `AFTER_THE_CLOSE` from the retention, pinned the
   way the capture pair's fold is.
-- **Unit, store (M3)**: the close acknowledgement settles `True`
+- **Unit, store (M2)**: the close acknowledgement settles `True`
   after commit and `False` on drop and on a stopped store; ordering
   (an acknowledged close implies the session's earlier turns
   readable, driven, not assumed).
-- **Integration (M3)**: the wire claim, decoded from protobuf a
+- **Integration (M2)**: the wire claim, decoded from protobuf a
   `Receiver` collected: a real device conversation with a handover,
   transcripts arriving as spans in the session trace with input,
   output and legs spelled as recorded, and the sentinel present in
@@ -459,7 +471,7 @@ promise-side half this completes, and the amendment cites it.
   shutdown within its own bound); a wedged-store case proving the
   session closes unaffected within its bound and the `unrecorded`
   event fires within the wait's budget.
-- **Live, recorded not asserted (M3)**: the walkthrough against a
+- **Live, recorded not asserted (M2)**: the walkthrough against a
   self-hosted Langfuse (the #67 stack), a multi-turn conversation
   with a handover, the acceptance read back through
   `/api/public/v2/observations`: each turn's text in the rendered
@@ -505,18 +517,11 @@ promise-side half this completes, and the amendment cites it.
   footprint: renames on existing modules, no new seam. Documentation
   footprint: the pages above, each through its owner; generated
   reference only through its generator.
-- [ ] **M2: the session-turns query gets one home.** The inline
-  `api.py` query moves to `threads.py` as `session_turns`, the
-  route calls it, the response pinned byte-identical; no `Reads`
-  method yet (its caller arrives in M3). Design footprint: deepens
-  `threads.py` as the home of thread and session reads; `api.py`
-  loses implementation knowledge. Documentation footprint: none
-  staled (an internal move; the API contract is pinned unchanged),
-  stated per the plan rule; fragment not needed, no observable
-  change, and the changelog records notable changes only.
-- [ ] **M3: the flag, the exporter, the vocabulary, the record.**
+- [ ] **M2: the flag, the exporter, the vocabulary, the record.**
+  The rendering-gate probe first, its result recorded;
   `export_transcripts` with its prose and refusal order;
-  `transcript_export.py`; `Reads.session_turns`; the `Close`
+  `transcript_export.py`; `threads.transcript_rows` and
+  `Reads.transcript_rows`; the `Close`
   acknowledgement; `Telemetry.export_transcript` and the fold
   additions; the two events, closed set, channel, drivers,
   regenerated events reference and README index rows; generated
@@ -527,8 +532,8 @@ promise-side half this completes, and the amendment cites it.
   `changelog.d/495-transcript-export.md` (### Added). Design
   footprint: the new module with its depth sentence, one returned
   acknowledgement on an existing seam, one method each on
-  `Telemetry` and `Reads`. Documentation footprint as listed, each
-  page through its owner.
+  `Telemetry`, `threads` and `Reads`. Documentation footprint as
+  listed, each page through its owner.
 
 ## Plan review round
 
@@ -589,6 +594,15 @@ Findings condensed but faithful; resolutions appended per amendment.
    and ordering; the API keeps its validation, pagination and
    nesting; the exporter receives only the authorized transcript
    fields.
+
+   *Resolution.* Adopted; the shared-home milestone dissolved. Two
+   readers asking two questions are two queries, so the API route
+   stays untouched and the exporter gets its own narrow primitive,
+   `threads.transcript_rows(connection, session)` with an explicit
+   projection (`id`, `t_ms`, `agent`, `heard`, `reply`, `legs`)
+   ordered by `id`, plus `Reads.transcript_rows(session)`, landing
+   in the milestone with their only caller. The plan is now two
+   milestones (M1 rename, M2 exporter), renumbered throughout.
 
 4. **P2: The legs representation is not a valid OpenTelemetry
    attribute as written.** The column is an array of objects;
