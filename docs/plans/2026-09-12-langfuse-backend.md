@@ -499,7 +499,7 @@ variant case, and the workflow's per-image import checks.
   tables, no new seam. Documentation footprint: the implementation
   doc's walkthrough record; `docs/reference/events.md` untouched;
   a `changelog.d/` fragment.
-- [x] **[M2: the correlation](2026-09-12-langfuse-backend-implementation.md#m2-the-correlation-and-the-vocabulary)** (PR TBD). `trace_of` with
+- [x] **[M2: the correlation](2026-09-12-langfuse-backend-implementation.md#m2-the-correlation-and-the-vocabulary)** (PR #480). `trace_of` with
   its bounded retention, recorded at the session span's open, spelled
   by the SDK's own `format_trace_id` and kept past the close pop. The
   two catalog events moved to M3, where their emit sites are: the
