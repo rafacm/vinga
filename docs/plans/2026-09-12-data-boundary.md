@@ -547,3 +547,48 @@ per amendment.
    ordered boundaries with the fail-closed rule and both limits
    kept word-for-word, the citation spells `host`, and the
    promise sentence and enumerated list stand untouched.
+
+### Delta re-review
+
+External review: codex CLI 0.154.0, model gpt-5.6-terra, read-only
+sandbox, 2026-09-12, runtime 3m18s, reviewing commit 284c29e5 plus
+the cell-count tidy. Verdict as received: **ready after the P2
+amendments**. Findings condensed but faithful; resolutions
+appended per amendment.
+
+1. **P2: The domain migration omits explicit legacy `null`
+   values.** Stored bodies preserve explicitly set fields
+   (`exclude_unset=True`), so a valid old row carrying
+   `"egress": null` keeps the now-forbidden key and fails at boot
+   after upgrade. Migrate explicit `null` by removing the key,
+   distinct from absence only as input history, and add
+   pre-upgrade-null rows to the migration test on both entry
+   kinds.
+
+2. **P2: The provider-options ownership is contradictory.** The
+   old-spellings section gives rejection to the `ProviderConfig`
+   validator while Module layout still says `provider_options.py`
+   reserves `egress`, recreating the rejected design.
+   `ProviderConfig` alone rejects the legacy key before extras are
+   retained; `provider_options.py` only updates its
+   non-option-field vocabulary for `reach`.
+
+3. **P2: MCP tests do not prove the new tier for MCP entries.**
+   The rank table drives only provider builds, and
+   `check_mcp_server` is a separate entry point, so an MCP
+   implementation treating every non-host reach as refusal would
+   pass. Add MCP acceptance and rejection cells (host-at-host,
+   network-at-network, network-at-host at minimum) plus undeclared
+   behavior for absent versus declared boundaries.
+
+4. **P3: The absent-boundary description contradicts the retained
+   class-marking invariant.** "Nothing refuses" overreaches: an
+   absent boundary disables boundary-based refusal, while absent
+   or invalid class markings stay programming errors refused in
+   every mode. Narrow the sentence.
+
+5. **P3: The final grep rule is not mechanically specified.** A
+   substring search matches "regression" everywhere, so "any other
+   hit is a missed site" cannot be applied. Require word-boundary
+   token matching for `egress` and `local_only`, then list the
+   remaining historical lines explicitly.
