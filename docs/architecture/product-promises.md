@@ -97,7 +97,10 @@ than caveats to it: the mechanism admits declarations, not behavior
 (it is not a network sandbox and proves nothing about a remote
 endpoint), and stage-by-stage provider mixing is a property of
 staged runtimes (a native speech-to-speech runtime may own several
-stages together).
+stages together). The boundary constrains defaults and enforcement,
+never which capabilities exist: a content export feature is lawful
+exactly when it declares its destination, defaults off, and refuses
+under a local boundary.
 
 **Example.** An inherently-cloud runtime (a native realtime session)
 arriving as a sibling runtime is fine and expected; the local

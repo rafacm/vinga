@@ -55,7 +55,7 @@ meaning all of:
 - agent memory;
 - tool use.
 
-Around the list, four rules:
+Around the list, five rules:
 
 1. **Membership is by recorded decision, flagged at development
    time.** Every committed plan and every feature doc answers the
@@ -84,6 +84,18 @@ Around the list, four rules:
    and proves nothing about a remote endpoint. And stage-by-stage
    provider mixing is a property of staged runtimes; a native
    speech-to-speech runtime may own several stages together.
+5. **The boundary bounds defaults, not capabilities.** The promise
+   constrains how session data may leave (declared destinations,
+   refusal at build, everything off by default) and what a locally
+   bounded server can never do; it does not forbid features whose
+   purpose is sending content out. A deliberately enabled content
+   export (a capture attached to a trace, transcripts to an
+   evaluation backend) is lawful when it rides a content surface,
+   declares its destination like any provider, defaults off, and
+   refuses under a local boundary. Such a feature is the mechanism
+   demonstrating its worth, not an exception carved out of it. Which
+   channel content may ride and at what fidelity is the
+   content-and-telemetry record's subject, not this one's.
 
 ## Consequences
 
@@ -102,6 +114,12 @@ Around the list, four rules:
   [#493](https://github.com/rafacm/vinga/issues/493), which renames
   the spelling and adds a network tier, updates a citation rather
   than a promise.
+- The telemetry content exports (the capture attachment of
+  [#67](https://github.com/rafacm/vinga/issues/67), the transcript
+  export of [#495](https://github.com/rafacm/vinga/issues/495)) are
+  the first features held to rule 5, and the disclosure-ladder
+  naming of the `server.telemetry` section is that rule made legible
+  in configuration.
 - Drift stays visible by construction: the local path cannot fall
   below the list without a falsifiable promise breaking, and the
   list cannot grow or shrink by implication because every change to
