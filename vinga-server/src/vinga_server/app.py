@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from vinga_server import __version__, logs, onboarding, ota, ws
 from vinga_server.auth import build_device_auth
 from vinga_server.build_info import revision
-from vinga_server.capture import CaptureStore, DeviceFacts
+from vinga_server.capture import CaptureStore, DeviceFacts, sweep_upload_staging
 from vinga_server.capture_upload import build_capture_upload
 from vinga_server.composition import Composition
 from vinga_server.config import Config, ConfigError
@@ -257,6 +257,23 @@ async def _build_composition(
     live = LiveEvents()
     attach_server_tap(live)
     stack.callback(detach_server_tap, live)
+    # What the run before this one left staged for upload, said and
+    # removed (#67). In front of every refusal this build can raise,
+    # which is the whole of where it has to be: a staged pair is room
+    # audio waiting to leave, and the configurations it waits in are
+    # exactly the ones that refuse or build nothing. An exporter refused
+    # under `local_only` exits above the capture section entirely, an
+    # attachment refused for its missing extra exits above the store, and
+    # a configured-but-disabled capture builds no store at all. It
+    # answers to the capture SECTION, because the section is what names
+    # the directory; a boot with no capture section leaves the directory
+    # untouched, which parks this with the rest of the capture machinery.
+    #
+    # After the hub above rather than before it, so the events it emits
+    # reach whoever is tailing the redeploy, which is the reason that hub
+    # is built first.
+    if config.server.capture is not None:
+        sweep_upload_staging(config.server.capture.dir)
     # And the optional exporter (#66), built before every resource a
     # boot can open. A deployment that asked for tracing it cannot have
     # learns that before it learns anything else, and nothing has been
@@ -576,12 +593,6 @@ async def _build_composition(
         )
     )
     if capture is not None:
-        # What the run before this one left staged, said and removed.
-        # The store's own and not the uploader's, so a boot that stopped
-        # exporting does not leave room audio behind in silence, and a
-        # boot with no capture section at all leaves the directory
-        # untouched because it builds no store either.
-        capture.startup()
         # Room audio is the whole of what makes this a recording, and the
         # decision track beside it is what the events already are. It
         # used to say "transcripts", which was true while the events
