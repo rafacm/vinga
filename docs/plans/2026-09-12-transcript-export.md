@@ -272,10 +272,17 @@ and `vinga.agent` (the agent the turn opened with), and the content
 in the fields the backend renders: `langfuse.observation.input` for
 `heard`, `langfuse.observation.output` for `reply`. Where the
 `legs` column is present (a handover split the reply), the per-leg
-attribution rides `langfuse.observation.metadata.legs` as the
-column's JSON with the token halves left out (they are metadata the
-generations already carry; content and its attribution are what this
-observation adds). A turn whose text halves are both null (recorded
+attribution rides `langfuse.observation.metadata.legs` under an
+exact wire encoding: a canonical JSON document (sorted keys, no
+extra whitespace) serialized to ONE STRING attribute value, holding
+the legs in order, each allowlisted to `agent` and `text`. A string
+because OTel span attributes take primitives or homogeneous
+primitive arrays, never mappings, and the existing post-close
+writes are all string-valued; allowlisted because the token halves
+are metadata the generations already carry, and content plus its
+attribution is what this observation adds. The unit pin asserts the
+exact serialized string, the wire test asserts the protobuf value,
+and the walkthrough records how the backend renders it. A turn whose text halves are both null (recorded
 before text was on, or nothing spoken) exports no span; a session
 whose readable turns number zero exports nothing and emits nothing,
 because a trail entry for an empty export would be noise a reader
@@ -611,6 +618,13 @@ Findings condensed but faithful; resolutions appended per amendment.
    exact wire encoding (canonical JSON string after allowlisting
    `agent` and `text`), verify the rendering live, pin both the
    protobuf value and the rendered result.
+
+   *Resolution.* Adopted. The span-shape section now fixes the
+   encoding: one string attribute holding canonical JSON (sorted
+   keys, no extra whitespace) of the legs in order, each
+   allowlisted to `agent` and `text`; the unit pin asserts the
+   exact string, the wire test the protobuf value, and the
+   walkthrough records the rendering.
 
 5. **P2: Shutdown can tear down the worker's dependencies while a
    30-second job is still running.** A job may wait 30 s on the
