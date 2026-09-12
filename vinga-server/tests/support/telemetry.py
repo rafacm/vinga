@@ -32,10 +32,13 @@ from vinga_server.config.models import TelemetryConfig
 from vinga_server.events import ServerEvents, SessionEvents, assembly
 from vinga_server.events.catalog import (
     CAPTURE_CHANNEL,
+    CAPTURE_UPLOAD_CHANNEL,
     BargeIn,
     BargeInUnderFloor,
     BargeInWithoutTranscript,
     CaptureStarted,
+    CaptureUploaded,
+    CaptureUploadFailed,
     FramesDropped,
     Handover,
     NothingHeard,
@@ -52,6 +55,7 @@ from vinga_server.events.catalog import (
 from vinga_server.events.values import (
     AgentNames,
     AlsoBoundTo,
+    CaptureUploadFailure,
     ClientId,
     CloseReason,
     ConfiguredPath,
@@ -589,10 +593,41 @@ def capture_emitter() -> ServerEvents:
 
 
 def capture_started(emitter: ServerEvents, path: str = "/data/captures") -> None:
-    """The one server-channel event with a session in it, emitted the
-    way the capture emits it."""
+    """A server-channel event with a session in it, emitted the way the
+    capture emits it, and the one that arrives BEFORE its session
+    opens."""
     emitter.emit(
         lambda: CaptureStarted(session=SessionId(SESSION), path=ConfiguredPath(Path(path)))
+    )
+
+
+def upload_emitter() -> ServerEvents:
+    """An emitter on the uploader's own channel, for the same reason
+    `capture_emitter` exists: a variant handed to an emitter on another
+    channel is refused at emit."""
+    return ServerEvents(CAPTURE_UPLOAD_CHANNEL)
+
+
+def capture_uploaded(emitter: ServerEvents, session: str = SESSION) -> None:
+    """A recording that reached its trace, emitted the way the uploader
+    emits it: on a worker of its own, after the session closed."""
+    emitter.emit(
+        lambda: CaptureUploaded(
+            session=SessionId(session),
+            audio_bytes=Count(173464),
+            manifest_bytes=Count(1258),
+            elapsed_ms=Whole(412),
+            megabytes=Real(0.17),
+        )
+    )
+
+
+def capture_upload_failed(emitter: ServerEvents, session: str = SESSION) -> None:
+    """And one that did not."""
+    emitter.emit(
+        lambda: CaptureUploadFailed(
+            session=SessionId(session), reason=CaptureUploadFailure.UNREACHABLE
+        )
     )
 
 

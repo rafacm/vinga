@@ -26,6 +26,7 @@ about the background thread and the composition, which is the other
 lane's business.
 """
 
+import contextlib
 import logging
 import sys
 import threading
@@ -45,6 +46,8 @@ from tests.support.telemetry import (
     barge_in,
     capture_emitter,
     capture_started,
+    capture_upload_failed,
+    capture_uploaded,
     close_session,
     drop_frames,
     exporting,
@@ -57,6 +60,7 @@ from tests.support.telemetry import (
     released,
     session_events,
     start_turn,
+    upload_emitter,
 )
 from vinga_server.config import ConfigError
 from vinga_server.config.models import TelemetryConfig
@@ -767,6 +771,106 @@ def test_the_retention_keeps_the_last_sessions_and_evicts_the_oldest() -> None:
     assert telemetry.trace_of(ids[1]) is not None
     assert telemetry.trace_of(ids[-1]) is not None
     assert len({telemetry.trace_of(one) for one in ids[1:]}) == RETAINED_TRACES
+
+
+# --- the outcomes that arrive after the close --------------------------
+#
+# A recording's trip to the backend runs on a worker of its own once the
+# session is over, so its two outcome events reach the exporter with the
+# span map already emptied. They used to be dropped there: the server
+# fold answered `capture_started` and nothing else, so the vocabulary sat
+# in APPROVED and never left the process, and the off-host trace the
+# milestone is for had no record of whether a recording made it.
+
+
+@contextlib.contextmanager
+def watching_the_server(telemetry: Telemetry) -> Iterator[None]:
+    """The server tap attached for the length of a block.
+
+    The server channels are process-global, so a tap left on would
+    deliver into an exporter the next case has finished with.
+    """
+    tap = telemetry.server_tap()
+    attach_server_tap(tap)
+    try:
+        yield
+    finally:
+        detach_server_tap(tap)
+
+
+def test_an_upload_outcome_lands_on_the_trace_its_session_closed_in() -> None:
+    """The claim the milestone makes: a reader of the trace can see that
+    a recording is there.
+
+    A SPAN rather than a span event, which is a finding rather than a
+    preference: the backend this surface exists for ingests no span
+    events at all, so an outcome recorded as one would be invisible in
+    the one place a reader goes looking for it.
+    """
+    from opentelemetry.trace import format_trace_id
+
+    telemetry, memory = exporting()
+    a_session(telemetry, SESSION)
+
+    with watching_the_server(telemetry):
+        capture_uploaded(upload_emitter())
+
+    spans = finished(telemetry, memory)
+    written = named(spans, "capture_uploaded")
+    session_span = named(spans, "session")
+    assert format_trace_id(written.context.trace_id) == telemetry.trace_of(SESSION)
+    assert written.parent is not None
+    assert written.parent.span_id == session_span.context.span_id
+
+
+def test_an_upload_outcome_carries_what_its_declaration_declares() -> None:
+    """The catalog's fields and no others, plus the session under both
+    names so the query a reader makes finds it beside the turns."""
+    telemetry, memory = exporting()
+    a_session(telemetry, SESSION)
+
+    with watching_the_server(telemetry):
+        capture_uploaded(upload_emitter())
+
+    held = dict(named(finished(telemetry, memory), "capture_uploaded").attributes or {})
+    assert held["audio_bytes"] == 173464
+    assert held["manifest_bytes"] == 1258
+    assert held["elapsed_ms"] == 412
+    assert held["vinga.session.id"] == SESSION
+    assert held["session.id"] == SESSION
+    # The sentence's own rendering is not a field, and neither is the
+    # event name: it is the span's.
+    assert "megabytes" not in held
+    assert "event" not in held
+
+
+def test_a_failed_upload_says_why_on_the_trace() -> None:
+    """The other half of the trail, and the half a reader needs most:
+    the reason from the closed set, on the trace with no audio in it."""
+    telemetry, memory = exporting()
+    a_session(telemetry, SESSION)
+
+    with watching_the_server(telemetry):
+        capture_upload_failed(upload_emitter())
+
+    held = dict(
+        named(finished(telemetry, memory), "capture_upload_failed").attributes or {}
+    )
+    assert held["reason"] == "unreachable"
+
+
+def test_an_outcome_for_a_session_this_exporter_never_saw_writes_nothing() -> None:
+    """The boot sweep's `abandoned` is about a session a PREVIOUS process
+    ran, so there is no trace of this process's to put it on. Nothing is
+    invented, and the JSON log is where that one stays."""
+    telemetry, memory = exporting()
+    a_session(telemetry, SESSION)
+
+    with watching_the_server(telemetry):
+        capture_upload_failed(upload_emitter(), session=f"{99:032x}")
+
+    spans = finished(telemetry, memory)
+    assert [span for span in spans if span.name == "capture_upload_failed"] == []
 
 
 # --- the reference that makes an attachment playable -------------------
