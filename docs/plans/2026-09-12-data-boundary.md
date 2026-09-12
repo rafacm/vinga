@@ -187,13 +187,18 @@ Three old keys, three refusal shapes, each pinned by a test:
   (`provider_options.py`'s "everything beyond type, api_key_env and
   egress"), so removing the field would let an old `egress: false`
   flow silently into options and reach the provider as a stray
-  option, or vanish. The plan closes it explicitly: `egress` joins
-  the reserved names the options layer refuses by name with a
-  fixed sentence pointing at `reach` (the options layer already
-  owns a reserved-key concept for the seven pass-through fields;
-  this is one more row, not a mechanism), and the test plants
-  `egress: false` on a provider entry and pins the refusal names
-  the key and the remedy without echoing the value.
+  option, or vanish. The review corrected the first draft's
+  remedy: the options layer's reserved set is OpenAI chat request
+  fields enforced only by `OpenaiCompatibleOptions`, which other
+  types never pass, so a row there would miss most providers and
+  document the key falsely. The rejection lives at the common
+  `ProviderConfig` boundary instead, a model validator that
+  refuses a legacy `egress` key BEFORE `model_extra` becomes
+  provider options, with a fixed value-free sentence naming
+  `reach` as the remedy. Tests drive it on an open-ended
+  `openai_compatible` entry and on a provider type with no options
+  model, pinning that the refusal names the key and the remedy
+  without echoing the value.
 
 ### One milestone, because a half-renamed vocabulary is not releasable
 
@@ -354,6 +359,12 @@ per amendment.
    common `ProviderConfig` boundary before `model_extra` becomes
    options, fixed value-free remedy naming `reach`, tested on an
    open-ended entry and an optionless type.
+
+   *Resolution.* Adopted. The trap's remedy moved to a
+   `ProviderConfig` model validator refusing the legacy key
+   before `model_extra` becomes options, with both prescribed
+   tests named; the options-layer row is withdrawn with the
+   reviewer's reason recorded.
 
 4. **P2: Existing stored domain configuration has no upgrade
    path.** Provider and MCP bodies persist as opaque text and can
