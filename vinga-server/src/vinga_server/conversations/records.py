@@ -189,7 +189,7 @@ class MilestoneRecord:
 
 
 class Acknowledgement:
-    """Whether one turn's durable transaction committed, waitable.
+    """Whether one record's durable transaction committed, waitable.
 
     A handle rather than a callback: the writer settles it on the thread
     that did the work, and whoever wants the answer waits for it with a
@@ -197,13 +197,20 @@ class Acknowledgement:
     the pipeline creates one and drops it; the consumers are the paths
     that must not read past their own writes.
 
-    It speaks for its own turn and for nothing else. A later turn
+    It speaks for its own record and for nothing else. A later record
     landing says nothing about an earlier one, which is why a resume
     reads the thread's `incomplete` flag as well: a gap in the middle of
-    a thread is exactly the state a per-turn answer cannot describe.
+    a thread is exactly the state a per-record answer cannot describe.
+
+    What a record's own answer implies about the records IN FRONT of it
+    is the record's question rather than this class's, and exactly one
+    record answers it: a session's close is the last thing on a writer's
+    queue for that session, so the barrier it is and the limits of that
+    barrier are documented where the barrier lives, on `Close` and
+    `close_session` in `store.py` (#495).
 
     `wait` answers false three ways, and deliberately does not tell them
-    apart: the turn was dropped, the writer is gone, or the bound
+    apart: the record was dropped, the writer is gone, or the bound
     expired before an answer arrived. All three mean the same thing to a
     caller, which is that it may not assume the write landed.
     """
@@ -215,15 +222,15 @@ class Acknowledgement:
         self._landed = False
 
     def wait(self, timeout: float | None = None) -> bool:
-        """Whether the turn's durable transaction committed, waiting up
-        to `timeout` seconds for an answer. False on a timeout, which is
-        not an answer and is treated as one."""
+        """Whether the record's durable transaction committed, waiting
+        up to `timeout` seconds for an answer. False on a timeout, which
+        is not an answer and is treated as one."""
         if not self._done.wait(timeout):
             return False
         return self._landed
 
     def settle(self, landed: bool) -> None:
-        """The writer's half: say what became of the turn, once. A
+        """The writer's half: say what became of the record, once. A
         second call is ignored, so a batch settled by a tombstone and
         then met again by a drain does not change its own answer."""
         if self._done.is_set():

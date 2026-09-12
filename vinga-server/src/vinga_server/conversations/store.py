@@ -714,12 +714,41 @@ class Milestone:
 
 @dataclass(frozen=True)
 class Close:
-    """A session ended. A marker, and the last record of that session."""
+    """A session ended. A marker, and the last record of that session.
+
+    Its handle is the one acknowledgement on this queue that speaks for
+    more than its own record, and what it speaks for is stated here
+    rather than left to be inferred (#495). One writer thread consumes
+    one FIFO queue, and a close is the last item that session will ever
+    put on it, so a close acknowledgement settling `True` means every
+    earlier record of this queue has been RESOLVED: landed, or dropped
+    and counted. That is the whole of the barrier and the whole of what
+    a reader may take from it.
+
+    The limit is part of the contract rather than a gap in it. A close
+    can commit after an earlier turn was dropped, and it still answers
+    `True`: what the barrier promises is that nothing of this session is
+    still on its way, never that everything spoken was stored. A reader
+    that reads the store afterwards therefore carries exactly what the
+    store holds, which is correct because the store is what it is
+    reading rather than the conversation as it was spoken.
+
+    `False` is the `Acknowledgement`'s own three answers, deliberately
+    not told apart: the close was dropped, the writer is gone, or the
+    caller's bound expired. All three mean a reader may not assume the
+    session's turns are readable.
+    """
 
     session: str
     duration_s: float | None
     reason: str | None
     dropped: int
+    # The handle the producer kept, settled by the writer when the
+    # close's own durable transaction commits, which is the instant the
+    # barrier above becomes true. Carried on the queue item the way a
+    # turn's is, rather than looked up later, because what settles it is
+    # this item reaching the writer.
+    acknowledgement: Acknowledgement
 
 
 class Half(enum.Enum):
@@ -1113,17 +1142,43 @@ class ConversationStore:
 
     def close_session(
         self, session_id: str, duration_s: float | None = None, reason: str | None = None
-    ) -> None:
+    ) -> Acknowledgement:
         """End one session's record. A control record and the last
         marker: a dropped close would make the store unable to say what
-        it lost."""
+        it lost.
+
+        The handle that comes back is a BARRIER, which is what makes it
+        different from a turn's and why the difference is documented
+        here as well as on `Close` (#495). One writer thread consumes one
+        FIFO queue and this is the last item this session puts on it, so
+        a `True` answer means every earlier record of that queue has been
+        resolved: landed, or dropped and counted. It does NOT mean
+        everything spoken was stored; a close committing after an earlier
+        turn was dropped still answers `True`, and a reader that goes to
+        the store then reads exactly what the store holds.
+
+        A `False` is the three the `Acknowledgement` never tells apart
+        (dropped, stopped, timed out), and all three say the same thing:
+        the session's turns may not be assumed readable. A store that has
+        already stopped answers a settled refusal rather than a handle
+        nothing will ever settle, which is the shape `record_turn` uses
+        for the same situation.
+
+        Today's callers on the audio path drop the handle, exactly as
+        they drop a turn's, and nothing on that path waits.
+        """
+        acknowledgement = Acknowledgement()
         with self._lock:
             if self._stopped:
-                return
+                acknowledgement.settle(False)
+                return acknowledgement
             dropped = self._dropped.pop(session_id, 0)
             self._opened_at.pop(session_id, None)
             self._warned.discard(session_id)
-            self._queue.put_nowait(Close(session_id, duration_s, reason, dropped))
+            self._queue.put_nowait(
+                Close(session_id, duration_s, reason, dropped, acknowledgement)
+            )
+        return acknowledgement
 
     def forget(self, threads_gone: Iterable[str]) -> None:
         """These threads have been deleted; stop writing to them.
@@ -1225,6 +1280,7 @@ class ConversationStore:
             return
         if isinstance(item, Close):
             if item.session not in self._batches:
+                item.acknowledgement.settle(False)
                 self._refuse(item.session)
                 return
             self._commit(item.session, closing=item)
@@ -1288,7 +1344,7 @@ class ConversationStore:
                 item = self._queue.get_nowait()
             except queuing.Empty:
                 return
-            if isinstance(item, Turn | Milestone):
+            if isinstance(item, Turn | Milestone | Close):
                 item.acknowledgement.settle(False)
 
     def _commit(
@@ -1337,7 +1393,7 @@ class ConversationStore:
             self._batches.pop(session_id, None)
             self._devices.pop(session_id, None)
             self._retire(session_id)
-            self._settle(batch, landed=False)
+            self._settle(batch, landed=False, closing=closing)
             self._release(len(batch.events))
             return
         if outcome is _Durable.COMMITTED:
@@ -1355,7 +1411,7 @@ class ConversationStore:
         # a waiter woken by an acknowledgement reads the thread's row
         # next, and it may never find that row still claiming to be
         # whole. A later turn must never imply an earlier one landed.
-        self._settle(batch, landed=outcome is _Durable.COMMITTED)
+        self._settle(batch, landed=outcome is _Durable.COMMITTED, closing=closing)
         lost = self._events(session_id, batch)
         if closing is not None and lost:
             # The close row was written before this half ran, and the
@@ -1593,12 +1649,24 @@ class ConversationStore:
                     kept.append(item)
             held[:] = kept
 
-    def _settle(self, batch: _Batch, landed: bool) -> None:
-        """What became of every durable record of this batch, said once
+    def _settle(
+        self, batch: _Batch, landed: bool, closing: "Close | None" = None
+    ) -> None:
+        """What became of every durable record of this marker, said once
         each. A checkpoint answers the same way a turn does, because
-        what its caller asked was the same question."""
+        what its caller asked was the same question.
+
+        A close answers here too, and from exactly the same outcome,
+        which is what makes the barrier true rather than approximately
+        true: the close row is written by the transaction this is
+        reporting on, so a `True` here is that transaction committed,
+        and everything this writer had for this session went in front of
+        it on one queue (#495).
+        """
         for item in [*batch.turns, *batch.milestones]:
             item.acknowledgement.settle(landed)
+        if closing is not None:
+            closing.acknowledgement.settle(landed)
 
     def _alive(self, connection: Any, session_id: str) -> bool:
         found = connection.execute(

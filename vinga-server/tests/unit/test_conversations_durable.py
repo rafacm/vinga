@@ -666,3 +666,116 @@ def test_a_checkpoint_the_writer_will_never_see_is_acknowledged_false(stores) ->
     store.stop()
 
     assert store.record_milestone("alpha", a_checkpoint()).wait(TIMEOUT_S) is False
+
+
+# The close, which is the one handle that speaks for more than itself
+
+
+def test_a_close_is_acknowledged_when_its_transaction_commits(stores) -> None:
+    """The close's own half of the barrier: true once the transaction
+    that wrote the close row committed, and not before. The gate is what
+    makes "not before" assertable."""
+    gate = Gate()
+    store = stores(gate=gate)
+    store.start()
+    store.open_session("alpha", 100.0, MANIFEST)
+    gate.wait()
+    gate.let_through()
+
+    closed = store.close_session("alpha", duration_s=1.0, reason="idle")
+    gate.wait()
+    assert closed.wait(0.05) is False, "acknowledged before the commit"
+
+    gate.open_forever()
+    assert closed.wait(TIMEOUT_S) is True
+
+
+def test_an_acknowledged_close_means_the_sessions_turns_are_readable(stores) -> None:
+    """The barrier itself, driven rather than assumed (#495).
+
+    Four turns are recorded and their handles deliberately dropped, the
+    way the audio path drops them, and the only thing waited on is the
+    close. One writer thread consumes one FIFO queue, so a `True` there
+    has to mean every one of those turns has already been resolved: a
+    reader that goes to the store on the strength of this answer finds
+    all four.
+    """
+    store = stores()
+    store.start()
+    store.open_session("alpha", 100.0, MANIFEST)
+    for spoken in ("one", "two", "three", "four"):
+        store.record_turn("alpha", a_turn(heard=spoken))
+
+    assert store.close_session("alpha", duration_s=1.0, reason="idle").wait(
+        TIMEOUT_S
+    ) is True
+
+    assert [row["heard"] for row in rows("turns")] == ["one", "two", "three", "four"]
+
+
+def test_a_close_committing_after_a_dropped_turn_still_answers_true(stores) -> None:
+    """The stated limit of the barrier, which is as much part of the
+    contract as the barrier (#495).
+
+    The second marker's transaction is refused, so that turn is dropped
+    and counted as a hole in its thread; the close that follows commits.
+    The close answers `True`, because what it promises is that nothing
+    of this session is still on its way, never that everything spoken
+    was stored, and a reader then carries exactly what the store holds.
+    """
+    store, _ = recording(
+        stores, lambda count: RuntimeError("no") if count == 1 else None
+    )
+    dropped = store.record_turn("alpha", a_turn(heard="lost"))
+    assert dropped.wait(TIMEOUT_S) is False
+    store.record_turn("alpha", a_turn(heard="kept"))
+
+    assert store.close_session("alpha", duration_s=1.0, reason="idle").wait(
+        TIMEOUT_S
+    ) is True
+
+    assert [row["heard"] for row in rows("turns")] == ["kept"]
+    (thread,) = rows("conversations")
+    assert thread["incomplete"] is True
+
+
+def test_a_close_whose_own_transaction_fails_is_acknowledged_false(stores) -> None:
+    """And the other side of the pair: the close transaction itself
+    refused, which is a session whose record may be missing anything at
+    all, so the barrier answers false rather than true-with-a-hole."""
+    store, _ = recording(
+        stores, lambda count: RuntimeError("no") if count == 2 else None
+    )
+    store.record_turn("alpha", a_turn(heard="kept")).wait(TIMEOUT_S)
+
+    assert store.close_session("alpha", duration_s=1.0, reason="idle").wait(
+        TIMEOUT_S
+    ) is False
+
+
+def test_a_close_the_writer_will_never_see_is_acknowledged_false(stores) -> None:
+    """A store that has stopped answers a settled refusal rather than a
+    handle nothing will ever settle, which is what keeps a caller's own
+    bound from being the only thing between it and a wait forever."""
+    store = stores()
+    store.start()
+    store.open_session("alpha", 100.0, MANIFEST)
+    store.stop()
+
+    assert store.close_session("alpha", duration_s=1.0, reason="idle").wait(
+        TIMEOUT_S
+    ) is False
+
+
+def test_a_close_for_a_session_the_writer_never_opened_is_acknowledged_false(
+    stores,
+) -> None:
+    """A close the writer refuses because it is recording no such
+    session settles false too: the handle answers whatever became of the
+    record, and a refusal is one of the things that become of it."""
+    store = stores()
+    store.start()
+
+    assert store.close_session("ghost", duration_s=1.0, reason="idle").wait(
+        TIMEOUT_S
+    ) is False
