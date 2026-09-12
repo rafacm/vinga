@@ -2729,18 +2729,28 @@ unit that stage is actually billed in:
 
 | Stage | Span | What it reports |
 | --- | --- | --- |
-| Transcription | `asr` | `gen_ai.usage.input_seconds`, the length of the utterance the ear was handed |
+| Transcription | `asr` | `gen_ai.usage.input_milliseconds`, how much audio the ear was actually sent |
 | Generation | `llm` | `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens`, as the endpoint reported them |
 | Synthesis | `tts_stream` | `gen_ai.usage.input_characters`, the length of the sentence the voice was handed |
 
-The seconds and the characters are both INPUT, read from the model's
-side the way the OpenTelemetry GenAI conventions read the token halves:
-an ear is given the audio and produces a transcript, a voice is given
-the sentence and produces the audio. Those conventions name token
+The milliseconds and the characters are both INPUT, read from the
+model's side the way the OpenTelemetry GenAI conventions read the token
+halves: an ear is given the audio and produces a transcript, a voice is
+given the sentence and produces the audio. Those conventions name token
 counts and nothing else, so the two units they have no word for state
 that unit in the attribute name rather than being reported as tokens
-they are not. A stage that measured nothing reports no usage rather
-than a zero: an absent measurement and a free call are different facts.
+they are not. Every value is a whole number, because a backend drops a
+usage value that is not.
+
+**The transcription number is what was SENT, not how long you spoke.**
+The two come apart in both directions on a real endpoint: a clip under
+the endpoint's own minimum is never sent at all and reports zero, and a
+clip a prompt-echo retry has to send a second time reports twice its
+length. How long the user spoke is a different question and stays where
+it was, on `vinga.asr.duration_s`. An engine that cannot say what it
+submitted, which is every local one, reports no usage rather than a
+zero: an unmeasured call and a free call are different facts, and only
+the second is worth nothing.
 
 Usage is not a cost. A backend turns one into the other with a model
 definition, which is a match pattern, a unit and a price per unit, and
@@ -2758,16 +2768,21 @@ trusting a cost report made long after this one.
 
 | Model | Match pattern | Unit | Input price | Published as |
 | --- | --- | --- | --- | --- |
-| `gpt-transcribe` | `(?i)^(gpt-transcribe)$` | `SECONDS` | `0.000075` | $0.0045 per minute |
-| `whisper-1` | `(?i)^(whisper-1)$` | `SECONDS` | `0.0001` | $0.006 per minute |
+| `gpt-transcribe` | `(?i)^(gpt-transcribe)$` | `MILLISECONDS` | `0.000000075` | $0.0045 per minute |
+| `whisper-1` | `(?i)^(whisper-1)$` | `MILLISECONDS` | `0.0000001` | $0.006 per minute |
 | `tts-1` | `(?i)^(tts-1)$` | `CHARACTERS` | `0.000015` | $15.00 per 1M characters |
 | `tts-1-hd` | `(?i)^(tts-1-hd)$` | `CHARACTERS` | `0.00003` | $30.00 per 1M characters |
 
 The price column is the published one converted into the unit the span
-reports, and nothing else: 0.0045 per minute is 0.000075 per second,
-15.00 per million characters is 0.000015 per character. An exact
-conversion of a list price is still that list price. An estimate is not,
-which is why the models below get no definition at all.
+reports, and nothing else: 0.0045 per minute is 0.000000075 per
+millisecond, 15.00 per million characters is 0.000015 per character. An
+exact conversion of a list price is still that list price. An estimate
+is not, which is why the models below get no definition at all.
+
+Milliseconds rather than seconds for the two speech models, because a
+usage value has to be a whole number and whole seconds are too coarse
+for what a voice assistant actually hears: rounding a 0.4 second "ja"
+up to one second would overcharge it by 150%.
 
 The match pattern is what the backend compares the span's
 `gen_ai.request.model` against, and that value is whatever your provider

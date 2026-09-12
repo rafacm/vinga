@@ -736,6 +736,7 @@ session %s: heard %.2f s of speech
 | `asr_ms` | `INT` | no | no |  | What the transcription cost, measured where it was run. An interrupting turn carries the latency the barge-in gate measured for its own confirmation, since that is the transcription this turn is answering. |
 | `language` | `ID` | no | no | the `language` syntax | Only engines that detected carry this. |
 | `language_confidence` | `FLOAT` | no | no |  |  |
+| `submitted_ms` | `INT` | no | no |  | How much audio the ear was actually SENT, summed over every request this transcription made, which is what a vendor bills on. Not `duration_s`: a clip under an endpoint's floor is never sent and says 0, a clip an echo retry hears twice says twice its length, and an engine that cannot answer leaves it out rather than saying none was sent. Milliseconds because a whole number is what a backend's usage accounting will take, and rounding a short acknowledgement to whole seconds would overstate it by more than its own length. |
 | `provider` | `IDENTIFIER` | no | no |  |  |
 | `type` | `IDENTIFIER` | no | no |  |  |
 | `host` | `IDENTIFIER` | no | no |  |  |
@@ -767,6 +768,7 @@ session %s: nothing transcribed from %.2f s of speech
 | `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `duration_s` | `FLOAT` | yes | no |  | How long the utterance that produced nothing was. |
 | `asr_ms` | `INT` | no | no |  | What the transcription that answered nothing cost. |
+| `submitted_ms` | `INT` | no | no |  | How much audio the ear was actually SENT, summed over every request this transcription made, which is what a vendor bills on. Not `duration_s`: a clip under an endpoint's floor is never sent and says 0, a clip an echo retry hears twice says twice its length, and an engine that cannot answer leaves it out rather than saying none was sent. Milliseconds because a whole number is what a backend's usage accounting will take, and rounding a short acknowledgement to whole seconds would overstate it by more than its own length. |
 
 ### `transcription_abandoned`
 

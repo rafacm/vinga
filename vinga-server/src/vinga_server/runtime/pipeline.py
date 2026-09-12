@@ -1502,6 +1502,15 @@ class PipelineRuntime:
                 # ASR is done, so the mid-ASR marker comes down: from here a
                 # barge-in has nothing of the user's left to destroy.
                 self._turntaking.clear_pending()
+                # What the ear says it was SENT, which is what a vendor
+                # bills on and is not how long the user spoke: a clip
+                # under an endpoint's floor never left this process and
+                # a clip an echo retry heard twice cost twice. It rides
+                # the result rather than being measured here, because
+                # the only thing that knows how many requests a call
+                # made is the call. An engine that does not count leaves
+                # it None and the record says nothing rather than none.
+                submitted = result.submitted_ms
                 if result.lock_language is not None:
                     self._asr_language = result.lock_language
                 transcript = result.text.strip()
@@ -1532,6 +1541,7 @@ class PipelineRuntime:
                             asr_ms,
                             result.language,
                             confidence,
+                            submitted,
                         )
                     )
                     # The emission's own reading rather than a second one
@@ -1571,6 +1581,9 @@ class PipelineRuntime:
                             conversation=ConversationId(self._conversation),
                             duration_s=Real(heard_s),
                             asr_ms=ABSENT if asr_ms is None else Whole(asr_ms),
+                            submitted_ms=(
+                                ABSENT if submitted is None else Whole(submitted)
+                            ),
                         )
                     )
                 if transcript:
