@@ -208,10 +208,25 @@ links with the failure event, and a job the queue rejects
 (overflow) has its links removed at the rejection, in the same
 breath as the `dropped` event. Shutdown abandons whatever is
 queued: the worker's bounded join expires, and what remains staged
-is handled at the next boot, where the sweep emits one sanitized
-`capture_upload_failed` (reason `abandoned`) per leftover job
-before removing its links, so a restart cannot silently discard the
-only record that an upload never happened; nothing is persisted for
+is handled at the next open of the capture directory. The sweep is
+`CaptureStore`'s, not the uploader's, deliberately: the delta round
+showed a next boot with the flag off, capture off, `local_only` on
+or the extra removed never constructs the uploader, and staged room
+audio would then persist silently in exactly the configurations an
+operator chose to stop exporting. So `CaptureStore` startup, which
+opens the directory in every capture-configured boot, sweeps
+`upload-staging/`: each job is its own subdirectory (which is also
+what makes the two-link commit atomic), and the sweep emits one
+sanitized `capture_upload_failed` (reason `abandoned`) per job
+before removing it, so a restart cannot silently discard the only
+record that an upload never happened. A boot with capture itself
+absent leaves the directory untouched, which is stated in the
+reference prose (removing the capture section parks the sweep with
+the rest of the capture machinery). Within one process, sequential
+lifespans hand ownership the way telemetry's lease does: a prior
+lifespan's expired worker may still hold an in-flight job, so the
+sweep skips jobs younger than the process and the new worker never
+adopts another lifespan's job. Nothing is persisted for
 retry, deliberately, because a retry store would be a durability
 promise this flag does not make and the failure event is the honest
 ledger. Tests assert the staging directory's exact contents after
@@ -223,11 +238,17 @@ rather than hidden.
 
 ### The uploader runs where telemetry's shutdown runs
 
-A dedicated daemon worker thread with a bounded queue (admission
-sized from `server.limits.max_sessions` at build, because a routine
-shutdown closes every live session concurrently and a healthy
-redeploy of a full server finishes that many captures at once; a
-job beyond that bound is dropped with a warning event), the
+A dedicated daemon worker thread over a bounded best-effort
+backlog, and the bound is honest about what it cannot promise: the
+queue admits `server.limits.max_sessions` jobs beyond whatever is
+in flight, because a routine shutdown closes every live session
+concurrently and a healthy redeploy of a full server must not
+deterministically drop any of THOSE, while jobs from earlier
+sessions may still occupy the backlog when that drain begins, and a
+backlog that deep means the endpoint has been failing for a while;
+a job the bound rejects is dropped with its warning event, which is
+the drop stated rather than hidden. The Tests section carries the
+drain case this implies. The worker follows the
 `telemetry.py:1391-1463`
 precedent stated in the plan because the reasons are not guessable:
 a daemon thread of its own rather than `asyncio.to_thread`, because
@@ -417,7 +438,11 @@ variant case, and the workflow's per-image import checks.
   identifier positions and stays bounded by `SessionId`, the
   contract the generated events reference already documents; the
   SDK faked at the import seam the way `_import_sdk` is, with the
-  real-SDK logging case living in the integration suite.
+  real-SDK logging case living in the integration suite; and the
+  drain case: a full `max_sessions` set of sessions closing
+  concurrently with the backlog already occupied, every job
+  accounted for as uploaded or dropped-with-event, none lost
+  silently.
 - **Unit, telemetry**: `trace_of` present after close, evicted
   after 64 later sessions, absent when telemetry never saw the
   session; alias attributes on the wire tables' unit pins.
@@ -695,6 +720,13 @@ condensed but faithful; resolutions appended per amendment.
    sanitized `abandoned` event; specify fresh-process versus
    sequential-lifespan ownership.
 
+   *Resolution.* Adopted. The sweep is `CaptureStore` startup's,
+   running whenever the capture directory opens regardless of the
+   uploader's existence; jobs are per-job subdirectories (which is
+   also the atomic commit); the capture-absent case is stated; and
+   sequential lifespans neither adopt nor double-sweep another
+   lifespan's in-flight job.
+
 3. **P2: `max_sessions` does not bound queued jobs, and the
    promised drain test is absent from the Tests section.** Jobs
    from already-closed sessions can occupy the queue when a full
@@ -702,3 +734,9 @@ condensed but faithful; resolutions appended per amendment.
    backlog, reserve capacity for live sessions or state the drop
    honestly, and put the max-drain-with-occupancy test in the Tests
    section.
+
+   *Resolution.* Adopted. The queue is a bounded best-effort
+   backlog admitting `max_sessions` beyond what is in flight, the
+   possible drop of stale backlog is stated with its event, and the
+   max-drain-with-occupancy case is in the Tests section with
+   every-job accounting.
