@@ -253,6 +253,7 @@ historical  vinga provider show llm claude
 historical  vinga reference
 historical  vinga reference server
 historical  vinga reload
+historical  vinga session as
 historical  vinga session as grouped per-turn
 historical  vinga session delete
 historical  vinga session list
