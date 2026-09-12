@@ -684,6 +684,7 @@ One MCP server, named so agents can reference it.
 ```bash
 vinga mcp-server set home -f examples/mcp-server-stdio.yaml
 vinga mcp-server set weather -f examples/mcp-server-streamable-http.yaml
+vinga mcp-server set search -f examples/mcp-server-search.yaml
 ```
 
 ### Prompt fragment
@@ -740,6 +741,7 @@ vinga provider secret set llm brain api_key
 vinga provider secret set llm claude api_key
 vinga mcp-server secret set home env.API_ACCESS_TOKEN
 vinga mcp-server secret set weather headers.Authorization
+vinga mcp-server secret set search headers.Authorization
 ```
 
 <!-- end generated: cli recipes -->

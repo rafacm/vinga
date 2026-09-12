@@ -55,9 +55,11 @@ generated  vinga mcp-server secret
 generated  vinga mcp-server secret clear
 generated  vinga mcp-server secret set
 generated  vinga mcp-server secret set home
+generated  vinga mcp-server secret set search
 generated  vinga mcp-server secret set weather
 generated  vinga mcp-server set
 generated  vinga mcp-server set home
+generated  vinga mcp-server set search
 generated  vinga mcp-server set weather
 generated  vinga mcp-server show
 generated  vinga mcp-server status
@@ -350,9 +352,11 @@ respell  vinga list
 respell  vinga mcp-server delete
 respell  vinga mcp-server secret set
 respell  vinga mcp-server secret set home
+respell  vinga mcp-server secret set search
 respell  vinga mcp-server secret set weather
 respell  vinga mcp-server set
 respell  vinga mcp-server set home
+respell  vinga mcp-server set search
 respell  vinga mcp-server set weather
 respell  vinga mcp-server status
 respell  vinga memory

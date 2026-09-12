@@ -276,6 +276,7 @@ Examples:
 
 - [`mcp-server-stdio.yaml`](../../vinga-server/examples/mcp-server-stdio.yaml)
 - [`mcp-server-streamable-http.yaml`](../../vinga-server/examples/mcp-server-streamable-http.yaml)
+- [`mcp-server-search.yaml`](../../vinga-server/examples/mcp-server-search.yaml)
 
 ### Prompt fragment
 
