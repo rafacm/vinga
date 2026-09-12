@@ -333,6 +333,53 @@ refusal's semantics in the same diff as a retention bound, which is
 the "behavior changes sit alone in review" rule broken for the
 convenience of a checklist.
 
+### M4b is one key on the telemetry section, asserting every destination
+
+The three questions #493's implementation doc left open are answered
+here rather than in the milestone, because they are the milestone.
+
+**One key, on the section that owns the exports.**
+`server.telemetry.reach`, taking the `Reach` vocabulary the MCP entries
+already declare in (`host`, `network`, `internet`), absent by default.
+Not three keys: a reach is a property of where a transport points, and
+splitting it per content class would let an operator assert something
+about audio that is untrue of transcripts riding the same endpoint.
+
+**Absent means `internet`, which is exactly today's behavior.** The
+three call sites pass a fixed `Reach.INTERNET` now, so a deployment
+that upgrades into this key and does not set it is refused and admitted
+in precisely the cases it was before. The key widens; it never narrows
+by default.
+
+**One assertion covers every destination the section sends to**, and
+the semantics are the outermost of them, which is the same shape
+`server.data_boundary` itself has. Two transports exist: the OTLP
+endpoint that traces and transcripts ride, and the Langfuse REST host
+the capture upload uses. An operator whose collector is on the LAN and
+whose media host is a vendor has asserted `internet`, because that is
+the outermost reach of what this section sends, and the refusal then
+applies to all three features rather than to the one that would have
+been caught. That is the honest direction to round in: an assertion
+that admitted the LAN case while audio left for a vendor would be the
+boundary broken by a key meant to describe it.
+
+**It is an assertion, not a proof**, and it is documented in those
+words beside the key, the way the promises page already says of the
+whole mechanism (it "admits declarations, not behavior"). An operator
+who points `OTEL_EXPORTER_OTLP_ENDPOINT` at a vendor after declaring
+`network` has lied to their own configuration, and vinga cannot tell.
+
+**Refusal ordering is unchanged and the sentence gains one fact.**
+Each builder still calls `check_feature` before it constructs anything,
+in the order it does today; what changes is the second argument, from
+the fixed `Reach.INTERNET` to the section's declared reach. The
+existing sentence names the switch, the reach and the boundary and
+carries no endpoint; it keeps all of that and names
+`server.telemetry.reach` as the declaration the reach came from, so an
+operator reading a refusal can see which of their own statements
+produced it. No endpoint, no host and no credential is rendered, which
+is the rule this sentence already keeps.
+
 ### The staged LLM input is bounded per session, oldest dropped first
 
 A session's rounds are not bounded by anything the server controls
@@ -511,8 +558,12 @@ What is new per milestone:
   established, extended to a capture job: a job admitted before
   sixty-four later sessions open still attaches, which fails against
   today's code.
-- **M4b**: refusal and admission cases per section, including the
-  asymmetric case (trace transport asserted, media transport not).
+- **M4b**: refusal and admission cases per feature at each reach, the
+  absent-key case pinning that today's behavior is unchanged (which is
+  the upgrade proof), a case that one asserted reach governs all three
+  features rather than the one it was written for, and a sentinel case
+  that no refusal sentence renders an endpoint, a host or a credential
+  however the environment is set.
 - **M5**: the sentinel suite over the staged content (a planted
   credential-shaped value in a tool result must reach the export and
   must NOT reach any log, event or span outside it, which is the
@@ -619,10 +670,15 @@ the manifest with its own generator when stale.
   and declined. Design footprint: the retention generalized in place,
   a second caller on an existing seam.
 - [ ] **M4b: the operator's collector reach**. The reach assertion
-  #493's implementation doc named: where the key lives, one key or
-  three, and `check_feature` taking the asserted reach instead of a
-  fixed `Reach.INTERNET` at its three call sites. Design footprint: an
-  argument at three existing call sites, no new rule.
+  #493's implementation doc named, in the shape settled under "M4b is
+  one key on the telemetry section": `server.telemetry.reach` in the
+  `Reach` vocabulary, absent meaning `internet` so an upgrade changes
+  nothing, one assertion covering every destination the section sends
+  to and meaning the outermost of them, `check_feature` taking it
+  instead of a fixed `Reach.INTERNET` at its three call sites, and the
+  refusal sentence naming the declaration without naming an endpoint.
+  Design footprint: one field and an argument at three existing call
+  sites, no new rule.
 - [ ] **M5: `export_llm_input`**. The third class: the flag with its
   prose and refusal order, `llm_input_export.py` staging the assembled
   request per round under a stated bound, `Telemetry.export_llm_input`
@@ -712,6 +768,18 @@ Findings condensed but faithful; resolutions appended per amendment.
    before implementation: the key or keys, defaults, which transports
    each assertion covers, behavior when `export_audio` uses a different
    `LANGFUSE_HOST`, refusal ordering, and the value-free error text.
+
+   *Resolution.* Adopted, and answered in a section of its own. One
+   key, `server.telemetry.reach`, in the `Reach` vocabulary the MCP
+   entries already use; absent means `internet`, which is what the
+   three call sites pass today, so an upgrade is byte-identical. One
+   assertion covers every destination the section sends to and means
+   the outermost of them, so the mixed case (LAN collector, vendor
+   media host) is `internet` and refuses all three features rather than
+   admitting the one that would have been caught. The refusal keeps its
+   ordering and its value-free sentence and names the declaration the
+   reach came from. The key is documented as an assertion rather than a
+   proof, in the promises page's own words.
 
 4. **P2: capture pinning cannot use the existing retained-context seam
    as claimed.** The opaque context can only be passed to
