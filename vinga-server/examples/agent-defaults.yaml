@@ -32,8 +32,21 @@ vad: silero
 #     tools:
 #       - turn_on_light
 #       - turn_off_light
+#
+# Deciding what not to grant is the same work as deciding what to
+# grant, and on shared family hardware it is the harder half. Search is
+# the usual case: granting it here gives it to every agent in the
+# deployment, including the one a child talks to and the one that tells
+# bedtime stories, and neither of those wants the open web. Either
+# withhold it here and grant it in the agents that should have it, or
+# grant it here and have those agents name a list of their own without
+# it. Both are ordinary; what is not ordinary is discovering which one
+# you chose by listening to an agent answer.
 mcp:
   - weather
+  - server: search
+    tools:
+      - tavily_search
 
 # The shared prompt fragments every agent's system prompt carries, by
 # the name each is defined under in prompt_fragments (see

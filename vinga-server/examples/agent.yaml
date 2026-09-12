@@ -36,6 +36,12 @@ tts: eleven
 # `home__turn_on_light`); leaving `tools` out of the object means the
 # whole server, and there is no deny list, because a denied set would
 # silently grant whatever the server adds next.
+#
+# Replacing rather than extending is what makes withholding possible at
+# all: this agent carries the deployment's search grant unless it says
+# otherwise, and the way it says otherwise is to write the list it does
+# want. That is why an agent meant for a child is settled here, in a
+# list, rather than argued with in its prompt.
 mcp:
   - weather
   - server: home
