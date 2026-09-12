@@ -37,6 +37,13 @@ has to be one row rather than one row per stream. That last one is the
 case the join shape exists for, and it is the case an implementation
 gets wrong silently.
 
+The recorded name is the second key of exactly that shape. It is dated
+and never rewritten, so a board renamed mid-window is two rows rather
+than one retitled series, and the sessions that carry no name (every
+one recorded before the column existed, and every board nobody named)
+are one more null group the join has to keep whole rather than scatter
+across its streams.
+
 That the four originals survive the migration that added the siblings
 is `test_metrics_views_upgrade.py`, on a database that stood at
 `1006_metrics_views`: nothing here could tell an untouched view from a
@@ -70,7 +77,9 @@ def store() -> Iterator:
         engine.dispose()
 
 
-def rows(engine, view: str, *, timezone: str | None = None) -> list[tuple]:
+def rows(
+    engine, view: str, *, timezone: str | None = None, by: str = "1, 2"
+) -> list[tuple]:
     """Every row of one view, ordered so an assertion can be a literal.
 
     `timezone` sets the session timezone of the connection doing the
@@ -78,7 +87,9 @@ def rows(engine, view: str, *, timezone: str | None = None) -> list[tuple]:
     than the reader's.
 
     Ordered by the first two columns, which is Postgres ascending with
-    nulls last, so a null agent group is the last row of its day.
+    nulls last, so a null agent group is the last row of its day. `by`
+    widens that where two columns are not a total order: one board under
+    two names is two rows of a per-device view that share both of them.
     """
     with engine.connect() as connection:
         if timezone is not None:
@@ -86,7 +97,7 @@ def rows(engine, view: str, *, timezone: str | None = None) -> list[tuple]:
         return [
             tuple(row)
             for row in connection.execute(
-                text(f"select * from record.{view} order by 1, 2")
+                text(f"select * from record.{view} order by {by}")
             )
         ]
 
@@ -425,6 +436,109 @@ def test_a_board_and_a_stranger_on_one_day_keep_their_own_numbers(store) -> None
     assert rows(store, "metrics_sessions_by_device_daily") == [
         (day, BOARD_A, None, 1, 1, 1),
         (day, None, None, 1, 1, 3),
+    ]
+
+
+def test_a_renamed_board_splits_its_series_rather_than_retitling_it(store) -> None:
+    """What the label being part of the key means, in the case it was
+    chosen for.
+
+    `sessions.device_name` is dated: it says what the board was called
+    when the session opened, and nothing rewrites it. So a board renamed
+    mid-window has sessions carrying both names, and the view has to
+    decide what a row is. One row per (device, name) pair is what this
+    asserts: the old name keeps the numbers it earned and the new name
+    starts its own series, which is the reading a most-recent-name rule
+    would destroy by stamping today's label over last week's rows.
+
+    The third session is the board before anybody named it, which is
+    every session recorded before the column existed. It groups as its
+    own null-name row rather than joining either series or vanishing,
+    the way a null device already does.
+
+    The ungrouped view beside them is what says none of this moved a
+    total: one board, three sessions, one day.
+    """
+    with store.begin() as connection:
+        plant_session(
+            connection,
+            "renamed-old",
+            "2026-07-04T09:00:00+00:00",
+            device=BOARD_A,
+            device_name="Kitchen Speaker",
+        )
+        plant_session(
+            connection,
+            "renamed-new",
+            "2026-07-04T10:00:00+00:00",
+            device=BOARD_A,
+            device_name="Hallway Speaker",
+        )
+        plant_session(
+            connection, "renamed-never", "2026-07-04T11:00:00+00:00", device=BOARD_A
+        )
+        plant_turn(connection, "renamed-old", 0, asr_ms=100)
+        plant_turn(connection, "renamed-new", 0, asr_ms=300)
+        plant_turn(connection, "renamed-never", 0, asr_ms=200)
+
+    day = datetime.date(2026, 7, 4)
+    # Ordered by the day, the device and then the name ascending with
+    # nulls last, which is the order the read surface pages on now that
+    # the name is one of the keys.
+    assert rows(store, "metrics_sessions_by_device_daily", by="1, 2, 3") == [
+        (day, BOARD_A, "Hallway Speaker", 1, 1, 1),
+        (day, BOARD_A, "Kitchen Speaker", 1, 1, 1),
+        (day, BOARD_A, None, 1, 1, 1),
+    ]
+    assert rows(store, "metrics_sessions_daily") == [(day, 3, 3, 3)]
+
+    # The latency numbers are what a series being split really means:
+    # each name's percentile is over its own turn, and the day's is over
+    # all three.
+    assert rows(store, "metrics_stage_latency_by_device_daily", by="1, 2, 3") == [
+        (day, BOARD_A, "Hallway Speaker", "sam", "asr", 1, 300.0, 300.0, 300),
+        (day, BOARD_A, "Kitchen Speaker", "sam", "asr", 1, 100.0, 100.0, 100),
+        (day, BOARD_A, None, "sam", "asr", 1, 200.0, 200.0, 200),
+    ]
+    assert rows(store, "metrics_stage_latency_daily") == [
+        (day, "sam", "asr", 3, 200.0, 290.0, 300),
+    ]
+
+
+def test_sessions_with_no_recorded_name_are_one_row_and_keep_their_numbers(
+    store,
+) -> None:
+    """The rows every deployment already has, and the second null key of
+    these views.
+
+    Nothing backfilled `sessions.device_name`, so every session recorded
+    before it existed carries a null there, as does every board nobody
+    named. Those sessions have to keep aggregating exactly as they did
+    when the column was the literal null: one row for the board, with
+    the numbers of all of them.
+
+    The trap is the same one the null device sprang, one key over. The
+    two views below combine independently aggregated streams, and two
+    SQL nulls are not equal, so a join on `=` over the name would leave
+    every stream of this group unmatched by every other: one row would
+    still come back, because `UNION` treats two nulls as one value, and
+    it would carry one stream's number, zeroes where the others belong
+    and a broken rate. So the numbers are what is asserted, not the row
+    count.
+    """
+    with store.begin() as connection:
+        plant_session(connection, "unnamed-one", "2026-07-05T09:00:00+00:00", device=BOARD_A)
+        plant_session(connection, "unnamed-two", "2026-07-05T10:00:00+00:00", device=BOARD_A)
+        plant_turn(connection, "unnamed-one", 0, asr_ms=100)
+        plant_turn(connection, "unnamed-two", 0, asr_ms=200)
+        plant_event(connection, "unnamed-one", 0, "provider_failed")
+
+    day = datetime.date(2026, 7, 5)
+    assert rows(store, "metrics_sessions_by_device_daily", by="1, 2, 3") == [
+        (day, BOARD_A, None, 2, 2, 2),
+    ]
+    assert rows(store, "metrics_event_rates_by_device_daily", by="1, 2, 3") == [
+        (day, BOARD_A, None, 2, 2, 1, 0, 0.5, 0.0),
     ]
 
 

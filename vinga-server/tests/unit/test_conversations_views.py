@@ -146,25 +146,29 @@ def test_a_sibling_is_the_view_it_mirrors_plus_the_device_and_its_label() -> Non
             NAME,
             *[column.name for column in view.columns[1:]],
         ], sibling.name
-        assert [column.name for column in sibling.keys][:2] == [DAY, DEVICE]
-        # The label is not part of what makes a row one row: it is
-        # whatever the device is called, which is not an identity.
-        assert NAME not in [column.name for column in sibling.keys]
+        assert [column.name for column in sibling.keys][:3] == [DAY, DEVICE, NAME]
         # Everything the mirrored view said about a column, said once.
         assert sibling.columns[3:] == view.columns[1:]
         assert sibling.telemetry_off == view.telemetry_off
         assert sibling.question.startswith(view.question)
 
 
-def test_the_label_is_declared_null_rather_than_left_out() -> None:
-    """Null in every row until a copy of the label lands on the `record`
-    side, and selected as a literal so the columns a caller reads do not
-    move on the day it arrives. The analyst role is revoked on `domain`,
-    so this cannot be a join and nobody should turn it into one."""
+def test_the_label_is_the_name_the_session_itself_recorded() -> None:
+    """Read off the session rather than joined, and nullable.
+
+    The analyst role is granted on `record` and revoked on `domain`, so
+    a label here cannot be a join to the configuration and nobody
+    should turn it into one: what fills it is the copy
+    `sessions.device_name` holds, written when the session opened.
+    Nullable because nothing backfilled it and because a board nobody
+    named has no name to record.
+    """
     for sibling in BY_DEVICE_VIEWS:
         [label] = [column for column in sibling.columns if column.name == NAME]
         assert label.nullable
-        assert "NULL::text AS name" in sibling.body, sibling.name
+        assert label.key
+        assert "s.device_name AS name" in sibling.body, sibling.name
+        assert "NULL::text AS name" not in sibling.body, sibling.name
         assert "domain" not in sibling.body
 
 
@@ -186,9 +190,14 @@ def test_both_combining_views_join_their_streams_null_safely() -> None:
     for view in (EVENT_RATES_BY_DEVICE, SESSIONS_BY_DEVICE):
         assert "IS NOT DISTINCT FROM spine.device" in view.body, view.name
         assert "IS NOT DISTINCT FROM spine.day" in view.body, view.name
-        # No `=` join on either key, which is the thing being ruled out.
+        # The name is a key that is null on every session recorded
+        # before it existed, so it is the same rule and not a weaker
+        # one.
+        assert "IS NOT DISTINCT FROM spine.name" in view.body, view.name
+        # No `=` join on any key, which is the thing being ruled out.
         assert "= spine.device" not in view.body, view.name
         assert "= spine.day" not in view.body, view.name
+        assert "= spine.name" not in view.body, view.name
         # And a full join is not how the union is taken, because
         # Postgres will not execute one on this condition.
         assert "FULL OUTER JOIN" not in view.body, view.name

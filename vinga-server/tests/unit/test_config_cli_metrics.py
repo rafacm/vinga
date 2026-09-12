@@ -113,6 +113,7 @@ def a_day(
     agent: str = "sam",
     session: str | None = None,
     device: str | None = BOARD_A,
+    device_name: str | None = None,
 ) -> None:
     """One session opened at noon on a named UTC day, with a measured
     turn and one counted event on it.
@@ -122,12 +123,19 @@ def a_day(
     the property the views are cut on.
 
     `device` is the board it ran on, which the per-device breakdown
-    groups by.
+    groups by, and `device_name` is what it was called when the session
+    opened. The default is no name at all, which is what a board nobody
+    named carries.
     """
     named = session if session is not None else day
     with store.begin() as connection:
         plant_session(
-            connection, named, f"{day}T12:00:00+00:00", agent=agent, device=device
+            connection,
+            named,
+            f"{day}T12:00:00+00:00",
+            agent=agent,
+            device=device,
+            device_name=device_name,
         )
         plant_turn(
             connection, named, 0, agent=agent, asr_ms=120, input_tokens=7, output_tokens=3
@@ -736,11 +744,12 @@ def test_the_device_breakdown_prints_a_board_per_row(run, store, capsys) -> None
 
     Two boards on one day, and the ungrouped answer beside it, which is
     what says the flag did something: one row of two sessions becomes
-    two rows of one. The label is null in every row of this release and
-    prints the placeholder every other null cell here prints, never a
-    blank and never a zero.
+    two rows of one. One board was named when its session opened and the
+    other was not, so the label prints what the record holds and, where
+    it holds nothing, the placeholder every other null cell here prints,
+    never a blank and never a zero.
     """
-    a_day(store, DAY, session="a", device=BOARD_A)
+    a_day(store, DAY, session="a", device=BOARD_A, device_name="Kitchen")
     a_day(store, DAY, session="b", device=BOARD_B)
 
     code, printed, err = out(
@@ -762,7 +771,7 @@ def test_the_device_breakdown_prints_a_board_per_row(run, store, capsys) -> None
     assert heading.split()[:3] == ["DAY", "DEVICE", "NAME"]
     rows = [line.split() for line in printed.splitlines() if line.startswith(DAY)]
     assert [(row[1], row[2]) for row in rows] == [
-        (BOARD_A, cli.NOTHING_THERE),
+        (BOARD_A, "Kitchen"),
         (BOARD_B, cli.NOTHING_THERE),
     ]
 

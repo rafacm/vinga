@@ -62,7 +62,7 @@ EXPECTED_INDEXES = {
     "ix_conversation_milestones_conversation",
 }
 
-HEAD = "1008_metrics_views_by_device"
+HEAD = "1009_views_read_the_name"
 
 
 def _tables(engine, schema_name: str) -> set[str]:
