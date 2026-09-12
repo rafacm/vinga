@@ -516,10 +516,19 @@ promise-side half this completes, and the amendment cites it.
   close ordering (nothing enqueued before `session_closed`, session
   close latency bounded when the worker is wedged); shutdown during
   an acknowledgement wait (the in-flight job's `dropped` emitted
-  within the join budget, tap still attached); sentinel plants
-  (credential-shaped text as `heard`/`reply`) asserted absent from
-  both log formats, both events' payloads and exception chains for
-  every failure family, and present only in the span attributes;
+  within the join budget, tap still attached); sentinel plants in TWO
+  families with opposite claims: in-projection sentinels
+  (credential-shaped text as `heard`, `reply` and a leg's `text`)
+  asserted absent from both log formats, both events' payloads and
+  exception chains for every failure family and present only in
+  the span attributes and the wire; and out-of-projection
+  sentinels, distinct values planted in every content-bearing
+  field the row family can hold that the export is NOT authorized
+  to read (tool invocation arguments and results, a milestone
+  recap's text, the legs' token halves replaced by marker
+  numbers), asserted absent from the span attributes, the protobuf
+  request, both log formats, event payloads and exception chains,
+  which is what proves the projection rather than trusting it;
   session id positional, bounded by `SessionId`.
 - **Unit, telemetry (M2)**: `export_transcript` `True`/`False`
   contract (never-seen, evicted, stopped); the two new events
@@ -755,6 +764,15 @@ Findings condensed but faithful; resolutions appended per amendment.
    field the read path can encounter, asserted absent from
    attributes, protobuf requests, both log formats, event payloads
    and exception chains.
+
+   *Resolution.* Adopted, on top of finding 3's narrowed
+   projection. The sentinel suite now has two families with
+   opposite claims: in-projection sentinels present only in the
+   span attributes and the wire, and distinct out-of-projection
+   sentinels (tool arguments, tool results, recap text, marker
+   token values) planted in the stored rows and asserted absent
+   from the attributes, the protobuf request, both log formats,
+   event payloads and exception chains.
 
 9. **P2: A global database row ID is not the requested turn
    index.** `turns.id` is a database-wide identity and timeline
