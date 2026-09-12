@@ -148,16 +148,32 @@ recording stopped, and the tests drive both early paths
 (duration-limit, write failure) to prove no upload starts before
 the session's close.
 
-The trace id crosses from telemetry through a new, deliberately
-narrow read surface: `Telemetry` records (session id, trace id) when
-the session span opens and retains it in a bounded FIFO map past the
-close pop (size 64, oldest evicted; a capture uploads within
-seconds of its closing session, and an eviction miss downgrades the
-attachment to session-id-only metadata with a warning event rather
-than an error). `Telemetry.trace_of(session) -> str | None` is the
-whole surface. The alternative, carrying the trace id on an event
-payload, would put a correlation identifier into the catalog and
-every consumer's vocabulary for one reader's benefit.
+How the media request names its trace is a fact about Langfuse the
+repository does not hold, so it is discovered before it is designed:
+milestone 1's live walkthrough includes the media-correlation
+questions alongside the mapping ones. What identifier format the
+media API takes and whether it is the OTel trace id; what happens
+when media arrives before the trace is ingested (the batch exporter
+can hold a session's spans up to five seconds past close,
+`telemetry.py:159-162`, so the upload can easily win the race), and
+whether an upsert, a retry-after, or a refusal answers; and whether
+any attach-by-session-id path exists at all. Milestone 2 is designed
+from those recorded answers. The mechanism below is the hypothesis
+M1 tests, stated so the walkthrough has something to falsify, not a
+commitment: `Telemetry` records (session id, trace id) when the
+session span opens and retains it in a bounded FIFO map past the
+close pop (size 64, oldest evicted), with
+`Telemetry.trace_of(session) -> str | None` the whole surface, and
+the uploader bounding any arrives-before-ingestion window with a
+short bounded retry whose shape M1's findings set. A correlation
+that cannot be established is a `capture_upload_failed` with reason
+`no_trace`, never a silent success: an upload that lands somewhere a
+reader cannot find from the trace would recreate the gap this issue
+closes, so session-id-only metadata is not called an attachment
+unless the walkthrough proves Langfuse renders it as one. The
+alternative, carrying the trace id on an event payload, would put a
+correlation identifier into the catalog and every consumer's
+vocabulary for one reader's benefit, and stays rejected.
 
 ### The prune race: staging by hardlink
 
@@ -441,6 +457,13 @@ condensed but faithful; resolutions appended per amendment.
    design M2 after; bound any ordering retry; a missing correlation
    is `capture_upload_failed`, and session-only metadata is not
    called an attachment unless proven.
+
+   *Resolution.* Adopted. Media correlation joins M1's live
+   discovery with the three questions spelled out; M2 is designed
+   from the recorded answers with the current mechanism demoted to
+   the hypothesis under test; a failed correlation is
+   `capture_upload_failed` with reason `no_trace`; the downgrade
+   claim is withdrawn unless the walkthrough proves the rendering.
 
 4. **P1: The blackholed-endpoint test cannot emit the warning it
    claims.** A blackhole accepts and never answers; without a
