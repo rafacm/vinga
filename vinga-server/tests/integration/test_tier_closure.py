@@ -1056,7 +1056,7 @@ def test_the_attachment_refuses_from_an_install_without_its_extra(
             "VINGA_SERVER__CAPTURE__ENABLED": "true",
             "VINGA_SERVER__CAPTURE__DIR": str(tmp_path / "captures"),
             "VINGA_SERVER__TELEMETRY__ENABLED": "true",
-            "VINGA_SERVER__TELEMETRY__ATTACH_CAPTURES": "true",
+            "VINGA_SERVER__TELEMETRY__EXPORT_AUDIO": "true",
         },
     )
 

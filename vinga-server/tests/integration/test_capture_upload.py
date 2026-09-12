@@ -202,7 +202,7 @@ def attaching(captures: Path) -> Config:
         default_agent="assistant",
         server=ServerConfig(
             capture=CaptureConfig(enabled=True, dir=captures),
-            telemetry=TelemetryConfig(enabled=True, attach_captures=True),
+            telemetry=TelemetryConfig(enabled=True, export_audio=True),
         ),
     )
 

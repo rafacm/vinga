@@ -806,7 +806,7 @@ class TelemetryConfig(BaseModel):
 
     Two fields since #67, and the second is a different kind of switch
     from every other one in this file. `enabled` above sends metadata;
-    `attach_captures` sends a recording of a room. It is its own
+    `export_audio` sends a recording of a room. It is its own
     decision for that reason and defaults off.
 
     The rule that refuses it with `enabled` off is deliberately NOT a
@@ -835,7 +835,7 @@ class TelemetryConfig(BaseModel):
         ),
     )
 
-    attach_captures: bool = Field(
+    export_audio: bool = Field(
         default=False,
         description=(
             "Whether a closed session's recording is uploaded to the telemetry "
@@ -1444,7 +1444,7 @@ class BootRefusal(NamedTuple):
 # for it would be the one shape that skipped the sweep. It is
 # `build_capture_upload`'s, beside the two refusals that were always
 # the builder's, and what the reference publishes about it is the
-# `attach_captures` field's own prose.
+# `export_audio` field's own prose.
 #
 # Below the models rather than beside the sentences above, because a row
 # names the model it is a rule of and a model has to exist before it can

@@ -299,7 +299,7 @@ SESSION_ID_NAMES = (VINGA_SESSION_ID, SESSION_ID_ALIAS)
 # token the BACKEND minted for bytes an operator already authorized to
 # leave, and its only content is an opaque identifier in that backend's
 # own namespace. It is written on no session unless
-# `server.telemetry.attach_captures` is on, so a deployment that exports
+# `server.telemetry.export_audio` is on, so a deployment that exports
 # traces and no audio never sees one.
 #
 # Two spellings for one token, because Langfuse resolves a reference
