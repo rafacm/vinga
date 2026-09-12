@@ -1,7 +1,7 @@
 """The provider types: what builds each one, and what it accepts.
 
 A provider entry's options are everything it carries beyond `type`,
-`api_key_env` and `egress`, and until this module existed they were
+`api_key_env` and `reach`, and until this module existed they were
 read key by key inside the type's own builder: a ladder of
 `OptionsReader` calls that named a rule per key, refused the leftovers,
 and was invisible to every surface that documents the configuration.
