@@ -39,6 +39,7 @@ from vinga_server.capture import CaptureStore, SessionCapture, sweep_upload_stag
 from vinga_server.capture_upload import (
     _QUIETING,
     ATTACH_KEY,
+    ATTACHMENT_NEEDS_TELEMETRY,
     AUDIO_NAME,
     LANGFUSE_HOST_ENV,
     LANGFUSE_PUBLIC_KEY_ENV,
@@ -343,32 +344,60 @@ def test_a_capture_off_deployment_says_nothing_with_the_flag_off(
 def test_the_attachment_is_refused_without_an_exporter() -> None:
     """The cross-field rule, once there is something to attach.
 
-    Three keys across two sections, which is why it is `ServerConfig`'s
-    and not `TelemetryConfig`'s: a rule that could see only the telemetry
-    section refused every capture-off file at load, ahead of the no-op
-    the decision order promises. With capture effectively on, an
-    attachment still needs an exporter, because what names it is the
-    trace its session was exported under.
+    Three keys across two sections, and the builder's rather than a
+    model's, which is a boot ordering rather than a taxonomy: a validator
+    raises while the file is being PARSED, in front of the staging sweep
+    that every refusal has to happen behind, so a parse-time rule for
+    this would have been the one refusal shape that left staged room
+    audio on disk.
 
     The sentence names both keys and the way out, and no value.
     """
-    from vinga_server.config.models import ATTACHMENT_NEEDS_TELEMETRY
+    with pytest.raises(ConfigError) as refusal:
+        build_capture_upload(
+            a_server(telemetry={"enabled": False, "attach_captures": True}),
+            telemetry=None,
+        )
 
-    with pytest.raises(ValueError) as refusal:
-        a_server(telemetry={"enabled": False, "attach_captures": True})
-
-    assert ATTACHMENT_NEEDS_TELEMETRY in str(refusal.value)
+    assert str(refusal.value) == ATTACHMENT_NEEDS_TELEMETRY
     assert "telemetry.enabled" in ATTACHMENT_NEEDS_TELEMETRY
     assert ATTACH_KEY.endswith("telemetry.attach_captures")
+    assert refusal.value.__cause__ is None
+    assert refusal.value.__context__ is None
 
 
-def test_the_telemetry_section_alone_refuses_nothing() -> None:
-    """And the same combination on the section by itself loads, which is
-    what makes the rule a server-level one rather than a moved one: the
-    section cannot see whether anything is being recorded."""
-    from vinga_server.config.models import TelemetryConfig
+def test_the_configuration_that_is_refused_still_parses() -> None:
+    """And it parses, which is the whole of the delta round's finding.
+
+    A file the loader rejects never reaches a composition, so the sweep
+    in front of every refusal would not run for the one configuration
+    whose refusal is about the attachment. The boot case below is the
+    same claim from the other end.
+    """
+    config = a_server(telemetry={"enabled": False, "attach_captures": True})
+
+    assert config.telemetry is not None
+    assert config.telemetry.attach_captures is True
+    assert config.capture is not None
+
+
+def test_no_model_refuses_the_combination_on_its_own() -> None:
+    """Neither the section nor the whole server half rejects it, which is
+    what leaves the composition free to sweep before the builder speaks.
+
+    Asserted on both models rather than on one, because the rule has
+    lived on each of them: a validator returning to either is a sweep
+    that stops running for this configuration, and nothing else in the
+    lane would notice."""
+    from vinga_server.config.models import ServerConfig, TelemetryConfig
 
     assert TelemetryConfig(enabled=False, attach_captures=True).attach_captures
+    assert ServerConfig.model_validate(
+        {
+            "capture": {"enabled": True, "dir": "/tmp/vinga-captures"},
+            "telemetry": {"enabled": False, "attach_captures": True},
+        }
+    ).capture is not None
 
 
 def test_local_only_refuses_before_anything_is_built() -> None:
@@ -1197,6 +1226,14 @@ BOOTS = (
         True,
         id="extra-absent",
     ),
+    pytest.param(
+        {
+            "capture": {"enabled": True},
+            "telemetry": {"enabled": False, "attach_captures": True},
+        },
+        True,
+        id="telemetry-off",
+    ),
 )
 
 
@@ -1211,10 +1248,12 @@ def test_every_boot_with_a_capture_section_sweeps_what_was_left(
     """Four boots, each with a job a previous run left staged, and each
     of them says so and removes it.
 
-    Two boot and two refuse, and the refusals are the point: `local_only`
-    exits above the capture section entirely, at the exporter, and the
-    missing extra exits above the store. A sweep that ran from either of
-    those would never run at all.
+    Two boot and three refuse, and the refusals are the point:
+    `local_only` exits above the capture section entirely, at the
+    exporter, the missing extra exits above the store, and the
+    attachment with no exporter to name a trace used to exit above the
+    composition itself, while the file was still being parsed. A sweep
+    that ran from any of those would never run at all.
     """
     import vinga_server.capture_upload as module
     from tests.support.apps import entered_client

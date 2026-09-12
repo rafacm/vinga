@@ -290,12 +290,15 @@ def build_capture_upload(
        altogether, answers None with nothing said. That is the default,
        and the default costs a server nothing: no import, no object, no
        thread, no callback.
-    3. **Telemetry.** An attachment names the trace its session was
-       exported under, so `attach_captures` on with `enabled` off is
-       refused. That refusal is `TelemetryConfig`'s own model validator
-       rather than a check here, because both keys are in one model;
-       what is left here is the assertion that keeps this function
-       total.
+    3. **Telemetry.** An attachment is named by the trace its session
+       was exported under, so `attach_captures` on with `enabled` off is
+       refused. Here rather than as a model validator, and the reason is
+       a boot ordering rather than a taxonomy: a validator raises while
+       the file is being PARSED, before the composition exists, and the
+       staging sweep has to run in front of every refusal because staged
+       room audio waiting to leave is exactly what a refusing
+       configuration leaves behind. A parse-time rule for this would
+       therefore have been the one refusal shape that skipped the sweep.
     4. **Egress.** Asked of `egress.py` before any import, any
        construction and any thread, so under `server.local_only` the
        SDK is provably never reached.
@@ -326,9 +329,11 @@ def build_capture_upload(
         return None
     if not attaching:
         return None
+    if not telemetry_section.enabled:
+        raise ConfigError(ATTACHMENT_NEEDS_TELEMETRY)
     if telemetry is None:
-        # Unreachable through the configuration, because the model
-        # refuses the combination that would produce it, and asserted
+        # Unreachable through the configuration, since an enabled
+        # telemetry section is what builds an exporter, and asserted
         # rather than assumed: a caller composing this by hand with no
         # exporter would otherwise get an uploader with nothing to ask
         # for a trace id.
@@ -354,10 +359,27 @@ def build_capture_upload(
     )
 
 
-# The one refusal here that an operator cannot reach by editing a file,
-# kept as a sentence anyway: it is what a composition built by hand gets
-# instead of an uploader that would answer `no_trace` to every session
-# it was ever given.
+# What an attachment with nothing to attach to is refused with. An
+# attachment is named by the trace its session was exported under; with
+# no exporter there is no trace, and an upload nobody can find from a
+# trace would recreate exactly the gap attaching exists to close.
+#
+# It reads like a cross-field configuration rule and it is one, and it
+# is nonetheless here rather than on a model, for the reason the
+# builder's step 3 gives: a validator raises during the parse, in front
+# of the staging sweep that every refusal has to happen behind. What the
+# generated reference publishes about it is the `attach_captures` field's
+# own prose rather than a row in the cross-field section.
+ATTACHMENT_NEEDS_TELEMETRY = (
+    "telemetry.attach_captures is on with telemetry.enabled off; an attachment is "
+    "named by the trace its session was exported under, and there is no trace to "
+    "name, so switch telemetry.enabled on or telemetry.attach_captures off"
+)
+
+# And the one refusal here that an operator cannot reach by editing a
+# file, kept as a sentence anyway: it is what a composition built by hand
+# gets instead of an uploader that would answer `no_trace` to every
+# session it was ever given.
 ATTACHMENT_NEEDS_AN_EXPORTER = (
     f"{ATTACH_KEY} is on and no exporter was built, so no session has a trace "
     f"to be attached to; switch server.telemetry.enabled on"
