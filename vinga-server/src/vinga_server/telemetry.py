@@ -250,17 +250,50 @@ EVENT_FIELD = "event"
 # added to, and the third is its own name.
 _IDENTITIES = frozenset({EVENT_FIELD, SESSION_FIELD, DEVICE_FIELD})
 
+# The session id's second spelling, carried by every span beside
+# `vinga.session.id` (#67 M1, verified against a live Langfuse 4.35.0).
+#
+# A backend that groups traces into sessions has to be told which
+# attribute holds the session, and it cannot be told in vinga's
+# vocabulary: pointed at a Langfuse with the #66 export exactly as
+# merged, all twenty observations of a three-turn conversation arrived
+# with an empty `sessionId`, so the three turn traces and the session
+# trace were four unrelated traces in the UI. The generic
+# `session.id` is what that backend reads, and it is the conventions'
+# own name rather than a vendor's: the same attribute on a span is
+# inert metadata under a backend that does not group, which is why this
+# is an unconditional second spelling rather than a Langfuse-shaped
+# mode.
+#
+# `vinga.session.id` stays what it is and stays first. This is the same
+# fact under a second name for one reader, not a rename, and the
+# walkthrough record in
+# `docs/plans/2026-09-12-langfuse-backend-implementation.md` carries the
+# API answers that made it necessary.
+SESSION_ID_ALIAS = "session.id"
+
+VINGA_SESSION_ID = "vinga.session.id"
+
+# What a session id is spelled as everywhere: the vinga name first,
+# because that is the one this repository's own documentation, tests and
+# operators read, and the generic alias behind it.
+SESSION_ID_NAMES = (VINGA_SESSION_ID, SESSION_ID_ALIAS)
+
 # Which payload fields become attributes on which span, and under what
 # name. Written out rather than derived from the payload, so an event
 # that gains a field does not silently gain an attribute: what a span
 # carries is a decision, and the events reference is where the field it
 # came from is documented.
 #
+# A value may be a tuple, which exports the one field under each of
+# those names. One fact under two spellings is not two facts: the
+# session id is the only one, for the grouping reason stated above it.
+#
 # The prefix is vinga's own. The settled `gen_ai.*` correspondence sits
 # on the LLM round span below, where those attributes have a meaning;
 # nothing on these two spans is a GenAI fact.
 SESSION_ATTRIBUTES = {
-    SESSION_FIELD: "vinga.session.id",
+    SESSION_FIELD: SESSION_ID_NAMES,
     DEVICE_FIELD: "vinga.device.id",
     "agent": "vinga.agent",
     "conversation": "vinga.conversation.id",
@@ -273,7 +306,7 @@ SESSION_CLOSE_ATTRIBUTES = {
 }
 
 TURN_ATTRIBUTES = {
-    SESSION_FIELD: "vinga.session.id",
+    SESSION_FIELD: SESSION_ID_NAMES,
     DEVICE_FIELD: "vinga.device.id",
     "agent": "vinga.agent",
     "conversation": "vinga.conversation.id",
@@ -306,7 +339,7 @@ TURN_FINISHED_ATTRIBUTES = {
 # makes carries by construction. A per-span copy would be the same fact
 # twice, and the resource is where a backend looks for it.
 CONTEXT_ATTRIBUTES = {
-    SESSION_FIELD: "vinga.session.id",
+    SESSION_FIELD: SESSION_ID_NAMES,
     DEVICE_FIELD: "vinga.device.id",
 }
 
@@ -1154,9 +1187,11 @@ def _rules(payload: dict[str, Any]) -> dict[str, _Rule]:
     return APPROVED.get(name, {})
 
 
-def _attributes(payload: dict[str, Any], table: dict[str, str]) -> dict[str, Any]:
-    """The span attributes one payload contributes, under the vinga
-    names the table gives them.
+def _attributes(
+    payload: dict[str, Any], table: dict[str, str | tuple[str, ...]]
+) -> dict[str, Any]:
+    """The span attributes one payload contributes, under the names the
+    table gives them.
 
     Through the same shape rule the span events go through, so there is
     one answer in this module to "what may a payload field become on a
@@ -1165,15 +1200,22 @@ def _attributes(payload: dict[str, Any], table: dict[str, str]) -> dict[str, Any
     contributes nothing rather than a null: an `Absent` value is left
     out of a payload by the catalog, and an attribute saying `None`
     would be a claim the event did not make.
+
+    A table entry naming several attributes exports the one value under
+    each of them, which is what `SESSION_ID_NAMES` is: the same fact
+    read by two vocabularies, decided once in the table rather than by
+    a second fold here.
     """
     rules = _rules(payload)
     attributes: dict[str, Any] = {}
-    for key, name in table.items():
+    for key, names in table.items():
         rule = rules.get(key)
         if rule is None:
             continue
         held = _as_attribute(payload.get(key), rule)
-        if held is not None:
+        if held is None:
+            continue
+        for name in (names,) if isinstance(names, str) else names:
             attributes[name] = held
     return attributes
 

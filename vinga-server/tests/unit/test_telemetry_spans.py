@@ -87,6 +87,7 @@ from vinga_server.telemetry import (
     ASR_SPAN,
     LLM_SPAN,
     PLAYBACK_SPAN,
+    SESSION_ID_ALIAS,
     TTS_SPAN,
     TURN_SPAN,
 )
@@ -94,6 +95,13 @@ from vinga_server.telemetry import (
 # One nanosecond per millisecond of the durations below, so a case can
 # say what it expects in the units the events carry.
 MS = 1_000_000
+
+# The foreign-prefixed names every span carries whatever its stage did,
+# which is the session id's grouping spelling (#67 M1) and nothing else.
+# The closed-set assertions below subtract it by name rather than
+# loosening to a prefix match: what they exist to catch is a key a
+# backend reads by name arriving without anybody having chosen it.
+GROUPING = {SESSION_ID_ALIAS}
 
 
 @pytest.fixture(autouse=True)
@@ -274,6 +282,7 @@ def test_a_transcription_names_the_ear_that_ran_it() -> None:
     assert {key for key in carried if not key.startswith("vinga.")} == {
         "gen_ai.provider.name",
         "gen_ai.request.model",
+        *GROUPING,
     }
 
 
@@ -417,6 +426,7 @@ def test_one_round_is_one_span_with_the_settled_gen_ai_keys() -> None:
         "server.address",
         "gen_ai.usage.input_tokens",
         "gen_ai.usage.output_tokens",
+        *GROUPING,
     }
     assert llm.end_time - llm.start_time == 800 * MS
     assert llm.end_time == int((ended + telemetry._offset) * 1e9)
@@ -478,7 +488,9 @@ def test_a_provider_with_no_identity_carries_no_gen_ai_keys() -> None:
     close_session(events)
 
     llm = named(finished(telemetry, memory), LLM_SPAN)
-    assert {key for key in llm.attributes if not key.startswith("vinga.")} == set()
+    assert {
+        key for key in llm.attributes if not key.startswith("vinga.")
+    } == GROUPING
     assert "vinga.provider.llm.name" not in llm.attributes
 
 
@@ -614,6 +626,7 @@ def test_a_stream_names_the_voice_that_produced_it() -> None:
     assert {key for key in carried if not key.startswith("vinga.")} == {
         "gen_ai.provider.name",
         "gen_ai.request.model",
+        *GROUPING,
     }
 
 
@@ -927,6 +940,53 @@ def test_every_stage_span_carries_the_session_context() -> None:
         assert span.resource.attributes["service.version"]
 
 
+def test_every_span_spells_the_session_id_under_both_names() -> None:
+    """The grouping alias, on every span shape this exporter makes.
+
+    A backend that groups traces into sessions has to be told which
+    attribute the session lives in, and `vinga.session.id` is not a name
+    any of them reads: pointed at a live Langfuse, a three-turn
+    conversation arrived as four unrelated traces with an empty session
+    (the walkthrough record in
+    `docs/plans/2026-09-12-langfuse-backend-implementation.md`). So every
+    span carries the generic `session.id` beside vinga's own spelling,
+    and the same value under both: two names for one fact is only safe
+    while it stays one fact.
+
+    Every shape in one case, deliberately, for the reason the context
+    case above gives: the alias is one derivation rather than six
+    remembered copies.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.3)
+    hear(events)
+    clock.tick(0.8)
+    round_done(events, duration_ms=800)
+    clock.tick(0.4)
+    synthesize(events, stream_ms=400)
+    start_speaking(events)
+    clock.tick(0.5)
+    finish_reply(events, sentences=1)
+    finish_speaking(events, frames=12, at=clock())
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    assert {span.name for span in spans} == {
+        "session",
+        TURN_SPAN,
+        ASR_SPAN,
+        LLM_SPAN,
+        TTS_SPAN,
+        PLAYBACK_SPAN,
+    }
+    for span in spans:
+        assert span.attributes[SESSION_ID_ALIAS] == SESSION, span.name
+        assert span.attributes["vinga.session.id"] == SESSION, span.name
+
+
 def test_a_stage_after_a_handover_carries_the_new_agent_s_providers() -> None:
     """The context follows the agent that actually ran the stage.
 
@@ -1066,7 +1126,9 @@ def test_an_asr_outcome_that_names_no_ear_keeps_the_session_s_own() -> None:
         assert carried["vinga.provider.asr.model"] == "small"
         # And nothing claiming to be the call's own identity, which is
         # the claim the outcome declined to make.
-        assert {key for key in carried if not key.startswith("vinga.")} == set()
+        assert {
+            key for key in carried if not key.startswith("vinga.")
+        } == GROUPING
 
 
 # --- the gate's rejection, driven through the real runtime ------------
