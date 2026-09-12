@@ -767,8 +767,8 @@ jobs:
           # wheel carrying anything else is one whose databases this
           # commit's code cannot read. A new migration moves this line,
           # deliberately, exactly as the other two chains' heads below.
-          if domain_revisions != {"3003_device_record"}:
-              sys.exit(f"the wheel's domain chain is at {sorted(domain_revisions)}, not ['3003_device_record']")
+          if domain_revisions != {"3004_reach_replaces_egress"}:
+              sys.exit(f"the wheel's domain chain is at {sorted(domain_revisions)}, not ['3004_reach_replaces_egress']")
           print(f"migrated a fresh database from {installed.parent}")
 
           # The conversation store, from the same installed artifact and
