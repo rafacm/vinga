@@ -288,7 +288,16 @@ async def _build_composition(
     # timeout. A session's own close path does none of this: the tap it
     # holds comes off with the session, and the exporter outlives it.
     telemetry = build_telemetry(
-        config.server.telemetry, local_only=config.server.local_only
+        config.server.telemetry,
+        local_only=config.server.local_only,
+        # What this deployment's own capacity is, which the retention
+        # bound is derived FROM (#495). Derived means handed over: a
+        # builder computing the right number from a default nobody
+        # passed is two structures agreeing by coincidence, and the
+        # coincidence breaks at exactly the size the derivation exists
+        # for, since the map is written at a session's OPEN and the
+        # session that opened first is the one a fixed bound evicts.
+        max_sessions=config.server.limits.max_sessions,
     )
     if telemetry is not None:
         stack.push_async_callback(telemetry.shutdown)

@@ -40,6 +40,7 @@ from tests.support.configs import config_with_agent
 from tests.support.notices import CHECK_IN, boundaries
 from tests.support.problems import refused
 from tests.support.stores import CONVERSATIONS_MANIFEST
+from tests.support.telemetry import Clock, open_session, session_events
 from vinga_server import __version__
 from vinga_server.app import StartupFailed, create_app, startup_failure
 from vinga_server.build_info import revision
@@ -61,7 +62,7 @@ from vinga_server.onboarding.origin import onboarding_url
 from vinga_server.providers import ProviderError
 from vinga_server.providers import world as provider_world
 from vinga_server.providers.mock import MockTts
-from vinga_server.telemetry import Telemetry
+from vinga_server.telemetry import RETAINED_TRACES, Telemetry
 from vinga_server.tools.mcp import McpServers
 from vinga_server.transcript_export import TranscriptExport
 
@@ -1173,3 +1174,36 @@ def test_a_deployment_that_records_nothing_builds_no_transcript_exporter() -> No
     nothing is built and nothing rides the composition."""
     with TestClient(served(recording_config(DatabaseConfig().name))) as client:
         assert client.app.state.composition.transcripts is None
+
+
+def test_the_composition_gives_telemetry_its_configured_capacity() -> None:
+    """The retention bound is derived from `server.limits.max_sessions`,
+    and derived means the composition has to hand it over: a builder
+    that computes the right number from a default nobody passed is two
+    structures agreeing by coincidence.
+
+    Driven at the size the derivation exists for. A deployment above the
+    exporter's own slack is exactly where a fixed sixty-four evicts a
+    LIVE session's context, because the map is written at the open, and
+    the session that opened first is the one it takes.
+    """
+    capacity = RETAINED_TRACES + 40
+    config = config_with_agent(
+        server={
+            "database": {"name": DatabaseConfig().name},
+            "limits": {"max_sessions": capacity},
+            "telemetry": {"enabled": True},
+        }
+    )
+
+    with TestClient(served(config)) as client:
+        telemetry = client.app.state.composition.telemetry
+        assert telemetry is not None
+        clock = Clock()
+        opened = [f"{index:032x}" for index in range(capacity)]
+        for session in opened:
+            events = session_events(clock, telemetry, session=session)
+            open_session(events)
+        held = [one for one in opened if telemetry.retained_context(one) is None]
+
+    assert held == [], f"{len(held)} live sessions lost the trace they opened under"
