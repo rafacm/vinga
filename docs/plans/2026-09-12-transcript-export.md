@@ -41,8 +41,11 @@ refuses under a local boundary. The enumerated list does not move.
   this content exists locally, it leaves.
 - **The source is the conversation store, not the live pipeline.**
   Transcripts export post hoc from what the store recorded, through
-  the post-close span mechanism #67 M3 built (retained trace
-  context, the exporter's own bounded OTLP queue). A content-bearing
+  the post-close span mechanism #67 M3 built (the retained trace
+  context; delivery is refined by this plan's review round from the
+  shared span queue to a bounded export call, because the queue
+  cannot answer for the failure event the issue requires). A
+  content-bearing
   tap feeding the generation spans at fold time is rejected for this
   issue and, by this plan's ADR amendment, as policy: the emit/span
   fold seam stays content-free.
@@ -130,7 +133,7 @@ close, stopped, or timed out, all of which mean the export may not
 assume the turns are readable, and per the `Acknowledgement`
 docstring the three are deliberately not told apart.
 
-### The transcript rides the existing OTLP exporter; no SDK, no extra, no staging
+### The transcript travels as OTLP spans; no SDK, no extra, no staging, and delivery is a bounded call with an answer
 
 The shape #67's uploader has (staging hardlinks, a Langfuse REST
 client, presigned PUTs, a boot sweep) exists because audio bytes
@@ -140,15 +143,49 @@ ingests spans and renders `langfuse.observation.*` fields, M3's
 `reference_media` already writes a post-close span into the retained
 session context, and the `AFTER_THE_CLOSE` fold does the same for
 the outcome events. So the transcript exporter needs no `[langfuse]`
-extra, no second credential family, no request timeout of its own
-and no staging directory: it assembles attribute sets and hands them
-to `Telemetry`, whose `BatchSpanProcessor` queue (bounded, drops on
-overflow, five-second schedule) is the delivery mechanism this
-repository already trusts and bounds. Nothing is persisted, so there
-is no boot sweep and no `abandoned` reason; a process that dies with
-an export queued loses a transcript export and nothing else, and the
-turns themselves stay in the store, re-exportable by any future
-surface.
+extra, no second credential family and no staging directory.
+
+What it does NOT ride is the shared `BatchSpanProcessor` queue,
+because that queue cannot answer for delivery: it drops on
+saturation and swallows collector failure, `force_flush` reports
+only that the flush finished, and the issue's acceptance requires an
+unreachable backend to surface as a warning event. So the transcript
+spans are built and delivered as one bounded call with a result.
+`Telemetry.export_transcript(session, context, turns)` builds the
+turn spans on a private tracer bound to the same resource and
+collected in memory rather than queued, and hands the batch to a
+dedicated OTLP exporter instance: the same exporter class the #66
+substrate constructs, through the existing `_Sdk` seam, from the
+same `OTEL_EXPORTER_OTLP_*` environment, so there is still one
+transport vocabulary and one credential family. The instance is
+constructed lazily at the worker's first job, on the worker thread,
+where it is the only user, and a construction failure is a contained
+delivery failure, never a boot event. The call's bound is the
+export-timeout posture (30 s) with the exporter's own internal
+bounded retry as the whole retry policy; `SpanExportResult` decides
+the answer: `delivered`, or the closed set's new `undelivered`
+(export failure or timeout; deliberately not told apart further,
+because the result is binary and a sentence must never carry the far
+side's words). Before constructing the instance the worker takes a
+`quieting.py` lease over the OTel SDK namespaces, held in its own
+`finally` past a bounded-shutdown expiry, the #67 M3 pattern: a late
+export failure must not print an endpoint or header through a
+namespace telemetry has already un-quieted.
+
+The blackholed-endpoint integration case is therefore the #67
+pattern verbatim: an accept-and-never-answer receiver, with three
+latencies asserted separately (the session closes unaffected within
+its bound, `transcript_export_failed` with reason `undelivered`
+fires within the timeout budget, shutdown completes within its own
+bound).
+
+Nothing is persisted, so there is no boot sweep and no `abandoned`
+reason; a process that dies with an export queued loses a transcript
+export and nothing else, and the turns themselves stay in the store,
+re-exportable by any future surface. The two outcome EVENTS still
+fold through the shared queue best-effort, which is honest: the log
+is their surface of record and the trace copy is a courtesy, the
+#67 posture.
 
 ### A sibling module, not a generalized post-close worker
 
@@ -269,13 +306,15 @@ message):
 `TranscriptsExported` carries `session: SessionId`,
 `turns: Count`, `elapsed_ms: Whole`. `TranscriptExportFailed`
 carries `session` and `reason` from a new closed set
-`TranscriptExportFailure` in `events/values.py`, four members with
+`TranscriptExportFailure` in `events/values.py`, five members with
 their decision sites: `unrecorded` (the close acknowledgement
 answered `False`: dropped, stopped or timed out, deliberately not
 told apart), `unreadable` (the store's read seam answered
-`Unreadable`), `no_trace` (`export_transcript` answered `False`),
-`dropped` (the queue bound turned the job away, or shutdown's bound
-expired with it queued). No `abandoned`: nothing persists. Both
+`Unreadable`), `no_trace` (no retained trace context for the
+session), `undelivered` (the bounded export answered failure or
+timed out), `dropped` (the queue bound turned the job away, or
+shutdown ended it before completion). No `abandoned`: nothing
+persists. Both
 events join `AFTER_THE_CLOSE` so the trail reaches the trace, the
 #67 confirmation-round lesson applied on day one rather than found
 in review. Both land in the same milestone as the worker that emits
@@ -389,9 +428,10 @@ promise-side half this completes, and the amendment cites it.
   set pinned, legs present exactly on the handover turn, both id
   spellings; the resumed-conversation case (second session exports
   only its own turns); null-text turns skipped and the empty
-  session silent; the four failure reasons each driven at its
+  session silent; the five failure reasons each driven at its
   decision site (a settled-`False` acknowledgement, an `Unreadable`
-  read, an evicted retention entry, a full queue); the drain case
+  read, a missing retained context, a failing export seam, a full
+  queue); the drain case
   (`max_sessions` concurrent closes with the backlog occupied,
   every job accounted for as exported or dropped-with-event); the
   close ordering (nothing enqueued before `session_closed`, session
@@ -413,9 +453,12 @@ promise-side half this completes, and the amendment cites it.
   transcripts arriving as spans in the session trace with input,
   output and legs spelled as recorded, and the sentinel present in
   exactly the span attributes and nowhere else on the wire's event
-  spans; a wedged-store case proving the session closes unaffected
-  within its bound and the `unrecorded` event fires within the
-  wait's budget.
+  spans; the blackholed endpoint (an accept-and-never-answer
+  receiver, three latencies asserted separately: session close,
+  the `undelivered` failure event within the timeout budget,
+  shutdown within its own bound); a wedged-store case proving the
+  session closes unaffected within its bound and the `unrecorded`
+  event fires within the wait's budget.
 - **Live, recorded not asserted (M3)**: the walkthrough against a
   self-hosted Langfuse (the #67 stack), a multi-turn conversation
   with a handover, the acceptance read back through
@@ -505,6 +548,20 @@ Findings condensed but faithful; resolutions appended per amendment.
    export (queue rejection and collector failure included) without
    blocking the session path, add the closed reason and the
    blackhole test, or change the transport design.
+
+   *Resolution.* Adopted; the transport half changed. Transcript
+   spans no longer ride the shared `BatchSpanProcessor`: they are
+   built on a private tracer, collected in memory, and delivered by
+   one bounded call to a dedicated OTLP exporter instance (same
+   class, same `_Sdk` seam, same environment; lazily constructed on
+   the worker thread), with `SpanExportResult` deciding a new
+   closed reason `undelivered` and the exporter's internal bounded
+   retry as the whole retry policy. The worker takes a quieting
+   lease over the OTel namespaces past shutdown expiry. The
+   blackhole integration case joins the Tests section with three
+   latencies asserted separately. The outcome events keep riding
+   the shared queue best-effort, stated as such: the log is their
+   surface of record.
 
 2. **P1: The plan explicitly permits violating the settled
    input/output requirement.** The risk section says a failed
