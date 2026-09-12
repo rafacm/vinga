@@ -79,8 +79,11 @@ them, and they are not re-litigated here.
   cost.
 - **M5 exports exactly what the model saw**, tool arguments and
   results included. The #495 transcript exclusion of tool invocations
-  stands for transcripts; this class is the byte-faithful request,
-  which is its whole point.
+  stands for transcripts; this class is the assembled request, which is
+  its whole point. What "exactly" bounds is settled under "the fidelity
+  boundary" below: the request as vinga assembled it, which is the
+  enumeration the issue itself gives (system prompt, memory, tool
+  schemas, message history).
 - **Fine-grained control is #393's policy layer**, deliberately not
   deployment booleans.
 - **The sequence overrides the previously agreed queue** (#487 M1 then
@@ -321,6 +324,43 @@ delivery as post-close on the #495 bounded seam, and a per-turn
 delivery would put an export on the audio path's own worker cadence,
 which is the thing every content escalation here has been careful to
 stay off.
+
+### The fidelity boundary is the request vinga assembled
+
+`LlmProvider.stream(system, turns, tools, tool_choice)` is a neutral
+seam: each adapter then translates those four values into its vendor's
+own message and tool shapes and adds what the vendor needs beside them
+(the model, the limits, the stream options, whatever passthrough the
+entry configured). So a request staged at that seam is one translation
+short of the bytes on the wire, and this plan's first draft called it
+byte-faithful, which it is not.
+
+The class is the request as vinga assembled it, and the plan, the ADR
+and the flag's own prose say that in those words. Concretely it
+contains the system prompt with its memory and know-how blocks, the
+message history as the model was given it, the tool schemas offered,
+the tool arguments the model asked for and the results it was handed
+back, and the tool choice. It does not contain vendor framing, the
+generation parameters, the endpoint, any header, or any credential.
+
+That boundary is chosen rather than conceded, for three reasons. It is
+the enumeration the issue itself gives for this class (system prompt,
+memory, tool schemas, message history), so it is the settled decision
+implemented precisely rather than narrowed. It is the one place where
+the request exists once rather than once per vendor, so the class does
+not silently mean different things depending on which adapter a
+deployment runs. And a snapshot taken after adapter translation would
+be a content surface built out of an SDK's own call arguments, which is
+where credentials live: the no-leak contract would then depend on an
+exclusion list per adapter, maintained forever, instead of on a seam
+that never sees one.
+
+What it costs is stated rather than hidden: a model parameter that
+changes a reply (a temperature, a token limit) is not in this class.
+Those are configuration rather than content, the generation span
+already carries the model identity as `gen_ai.request.model`, and an
+issue that needs the vendor's own body is a decision of its own with
+its own credential review.
 
 ### The M5 module is its own, and the seam is one more bounded call
 
@@ -597,6 +637,16 @@ Findings condensed but faithful; resolutions appended per amendment.
    snapshot after adapter translation, stating which transport fields
    (authorization headers above all) are excluded and testing each
    adapter's snapshot against the real SDK arguments.
+
+   *Resolution.* Adopted, first branch. The wire-fidelity language is
+   gone and a new section, "the fidelity boundary is the request vinga
+   assembled", states exactly what the class contains and what it does
+   not, why that boundary is the issue's own enumeration rather than a
+   narrowing of it, and what it costs. The provider-side snapshot is
+   rejected with a reason the review's own evidence supplies: a content
+   surface built from an SDK's call arguments puts the no-leak contract
+   behind a per-adapter exclusion list, and the seam that never sees a
+   credential is the one to build on.
 
 2. **P1: initial prompt provenance is emitted before a telemetry
    session exists.** `PipelineRuntime.__init__` calls `_activate_agent`,
