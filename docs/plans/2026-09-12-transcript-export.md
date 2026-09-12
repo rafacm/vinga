@@ -633,7 +633,7 @@ promise-side half this completes, and the amendment cites it.
 
 ## Milestones
 
-- [x] **[M1: rename `attach_captures` to `export_audio`](2026-09-12-transcript-export-implementation.md#m1-rename-attach_captures-to-export_audio)** (PR TBD). The
+- [x] **[M1: rename `attach_captures` to `export_audio`](2026-09-12-transcript-export-implementation.md#m1-rename-attach_captures-to-export_audio)** (PR #497). The
   sweep as scoped under "the rename is its own leading milestone":
   field, key constant, sentences, sixteen test sites, both example
   configs, regenerated reference, observability map row, ADR
