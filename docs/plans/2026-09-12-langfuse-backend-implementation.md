@@ -798,15 +798,14 @@ line.
    retained log, and B's own release would restore A's already-quiet
    snapshot and silence the namespaces permanently. The module holds one
    instance now, and the regression case drives the overlap in order.
-2. **The cross-field refusal moved to `ServerConfig`.** On
-   `TelemetryConfig` it fired unconditionally, so a file with the
-   attachment on and capture off did not parse at all and the
-   capture-first no-op could never run. That is the decision order
-   broken where it matters most: an operator turning capture off is
-   mid-toggle, not misconfigured. The rule now resolves capture first,
-   exactly as the builder does, and the case matrix is capture absent
-   and capture disabled against the exporter on and off, with local_only
-   armed and the extra faked away at once.
+2. **The cross-field refusal left `TelemetryConfig`.** There it fired
+   unconditionally, so a file with the attachment on and capture off did
+   not parse at all and the capture-first no-op could never run. That is
+   the decision order broken where it matters most: an operator turning
+   capture off is mid-toggle, not misconfigured. It went to
+   `ServerConfig`, which can see all three keys, and the DELTA round then
+   showed that residence had a cost of its own; it is the builder's now,
+   and the section below says why.
 3. **The sweep answers to the capture SECTION, from in front of every
    boot refusal.** It was `CaptureStore.startup()`, and a store is only
    built where capture is ENABLED, with the uploader's builder ahead of
@@ -877,6 +876,57 @@ for the OTEL extra first.
 The catalog vocabulary is M2's recorded design unchanged, landed here
 with its three drivers. The baseline was watched red on exactly the
 assertion M2 recorded before the drivers existed.
+
+### The delta round: the refusal moved once more
+
+One P1 and one P2, both genuine.
+
+**The rule is the builder's, not a validator's.** Putting it on
+`ServerConfig` fixed the capture-off no-op and introduced a subtler
+version of the same class of bug: a model validator raises while the
+file is being PARSED, so the one configuration whose refusal is about
+the attachment (capture on, the exporter off) never reached a
+composition, and the staging sweep that runs in front of every other
+refusal did not run for it. A previous run's staged room audio stayed on
+disk in exactly the configuration an operator writes to stop exporting.
+
+Two shapes were on offer: catch the `FieldProblemsError` at composition
+after sweeping, or move the rule into the builder. The builder, because
+the sol round's own finding already offered it ("or perform it in the
+builder"), because catching a parse error after the fact means the
+loader's refusal path and the composition's would both have to know
+about this one rule, and because it puts all three of the attachment's
+refusals in one place and one documented order.
+
+What that costs is the row in the reference's cross-field section, which
+publishes only refusals a model validator provably raises: the registry
+is checked by provoking each row through `model_validate`, so a row
+whose rule is not a validator cannot be held to anything. It is not a
+loss of documentation. The `attach_captures` field's own prose already
+says the attachment needs `enabled` and is refused at boot without it,
+and no other builder refusal in this repository is in that section
+either: not the missing extra, not either egress refusal. The registry's
+comment now says why this one is not.
+
+Three cases, all red against the validator: the refused configuration
+PARSES, which is the finding from the loader's end; neither model
+refuses it, asserted on both because the rule has lived on each and a
+validator returning to either would silently stop the sweep; and the
+boot matrix's fifth row, a staged job with capture on, the attachment on
+and telemetry off, with the sweep proven to run and the refusal
+preserved.
+
+**And the description said the wrong thing about the credentials.** It
+said the three `LANGFUSE_*` variables are ones "the SDK reads", which
+was true of the design the plan wrote and stopped being true with
+deviation 1: the generated REST client takes its base URL and its
+credentials as arguments, so this module reads them. The sentence had
+reached the generated reference, the example config and the
+observability map. All four now say what is true and keep what matters:
+transport credentials read from the environment, never a vinga
+configuration key, never stored, never rendered back, with the OTLP
+half's own attribution spelled out beside them because that one IS read
+by its SDK.
 
 ### The live walkthrough
 
@@ -1021,8 +1071,8 @@ decodable. Nothing here asserts a pixel.
 - `uv run ruff check .`: All checks passed!
 - `uv run mypy` (strict over `src/vinga_server/events`): Success: no
   issues found in 5 source files
-- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 6994 passed, 19
-  skipped (6907 in M2, plus this milestone's eighty-seven)
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 6995 passed, 19
+  skipped (6907 in M2, plus this milestone's eighty-eight)
 - `uv run pytest tests/integration -q`: 324 passed, against Postgres
   from the committed compose file on `VINGA_DB_PORT=55673`
 - `python3 scripts/fold_changelog.py check .`: checked 1 fragments, 0
