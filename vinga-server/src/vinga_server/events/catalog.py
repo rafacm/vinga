@@ -1396,7 +1396,21 @@ class NothingHeard(Variant):
     asr_ms: Whole | Absent = value(
         default=ABSENT, note="What the transcription that answered nothing cost."
     )
-
+    submitted_ms: Whole | Absent = value(
+        default=ABSENT,
+        note=(
+            "How much audio the ear was actually SENT, summed over every "
+            "request this transcription made, which is what a vendor "
+            "bills on. Not `duration_s`: a clip under an endpoint's "
+            "floor is never sent and says 0, a clip an echo retry hears "
+            "twice says twice its length, and an engine that cannot "
+            "answer leaves it out rather than saying none was sent. "
+            "Milliseconds because a whole number is what a backend's "
+            "usage accounting will take, and rounding a short "
+            "acknowledgement to whole seconds would overstate it by "
+            "more than its own length."
+        ),
+    )
 
 @dataclass(frozen=True)
 class TranscriptionAbandoned(Variant):
@@ -1560,6 +1574,21 @@ class Heard(Variant):
         default=ABSENT, note="Only engines that detected carry this."
     )
     language_confidence: Real | Absent = value(default=ABSENT)
+    submitted_ms: Whole | Absent = value(
+        default=ABSENT,
+        note=(
+            "How much audio the ear was actually SENT, summed over every "
+            "request this transcription made, which is what a vendor "
+            "bills on. Not `duration_s`: a clip under an endpoint's "
+            "floor is never sent and says 0, a clip an echo retry hears "
+            "twice says twice its length, and an engine that cannot "
+            "answer leaves it out rather than saying none was sent. "
+            "Milliseconds because a whole number is what a backend's "
+            "usage accounting will take, and rounding a short "
+            "acknowledgement to whole seconds would overstate it by "
+            "more than its own length."
+        ),
+    )
     provider: Identifier | Absent = value(default=ABSENT)
     type: Identifier | Absent = value(default=ABSENT)
     host: Identifier | Absent = value(default=ABSENT)

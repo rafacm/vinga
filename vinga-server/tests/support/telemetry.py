@@ -55,6 +55,7 @@ from vinga_server.events.catalog import (
     TurnStarted,
 )
 from vinga_server.events.values import (
+    ABSENT,
     AgentNames,
     AlsoBoundTo,
     CaptureUploadFailure,
@@ -392,6 +393,7 @@ def hear(
     identity: Identity | None = None,
     unbuilt: bool = False,
     agent: str = AGENT,
+    submitted_ms: int | None = 900,
 ) -> float:
     """The ASR outcome that answered, built through the events' own
     assembly so the quartet's absence rules are the real ones.
@@ -415,6 +417,7 @@ def hear(
             asr_ms,
             language,
             0.98 if language is not None else None,
+            submitted_ms,
         )
     )
 
@@ -432,16 +435,25 @@ def drop_frames(events: SessionEvents, reasons: dict[str, int], second: int = 3)
 
 
 def hear_nothing(
-    events: SessionEvents, duration_s: float = 0.9, asr_ms: int = 220
+    events: SessionEvents,
+    duration_s: float = 0.9,
+    asr_ms: int = 220,
+    submitted_ms: int | None = 900,
 ) -> float:
     """The ASR outcome that answered nothing at all, which is the issue's
-    motivating gap: 0.9 s of speech transcribed to an empty string."""
+    motivating gap: 0.9 s of speech transcribed to an empty string.
+
+    `submitted_ms` defaults to the clip's own length, which is the
+    ordinary case (the ear was sent it and answered nothing); a case
+    about an endpoint's floor passes 0, and one about an engine that
+    does not count passes None."""
     return events.emit(
         lambda: NothingHeard(
             agent=Identifier(AGENT),
             conversation=ConversationId(CONVERSATION),
             duration_s=Real(duration_s),
             asr_ms=Whole(asr_ms),
+            submitted_ms=ABSENT if submitted_ms is None else Whole(submitted_ms),
         )
     )
 

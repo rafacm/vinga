@@ -870,14 +870,27 @@ def _as_attribute(held: Any, rule: _Rule) -> Any | None:
 # rate against it and the stage stays unpriceable however carefully it
 # was measured.
 #
-# Neither is a second measurement. The ASR seconds are the same
-# `duration_s` the stage already reports under its own vinga name, read
-# by a second vocabulary the way `SESSION_ID_NAMES` is read by two, and
-# the TTS characters are the count the catalog now declares on the
-# event. An outcome that carries no measurement contributes no
-# attribute, which is `_attributes`' own rule and the difference
-# between "nothing was measured" and "it cost nothing".
-ASR_USAGE = "gen_ai.usage.input_seconds"
+# The ASR number is NOT `duration_s`, and the difference is the whole
+# point of these two attributes. How long the user spoke is one fact;
+# how much audio the ear was actually sent is another, and the two come
+# apart in both directions on a real adapter: a clip under an endpoint's
+# floor is never sent at all, and a clip an echo retry hears a second
+# time is sent twice. `vinga.asr.duration_s` goes on answering the
+# first, and the usage answers the second off `submitted_ms`, which the
+# ear itself counts because the call is the only thing that knows how
+# many requests it made.
+#
+# Milliseconds rather than seconds, which the live gate settled: a
+# backend drops a non-integer usage value outright, and rounding to
+# whole seconds would overstate a 0.4 second "ja" by more than its own
+# length, on exactly the utterances a voice assistant is made of. The
+# unit is in the name, so nothing has to be inferred from the number.
+#
+# An outcome that carries no measurement contributes no attribute, which
+# is `_attributes`' own rule and the difference between "nothing was
+# measured" and "it cost nothing". A measured zero is the second of
+# those and is exported as a zero.
+ASR_USAGE = "gen_ai.usage.input_milliseconds"
 TTS_USAGE = "gen_ai.usage.input_characters"
 
 # The ASR span, whose four ends carry four overlapping field sets. One
@@ -901,7 +914,8 @@ TTS_USAGE = "gen_ai.usage.input_characters"
 ASR_ATTRIBUTES = {
     "agent": "vinga.agent",
     "conversation": "vinga.conversation.id",
-    "duration_s": ("vinga.asr.duration_s", ASR_USAGE),
+    "duration_s": "vinga.asr.duration_s",
+    "submitted_ms": ASR_USAGE,
     "language": "vinga.asr.language",
     "language_confidence": "vinga.asr.language_confidence",
     "error": "vinga.asr.error",

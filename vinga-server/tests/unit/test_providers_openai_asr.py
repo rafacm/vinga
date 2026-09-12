@@ -477,6 +477,69 @@ async def test_an_entry_with_no_prompt_suppresses_nothing() -> None:
     assert (await asr.transcribe(ONE_SECOND, 16000)).text == "vinga"
 
 
+# --- what the ear says it was sent ------------------------------------
+
+
+async def test_a_transcription_reports_the_audio_it_actually_submitted() -> None:
+    """The ordinary case: one request, the whole clip, counted in
+    milliseconds.
+
+    It is a separate number from how long the user spoke, and the two
+    cases below are why: this adapter can send nothing at all and can
+    send the same clip twice, and a billing number taken from the
+    utterance is wrong in both directions.
+    """
+    result = await provider(transcript_handler()).transcribe(ONE_SECOND, 16000)
+
+    assert result.submitted_ms == 1000
+
+
+async def test_audio_under_the_floor_is_billed_for_nothing() -> None:
+    """A clip below the endpoint's own minimum never leaves this
+    process, so the ear was sent nothing and says so.
+
+    Zero rather than no answer, which is the distinction this field
+    exists to make: the floor is a fact this adapter knows, and an
+    absent measurement would claim it did not. What it must NOT say is
+    the clip's own length, which is the cost this transcription would
+    have had if it had happened.
+    """
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"text": "Hej"})
+
+    # Half the 0.1 s floor, so nothing is sent at all.
+    result = await provider(handler).transcribe(b"\x00\x00" * 800, 16000)
+
+    assert seen == [], "the adapter sent a clip it said was under the floor"
+    assert result.submitted_ms == 0
+    assert result.submitted_ms != 50, "the clip's own length was reported as usage"
+
+
+async def test_an_echo_retry_is_billed_for_both_hearings() -> None:
+    """The same bytes twice is twice the usage.
+
+    The retry re-sends the clip rather than a part of it, so an operator
+    reading cost off the utterance would see half of what the vendor
+    charged, on exactly the short acknowledgements the echo guard fires
+    on most.
+    """
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        text = "vinga, Oliver" if len(seen) == 1 else "Yes, please."
+        return httpx.Response(200, json={"text": text})
+
+    result = await provider(handler, prompt="vinga, Oliver").transcribe(ONE_SECOND, 16000)
+
+    assert len(seen) == 2, "the echo retry did not run, so this proves nothing"
+    assert result.text == "Yes, please."
+    assert result.submitted_ms == 2000
+
+
 # --- the retry behind the echo guard (#69) ---------------------------
 
 

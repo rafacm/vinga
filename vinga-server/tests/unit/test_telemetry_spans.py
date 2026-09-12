@@ -111,7 +111,7 @@ GROUPING = {SESSION_ID_ALIAS}
 # closed-set assertions below for the same reason the grouping alias is:
 # a usage key is a fact somebody chose to export, and the point of those
 # assertions is that nothing arrives under a foreign name by accident.
-ASR_USED = {"gen_ai.usage.input_seconds"}
+ASR_USED = {"gen_ai.usage.input_milliseconds"}
 TTS_USED = {"gen_ai.usage.input_characters"}
 
 
@@ -803,37 +803,111 @@ def test_a_stream_names_the_voice_that_produced_it() -> None:
 # --- what each stage was given, in the unit it is billed in -----------
 
 
-def test_a_transcription_reports_the_audio_it_was_given_as_input_usage() -> None:
-    """`gen_ai.usage.input_seconds`, beside the two token counts a round
-    already reports and read the same way.
+def test_a_transcription_reports_the_audio_the_ear_was_actually_sent() -> None:
+    """`gen_ai.usage.input_milliseconds`, beside the two token counts a
+    round already reports and read the same way.
 
     The direction is the model's, exactly as the conventions read the
     token halves: an ear is GIVEN the audio and produces a transcript,
-    so the seconds are input. It is not cosmetic. A backend prices the
-    keys `input`, `output` and `total`, so a number under any other name
-    has no rate beside it and an ASR stage stays unpriceable however
-    carefully it is measured.
+    so the milliseconds are input. It is not cosmetic. A backend prices
+    the keys `input`, `output` and `total`, so a number under any other
+    name has no rate beside it and an ASR stage stays unpriceable
+    however carefully it is measured.
 
-    The unit is in the name because the conventions have no word for it:
-    calling seconds of audio tokens would be false in the way this
-    module refuses to be false elsewhere.
+    The unit is in the name because the conventions have no word for it,
+    and it is milliseconds rather than seconds because the live gate
+    found a non-integer usage value dropped outright.
+
+    And the SOURCE is what the ear says it submitted, not how long the
+    user spoke. The two cases below are the ones that come apart.
     """
     clock = Clock()
     telemetry, memory = exporting()
     events = a_turn(clock, telemetry)
 
     clock.tick(0.3)
-    hear(events, duration_s=0.9, asr_ms=300)
+    hear(events, duration_s=0.9, asr_ms=300, submitted_ms=900)
     finish_reply(events)
     close_session(events)
 
     asr = named(finished(telemetry, memory), ASR_SPAN).attributes
-    assert asr["gen_ai.usage.input_seconds"] == pytest.approx(0.9)
-    # One measurement, two readers: the stage's own vinga name and the
-    # conventions' usage name, which is the SESSION_ID_ALIAS shape
-    # rather than a second fact.
+    assert asr["gen_ai.usage.input_milliseconds"] == 900
+    # An integer, because the gate found a float dropped by the backend
+    # on both of the paths it could arrive on.
+    assert isinstance(asr["gen_ai.usage.input_milliseconds"], int)
+    # Two facts, two attributes: how long the user spoke stays under the
+    # stage's own vinga name and is not what anyone is billed for.
     assert asr["vinga.asr.duration_s"] == pytest.approx(0.9)
-    assert "gen_ai.usage.output_seconds" not in asr
+    assert "gen_ai.usage.output_milliseconds" not in asr
+
+
+def test_an_ear_that_was_sent_nothing_reports_a_usage_of_zero() -> None:
+    """A clip under an endpoint's own floor never leaves the process, so
+    the stage cost nothing and the span says nothing was sent.
+
+    The number the span must NOT carry is the utterance's length, which
+    is what this attribute used to be aliased to: it would invent a
+    charge for a request no adapter made. Zero rather than an absence,
+    because the adapter KNOWS it sent nothing, and the absence rule
+    below is for a measurement nobody could take.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.05)
+    hear_nothing(events, duration_s=0.05, asr_ms=1, submitted_ms=0)
+    finish_reply(events, outcome=ReplyOutcome.NOTHING_HEARD, sentences=0)
+    close_session(events)
+
+    asr = named(finished(telemetry, memory), ASR_SPAN).attributes
+    assert asr["gen_ai.usage.input_milliseconds"] == 0
+    assert asr["vinga.asr.duration_s"] == pytest.approx(0.05)
+
+
+def test_an_ear_that_heard_the_clip_twice_reports_both_hearings() -> None:
+    """An echo retry sends the same bytes a second time, so the usage is
+    twice the clip and the utterance is unchanged.
+
+    Half the real cost is what the aliased attribute reported here, on
+    exactly the short acknowledgements the echo guard fires on most.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.8)
+    hear(events, duration_s=0.9, asr_ms=800, submitted_ms=1800)
+    finish_reply(events)
+    close_session(events)
+
+    asr = named(finished(telemetry, memory), ASR_SPAN).attributes
+    assert asr["gen_ai.usage.input_milliseconds"] == 1800
+    assert asr["vinga.asr.duration_s"] == pytest.approx(0.9)
+
+
+def test_an_ear_that_cannot_say_what_it_sent_reports_no_usage() -> None:
+    """A local engine bills nothing and counts nothing, so it leaves the
+    field out and the span carries no usage attribute at all.
+
+    Which is a different answer from the zero above: one says the ear
+    was sent nothing, the other says nobody measured. A backend reading
+    the first prices it at zero, and reading the second knows not to.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.3)
+    hear(events, duration_s=0.9, asr_ms=300, submitted_ms=None)
+    finish_reply(events)
+    close_session(events)
+
+    asr = named(finished(telemetry, memory), ASR_SPAN).attributes
+    assert "gen_ai.usage.input_milliseconds" not in asr
+    # Beside the thing the case is about, so a span that never got built
+    # cannot pass this.
+    assert asr["vinga.asr.duration_s"] == pytest.approx(0.9)
 
 
 def test_a_stream_reports_the_sentence_it_was_given_as_input_usage() -> None:
@@ -882,7 +956,7 @@ def test_a_stage_that_measured_nothing_reports_no_usage_rather_than_zero() -> No
     close_session(events)
 
     asr = named(finished(telemetry, memory), ASR_SPAN).attributes
-    assert "gen_ai.usage.input_seconds" not in asr
+    assert "gen_ai.usage.input_milliseconds" not in asr
     assert "vinga.asr.duration_s" not in asr
     # The span itself is real, so this is an absence beside the thing
     # the case is about rather than a case that asserted nothing.

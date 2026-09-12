@@ -437,6 +437,7 @@ def heard(
     asr_ms: int | None,
     language: str | None,
     language_confidence: float | None,
+    submitted_ms: int | None = None,
 ) -> Variant:
     """The `heard` event for one transcription.
 
@@ -447,7 +448,9 @@ def heard(
 
     The language pair arrives as the plain values the engine answered
     with, or as None where it detected nothing, which is a fact about
-    the engine rather than a zero.
+    the engine rather than a zero. `submitted_ms` follows the same rule
+    for a different question: it is what the ear was SENT, as the ear
+    itself counted it, and None from an engine that does not count.
     """
     entry, type_, host, model = _entry_fields(provider)
     return Heard(
@@ -459,6 +462,7 @@ def heard(
         language_confidence=(
             ABSENT if language_confidence is None else Real(language_confidence)
         ),
+        submitted_ms=ABSENT if submitted_ms is None else Whole(submitted_ms),
         provider=entry,
         type=type_,
         host=host,

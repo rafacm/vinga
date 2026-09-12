@@ -225,7 +225,12 @@ class OpenAiAsr(AsrProvider):
                 len(pcm),
                 self._min_audio_s,
             )
-            return AsrResult(text="")
+            # Nothing was sent, so nothing was billed, and the answer
+            # says so with a measured zero rather than with silence:
+            # "this ear submitted nothing" is a fact about the floor,
+            # where an absent measurement would be a fact about the
+            # engine.
+            return AsrResult(text="", submitted_ms=0)
         # A configured language always beats the hint, as elsewhere. The
         # hint can only be a lock some provider asked for, and this one
         # never does, so in practice it is the configured language or
@@ -246,10 +251,21 @@ class OpenAiAsr(AsrProvider):
         # Cancellation, a genuine bug, and another vendor's SDK error are
         # outside OPENAI_FAILURES and pass through as themselves.
         failure: ProviderCallError | None = None
+        # How much audio this call put on the wire, counted per REQUEST
+        # rather than per utterance. The first request always sends the
+        # whole clip; the echo retry below sends the same bytes a second
+        # time, and a clip the deadline left no room for sends nothing.
+        clip_ms = round(len(pcm) / 2 / sample_rate * 1000)
+        submitted_ms = 0
         try:
             text = await self._request(pcm, sample_rate, pinned, self._prompt)
+            submitted_ms = clip_ms
             if self._is_echoed_prompt(text):
-                text = await self._retry_without_prompt(pcm, sample_rate, pinned, deadline)
+                text, resent = await self._retry_without_prompt(
+                    pcm, sample_rate, pinned, deadline
+                )
+                if resent:
+                    submitted_ms += clip_ms
         except OPENAI_FAILURES as exc:
             failure = call_failure(LABEL, exc)
         # Raised out here rather than in the except arm, so the SDK
@@ -259,7 +275,7 @@ class OpenAiAsr(AsrProvider):
         if failure is not None:
             raise failure from None
         # Language fields stay empty: this provider does not detect.
-        return AsrResult(text=text)
+        return AsrResult(text=text, submitted_ms=submitted_ms)
 
     async def _request(
         self,
@@ -292,9 +308,17 @@ class OpenAiAsr(AsrProvider):
 
     async def _retry_without_prompt(
         self, pcm: bytes, sample_rate: int, pinned: str | None, deadline: float
-    ) -> str:
+    ) -> tuple[str, bool]:
         """A second hearing for a clip whose transcript was the prompt
-        handed back.
+        handed back, and whether the clip was actually sent again.
+
+        The flag is what the caller bills on. Four of the five ways this
+        ends put the clip on the wire a second time, the deadline timeout
+        included, because bytes a request was cancelled in the middle of
+        are bytes the far side received; only the skip below sends
+        nothing. A caller counting retries by their OUTCOME would miss
+        the two that answer nothing at all, which are exactly the ones a
+        suspicious clip is most likely to produce.
 
         The guard used to treat the echo as proof of silence, and the
         field data says it is not: nine echoes in two days of testing,
@@ -330,7 +354,7 @@ class OpenAiAsr(AsrProvider):
                     remaining_s=Real(remaining_s),
                 )
             )
-            return ""
+            return "", False
         logger.warning(
             "openai asr: the transcript came back as the configured prompt, "
             "retrying %.2f s of audio without it",
@@ -360,7 +384,7 @@ class OpenAiAsr(AsrProvider):
                     remaining_s=Real(remaining_s),
                 )
             )
-            return ""
+            return "", True
         retry_ms = round((loop.time() - started) * 1000)
         if self._is_echoed_prompt(retry):
             events.emit(
@@ -370,7 +394,7 @@ class OpenAiAsr(AsrProvider):
                     retry_ms=Whole(retry_ms),
                 )
             )
-            return ""
+            return "", True
         if not retry:
             events.emit(
                 lambda: EchoConfirmedEmpty(
@@ -379,7 +403,7 @@ class OpenAiAsr(AsrProvider):
                     retry_ms=Whole(retry_ms),
                 )
             )
-            return ""
+            return "", True
         # The recovered transcript is not in the sentence, and naming
         # that one exists would add no diagnostic the fields lack.
         # Conversation-derived text is banned on the events without
@@ -394,7 +418,7 @@ class OpenAiAsr(AsrProvider):
                 retry_ms=Whole(retry_ms),
             )
         )
-        return retry
+        return retry, True
 
 
     def _is_echoed_prompt(self, text: str) -> bool:

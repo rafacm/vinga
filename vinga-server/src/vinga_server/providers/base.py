@@ -407,12 +407,21 @@ class AsrResult:
     asking the session to reuse a language for the rest of the session:
     the session hands it back as `language_hint` on later calls, which
     is what lets a per-session policy live in a provider that is itself
-    shared between sessions and holds no per-session state."""
+    shared between sessions and holds no per-session state.
+
+    `submitted_ms` is how much audio this call actually SUBMITTED,
+    summed over every request it made, which is what a vendor bills on
+    and is not the same number as how long the user spoke. A call that
+    sent nothing answers 0, a call that sent the same clip twice answers
+    twice its length, and an engine that cannot say answers None: a
+    local engine bills nothing, and a measurement nobody took is
+    different from a measurement of nothing."""
 
     text: str
     language: str | None = None
     language_confidence: float | None = None
     lock_language: str | None = None
+    submitted_ms: int | None = None
 
 
 class AsrProvider(Provider, ABC):
