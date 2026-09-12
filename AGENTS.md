@@ -230,6 +230,12 @@ verb or a flag.
   Key parameters, Verification, and Files modified. Milestone work under a
   plan is documented by the implementation doc and the PR instead. No
   session transcripts are kept in this repository.
+- Every plan and feature doc carries one "Local baseline" line: not
+  applicable, outside (with the reason), or joins (citing the recorded
+  decision and updating `docs/architecture/product-promises.md` in the
+  same change). The rule is the enumerated-baseline record in
+  `docs/adr/`; the line makes the membership decision explicit where
+  it applies and costs one line where it does not.
 - Active plans keep a milestone checklist that doubles as the milestone
   descriptions (one annotated checkbox item per milestone, no separate
   status list). Tick the milestone (with its PR number) in the same change
