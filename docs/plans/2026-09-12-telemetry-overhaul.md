@@ -889,7 +889,7 @@ the manifest with its own generator when stale.
 ## Milestones
 
 - [x] **[M1: the ADR amendment](2026-09-12-telemetry-overhaul-implementation.md#m1-the-adr-amendment)**
-  (PR TBD). The fourth amendment to the
+  (PR #505). The fourth amendment to the
   content-and-telemetry record: three content classes under one
   `export_` prefix, the family rule stated once, artifacts riding
   their class, class widening as a changelog-announced event, the
