@@ -134,19 +134,30 @@ both reaching `CaptureStore.finished()` while the device session
 carries on, so `finished()` alone is not a session-close signal
 either. The design therefore separates the two facts it conflated.
 `CaptureStore` keeps `finished()` as what it is (the files are
-final) and gains a session-level `session_closed(session)` call,
-invoked from the device session's own close ordering in
-`device/session.py`, immediately after `self._capture_audio.close()`
-(step 5), which is the first moment both facts hold: the session is
-over and its triplet, early-finished or just-closed, is final. That
-call is where the uploader's injected hook runs (compared
-`is not None` per the honest-seams lens, wired by composition in
-`app.py` when the uploader exists), receiving the session id and
-the file paths. An early-finished capture is therefore staged and
-enqueued only when its session closes, never at the moment its
-recording stopped, and the tests drive both early paths
-(duration-limit, write failure) to prove no upload starts before
-the session's close.
+final) but the staging happens THERE, before `finished()` hands the
+files to `prune()`: `finished()` itself becomes prune-candidacy, so
+the only moment the pair is guaranteed both final and still on disk
+is inside that callback, and the delta round proved a
+session-close-time staging loses a duration-limit capture to an
+intervening prune. So the uploader's hook has two halves. At
+files-final it stages the pair atomically (a complete capture only:
+a write-failure capture, whose manifest says `complete: false` and
+whose WAV may be unpatchable, is never uploaded, and its session
+close records `capture_upload_failed` with the closed-set reason
+`incomplete` instead, since attaching a recording the manifest
+disowns would present broken evidence as evidence). At
+`session_closed(session)`, a new session-level call invoked from
+the device session's own close ordering immediately after
+`self._capture_audio.close()` (step 5), the retained staged job is
+enqueued. Both halves compare `is not None` per the honest-seams
+lens and are wired by composition in `app.py` when the uploader
+exists. An early-finished capture is therefore staged the moment
+its files are final and enqueued only when its session closes, and
+the tests drive both early paths (duration-limit, write failure) to
+prove no upload starts before the session's close AND that a prune
+storm between the early finish and the close cannot erase the
+staged pair (the hardlinks survive the triplet's unlink by
+construction, which is the property the test pins).
 
 How the media request names its trace is a fact about Langfuse the
 repository does not hold, so it is discovered before it is designed:
@@ -321,7 +332,7 @@ The catalog-first discipline (#66 M1): `capture_uploaded`
 the far side that could carry a credential) and
 `capture_upload_failed` (session, plus a reason from a closed set:
 `unreachable`, `refused`, `too_large`, `no_trace`, `dropped`,
-`staging_lost`, `abandoned`; never the exception's words, classes rendered per
+`staging_lost`, `abandoned`, `incomplete`; never the exception's words, classes rendered per
 the no-leak lens). Both join `events/catalog.py`, the generated
 events reference, and the exporter's APPROVED table by derivation.
 They are the field-test trail: a capture that silently failed to
@@ -666,6 +677,13 @@ condensed but faithful; resolutions appended per amendment.
    disposition; the early-path tests must prove both no early
    upload and that an intervening prune cannot erase the staged
    pair.
+
+   *Resolution.* Adopted. Staging moves to the files-final callback
+   itself, ahead of prune-candidacy; enqueue stays at
+   `session_closed`; a write-failure capture is never uploaded and
+   its session records the new closed-set reason `incomplete`; the
+   early-path tests pin both properties, including hardlink
+   survival through an intervening prune.
 
 2. **P2: The abandoned-job sweep is not reachable in valid
    next-boot configurations.** The builder returns before all later
