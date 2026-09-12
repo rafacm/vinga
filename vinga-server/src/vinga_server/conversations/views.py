@@ -839,23 +839,34 @@ BY_DEVICE_QUESTION = "Broken down by the device the session ran on."
 # the same rows, narrowed to one device before anything is counted.
 BY_DEVICE_DENOMINATOR = (
     "Every denominator here is that device's own: the rows are split by device "
-    "before anything is counted, so a column means what it means on the ungrouped "
-    "view with the day narrowed to one device. A session whose device was never "
-    "understood groups as a null-device row rather than vanishing, the way a null "
-    "agent already does."
+    "and by the name that device recorded before anything is counted, so a column "
+    "means what it means on the ungrouped view with the day narrowed to one of "
+    "them. A session whose device was never understood groups as a null-device row "
+    "rather than vanishing, the way a null agent already does, and so does a "
+    "session that recorded no name. The name is in that split because it is dated: "
+    "a board renamed inside the window is one row per name it was recorded under "
+    "rather than one series retitled."
 )
 
 # The two columns every sibling carries, between the day and the
-# dimensions the mirrored view already had. The MAC is the key because
-# it is what the record stores and what survives a rename; the label is
-# declared now and filled in later, so the shape a caller reads does
-# not move on the day it arrives.
+# dimensions the mirrored view already had, and both are part of what
+# makes a row one row.
+#
+# The MAC is the identity: it is what the record stores and what
+# survives whatever the board is called. The label beside it is in the
+# key rather than merely along for the ride because it is dated.
+# `sessions.device_name` says what the device was called when that
+# session opened and nothing rewrites it, so a board renamed mid-window
+# has rows under both names, and the honest reading of that is two
+# series rather than one of them relabelled by whichever name happens to
+# be latest. A reader who wants the device whole groups on `device` and
+# ignores this column, which a most-recent-name rule would not have left
+# them the numbers to do.
 #
 # The label cannot be a join. `deploy/postgres-init.sql` grants the
 # analyst role on `record` and revokes it on `domain`, so no analyst and
 # no dashboard can reach `domain.devices` at all: what puts a label on
-# this side is a copy in the `record` schema, which is #449's, and until
-# it lands the column is the literal null this view selects.
+# this side is the copy the session itself carries.
 BY_DEVICE_COLUMNS: tuple[Column, ...] = (
     Column(
         name=DEVICE,
@@ -878,20 +889,23 @@ BY_DEVICE_COLUMNS: tuple[Column, ...] = (
         name=NAME,
         type="text",
         meaning=(
-            "The device's human label, for a reader who does not read MACs. Null "
-            "in every row of this release: the analyst role is granted on `record` "
-            "and revoked on `domain`, so this column cannot be a join to the "
-            "configuration, and what fills it is a copy of the label on this side. "
-            "Read `device` as the identity and this as a convenience that is not "
-            "there yet."
+            "What that device was called when the session opened, for a reader who "
+            "does not read MACs. Dated rather than current: `sessions.device_name` "
+            "is written at the session open and never rewritten, so this is the "
+            "label the rows under it were recorded with and not the one the board "
+            "carries today. Null wherever no name was recorded, which covers a "
+            "board nobody has named, a MAC no device record stands behind, and "
+            "every session that opened before the column existed."
         ),
         units="none",
         nullable=True,
         formula=(
-            "`NULL::text`. Declared now and selected as a literal so that the "
-            "columns a caller reads do not move on the day the label arrives."
+            "`sessions.device_name`, grouped. Part of what makes a row one row, so "
+            "a device renamed inside the window is one row per name it was recorded "
+            "under rather than one series retitled, and a null name groups as its "
+            "own row rather than vanishing."
         ),
-        key=False,
+        key=True,
     ),
 )
 
@@ -930,7 +944,7 @@ STAGE_LATENCY_BY_DEVICE = per_device(
     f"""SELECT
     {offset_day("t")} AS day,
     s.device AS device,
-    NULL::text AS name,
+    s.device_name AS name,
     t.agent AS agent,
     stage.name AS stage,
     count(*) AS measured_turns,
@@ -947,7 +961,7 @@ CROSS JOIN LATERAL (
         ('{STAGES[3]}'::text, t.tts_first_audio_ms)
 ) AS stage(name, ms)
 WHERE stage.ms IS NOT NULL
-GROUP BY 1, 2, 4, 5""",
+GROUP BY 1, 2, 3, 4, 5""",
 )
 
 
@@ -956,7 +970,7 @@ TOKENS_BY_DEVICE = per_device(
     f"""SELECT
     attribution.day AS day,
     attribution.device AS device,
-    NULL::text AS name,
+    attribution.name AS name,
     attribution.agent AS agent,
     count(DISTINCT attribution.turn) AS turns,
     count(attribution.input_tokens) AS input_measured_turns,
@@ -967,6 +981,7 @@ FROM (
     SELECT
         {offset_day("t")} AS day,
         s.device AS device,
+        s.device_name AS name,
         t.id AS turn,
         CASE WHEN leg.entry IS NULL THEN t.agent
              ELSE leg.entry ->> 'agent' END AS agent,
@@ -980,20 +995,22 @@ FROM (
         CASE WHEN json_typeof(t.legs) = 'array' THEN t.legs END
     ) AS leg(entry) ON true
 ) AS attribution
-GROUP BY 1, 2, 4""",
+GROUP BY 1, 2, 3, 4""",
 )
 
 
 # The two views below combine streams that are aggregated
 # independently, and both of them are joined on a key that can be null.
 #
-# Ordinary equality is what would be wrong, and quietly. A device key is
-# null for a session that was rejected before a device was understood,
-# and two SQL nulls are not equal to each other: an equality join would
-# leave every stream of a null-device group unmatched by every other, so
-# that group would come back with one stream's number and zeroes where
-# the others should have been, and its rates null or wrong. A null
-# device is one group, not an absence, which is what
+# Ordinary equality is what would be wrong, and quietly. Two of the
+# three keys are nullable: the device is null for a session rejected
+# before a device was understood, and the name is null for every session
+# recorded before `sessions.device_name` existed and for every board
+# nobody has named. Two SQL nulls are not equal to each other, so an
+# equality join would leave every stream of such a group unmatched by
+# every other, and that group would come back with one stream's number
+# and zeroes where the others should have been, its rates null or wrong.
+# A null key is one group, not an absence, which is what
 # `IS NOT DISTINCT FROM` says and `=` does not.
 #
 # So the shape is not the mirrored view's. The four shipped views chain
@@ -1002,61 +1019,65 @@ GROUP BY 1, 2, 4""",
 # which `IS NOT DISTINCT FROM` is not ("FULL JOIN is only supported with
 # merge-joinable or hash-joinable join conditions"). The union the full
 # joins were there to produce is therefore taken directly, as a spine of
-# every (day, device) pair any stream has, and each stream is left
-# joined onto it. `UNION` is what dedupes the spine, and it already
+# every (day, device, name) triple any stream has, and each stream is
+# left joined onto it. `UNION` is what dedupes the spine, and it already
 # treats two nulls as one value, so the spine has exactly one row per
 # group before anything is joined to it. The day is joined the same way
-# as the device, from symmetry rather than from need: a day is never
-# null, and a pair of conditions that read as one rule is worth more
-# than the distinction.
+# as the other two, from symmetry rather than from need: a day is never
+# null, and three conditions that read as one rule are worth more than
+# the distinction.
 EVENT_RATES_BY_DEVICE = per_device(
     EVENT_RATES,
     f"""WITH turn_days AS (
     SELECT
         {offset_day("t")} AS day,
         s.device AS device,
+        s.device_name AS name,
         count(*) AS turns
     FROM {SCHEMA}.turns t
     JOIN {SCHEMA}.sessions s ON s.session = t.session
-    GROUP BY 1, 2
+    GROUP BY 1, 2, 3
 ), session_days AS (
     SELECT
         {SESSION_DAY} AS day,
         s.device AS device,
+        s.device_name AS name,
         count(*) AS sessions
     FROM {SCHEMA}.sessions s
-    GROUP BY 1, 2
+    GROUP BY 1, 2, 3
 ), failure_days AS (
     SELECT
         {offset_day("e")} AS day,
         s.device AS device,
+        s.device_name AS name,
         count(*) AS provider_failures
     FROM {SCHEMA}.events e
     JOIN {SCHEMA}.sessions s ON s.session = e.session
     WHERE e.name = '{PROVIDER_FAILED}'
-    GROUP BY 1, 2
+    GROUP BY 1, 2, 3
 ), suppression_days AS (
     SELECT
         {offset_day("e")} AS day,
         s.device AS device,
+        s.device_name AS name,
         count(*) AS barge_in_suppressions
     FROM {SCHEMA}.events e
     JOIN {SCHEMA}.sessions s ON s.session = e.session
     WHERE e.name = '{BARGE_IN_SUPPRESSED}'
-    GROUP BY 1, 2
+    GROUP BY 1, 2, 3
 ), spine AS (
-    SELECT day, device FROM turn_days
+    SELECT day, device, name FROM turn_days
     UNION
-    SELECT day, device FROM session_days
+    SELECT day, device, name FROM session_days
     UNION
-    SELECT day, device FROM failure_days
+    SELECT day, device, name FROM failure_days
     UNION
-    SELECT day, device FROM suppression_days
+    SELECT day, device, name FROM suppression_days
 )
 SELECT
     spine.day AS day,
     spine.device AS device,
-    NULL::text AS name,
+    spine.name AS name,
     coalesce(turn_days.turns, 0) AS turns,
     coalesce(session_days.sessions, 0) AS sessions,
     coalesce(failure_days.provider_failures, 0) AS provider_failures,
@@ -1069,15 +1090,19 @@ FROM spine
 LEFT JOIN turn_days
     ON turn_days.day IS NOT DISTINCT FROM spine.day
     AND turn_days.device IS NOT DISTINCT FROM spine.device
+    AND turn_days.name IS NOT DISTINCT FROM spine.name
 LEFT JOIN session_days
     ON session_days.day IS NOT DISTINCT FROM spine.day
     AND session_days.device IS NOT DISTINCT FROM spine.device
+    AND session_days.name IS NOT DISTINCT FROM spine.name
 LEFT JOIN failure_days
     ON failure_days.day IS NOT DISTINCT FROM spine.day
     AND failure_days.device IS NOT DISTINCT FROM spine.device
+    AND failure_days.name IS NOT DISTINCT FROM spine.name
 LEFT JOIN suppression_days
     ON suppression_days.day IS NOT DISTINCT FROM spine.day
-    AND suppression_days.device IS NOT DISTINCT FROM spine.device""",
+    AND suppression_days.device IS NOT DISTINCT FROM spine.device
+    AND suppression_days.name IS NOT DISTINCT FROM spine.name""",
 )
 
 
@@ -1087,27 +1112,29 @@ SESSIONS_BY_DEVICE = per_device(
     SELECT
         {SESSION_DAY} AS day,
         s.device AS device,
+        s.device_name AS name,
         count(*) AS sessions,
         count(*) FILTER (WHERE s.metrics) AS telemetry_sessions
     FROM {SCHEMA}.sessions s
-    GROUP BY 1, 2
+    GROUP BY 1, 2, 3
 ), turn_days AS (
     SELECT
         {offset_day("t")} AS day,
         s.device AS device,
+        s.device_name AS name,
         count(*) AS turns
     FROM {SCHEMA}.turns t
     JOIN {SCHEMA}.sessions s ON s.session = t.session
-    GROUP BY 1, 2
+    GROUP BY 1, 2, 3
 ), spine AS (
-    SELECT day, device FROM session_days
+    SELECT day, device, name FROM session_days
     UNION
-    SELECT day, device FROM turn_days
+    SELECT day, device, name FROM turn_days
 )
 SELECT
     spine.day AS day,
     spine.device AS device,
-    NULL::text AS name,
+    spine.name AS name,
     coalesce(session_days.sessions, 0) AS sessions,
     coalesce(session_days.telemetry_sessions, 0) AS telemetry_sessions,
     coalesce(turn_days.turns, 0) AS turns
@@ -1115,9 +1142,11 @@ FROM spine
 LEFT JOIN session_days
     ON session_days.day IS NOT DISTINCT FROM spine.day
     AND session_days.device IS NOT DISTINCT FROM spine.device
+    AND session_days.name IS NOT DISTINCT FROM spine.name
 LEFT JOIN turn_days
     ON turn_days.day IS NOT DISTINCT FROM spine.day
-    AND turn_days.device IS NOT DISTINCT FROM spine.device""",
+    AND turn_days.device IS NOT DISTINCT FROM spine.device
+    AND turn_days.name IS NOT DISTINCT FROM spine.name""",
 )
 
 
