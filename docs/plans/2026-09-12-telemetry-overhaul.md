@@ -939,7 +939,8 @@ the manifest with its own generator when stale.
   `manifest_bytes` their `vinga.` names. Live gate recorded. Design
   footprint: four tables and one fold on the module that owns folds,
   one retained fact beside the provider context.
-- [ ] **M3: cost accounting**. `characters` declared on
+- [x] **[M3: cost accounting](2026-09-12-telemetry-overhaul-implementation.md#m3-cost-accounting)**
+  (PR TBD). `characters` declared on
   `SentenceSynthesized` and passed at the emit site;
   `gen_ai.usage.input_characters` on the TTS span and
   `gen_ai.usage.input_seconds` on the ASR span; Langfuse model

@@ -361,3 +361,142 @@ span on a different trace. A reader of the turn trace gets the timings
 and not a word of what was said, which is exactly what that issue
 reports, and what M4a plus #506 are sequenced to fix.
 
+
+## M3: cost accounting
+
+One declared field, two table entries, and the half the plan review
+forced: the procedure an operator follows to turn usage into money,
+because the server never writes a price. What changes for a deployment
+is that all three conversation stages report what they were given
+instead of one, and that a documented set of backend model definitions
+can price two of them.
+
+### What landed
+
+| Piece | Where |
+| --- | --- |
+| `characters` on the synthesis event | `events/catalog.py`: a declared `Count` on `SentenceSynthesized`, with the note saying it is the length of the sentence handed to the voice and never a byte of it |
+| The measurement at the emit site | `events/assembly.py` `sentence_synthesized` takes the number, and `runtime/pipeline.py` passes `len(sentence)` from `_speak_after`, which is where the string already is; `_sentence_synthesized` gains the parameter and no access to the text |
+| The usage attributes | `telemetry.py`: `ASR_USAGE` and `TTS_USAGE` beside the stage tables, `duration_s` exported under its vinga name AND `gen_ai.usage.input_seconds`, and `characters` under `gen_ai.usage.input_characters` |
+| The events reference | `docs/reference/events.md`, regenerated with `uv run vinga-server events reference` |
+| The operator procedure | `vinga-server/README.md`, a new "What a conversation cost" section between the capture and conversation-store ones, plus its bullet in the page index |
+| The map's row | `docs/architecture/observability-surfaces.md`: the exported-traces row says each stage reports what it was given, in its own unit, and that the cost is the backend's to compute |
+| The fragment | `changelog.d/502-usage-accounting.md` (### Added) |
+| The cases | `tests/unit/test_event_assembly.py` (the shape), `tests/unit/test_turn_lifecycle.py` (the emit site, driven through a real reply), `tests/unit/test_telemetry_spans.py` (both usage attributes and the absence), with `characters` added to `synthesize` in `tests/support/telemetry.py` and to the recorded payload in `tests/unit/test_event_baseline.py` |
+
+### Deviations from the plan
+
+One, and it is a widening rather than a departure.
+
+- **The ASR usage attribute rides the table entry `duration_s`
+  already has, so every ASR outcome that measured the audio reports
+  it.** The plan and the brief both say the seconds come from
+  `heard.duration_s`. `ASR_ATTRIBUTES` is one table for all four ASR
+  ends, and `_attributes` already exports one value under several
+  names, so spelling the entry as a pair gives `nothing_heard` and
+  `transcription_abandoned` the usage too. That is the honest answer
+  rather than an accident: the ear was given that many seconds of audio
+  whatever came back from it, and a vendor bills for the call that
+  returned an empty transcript. A second code path that exported the
+  seconds only for `heard` would have been a second home for one fact
+  and would have under-reported what a deployment was charged.
+
+### Resolutions the plan left to this milestone
+
+- **`characters` is required rather than absent-able.** Every emit
+  site holds the sentence it synthesized, so a missing count would mean
+  a caller that forgot rather than a measurement that could not be
+  taken, and the catalog is where that distinction is declared.
+- **The field sits between `index` and `stream_ms`.** It is a fact
+  about the sentence, so it goes with the other one, and the two
+  latencies stay together after it.
+- **The TTS characters get no vinga spelling of their own.** The ASR
+  seconds keep `vinga.asr.duration_s` because that name was already
+  exported and read; the count is new and nothing read it before, so
+  one name is enough and a second would be the same fact twice.
+- **Where the README section goes and what it is called.** "What a
+  conversation cost", between "Capturing a session" and "The
+  conversation store", which puts it in the run of operator sections
+  the plan names and next to the other one that talks to a telemetry
+  backend.
+
+### Discoveries
+
+- **A failed transcription carries no `duration_s` at all**, which is
+  what makes the absence case real rather than synthetic. The field is
+  declared `carried=False` on `ProviderFailed`: it is rendered into the
+  sentence the log line prints and never put in the payload. So the
+  span for a failed ASR call reports no usage rather than zero seconds,
+  and the existing comment on `ASR_ATTRIBUTES` already said as much,
+  that `duration_s` is on three of the four outcomes.
+- **That case passes against the pre-milestone code**, because it is an
+  absence assertion, and it was proved by mutation instead of by
+  watching it fail: `attributes.setdefault(ASR_USAGE, 0.0)` in the ASR
+  fold makes it fail, and it passes again with the mutation reverted.
+  Recorded because "written to fail first" cannot be honestly claimed
+  for it.
+- **Three closed-set pins moved with the tables.** The two quartet
+  cases and the one about an outcome that names no ear each assert the
+  exact set of foreign-prefixed keys on a span, so a usage attribute is
+  exactly the kind of arrival they exist to catch. They subtract the
+  new names by name rather than by loosening to a prefix match, which
+  is the property that makes them worth keeping.
+- **The unit lane run under CI's own distribution fails here for
+  reasons that are not this milestone's.** `-n auto --dist loadfile`
+  produced database errors across `test_memory_schema.py`,
+  `test_db_open.py`, `test_session_device_location.py` and others, and
+  every one of those files passes on its own and in a serial run. The
+  compose Postgres this worktree reaches is shared with another session
+  in this repository, so the parallel lane contends with it. Recorded
+  as an environment fact, not as a result.
+- **The published pricing URL has moved.** `platform.openai.com/docs/pricing`
+  answers 301 to `developers.openai.com/api/docs/pricing`, and the
+  README cites the destination so a reader does not follow a redirect
+  to find out whether the price is still there.
+
+### Verification
+
+- [x] `uv run ruff check .`: `All checks passed!`
+- [x] `uv run mypy` (the events package's strict lane, which this
+      milestone's new field is inside): `Success: no issues found in 5
+      source files`.
+- [x] `uv run pytest tests/unit -q`: `7179 passed, 19 skipped in
+      769.98s`, against the 7174 of M2's recorded run, which is this
+      milestone's five cases.
+- [x] `uv run pytest tests/unit/test_command_spellings.py -q`:
+      `52 passed`, the manifest unchanged by this milestone's
+      documentation.
+- [x] The events reference drift check
+      (`uv run pytest tests/unit/test_event_docs.py tests/unit/test_event_baseline.py -q`):
+      `30 passed`, after regenerating with the generator.
+- [x] `python3 scripts/check_doc_links.py .`:
+      `checked 239 files, 0 failures`.
+- [x] `python3 scripts/fold_changelog.py check .`:
+      `checked 2 fragments, 0 failures`.
+- [x] `uv run pytest tests/integration -q`: `341 passed in 483.49s`.
+- [ ] The M3 live gate, which is the section below. It belongs to
+      whoever holds the backend's credentials: this milestone must not
+      create a model definition in anyone's project, and did not.
+- [ ] Anything on a board. No protocol, no firmware-visible behavior
+      and no device path moves in this milestone.
+
+### The live gate
+
+Not run here, and deliberately: the gate enters model definitions in a
+real backend and then reads a cost query back, which is a write to a
+third-party system and needs credentials this milestone declines to
+acquire. What it asks, in the plan's own order:
+
+- does an unrecognized `gen_ai.usage.*` key reach `usageDetails`, or is
+  it dropped, in which case the recorded fallback is
+  `langfuse.observation.usage_details` carrying canonical JSON beside
+  the conventions' name and never instead of it;
+- do the ASR and TTS observations arrive as `GENERATION`;
+- does a definition entered through `createModel` price them;
+- and the issue's stated acceptance, qualified as the plan settles it:
+  against a backend with the documented definitions entered, the
+  per-session per-stage cost query returns nonzero rows for `asr`,
+  `llm` and `tts_stream`.
+
+The four definitions to enter are the README's table, which is written
+so the gate can be run from it without reading this section.
