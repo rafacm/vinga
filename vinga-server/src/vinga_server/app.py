@@ -61,6 +61,7 @@ from vinga_server.runtime import prompt
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
 from vinga_server.telemetry import build_telemetry
 from vinga_server.tools.mcp import McpConfigError, McpServers
+from vinga_server.transcript_export import build_transcript_export
 
 events = ServerEvents(__name__)
 
@@ -581,6 +582,28 @@ async def _build_composition(
     )
     if capture_upload is not None:
         stack.push_async_callback(capture_upload.shutdown)
+    # And the other post-close surface, when a deployment asked for it
+    # (#495). Built from the whole server section for the same reason
+    # the uploader is: the first thing it resolves is recording, and
+    # with nothing recorded it is a no-op rather than a refusal.
+    #
+    # Its shutdown is registered HERE, behind every teardown it has to
+    # unwind in front of. The stack unwinds last in first out, so this
+    # runs before the conversation writer stops, before the event tap
+    # comes off and before telemetry is released, which is exactly what
+    # its contract needs: a worker interrupted mid-job says what became
+    # of that job, and it says it through the tap and onto the trace.
+    # The two registrations that come after this one release nothing (an
+    # attribute is removed and the MCP managers are stopped), so being
+    # the last TEARDOWN registered is what "last" has to mean here.
+    transcripts = build_transcript_export(
+        config.server,
+        telemetry=telemetry,
+        database=database,
+        local_only=config.server.local_only,
+    )
+    if transcripts is not None:
+        stack.push_async_callback(transcripts.shutdown)
     capture = (
         None
         if capture_section is None or not capture_section.enabled
@@ -701,6 +724,7 @@ async def _build_composition(
         capture=capture,
         live=live,
         telemetry=telemetry,
+        transcripts=transcripts,
         api=api_runtime,
     )
     # Connected last, and closed first on the way out so stdio child

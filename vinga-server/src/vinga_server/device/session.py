@@ -71,6 +71,7 @@ from vinga_server.config.models import (
 )
 from vinga_server.config.store import LiveDevice
 from vinga_server.conversations import ConversationStore, SessionSink
+from vinga_server.conversations.records import Acknowledgement
 from vinga_server.device import watchdog
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.device.boundary import (
@@ -118,6 +119,12 @@ from vinga_server.tools.device import DeviceToolClient
 
 if TYPE_CHECKING:  # the registry names this class the same way
     from vinga_server.registry import SessionRegistry
+
+    # And the post-close surface this hands a barrier to, named rather
+    # than imported: `transcript_export.py` imports `telemetry.py`,
+    # which nothing here does, and a runtime import would make this
+    # edge pay for a module it only ever holds.
+    from vinga_server.transcript_export import TranscriptExport
 
 # What the server speaks: TTS output is resampled to this rate, encoded
 # in 60 ms Opus frames, and announced in the server hello.
@@ -181,6 +188,7 @@ class DeviceSession:
         sessions: "SessionRegistry | None" = None,
         live: LiveEvents | None = None,
         telemetry: "Telemetry | None" = None,
+        transcripts: "TranscriptExport | None" = None,
     ) -> None:
         self.websocket = websocket
         # The world this server is serving, asked rather than kept: a
@@ -205,6 +213,12 @@ class DeviceSession:
             bindings if bindings is not None else DeviceBindings.snapshot_only(generations)
         )
         self._captures = captures
+        # And where a closed session's turns go afterwards, when a
+        # deployment asked for that (#495). An optional collaborator
+        # like the captures above, compared `is not None`, and handed
+        # the one thing it cannot get for itself: the handle the store
+        # returns when this session's record is closed.
+        self._transcripts = transcripts
         # Where this connection reports which world it ended up talking
         # through, and where the slot it took goes back. Optional for
         # the caller with no server around it, which is a test driving a
@@ -641,7 +655,13 @@ class DeviceSession:
             # Both after session_closed, so that event is the last line
             # of the decision track, the last row of the record, and the
             # WAV header is patched with a length covering everything.
-            self._stop_recording()
+            #
+            # What comes back is the store's barrier for this session,
+            # kept for the transcript export below: the close is the
+            # last thing this session puts on the writer's queue, so an
+            # acknowledgement of it is what says the session's turns are
+            # readable (#495).
+            recorded = self._stop_recording()
             if self._capture_audio is not None:
                 self._events.detach_capture()
                 self._capture_audio.close()
@@ -656,6 +676,12 @@ class DeviceSession:
             # this session is done.
             if self._captures is not None:
                 self._captures.session_closed(self.session_id)
+            # And beside it, the other post-close surface, handed the
+            # barrier the store just returned. It does no work here: a
+            # read of a retained context and a put on a bounded queue,
+            # and everything else happens on a worker of its own (#495).
+            if self._transcripts is not None:
+                self._transcripts.session_closed(self.session_id, recorded)
             if self._cancelled is not None:
                 # A cleanup step was cancelled, and now that the record
                 # is complete the cancellation goes on its way: the
@@ -875,16 +901,23 @@ class DeviceSession:
         record = self._device_record
         return record.name if record is not None and record.named else None
 
-    def _stop_recording(self) -> None:
+    def _stop_recording(self) -> "Acknowledgement | None":
         """Close this session's row: its duration, what ended it, and
         what it lost. Called after `session_closed` is emitted, so that
         event is the last row of the record as it is the last line of the
-        decision track."""
+        decision track.
+
+        What it answers is the store's barrier for this session, or
+        nothing where there was no record to close. Nothing on this path
+        waits on it: it is handed straight to the transcript export,
+        which is the one surface that must not read the store past its
+        own writes (#495).
+        """
         if self._record is None or self._conversations is None:
-            return
+            return None
         self._events.detach(self._record)
         self._record = None
-        self._conversations.close_session(
+        return self._conversations.close_session(
             self.session_id, self._open_duration_s(), self._closed_reason()
         )
 

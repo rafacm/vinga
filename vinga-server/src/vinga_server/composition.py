@@ -34,6 +34,7 @@ from vinga_server.onboarding import PendingDevices
 from vinga_server.registry import SessionRegistry
 from vinga_server.telemetry import Telemetry
 from vinga_server.tools.mcp import McpServers
+from vinga_server.transcript_export import TranscriptExport
 
 
 @dataclass
@@ -101,4 +102,8 @@ class Composition:
     # a per-session tap and the lifespan closing it, exactly as `live`
     # does.
     telemetry: Telemetry | None
+    # And the transcript exporter beside it, when a deployment asked for
+    # that too (#495). Here for the same reason: the device edge hands
+    # it a closed session and the lifespan shuts it down.
+    transcripts: TranscriptExport | None
     api: ApiRuntime

@@ -61,7 +61,9 @@ from vinga_server.onboarding.origin import onboarding_url
 from vinga_server.providers import ProviderError
 from vinga_server.providers import world as provider_world
 from vinga_server.providers.mock import MockTts
+from vinga_server.telemetry import Telemetry
 from vinga_server.tools.mcp import McpServers
+from vinga_server.transcript_export import TranscriptExport
 
 SENTENCE = "the llm provider 'mock' could not be built"
 
@@ -1110,3 +1112,64 @@ def test_the_mounted_api_holds_the_engine_only_while_the_server_serves(
     # application whose lifespan has been left is not a state a caller
     # can be told anything useful about.
     assert "log" in refused(late.json(), 500)
+
+
+# The transcript exporter's place in the unwind (#495)
+
+
+def test_the_transcript_exporter_unwinds_in_front_of_what_it_needs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ordering the exporter's contract rests on, recorded rather
+    than read off the source because what decides it is the order the
+    callbacks were registered in, which is exactly the kind of thing an
+    edit reverses without meaning to.
+
+    A worker interrupted mid-job has to SAY what became of that job, and
+    it says it as an event through the server tap and as a span through
+    telemetry, after reading the conversation store. So its shutdown has
+    to run while all three are still up: in front of the writer's stop,
+    in front of the tap coming off, and in front of the exporter being
+    released.
+    """
+    order: list[str] = []
+    stopping = ConversationStore.stop
+    releasing = Telemetry.stop_accepting
+    ending = TranscriptExport.shutdown
+
+    def stop(self: ConversationStore) -> None:
+        order.append("writer")
+        stopping(self)
+
+    def stop_accepting(self: Telemetry) -> None:
+        order.append("telemetry")
+        releasing(self)
+
+    async def shutdown(self: TranscriptExport) -> None:
+        order.append("transcripts")
+        await ending(self)
+
+    monkeypatch.setattr(ConversationStore, "stop", stop)
+    monkeypatch.setattr(Telemetry, "stop_accepting", stop_accepting)
+    monkeypatch.setattr(TranscriptExport, "shutdown", shutdown)
+
+    config = config_with_agent(
+        server={
+            "database": {"name": DatabaseConfig().name},
+            "conversations": {"enabled": True, "text": True},
+            "telemetry": {"enabled": True, "export_transcripts": True},
+        }
+    )
+    with TestClient(served(config)) as client:
+        assert client.app.state.composition.transcripts is not None
+        assert order == [], "something was let go of while serving"
+
+    assert order.index("transcripts") < order.index("writer")
+    assert order.index("transcripts") < order.index("telemetry")
+
+
+def test_a_deployment_that_records_nothing_builds_no_transcript_exporter() -> None:
+    """The default, from the composition's own end: the flag is off, so
+    nothing is built and nothing rides the composition."""
+    with TestClient(served(recording_config(DatabaseConfig().name))) as client:
+        assert client.app.state.composition.transcripts is None
