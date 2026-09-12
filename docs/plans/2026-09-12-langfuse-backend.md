@@ -482,7 +482,7 @@ variant case, and the workflow's per-image import checks.
 
 ## Milestones
 
-- [ ] **M1: the mapping, verified against a live Langfuse.** The
+- [x] **[M1: the mapping, verified against a live Langfuse](2026-09-12-langfuse-backend-implementation.md#m1-the-mapping-verified-against-a-live-langfuse)** (PR TBD). The
   local walkthrough with the #66 exporter as merged; findings
   recorded; the proven-necessary aliases added to the attribute
   tables with unit pins and wire assertions; the acceptance's
