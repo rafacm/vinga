@@ -4087,15 +4087,16 @@ CAPTURE_UPLOADED = declare(
 CAPTURE_UPLOAD_FAILED = declare(
     "capture_upload_failed",
     note=(
-        "A recording is not beside its trace, and why, from a closed set "
-        "of eight reasons. The field test's whole trail: a capture that "
+        "A recording is not usable from its trace, and why, from a closed "
+        "set of nine reasons. The field test's whole trail: a capture that "
         "silently failed to attach would leave a reader with a trace, no "
-        "audio, and no way to learn that any was meant to be there. Two "
-        "variants because two subsystems answer for it: seven reasons are "
-        "an attempt's own, said by the uploader, and `abandoned` is what a "
-        "restart finds staged and removes, said by the recording surface "
-        "that opens the directory whether or not an uploader was built at "
-        "all."
+        "audio, and no way to learn that any was meant to be there, and a "
+        "capture whose bytes landed with nothing pointing at them is the "
+        "same gap wearing a success. Two variants because two subsystems "
+        "answer for it: eight reasons are an attempt's own, said by the "
+        "uploader, and `abandoned` is what a restart finds staged and "
+        "removes, said by the recording surface that opens the directory "
+        "whether or not an uploader was built at all."
     ),
     variants=(CaptureUploadFailed, CaptureUploadAbandoned),
 )

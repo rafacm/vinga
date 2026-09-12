@@ -45,6 +45,7 @@ from typing import Any
 import pytest
 
 from tests.support.events import every_format
+from tests.support.telemetry import Receiver, attributes, named
 from tests.support.uploads import exporting
 from vinga_server.capture_upload import (
     _QUIETING,
@@ -86,6 +87,11 @@ class Media:
 
     def __init__(self) -> None:
         self.requests: list[tuple[str, str, bytes]] = []
+        # The ids this endpoint minted, in order, which is what a
+        # reference token has to name: the id is the far side's to
+        # choose, so a case that guessed it would be asserting its own
+        # arithmetic.
+        self.minted: list[str] = []
         self._lock = threading.Lock()
         endpoint = self
 
@@ -110,12 +116,14 @@ class Media:
 
             def do_POST(self) -> None:  # noqa: N802 - the stdlib's spelling
                 self._record("POST")
-                index = len(endpoint.requests)
+                with endpoint._lock:
+                    media_id = f"media-{len(endpoint.minted) + 1}"
+                    endpoint.minted.append(media_id)
                 self._answer(
                     201,
                     {
-                        "mediaId": f"media-{index}",
-                        "uploadUrl": f"{endpoint.url}/upload/media-{index}",
+                        "mediaId": media_id,
+                        "uploadUrl": f"{endpoint.url}/upload/{media_id}",
                     },
                 )
 
@@ -262,6 +270,66 @@ async def test_a_recorded_session_is_attached_to_its_trace(
     # And the staging is empty, because a job nobody will run again is
     # room audio waiting on a disk.
     assert not list(staging_root(captures).iterdir())
+
+
+async def test_the_uploaded_pair_is_referenced_on_the_session_trace(
+    serve, simulate, tmp_path: Path, media: Media, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The half that makes an attachment playable rather than merely
+    stored, decoded off the wire.
+
+    The upload associates the bytes with a trace; the reference written
+    back onto that trace is what makes the backend render a player. It
+    goes out as a span in the session's own trace, which is the path the
+    backend's own ingestion route names as supported when it refuses a
+    trace upsert, so what this reads is protobuf a collector received
+    rather than a second request.
+
+    The teardown order is what makes it readable at all, and it is the
+    exit stack's own: the uploader's shutdown was registered after the
+    exporter's, so it unwinds first, the worker finishes and writes its
+    span, and the exporter's flush behind it is what carries it.
+    """
+    captures = tmp_path / "captures"
+    monkeypatch.setenv(LANGFUSE_HOST_ENV, media.url)
+    monkeypatch.setenv(LANGFUSE_PUBLIC_KEY_ENV, "pk-lf-test")
+    monkeypatch.setenv(LANGFUSE_SECRET_KEY_ENV, "sk-lf-test")
+    collector = Receiver()
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.endpoint)
+
+    try:
+        async with serve(attaching(captures)) as port:
+            await simulate(port, DEVICE_MAC)
+            await a_finished_capture(captures)
+            await uploaded(media, 2)
+        spans = collector.spans()
+    finally:
+        collector.close()
+
+    minted = media.minted
+    assert len(minted) == 2
+    assert spans, "nothing reached the collector at all"
+
+    written = named(spans, "capture")
+    held = attributes(written)
+    # Both tokens, in the backend's own spelling, naming the ids the
+    # endpoint minted a moment earlier.
+    for name, kind, media_id in (
+        ("capture_audio", "audio/wav", minted[0]),
+        ("capture_manifest", "application/json", minted[1]),
+    ):
+        token = f"@@@langfuseMedia:type={kind}|id={media_id}|source=bytes@@@"
+        assert held[f"langfuse.observation.metadata.{name}"] == token
+        assert token in held["langfuse.observation.output"]
+    # In the session's own trace and under the session span, which is
+    # what makes a reader looking at the session find it rather than a
+    # player in a trace nobody opens.
+    session_span = named(spans, "session")
+    assert written.trace_id == session_span.trace_id
+    assert written.parent_span_id == session_span.span_id
+    # And it groups with the session, so the query a reader makes for
+    # that session returns it beside the turns.
+    assert held["session.id"] == attributes(session_span)["session.id"]
 
 
 # --- the hostile backend ----------------------------------------------

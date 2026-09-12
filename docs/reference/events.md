@@ -2519,13 +2519,15 @@ session %s: capture attached to its trace, %.1f MB in %d ms
 
 ### `capture_upload_failed`
 
-A recording is not beside its trace, and why, from a closed set of eight
+A recording is not usable from its trace, and why, from a closed set of nine
 reasons. The field test's whole trail: a capture that silently failed to
 attach would leave a reader with a trace, no audio, and no way to learn that
-any was meant to be there. Two variants because two subsystems answer for it:
-seven reasons are an attempt's own, said by the uploader, and `abandoned` is
-what a restart finds staged and removes, said by the recording surface that
-opens the directory whether or not an uploader was built at all.
+any was meant to be there, and a capture whose bytes landed with nothing
+pointing at them is the same gap wearing a success. Two variants because two
+subsystems answer for it: eight reasons are an attempt's own, said by the
+uploader, and `abandoned` is what a restart finds staged and removes, said by
+the recording surface that opens the directory whether or not an uploader was
+built at all.
 
 #### Variant 1: `vinga_server.capture_upload` at WARNING
 
@@ -2536,13 +2538,13 @@ session %s: capture not attached to its trace (%s)
 | # | Argument | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- |
 | 1 | `session` (`ID`) | no | the `session_id` syntax |  |
-| 2 | `reason` (`TOKEN`) | no | one of: `dropped`, `incomplete`, `no_trace`, `refused`, `staging_lost`, `too_large`, `unreachable` |  |
+| 2 | `reason` (`TOKEN`) | no | one of: `dropped`, `incomplete`, `no_trace`, `refused`, `staging_lost`, `too_large`, `unreachable`, `unreferenced` |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `reason` | `TOKEN` | yes | no | one of: `dropped`, `incomplete`, `no_trace`, `refused`, `staging_lost`, `too_large`, `unreachable` | Which of the ways an attempt ends badly this was. Never the far side's words: what an operator acts on is the class of the failure, and a response body near a credential is not this server's to write down. |
+| `reason` | `TOKEN` | yes | no | one of: `dropped`, `incomplete`, `no_trace`, `refused`, `staging_lost`, `too_large`, `unreachable`, `unreferenced` | Which of the ways an attempt ends badly this was. Never the far side's words: what an operator acts on is the class of the failure, and a response body near a credential is not this server's to write down. |
 
 #### Variant 2: `vinga_server.capture` at WARNING
 

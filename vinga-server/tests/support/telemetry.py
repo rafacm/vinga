@@ -7,11 +7,22 @@ variants the trace's shape is built out of. Building those by hand at
 the top of every case would be the same forty lines four times over, so
 they live here.
 
+`Receiver` and the two readers beside it are the other half: a real
+OTLP/HTTP collector in this process, so a lane can read what actually
+arrived on the wire rather than what an in-memory exporter kept. They
+were the export suite's own until a second suite needed them, which is
+the rule this directory exists for and which
+`test_support_boundaries.py` enforces: a helper two suites need belongs
+to neither of them.
+
 Nothing here knows what a span means. It provokes emissions and hands
-back what the exporter kept; every assertion about the shape is the
-suite's.
+back what the exporter kept or what a collector received; every
+assertion about the shape is the suite's.
 """
 
+import gzip
+import http.server
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -210,7 +221,12 @@ def finished(telemetry: Telemetry, memory: Any) -> list[Any]:
 
 
 def named(spans: list[Any], name: str) -> Any:
-    """The one span of a name, insisted on."""
+    """The one span of a name, insisted on.
+
+    Reads a `.name`, so it serves both what an in-memory exporter kept
+    and what `Receiver` below decoded: the protobuf message carries the
+    same field, which is what let the export suite's own copy of this go.
+    """
     matching = [span for span in spans if span.name == name]
     assert len(matching) == 1, f"expected one {name} span, got {len(matching)}"
     return matching[0]
@@ -578,3 +594,97 @@ def capture_started(emitter: ServerEvents, path: str = "/data/captures") -> None
     emitter.emit(
         lambda: CaptureStarted(session=SessionId(SESSION), path=ConfiguredPath(Path(path)))
     )
+
+
+class Receiver:
+    """An OTLP/HTTP collector, in this process and in one thread.
+
+    It accepts exactly what the exporter sends (a POST of protobuf to
+    `/v1/traces`, gzipped or not) and keeps the bodies. Answering 200
+    with an empty `ExportTraceServiceResponse` is what an OTLP receiver
+    owes a client, and it matters here: a client that is refused retries,
+    and a retry would make the count of what arrived a function of
+    timing.
+    """
+
+    def __init__(self) -> None:
+        self.bodies: list[bytes] = []
+        received = self.bodies
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self) -> None:  # noqa: N802 (the stdlib's spelling)
+                length = int(self.headers.get("content-length", 0))
+                body = self.rfile.read(length)
+                if self.headers.get("content-encoding") == "gzip":
+                    body = gzip.decompress(body)
+                if self.path.endswith("/v1/traces"):
+                    received.append(body)
+                self.send_response(200)
+                self.send_header("content-type", "application/x-protobuf")
+                self.send_header("content-length", "0")
+                self.end_headers()
+
+            def log_message(self, *args: Any) -> None:
+                """Silence: this lane's output is the test's."""
+
+        self._server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    @property
+    def endpoint(self) -> str:
+        host, port = self._server.server_address[:2]
+        return f"http://{host}:{port}"
+
+    def close(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join(timeout=5.0)
+
+    def spans(self) -> list[Any]:
+        """Every span in every body, decoded.
+
+        The proto package rides the exporter's own dependency, so this
+        decodes with the same definitions the server encoded with rather
+        than with a hand-written reader.
+        """
+        from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
+            ExportTraceServiceRequest,
+        )
+
+        decoded = []
+        for body in self.bodies:
+            request = ExportTraceServiceRequest()
+            request.ParseFromString(body)
+            for resource in request.resource_spans:
+                for scope in resource.scope_spans:
+                    decoded.extend(scope.spans)
+        return decoded
+
+    def resources(self) -> list[Any]:
+        from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
+            ExportTraceServiceRequest,
+        )
+
+        found = []
+        for body in self.bodies:
+            request = ExportTraceServiceRequest()
+            request.ParseFromString(body)
+            found.extend(resource.resource for resource in request.resource_spans)
+        return found
+
+
+def attributes(carrier: Any) -> dict[str, Any]:
+    """One protobuf attribute list as the plain mapping a case reads.
+
+    `AnyValue` is a union of five fields and exactly one is set, so the
+    value is whichever one the message says it is; anything else would
+    be this helper inventing a type the wire did not carry.
+    """
+    flat = {}
+    for pair in carrier.attributes:
+        which = pair.value.WhichOneof("value")
+        flat[pair.key] = getattr(pair.value, which) if which else None
+    return flat
+
+

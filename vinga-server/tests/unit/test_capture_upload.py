@@ -125,7 +125,9 @@ def an_uploader(
     uploads = CaptureUpload(
         tmp_path / "captures",
         sdk=seam,
-        telemetry=exporting(traces if traces is not None else {}),
+        telemetry=options.pop(
+            "telemetry", exporting(traces if traces is not None else {})
+        ),
         backlog=backlog,
         retries=options.pop("retries", 0),
         backoff_s=options.pop("backoff_s", 0.0),
@@ -757,6 +759,82 @@ async def test_an_attachment_that_landed_says_what_it_cost(
     assert not any("media" in str(key).lower() for key in held)
 
 
+@pytest.mark.asyncio
+async def test_each_uploaded_file_is_referenced_back_onto_the_trace(
+    tmp_path: Path, endpoint: str
+) -> None:
+    """The half that makes an attachment playable rather than merely
+    stored.
+
+    An upload associates a recording with a trace; what makes the backend
+    render it is a reference token written back onto that trace, which
+    both milestones' walkthroughs established. So the uploader asks the
+    exporter for exactly that, once per file, in the backend's own
+    spelling and naming the id the backend minted.
+    """
+    from tests.support.uploads import Traced
+
+    traced = Traced({"s1": TRACE})
+    uploads = CaptureUpload(
+        tmp_path / "captures",
+        sdk=fake_sdk()[0],
+        telemetry=traced,  # type: ignore[arg-type]
+        backlog=4,
+        retries=0,
+        shutdown_timeout_s=10.0,
+    )
+    store = capture_store(tmp_path, uploads=uploads)
+
+    a_recording(store, "s1")
+    store.session_closed("s1")
+    await drained(uploads)
+
+    assert len(traced.referenced) == 1
+    session, references = traced.referenced[0]
+    assert session == "s1"
+    assert sorted(references) == ["capture_audio", "capture_manifest"]
+    assert references["capture_audio"].startswith("@@@langfuseMedia:type=audio/wav|id=")
+    assert references["capture_manifest"].startswith(
+        "@@@langfuseMedia:type=application/json|id="
+    )
+    assert all(one.endswith("|source=bytes@@@") for one in references.values())
+    # The ids are the far side's, one per file, and they are the only
+    # far-side facts this server ever repeats: inside a token that only
+    # the backend can resolve, and never in an event.
+    assert len({one.split("|id=")[1] for one in references.values()}) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_recording_nothing_points_at_is_reported_as_a_failure(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, endpoint: str
+) -> None:
+    """`unreferenced`, which is the gap this surface exists to close
+    wearing a success.
+
+    The bytes landed and nothing points at them, so a reader has a trace,
+    audio in a store they cannot reach from it, and no reason to think
+    any is there. Said as a failure rather than as an upload with an
+    asterisk, and the exporter refusing is the real shape of it: a server
+    shutting down stops accepting spans while the worker is still
+    finishing.
+    """
+    caplog.set_level(logging.DEBUG)
+    uploads, recorder = an_uploader(
+        tmp_path, traces={"s1": TRACE}, telemetry=exporting({"s1": TRACE}, refusing=True)
+    )
+    store = capture_store(tmp_path, uploads=uploads)
+
+    a_recording(store, "s1")
+    store.session_closed("s1")
+    await drained(uploads)
+
+    # The upload itself happened, which is what makes the reason the
+    # right one rather than `unreachable`.
+    assert recorder.kinds == ["audio/wav", "application/json"]
+    assert reasons(caplog) == [CaptureUploadFailure.UNREFERENCED]
+    assert uploads_said(caplog) == []
+
+
 # --- the failures ------------------------------------------------------
 
 
@@ -1335,6 +1413,9 @@ async def test_the_sdk_namespace_is_quiet_before_the_worker_does_anything(
             quiet.append(logging.getLogger("httpx").propagate is False)
             return TRACE
 
+        def reference_media(self, session: str, references: dict[str, str]) -> bool:
+            return True
+
     seam, _ = fake_sdk()
     uploads = CaptureUpload(
         tmp_path / "captures",
@@ -1414,6 +1495,9 @@ async def test_an_uploader_that_outlived_its_bound_keeps_the_next_one_quiet(
         def trace_of(self, session: str) -> str | None:
             quiet_while_b_ran.append(logging.getLogger("httpx").propagate is False)
             return TRACE
+
+        def reference_media(self, session: str, references: dict[str, str]) -> bool:
+            return True
 
     second, _ = fake_sdk(recorder)
     running = CaptureUpload(

@@ -769,6 +769,94 @@ def test_the_retention_keeps_the_last_sessions_and_evicts_the_oldest() -> None:
     assert len({telemetry.trace_of(one) for one in ids[1:]}) == RETAINED_TRACES
 
 
+# --- the reference that makes an attachment playable -------------------
+#
+# The second half of `trace_of`'s reason to exist (#67 M3, the round's
+# fifth finding). An upload associates a recording with a trace; what
+# makes a backend render it is a reference token written back onto that
+# trace, and the backend's own ingestion route refuses a trace upsert on
+# a current self-hosted deployment and names the OTLP path as the
+# supported one. So the reference is a span in that trace, written after
+# the session closed and all its spans ended, which is the one thing the
+# retention above makes possible.
+
+
+A_REFERENCE = "@@@langfuseMedia:type=audio/wav|id=probe-media-1|source=bytes@@@"
+
+
+def test_a_reference_lands_in_the_trace_the_session_was_exported_under() -> None:
+    """One span, in that trace, as a child of the session span.
+
+    The trace is the claim: a reference in a trace of its own would
+    render a player nobody looking at the session would ever find, which
+    is the gap the attachment exists to close rather than a fix for it.
+    """
+    from opentelemetry.trace import format_trace_id
+
+    telemetry, memory = exporting()
+    a_session(telemetry, SESSION)
+    trace = telemetry.trace_of(SESSION)
+    assert trace is not None
+
+    assert telemetry.reference_media(SESSION, {"capture_audio": A_REFERENCE}) is True
+
+    spans = finished(telemetry, memory)
+    referencing = [span for span in spans if span.name == "capture"]
+    assert len(referencing) == 1
+    written = referencing[0]
+    session_span = next(span for span in spans if span.name == "session")
+    assert format_trace_id(written.context.trace_id) == trace
+    assert written.parent is not None
+    assert written.parent.span_id == session_span.context.span_id
+
+
+def test_a_reference_is_written_under_both_names_a_reader_meets() -> None:
+    """Two spellings for one token, because the backend resolves a
+    reference wherever it finds one and the two render differently: the
+    metadata key is what a reader filters and reads, and the output field
+    is what puts a player in the trace view. Both were confirmed live."""
+    telemetry, memory = exporting()
+    a_session(telemetry, SESSION)
+
+    telemetry.reference_media(
+        SESSION, {"capture_audio": A_REFERENCE, "capture_manifest": "m"}
+    )
+
+    written = next(
+        span for span in finished(telemetry, memory) if span.name == "capture"
+    )
+    held = dict(written.attributes or {})
+    assert held["langfuse.observation.metadata.capture_audio"] == A_REFERENCE
+    assert held["langfuse.observation.metadata.capture_manifest"] == "m"
+    assert held["langfuse.observation.output"] == f"{A_REFERENCE}\nm"
+    # And it groups with its session, so the query a reader makes finds
+    # it beside the turns.
+    assert held["vinga.session.id"] == SESSION
+    assert held["session.id"] == SESSION
+
+
+def test_a_session_with_no_retained_trace_cannot_be_referenced() -> None:
+    """Nothing is invented. A session this exporter never saw, or one
+    whose id has aged out, answers False, and what a caller does with a
+    False is say so."""
+    telemetry, memory = exporting()
+
+    assert telemetry.reference_media("neverseen", {"capture_audio": A_REFERENCE}) is False
+    assert [span for span in finished(telemetry, memory) if span.name == "capture"] == []
+
+
+def test_a_shutting_down_exporter_writes_no_reference() -> None:
+    """The real shape of the refusal an uploader has to report: a server
+    tearing down stops accepting while the worker is still finishing, and
+    a span started then would be one nothing will export."""
+    telemetry, memory = exporting()
+    a_session(telemetry, SESSION)
+    telemetry.stop_accepting()
+
+    assert telemetry.reference_media(SESSION, {"capture_audio": A_REFERENCE}) is False
+    assert [span for span in finished(telemetry, memory) if span.name == "capture"] == []
+
+
 def test_a_trace_is_readable_from_a_thread_that_is_not_the_session_loop() -> None:
     """The reader is the uploader's worker thread and the writer is the
     session loop, which is why the map has a lock of its own rather than
