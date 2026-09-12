@@ -124,8 +124,15 @@ NEEDS_THE_LANGFUSE_EXTRA = (
 # first upload's warning event rather than a refused boot. A missing key
 # reaches the far side as an unauthenticated request and comes back
 # `refused`, which is the honest report.
+# Three variables and not a fourth. The SDK's tracing client also
+# honors `LANGFUSE_BASE_URL` ahead of `LANGFUSE_HOST`, and this module
+# deliberately does not: that client is not the one this uses, nothing
+# in this repository documents the alias, and a variable an operator
+# never wrote that takes precedence over the one they did is a way for
+# room audio to reach a deployment nobody named. One documented name,
+# and it is the name on the generated reference and in both example
+# configs.
 LANGFUSE_HOST_ENV = "LANGFUSE_HOST"
-LANGFUSE_BASE_URL_ENV = "LANGFUSE_BASE_URL"
 LANGFUSE_PUBLIC_KEY_ENV = "LANGFUSE_PUBLIC_KEY"
 LANGFUSE_SECRET_KEY_ENV = "LANGFUSE_SECRET_KEY"
 
@@ -139,6 +146,21 @@ LANGFUSE_SECRET_KEY_ENV = "LANGFUSE_SECRET_KEY"
 # who wants any of it attaches a handler to the namespace itself, which
 # is a deliberate act rather than the default.
 QUIETED_NAMESPACES = ("langfuse", "httpx", "httpcore", "backoff")
+
+# And the one claim on them, for the whole process.
+#
+# Module level and not per uploader, which is the whole of what
+# `Quieting` is for and the one way to get it wrong: the logging
+# configuration is process-wide and uploaders overlap, because a wedged
+# worker outlives its shutdown's bound and a redeploy builds the next
+# uploader while the last one is still finishing. Two instances each
+# reference-counting their own claim on one global is exactly the
+# scenario `quieting.py` spells out: A's release restores the original
+# configuration while B is still uploading, so B's next presigned URL
+# reaches the retained log, and B's own release then restores A's
+# already-quiet snapshot and silences the namespaces for the rest of the
+# process with nothing holding them.
+_QUIETING = Quieting(*QUIETED_NAMESPACES)
 
 # Where a staged pair waits, under the capture directory so the links
 # land on the same filesystem as the files they are links to, which is
@@ -462,13 +484,15 @@ class CaptureUpload:
         self._starting = threading.Lock()
         self._worker: threading.Thread | None = None
         self._stopping = threading.Event()
-        # The SDK's silence, taken by the worker before it constructs
-        # anything and given back only when the worker has genuinely
-        # stopped, which is the asymmetry `Telemetry.shutdown` explains:
-        # a bounded wait that expired leaves work in flight, and what
-        # that work is about to log is a presigned URL.
+        # This uploader's claim on `_QUIETING` above, taken by the
+        # worker before it constructs anything and given back only when
+        # the worker has genuinely stopped, which is the asymmetry
+        # `Telemetry.shutdown` explains: a bounded wait that expired
+        # leaves work in flight, and what that work is about to log is a
+        # presigned URL. The claim is this uploader's and the quieting is
+        # the process's, which is why one is a field here and the other
+        # is not.
         self._quieted: Lease | None = None
-        self._quieting = Quieting(*QUIETED_NAMESPACES)
         self._client: Any | None = None
         self._http: httpx.Client | None = None
 
@@ -625,7 +649,7 @@ class CaptureUpload:
         the moment the work is genuinely over rather than the moment
         somebody stopped waiting for it.
         """
-        self._quieted = self._quieting.take()
+        self._quieted = _QUIETING.take()
         try:
             while True:
                 try:
@@ -734,9 +758,7 @@ class CaptureUpload:
         raises is an upload that failed and never a thread that died.
         """
         if self._client is None:
-            base = os.environ.get(LANGFUSE_BASE_URL_ENV) or os.environ.get(
-                LANGFUSE_HOST_ENV
-            )
+            base = os.environ.get(LANGFUSE_HOST_ENV)
             if not base:
                 # No default, and specifically not the SDK's own, which
                 # is a vendor's hosted endpoint: a server that quietly
