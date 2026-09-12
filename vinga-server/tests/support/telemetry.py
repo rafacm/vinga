@@ -62,6 +62,7 @@ from vinga_server.events.values import (
     ConversationId,
     Count,
     DeviceId,
+    DeviceName,
     DroppedFrames,
     Flag,
     Identifier,
@@ -260,6 +261,7 @@ def open_session(
     events: SessionEvents,
     providers: dict[str, Any] | None = None,
     keep_identities: bool = False,
+    device_name: str | None = None,
 ) -> float:
     """The session's own open. `providers` is what it says the
     conversation opened against, defaulting to the two-agent world
@@ -272,6 +274,12 @@ def open_session(
     pipeline then cannot find. So a caller with a live session asks for
     its own identities to be kept and gets a `session_open` about the
     session it actually has.
+
+    `device_name` is what an operator called the board, and it defaults
+    to the state every deployment's boards are in until somebody runs
+    `device rename`: nothing at all. A case about the name passes one,
+    which is the bounded copy the payload carries rather than anything
+    a device sent.
     """
     entries = PROVIDERS if providers is None else providers
     if not keep_identities:
@@ -290,10 +298,7 @@ def open_session(
             providers=ProviderEntries(entries),
             protocol=Whole(1),
             revision=Identifier("abc1234"),
-            # The board this lane drives is bound by MAC and named by
-            # nobody, which is the state every deployment's boards are
-            # in until an operator runs `device rename`.
-            device_name=None,
+            device_name=None if device_name is None else DeviceName(device_name),
             mac=DeviceId(device),
             said_client=ClientId("a-device-uuid"),
             bound_tail=AlsoBoundTo.of(()),
