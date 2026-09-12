@@ -381,3 +381,206 @@ reverted: six unit cases failing on `'session.id'` and the wire case on
 - `python3 scripts/check_doc_links.py .`: checked 231 files, 0 failures
 - `uv run pytest tests/unit/test_command_spellings.py -q`: 52 passed
 - The live walkthrough above, both runs, recorded rather than asserted.
+
+## M2: the correlation and the vocabulary
+
+The milestone designed from M1's recorded answers. Its first half
+landed as planned and is smaller than the plan feared, because the
+media API accepts a trace that has not been ingested yet and no
+ordering retry is needed. Its second half did NOT land here, and the
+reason is a repository invariant the plan's milestone cut did not
+account for: it is recorded in full below, with the declarations as
+designed, so M3 lands them whole rather than rediscovering them.
+
+### `Telemetry.trace_of`, and what it retains
+
+One method, and nothing else on the surface:
+
+```python
+def trace_of(self, session: str) -> str | None:
+```
+
+- **Recorded when the session span opens**, not at the close. That is
+  where the id exists, and a session the process later loses (a span
+  left unended) is still one a reader may ask about.
+- **Spelled by the SDK's own `format_trace_id`**, bound in `__init__`
+  beside the three OTel names the span lifecycle already binds. The
+  thirty-two lowercase hex characters an OTLP request carries are the
+  same characters `POST /api/public/media` takes back, which M1's
+  walkthrough established by running the round trip; a second spelling
+  written out here would be the drift `trace_of` exists to prevent.
+- **Retained past the close pop**, which is the whole point: the span
+  map is popped at `session_closed` and the capture triplet is only
+  final after it, so an id that lived as long as the span would be gone
+  at the one moment it is wanted.
+- **Bounded at `RETAINED_TRACES = 64`, oldest evicted first**, the
+  `PENDING_CAPTURES` posture and the same number: what a late reader
+  wants is the session that just ended, and a map that grew with every
+  session a process ever ran would be a slow leak in the one object a
+  server holds for its whole life.
+- **A session this exporter never saw answers None**, which is what
+  makes the uploader's `no_trace` a real answer rather than an invented
+  id.
+
+**The synchronization, stated rather than implied.** Everything else
+`Telemetry` holds is written and read on the session loop, which is why
+the span map and the pending-capture hold need no lock. This map is
+written there and read from the uploader's worker thread, so it has a
+lock of its own (`_retained_lock`) and the two operations a write is
+(record, then evict) are held together rather than left to the
+interpreter's own atomicity to imply. The module's existing discipline
+for cross-thread state is exactly this: a `threading.Lock` around the
+state, and `_claim`/`_QUIETING` are the precedents.
+
+### Why the two catalog events are not here
+
+The plan gives M2 the vocabulary and M3 the uploader that emits it.
+The repository refuses that split, and the refusal is deliberate rather
+than incidental:
+
+```
+tests/unit/test_event_baseline.py::test_every_catalog_variant_on_a_scoped_channel_is_produced
+AssertionError: assert ['capture_upl...oadAbandoned'] == []
+  Left contains 3 more items, first extra item: 'capture_uploaded: CaptureUploaded'
+```
+
+Every variant the catalog declares has to be produced by some driver's
+run, where a driver drives a real emit path in the production package
+and names it by module, function and ordinal. The rule's own words are
+that "a declaration nothing can produce is a permanent enlargement of
+what this server may say", and the suite carries no exemption list on
+purpose ("Nothing is exempt any more"). A milestone PR merges to `main`
+on its own, so declaring the vocabulary here would put an unproducible
+declaration on `main` for the whole of M3's development, which is the
+state the rule exists to refuse. Faking a driver against a module that
+does not exist yet, or adding an exemption, would both be papering over
+it.
+
+So the declarations move to M3 and land in the same change as the
+uploader that emits them. Nothing about them changes; the catalog-first
+discipline the plan cites from #66 M1 is preserved exactly as #66 kept
+it, where the declarations landed with the decision sites that emit
+them and ahead of the exporter that reads them.
+
+### The declarations, as designed and ready for M3
+
+Written and driven against the catalog's own import-time checks before
+being taken back out, so M3 lands a design that has been through them
+rather than a sketch. The draft diff is not committed; this is its
+content.
+
+**A new channel**, `CAPTURE_UPLOAD_CHANNEL = "vinga_server.capture_upload"`,
+joining `SERVER_CHANNELS` in channel-name order. A channel is the
+emitting module's own name and the reference says so ("an event declared
+on one channel and emitted from another is a violation even when its
+fields are lawful"), so the uploader's module needs one and the
+`abandoned` sweep, which lives in `CaptureStore`, keeps the capture
+channel.
+
+**The closed set**, `CaptureUploadFailure` in `events/values.py`, the
+plan's eight members with the reason each is told apart by, plus the
+`Literal` narrowing the catalog's own convention asks for:
+
+```python
+AttemptedUpload = Literal[UNREACHABLE, REFUSED, TOO_LARGE, NO_TRACE,
+                          DROPPED, STAGING_LOST, INCOMPLETE]
+```
+
+`abandoned` is outside it because it is not an attempt's outcome: it is
+what a restart finds staged and removes, said by the recording surface
+that opens the directory whether or not an uploader was built at all.
+The module's comment above the closed sets counts the narrowings and
+moves from three to four.
+
+**Three variants, two declarations.**
+
+| Variant | Channel | Level | Template |
+| --- | --- | --- | --- |
+| `CaptureUploaded` | capture_upload | INFO | `session %s: capture attached to its trace, %.1f MB in %d ms` |
+| `CaptureUploadFailed` | capture_upload | WARNING | `session %s: capture not attached to its trace (%s)` |
+| `CaptureUploadAbandoned` | capture | WARNING | `session %s: capture staged for upload was left by a previous run and has been removed` |
+
+`capture_uploaded` carries `session`, `audio_bytes` and
+`manifest_bytes` (the two files exactly, which is what a reader
+compares against what the backend holds), and `elapsed_ms`; the
+sentence renders the pair's total as megabytes through a `carried=False`
+field, the way `capture_over_budget` renders what it carries. No URL and
+no far-side id, for the reasons the declaration's own note gives: a
+presigned URL is a credential in a query string, and an id minted over
+there is a fact about a store this server does not own.
+`capture_upload_failed` carries `session` and `reason` and never an
+exception's words. Both spell the session in their own sentence, which
+is the server-channel rule: on a server channel `session` is an
+ordinary field rather than one the emitter owns.
+
+**What lands with them in M3**, none of it optional: the two rows in
+`vinga-server/README.md`'s logging index, the regenerated
+`docs/reference/events.md` (75 events in 104 variants, from 73 in 101),
+the drivers in `tests/tools/event_baseline.py` with their `CARRIED`
+rows and the driver count, and the `SERVER_CHANNELS` count in the
+generated reference's channels section. The exporter's `APPROVED` table
+needs nothing: it derives from the catalog, and
+`test_the_approved_table_covers_the_whole_catalog` is the pin that
+proves it picks them up by construction.
+
+### Tests
+
+`tests/unit/test_telemetry.py` gains five cases in a section of their
+own:
+
+- the id is readable after the close that popped the span, and it
+  equals `format_trace_id` of the exported span's own trace id, thirty
+  two lowercase hex characters;
+- a session the exporter never saw answers None;
+- the retention keeps `RETAINED_TRACES` and evicts the oldest, asserted
+  on both sides of the boundary rather than as a range;
+- a reader thread that is not the session loop, driven as contention
+  (forty sessions opening while a thread of its own reads) with every
+  answer either nothing yet or exactly that session's id;
+- and the synchronization itself: the map is held and a reader on
+  another thread is asserted not to answer until it is let go.
+
+The last one is the only case that can falsify the lock at all, since
+the GIL hides an unguarded read, and it is why it reaches for
+`_retained_lock` by name.
+
+`tests/support/telemetry.py`'s `session_events` takes the session id as
+an argument now, defaulting to the fixed one: a claim about the
+retention is a claim about several sessions at once, and a fixed id
+could not state it.
+
+All five were watched red first: `AttributeError: 'Telemetry' object
+has no attribute 'trace_of'`, and the synchronization case on
+`_retained_lock`.
+
+### Deviations from the plan
+
+1. **The two catalog events moved to M3**, for the reason under "Why the
+   two catalog events are not here". The plan's M2 and M3 checklist
+   items, its module-layout line for `events/catalog.py` and its "What
+   the upload writes back" section move with them. This is a milestone
+   cut correction rather than a design change: the declarations are
+   unchanged and recorded above.
+2. **No ordering retry, as M1 already recorded.** The plan's hypothesis
+   that a media request arriving before its trace would need a bounded
+   retry was falsified live in M1, so nothing in `trace_of` or its
+   retention is shaped by that window.
+3. **The changelog fragment is `67-capture-trace-retention.md`** rather
+   than a vocabulary-named one, because the vocabulary is not what this
+   milestone shipped.
+
+### Verification
+
+- `uv run ruff check .`: All checks passed!
+- `uv run mypy` (strict over `src/vinga_server/events`): Success: no
+  issues found in 5 source files
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 6907 passed, 19
+  skipped (6902 in M1, plus this milestone's five)
+- `uv run pytest tests/integration -q`: 305 passed, against Postgres
+  from the committed compose file on `VINGA_DB_PORT=55672`
+- `python3 scripts/fold_changelog.py check .`: checked 2 fragments, 0
+  failures
+- `python3 scripts/check_doc_links.py .`: checked 231 files, 0 failures
+- `uv run pytest tests/unit/test_command_spellings.py -q`: 52 passed
+- The five new cases watched red before the method existed, quoted
+  under "Tests" above.
