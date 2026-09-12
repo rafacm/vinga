@@ -309,9 +309,13 @@ and never audio.
 Two fields since #67, and the second is a different kind of switch from every
 other one in this file. `enabled` above sends metadata; `attach_captures`
 sends a recording of a room. It is its own decision for that reason and
-defaults off, and it is refused at boot with `enabled` off, because what an
-attachment names is the trace a session was exported under and there is no
-trace to name.
+defaults off.
+
+The rule that refuses it with `enabled` off is deliberately NOT here, and the
+reason is the attachment's decision order: capture resolves first, and the
+flag on with capture off is a no-op rather than a misconfiguration. A rule on
+this model could not see `server.capture`, so it refused an operator
+mid-toggle at load. It lives on `ServerConfig`, which can see all three keys.
 
 | Key | Type | Default | Constraints | Description |
 | --- | --- | --- | --- | --- |

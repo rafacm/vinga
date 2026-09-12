@@ -807,9 +807,14 @@ class TelemetryConfig(BaseModel):
     Two fields since #67, and the second is a different kind of switch
     from every other one in this file. `enabled` above sends metadata;
     `attach_captures` sends a recording of a room. It is its own
-    decision for that reason and defaults off, and it is refused at boot
-    with `enabled` off, because what an attachment names is the trace a
-    session was exported under and there is no trace to name.
+    decision for that reason and defaults off.
+
+    The rule that refuses it with `enabled` off is deliberately NOT
+    here, and the reason is the attachment's decision order: capture
+    resolves first, and the flag on with capture off is a no-op rather
+    than a misconfiguration. A rule on this model could not see
+    `server.capture`, so it refused an operator mid-toggle at load.
+    It lives on `ServerConfig`, which can see all three keys.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -862,22 +867,6 @@ class TelemetryConfig(BaseModel):
             "the next startup."
         ),
     )
-
-    @model_validator(mode="after")
-    def _check_attachment(self) -> "TelemetryConfig":
-        """Refuse an attachment that could only pretend.
-
-        The `ConversationsConfig` shape, and it applies here for the
-        same reason: both keys are in one model, so the refusal is the
-        model's own rather than a check some builder remembers to make.
-        The pointer names the switch to turn ON, which is that
-        precedent's rule too.
-        """
-        if self.attach_captures and not self.enabled:
-            raise FieldProblemsError(
-                [FieldProblem(json_pointer(("enabled",)), ATTACHMENT_NEEDS_TELEMETRY)]
-            )
-        return self
 
 
 # What a resumption that could not work is refused with. Fixed sentences
@@ -1415,6 +1404,44 @@ class ServerConfig(BaseModel):
             raise ValueError(NOTHING_DISCOVERABLE)
         return self
 
+    @model_validator(mode="after")
+    def _check_attachment(self) -> "ServerConfig":
+        """Refuse an attachment that could only pretend, and only once
+        there is something to attach.
+
+        Three keys across two sections, which is why the rule is here and
+        not on `TelemetryConfig` where two of them live. The attachment's
+        decision order is a contract this repository states twice, in the
+        plan and in `build_capture_upload`: capture resolves FIRST, and
+        the flag on with capture off is a no-op rather than a
+        misconfiguration, because an operator mid-toggle has not
+        misconfigured anything. A rule that read only the telemetry
+        section refused that operator's file at load, before any builder
+        could apply the no-op at all, so the short-circuit has to be part
+        of the rule.
+
+        With capture effectively on, an attachment still needs an
+        exporter: what it is named by is the trace its session was
+        exported under, and with no exporter there is no trace. The
+        pointer names the switch to turn ON, which is the
+        `ConversationsConfig` precedent's rule.
+        """
+        telemetry = self.telemetry
+        if telemetry is None or not telemetry.attach_captures:
+            return self
+        if self.capture is None or not self.capture.enabled:
+            return self
+        if not telemetry.enabled:
+            raise FieldProblemsError(
+                [
+                    FieldProblem(
+                        json_pointer(("telemetry", "enabled")),
+                        ATTACHMENT_NEEDS_TELEMETRY,
+                    )
+                ]
+            )
+        return self
+
 
 class BootRefusal(NamedTuple):
     """One combination of server-half keys that is refused at boot,
@@ -1468,10 +1495,13 @@ BOOT_REFUSALS: tuple[BootRefusal, ...] = (
         provoked_by={"enabled": True, "text": False, "resumption": True},
     ),
     BootRefusal(
-        model=TelemetryConfig,
+        model=ServerConfig,
         validator="_check_attachment",
         sentence=ATTACHMENT_NEEDS_TELEMETRY,
-        provoked_by={"enabled": False, "attach_captures": True},
+        provoked_by={
+            "capture": {"enabled": True, "dir": "/data/captures"},
+            "telemetry": {"enabled": False, "attach_captures": True},
+        },
     ),
     BootRefusal(
         model=ServerConfig,

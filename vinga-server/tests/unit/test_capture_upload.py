@@ -248,6 +248,81 @@ def test_a_capture_off_deployment_never_reaches_a_refusal() -> None:
     assert build_capture_upload(config, telemetry=exporting(), local_only=True) is None
 
 
+# Every combination the decision order has to answer, and the shape of
+# the answer for each.
+#
+# The rows are the point rather than the loop: what the round found is
+# that one of them (capture off with the exporter off) was refused by the
+# CONFIGURATION before any builder could apply the no-op, so a matrix
+# that stopped at "capture off is a no-op" could not see it. Each row
+# names both switches and what the pair must do.
+CAPTURE_OFF = (
+    pytest.param(None, {"enabled": True, "attach_captures": True}, id="absent-traced"),
+    pytest.param(
+        {"enabled": False, "dir": "/tmp/vinga-captures"},
+        {"enabled": True, "attach_captures": True},
+        id="disabled-traced",
+    ),
+    pytest.param(
+        None, {"enabled": False, "attach_captures": True}, id="absent-untraced"
+    ),
+    pytest.param(
+        {"enabled": False, "dir": "/tmp/vinga-captures"},
+        {"enabled": False, "attach_captures": True},
+        id="disabled-untraced",
+    ),
+)
+
+
+@pytest.mark.parametrize(("capture", "telemetry"), CAPTURE_OFF)
+def test_every_capture_off_shape_loads_and_builds_nothing(
+    capture: dict[str, Any] | None,
+    telemetry: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The matrix the round asked for, and the row that caught the bug.
+
+    `absent-untraced` and `disabled-untraced` are the attachment on with
+    neither a recording nor an exporter, which is exactly what an
+    operator has in hand for the two toggles between a recording
+    deployment and a plain one. The rule used to refuse both at LOAD, so
+    the file would not even parse and the no-op below could never run.
+    """
+    caplog.set_level(logging.INFO)
+    config = a_server(capture=capture, telemetry=telemetry)
+
+    assert build_capture_upload(config, telemetry=None) is None
+    assert ATTACH_KEY in caplog.text
+
+
+@pytest.mark.parametrize(("capture", "telemetry"), CAPTURE_OFF)
+@pytest.mark.parametrize("local_only", [False, True])
+def test_no_capture_off_shape_refuses_for_anything(
+    capture: dict[str, Any] | None,
+    telemetry: dict[str, Any],
+    local_only: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """And none of them reaches a refusal, whichever refusal it would
+    have been.
+
+    All three are armed at once: local_only on, no exporter handed in,
+    and the extra faked away. A capture-off deployment boots identically
+    through every one of them, which is the contract's own sentence.
+    """
+    import vinga_server.capture_upload as module
+
+    def never() -> None:
+        raise AssertionError("the SDK was imported for a capture-off deployment")
+
+    monkeypatch.setattr(module, "_import_sdk", never)
+    config = a_server(capture=capture, telemetry=telemetry, local_only=local_only)
+
+    assert (
+        build_capture_upload(config, telemetry=None, local_only=local_only) is None
+    )
+
+
 def test_a_capture_off_deployment_says_nothing_with_the_flag_off(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -264,11 +339,16 @@ def test_a_capture_off_deployment_says_nothing_with_the_flag_off(
 
 
 def test_the_attachment_is_refused_without_an_exporter() -> None:
-    """The cross-field rule, where it belongs: both keys are in one
-    model, so the combination never reaches a builder at all.
+    """The cross-field rule, once there is something to attach.
 
-    The sentence names both keys and the way out, and no value: every
-    word of it is this repository's own.
+    Three keys across two sections, which is why it is `ServerConfig`'s
+    and not `TelemetryConfig`'s: a rule that could see only the telemetry
+    section refused every capture-off file at load, ahead of the no-op
+    the decision order promises. With capture effectively on, an
+    attachment still needs an exporter, because what names it is the
+    trace its session was exported under.
+
+    The sentence names both keys and the way out, and no value.
     """
     from vinga_server.config.models import ATTACHMENT_NEEDS_TELEMETRY
 
@@ -278,6 +358,15 @@ def test_the_attachment_is_refused_without_an_exporter() -> None:
     assert ATTACHMENT_NEEDS_TELEMETRY in str(refusal.value)
     assert "telemetry.enabled" in ATTACHMENT_NEEDS_TELEMETRY
     assert ATTACH_KEY.endswith("telemetry.attach_captures")
+
+
+def test_the_telemetry_section_alone_refuses_nothing() -> None:
+    """And the same combination on the section by itself loads, which is
+    what makes the rule a server-level one rather than a moved one: the
+    section cannot see whether anything is being recorded."""
+    from vinga_server.config.models import TelemetryConfig
+
+    assert TelemetryConfig(enabled=False, attach_captures=True).attach_captures
 
 
 def test_local_only_refuses_before_anything_is_built() -> None:
