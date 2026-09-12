@@ -893,3 +893,11 @@ condensed but faithful; resolutions appended per amendment.
    blocked capture worker under `max_sessions > 64` can still lose
    older contexts. Remove the inheritance claim or pin the context
    in capture jobs with its own test.
+
+   *Resolution.* Adopted, the removal branch. The retention
+   paragraph now states the resize helps the capture uploader only
+   incidentally, names the residual exposure (a blocked capture
+   worker under `max_sessions > 64`), and marks closing it as the
+   capture uploader's own follow-up outside this issue's scope;
+   the sol round's resolution 6 note is corrected in place to
+   point here.
