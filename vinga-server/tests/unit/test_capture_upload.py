@@ -20,8 +20,10 @@ early must not upload until its session closes, and a prune storm
 between those two moments must not be able to erase what was staged.
 """
 
+import asyncio
 import json
 import logging
+import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -35,6 +37,7 @@ from tests.support.stores import store as capture_store
 from tests.support.uploads import ApiError, Recorder, exporting, fake_sdk
 from vinga_server.capture import CaptureStore, SessionCapture
 from vinga_server.capture_upload import (
+    _QUIETING,
     ATTACH_KEY,
     AUDIO_NAME,
     LANGFUSE_HOST_ENV,
@@ -76,6 +79,9 @@ def _no_credentials_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> Non
     cases mean."""
     for name in (
         LANGFUSE_HOST_ENV,
+        # Not a variable this module reads, and deleted anyway: a
+        # developer whose shell exports it must not be able to make the
+        # case below pass by accident.
         "LANGFUSE_BASE_URL",
         LANGFUSE_PUBLIC_KEY_ENV,
         LANGFUSE_SECRET_KEY_ENV,
@@ -1167,7 +1173,145 @@ async def test_the_lease_goes_back_when_the_worker_genuinely_stops(
     store.session_closed("s1")
     await drained(uploads)
 
-    assert uploads._quieting.held() == 0
+    assert _QUIETING.held() == 0
+
+
+@pytest.mark.asyncio
+async def test_an_uploader_that_outlived_its_bound_keeps_the_next_one_quiet(
+    tmp_path: Path, endpoint: str
+) -> None:
+    """The overlapping-lifespans case, which is why the quieting is one
+    process-wide claim rather than one per uploader.
+
+    Two uploaders exist routinely: a wedged worker outlives its
+    shutdown's bound, so a redeploy builds the next one while the last
+    is still finishing. With a claim each, A's release restores the
+    original configuration while B is still uploading, so B's next
+    presigned URL reaches the retained log, and B's own release then
+    restores A's already-quiet snapshot and silences the namespaces for
+    the rest of the process with nothing holding them.
+
+    Driven in that order: A wedges, A's bounded wait expires, B runs, A
+    finishes, and the namespaces are asserted quiet at every step until
+    B is genuinely done.
+    """
+    held = threading.Event()
+    release = threading.Event()
+    quiet_while_b_ran: list[bool] = []
+
+    def wedging(**options: Any) -> Any:
+        held.set()
+        release.wait(30.0)
+        raise RuntimeError("A never got anywhere")
+
+    first, recorder = fake_sdk()
+    wedged = CaptureUpload(
+        tmp_path / "a",
+        sdk=type(first)(client=wedging, error=first.error, content_type=str),
+        telemetry=exporting({"s1": TRACE}),
+        backlog=4,
+        retries=0,
+        shutdown_timeout_s=0.2,
+    )
+    store_a = capture_store(tmp_path / "a-dir", uploads=wedged)
+
+    class Watching:
+        def trace_of(self, session: str) -> str | None:
+            quiet_while_b_ran.append(logging.getLogger("httpx").propagate is False)
+            return TRACE
+
+    second, _ = fake_sdk(recorder)
+    running = CaptureUpload(
+        tmp_path / "b",
+        sdk=second,
+        telemetry=Watching(),  # type: ignore[arg-type]
+        backlog=4,
+        retries=0,
+        shutdown_timeout_s=10.0,
+    )
+    store_b = capture_store(tmp_path / "b-dir", uploads=running)
+
+    try:
+        a_recording(store_a, "s1")
+        store_a.session_closed("s1")
+        assert held.wait(10.0), "A never reached its client"
+        assert _QUIETING.held() == 1
+
+        # A's bounded wait expires with its worker still inside the
+        # client, which is the state this case is about.
+        await wedged.shutdown()
+        assert _QUIETING.held() == 1, "the expired wait gave the silence back"
+
+        a_recording(store_b, "s1")
+        store_b.session_closed("s1")
+        await asyncio.sleep(0.2)
+        assert _QUIETING.held() == 2
+
+        # A finishes now, on the abandoned side of its own timeout.
+        release.set()
+        deadline = time.monotonic() + 10.0
+        while _QUIETING.held() > 1 and time.monotonic() < deadline:
+            await asyncio.sleep(0.02)
+
+        assert _QUIETING.held() == 1, "A's release did not come back at all"
+        assert logging.getLogger("httpx").propagate is False, (
+            "A's release un-silenced the HTTP stack while B was still working"
+        )
+        assert quiet_while_b_ran == [True]
+    finally:
+        release.set()
+        await wedged.shutdown()
+        await running.shutdown()
+
+    assert _QUIETING.held() == 0
+    assert logging.getLogger("httpx").propagate is not False
+
+
+@pytest.mark.asyncio
+async def test_only_the_documented_host_variable_is_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One documented name for where a recording goes.
+
+    The SDK's own tracing client honors `LANGFUSE_BASE_URL` ahead of
+    `LANGFUSE_HOST`; this module reads only the second, because that
+    client is not the one it uses, nothing in this repository documents
+    the alias, and a variable an operator never wrote taking precedence
+    over the one they did is a way for room audio to reach a deployment
+    nobody named.
+    """
+    monkeypatch.setenv(LANGFUSE_HOST_ENV, "http://named.invalid:53010")
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "http://elsewhere.invalid:53010")
+    uploads, recorder = an_uploader(tmp_path, traces={"s1": TRACE})
+    store = capture_store(tmp_path, uploads=uploads)
+
+    a_recording(store, "s1")
+    store.session_closed("s1")
+    await drained(uploads)
+
+    assert [one["base_url"] for one in recorder.constructed] == [
+        "http://named.invalid:53010"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_alias_alone_is_no_endpoint_at_all(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """And the other half of the same claim: the alias on its own does
+    not configure anything, so an operator who wrote only it gets the
+    ordinary no-endpoint failure rather than a silent upload."""
+    caplog.set_level(logging.DEBUG)
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "http://elsewhere.invalid:53010")
+    uploads, recorder = an_uploader(tmp_path, traces={"s1": TRACE})
+    store = capture_store(tmp_path, uploads=uploads)
+
+    a_recording(store, "s1")
+    store.session_closed("s1")
+    await drained(uploads)
+
+    assert recorder.constructed == []
+    assert reasons(caplog) == [CaptureUploadFailure.UNREACHABLE]
 
 
 @pytest.mark.asyncio
@@ -1178,7 +1322,7 @@ async def test_a_shutdown_with_no_worker_is_not_an_error(tmp_path: Path) -> None
 
     await uploads.shutdown()
 
-    assert uploads._quieting.held() == 0
+    assert _QUIETING.held() == 0
 
 
 @pytest.fixture(autouse=True)
@@ -1189,4 +1333,5 @@ def _no_lease_outlives_its_case() -> Iterator[None]:
     is a leak a server would have too.
     """
     yield
+    assert _QUIETING.held() == 0, "a case left an uploader holding the silence"
     assert logging.getLogger("langfuse").propagate is not False

@@ -47,6 +47,7 @@ import pytest
 from tests.support.events import every_format
 from tests.support.uploads import exporting
 from vinga_server.capture_upload import (
+    _QUIETING,
     AUDIO_NAME,
     LANGFUSE_HOST_ENV,
     LANGFUSE_PUBLIC_KEY_ENV,
@@ -458,7 +459,7 @@ async def test_the_real_sdk_says_nothing_after_the_shutdowns_bound(
     assert SECRET not in every_format(caplog)
     assert SECRET not in captured.err
     assert SECRET not in captured.out
-    assert uploads._quieting.held() == 0
+    assert _QUIETING.held() == 0
 
 
 @pytest.fixture(autouse=True)
