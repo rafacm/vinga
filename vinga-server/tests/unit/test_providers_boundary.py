@@ -33,7 +33,6 @@ from vinga_server.config.models import (
     DatabaseConfig,
     McpServerConfig,
     ProviderConfig,
-    ServerConfig,
 )
 from vinga_server.config.secrets import generate_key
 from vinga_server.config.store import ConfigStore
@@ -629,31 +628,42 @@ def test_the_server_section_reaches_every_builder(monkeypatch: pytest.MonkeyPatc
     passing a boolean, or passing the default, would keep every cell
     green and quietly disarm the boundary for three whole features.
 
-    The three feature builders and the provider build are asked what
-    boundary they were handed, with `ServerConfig.data_boundary` the one
-    thing set, so a composition that dropped it on any of the four is
-    red here.
+    Driven through the real composition. The first version of this case
+    stubbed the three builders and then CALLED THE STUBS itself, which
+    is a test of its own arguments: deleting the boundary from all three
+    calls in `app._build_composition` left it green, which is PR #499's
+    second finding. So the app is built and its lifespan entered, and
+    what is asserted is what the composition handed the builders while
+    it ran.
+
+    The stubs answer None, which is what each of these builders answers
+    for an absent section anyway, so nothing downstream of them changes
+    shape. The boundary is `network` rather than `host` because the mock
+    providers reach the host: the fourth call site has to get through
+    for the composition to reach the three that are the subject here,
+    and it has its own case below.
     """
     import vinga_server.app as app
+    from tests.support.apps import entered_app
+    from tests.support.configs import config_with_agent
 
     handed: dict[str, object] = {}
+
+    def spy(name: str):
+        def built(*args: object, boundary: object = "unset", **kwargs: object) -> None:
+            handed[name] = boundary
+            return None
+
+        return built
+
     for name in ("build_telemetry", "build_capture_upload", "build_transcript_export"):
-        monkeypatch.setattr(
-            app,
-            name,
-            lambda *args, _name=name, boundary=None, **kwargs: handed.setdefault(
-                _name, boundary
-            ),
-        )
+        monkeypatch.setattr(app, name, spy(name))
 
-    section = ServerConfig.model_validate({"data_boundary": "network"})
-    assert section.data_boundary is Reach.NETWORK
+    config = config_with_agent(server={"data_boundary": "network"})
+    assert config.server.data_boundary is Reach.NETWORK
 
-    app.build_telemetry(section.telemetry, boundary=section.data_boundary)
-    app.build_capture_upload(section, telemetry=None, boundary=section.data_boundary)
-    app.build_transcript_export(
-        section, telemetry=None, database=DatabaseConfig(), boundary=section.data_boundary
-    )
+    with entered_app(config):
+        pass
 
     assert handed == {
         "build_telemetry": Reach.NETWORK,
