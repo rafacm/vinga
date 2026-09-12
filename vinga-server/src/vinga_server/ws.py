@@ -151,6 +151,7 @@ async def conversation(websocket: WebSocket) -> None:
         comp.sessions,
         comp.live,
         comp.telemetry,
+        comp.transcripts,
     )
     # Admission is decided after the token, so a full server still answers
     # a bad token with a refusal about the token.
