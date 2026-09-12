@@ -97,6 +97,46 @@ The distinction, in one sentence: what a device says ABOUT ITSELF
 at check-in may ride the events once bounded; what a person said
 through the device may not.
 
+### Amendment: content may be exported under a flag of its own (2026-09-12)
+
+#67 asked for a closed session's recording to be attached to the
+trace that session was exported under, which reads at first like
+this record's separation breaking: a recording is content, the
+telemetry backend is where metadata goes, and the two were
+deliberately kept apart. Decided, again as a product call rather
+than a reading of the original text:
+
+- **The separation holds, and it is about the JSON log.** What this
+  record separates is the metadata-only event surface from the
+  content stores. The events stay metadata-only, the OTLP spans
+  derived from them stay metadata-only, and no span gains a
+  transcript or a byte of audio. What #67 adds is not content ON a
+  span; it is content in a second content-capable store, associated
+  with a span by identifier.
+- **Exporting content is a decision, so it is a switch.** The
+  operator turns on `server.telemetry.attach_captures`, which
+  defaults off and which neither `server.capture` nor
+  `server.telemetry.enabled` implies. Recording a room for
+  diagnosis and shipping that recording to another deployment are
+  two decisions, and a flag that one implied the other would be
+  this record's separation broken in the only way that matters.
+- **The retention question moves with the content.** Every surface
+  answers how long, who can see it, and can it be deleted. This one
+  answers by delegating: the receiving deployment's policy governs,
+  vinga keeps nothing, and the flag's own reference prose says so in
+  those words. A backend with no policy configured retains
+  indefinitely, which is the caution the Consequences below already
+  drew from Langfuse's OSS tier, now applying to a surface vinga can
+  actually put audio on.
+- **The household-consent question is sharpened rather than
+  answered.** A household that consented to being recorded has not
+  thereby consented to the recording leaving the house. That is
+  still open, and the flag is where the decision now lives.
+
+In one sentence: content may leave this deployment only through a
+switch an operator sets for that purpose, and the metadata surface
+stays metadata whatever that switch says.
+
 ## Consequences
 
 - The no-leak contract on the events becomes enforceable by
