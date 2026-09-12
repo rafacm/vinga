@@ -145,7 +145,16 @@ shape.
 property of #136 is preserved (same three checks, same re-raise
 contract, same wording ownership), `EgressRefusal` becomes
 `BoundaryRefusal`, and the module docstring keeps its history
-paragraph with the rename recorded. What callers stop knowing is
+paragraph with the rename recorded. `Reach` lives here too, and
+the import cycle that placement threatens (`config/models.py`
+needs `Reach` for its fields while today's rule module imports the
+model types at runtime, `egress.py:35`) is broken on the rule
+module's side: `boundary.py` drops its runtime model imports,
+taking the two config types under `TYPE_CHECKING` with postponed
+annotations, since its functions only read attributes off them and
+never construct one. No pass-through enum module. The
+lightweight-import tests (schema and OpenAPI rendering loading no
+engine) stay green and are re-run by name in verification. What callers stop knowing is
 unchanged and stays the module's depth: the composition passes the
 parsed boundary through, and no caller decides anything. The
 refusal sentences rework to the issue's plainer shape, still
@@ -329,6 +338,13 @@ per amendment.
    `boundary.py` and drop the runtime model imports via postponed
    annotations plus `TYPE_CHECKING` (no pass-through enum module);
    preserve the lightweight-import tests.
+
+   *Resolution.* Adopted. The module section now states the
+   acyclic arrangement: `Reach` stays in `boundary.py`, the rule
+   module's model imports move under `TYPE_CHECKING` with
+   postponed annotations (its functions read attributes and never
+   construct models), no enum shim exists, and the
+   lightweight-import tests are named in verification.
 
 3. **P2: The old provider key cannot join the existing
    request-field reservation.** The reserved set is OpenAI chat
