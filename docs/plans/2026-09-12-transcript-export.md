@@ -236,6 +236,27 @@ test drives shutdown DURING an acknowledgement wait, not merely
 with work queued, and asserts the in-flight job's `dropped` event
 was emitted while the tap was still attached.
 
+The retained trace context is captured at admission, not looked up
+at export, and the retention itself is sized from configured
+capacity. Two holes the fixed 64-entry retention leaves, closed
+separately. First, a job queued behind a slow worker could see its
+context evicted by later sessions before the worker reached it: so
+`session_closed` asks telemetry for the retained context THEN and
+stores it in the job, making `no_trace` an admission-time answer an
+eviction can no longer change. Second, `_retain` records at session
+OPEN and `server.limits.max_sessions` has no upper bound, so a
+deployment running more than 64 concurrent sessions would evict a
+LIVE session's context before it ever closed: so the retention
+bound stops being a constant and becomes `max_sessions` plus the
+existing 64 of slack, computed where telemetry is built, which by
+construction means no live session's context is evicted by
+concurrent opens and the after-close window keeps its current
+depth. The capture uploader reads the same retention through
+`trace_of` and gains the same guarantee without changing. Tests
+drive a capacity above 64 with every session live, and eviction
+pressure (64-plus later sessions opening) between a job's admission
+and its export.
+
 ### What a resumed conversation exports: this session's turns, by the store's own membership
 
 The presumption in the issue, proven by schema: `turns.session`
@@ -676,6 +697,16 @@ Findings condensed but faithful; resolutions appended per amendment.
    requires a value above 64. Pin retained context per admitted job
    or derive a proved retention bound from configured capacity;
    test capacity above 64 under eviction pressure.
+
+   *Resolution.* Adopted, both halves. The retained context is
+   captured into the job at admission, so `no_trace` is decided at
+   `session_closed` and later eviction cannot change it; and the
+   retention bound derives from `server.limits.max_sessions` plus
+   the existing 64 of slack where telemetry is built, so a live
+   session's context cannot be evicted by concurrent opens, a
+   guarantee `trace_of` and the capture uploader inherit unchanged.
+   Both tests named (capacity above 64, eviction pressure between
+   admission and export).
 
 7. **P2: Reusing `Acknowledgement` contradicts its existing
    contract.** The class states repeatedly that it speaks for one
