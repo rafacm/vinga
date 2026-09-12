@@ -451,3 +451,33 @@ Re-verified after the round, same Postgres:
 - `uv run pytest tests/integration -q` was not rerun. The round touches
   `scripts/` and its unit suite only, and the previous round's 304
   passed stands.
+
+### Confirmation delta, PR #476
+
+One P1, and mergeable after it. `main` validated and resolved the
+repo-root above its own handler, and resolving a path is a filesystem
+walk rather than a string operation: a directory that answered
+`is_dir` can be a symlink loop by the time it is walked, and the walk
+then raises a `RuntimeError` carrying the path it was given. Outside
+the handler that became a library traceback reprinting the caller's
+own argument, which the output contract forbids for rejected input
+exactly as it does for accepted input. Both halves moved behind
+`checkout` and inside the handler, and `RuntimeError` now sits beside
+`OSError` in the backstop (`0c31bb1f`).
+
+Two cases. The race cannot be lost on purpose from outside a process,
+so that one imports the script and drives the failing call directly,
+still reading both streams whole; it was watched red first, with the
+`RuntimeError` escaping `main` and the path in the message. The half a
+real filesystem can reach, a symlink loop that is already there when
+the run starts, is a subprocess case: `is_dir` answers no, the refusal
+quotes nothing, and the exit code stays 2.
+
+- `uv run ruff check .`: All checks passed!
+- `uv run pytest tests/unit/test_fold_changelog.py -q`: 58 passed,
+  green under `TZ=UTC` and `TZ=Pacific/Auckland`, and green again with
+  the census file beside it under `-n 4 --dist loadfile` (110 passed).
+- `python3 scripts/fold_changelog.py check .`: checked 1 fragments, 0
+  failures.
+- The full unit lane and the fold rehearsal were not rerun: the write
+  path did not move.
