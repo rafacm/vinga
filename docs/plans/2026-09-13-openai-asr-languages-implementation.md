@@ -377,3 +377,138 @@ merged implementation:
 | The language kept beside the text across the retry | the provenance case and both discarding ones |
 | The suppression written over the configuration (`self._language is not None`) | the blank-language case and the hinted one |
 | The retry's text recombined with the first hearing's language | the skipped, asyncio-timeout and SDK-timeout discards (added in the review round; the confirmed echo and the empty retry already failed under the mutation above) |
+
+## M3: move the default model
+
+The default transcription model becomes `gpt-transcribe`, alone, so the
+one change every unconfigured deployment feels is reviewed by itself.
+After M1 the default has one home, the `model` field's own `default=`,
+so the code half is one line; the documentation half is the milestone.
+
+### What landed
+
+| Piece | Where |
+| --- | --- |
+| The default, on the field that owns it, with the comment and the description that argued for the model it replaced | `vinga-server/src/vinga_server/config/provider_options.py`: `OpenaiAsrOptions.model` |
+| The pins that say what an entry sends, with and without a model of its own | `vinga-server/tests/unit/test_providers_openai_asr.py`: `test_the_model_on_the_wire_is_the_default_or_the_one_that_was_named`, two ids, and `tests/unit/test_provider_options.py`'s defaults case |
+| The three generated references, each through its own generator | `docs/reference/domain-config.md`, `docs/reference/api-openapi.json`, `docs/reference/cli.md` |
+| The maintained pages that described the old default | `vinga-server/README.md`: the options table, a new paragraph after the comparison tables, the language-hint paragraph and the language-report paragraph; `vinga-server/examples/asr-openai.yaml`: the model paragraph, the two claims about what pinning `language` does, and the report paragraph; and the module docstring's language paragraph |
+| The changelog fragment | `changelog.d/500-asr-default-model.md`, two entries under Changed |
+
+### Deviations from the plan
+
+None in substance. One edit arrives a milestone early, deliberately and
+recorded here rather than smuggled: the plan puts "neither spelling
+pins a decode on this model" in M4's documentation footprint, beside
+the option M4 adds. But the claim it corrects, the example fragment's
+promise that naming a language "takes the question away from detection
+outright", is a fact about the gpt-4o pair, so it becomes false for an
+unconfigured deployment on THIS milestone rather than on M4. Correcting
+it here is what keeps the page true after the change that falsifies it;
+M4 still owns the paragraph about when to reach for which spelling,
+which needs the option to exist.
+
+The README gained one paragraph the plan's footprint does not name, for
+the same reason: its four measurement tables are all of models that are
+no longer the default, and a page whose only numbers describe something
+an operator no longer gets by default is misleading without a sentence
+saying so.
+
+### Resolutions the plan left to this milestone
+
+**What the example fragment's commented `model:` should be.** It showed
+`gpt-4o-transcribe` as the interesting alternative to a default that
+was its smaller sibling. It now shows `gpt-4o-mini-transcribe`, which
+is the value that keeps exactly what a deployment had before this
+milestone, and the changelog entry names the same one. A commented key
+in a fragment is not decoration: `test_every_documented_option_of_a_typed_type_installs`
+uncomments every one and installs the result.
+
+**Whether `config.example.yaml` moves.** It does not: the file names no
+transcription model anywhere, and the provider entries it documents
+carry no `model` key for this stage. Checked by reading it rather than
+inferred.
+
+**Whether the cost section moves.** It does not, and the reason is
+worth recording because the milestone's own facts pass close to it. The
+table of definitions worth entering already carries `gpt-transcribe`
+with its published per-minute price, and the bullet explaining that the
+gpt-4o pair deliberately gets none is still true of those two models.
+Nothing on that page said "the default" about either. What did change
+is the accuracy of the accounting, which is a fact rather than an edit:
+`gpt-transcribe` bills duration seconds where `gpt-4o-mini-transcribe`
+bills audio tokens, and the `asr` span reports `submitted_ms`, so #502
+M3's milliseconds-based cost accounting is now exactly right for the
+default model rather than an approximation of it. No telemetry code
+moved for that.
+
+### Discoveries
+
+**The existing default pin could not have caught this rename, and that
+is the shape of a test that agrees with anything.** M1 left
+`test_the_declared_default_model_is_the_one_on_the_wire`, which asserted
+`form_field(request, "model") == OpenaiAsrOptions.model_fields["model"].default`.
+That is the right claim about the builder, that it reads the field
+rather than a constant, and no claim at all about the value: renaming
+the default to anything keeps it green. The replacement names
+`gpt-transcribe` on the wire and asserts the field equals that same
+literal in the same case, so the builder claim survives with the value
+claim beside it, and the second id, an entry naming `whisper-1`, is the
+one that is independent of the default. That second id passed before
+the default moved and after it, which is what says it measures the
+override rather than the default.
+
+**A description reaches two of the three generated documents in full.**
+The CLI reference renders only a field description's first sentence
+(`model: str  (default: "gpt-transcribe")` and then one line), where the
+domain reference and the OpenAPI component carry the whole string. So a
+description rewritten for an operator is read by two of the three, and
+the sentence that has to survive the trim is the first one. Read off
+this milestone's own diff rather than from the generator.
+
+**The README's model measurements are all of models nobody gets by
+default now.** Four tables, latency on the desk, latency on the board,
+accuracy under white noise and accuracy in the room, every one taken on
+the gpt-4o pair or `whisper-1`. A grep for the old model name does find
+them, since they name it in their column headers, and that is exactly
+what makes them the interesting case: a grep says the name is there and
+says nothing about the tables being the page's only numbers, or about
+the model they measure no longer being the one an operator gets. Read
+as a page rather than as a set of matches, they are a section that
+misleads without lying. The answer here is the honest one rather than
+the impressive one: a paragraph saying the columns were not re-run
+against the new default, and pointing at what IS known about it.
+
+**M2's own changelog fragment says "until the default moves", and it
+stays as written.** A fragment's text is final by contract, the fold
+moves it byte for byte, and both entries land in the same dated section
+where the M3 entry says the default moved. Amending a merged
+milestone's fragment to keep a forward reference tidy would be editing
+a record for style.
+
+### Verification
+
+Run from `vinga-server/` with `PYTHONDONTWRITEBYTECODE=1` outside
+pytest. `uv run ruff check .` clean; `uv run mypy` clean; the unit lane
+serially green (7283 passed, 19 skipped); the integration lane green
+(341 passed);
+and the five drift checks the server workflow runs, each with the
+workflow's own recipe: the domain reference, the server reference
+(regenerated and unchanged, which is the expected answer for a page
+that renders no provider type), the OpenAPI document, the CLI page
+through its marker-preserving rebuild, and the recipes inside it
+against their own renderer. `scripts/check_doc_links.py` and
+`scripts/fold_changelog.py check` both clean, and the command-spellings
+census unchanged by the documentation edits.
+
+The distributed lane (`-n auto --dist loadfile`) was not run. It fails
+on this machine for a reason unrelated to any change, recorded in M1's
+own verification: Postgres drops connections under the worker count and
+every failure is `psycopg.OperationalError`. Not chased and not
+claimed.
+
+Both claims were watched failing first, before the default moved: the
+wire case reported `gpt-4o-mini-transcribe` where `gpt-transcribe` was
+asserted, and the defaults case failed on the same string. The entry
+naming `whisper-1` passed at that point too, which is the evidence that
+the override case is not carried by the default.
