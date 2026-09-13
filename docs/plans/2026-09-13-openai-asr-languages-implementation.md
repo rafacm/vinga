@@ -218,3 +218,115 @@ planted rows they are about, a base URL default of `/v2` breaks the
 constant pin, a builder passing a literal model breaks the wire case,
 and rewording the temperature refusal breaks exactly its row of the
 characterization table.
+
+## M2: report the language the model heard
+
+`transcribe` fills `AsrResult.language` from the response's `languages`
+list, where the request named no single language, and declines
+anything that is not exactly one syntactically valid code.
+
+### What landed
+
+| Piece | Where |
+| --- | --- |
+| The hearing pair one request answers, transcript and language together | `vinga-server/src/vinga_server/providers/openai_asr.py`: `_Hearing`, returned by `_request` and by `_retry_without_prompt`, so the retry replaces both halves or neither |
+| The suppression, derived from the value the request sent | the same module: `single` is computed once, put on the wire as `language`, and read back to decide whether a reported code is evidence |
+| The normalization, asked of the type the code becomes | the same module: `_reported_language` and `_code_of`, answering None for every malformed shape |
+| The module docstring's language paragraph, replaced by what the provider now does | the same module's docstring |
+| The pins that say the new behaviour | `vinga-server/tests/unit/test_providers_openai_asr.py`: the filled case, the three suppressed cases, the empty list, the eight malformed shapes through event assembly, the retry's provenance and the discarding outcomes |
+| The two README claims this falsifies | `vinga-server/README.md`: the local engine's remaining wins, and the paragraph that said no language is reported |
+| The example fragment's closing paragraph | `vinga-server/examples/asr-openai.yaml` |
+| The changelog fragment | `changelog.d/500-asr-language-report.md`, one entry under Added |
+
+### Deviations from the plan
+
+None in substance. Two shapes differ from the plan's prose and neither
+changes what is claimed:
+
+- The plan lists the configured case and the hinted case as two tests.
+  They are one parameterized case with three ids (`configured`,
+  `hinted`, `both`), because the rule is one rule about what the
+  request named and the third id is the combination the plan's
+  precedence decision is about.
+- Two tests are here that the plan's list does not name: the confirmed
+  echo and the empty retry, each asserting that a discarded hearing
+  answers no language. They are the other half of the provenance claim,
+  and they were the cases that failed under the provenance mutation
+  beside the recovered one.
+
+### Resolutions the plan left to this milestone
+
+**What "was told a single language" means, in terms the request can
+answer.** The plan states the rule over what was sent rather than over
+what was configured, and that distinction has teeth here: a blank
+`language` is a spelling M1 preserved, and `language=pinned if pinned
+else Omit()` puts no field on the wire for it. So the suppression is
+read off the value the request actually carried, computed once as
+`single` and used twice, rather than from `self._language` beside it.
+An entry with `language: ""` therefore gets the report, which is
+correct, because the model was told nothing.
+
+**Where the syntax check lives.** In the provider, and asked of
+`LanguageTag` itself rather than of a pattern restated here.
+`events/catalog.py::_named` already asks `EventName` the same way and
+for the same reason: the value becomes that type downstream, so a
+second expression of the rule is a bug pending. The catch is narrowed
+to `EventValueError`, which is what that type raises and nothing else
+does.
+
+**How far the malformed cases are asserted.** To the payload, through
+`assembly.heard` with the arguments `runtime/pipeline.py` passes, since
+that is the call that constructs `LanguageTag` with nothing catching
+the refusal. The assembly call is made before anything is asserted
+about the result, deliberately: under an implementation that passes a
+bad code on, the test then fails as the raise it would be in a turn
+rather than as a tidier assertion above it.
+
+### Discoveries
+
+**The default model reports nothing, so M2 changes no unconfigured
+deployment until M3.** The plan's measurement table says it and the
+consequence only shows up in the prose: `gpt-4o-mini-transcribe`, still
+the default here, answers no `languages` at all. So every page this
+milestone edits says which models answer rather than promising a
+report, and the code needs no rule for it: a response carrying no key
+leaves the field empty through the same path a malformed one does.
+
+**The report is a rate, not a verdict, and the honest example is the
+unhinted one.** The plan's sharpest caveat, a two-hint request choosing
+wrongly on a one-word clip, is about an option M4 adds, so quoting it
+now would document something an operator cannot yet write. The caveat
+that applies today is the issue's own failure: spoken German "Hallo"
+transcribed `Hello.` and reported `en`, which is the report agreeing
+with the mishearing rather than catching it. That is what the three
+documentation surfaces say.
+
+**The feature doc is not updated, and that is the taxonomy rather than
+an omission.** `docs/features/2026-08-06-openai-asr.md` still says this
+provider does not detect language.
+[`docs/README.md`](../README.md) puts `features/` under dated execution
+records, which "report what was true when they were written and are not
+rewritten when the code moves on". The inventory that found it, and that
+found nothing else outside the three pages this milestone edits and the
+changelog:
+
+```bash
+git grep -n -E "reports which language|No language is reported|does not detect language|no usable language|language_detect|reports no language|language fields stay" -- '*.md' '*.yaml' '*.yml'
+```
+
+### Verification
+
+Ruff, the unit lane and the integration lane, each run from
+`vinga-server/`. No generated reference moves in this milestone: the
+declaration and the default, which are what the three drift checks
+render, are M1's and M3's.
+
+Every claim was watched failing first, against four mutations of the
+merged implementation:
+
+| Mutation | What broke |
+| --- | --- |
+| Never report (`_Hearing(text, None)`) | the filled case and the recovered one |
+| Report unconditionally (the suppression removed) | all three suppressed cases |
+| The naive read (`reported[0]["code"]`) | all seven malformed shapes that carry a key, and the empty list; the empty and the overlong code as `EventValueError: a language matches the language syntax`, raised out of event assembly, which is the turn this normalization exists to save |
+| The language kept beside the text across the retry | the provenance case and both discarding ones |
