@@ -82,9 +82,9 @@ class TurnUnderway:
     sums always describe the same set of rounds: the ones that produced
     an `llm_round` event.
 
-    The two leading fields are the exception to "written by the reply
-    path": they are the pair that owns the turn, taken where the turn
-    begins and never written again. A handover changes who is speaking
+    The three leading fields are the exception to "written by the reply
+    path": they are taken where the turn begins and never written
+    again. The first two are the pair that owns the turn. A handover changes who is speaking
     partway through, and a record is assembled after that has happened,
     so a turn that read the current pair then would be attributed to the
     thread it handed over to. Held here rather than passed to `record`
@@ -100,10 +100,20 @@ class TurnUnderway:
     holds is never a blend of two threads: the pair above is fixed, and
     the totals under it are that pair's share of the reply and nothing
     else.
+
+    `utterance` is the third of the fixed fields and the one that
+    SURVIVES that move, which is the whole of why it is here. The pair
+    identifies the thread this share of the reply was spoken on and
+    differs between the two instances a handover makes; the utterance
+    identifies what the user said to prompt all of it, and is the same
+    on both. It is what a reader holding one stored row uses to find the
+    trace the turn went out under, since the exporter opens one turn
+    span per utterance and knows it by this name.
     """
 
     conversation: str
     agent: str
+    utterance: str | None = None
     at: float | None = None
     heard: str | None = None
     heard_duration_s: float | None = None
@@ -291,6 +301,7 @@ class TurnUnderway:
             at=self.at,
             conversation=self.conversation,
             agent=self.agent,
+            utterance=self.utterance,
             heard=self.heard,
             heard_duration_s=self.heard_duration_s,
             language=self.language,

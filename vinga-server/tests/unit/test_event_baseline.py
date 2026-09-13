@@ -527,6 +527,7 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                 "event",
                 "session",
                 "speech_ms",
+                "utterance",
             ),
         ),
     ),

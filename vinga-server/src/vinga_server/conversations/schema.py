@@ -434,6 +434,22 @@ turns = Table(
         ),
     ),
     Column(
+        "utterance",
+        Text,
+        nullable=True,
+        comment=(
+            "The utterance this turn answers, as the server minted it when the "
+            "turn opened. The name the trace knows the turn by: the exporter "
+            "opens one turn span per utterance and retains that span's context "
+            "under this id, so a reader holding this row can find the turn's "
+            "own trace without counting rows or comparing clocks. A handover "
+            "writes two rows here and both carry the same value, because both "
+            "answer one utterance; that is the one correlation that survives a "
+            "move. Metadata rather than content, and null for a turn no "
+            "utterance opened or a row written by a suite of its own."
+        ),
+    ),
+    Column(
         "heard",
         Text,
         nullable=True,

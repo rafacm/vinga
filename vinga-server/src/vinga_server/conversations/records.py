@@ -134,6 +134,15 @@ class TurnRecord:
     # without an agent is a turn the store would have to write outside
     # every thread, where nothing would ever prune it.
     agent: str
+    # The utterance this turn answers, as the server minted it at the
+    # turn's open. The one field here that is neither content nor a
+    # measurement: it is the name the trace knows this turn by, so a
+    # reader holding this row can find the turn's own trace without
+    # counting rows or comparing clocks, neither of which survives a
+    # handover. Optional because a store driven by a suite of its own
+    # mints no utterances, and because a row is worth keeping whether or
+    # not anything can be correlated to it later.
+    utterance: str | None = None
     heard: str | None = None
     heard_duration_s: float | None = None
     language: str | None = None

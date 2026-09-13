@@ -1872,6 +1872,16 @@ class SessionTurn(BaseModel):
             "below are where a split reply comes apart."
         )
     )
+    utterance: str | None = Field(
+        description=(
+            "The utterance this turn answers, by its uuid hex, as the server minted "
+            "it when the turn opened. The name a trace knows the turn by: one turn "
+            "span is exported per utterance, so this is what joins a row here to the "
+            "trace it went out under. A handover records two turns and both carry "
+            "this same value, since both answer one utterance. Null for a row "
+            "recorded before the correlation existed."
+        )
+    )
     heard: str | None = Field(
         description="What was said to the device, as transcribed. Null under text-off."
     )

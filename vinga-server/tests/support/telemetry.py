@@ -24,6 +24,7 @@ import gzip
 import http.server
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -74,6 +75,7 @@ from vinga_server.events.values import (
     Real,
     ReplyOutcome,
     SessionId,
+    UtteranceId,
     Whole,
 )
 from vinga_server.telemetry import Telemetry, build_telemetry
@@ -324,12 +326,24 @@ def close_session(
 
 
 def start_turn(
-    events: SessionEvents, speech_ms: int = 900, barge_in: bool = False, at: float | None = None
+    events: SessionEvents,
+    speech_ms: int = 900,
+    barge_in: bool = False,
+    at: float | None = None,
+    utterance: str | None = None,
 ) -> float:
+    """One turn opening, on a fresh utterance unless a case names one.
+
+    `utterance` is the id the exporter retains this turn's context
+    under. Minted per call by default, which is what the runtime does
+    and what keeps two `start_turn`s two turns; a case about the join
+    passes the same one twice to say two rows answer one utterance.
+    """
     return events.emit(
         lambda: TurnStarted(
             agent=Identifier(AGENT),
             conversation=ConversationId(CONVERSATION),
+            utterance=UtteranceId(utterance or uuid.uuid4().hex),
             speech_ms=Whole(speech_ms),
             barge_in=Flag(barge_in),
         ),
