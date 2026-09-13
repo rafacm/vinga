@@ -14,8 +14,11 @@ api_key_env: OPENAI_API_KEY
 
 # Default: gpt-transcribe, which is the model that says which language
 # it heard. gpt-4o-transcribe and gpt-4o-mini-transcribe are the
-# previous family and report no language at all, so pinning one of them
-# gives up the report below and nothing else; whisper-1 is the same
+# previous family and report no language at all. Naming
+# gpt-4o-mini-transcribe keeps what a deployment had before the default
+# moved, whole: the same transcription, the latency and accuracy the
+# server README's tables measured, billing per audio token rather than
+# per second of audio, and no language report. whisper-1 is the same
 # Whisper V2 as the local engine, at roughly twice the latency, and
 # reports a language only in a format this provider does not ask for.
 #
