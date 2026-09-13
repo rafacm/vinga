@@ -527,11 +527,16 @@ retained context does not address it. The contract:
   Lawful as metadata for the reason candidate A would have been: a
   server-minted identifier is not content.
   The store column it lands in needs no migration path for rows written
-  before it existed. The compatibility stance is recorded and was
-  reaffirmed for this change: no existing installation is supported
-  across it, provided the changelog says so. Without that, every
-  consumer of this key would have inherited a permanent
-  "row older than the key" branch in a read path.
+  before it existed, and that is what the recorded compatibility stance
+  bought: it was reaffirmed for this change, so the column may be
+  added without contorting the design around databases that predate
+  it. What that licenses is precisely the absence of a backfill, not a
+  refusal to boot. An existing database upgrades and keeps its rows;
+  the pre-M4a ones read null and cannot name a trace, which is the
+  same answer the correlation already gives for a context that has
+  aged out of the retention. So there is no "row older than the key"
+  branch: there is one no-target path, and it existed before this
+  key did.
   What this plan must NOT do is key on an ordinal counted independently
   on each side. The transcript export's ordinal counts the turns it
   actually wrote, so a session holding a turn with no stored text

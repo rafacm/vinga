@@ -238,15 +238,12 @@ class Traced:
     a hardlink.
 
     The two reads take a PINNED CONTEXT rather than a session id, which
-    is the interface M4a left behind: a caller pins once at admission and
-    the answer stops depending on when it asks. A double that kept the
-    session-keyed spelling could not fail the way the real one now
-    cannot, so it would certify nothing.
-
-    `evicting` is what makes that testable: the set of sessions whose
-    context is dropped from the retention the moment after it is pinned.
-    A pin taken before the eviction still resolves, which is the whole
-    claim; a caller that had not pinned would get nothing.
+    is the interface M4a left behind. What this double deliberately does
+    NOT model is eviction: a fake that dropped a context on request could
+    not tell a pin taken at admission from one taken on the worker, and
+    telling those apart is the whole of that milestone. The cases that
+    make that claim use the real retention instead, and they live beside
+    the uploader's own suite.
 
     `referenced` is what a case reads back: the tokens the uploader asked
     to have written onto each session's trace, which is the claim that
@@ -255,49 +252,27 @@ class Traced:
     """
 
     def __init__(
-        self,
-        traces: dict[str, str] | None = None,
-        *,
-        refusing: bool = False,
-        evicting: set[str] | None = None,
+        self, traces: dict[str, str] | None = None, *, refusing: bool = False
     ) -> None:
         self.traces = dict(traces or {})
         self.refusing = refusing
-        self.evicting = set(evicting or ())
         self.referenced: list[tuple[str, dict[str, str]]] = []
 
     def retained_context(self, session: str) -> Any | None:
-        if session not in self.traces:
-            return None
-        pin = Pin(session)
-        # Pinned and then evicted, which is the window the pin exists
-        # for: everything after this point can only be answered by the
-        # handle the caller already holds.
-        if session in self.evicting:
-            self.traces.pop(session)
-        return pin
+        return Pin(session) if session in self.traces else None
 
     def trace_of(self, context: Any) -> str | None:
         if not isinstance(context, Pin):
             return None
-        return self.traces.get(context.session) or self._evicted(context)
+        return self.traces.get(context.session)
 
     def reference_media(self, context: Any, references: dict[str, str]) -> bool:
         if self.refusing or not isinstance(context, Pin):
             return False
-        if context.session not in self.traces and not self._evicted(context):
+        if context.session not in self.traces:
             return False
         self.referenced.append((context.session, dict(references)))
         return True
-
-    def _evicted(self, context: "Pin") -> str | None:
-        """What a pin taken before an eviction still answers.
-
-        The real exporter answers from the frozen record the caller
-        holds, so eviction cannot reach it. This double has to say the
-        same thing explicitly.
-        """
-        return f"trace-{context.session}" if context.session in self.evicting else None
 
 
 def exporting(

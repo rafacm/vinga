@@ -751,10 +751,59 @@ utterance.
   which would have left the correlation readable by this process and by
   nothing else. One line, metadata, and it is what makes the join
   checkable from outside.
-- **The compatibility stance was made explicit.** No existing
-  installation is carried across the new column; the changelog says so.
-  Without that the column needed a "row older than the correlation"
-  branch in every reader that joins on it, permanently.
+- **The compatibility stance was stated too strongly at first, and the
+  external review caught it.** The changelog fragment said an existing
+  database was "not carried across this release" and then described
+  what happens to its preserved rows, which contradicts itself. What
+  the recorded stance actually licenses is the absence of a backfill,
+  not a refusal to boot: an existing database upgrades and keeps every
+  row, and the pre-M4a ones read null and cannot name a trace.
+
+  The review proposed going the other way, making the column non-null
+  and sending old stores down a reset path. That was not taken, for
+  three reasons. A null here is not a new state for a reader: it is the
+  same "no target" the correlation already answers with for a context
+  that has aged out of the retention, and it is handled by the same one
+  path, so there is no branch to inherit. Non-null would force every
+  store-driving suite and every double to mint telemetry-adjacent ids
+  for rows that have no utterance, which weakens exactly the
+  content-and-telemetry separation that made this design preferable to
+  putting trace ids on the record. And forcing a reset is a change of
+  posture rather than a defect fix, so it is the maintainer's call and
+  not a reviewer's or an implementer's. The wording was corrected
+  instead, in the fragment and in the plan.
+
+### What the external review changed
+
+Three findings, all taken, and two of them were holes in the tests
+rather than in the code. They are worth recording because both holes
+have the same shape: a case that passes for a reason weaker than the
+claim it is named after.
+
+- **The eviction cases did not prove the pin is taken at ADMISSION.**
+  They ran against a double whose eviction fired inside
+  `retained_context`, so moving that call from admission onto the
+  worker, which restores the first race outright, left both green. They
+  now drive the REAL retention: a job ahead of the target holds the only
+  worker, the target is admitted behind it, and enough later sessions
+  are opened to evict it for real. Both were then re-falsified against
+  the mutation each is actually about, moving the pin onto the worker
+  for the first window and restoring the session-keyed
+  `reference_media` for the second, and each fails against its own.
+  The double's eviction machinery was deleted rather than left
+  unused, since a fake that cannot tell those two apart has no business
+  looking as though it can.
+- **Nothing proved the stored handle is the handle the exporter was
+  given.** The store cases proved the rows agree with each other and
+  the exporter cases injected a synthetic id, so a runtime emitting one
+  uuid and storing another would have left every case green while
+  misfiling every artifact in the field. One case now drives a handover
+  through the real pipeline with both the recorder and the exporter's
+  tap attached, and insists the two stored rows, the span attribute and
+  the retention key are one string. Verified by mutation: emitting a
+  different id fails it.
+- **The compatibility claim contradicted itself**, which is the
+  deviation recorded above.
 
 ### Verification
 

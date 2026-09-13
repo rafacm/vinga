@@ -37,7 +37,15 @@ from typing import Any
 
 import pytest
 
+from tests.support.configs import BOTH_MAC
 from tests.support.events import both_formats, every_format
+from tests.support.providers import ScriptedLlm
+from tests.support.sessions import (
+    call,
+    events_of,
+    start_reply,
+    wait_for_reply,
+)
 from tests.support.telemetry import (
     AGENT,
     CONVERSATION,
@@ -79,6 +87,7 @@ from vinga_server.config import ConfigError
 from vinga_server.config.models import TelemetryConfig
 from vinga_server.events import Emission, attach_server_tap, detach_server_tap
 from vinga_server.events.values import CloseReason, ReplyOutcome
+from vinga_server.providers.base import Usage
 from vinga_server.telemetry import (
     _QUIETING,
     APPROVED,
@@ -2273,3 +2282,56 @@ def test_a_reference_written_on_a_turn_lands_in_that_turns_trace() -> None:
     assert written.context.trace_id == turn.trace_id
     assert written.parent.span_id == turn.span_id
     assert written.context.trace_id != context.trace_id
+
+
+# --- the two sides holding one value -----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_handle_the_store_writes_is_the_one_the_trace_is_keyed_by() -> None:
+    """The seam itself, driven once through the real pipeline.
+
+    Every case above this proves one side. The store cases prove that a
+    handover's two rows share a value and that two turns do not; the
+    exporter cases prove that a turn is retained under whatever
+    `turn_started` carried. Neither notices a runtime that emits one id
+    and stores another, which is a mutation that leaves both suites
+    green and misfiles every artifact in the field.
+
+    So this drives one handover through a real session with the
+    recorder and the exporter's tap both attached, and insists that the
+    stored rows, the span the backend will read, and the key the
+    retention answers to are all the same string.
+    """
+    from tests.support.records import recording_session
+
+    telemetry, memory = exporting()
+    poet = ScriptedLlm(
+        [[call("switch_agent", agent="tutor"), Usage(prompt_tokens=5, completion_tokens=1)]]
+    )
+    tutor = ScriptedLlm([["Tutor here."]])
+    session, spy, _ = recording_session(mac=BOTH_MAC, scripts={"poet": poet, "tutor": tutor})
+    events = events_of(session)
+    events.attach(telemetry.session_tap())
+    # Its OWN identities: the fixed ids in the support module would
+    # rename the agent this live session is talking as, and the pipeline
+    # would then fail to find it.
+    open_session(events, keep_identities=True)
+
+    start_reply(session, b"\x00\x00" * 320)
+    await wait_for_reply(session)
+
+    assert len(spy.records) == 2, "the handover did not record two turns"
+    asked, greeted = (record for _, record in spy.records)
+    turn = named(finished(telemetry, memory), "turn")
+    context = telemetry.retained_context(events.session_id)
+
+    minted = asked.utterance
+    assert minted is not None
+    # The store's two rows, which is the many-to-one.
+    assert greeted.utterance == minted
+    # The span a backend reads.
+    assert turn.attributes["vinga.utterance.id"] == minted
+    # And the key the retention actually answers to, which is what a
+    # post-close consumer will hand it.
+    assert telemetry.turn_context(context, minted) is not None
