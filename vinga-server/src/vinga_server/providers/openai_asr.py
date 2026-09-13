@@ -58,13 +58,20 @@ decided, not what was said, and the clip this work started from, a
 spoken German "Hallo", was transcribed `Hello.` and reported `en`.
 
 No model reports a confidence, so `language_confidence` stays empty,
-and a code is asked of `LanguageTag` before it travels, because
-`events/assembly.py` constructs one with nothing catching it and a code
-this module could not vouch for would break a turn that had already
-been transcribed. The session-scoped lock (`lock_language`) is still
-never asked for. The lock exists to spare faster-whisper a constant
-encoder pass per utterance (#22); here detection happens inside the
-model at no measurable cost, so there is nothing to spare.
+and a code is asked of `LanguageTag` before it travels. Not because a
+malformed one would break the turn, which is what this paragraph first
+claimed and is false: the site hands `SessionEvents.emit` a thunk and
+the guard around it drops an event it could not build, reporting the
+refusal, so the reply carries on. What a malformed code costs is that
+`heard` event whole, this turn's duration and `asr_ms` and submitted
+audio going with it, and the turn record beside it has neither a guard
+nor a value type, so the far side's string would land in a durable row
+and on the read surface over it. That is a poor price for a field whose
+absence says only that the language was not learned. The
+session-scoped lock (`lock_language`) is still never asked for. The
+lock exists to spare faster-whisper a constant encoder pass per
+utterance (#22); here detection happens inside the model at no
+measurable cost, so there is nothing to spare.
 """
 
 import asyncio
@@ -216,10 +223,13 @@ def _reported_language(response: object) -> str | None:
     The code itself is asked of `LanguageTag` rather than of a pattern
     written here, the way `events/catalog.py::_named` asks `EventName`
     and for the same reason: that is the type this value becomes in
-    `events/assembly.py`, which constructs it with nothing catching the
-    refusal, so a code accepted here and refused there would break a
-    turn that had already been transcribed. A far-side value decides
-    what one field says and never whether the turn survives.
+    `events/assembly.py`. A code accepted here and refused there does
+    not raise into the reply, because the emitter builds inside its own
+    guard; it costs the whole `heard` event, and it still reaches the
+    turn record, which has no guard and no value type on this field at
+    all. So a far-side value decides what one field says, and is not
+    allowed to decide whether the event carrying this turn's numbers is
+    emitted or what a durable row holds.
     """
     reported = getattr(response, "languages", None)
     if not isinstance(reported, list) or len(reported) != 1:

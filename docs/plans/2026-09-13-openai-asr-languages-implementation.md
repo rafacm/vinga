@@ -72,6 +72,40 @@ types converted before this one already give.
 
 ### Discoveries
 
+**A malformed code does not break the turn, and the plan's reason for
+normalizing was wrong.** This is the correction the PR review round's
+finding 3 forced, and it is worth stating plainly because the
+milestone inherited the claim rather than inventing it: the plan said a
+bad code would break event assembly in the middle of a transcribed
+turn. It does not. The site hands `SessionEvents.emit` a thunk exactly
+so that construction happens inside the guard, and that emitter's
+docstring says so: "a construction failure is telemetry's problem
+rather than the reply's". `_built` answers None and `emit` answers the
+instant with nothing dispatched.
+
+Measured, by taking the normalization back out and running the
+malformed set: every case that carries a code leaves no `heard`
+emission at any consumer and logs `construction_failed` on the session
+channel, and the transcription itself answers normally. The suite
+notices independently, which is worth recording: `tests/conftest.py`
+fails any test whose run produced an event-schema refusal unless it
+asked for the `refusals_are_expected` fixture, so the unnormalized path
+is red twice over.
+
+What a malformed code really costs is two things, and they are what the
+prose now says. The turn loses its whole `heard` event, and with it the
+duration, the `asr_ms` and the submitted audio that event carries,
+because one optional far-side field was malformed. And the turn record
+has no guard and no value type: `heard_utterance` assigns the string
+and `conversations/store.py` writes it into a nullable `Text` column,
+so an unnormalized code reaches a durable row and the `/api` read
+surface over it. The second half is not in the review's finding and is
+the stronger of the two: a dropped event is a gap, a stored far-side
+string is a value nothing downstream can tell from one this server
+minted. Both are a poor price for a field whose absence means only that
+the language was not learned, which is the claim the code, the plan and
+this document now make instead of the one they made.
+
 **This type needs no blank-spelling validator, and that is a property
 of the reader rather than of the options.** Two of the other three
 converted types carry `_blank_reads_as_unwritten` because their readers
@@ -233,7 +267,7 @@ anything that is not exactly one syntactically valid code.
 | The suppression, derived from the value the request sent | the same module: `single` is computed once, put on the wire as `language`, and read back to decide whether a reported code is evidence |
 | The normalization, asked of the type the code becomes | the same module: `_reported_language` and `_code_of`, answering None for every malformed shape |
 | The module docstring's language paragraph, replaced by what the provider now does | the same module's docstring |
-| The pins that say the new behaviour | `vinga-server/tests/unit/test_providers_openai_asr.py`: the filled case, the three suppressed cases, the blank that suppresses nothing, the empty list, the eight malformed shapes through event assembly, the retry's provenance and the discarding outcomes |
+| The pins that say the new behaviour | `vinga-server/tests/unit/test_providers_openai_asr.py`: the filled case, the three suppressed cases, the blank that suppresses nothing, the empty list, the eight malformed shapes down the emission and record path, the retry's provenance and all five discarding outcomes |
 | The two README claims this falsifies | `vinga-server/README.md`: the local engine's remaining wins, and the paragraph that said no language is reported |
 | The example fragment's closing paragraph | `vinga-server/examples/asr-openai.yaml` |
 | The changelog fragment | `changelog.d/500-asr-language-report.md`, one entry under Added |
@@ -282,13 +316,15 @@ second expression of the rule is a bug pending. The catch is narrowed
 to `EventValueError`, which is what that type raises and nothing else
 does.
 
-**How far the malformed cases are asserted.** To the payload, through
-`assembly.heard` with the arguments `runtime/pipeline.py` passes, since
-that is the call that constructs `LanguageTag` with nothing catching
-the refusal. The assembly call is made before anything is asserted
-about the result, deliberately: under an implementation that passes a
-bad code on, the test then fails as the raise it would be in a turn
-rather than as a tidier assertion above it.
+**How far the malformed cases are asserted.** Down the path production
+takes: the event through `SessionEvents.emit` with the thunk
+`runtime/pipeline.py` hands it, and the record through
+`TurnUnderway.heard_utterance` beside it, which is the pair of calls
+the pipeline makes in that order. Not through `assembly.heard` alone,
+which is what this milestone first did and what the PR review round
+corrected: the builder is not the deciding surface, the guard around it
+is. See the discovery below for what a malformed code actually costs
+and how it was measured.
 
 ### Discoveries
 
@@ -336,6 +372,7 @@ merged implementation:
 | --- | --- |
 | Never report (`_Hearing(text, None)`) | the filled case and the recovered one |
 | Report unconditionally (the suppression removed) | all three suppressed cases |
-| The naive read (`reported[0]["code"]`) | all seven malformed shapes that carry a key, and the empty list; the empty and the overlong code as `EventValueError: a language matches the language syntax`, raised out of event assembly, which is the turn this normalization exists to save |
+| The naive read (`reported[0]["code"]`) | all seven malformed shapes that carry a key, and the empty list. Down the production path each one loses its whole `heard` event to the emitter's guard, logs `construction_failed`, and lands the far side's string in the turn record, which is what the normalization is actually for |
 | The language kept beside the text across the retry | the provenance case and both discarding ones |
 | The suppression written over the configuration (`self._language is not None`) | the blank-language case and the hinted one |
+| The retry's text recombined with the first hearing's language | the skipped, asyncio-timeout and SDK-timeout discards (added in the review round; the confirmed echo and the empty retry already failed under the mutation above) |

@@ -24,7 +24,14 @@ from tests.support.llm_sdk import Falsey
 from vinga_server.boundary import Reach
 from vinga_server.config.models import ProviderConfig
 from vinga_server.config.provider_options import OpenaiAsrOptions
-from vinga_server.events import Emission, assembly, attach_server_tap, detach_server_tap
+from vinga_server.conversations.records import TurnRecord
+from vinga_server.events import (
+    Emission,
+    SessionEvents,
+    assembly,
+    attach_server_tap,
+    detach_server_tap,
+)
 from vinga_server.logs import TEXT_FORMAT, JsonFormatter
 from vinga_server.providers import (
     ProviderCallError,
@@ -36,6 +43,7 @@ from vinga_server.providers.base import AsrResult, ProviderError
 from vinga_server.providers.kit import DEFAULT_TIMEOUT_S
 from vinga_server.providers.openai_asr import OpenAiAsr
 from vinga_server.providers.openai_endpoint import DEFAULT_BASE_URL
+from vinga_server.runtime.turns import TurnUnderway
 
 # One 16 kHz second of s16le silence, comfortably over the API minimum.
 ONE_SECOND = b"\x00\x00" * 16000
@@ -122,30 +130,13 @@ def reporting_handler(reported: object, text: str = "Hej hej") -> object:
 # Its own sentinel because `None` is a report a handler can send.
 ABSENT_KEY = object()
 
-# The thread the pipeline hands the builder below, a uuid hex as the
-# runtime mints it.
+# The session, thread and agent the pipeline hands the two calls below,
+# spelled as the runtime mints them.
+SESSION = "0123456789abcdef0123456789abcdef"
 THREAD = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
+AGENT = "household"
 
 
-def heard_payload(asr: OpenAiAsr, result: AsrResult) -> dict[str, object]:
-    """The `heard` payload a transcription becomes, built through the
-    call `runtime/pipeline.py` builds it with.
-
-    The provider's answer is a plain string and the event's field is a
-    `LanguageTag`, which declines a malformed value by raising; this is
-    where that construction happens, so a claim that a far-side code
-    cannot break a turn is only worth making here.
-    """
-    return assembly.heard(
-        "poet",
-        THREAD,
-        asr,
-        1.0,
-        40,
-        result.language,
-        result.language_confidence,
-        result.submitted_ms,
-    ).payload()
 
 
 async def build_asr(**options: object) -> object:
@@ -209,6 +200,54 @@ def tap() -> Iterator[Tap]:
     finally:
         detach_server_tap(consumer)
 
+
+def only_heard(seen: Tap) -> Emission:
+    """The one `heard` emission that reached a consumer.
+
+    A guard that dropped the event leaves none, so this is where an
+    implementation that handed a malformed code on fails: not on the
+    field, which would be absent either way, but on the event that is
+    no longer there."""
+    (heard,) = seen.saw("heard")
+    return heard
+
+
+def downstream(asr: OpenAiAsr, result: AsrResult) -> tuple[Tap, TurnRecord | None]:
+    """Where one transcription's answer lands: the consumer that saw its
+    `heard` event, and the record the store would write.
+
+    Both halves of `runtime/pipeline.py`'s own sequence, in its order,
+    and through the calls it makes rather than through the builders
+    under them. The distinction is the whole point of this helper. The
+    event is emitted as a THUNK through `SessionEvents.emit`, whose
+    guard catches a construction refusal and drops the event with the
+    refusal reported, so what a malformed value costs is that event and
+    not the reply. The record is the `TurnRecord` the store writes field
+    for field (`conversations/store.py` maps `language` straight into a
+    nullable `Text` column), and nothing on that path checks a value at
+    all: a code the event would decline is a code the record would
+    keep.
+    """
+    events = SessionEvents(SESSION, clock=lambda: 1.0)
+    consumer = Tap()
+    events.attach(consumer)
+    turn = TurnUnderway(conversation=THREAD, agent=AGENT)
+    heard_at = events.emit(
+        lambda: assembly.heard(
+            AGENT,
+            THREAD,
+            asr,
+            1.0,
+            40,
+            result.language,
+            result.language_confidence,
+            result.submitted_ms,
+        )
+    )
+    turn.heard_utterance(
+        heard_at, result.text, 1.0, result.language, result.language_confidence
+    )
+    return consumer, turn.record(AGENT, ())
 
 def surfaces(record: logging.LogRecord) -> str:
     """Every retained rendering of one record: the unrendered template,
@@ -1125,11 +1164,15 @@ async def test_the_language_the_model_reports_reaches_the_record() -> None:
     none of here."""
     asr = provider(reporting_handler([{"code": "de"}]))
     result = await asr.transcribe(ONE_SECOND, 16000)
+    seen, record = downstream(asr, result)
 
     assert result.language == "de"
     assert result.language_confidence is None
     assert result.lock_language is None
-    assert heard_payload(asr, result)["language"] == "de"
+    (heard,) = seen.saw("heard")
+    assert heard.payload["language"] == "de"
+    assert record is not None
+    assert record.language == "de"
 
 
 @pytest.mark.parametrize(
@@ -1156,9 +1199,12 @@ async def test_a_language_this_request_named_is_never_reported_back(
     thing the model is told."""
     asr = provider(reporting_handler([{"code": "sv"}]), **configured)
     result = await asr.transcribe(ONE_SECOND, 16000, language_hint=hint)
+    seen, record = downstream(asr, result)
 
     assert result.language is None
-    assert "language" not in heard_payload(asr, result)
+    assert "language" not in only_heard(seen).payload
+    assert record is not None
+    assert record.language is None
 
 
 async def test_a_blank_language_names_nothing_and_suppresses_nothing() -> None:
@@ -1190,49 +1236,71 @@ async def test_a_clip_with_no_speech_in_it_reports_no_language() -> None:
     absent field without a rule of ours."""
     asr = provider(reporting_handler([], text="..."))
     result = await asr.transcribe(ONE_SECOND, 16000)
+    seen, record = downstream(asr, result)
 
     assert result.language is None
-    assert "language" not in heard_payload(asr, result)
+    assert "language" not in only_heard(seen).payload
+    assert record is not None
+    assert record.language is None
 
 
-@pytest.mark.parametrize(
-    "reported",
-    [
-        pytest.param(ABSENT_KEY, id="no key at all"),
-        pytest.param("de", id="a string where the list belongs"),
-        pytest.param(["de"], id="a list of bare strings"),
-        pytest.param([{"language": "de"}], id="an entry with no code"),
-        pytest.param([{"code": 5}], id="a code that is not a string"),
-        pytest.param([{"code": ""}], id="an empty code"),
-        pytest.param([{"code": "d" * 40}], id="an overlong code"),
-        pytest.param([{"code": "de"}, {"code": "en"}], id="two entries"),
-    ],
-)
-async def test_a_malformed_report_leaves_the_field_empty_and_raises_nothing(
-    reported: object,
+# The malformed answers an endpoint can give, each with the string a
+# reader could recognize it by where it has one, so the claim that
+# nothing of it survives is checked rather than assumed. `None` is for
+# the two shapes that carry no recognizable value: no key at all, and a
+# code that is the empty string.
+MALFORMED = [
+    pytest.param(ABSENT_KEY, None, id="no key at all"),
+    pytest.param("nevervalid", "nevervalid", id="a string where the list belongs"),
+    pytest.param(["nevervalid"], "nevervalid", id="a list of bare strings"),
+    pytest.param([{"language": "nevervalid"}], "nevervalid", id="an entry with no code"),
+    pytest.param([{"code": 5550123}], "5550123", id="a code that is not a string"),
+    pytest.param([{"code": ""}], None, id="an empty code"),
+    pytest.param([{"code": "nevervalid" * 4}], "nevervalid", id="an overlong code"),
+    pytest.param([{"code": "de"}, {"code": "en"}], None, id="two entries"),
+]
+
+
+@pytest.mark.parametrize(("reported", "marker"), MALFORMED)
+async def test_a_malformed_report_costs_one_field_and_nothing_else(
+    reported: object, marker: str | None, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Asserted as far as event assembly, because that is the surface
-    that would actually break: `LanguageTag("")` and a forty-character
-    value both raise, and `events/assembly.py` builds
-    `LanguageTag(language)` with nothing catching it. A code this
-    provider passed on and that type refused would therefore end a turn
-    that had already been transcribed, which is a worse failure than the
-    silence the report was meant to prevent.
+    """Asserted down the path production takes, because that is the path
+    that decides what a malformed code costs, and it is not what this
+    plan first claimed.
 
-    The transcript survives every one of them: what an endpoint answers
-    about language decides what one field says, never whether the turn
-    lives."""
+    `LanguageTag("")` and a forty-character value both raise, and
+    `events/assembly.py` constructs one without catching. But the site
+    hands `SessionEvents.emit` a THUNK, so the construction happens
+    inside the emitter's guard: a refusal is reported and the whole
+    `heard` event is dropped, and the reply carries on. The turn record
+    has no such guard and no value type either. So an unnormalized code
+    costs the event that carries this turn's duration, its `asr_ms` and
+    its submitted audio, and puts the far side's string into a durable
+    record and onto the read surface over it, for a field whose absence
+    means only that the language was not learned. That is the trade this
+    normalization exists to refuse.
+
+    What is asserted here is that none of it happens: the event
+    survives, carries no language, the record carries none either, and
+    nothing of what the endpoint answered reaches any of the retained
+    surfaces."""
     handler = transcript_handler() if reported is ABSENT_KEY else reporting_handler(reported)
     asr = provider(handler)
-    result = await asr.transcribe(ONE_SECOND, 16000)
-    # Assembled before anything is asserted about the result, so an
-    # implementation that passed the code on fails here, as the raise it
-    # would be in a turn, rather than as a tidier assertion above it.
-    payload = heard_payload(asr, result)
+    with caplog.at_level(logging.DEBUG):
+        result = await asr.transcribe(ONE_SECOND, 16000)
+        seen, record = downstream(asr, result)
 
     assert result.text == "Hej hej"
     assert result.language is None
-    assert "language" not in payload
+    # The event is here at all, which is the half an implementation
+    # without the normalization loses: the guard would have dropped it.
+    assert "language" not in only_heard(seen).payload
+    assert record is not None
+    assert record.language is None
+    if marker is not None:
+        assert marker not in seen.rendered()
+        assert marker not in caplog.text
 
 
 async def test_the_recovered_hearing_carries_its_own_language() -> None:
@@ -1257,7 +1325,7 @@ async def test_the_recovered_hearing_carries_its_own_language() -> None:
 
     assert result.text == "Ja tack"
     assert result.language == "sv"
-    assert heard_payload(asr, result)["language"] == "sv"
+    assert only_heard(downstream(asr, result)[0]).payload["language"] == "sv"
 
 
 @pytest.mark.parametrize(

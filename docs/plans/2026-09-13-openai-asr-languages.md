@@ -213,6 +213,32 @@ from the endpoint would therefore break event assembly in the middle
 of a turn that had already been transcribed, which is a worse failure
 than the silence it was meant to prevent.
 
+**Correction, from M2's own PR review round (#513, finding 3).** The
+sentence above beginning "A malformed `code` from the endpoint would
+therefore break event assembly in the middle of a turn" is false, and
+it was this plan's error rather than the milestone's. `assembly.heard`
+is not called by the site; it is handed to `SessionEvents.emit` as a
+thunk, and its own docstring says why: "building, validating, rendering
+and serializing all happen inside the guard, so a construction failure
+is telemetry's problem rather than the reply's". `_built` answers None
+on a refusal and `emit` answers the instant with nothing dispatched.
+Confirmed by running it: with the normalization removed, each malformed
+code leaves no `heard` emission at any consumer, reports
+`construction_failed` on the session channel, and the transcription
+answers normally.
+
+So the true cost is two things, and the normalization is right for both
+of them rather than for the one this plan named. The turn loses its
+whole `heard` event, with the duration, the `asr_ms` and the submitted
+audio it carries, because one optional far-side field was malformed.
+And the turn record beside it has no guard and no value type:
+`runtime/turns.py::heard_utterance` assigns the string, and
+`conversations/store.py` writes it into a nullable `Text` column, so
+the far side's value would reach a durable row and the `/api` read
+surface over it. Both are a poor price for a field whose absence means
+only that the language was not learned, which is a smaller claim than
+"it would break the turn" and the one the evidence supports.
+
 So the provider normalizes, and answers None for anything that is not
 exactly one syntactically valid code: no key, a value that is not a
 list, an empty list, more than one entry, an entry that is not a
