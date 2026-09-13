@@ -158,12 +158,26 @@ and refusing it would be a rule about our taxonomy rather than about
 the endpoint, which accepts it.
 
 **Does a reported code need validating before it becomes a
-`LanguageTag`?** The value type already declines a value that is not a
-code, rather than truncating it, and the fill path reads
-`model_extra` rather than a declared SDK field, so the plan's tests
-plant a malformed code and a non-list and assert the turn survives
-with no language rather than raising. A far-side value decides nothing
-here except what one field says.
+`LanguageTag`?** Yes, in the provider, and this plan first said
+otherwise. `LanguageTag` does not decline a bad value politely: run
+against it, `LanguageTag("")` and a forty-character value both raise
+`EventValueError`, and `events/assembly.py` builds
+`LanguageTag(language)` with nothing catching it. A malformed `code`
+from the endpoint would therefore break event assembly in the middle
+of a turn that had already been transcribed, which is a worse failure
+than the silence it was meant to prevent.
+
+So the provider normalizes, and answers None for anything that is not
+exactly one syntactically valid code: no key, a value that is not a
+list, an empty list, more than one entry, an entry that is not a
+mapping or a typed object, a missing or non-string `code`, and a code
+failing the syntax. The read is
+`getattr(response, "languages", None)` rather than a reach into
+`model_extra`, so a field the SDK declares later and an extra one
+today are the same read, and the entries are taken through the same
+accessor so a mapping and a typed object are the same walk. A far-side
+value decides nothing here except what one field says, and it may not
+decide whether the turn survives.
 
 ## The smaller decisions
 
@@ -381,11 +395,17 @@ records; nothing new is needed to see a request or a log line.
 - **M2**: a response carrying `languages: [{"code": "de"}]` with
   nothing configured fills the field; the same response with
   `language: sv` configured leaves it empty; with a session
-  `language_hint` leaves it empty; `languages: []` leaves it empty;
-  a malformed payload (a string instead of a list, a list of strings,
-  a mapping with no `code`) leaves it empty and raises nothing; the
-  value reaches the `heard` event through the pipeline's existing
-  path, asserted at the event rather than re-asserted on the result.
+  `language_hint` leaves it empty; `languages: []` leaves it empty.
+  Then the malformed set, each asserted to leave the field empty AND
+  to raise nothing, through the pipeline as far as event assembly so
+  that the surface which actually constructs `LanguageTag` is the one
+  proven not to fail: no key at all, a string where the list belongs,
+  a list of strings, a mapping without `code`, a `code` that is not a
+  string, an empty `code`, a forty-character `code`, and two entries
+  where one is expected. The empty and overlong codes are the two that
+  raise from `LanguageTag` today, so they are the two that would have
+  broken a turn, and each is watched failing against an
+  implementation without the normalization before the claim is made.
 - **M4**: a repeated-part helper beside `form_field`, since the list
   is sent as two parts named `languages[]` and the existing helper
   cannot see them; with it, that both codes arrive, in the written
