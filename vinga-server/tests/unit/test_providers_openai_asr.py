@@ -1014,7 +1014,10 @@ async def test_an_echo_with_no_budget_left_is_not_retried(
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return httpx.Response(200, json={"text": "vinga, Oliver"})
+        # The discarded response reports a language, so a provider that
+        # kept the first hearing's half would be visible here rather
+        # than only on the two outcomes that answer a second response.
+        return httpx.Response(200, json={"text": "vinga, Oliver", "languages": [{"code": "en"}]})
 
     # The budget is below the one-second retry floor before the first
     # request even starts, which stands in for a first request that
@@ -1024,6 +1027,7 @@ async def test_an_echo_with_no_budget_left_is_not_retried(
         result = await asr.transcribe(ONE_SECOND, 16000)
 
     assert result.text == ""
+    assert result.language is None
     assert len(seen) == 1
     (event,) = [r for r in caplog.records if getattr(r, "event", None) == "asr_prompt_echo"]
     assert event.outcome == "skipped"  # type: ignore[attr-defined]
@@ -1047,7 +1051,12 @@ async def test_the_deadline_is_absolute_rather_than_per_connection_phase(
         nonlocal calls
         calls += 1
         if calls == 1:
-            return httpx.Response(200, json={"text": "vinga, Oliver"})
+            # Reporting a language, for the reason the skipped case
+            # gives: a cut-off retry answers no text, so it answers no
+            # language either.
+            return httpx.Response(
+                200, json={"text": "vinga, Oliver", "languages": [{"code": "en"}]}
+            )
         # Far longer than the whole budget, inside what would be a
         # single read phase.
         await asyncio.sleep(30)
@@ -1064,6 +1073,7 @@ async def test_the_deadline_is_absolute_rather_than_per_connection_phase(
         elapsed = loop.time() - started
 
     assert result.text == ""
+    assert result.language is None
     assert calls == 2
     assert elapsed < 1.0
     (event,) = [r for r in caplog.records if getattr(r, "event", None) == "asr_prompt_echo"]
@@ -1083,7 +1093,9 @@ async def test_a_retry_cut_off_by_the_deadline_discards_rather_than_fails(
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
         if len(seen) == 1:
-            return httpx.Response(200, json={"text": "vinga, Oliver"})
+            return httpx.Response(
+                200, json={"text": "vinga, Oliver", "languages": [{"code": "en"}]}
+            )
         raise httpx.ReadTimeout("the deadline came first", request=request)
 
     asr = provider(handler, prompt="vinga, Oliver")
@@ -1091,6 +1103,7 @@ async def test_a_retry_cut_off_by_the_deadline_discards_rather_than_fails(
         result = await asr.transcribe(ONE_SECOND, 16000)
 
     assert result.text == ""
+    assert result.language is None
     assert len(seen) == 2
     (event,) = [r for r in caplog.records if getattr(r, "event", None) == "asr_prompt_echo"]
     assert event.outcome == "timed_out"  # type: ignore[attr-defined]
