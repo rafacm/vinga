@@ -339,3 +339,148 @@ them.
   in this plan with the shape of the evidence rather than as a claim
   about the vendor's future, and the tests pin our own handling, never
   the endpoint's behaviour.
+
+## Plan review round
+
+External review of commit `2a5ce4e5`, 2026-09-13. Backend codex
+(codex-cli 0.154.0), model `gpt-5.6-sol`, sandbox read-only, 979 s
+wall clock. Eleven findings, four P1 and seven P2, verdict "ready
+after the P1/P2 amendments". Every one was confirmed against the code
+before being accepted, and none was rejected; three were confirmed by
+running something rather than by reading, and those runs are recorded
+with the finding.
+
+**1 (P1). The `languages` milestone lands before the model that
+accepts it.** `languages` arrives while the default is still
+`gpt-4o-mini-transcribe`, which 400s on it, and the failure is not the
+startup failure this plan's risk section claims: `build` only
+constructs the client, so an incompatible entry applies successfully
+and fails on the first transcription of a real conversation.
+
+*Resolution*: milestones reordered so the default moves before
+`languages` arrives, and the risk bullet corrected to say request time
+rather than startup. See "Milestones" below.
+
+**2 (P1). A session language hint can make the provider send both
+controls.** The validator sees configuration, not the runtime hint.
+With `languages` configured and a non-None `language_hint`,
+`pinned = self._language or language_hint` puts `language` in the same
+request as `languages`, which is the combination the endpoint refuses.
+Confirmed reachable: `_asr_language` is session-scoped and
+deliberately survives an agent switch (`runtime/pipeline.py:787-791`,
+"the speaker does not change on an agent switch"), so a session whose
+first agent transcribes with `faster_whisper`, which is the type that
+sets `lock_language`, and then hands over to an agent using this type
+carries a hint into it.
+
+*Resolution*: precedence stated and tested, including the echo-retry
+path. See "The smaller decisions".
+
+**3 (P1). M1 moves ownership of the model default, and the old
+milestone 4 edits the owner it obsoleted.** After the conversion the
+builder reads `options.model` and the field declares the default, the
+way `FasterWhisperOptions` does with `default="small"`; confirmed that
+`faster_whisper.py` keeps no `DEFAULT_MODEL` constant at all.
+`openai_asr.DEFAULT_MODEL` would be left either unused or as a second
+home for one fact.
+
+*Resolution*: the field is the one home, the constant goes in M1, and
+the default-move milestone edits the field. See M1 and M3.
+
+**4 (P2). The endpoint-conditional temperature check cannot move into
+the options model.** `config/provider_options.py` documents an import
+contract ("no provider package, no engine, no database driver, no
+cryptography") with three committed pins behind it, and
+`providers/openai_endpoint.py`, which owns endpoint classification,
+imports `providers.base` and `providers.kit`. Importing it from the
+model would break `test_the_configuration_cli_loads_none_of_this_package`
+and duplicating its URL rules into the model would break locality.
+
+*Resolution*: the check stays in the builder, after typed validation.
+See M1.
+
+**5 (P1). M1 names one generated artifact and CI diffs three.**
+Declaring an options model changes `docs/reference/domain-config.md`,
+`docs/reference/api-openapi.json` (which carries one component per
+declared model, today `LlmOpenaiCompatibleOptions`,
+`AsrFasterWhisperOptions`, `TtsElevenlabsOptions`, and whose API
+description embeds the sentence listing which types declare one) and
+`docs/reference/cli.md` (which renders an "options for asr type
+faster_whisper" section per declared model). All three are diffed by
+the server workflow.
+
+*Resolution*: all three named in M1's documentation footprint and in
+its verification, and again in the default-move milestone.
+
+**6 (P2). The `languages` contract and its wire shape are
+underspecified.** Empty lists, invalid strings, duplicates, order and
+normalization are unsettled; `LanguageTag` is not an ISO 639-1
+validator (confirmed: it accepts `not-a-language` and `de-DE` and
+rejects only what fails its syntax); and the SDK does not send a list
+as one field. Confirmed by capturing a request through a mock
+transport: `extra_body={"languages": ["de", "en"]}` is serialized as
+two repeated multipart parts named `languages[]`, so the existing
+`form_field` helper, which looks for exactly one part by exact name,
+would find nothing and a test built on it would pass while asserting
+nothing.
+
+*Resolution*: the contract is settled in "The smaller decisions" and
+the tests gain a repeated-part helper. The `languages[]` spelling is
+what the live endpoint accepted in this plan's measurements, so it is
+recorded as the wire fact rather than treated as an SDK detail.
+
+**7 (P2). The tests do not reach the write-time refusal they
+promise.** `build_asr` in the provider tests constructs a provider and
+never touches the configuration store; the write gate is in
+`config/store.py`. The plan also tested only that both field names
+appear, not the issue's requirement that the message says which model
+wants which form.
+
+*Resolution*: a store-level write test added to M4's tests, asserting
+the refusal happens before persistence, the stored row is unchanged,
+and the guidance is present.
+
+**8 (P2). The normalization can still break the turn it claims to
+protect.** Confirmed by running it: `LanguageTag("")` and a
+forty-character value both raise `EventValueError`, and
+`events/assembly.py` constructs `LanguageTag(language)` without
+catching, so a malformed `code` reaching the result breaks event
+assembly rather than being declined. Reading only `model_extra` is
+also not forward-compatible, since a field the SDK later declares
+stops being extra.
+
+*Resolution*: the provider normalizes and returns None on anything
+that is not exactly one syntactically valid code, reading through
+`getattr(response, "languages", None)` so a declared field and an
+extra one are the same read. See M2.
+
+**9 (P2). The echo retry has no defined language provenance.**
+`_request` answers text only, and the retry can replace the first
+response; an implementation could return the retry's text with the
+first response's language.
+
+*Resolution*: a request answers one text-and-language observation, and
+the retry's pair replaces the first one whole. See M2.
+
+**10 (P2). The read-back tightening is not behaviour-preserving for a
+stored row.** `_stored_option_types` validates every stored provider
+row on read and its own docstring warns that an entry written before
+its type declared a model can hold a key the model refuses. The
+spellings of absence today's reader accepts are the compatibility
+surface, which is why `FasterWhisperOptions` carries an explicit
+`_blank_reads_as_unwritten` validator.
+
+*Resolution*: M1 enumerates the spellings the current reader accepts,
+preserves them, adds a stored-row upgrade test and a changelog
+compatibility note, and drops the unqualified "behaviour-preserving"
+claim.
+
+**11 (P2). Two maintained README claims become false and one table
+becomes incomplete.** `vinga-server/README.md` says the local engine
+"is the only one that reports which language it heard" and carries a
+"**No language is reported back.**" paragraph asserting the fields stay
+empty; its options table lists no `languages`. A grep for the model
+name in the default-move milestone would not have found any of them.
+
+*Resolution*: named in the documentation footprint of the milestone
+that falsifies each.
