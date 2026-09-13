@@ -263,6 +263,17 @@ decide whether the turn survives.
   is session-scoped and survives an agent switch on purpose, so an
   agent transcribing with `faster_whisper` can hand a session over to
   one using this type.
+- **A request answers one text-and-language pair, and the retry's pair
+  replaces the first one whole.** `_request` answers text today, and
+  the echo retry can replace the first response's text with a second
+  response's. If the language travelled beside the text rather than
+  inside the same answer, an implementation could hand back the
+  retry's transcript with the discarded response's language, which is
+  a mislabelled turn that no test of a single response would catch. So
+  the language is part of what a request returns, never a variable the
+  two paths both assign, and the discarding outcomes (the confirmed
+  echo, the empty retry, the skipped and timed-out retries) answer no
+  language at all, because they answer no text either.
 - **The echo retry resends `languages` unchanged.** It is the same
   clip being heard again under the same description; withholding the
   prompt is the point of that retry, and withholding the language
@@ -406,6 +417,12 @@ records; nothing new is needed to see a request or a log line.
   raise from `LanguageTag` today, so they are the two that would have
   broken a turn, and each is watched failing against an
   implementation without the normalization before the claim is made.
+  And the retry's provenance: a first response that is the echoed
+  prompt reporting one code and a recovered second response reporting
+  a different one, asserting the result carries the recovered
+  response's code and not the discarded one's, which is the test that
+  distinguishes a pair returned together from two values assigned
+  separately.
 - **M4**: a repeated-part helper beside `form_field`, since the list
   is sent as two parts named `languages[]` and the existing helper
   cannot see them; with it, that both codes arrive, in the written
