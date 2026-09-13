@@ -91,6 +91,16 @@ api_key_env: OPENAI_API_KEY
 # measurement. whisper-1 and a compatible endpoint were not measured
 # and decide this for themselves. So on the default a wrong value is
 # fairly harmless and an empty one is what costs you.
+#
+# Setting it also switches the language report off, which is the trade
+# this one line makes: told a single language, the model hands that code
+# back rather than saying what it heard, so the report described at the
+# bottom of this file stays empty for as long as this line is here. It
+# is still set here, because the advice above was earned on a real
+# device and a wrong transcript costs a turn where a missing report
+# costs a number. To learn what the ear actually hears, comment this out
+# for a while on a deployment whose transcripts already look right, read
+# the codes that arrive, and pin afterwards.
 language: sv
 
 # 0.0 to 1.0. Raise it only to loosen a decode that is stuck; the
@@ -112,7 +122,8 @@ language: sv
 # reaches the `heard` event and the conversation record, and only where
 # nothing named a language: told one, the model hands that code straight
 # back rather than saying what it heard, so `language` above suppresses
-# the report as surely as it steadies the transcription. Read what does
+# the report as surely as it steadies the transcription, and as this
+# fragment ships, with that line set, no turn reports one. Read what does
 # arrive as a rate to watch rather than a verdict on one turn, since it
 # says what the model decided rather than what was said: a spoken German
 # "Hallo" came back as "Hello." and reported as English.
