@@ -457,10 +457,24 @@ def _import_sdk() -> Sdk | None:
 
 @dataclass(frozen=True)
 class _Job:
-    """One staged pair, waiting for a worker."""
+    """One staged pair, waiting for a worker.
+
+    `context` is the trace this job's session was exported under, taken
+    at ADMISSION rather than looked up on the worker. That is the whole
+    of the difference M4a made here: the retention is bounded and
+    oldest-evicted, so a job queued behind a slow worker used to watch
+    its own context age out between the close that made it and the
+    moment the worker reached it, and a healthy upload would report that
+    the session had no trace. Pinned here, `no_trace` is an answer about
+    the moment the session closed, which is the moment it is about.
+
+    None where this deployment exports nothing, or where the exporter
+    never saw the session; the worker reports that as it always did.
+    """
 
     session: str
     path: Path
+    context: Any = None
 
 
 class _Refused(Exception):
@@ -623,7 +637,15 @@ class CaptureUpload:
             return
         self._start()
         try:
-            self._queue.put_nowait(_Job(session=session, path=path))
+            self._queue.put_nowait(
+                _Job(
+                    session=session,
+                    path=path,
+                    # Pinned in the same breath as the admission, which
+                    # is what makes the two windows below one answer.
+                    context=self._telemetry.retained_context(session),
+                )
+            )
         except queue.Full:
             # The links go in the same breath as the event, because a
             # job nobody will ever run is room audio sitting on a disk
@@ -730,7 +752,7 @@ class CaptureUpload:
 
     def _deliver(self, job: _Job, began: float) -> AttemptedUpload | None:
         """The upload itself, or the reason it did not happen."""
-        trace = self._telemetry.trace_of(job.session)
+        trace = self._telemetry.trace_of(job.context)
         if trace is None:
             # Never retried, and the walkthrough that settled this is
             # M1's: the media API accepts a `traceId` it has not
@@ -749,7 +771,7 @@ class CaptureUpload:
         references, reason = self._send(trace, audio, manifest)
         if reason is not None:
             return reason
-        if not self._telemetry.reference_media(job.session, references):
+        if not self._telemetry.reference_media(job.context, references):
             # The bytes landed and nothing points at them, which is the
             # gap this surface exists to close wearing a success: an
             # upload associates a recording with a trace, and what makes

@@ -1478,11 +1478,14 @@ async def test_the_sdk_namespace_is_quiet_before_the_worker_does_anything(
     quiet: list[bool] = []
 
     class Watching:
-        def trace_of(self, session: str) -> str | None:
+        def retained_context(self, session: str) -> object | None:
+            return session
+
+        def trace_of(self, context: object) -> str | None:
             quiet.append(logging.getLogger("httpx").propagate is False)
             return TRACE
 
-        def reference_media(self, session: str, references: dict[str, str]) -> bool:
+        def reference_media(self, context: object, references: dict[str, str]) -> bool:
             return True
 
     seam, _ = fake_sdk()
@@ -1561,11 +1564,14 @@ async def test_an_uploader_that_outlived_its_bound_keeps_the_next_one_quiet(
     store_a = capture_store(tmp_path / "a-dir", uploads=wedged)
 
     class Watching:
-        def trace_of(self, session: str) -> str | None:
+        def retained_context(self, session: str) -> object | None:
+            return session
+
+        def trace_of(self, context: object) -> str | None:
             quiet_while_b_ran.append(logging.getLogger("httpx").propagate is False)
             return TRACE
 
-        def reference_media(self, session: str, references: dict[str, str]) -> bool:
+        def reference_media(self, context: object, references: dict[str, str]) -> bool:
             return True
 
     second, _ = fake_sdk(recorder)

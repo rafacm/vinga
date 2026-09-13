@@ -215,13 +215,38 @@ def fake_sdk(
     return Sdk(client=client, error=ApiError, content_type=str), kept
 
 
+@dataclass(frozen=True)
+class Pin:
+    """What a pinned context is, as far as the uploader can tell.
+
+    Opaque to the uploader by contract: it takes one from
+    `retained_context` at admission, carries it, and hands it back. This
+    double therefore makes it a session id in a wrapper, which is the
+    least a thing can be and still be a handle rather than a name.
+    """
+
+    session: str
+
+
 class Traced:
-    """A telemetry exporter, as the two questions the uploader asks it.
+    """A telemetry exporter, as the three questions the uploader asks it.
 
     Not a `Telemetry`, and typed as one at the call site because that is
-    what the uploader declares: what it uses is `trace_of` and
-    `reference_media`, and a lane that had to build a real exporter to
-    answer one string would be driving OpenTelemetry to test a hardlink.
+    what the uploader declares: what it uses is `retained_context`,
+    `trace_of` and `reference_media`, and a lane that had to build a real
+    exporter to answer one string would be driving OpenTelemetry to test
+    a hardlink.
+
+    The two reads take a PINNED CONTEXT rather than a session id, which
+    is the interface M4a left behind: a caller pins once at admission and
+    the answer stops depending on when it asks. A double that kept the
+    session-keyed spelling could not fail the way the real one now
+    cannot, so it would certify nothing.
+
+    `evicting` is what makes that testable: the set of sessions whose
+    context is dropped from the retention the moment after it is pinned.
+    A pin taken before the eviction still resolves, which is the whole
+    claim; a caller that had not pinned would get nothing.
 
     `referenced` is what a case reads back: the tokens the uploader asked
     to have written onto each session's trace, which is the claim that
@@ -230,20 +255,49 @@ class Traced:
     """
 
     def __init__(
-        self, traces: dict[str, str] | None = None, *, refusing: bool = False
+        self,
+        traces: dict[str, str] | None = None,
+        *,
+        refusing: bool = False,
+        evicting: set[str] | None = None,
     ) -> None:
         self.traces = dict(traces or {})
         self.refusing = refusing
+        self.evicting = set(evicting or ())
         self.referenced: list[tuple[str, dict[str, str]]] = []
 
-    def trace_of(self, session: str) -> str | None:
-        return self.traces.get(session)
+    def retained_context(self, session: str) -> Any | None:
+        if session not in self.traces:
+            return None
+        pin = Pin(session)
+        # Pinned and then evicted, which is the window the pin exists
+        # for: everything after this point can only be answered by the
+        # handle the caller already holds.
+        if session in self.evicting:
+            self.traces.pop(session)
+        return pin
 
-    def reference_media(self, session: str, references: dict[str, str]) -> bool:
-        if self.refusing or session not in self.traces:
+    def trace_of(self, context: Any) -> str | None:
+        if not isinstance(context, Pin):
+            return None
+        return self.traces.get(context.session) or self._evicted(context)
+
+    def reference_media(self, context: Any, references: dict[str, str]) -> bool:
+        if self.refusing or not isinstance(context, Pin):
             return False
-        self.referenced.append((session, dict(references)))
+        if context.session not in self.traces and not self._evicted(context):
+            return False
+        self.referenced.append((context.session, dict(references)))
         return True
+
+    def _evicted(self, context: "Pin") -> str | None:
+        """What a pin taken before an eviction still answers.
+
+        The real exporter answers from the frozen record the caller
+        holds, so eviction cannot reach it. This double has to say the
+        same thing explicitly.
+        """
+        return f"trace-{context.session}" if context.session in self.evicting else None
 
 
 def exporting(

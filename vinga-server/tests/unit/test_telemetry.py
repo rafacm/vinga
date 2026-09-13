@@ -190,9 +190,7 @@ def test_a_narrow_boundary_refuses_before_anything_is_constructed(
     boundary as "not host" would pass the first and fail the second.
     """
     reached = []
-    monkeypatch.setattr(
-        "vinga_server.telemetry._otlp_exporter", lambda: reached.append(True)
-    )
+    monkeypatch.setattr("vinga_server.telemetry._otlp_exporter", lambda: reached.append(True))
     monkeypatch.setattr(
         "vinga_server.telemetry._import_sdk",
         lambda: reached.append("imported"),
@@ -373,9 +371,7 @@ def test_a_session_becomes_one_root_span() -> None:
     assert span.attributes["vinga.agent"] == AGENT
     assert span.attributes["vinga.conversation.id"] == CONVERSATION
     assert span.attributes["vinga.session.close_reason"] == "idle"
-    assert span.end_time - span.start_time == pytest.approx(
-        int((closed - opened) * 1e9), abs=1000
-    )
+    assert span.end_time - span.start_time == pytest.approx(int((closed - opened) * 1e9), abs=1000)
 
 
 def test_a_turn_is_its_own_trace_linked_to_the_session() -> None:
@@ -399,9 +395,7 @@ def test_a_turn_is_its_own_trace_linked_to_the_session() -> None:
 
     assert turn.parent is None, "a turn is linked to its session, never parented"
     assert turn.context.trace_id != session.context.trace_id
-    assert [link.context.span_id for link in turn.links] == [
-        session.context.span_id
-    ]
+    assert [link.context.span_id for link in turn.links] == [session.context.span_id]
     assert turn.attributes["vinga.turn.speech_ms"] == 900
     assert turn.attributes["vinga.turn.barge_in"] is False
     assert turn.attributes["vinga.turn.outcome"] == "completed"
@@ -720,6 +714,23 @@ def a_session(telemetry: Telemetry, session: str) -> str:
     return session
 
 
+def trace_named(telemetry: Telemetry, session: str) -> str | None:
+    """The trace of a session looked up NOW, which is the question a
+    caller that did not pin is asking.
+
+    `trace_of` takes a pinned context since M4a, so the session-keyed
+    question is these two calls: find what the retention holds for this
+    session at this moment, then ask it. That is the shape every case
+    below about the RETENTION wants, because what they vary is what the
+    retention still holds.
+
+    The other claim, that a context pinned earlier answers whatever the
+    retention has done since, cannot be written this way by
+    construction. It has its own cases.
+    """
+    return telemetry.trace_of(telemetry.retained_context(session))
+
+
 def test_a_trace_is_readable_after_the_close_that_popped_its_span() -> None:
     """The retention's point. The span map is popped at
     `session_closed`, and the uploader asks its question afterwards: the
@@ -734,7 +745,7 @@ def test_a_trace_is_readable_after_the_close_that_popped_its_span() -> None:
     a_session(telemetry, SESSION)
 
     span = named(finished(telemetry, memory), "session")
-    trace = telemetry.trace_of(SESSION)
+    trace = trace_named(telemetry, SESSION)
 
     assert trace == format_trace_id(span.context.trace_id)
     assert trace is not None
@@ -758,7 +769,7 @@ def test_a_session_that_is_still_open_is_already_answerable() -> None:
     events = session_events(clock, telemetry, session=SESSION)
 
     open_session(events)
-    while_open = telemetry.trace_of(SESSION)
+    while_open = trace_named(telemetry, SESSION)
 
     assert while_open is not None, "an open session has no trace to be named by"
     assert len(while_open) == 32 and while_open == while_open.lower()
@@ -769,7 +780,7 @@ def test_a_session_that_is_still_open_is_already_answerable() -> None:
     span = named(finished(telemetry, memory), "session")
 
     assert while_open == format_trace_id(span.context.trace_id)
-    assert telemetry.trace_of(SESSION) == while_open
+    assert trace_named(telemetry, SESSION) == while_open
 
 
 def test_a_session_the_exporter_never_saw_has_no_trace() -> None:
@@ -779,7 +790,7 @@ def test_a_session_the_exporter_never_saw_has_no_trace() -> None:
     telemetry, _ = exporting()
     a_session(telemetry, SESSION)
 
-    assert telemetry.trace_of("ffffffffffffffffffffffffffffffff") is None
+    assert trace_named(telemetry, "ffffffffffffffffffffffffffffffff") is None
 
 
 def test_the_retention_keeps_the_last_sessions_and_evicts_the_oldest() -> None:
@@ -798,10 +809,10 @@ def test_the_retention_keeps_the_last_sessions_and_evicts_the_oldest() -> None:
     for one in ids:
         a_session(telemetry, one)
 
-    assert telemetry.trace_of(ids[0]) is None, "the oldest survived its eviction"
-    assert telemetry.trace_of(ids[1]) is not None
-    assert telemetry.trace_of(ids[-1]) is not None
-    assert len({telemetry.trace_of(one) for one in ids[1:]}) == RETAINED_TRACES
+    assert trace_named(telemetry, ids[0]) is None, "the oldest survived its eviction"
+    assert trace_named(telemetry, ids[1]) is not None
+    assert trace_named(telemetry, ids[-1]) is not None
+    assert len({trace_named(telemetry, one) for one in ids[1:]}) == RETAINED_TRACES
 
 
 # --- the outcomes that arrive after the close --------------------------
@@ -849,7 +860,7 @@ def test_an_upload_outcome_lands_on_the_trace_its_session_closed_in() -> None:
     spans = finished(telemetry, memory)
     written = named(spans, "capture_uploaded")
     session_span = named(spans, "session")
-    assert format_trace_id(written.context.trace_id) == telemetry.trace_of(SESSION)
+    assert format_trace_id(written.context.trace_id) == trace_named(telemetry, SESSION)
     assert written.parent is not None
     assert written.parent.span_id == session_span.context.span_id
 
@@ -896,9 +907,7 @@ def test_a_failed_upload_says_why_on_the_trace() -> None:
     with watching_the_server(telemetry):
         capture_upload_failed(upload_emitter())
 
-    held = dict(
-        named(finished(telemetry, memory), "capture_upload_failed").attributes or {}
-    )
+    held = dict(named(finished(telemetry, memory), "capture_upload_failed").attributes or {})
     assert held["vinga.export.reason"] == "unreachable"
     assert "reason" not in held
 
@@ -917,9 +926,7 @@ def test_a_transcript_export_outcome_carries_the_same_names() -> None:
     with watching_the_server(telemetry):
         transcripts_exported(transcript_emitter())
 
-    held = dict(
-        named(finished(telemetry, memory), "transcripts_exported").attributes or {}
-    )
+    held = dict(named(finished(telemetry, memory), "transcripts_exported").attributes or {})
     assert held["vinga.export.turns"] == 7
     assert held["vinga.export.elapsed_ms"] == 96
     assert [key for key in held if not key.count(".")] == []
@@ -965,10 +972,15 @@ def test_a_reference_lands_in_the_trace_the_session_was_exported_under() -> None
 
     telemetry, memory = exporting()
     a_session(telemetry, SESSION)
-    trace = telemetry.trace_of(SESSION)
+    trace = trace_named(telemetry, SESSION)
     assert trace is not None
 
-    assert telemetry.reference_media(SESSION, {"capture_audio": A_REFERENCE}) is True
+    assert (
+        telemetry.reference_media(
+            telemetry.retained_context(SESSION), {"capture_audio": A_REFERENCE}
+        )
+        is True
+    )
 
     spans = finished(telemetry, memory)
     referencing = [span for span in spans if span.name == "capture"]
@@ -989,12 +1001,11 @@ def test_a_reference_is_written_under_both_names_a_reader_meets() -> None:
     a_session(telemetry, SESSION)
 
     telemetry.reference_media(
-        SESSION, {"capture_audio": A_REFERENCE, "capture_manifest": "m"}
+        telemetry.retained_context(SESSION),
+        {"capture_audio": A_REFERENCE, "capture_manifest": "m"},
     )
 
-    written = next(
-        span for span in finished(telemetry, memory) if span.name == "capture"
-    )
+    written = next(span for span in finished(telemetry, memory) if span.name == "capture")
     held = dict(written.attributes or {})
     assert held["langfuse.observation.metadata.capture_audio"] == A_REFERENCE
     assert held["langfuse.observation.metadata.capture_manifest"] == "m"
@@ -1011,7 +1022,12 @@ def test_a_session_with_no_retained_trace_cannot_be_referenced() -> None:
     False is say so."""
     telemetry, memory = exporting()
 
-    assert telemetry.reference_media("neverseen", {"capture_audio": A_REFERENCE}) is False
+    assert (
+        telemetry.reference_media(
+            telemetry.retained_context("neverseen"), {"capture_audio": A_REFERENCE}
+        )
+        is False
+    )
     assert [span for span in finished(telemetry, memory) if span.name == "capture"] == []
 
 
@@ -1023,7 +1039,12 @@ def test_a_shutting_down_exporter_writes_no_reference() -> None:
     a_session(telemetry, SESSION)
     telemetry.stop_accepting()
 
-    assert telemetry.reference_media(SESSION, {"capture_audio": A_REFERENCE}) is False
+    assert (
+        telemetry.reference_media(
+            telemetry.retained_context(SESSION), {"capture_audio": A_REFERENCE}
+        )
+        is False
+    )
     assert [span for span in finished(telemetry, memory) if span.name == "capture"] == []
 
 
@@ -1049,7 +1070,7 @@ def test_a_trace_is_readable_from_a_thread_that_is_not_the_session_loop() -> Non
         try:
             while not stop.is_set():
                 for one in ids:
-                    read.append((one, telemetry.trace_of(one)))
+                    read.append((one, trace_named(telemetry, one)))
         except BaseException as raised:  # noqa: BLE001 - reported, not swallowed
             failed.append(raised)
 
@@ -1089,7 +1110,7 @@ def test_a_read_waits_for_the_write_it_overlaps() -> None:
     answer: list[str | None] = []
 
     def reading() -> None:
-        answer.append(telemetry.trace_of(SESSION))
+        answer.append(trace_named(telemetry, SESSION))
         answered.set()
 
     with telemetry._retained_lock:
@@ -1099,7 +1120,7 @@ def test_a_read_waits_for_the_write_it_overlaps() -> None:
 
     assert answered.wait(10.0), "a read never answered once the map was free"
     reader.join(10.0)
-    assert answer == [telemetry.trace_of(SESSION)]
+    assert answer == [trace_named(telemetry, SESSION)]
 
 
 def test_an_open_at_the_bound_waits_for_the_map_it_has_to_move() -> None:
@@ -1152,9 +1173,9 @@ def test_an_open_at_the_bound_waits_for_the_map_it_has_to_move() -> None:
     writer.join(10.0)
     assert not writer.is_alive()
     assert failed == []
-    assert telemetry.trace_of(newcomer) is not None, "the newcomer was not recorded"
-    assert telemetry.trace_of(ids[0]) is None, "the oldest was not the one evicted"
-    assert [one for one in ids[1:] if telemetry.trace_of(one) is None] == []
+    assert trace_named(telemetry, newcomer) is not None, "the newcomer was not recorded"
+    assert trace_named(telemetry, ids[0]) is None, "the oldest was not the one evicted"
+    assert [one for one in ids[1:] if trace_named(telemetry, one) is None] == []
 
 
 # --- the board's name, on every span -----------------------------------
@@ -1192,9 +1213,7 @@ def test_the_session_span_carries_the_board_s_name() -> None:
     telemetry, memory = exporting()
     a_named_session(telemetry)
 
-    assert named(finished(telemetry, memory), "session").attributes[
-        "vinga.device.name"
-    ] == BOARD
+    assert named(finished(telemetry, memory), "session").attributes["vinga.device.name"] == BOARD
 
 
 def test_a_turn_and_its_stages_carry_the_board_s_name() -> None:
@@ -1241,7 +1260,7 @@ def test_a_media_reference_carries_the_board_s_name() -> None:
     telemetry, memory = exporting()
     a_named_session(telemetry)
 
-    telemetry.reference_media(SESSION, {"capture_audio": A_REFERENCE})
+    telemetry.reference_media(telemetry.retained_context(SESSION), {"capture_audio": A_REFERENCE})
 
     written = named(finished(telemetry, memory), "capture")
     assert written.attributes["vinga.device.name"] == BOARD
@@ -1304,7 +1323,7 @@ def test_a_board_nobody_named_says_nothing_rather_than_null() -> None:
     close_session(events)
     context = telemetry.retained_context(SESSION)
     assert context is not None
-    telemetry.reference_media(SESSION, {"capture_audio": A_REFERENCE})
+    telemetry.reference_media(telemetry.retained_context(SESSION), {"capture_audio": A_REFERENCE})
     with watching_the_server(telemetry):
         capture_uploaded(upload_emitter())
     telemetry.export_transcript(
@@ -1462,9 +1481,7 @@ def test_a_prompt_assembled_before_the_session_opened_is_claimed_by_it() -> None
     assert turn.attributes["vinga.prompt.sources.persona"] == 210
     # And the event itself lands on the session span it was waiting
     # for, which is the other half of what being dropped cost.
-    assert [event.name for event in named(spans, "session").events] == [
-        "prompt_assembled"
-    ]
+    assert [event.name for event in named(spans, "session").events] == ["prompt_assembled"]
 
 
 def test_the_hold_is_bounded_and_a_session_that_never_opens_leaves_nothing() -> None:
@@ -1566,9 +1583,7 @@ async def test_a_failed_export_leaks_nothing(
     """
     caplog.set_level(logging.DEBUG)
     clock = Clock()
-    telemetry = build_telemetry(
-        TelemetryConfig(enabled=True), batch_size=1, schedule_delay_ms=1
-    )
+    telemetry = build_telemetry(TelemetryConfig(enabled=True), batch_size=1, schedule_delay_ms=1)
     assert telemetry is not None
     events = session_events(clock, telemetry)
     open_session(events)
@@ -1669,9 +1684,7 @@ def test_a_mapping_field_survives_as_deterministic_json() -> None:
     assembled, dropped = session.events
 
     assert assembled.name == "prompt_assembled"
-    assert assembled.attributes["sources"] == (
-        '{"fragment:house-rules":84,"persona":210}'
-    )
+    assert assembled.attributes["sources"] == ('{"fragment:house-rules":84,"persona":210}')
     assert assembled.attributes["characters"] == 294
     assert dropped.name == "frames_dropped"
     assert dropped.attributes["reasons"] == '{"barge_in_off":1,"not_listening":3}'
@@ -1913,9 +1926,7 @@ def _fold(telemetry: object, payload: dict[str, object]) -> None:
     from vinga_server.events import Emission
 
     tap = telemetry.session_tap()  # type: ignore[attr-defined]
-    tap.emit(
-        Emission(payload=dict(payload), at=time.monotonic(), level=20, message="", args=())
-    )
+    tap.emit(Emission(payload=dict(payload), at=time.monotonic(), level=20, message="", args=()))
 
 
 def test_the_sdk_namespace_is_quieted_and_restored() -> None:
