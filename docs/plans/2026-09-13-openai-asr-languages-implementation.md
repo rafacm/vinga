@@ -57,13 +57,18 @@ Every spelling in that table that built today builds now, which is
 what the parity rows and the planted stored rows say between them.
 
 **What is deliberately not preserved**, and it is in the changelog
-fragment as a compatibility note: `model: null` and `base_url: null`
-never built, but their refusal arrived when a provider was
-CONSTRUCTED, so a row nothing referenced sat unread in the database;
-the declaration moves that to load time, where it is a boot refusal for
-the whole configuration. And an unknown option is no longer quoted back
-by name, which is the answer the three types converted before this one
-already give.
+fragment as a compatibility note: every stored `openai` ASR row the
+model refuses is now a boot refusal, whether or not any agent names it.
+The plan said the unknown-key half was already refused at build; the PR
+review round corrected that and the plan carries the correction, so
+this section states the wider fact rather than the narrow one it was
+first written with. `finish()` runs inside a factory and a factory runs
+only for a referenced entry (`providers/world.py::build_world` walks
+`config.agents`), so before the declaration an unreferenced row could
+hold anything: an unknown key, a null where a number belongs, a number
+where a string belongs. All of them load-refuse now. And an unknown
+option is no longer quoted back by name, which is the answer the three
+types converted before this one already give.
 
 ### Discoveries
 
@@ -98,6 +103,19 @@ key and installs the result, so `examples/asr-openai.yaml` joined that
 set on this milestone. It passed unchanged, which is worth recording
 because it is the case that would have caught a fragment documenting a
 key the model does not declare.
+
+**A factory-time refusal is not a boot-time refusal, which is what
+the plan got wrong.** `OptionsReader.finish()` refuses an unknown
+option, but only where a factory runs, and `build_world` builds only
+the stages the configured agents reference. So the sentence the plan
+carried, that such a row "cannot boot today either", held for a
+referenced entry and for no other. Measured rather than argued: with
+the declaration removed from the table, an unreferenced row holding
+`beam_size: 1`, `timeout_s: null` and `language: 5` loads and hands
+those three keys back. The plan now records the correction as a
+correction, the changelog names the wider surface, and the refusal test
+is parameterized across it, with the unknown key as the case that
+proves the correction rather than the assumption.
 
 **A declared type owes a committed body, and the suite says so
 without being told which type.** `test_every_declared_type_has_a_body_of_its_own`
