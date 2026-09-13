@@ -17,12 +17,22 @@ is specific to its own board.
 
 ## On this page
 
-- [What the device listens to, and when](#what-the-device-listens-to-and-when): the three listening modes, which boards use which, and what the microphone is doing between conversations.
-- [Networks](#networks): the WiFi rules every board shares, including the 5 GHz trap that catches most provisioning.
-- [Getting a board onto your server](#getting-a-board-onto-your-server): the one URL that ties a board to a backend, and the two ways it gets there.
-- [Driving a board from a terminal session](#driving-a-board-from-a-terminal-session): resetting, reading the boot log, reading NVS back and reading the whole of what a board reports at check-in, with the reset behavior that is not what the usual advice says.
-- [Talking to the device itself](#talking-to-the-device-itself): the controls a board publishes as tools, so an agent can turn it down.
-- [What the wake word does, and does not, do](#what-the-wake-word-does-and-does-not-do): what waking is, what it is not, and why it never picks an agent.
+- [What the device listens to, and when](#what-the-device-listens-to-and-when):
+  the three listening modes, which boards use which, and what the
+  microphone is doing between conversations.
+- [Networks](#networks): the WiFi rules every board shares, including
+  the 5 GHz trap that catches most provisioning.
+- [Getting a board onto your server](#getting-a-board-onto-your-server):
+  the one URL that ties a board to a backend, and the two ways it gets
+  there.
+- [Driving a board from a terminal session](#driving-a-board-from-a-terminal-session):
+  resetting, reading the boot log, reading NVS back and reading the
+  whole of what a board reports at check-in, with the reset behavior
+  that is not what the usual advice says.
+- [Talking to the device itself](#talking-to-the-device-itself): the
+  controls a board publishes as tools, so an agent can turn it down.
+- [What the wake word does, and does not, do](#what-the-wake-word-does-and-does-not-do):
+  what waking is, what it is not, and why it never picks an agent.
 
 ## What the device listens to, and when
 
@@ -39,10 +49,9 @@ follows the board's listening mode. Which mode a board starts in is
 settled when its firmware is built, by whether echo cancellation is on.
 The mode belongs to the device either way: the server is
 [told which one it is and cannot change it](../xiaozhi-notes.md#the-device-owns-the-listening-mode-and-the-server-cannot-change-it),
-while on the boards that have the
-echo-cancellation gesture the user can, and switching it moves the
-board between the two modes below. Each guide names the mode its board
-starts in.
+while on the boards that have the echo-cancellation gesture the user
+can, and switching it moves the board between the two modes below. Each
+guide names the mode its board starts in.
 
 - **Realtime**, the mode on boards with echo cancellation. The
   microphone streams continuously for the whole session, silence
