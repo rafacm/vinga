@@ -660,3 +660,116 @@ hand outside this branch, and pricing stays the operator's, which is
 the whole of what the plan decided here. A deployment that enters none
 of them sees usage and no cost, which the README says where an operator
 will look.
+
+## M4a: post-close retention and pinning
+
+The plan left this milestone's join key deliberately unsettled, named
+two candidates and required M4a to prove one before building. Both are
+dead, and what killed the second is a fact about this codebase that
+outlives the key.
+
+### The measurement, which came before any code
+
+**Candidate B, the per-session `t_ms` offset both sides already carry,
+is dead: the two sides stamp different instants.** `turn_started` is
+stamped `utterance.ended_at`, the moment the user stopped speaking. The
+store's `t_ms` derives from `heard_at`, the `heard` emission, which
+lands after the ASR stage RETURNS. Driven on a real multi-turn session
+over the wire against a real OTLP collector, the exporter's turn-span
+offset and the store's `t_ms` sat **5 ms apart** with a near-instant
+mock ASR and **407 ms apart** with 400 ms of latency injected into it.
+The gap is the ASR stage: unbounded, and different every turn.
+
+The injection is the part worth keeping. A mock-only run rounds the two
+into the same millisecond and reports a match, so the honest version of
+this measurement had to make the stage cost something first. A key
+adopted on the unlatenced run would have passed every test in this
+repository and misfiled artifacts on every real deployment.
+
+**Candidate A, the store's own turn id reaching the exporter, is dead
+as written**, because at `turn_started` no store row exists yet, and by
+the turn's end there may be two.
+
+**Why there may be two, which is the finding underneath both.** The
+store's turn and the exporter's turn are different concepts and both
+are right. The exporter opens one turn span per USER UTTERANCE. The
+store writes one row per (turn x conversation): `_record_turn` has
+exactly two call sites, the reply's `finally` (once per reply, however
+it ended) and the handover boundary. So records per turn = 1 +
+handovers, and `switches_left` is 1 per turn with a second switch
+refused, which bounds it at two rows per turn.
+
+Measured rather than reasoned about, because the same instinct had
+already been wrong once: **a barge-in does NOT split the record** (two
+turns, one record and one turn span each, in two distinct traces) and
+**neither does a reply that failed mid-stream** (one record). Only a
+handover splits it. The committed suite already proved the record half
+of the barge-in case: `test_a_cancelled_reply_records_what_its_finally_saw`
+drives `ReplyOutcome.BARGED_IN` and asserts `only_record`.
+
+**And nothing linked a handover's two rows.** The second comes from
+`_seeded_turn`, a fresh turn state whose `at` is a new clock reading,
+on another thread, with another agent, carrying no utterance of its
+own.
+
+### What was built instead
+
+An **utterance handle**, minted where `turn_started` is emitted,
+declared on that event, carried on the turn state into every
+`TurnRecord` that turn produces, and written to a new nullable
+`record.turns.utterance` column by migration `1010`. The exporter
+retains each turn's context under it, and it is on the turn span as
+`vinga.utterance.id` so that a reader of the trace can use the
+correlation rather than only the server that minted it.
+
+It is named for the UTTERANCE rather than the turn deliberately. The
+store models a handover as two turns on two threads and is right to:
+the seeded turn has nothing heard on it. A handle claiming those rows
+are one turn would contradict a model that is correct for its own
+purpose, where what is actually true of them is that they answer one
+utterance.
+
+### Deviations from the plan
+
+- **The plan's join key was replaced rather than chosen.** The plan
+  offered candidates A and B and said M4a settles it with evidence; the
+  evidence killed both, so a third shape was built. That is the
+  milestone's own mandate discharged, not a scope change, but it is the
+  plan's most load-bearing paragraph and it was rewritten in place
+  before implementation began.
+- **The plan's regression case was misdescribed and has been
+  corrected.** It called for a case that a second `turn_started`
+  arriving before its predecessor's `reply_finished` "does not silently
+  discard the second turn's span". That is not today's behavior:
+  `_open_turn` early-returns when a turn is already open, which is
+  deliberate, and probed directly the second turn's span IS lost. What
+  protects it is that `reply_finished` is the reply `finally`'s first
+  statement and a barge-in awaits the cancelled reply through it. So
+  the case pins that ORDER, in the module that decides it.
+- **One addition beyond the plan's letter:** `vinga.utterance.id` on
+  the turn span. The plan described the handle only as a retention key,
+  which would have left the correlation readable by this process and by
+  nothing else. One line, metadata, and it is what makes the join
+  checkable from outside.
+- **The compatibility stance was made explicit.** No existing
+  installation is carried across the new column; the changelog says so.
+  Without that the column needed a "row older than the correlation"
+  branch in every reader that joins on it, permanently.
+
+### Verification
+
+The two eviction windows are two cases and both were **falsified before
+being trusted**: with the pre-M4a addressing restored, each fails with
+the `no_trace` this milestone exists to remove. The turn retention has
+its cap asserted on both sides of itself, a turn a barge-in ended is
+shown pinned all the same (captured at the open, not the close), and a
+media reference addressed by a turn's context is shown landing in that
+turn's own trace rather than its session's.
+
+### Left alone deliberately
+
+The cross-side join is proved on each side separately: the store rows
+share one id, and the exporter retains a turn under a given id. Joining
+them at the wire belongs with #506, which is the first consumer that
+actually performs the join, and proving it there rather than here keeps
+this milestone's diff to the mechanism.
