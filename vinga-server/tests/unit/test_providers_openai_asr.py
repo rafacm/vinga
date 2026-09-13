@@ -24,7 +24,7 @@ from tests.support.llm_sdk import Falsey
 from vinga_server.boundary import Reach
 from vinga_server.config.models import ProviderConfig
 from vinga_server.config.provider_options import OpenaiAsrOptions
-from vinga_server.events import Emission, attach_server_tap, detach_server_tap
+from vinga_server.events import Emission, assembly, attach_server_tap, detach_server_tap
 from vinga_server.logs import TEXT_FORMAT, JsonFormatter
 from vinga_server.providers import (
     ProviderCallError,
@@ -32,7 +32,7 @@ from vinga_server.providers import (
     build_entry,
     openai_asr,
 )
-from vinga_server.providers.base import ProviderError
+from vinga_server.providers.base import AsrResult, ProviderError
 from vinga_server.providers.kit import DEFAULT_TIMEOUT_S
 from vinga_server.providers.openai_asr import OpenAiAsr
 from vinga_server.providers.openai_endpoint import DEFAULT_BASE_URL
@@ -104,6 +104,48 @@ def transcript_handler(text: str = "Hej hej") -> object:
         return httpx.Response(200, json={"text": text})
 
     return handler
+
+
+def reporting_handler(reported: object, text: str = "Hej hej") -> object:
+    """A response that reports a language the way `gpt-transcribe` does:
+    a `languages` list beside the text, on the plain `json` format this
+    provider asks every model for."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"text": text, "languages": reported})
+
+    return handler
+
+
+# A response that carries no `languages` key at all, which is what the
+# gpt-4o models answer and what a compatible endpoint may answer.
+# Its own sentinel because `None` is a report a handler can send.
+ABSENT_KEY = object()
+
+# The thread the pipeline hands the builder below, a uuid hex as the
+# runtime mints it.
+THREAD = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
+
+
+def heard_payload(asr: OpenAiAsr, result: AsrResult) -> dict[str, object]:
+    """The `heard` payload a transcription becomes, built through the
+    call `runtime/pipeline.py` builds it with.
+
+    The provider's answer is a plain string and the event's field is a
+    `LanguageTag`, which declines a malformed value by raising; this is
+    where that construction happens, so a claim that a far-side code
+    cannot break a turn is only worth making here.
+    """
+    return assembly.heard(
+        "poet",
+        THREAD,
+        asr,
+        1.0,
+        40,
+        result.language,
+        result.language_confidence,
+        result.submitted_ms,
+    ).payload()
 
 
 async def build_asr(**options: object) -> object:
@@ -1055,15 +1097,154 @@ async def test_a_retry_cut_off_by_the_deadline_discards_rather_than_fails(
     assert event.retry_ms >= 0  # type: ignore[attr-defined]
 
 
-async def test_no_language_is_reported_and_no_session_lock_is_asked_for() -> None:
-    """The response carries no usable language and no confidence at all,
-    so the fields stay empty rather than echoing the configuration back
-    at the session as if it had been detected."""
-    asr = provider(transcript_handler(), language="sv")
+# --- the language the model heard -------------------------------------
+
+
+async def test_the_language_the_model_reports_reaches_the_record() -> None:
+    """Unhinted, the report is a detection, and it is the one thing this
+    provider could not say before: an operator watching a pipeline
+    mishear Swedish as English had nothing on any surface to see it
+    with.
+
+    The confidence and the lock stay empty beside it, and neither is an
+    oversight: no model reports a confidence at all, and the
+    session-scoped lock exists to spare a local encoder pass there is
+    none of here."""
+    asr = provider(reporting_handler([{"code": "de"}]))
     result = await asr.transcribe(ONE_SECOND, 16000)
-    assert result.language is None
+
+    assert result.language == "de"
     assert result.language_confidence is None
     assert result.lock_language is None
+    assert heard_payload(asr, result)["language"] == "de"
+
+
+@pytest.mark.parametrize(
+    ("configured", "hint"),
+    [
+        pytest.param({"language": "sv"}, None, id="configured"),
+        pytest.param({}, "sv", id="hinted"),
+        pytest.param({"language": "sv"}, "en", id="both"),
+    ],
+)
+async def test_a_language_this_request_named_is_never_reported_back(
+    configured: dict[str, object], hint: str | None
+) -> None:
+    """Told a single language, `gpt-transcribe` hands that code back
+    rather than saying what it heard: measured against the live endpoint
+    on 2026-09-13, German speech sent with `language: sv` answered
+    `languages: [{"code": "sv"}]`. So a code is evidence about the audio
+    only where this request named none, and filling the field regardless
+    would put an entry's own configuration into a metric under the name
+    of a measurement.
+
+    The session hint suppresses it for the same reason and not by
+    accident: it reaches the request as `language`, which is the same
+    thing the model is told."""
+    asr = provider(reporting_handler([{"code": "sv"}]), **configured)
+    result = await asr.transcribe(ONE_SECOND, 16000, language_hint=hint)
+
+    assert result.language is None
+    assert "language" not in heard_payload(asr, result)
+
+
+async def test_a_clip_with_no_speech_in_it_reports_no_language() -> None:
+    """An empty list is the endpoint's own spelling of "I heard no
+    language", answered on silence and on laughter, and it maps onto the
+    absent field without a rule of ours."""
+    asr = provider(reporting_handler([], text="..."))
+    result = await asr.transcribe(ONE_SECOND, 16000)
+
+    assert result.language is None
+    assert "language" not in heard_payload(asr, result)
+
+
+@pytest.mark.parametrize(
+    "reported",
+    [
+        pytest.param(ABSENT_KEY, id="no key at all"),
+        pytest.param("de", id="a string where the list belongs"),
+        pytest.param(["de"], id="a list of bare strings"),
+        pytest.param([{"language": "de"}], id="an entry with no code"),
+        pytest.param([{"code": 5}], id="a code that is not a string"),
+        pytest.param([{"code": ""}], id="an empty code"),
+        pytest.param([{"code": "d" * 40}], id="an overlong code"),
+        pytest.param([{"code": "de"}, {"code": "en"}], id="two entries"),
+    ],
+)
+async def test_a_malformed_report_leaves_the_field_empty_and_raises_nothing(
+    reported: object,
+) -> None:
+    """Asserted as far as event assembly, because that is the surface
+    that would actually break: `LanguageTag("")` and a forty-character
+    value both raise, and `events/assembly.py` builds
+    `LanguageTag(language)` with nothing catching it. A code this
+    provider passed on and that type refused would therefore end a turn
+    that had already been transcribed, which is a worse failure than the
+    silence the report was meant to prevent.
+
+    The transcript survives every one of them: what an endpoint answers
+    about language decides what one field says, never whether the turn
+    lives."""
+    handler = transcript_handler() if reported is ABSENT_KEY else reporting_handler(reported)
+    asr = provider(handler)
+    result = await asr.transcribe(ONE_SECOND, 16000)
+    # Assembled before anything is asserted about the result, so an
+    # implementation that passed the code on fails here, as the raise it
+    # would be in a turn, rather than as a tidier assertion above it.
+    payload = heard_payload(asr, result)
+
+    assert result.text == "Hej hej"
+    assert result.language is None
+    assert "language" not in payload
+
+
+async def test_the_recovered_hearing_carries_its_own_language() -> None:
+    """The retry's transcript and the retry's language, never the
+    discarded response's beside the recovered text.
+
+    The two responses report different codes on purpose: a provider that
+    let the language travel as a variable the two paths both assign
+    would hand back the recovered words labelled with the language of a
+    response it threw away, and no test of a single response would see
+    it."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if len(seen) == 1:
+            return httpx.Response(200, json={"text": "vinga", "languages": [{"code": "en"}]})
+        return httpx.Response(200, json={"text": "Ja tack", "languages": [{"code": "sv"}]})
+
+    asr = provider(handler, prompt="vinga")
+    result = await asr.transcribe(ONE_SECOND, 16000)
+
+    assert result.text == "Ja tack"
+    assert result.language == "sv"
+    assert heard_payload(asr, result)["language"] == "sv"
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        pytest.param("vinga", id="the echo confirmed"),
+        pytest.param("", id="the retry empty"),
+    ],
+)
+async def test_a_discarded_hearing_answers_no_language(outcome: str) -> None:
+    """The outcomes that discard answer no text, so they answer no
+    language: a turn nothing was heard in is not a turn to label."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        text = "vinga" if len(seen) == 1 else outcome
+        return httpx.Response(200, json={"text": text, "languages": [{"code": "en"}]})
+
+    result = await provider(handler, prompt="vinga").transcribe(ONE_SECOND, 16000)
+
+    assert result.text == ""
+    assert result.language is None
 
 
 # --- audio too short to send -----------------------------------------
