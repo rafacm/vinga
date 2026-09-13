@@ -544,10 +544,17 @@ async def test_a_refused_option_carries_nothing_of_what_was_written() -> None:
 
     A rejected option is exactly where a pasted credential lands, so the
     value is looked for in the sentence, in the repr, and through every
-    cause and context a renderer could walk. Planted as a value rather
-    than as a key, because an unknown key is deliberately named back:
-    there is no closed set to list instead, so a refusal naming nothing
-    would leave an operator with a typo they cannot see."""
+    cause and context a renderer could walk.
+
+    Planted in a DECLARED field's rejected value, which is the half this
+    case owns: `temperature` is this repository's own word and travels,
+    and what was written under it is the caller's and may not. The other
+    half, that a key an operator invented is not quoted back either,
+    belongs to `test_an_unknown_option_fails_the_build` above and to the
+    refusal table beside it, which assert the name's absence where the
+    name is the thing at risk. This docstring used to claim the
+    opposite, that an unknown key is deliberately named back; that was
+    the reader's policy, and declaring the type's options ended it."""
     with pytest.raises(ProviderError) as caught:
         await build_asr(type="openai", api_key_env="OPENAI_KEY", temperature=SENTINEL)
 
