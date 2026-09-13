@@ -946,7 +946,7 @@ options for asr type faster_whisper:
 
 options for asr type openai:
 
-  model: str  (default: "gpt-4o-mini-transcribe")
+  model: str  (default: "gpt-transcribe")
     The transcription model, in OpenAI's own vocabulary.
   base_url: str  (default: "https://api.openai.com/v1")
     The transcription endpoint.
