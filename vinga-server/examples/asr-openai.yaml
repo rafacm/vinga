@@ -81,12 +81,13 @@ api_key_env: OPENAI_API_KEY
 # fixed it outright. `prompt` above does not compensate; it fixes
 # vocabulary, not language, and a hint carrying a language's flavour can
 # pull an unpinned detection toward that language instead, which is the
-# other half of why this is worth setting. No model this type reaches
-# treats it as a hard pin: the gpt-4o pair answers in the language it
-# hears whatever this says, and the default does the same, measured on
-# 2026-09-13 with German speech sent as Swedish and transcribed as
-# German. So a wrong value is fairly harmless and an empty one is what
-# costs you.
+# other half of why this is worth setting. On the default it is a hint
+# rather than a hard pin: gpt-transcribe was sent German speech with
+# language: sv on 2026-09-13 and transcribed it as German anyway, and
+# the gpt-4o pair answered in the language it heard in an earlier
+# measurement. whisper-1 and a compatible endpoint were not measured
+# and decide this for themselves. So on the default a wrong value is
+# fairly harmless and an empty one is what costs you.
 language: sv
 
 # 0.0 to 1.0. Raise it only to loosen a decode that is stuck; the
