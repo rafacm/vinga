@@ -952,6 +952,10 @@ options for asr type openai:
     The transcription endpoint.
   language: str | null  (default: null)
     Spoken language (ISO 639-1, such as sv or en).
+  languages: list[str] | null  (default: null)
+    The languages spoken here, when there is more than one (ISO 639-1, such as
+    [sv, en]), accepted by gpt-transcribe and answered with a 400 by whisper-1
+    and gpt-4o-mini-transcribe.
   prompt: str | null  (default: null)
     Words the transcriber should expect (names, places, the assistant's own
     name), and not the agent's instruction, which is the agent's own entry.
