@@ -60,6 +60,8 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   endpoint costs one empty field rather than a turn that had already
   been transcribed.
 
+- The `openai` ASR type takes a `languages` list, for a household that speaks more than one: it names a set the model chooses inside, where `language` names one the model is told. Only `gpt-transcribe` was measured to accept it, on 2026-09-13; `whisper-1` and `gpt-4o-mini-transcribe` each answered 400 to it, and neither `gpt-4o-transcribe` nor any compatible endpoint was tested. Nothing checks that at startup, because building a provider speaks to no endpoint, so an entry naming a model that refuses the option applies cleanly and fails on the first real transcription. The two options cannot both be set, which the API decides rather than vinga: a request naming both is refused by every model measured, so an entry writing both is refused where it is written, naming both fields and saying which model takes which form. A set of two or more is the one description that leaves the language report on, since what comes back is the choice the model made inside it; a set of exactly one is a pin like `language`, and switches the report off.
+
 ### Changed
 
 - **The `openai` ASR type declares what it accepts** (#500, M1). Its six
@@ -125,6 +127,10 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   nothing, so the entry applies cleanly, boots cleanly, and fails on the
   first transcription of a real conversation. An entry that already
   names a model is unaffected, as is one pointing at OpenAI itself.
+
+### Fixed
+
+- Two option rules that are published as JSON Schema patterns were checked more loosely than they were published. Python's `$` matches immediately before a terminal newline where a JSON Schema `$` means end of input, so a trailing newline was accepted by the server and would have been refused by a client generated from the same document: `languages` on the `openai` ASR type took a code the value type it becomes downstream rejects, and `output_format` on the `elevenlabs` TTS type took a format string it then sent to the vendor with the newline in it. Both are now held to the whole string. A value of either shape is one an API caller or an explicitly quoted YAML scalar could write, and no ordinary configuration produces one.
 
 ## 2026-09-12
 
