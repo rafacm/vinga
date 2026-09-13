@@ -59,6 +59,34 @@ aggregate rather than a verdict per turn: the code says what the model
 decided, not what was said, and the clip this work started from, a
 spoken German "Hallo", was transcribed `Hello.` and reported `en`.
 
+**A request names a language in one of two spellings, and the second
+one is a set.** `language` is what every model here takes; `languages`
+is a list for a household that speaks more than one, and only
+`gpt-transcribe` was measured to accept it, `whisper-1` and
+`gpt-4o-mini-transcribe` each answering 400 in their own words. The two
+cannot be written on one entry, which the API decides rather than this
+repository: a request carrying both is a 400 on every model measured,
+so `OpenaiAsrOptions` refuses the pair where it is written rather than
+letting a conversation fail for a reason no log explains. What the
+options model cannot see is the session hint, which arrives per call,
+so the order is stated here: a configured `language` wins, then a
+configured `languages`, and while that is set the hint is not sent at
+all in either spelling, and otherwise the hint travels as `language`.
+Without that middle step an entry describing its household would put
+both on the wire for any session that had picked a language up from
+another engine, which is reachable rather than theoretical.
+
+A set of two or more is the one case where a reported code survives a
+request that named languages, and that is the same rule rather than an
+exception to it: the model was handed a choice and what comes back is
+which one it made, where a single language handed over is a code handed
+straight back. A list of exactly one is therefore a pin for reporting
+purposes, exactly as `language` is, and it is what an operator
+migrating from the singular will write. The caveat is that a choice is
+still a choice: with two hints on a one-word clip the model chose
+wrongly in measurement, spoken German "Hallo" reported as `en`, so what
+arrives from a set is a rate to watch rather than a verdict on a turn.
+
 No model reports a confidence, so `language_confidence` stays empty,
 and a code is asked of `LanguageTag` before it travels. Not because a
 malformed one would break the turn, which is what this paragraph first
@@ -278,6 +306,7 @@ class OpenAiAsr(AsrProvider):
         api_key: str,
         base_url: str = DEFAULT_BASE_URL,
         language: str | None = None,
+        languages: list[str] | None = None,
         prompt: str | None = None,
         temperature: float | None = None,
         timeout_s: float = DEFAULT_TIMEOUT_S,
@@ -287,6 +316,11 @@ class OpenAiAsr(AsrProvider):
         self.model = model
         self.host = endpoint_host(base_url)
         self._language = language
+        # The household's own set, sent through `extra_body` because the
+        # installed SDK models no such parameter. Kept as written: the
+        # endpoint is free to weigh the order, so reordering it here
+        # would be this provider inventing a policy on its behalf.
+        self._languages = languages
         self._prompt = prompt
         self._temperature = temperature
         # Kept for the echo retry's deadline: the whole transcribe call,
@@ -345,7 +379,17 @@ class OpenAiAsr(AsrProvider):
         # language this request names, which is what decides whether the
         # code the model answers with is a report or an echo of what it
         # was told: see `_request` below.
-        pinned = self._language or language_hint
+        #
+        # A configured `languages` comes next, and while it is set the
+        # hint is not sent AT ALL, in either spelling. The endpoint
+        # refuses a request naming both and the write-time rule cannot
+        # see a hint, which arrives per call from the session, so
+        # without this line an entry describing its household would 400
+        # on any session that had picked a language up from another
+        # engine. The hint is a suggestion a provider may ignore, which
+        # the stage contract already says, and an entry that has
+        # described its household is the better description of the two.
+        pinned = self._language or (None if self._languages else language_hint)
         # One deadline for the whole call, echo retry included. The
         # client's retries are off (MAX_RETRIES) precisely so timeout_s
         # bounds what a user can be left waiting on one utterance, and
@@ -368,10 +412,14 @@ class OpenAiAsr(AsrProvider):
         clip_ms = round(len(pcm) / 2 / sample_rate * 1000)
         submitted_ms = 0
         try:
-            heard = await self._request(pcm, sample_rate, pinned, self._prompt)
+            heard = await self._request(
+                pcm, sample_rate, pinned, self._languages, self._prompt
+            )
             submitted_ms = clip_ms
             if self._is_echoed_prompt(heard.text):
-                heard, resent = await self._retry_without_prompt(pcm, sample_rate, pinned, deadline)
+                heard, resent = await self._retry_without_prompt(
+                    pcm, sample_rate, pinned, self._languages, deadline
+                )
                 if resent:
                     submitted_ms += clip_ms
         except OPENAI_FAILURES as exc:
@@ -394,14 +442,23 @@ class OpenAiAsr(AsrProvider):
         pcm: bytes,
         sample_rate: int,
         pinned: str | None,
+        languages: list[str] | None,
         prompt: str | None,
         timeout_s: float | None = None,
     ) -> _Hearing:
-        # The single language this request names, or None where it names
-        # none. Read below as well as sent here, so what suppresses the
-        # report is exactly what the model was told: a blank `language`
-        # puts no field on the wire and is therefore not a pin.
-        single = pinned if pinned else None
+        # The single language this request names, whichever spelling
+        # named it, or None where it names none or names a set.
+        #
+        # Read below as well as put on the wire, so what suppresses the
+        # report is exactly what the model was told. Two spellings say
+        # one language: `language`, from an entry that pinned one or a
+        # session that hinted one, and a `languages` list of exactly
+        # one, which is how an operator writes "this household speaks
+        # German" as a list. A list of two or more names a SET, and the
+        # code that comes back is then the model's choice within it,
+        # which is a detection under constraints rather than an echo.
+        named = [pinned] if pinned else list(languages or ())
+        single = named[0] if len(named) == 1 else None
         response = await self._client.audio.transcriptions.create(
             file=(UPLOAD_NAME, wav_bytes(pcm, sample_rate), "audio/wav"),
             model=self.model,
@@ -410,9 +467,18 @@ class OpenAiAsr(AsrProvider):
             # `verbose_json` is whisper-1 only and adds nothing usable
             # here. See the module docstring on language.
             response_format="json",
-            language=single if single is not None else Omit(),
+            language=pinned if pinned else Omit(),
             prompt=prompt if prompt else Omit(),
             temperature=self._temperature if self._temperature is not None else Omit(),
+            # The plural, which the installed SDK (openai 2.48.0) has no
+            # parameter for and `extra_body` is its declared door for.
+            # It is serialized as repeated multipart parts named
+            # `languages[]`, one per element, never one comma-joined
+            # field, and that is the encoding the live endpoint
+            # accepted. Sent only when set, so `whisper-1` and a
+            # self-hosted compatible endpoint, which refuse it, see no
+            # such key at all.
+            extra_body={"languages": languages} if languages else None,
             # The client's own timeout, unless this request is a retry
             # living on what the first request left of it. NOT_GIVEN,
             # not Omit(): Omit is a serialization sentinel for request
@@ -431,7 +497,12 @@ class OpenAiAsr(AsrProvider):
         )
 
     async def _retry_without_prompt(
-        self, pcm: bytes, sample_rate: int, pinned: str | None, deadline: float
+        self,
+        pcm: bytes,
+        sample_rate: int,
+        pinned: str | None,
+        languages: list[str] | None,
+        deadline: float,
     ) -> tuple[_Hearing, bool]:
         """A second hearing for a clip whose transcript was the prompt
         handed back, and whether the clip was actually sent again.
@@ -470,6 +541,12 @@ class OpenAiAsr(AsrProvider):
         than an error, since the reply it would have ended is one the
         guard was about to end anyway.
 
+        The language description travels unchanged, in whichever
+        spelling the entry wrote it. It is the same clip being heard
+        again under the same description; withholding the prompt is the
+        point of this retry, and withholding the household's languages
+        with it would make the retry a different question.
+
         The #54 rationale stands: an exact echo of the prompt is never
         handed to the session as an utterance, retried or not."""
         duration_s = round(len(pcm) / 2 / sample_rate, 2)
@@ -501,7 +578,7 @@ class OpenAiAsr(AsrProvider):
             # than being cancelled mid-phase.
             async with asyncio.timeout(remaining_s):
                 retry = await self._request(
-                    pcm, sample_rate, pinned, None, timeout_s=remaining_s
+                    pcm, sample_rate, pinned, languages, None, timeout_s=remaining_s
                 )
         except (TimeoutError, APITimeoutError):
             retry_ms = round((loop.time() - started) * 1000)
@@ -598,6 +675,7 @@ def build(label: str, config: ProviderConfig, options: OpenaiAsrOptions) -> Open
         api_key=endpoint_api_key(label, config.type, config.api_key_env, is_openai),
         base_url=options.base_url,
         language=options.language,
+        languages=options.languages,
         prompt=options.prompt,
         temperature=options.temperature,
         timeout_s=options.timeout_s,
