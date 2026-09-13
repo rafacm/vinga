@@ -284,13 +284,15 @@ audio through Opus gives detection much less to go on than a clean
 file, and the model appears to fall back on English phonetics. Pinning
 fixed it outright, and no `prompt` rescued it while unpinned.
 
-Setting it is still a hint rather than a hard pin, on every model this
-type reaches: a `gpt-4o` model given Swedish audio and `language: en`
-answers in Swedish anyway, and the default does the same, measured with
-German speech sent as Swedish and transcribed as German. The local
-engine would have forced the wrong language and produced nonsense. So a
-wrong value is fairly harmless, and it is leaving it *empty* that costs
-you.
+Setting it is a hint rather than a hard pin on the two models that were
+measured: a `gpt-4o` model given Swedish audio and `language: en`
+answers in Swedish anyway, and `gpt-transcribe`, the default, did the
+same on 2026-09-13 with German speech sent as Swedish and transcribed
+as German. That says nothing about `whisper-1` or about a compatible
+endpoint, which decide it for themselves and were not measured. The
+local engine would have forced the wrong language and produced
+nonsense. So on the default a wrong value is fairly harmless, and it is
+leaving it *empty* that costs you.
 
 **The language it heard is reported back, where the model answers one
 and you named none.** `gpt-transcribe`, the default, answers a code
