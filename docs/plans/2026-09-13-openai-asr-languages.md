@@ -463,7 +463,7 @@ transcription of a real conversation.
   the local engine is the only engine that reports what it heard and
   the "No language is reported back" paragraph. Changelog: Added.
 - [x] **[M3: move the default model](2026-09-13-openai-asr-languages-implementation.md#m3-move-the-default-model)**
-  (PR TBD). The default becomes
+  (PR #514). The default becomes
   `gpt-transcribe`, alone, so the one change every unconfigured
   deployment feels is reviewed by itself, and so that the option M4
   adds arrives on a model that accepts it. After M1 the default's one
