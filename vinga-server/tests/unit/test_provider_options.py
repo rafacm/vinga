@@ -44,6 +44,7 @@ from vinga_server.config.provider_options import (
     RESERVED_REQUEST_FIELDS,
     ElevenlabsOptions,
     FasterWhisperOptions,
+    OpenaiAsrOptions,
     OpenaiCompatibleOptions,
     OptionsRefused,
     VadParameters,
@@ -73,10 +74,15 @@ ELEVENLABS = ("tts", "elevenlabs")
 
 OPENAI = ("llm", "openai_compatible")
 
+# The fourth, and the one whose type name is not unique: `openai` is an
+# ASR type and a TTS type, which is why every address here is a pair.
+OPENAI_ASR = ("asr", "openai")
+
 BASE: dict[tuple[str, str], dict[str, object]] = {
     WHISPER: {},
     ELEVENLABS: {"voice_id": "voice-1"},
     OPENAI: {"base_url": "http://localhost:11434/v1", "model": "qwen3:8b"},
+    OPENAI_ASR: {},
 }
 
 
@@ -109,6 +115,12 @@ def elevenlabs(**options: object) -> ElevenlabsOptions:
 def openai_compatible(**options: object) -> OpenaiCompatibleOptions:
     entry = accept(OPENAI, **options)
     assert isinstance(entry, OpenaiCompatibleOptions)
+    return entry
+
+
+def openai_asr(**options: object) -> OpenaiAsrOptions:
+    entry = accept(OPENAI_ASR, **options)
+    assert isinstance(entry, OpenaiAsrOptions)
     return entry
 
 
@@ -296,10 +308,74 @@ OPENAI_PARITY: list[tuple[str, object, bool]] = [
     ("stream_options", {"include_usage": True}, False),
 ]
 
+OPENAI_ASR_PARITY: list[tuple[str, object, bool]] = [
+    # string options with a default, which `string(key, default)` read:
+    # a string and nothing else, and a blank is a VALUE here rather than
+    # a spelling of absence. This reader had no `or <default>` after it,
+    # exactly as the elevenlabs one did not, so an empty model id
+    # travelled to the API and still does.
+    ("model", "gpt-4o-transcribe", True),
+    ("model", "", True),
+    ("model", 5, False),
+    ("model", True, False),
+    # And the null that never built: `string()` answered None and the
+    # builder's own assertion caught it, which is a refusal either way
+    # and is the one row whose SURFACE moves. What that costs a stored
+    # row is pinned in `test_config_store.py`.
+    ("model", None, False),
+    ("base_url", "http://localhost:8000/v1", True),
+    ("base_url", None, False),
+    ("base_url", 5, False),
+    # A blank base_url passes the model and is refused where the
+    # endpoint question is asked, which is `parse_base_url` at build.
+    # Accepted here for the reason the openai_compatible type accepts
+    # `not-a-url`: a URL rule in this model would be a second home for
+    # one that already has one.
+    ("base_url", "", True),
+    ("base_url", "not-a-url", True),
+    # string options with no default, which `string(key)` read: absent,
+    # null and blank were three ways of writing nothing, and the
+    # builder's `self._language or language_hint` made the blank behave
+    # as the other two.
+    ("language", "sv", True),
+    ("language", "", True),
+    ("language", None, True),
+    ("language", 5, False),
+    ("prompt", "vinga, Stockholm", True),
+    ("prompt", "", True),
+    ("prompt", None, True),
+    ("prompt", 5, False),
+    # the knob with no default of ours, which `optional_number` read: a
+    # number, or nothing at all, and a null is how an operator writes
+    # "leave it to the API".
+    ("temperature", 0.4, True),
+    ("temperature", 1, True),
+    ("temperature", None, True),
+    ("temperature", "0.4", False),
+    ("temperature", True, False),
+    # And the range that is NOT this model's: it is OpenAI's own, so it
+    # applies only when the endpoint is OpenAI, and the builder asks
+    # that question. A model that refused this would refuse a working
+    # configuration on a compatible server.
+    ("temperature", 2.0, True),
+    # a number with a default, which `number(key, default)` read: it
+    # measured whatever it popped rather than falling back on it, so a
+    # null was refused and a whole number was ordinary.
+    ("timeout_s", 15, True),
+    ("timeout_s", 12.5, True),
+    ("timeout_s", None, False),
+    ("timeout_s", "15", False),
+    ("timeout_s", True, False),
+    # and the key that is not an option of this type at all, which is
+    # what `finish()` refused.
+    ("beam_size", 1, False),
+]
+
 PARITY: list[tuple[tuple[str, str], str, object, bool]] = [
     *((WHISPER, *row) for row in WHISPER_PARITY),
     *((ELEVENLABS, *row) for row in ELEVENLABS_PARITY),
     *((OPENAI, *row) for row in OPENAI_PARITY),
+    *((OPENAI_ASR, *row) for row in OPENAI_ASR_PARITY),
 ]
 
 PARITY_IDS = [
@@ -593,16 +669,17 @@ def test_an_omitted_name_is_refused_by_the_name_it_omitted() -> None:
 
 
 def test_the_only_open_door_among_the_declared_types() -> None:
-    """The three declared types, and the one difference between them.
+    """The declared types, and the one difference between them.
 
-    Asserted together so that opening one of the other two, or closing
-    this one, is a deliberate act rather than a setting that drifted. A
-    type whose door is shut refuses what it does not declare; this one
-    is the door itself.
+    Asserted together so that opening one of the others, or closing this
+    one, is a deliberate act rather than a setting that drifted. A type
+    whose door is shut refuses what it does not declare; this one is the
+    door itself.
     """
     assert OpenaiCompatibleOptions.model_config["extra"] == "allow"
     assert FasterWhisperOptions.model_config["extra"] == "forbid"
     assert ElevenlabsOptions.model_config["extra"] == "forbid"
+    assert OpenaiAsrOptions.model_config["extra"] == "forbid"
 
 
 def test_a_key_this_type_does_not_declare_is_kept_rather_than_refused() -> None:
@@ -852,6 +929,127 @@ def test_the_published_cap_is_an_integer_a_client_cannot_send_null_for() -> None
     # reference prints it.
     assert openai_compatible().max_tokens is None
     assert docgen.default(OpenaiCompatibleOptions.model_fields["max_tokens"]) == "unset"
+
+
+# What the openai ASR type is, beside its parity
+#
+# The fourth converted type, and the one whose reader had no spelling of
+# absence worth a validator. What is pinned here is the defaults it
+# hands a builder, the two constants it restates because it may not
+# import them, and the two rules it deliberately does not hold.
+
+
+def test_the_openai_asr_defaults_are_the_ones_the_builder_had() -> None:
+    """What a fragment that names nothing but a key gets. Read by the
+    builder rather than by the API, so a change here changes what every
+    existing deployment is sending.
+
+    The model is the one that moved home: the builder kept it as
+    `DEFAULT_MODEL` and read the option through it, and the field is
+    where it lives now."""
+    options = openai_asr()
+
+    assert options.model == "gpt-4o-mini-transcribe"
+    assert options.base_url == "https://api.openai.com/v1"
+    assert options.language is None
+    assert options.prompt is None
+    assert options.temperature is None
+    assert options.timeout_s == 30.0
+
+
+def test_this_asr_type_has_no_blank_spelling_of_an_absent_option() -> None:
+    """The parity decision this type asked for, and its answer is none.
+
+    Two of the four converted types carry a `_blank_reads_as_unwritten`
+    validator, listing the options whose absence had a second spelling
+    because the reader ended them with `or <default>` or read them
+    through a call that answered an empty mapping. This reader had
+    neither: every blank it accepted it PASSED ON, and every blank it
+    passed on behaved as a blank downstream. `model: ""` reached the
+    request as an empty model id, and `language: ""` and `prompt: ""`
+    were falsey where the provider reads them, which is the same thing
+    absence does there.
+
+    So the fields hold what was written, and the absence of a validator
+    is the claim. Asserted as the values rather than argued in a
+    comment, because what would break silently is a later hand adding
+    the list this type does not need.
+    """
+    assert openai_asr(model="").model == ""
+    assert openai_asr(language="").language == ""
+    assert openai_asr(prompt="").prompt == ""
+    # And as WRITTEN, not as unwritten, which is the difference a
+    # `_blank_reads_as_unwritten` validator would make.
+    for name in ("model", "language", "prompt"):
+        assert name in openai_asr(**{name: ""}).model_fields_set
+
+
+def test_the_endpoint_rules_are_not_this_models() -> None:
+    """Where the work is divided, stated as what this model does NOT do.
+
+    Both rules this type has beyond the shapes are questions about the
+    ENDPOINT: whether `base_url` is a URL this repository can classify,
+    and whether the endpoint is OpenAI itself, which is the only one
+    whose temperature range this repository knows. `openai_endpoint`
+    owns both, and it imports the provider package, which this module
+    may not (`test_the_configuration_cli_loads_none_of_this_package`).
+
+    Pinned as acceptance rather than argued in a comment, because the
+    thing that would break silently is this model quietly gaining a rule
+    that already has a home. That the builder still refuses both is
+    pinned in `test_providers_openai_asr.py`, where a builder can run.
+    """
+    assert openai_asr(base_url="not-a-url").base_url == "not-a-url"
+    assert openai_asr(temperature=2.0).temperature == 2.0
+
+
+def test_the_asr_types_refusal_carries_nothing_of_what_was_written() -> None:
+    """The fourth converted type's plant, in both places one lands.
+
+    A key an operator invented and a value they pasted, looked for in
+    the sentence, the repr, the cause, the context and the structured
+    problems. The pointer for the invented key is the fragment rather
+    than the key, which is `safe_location`'s rule meeting a closed door.
+    """
+    refusal = refuse(OPENAI_ASR, **{SECRET: SECRET, "prompt": {"nested": SECRET}})
+
+    rendered = "\n".join(
+        [
+            str(refusal),
+            repr(refusal),
+            repr(refusal.__cause__),
+            repr(refusal.__context__),
+            *(f"{problem.path} {problem.message}" for problem in refusal.problems),
+        ]
+    )
+
+    assert SECRET not in rendered
+    assert refusal.__cause__ is None
+    assert refusal.__context__ is None
+    assert {problem.path for problem in refusal.problems} == {"", "/prompt"}
+
+
+def test_the_asr_types_fields_reach_every_surface_that_publishes_them() -> None:
+    """The declaration's own footprint, which is three generated
+    references and a schema command rather than one file.
+
+    Read here rather than only diffed on CI: what a client generates
+    from and what an operator reads are the same fields, and a type
+    that declared a model without reaching them would be a conversion
+    that changed only the refusals.
+    """
+    from vinga_server.config import docgen
+
+    published = [
+        json.loads(docgen.schema("provider", "asr", "openai")),
+        json.loads(docgen.openapi())["components"]["schemas"]["AsrOpenaiOptions"],
+    ]
+
+    for schema in published:
+        for name in OpenaiAsrOptions.model_fields:
+            assert schema["properties"][name]["description"], name
+        # A closed door, in the vocabulary a document has for one.
+        assert schema["additionalProperties"] is False
 
 
 # Where a refusal points

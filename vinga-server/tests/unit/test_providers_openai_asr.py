@@ -23,6 +23,7 @@ from tests.support.events import fields_of
 from tests.support.llm_sdk import Falsey
 from vinga_server.boundary import Reach
 from vinga_server.config.models import ProviderConfig
+from vinga_server.config.provider_options import OpenaiAsrOptions
 from vinga_server.events import Emission, attach_server_tap, detach_server_tap
 from vinga_server.logs import TEXT_FORMAT, JsonFormatter
 from vinga_server.providers import (
@@ -32,7 +33,9 @@ from vinga_server.providers import (
     openai_asr,
 )
 from vinga_server.providers.base import ProviderError
+from vinga_server.providers.kit import DEFAULT_TIMEOUT_S
 from vinga_server.providers.openai_asr import OpenAiAsr
+from vinga_server.providers.openai_endpoint import DEFAULT_BASE_URL
 
 # One 16 kHz second of s16le silence, comfortably over the API minimum.
 ONE_SECOND = b"\x00\x00" * 16000
@@ -493,6 +496,46 @@ async def test_an_entry_written_this_way_builds(options: dict[str, object]) -> N
     carry: what a deployment may have written and must go on being able
     to write."""
     assert isinstance(await build_asr(type="openai", **options), OpenAiAsr)
+
+
+def test_the_two_constants_the_model_restates_are_the_ones_that_ship() -> None:
+    """The price of the options model living where no client library
+    can be imported, paid here rather than left as a comment.
+
+    `OpenaiAsrOptions` declares `base_url` and `timeout_s` as literals
+    because `config/provider_options.py` weighs pydantic and
+    `config.models` and nothing else: `openai_endpoint` imports the
+    provider package and the kit speaks httpx. This file is on the side
+    that may import both, which makes it the one place the two
+    statements can be held against each other. The elevenlabs type pays
+    the same price for the same timeout, in its own suite.
+    """
+    assert OpenaiAsrOptions.model_fields["base_url"].default == DEFAULT_BASE_URL
+    assert OpenaiAsrOptions.model_fields["timeout_s"].default == DEFAULT_TIMEOUT_S
+
+
+@pytest.mark.usefixtures("environment")
+async def test_the_declared_default_model_is_the_one_on_the_wire() -> None:
+    """The default's one home, read from the end that matters.
+
+    The builder used to keep a `DEFAULT_MODEL` constant beside the
+    field's job, and what makes the deletion safe is not that nothing
+    imports it: it is that an entry naming no model still asks the API
+    for the model the field declares. A second copy left behind would
+    have kept this green while going stale.
+    """
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"text": "Hej"})
+
+    built = await build_asr(type="openai", api_key_env="OPENAI_KEY")
+    assert isinstance(built, OpenAiAsr)
+    await transported(built, handler).transcribe(ONE_SECOND, 16000)
+
+    (request,) = seen
+    assert form_field(request, "model") == OpenaiAsrOptions.model_fields["model"].default
 
 
 @pytest.mark.usefixtures("environment")
