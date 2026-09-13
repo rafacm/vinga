@@ -344,6 +344,32 @@ by what it now does and under which condition.
 No seam moves. `AsrResult` already carries the field; the pipeline
 already reads it; the telemetry map already names it.
 
+## The documentation footprint, and how it was found
+
+The milestones below name `vinga-server/README.md` three times, and
+the way that page was found is the point rather than an aside. A grep
+for the model name finds nothing there: the claims that this work
+falsifies do not name a model. They are a sentence saying the local
+engine "is the only one that reports which language it heard"
+(`vinga-server/README.md:191-194`), a paragraph headed "**No language
+is reported back.**" asserting that `AsrResult`'s language fields stay
+empty and that the `heard` log line carries none
+(`:278-285`), and an options table for this type with no `languages`
+row and a displayed default (`:208-216`). Each is true today and each
+becomes false in a different milestone, which is why the footprint is
+split across M2, M3 and M4 rather than swept into one documentation
+commit at the end.
+
+The root `README.md` was checked the same way and carries no claim
+this work touches: its only language material is about the reply
+language in an agent prompt, which is the LLM's business and not the
+ear's.
+
+The rule this follows is the taxonomy in `docs/README.md`: a
+maintained guide describes current behaviour and moves with the
+system. A milestone that changes behaviour and stales no page says so;
+these three stale a page each, and say which.
+
 ## Milestones
 
 Cut so that the one behaviour change every existing deployment feels,
