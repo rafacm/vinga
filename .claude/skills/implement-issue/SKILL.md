@@ -134,6 +134,14 @@ subagent brief:
   the surviving breakage is how a substring assertion is caught
   posing as a pinned line.
 
+**One plan may cover a PAIR of issues** that share a module and a
+shape, with a milestone per issue and each issue closed by its own PR:
+the plan and its review round are the fixed cost here (roughly 45
+minutes), and paying it twice for two issues that will make the same
+decisions is waste. The test is whether the second issue's plan would
+restate the first's reasoning rather than add to it. Two issues that
+merely land near each other in the queue are still two plans.
+
 ## Step 2: external plan review
 
 Use the `external-review` skill in plan mode. Record the findings
@@ -145,8 +153,24 @@ address each finding with its own amendment commit, appending a
 
 One general-purpose subagent with model opus per milestone, each in
 its own scratchpad worktree, on a branch stacked on the previous
-milestone's branch. The subagent's brief states, verbatim where
-possible:
+milestone's branch.
+
+**Launch milestone N+1's subagent when N's PR OPENS, not when it
+merges.** The trigger is an instant, stated here because the property
+alone is too easy to honour in words and skip in practice: the #500 run
+of 2026-09-13 stacked its branches correctly and still started every
+milestone 11 to 20 minutes AFTER its predecessor merged, which is the
+whole point of stacking thrown away four times in a row. The tell is in
+the inter-PR gaps: an overlapped run shows 13 to 32 minutes between a
+merge and the next PR (sometimes negative, two PRs open at once), a
+serial one shows 72 to 145. N+1 implements against N's branch while N
+sits in review, so the critical path is the longer of implement and
+review rather than their sum, which measured about 35 to 40 percent of
+a multi-milestone issue's wall time. Its price is the retargeting
+discipline under "Merging", which is not optional and is what #467
+made safer.
+
+The subagent's brief states, verbatim where possible:
 
 - The reviewed plan is the authoritative spec, including its review
   round; where the brief and the plan disagree, the plan wins.
@@ -208,7 +232,14 @@ decisions and recorded deviations, and a Verification section as a
 task list with honestly checked and unchecked boxes; an unchecked
 box carries a note saying why it is not yet verifiable. Substitute
 the PR number into the plan's milestone tick once the PR exists.
-Wait for CI green before the review round. Two CI shapes to know:
+**Start the external review round as soon as the PR is pushed, in
+parallel with its first CI run.** A reviewer reads the diff and not the
+run, so the two have no ordering between them; serializing them spent
+about 11 minutes a PR for nothing. What CI green gates is the MERGE,
+not the review. If CI comes back red, the fix commit joins the review
+findings in the same fix round.
+
+Two CI shapes to know:
 a docs-only diff outside `docs/reference/` runs the `docs` workflow
 (link check plus the command-spellings census), not the server
 lanes, and its green is the check the PR waits for; and a
