@@ -162,6 +162,18 @@ LANGUAGES_RULE = "must be a non-empty list of language codes, each written once"
 # expression would buy the constant and pay for the tier. Pinned against
 # the syntax it restates by a case in `test_providers_openai_asr.py`,
 # which is on the side that may import both.
+#
+# READ WITH `fullmatch`, and the anchors are here for the DOCUMENT
+# rather than for the validator. A JSON Schema pattern is unanchored, so
+# what is published has to carry `^` and `$` to say what the rule is;
+# Python's `$`, unlike ECMA-262's, also matches immediately before a
+# terminal newline, so a validator reading this with `match` accepted
+# `en\n` where `LanguageTag`'s own `\A...\Z` refuses it. That was a real
+# divergence between two homes of one rule, found in review, and it is
+# the precise hazard restating a pattern carries: the two spellings can
+# agree on every ordinary value and part company on a boundary. The
+# equivalence case therefore leads with the whitespace edges rather
+# than with ordinary codes.
 LANGUAGE_PATTERN = r"^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{1,8})*$"
 
 LANGUAGE_MAX_LENGTH = 16
@@ -233,7 +245,7 @@ def _as_languages(value: list[str] | None) -> list[str] | None:
     if not value or len(set(value)) != len(value):
         raise ValueError(LANGUAGES_RULE)
     for code in value:
-        if len(code) > LANGUAGE_MAX_LENGTH or _LANGUAGE.match(code) is None:
+        if len(code) > LANGUAGE_MAX_LENGTH or _LANGUAGE.fullmatch(code) is None:
             raise ValueError(LANGUAGE_RULE)
     return value
 

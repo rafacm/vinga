@@ -389,6 +389,14 @@ OPENAI_ASR_PARITY: list[tuple[str, object, bool]] = [
     # its length, punctuation it does not admit, and not a string at
     # all. The scalar is the fifth: a bare code is not a list of one.
     ("languages", ["s"], False),
+    # The boundary this rule got wrong once, and the reason it is a row
+    # rather than a comment. Python's `$` matches immediately before a
+    # terminal newline where `\Z` does not, so a pattern anchored with
+    # `$` and read with `match` accepted "en\n" while the value type
+    # these codes become refused it. The two homes are held together by
+    # a case in `test_providers_openai_asr.py`; this is the same fact
+    # said where every other value rule of this type is said.
+    ("languages", ["en\n"], False),
     ("languages", ["sv" * 9], False),
     ("languages", ["not a language"], False),
     ("languages", ["sv", 5], False),
