@@ -232,10 +232,11 @@ of them rather than for the one this plan named. The turn loses its
 whole `heard` event, with the duration, the `asr_ms` and the submitted
 audio it carries, because one optional far-side field was malformed.
 And the turn record beside it has no guard and no value type:
-`runtime/turns.py::heard_utterance` assigns the string, and
-`conversations/store.py` writes it into a nullable `Text` column, so
-the far side's value would reach a durable row and the `/api` read
-surface over it. Both are a poor price for a field whose absence means
+`runtime/turns.py::heard_utterance` assigns the string,
+`conversations/store.py` writes it into a nullable `Text` column, and
+the `/api` turn model publishes it as a bare `str | None`
+(`config/responses.py`), so the far side's value would reach a durable
+row and a read surface over it unchecked at every step. Both are a poor price for a field whose absence means
 only that the language was not learned, which is a smaller claim than
 "it would break the turn" and the one the evidence supports.
 

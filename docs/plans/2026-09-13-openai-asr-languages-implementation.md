@@ -96,10 +96,11 @@ What a malformed code really costs is two things, and they are what the
 prose now says. The turn loses its whole `heard` event, and with it the
 duration, the `asr_ms` and the submitted audio that event carries,
 because one optional far-side field was malformed. And the turn record
-has no guard and no value type: `heard_utterance` assigns the string
-and `conversations/store.py` writes it into a nullable `Text` column,
-so an unnormalized code reaches a durable row and the `/api` read
-surface over it. The second half is not in the review's finding and is
+has no guard and no value type: `heard_utterance` assigns the string,
+`conversations/store.py` writes it into a nullable `Text` column, and
+the `/api` turn model publishes it as a bare `str | None`
+(`config/responses.py`), so an unnormalized code reaches a durable row
+and a read surface over it with nothing checking it on the way. The second half is not in the review's finding and is
 the stronger of the two: a dropped event is a gap, a stored far-side
 string is a value nothing downstream can tell from one this server
 minted. Both are a poor price for a field whose absence means only that
