@@ -944,6 +944,24 @@ options for asr type faster_whisper:
   vad_parameters.min_silence_duration_ms: int | null  (default: null)
     How much silence ends a speech segment, in milliseconds.
 
+options for asr type openai:
+
+  model: str  (default: "gpt-4o-mini-transcribe")
+    The transcription model, in OpenAI's own vocabulary.
+  base_url: str  (default: "https://api.openai.com/v1")
+    The transcription endpoint.
+  language: str | null  (default: null)
+    Spoken language (ISO 639-1, such as sv or en).
+  prompt: str | null  (default: null)
+    Words the transcriber should expect (names, places, the assistant's own
+    name), and not the agent's instruction, which is the agent's own entry.
+  temperature: float | null  (default: null)
+    Decoding temperature, which OpenAI itself takes between 0.0 and 1.0.
+  timeout_s: float  (default: 30.0)
+    Seconds before a transcription request is abandoned, and a real bound
+    because the client's own retries are off: the SDK would otherwise try a
+    failed request three times while the user waits for an answer.
+
 options for tts type elevenlabs:
 
   voice_id: str  (required)

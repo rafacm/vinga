@@ -155,13 +155,13 @@ vinga provider set <stage> <name> -f fragment.yaml
 
 A provider entry carries whatever options its `type` takes. The types that
 declare an option model, as stage and type, are: llm openai_compatible, asr
-faster_whisper, tts elevenlabs. Their options are checked when the entry is
-written and refused by name, they are printed by `vinga schema provider
-<stage> <type>`, and the reference lists their fields under the provider
-section. Every other type has its options passed through rather than declared,
-so no schema can list those, and until the rest are typed (#88) they are
-documented in the example fragments below, which is also where the measured
-numbers behind each default are kept.
+faster_whisper, asr openai, tts elevenlabs. Their options are checked when the
+entry is written and refused by name, they are printed by `vinga schema
+provider <stage> <type>`, and the reference lists their fields under the
+provider section. Every other type has its options passed through rather than
+declared, so no schema can list those, and until the rest are typed (#88) they
+are documented in the example fragments below, which is also where the
+measured numbers behind each default are kept.
 
 Examples:
 
@@ -218,6 +218,21 @@ Fields of `vad_parameters`:
 | --- | --- | --- | --- |
 | `min_silence_duration_ms` | `int \| null` | `null` | How much silence ends a speech segment, in milliseconds. Any other key written here is passed to the engine's VAD unread, which is what this section is for. |
 | ... | | | Passed through to the provider implementation. |
+
+#### `asr` options for `type: openai`
+
+`providers.asr.<name>`
+
+The options the `openai` ASR type accepts.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `model` | `str` | `"gpt-4o-mini-transcribe"` | The transcription model, in OpenAI's own vocabulary. gpt-4o-transcribe is the larger sibling of the default and holds up better on the noisiest input; whisper-1 is the same Whisper V2 as the local engine, at roughly twice the latency of the gpt-4o pair. |
+| `base_url` | `str` | `"https://api.openai.com/v1"` | The transcription endpoint. Any server implementing /v1/audio/transcriptions works here, the same way openai_compatible opens the LLM stage to local models; a keyless self-hosted one can leave api_key_env out. This is also what decides whether the audio leaves the host, so the type cannot declare its own reach. |
+| `language` | `str \| null` | `null` | Spoken language (ISO 639-1, such as sv or en). Set it for any deployment that is not English: detection happens inside the model at no measurable cost, but far-field microphone audio through Opus gives it far less to go on than clean audio does. |
+| `prompt` | `str \| null` | `null` | Words the transcriber should expect (names, places, the assistant's own name), and not the agent's instruction, which is the agent's own entry. Keep it to plain vocabulary: on short or low-content audio the model hands this string back as the transcript instead of hearing anything. |
+| `temperature` | `float \| null` | `null` | Decoding temperature, which OpenAI itself takes between 0.0 and 1.0. Raise it only to loosen a decode that is stuck; unset leaves the API its own default. |
+| `timeout_s` | `float` | `30.0` | Seconds before a transcription request is abandoned, and a real bound because the client's own retries are off: the SDK would otherwise try a failed request three times while the user waits for an answer. |
 
 #### `tts` options for `type: elevenlabs`
 
