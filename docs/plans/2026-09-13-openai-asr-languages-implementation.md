@@ -486,6 +486,72 @@ where the M3 entry says the default moved. Amending a merged
 milestone's fragment to keep a forward reference tidy would be editing
 a record for style.
 
+### PR review round, PR #514
+
+External review: codex CLI 0.154.0, model gpt-5.6-sol, read-only
+sandbox, 2026-09-13, runtime 5m22s, reviewing main...93bd1eb1. Verdict
+as received: **mergeable after the listed fixes**. Three findings, all
+P2, all adopted, each fixed in a commit of its own. They are one
+failure repeated three times, which is worth naming rather than
+numbering: a claim written one step wider than the evidence behind it.
+
+1. **The hint-versus-pin claim was scoped to one model and the pages
+   stated it generally.** Both pages said no model this type reaches
+   treats `language` as a hard pin. Two measurements stand behind that
+   sentence, the gpt-4o one this repository already carried and the
+   plan's own on `gpt-transcribe`, which says "this model" and means
+   it. Generalized, it also spoke for `whisper-1`, which nobody
+   measured, and for every compatible endpoint, which this project
+   cannot speak for at all.
+
+   *Resolution.* Adopted in `3ba4ce3b`. Both pages now name the two
+   measured models, date the new measurement, and say that the
+   unmeasured cases decide for themselves. The advice does not move:
+   pinning for a non-English deployment is still what the field session
+   earned.
+
+2. **"And nothing else" was false in this branch's own diff.** The
+   fragment said pinning a gpt-4o model gives up the language report
+   and nothing else, while the changelog beside it records a different
+   billing unit and the README records that the new default's latency
+   and accuracy were never compared against the old one's.
+
+   *Resolution.* Adopted in `90136255`. The fragment says what naming
+   `gpt-4o-mini-transcribe` keeps, whole: the same transcription, the
+   measured latency and accuracy, per-audio-token billing, and no
+   language report. The field's own comment carried the same over-claim
+   in fewer words and was corrected with it.
+
+3. **The changelog promised a language to configurations that suppress
+   it.** It said a deployment that never set `model` starts carrying a
+   language, while M2 suppresses the report on any request that named a
+   single language, and the shipped fragment leaves `model` unset with
+   `language: sv` active. Verified by running rather than by reading:
+   an entry of exactly that shape sends `gpt-transcribe` with
+   `language=sv` and answers `AsrResult.language` None, with the
+   transcript intact.
+
+   *Resolution.* Adopted in `2fbaddeb`. The entry now says the report is
+   filled only where the request named no single language, names the
+   shipped fragment as an entry that therefore reports nothing, and says
+   what to leave unset to get one.
+
+**The example fragment's `language: sv`, examined and kept.** The
+review's third finding is also a question about the fragment, since
+those two lines are the configuration most operators copy and they
+teach the one combination in which M2's work does nothing. Kept active,
+for a reason now recorded beside it: the pinning advice was earned on a
+real device, where unpinned far-field Swedish came back as
+English-shaped nonsense, and a wrong transcript costs a turn where a
+missing report costs a number. A shipped example that taught the first
+failure in order to buy the second would be a bad trade. What was
+actually missing is that the trade was invisible at the line that makes
+it, stated only in the closing paragraph a reader reaches last. So the
+option now says it suppresses the report, says why it is set anyway,
+and gives the one honest way to have both: comment it out for a while
+on a deployment whose transcripts already look right, read the codes
+that arrive, and pin afterwards. Nothing in the advice itself moved.
+
 ### Verification
 
 Run from `vinga-server/` with `PYTHONDONTWRITEBYTECODE=1` outside
@@ -506,6 +572,14 @@ on this machine for a reason unrelated to any change, recorded in M1's
 own verification: Postgres drops connections under the worker count and
 every failure is `psycopg.OperationalError`. Not chased and not
 claimed.
+
+Every one of those was run again on the tree the review round left,
+with the same answers: 7283 passed and 19 skipped, 341 passed, five
+drift checks clean, links and fragments clean. The review's third
+finding was settled by running rather than by reading, in a throwaway
+case since deleted: an entry with no `model` and `language: sv`, the
+shipped fragment's own shape, puts `gpt-transcribe` and `language=sv`
+on the wire and answers a transcript with no language beside it.
 
 Both claims were watched failing first, before the default moved: the
 wire case reported `gpt-4o-mini-transcribe` where `gpt-transcribe` was
