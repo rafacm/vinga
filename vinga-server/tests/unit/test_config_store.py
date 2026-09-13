@@ -1412,21 +1412,79 @@ def test_an_openai_asr_row_written_before_the_declaration_still_reads(
     assert {name: entry.options[name] for name in options} == options
 
 
-def test_an_openai_asr_row_the_builder_never_accepted_is_refused_on_read(
-    store: ConfigStore,
+# The other half of the tightening, and it is wider than two nulls
+#
+# The plan's first reading of this was that unknown keys were already
+# refused, because `OptionsReader.finish()` refuses one when the
+# provider is built. `finish()` runs inside a FACTORY, and a factory
+# runs only for an entry some agent references: `build_world` walks
+# `config.agents` and resolves each one's four stages, so a provider row
+# no agent names was never constructed and was never checked at all.
+#
+# So what the declaration newly refuses is every row this model rejects,
+# referenced or not, and each shape of rejection gets a case. The
+# unknown key is the one that carries the correction: it is the shape
+# the old reasoning said was already covered.
+#
+# Each case carries what the refusal has to SAY as well as what
+# provokes it: the field, for one this repository declared, and the rule
+# otherwise. A key an operator invented is never printed, which is
+# `safe_location`'s rule, so those cases name the rule instead.
+UNREADABLE_OPENAI_ASR: list[tuple[str, dict[str, object], str]] = [
+    # The two that never built, whose refusal used to arrive only when
+    # some agent's provider was constructed: `string()` answered None
+    # and the builder's own assertion caught it.
+    ("a null model", {"model": None}, "model"),
+    ("a null base_url", {"base_url": None}, "base_url"),
+    # The one that never built either, refused a step earlier by
+    # `number()`, which measured whatever it popped.
+    ("a null timeout", {"timeout_s": None}, "timeout_s"),
+    # And the wrong types on both sides, which the reader refused with a
+    # sentence of its own.
+    ("a number where a string belongs", {"language": 5}, "language"),
+    ("a string where a number belongs", {"temperature": "warm"}, "temperature"),
+    # The case the correction is about: an unknown key was said to be
+    # refused already, and for an unreferenced row nothing checked it at
+    # all. The name is withheld, so the rule is what the sentence
+    # carries.
+    ("a key this type does not have", {"beam_size": 1}, "an unrecognized key is not permitted"),
+    # And the same shape with the key itself credential-shaped, which
+    # does NOT reach the options model: a key naming a secret is refused
+    # at the `ProviderConfig` boundary every type passes through, before
+    # any type's own contract is consulted. That ordering is right, and
+    # the case is kept for what it does prove, which is that the more
+    # dangerous of the two rules still reaches this row first and still
+    # quotes nothing of it.
+    (
+        "a key this type does not have, named like a credential",
+        {SECRET: SECRET},
+        "looks like an inline secret",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("options", "says"),
+    [(options, says) for _, options, says in UNREADABLE_OPENAI_ASR],
+    ids=[name for name, _, _ in UNREADABLE_OPENAI_ASR],
+)
+def test_an_openai_asr_row_the_model_refuses_is_refused_on_read(
+    store: ConfigStore, options: dict[str, object], says: str
 ) -> None:
     """The half of the tightening that is not behaviour-preserving, said
     out loud rather than discovered on somebody's upgrade.
 
-    `model: null` and `base_url: null` never built: `string()` answered
-    None and the builder's own assertion caught it, which reached an
-    operator as "the openai provider would not build". But that happened
-    when the entry was CONSTRUCTED, so a row nothing referenced sat in
-    the database unread. The declaration moves the refusal to load time,
+    None of these rows ever built. What changes is WHEN that is found
+    out: at construction, for an entry an agent referenced, and never at
+    all for one nothing did. The declaration moves it to load time,
     where it is a storage failure for the whole configuration.
 
-    What the refusal may say is the other half: the entry and the field,
-    never the value, exactly as an unreadable row says it.
+    What the refusal may say is the other half, and it is asserted on
+    every case rather than on the first: the entry, and then the field
+    where the field is one this repository declared or the rule where it
+    is not. The planted `prompt` carries the sentinel through every
+    case, so a refusal that started quoting the row would fail here
+    whichever shape provoked it.
     """
     planted(
         store,
@@ -1434,7 +1492,7 @@ def test_an_openai_asr_row_the_builder_never_accepted_is_refused_on_read(
             stage="asr",
             name="ears",
             body=json.dumps(
-                {"type": "openai", "api_key_env": "OPENAI_KEY", "model": None, "prompt": SECRET}
+                {"type": "openai", "api_key_env": "OPENAI_KEY", "prompt": SECRET, **options}
             ),
             secrets={},
         ),
@@ -1444,8 +1502,13 @@ def test_an_openai_asr_row_the_builder_never_accepted_is_refused_on_read(
         store.load()
 
     assert "providers.asr.ears" in str(caught.value)
-    assert "model" in str(caught.value)
+    assert says in str(caught.value)
     assert SECRET not in _chain(caught.value)
+    # And the key an operator invented is never in it, whichever rule
+    # reached the row: the two cases that carry one write it as
+    # `beam_size` and as the sentinel, and neither is this repository's
+    # word.
+    assert "beam_size" not in str(caught.value)
 
 
 def test_a_row_that_is_not_loadable_is_reported_as_a_config_error(
