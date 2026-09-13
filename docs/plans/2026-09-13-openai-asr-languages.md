@@ -167,6 +167,17 @@ here except what one field says.
 
 ## The smaller decisions
 
+- **Declaring a model regenerates three committed references, not
+  one.** `docs/reference/domain-config.md` renders the fields;
+  `docs/reference/api-openapi.json` carries one component per declared
+  model (today `LlmOpenaiCompatibleOptions`, `AsrFasterWhisperOptions`
+  and `TtsElevenlabsOptions`) and embeds, in its API description, the
+  sentence listing which types declare one; `docs/reference/cli.md`
+  renders a section per declared model, today headed "options for asr
+  type faster_whisper". The server workflow diffs all three and fails
+  on a stale one, so each is regenerated through its own generator and
+  committed in the milestone that moves it, M1 for the declaration and
+  M3 for the default the three of them render.
 - **The model default has exactly one home, and M1 moves it there.**
   A converted type declares its default on the field:
   `FasterWhisperOptions` says `default="small"` and
@@ -362,6 +373,12 @@ records; nothing new is needed to see a request or a log line.
   accepted and does not.
 - **M4**: the default is the new model, and an entry that sets `model`
   still sends what it set.
+
+Beyond the unit lane, every milestone that touches the declaration or
+the default runs the three drift checks the server workflow runs, in
+its own verification rather than on CI's word: the domain reference,
+the OpenAPI document and the CLI reference, each regenerated and
+diffed.
 
 Each new claim is written to fail first and watched failing before it
 is made, per the falsify-before-claiming lens, and each commit body
