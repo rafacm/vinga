@@ -167,6 +167,17 @@ here except what one field says.
 
 ## The smaller decisions
 
+- **The model default has exactly one home, and M1 moves it there.**
+  A converted type declares its default on the field:
+  `FasterWhisperOptions` says `default="small"` and
+  `providers/faster_whisper.py` keeps no constant of its own. So M1
+  deletes `openai_asr.DEFAULT_MODEL` rather than leaving it beside the
+  field as a second copy, and carries its reasoning into the field's
+  description and the comment above it, which is the part worth
+  keeping. M3 then edits the field. Two structures that must agree are
+  one structure with a bug pending, and a constant the builder no
+  longer reads is the version of that bug where the stale one looks
+  authoritative.
 - **`languages` travels through `extra_body`.** The installed SDK
   (`openai` 2.48.0) has no `languages` parameter on
   `audio.transcriptions.create`, and `gpt-transcribe` is not in its
