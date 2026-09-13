@@ -683,7 +683,8 @@ def test_the_language_syntax_the_model_restates_is_the_one_that_ships() -> None:
     # And the claim in its own terms, so a pattern rewritten to spell
     # the same rule passes and one rewritten to spell another does not:
     # what the option accepts is what the value type holds, including
-    # the two that show this is a shape rather than a membership test.
+    # `not-a-language`, which both accept and which is the whole of why
+    # this is a shape rather than a membership test.
     for code in ("sv", "en-US", "de_DE", "not-a-language", "s", "sv" * 9, "not a language"):
         held = True
         try:
