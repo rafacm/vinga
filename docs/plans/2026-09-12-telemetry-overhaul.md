@@ -476,32 +476,64 @@ against today's code.
 trace is a root trace of its own linked to the session, so the session's
 retained context does not address it. The contract:
 
-- **What identifies it: unsettled, and M4a settles it with evidence.**
-  This plan first said "the session-local ordinal the turn span
-  already carries as `vinga.turn.index`", and that is false. `grep`
-  says `TURN_INDEX` and `TURN_ID` are written in exactly one place,
-  the transcript observation built from a store row; `TURN_ATTRIBUTES`
-  carries `speech_ms` and `barge_in` and no ordinal, and
-  `turn_started` carries no store turn id, so at `_open_turn` the
-  exporter knows no name for the turn that a post-close reader of the
-  store could match. Whatever crosses stays opaque as it does today;
-  what is open is the KEY, and it is load-bearing for three consumers
-  (#506's re-parenting, #496's clips, #501's reply audio), so M4a
-  proves one rather than assuming it:
-  - **Candidate A, the store's own turn id reaches the exporter**, as
-    one declared field on an event. Robust by construction, since both
-    sides then name the same row. It costs a catalog change, lawful
-    because a store-minted row id is a server-minted identifier and
-    therefore metadata, and it is the answer if B does not hold.
-  - **Candidate B, the per-session `t_ms` offset both sides already
-    carry.** The transcript observation writes `vinga.turn.t_ms` from
-    the store row, and the exporter knows a turn's start instant at
-    `_open_turn`. Free if the two derive from the same clock and the
-    same instant; worthless if they can differ by a millisecond. M4a
-    verifies that against a real multi-turn session and records what
-    it found, with the comparison, before building on it.
-  What M4a must NOT do is key on an ordinal counted independently on
-  each side. The transcript export's ordinal counts the turns it
+- **What identifies it: SETTLED by measurement, 2026-09-13.** Both
+  candidates this plan named are dead, and the reason the second one
+  died matters more than the key it was going to be.
+  - **Candidate B, the per-session `t_ms` offset, is dead: the two
+    sides stamp different instants.** `turn_started` is stamped
+    `utterance.ended_at`, the moment the user stopped speaking. The
+    store's `t_ms` derives from `heard_at`, the `heard` emission, which
+    lands after the ASR stage RETURNS. Measured on a real multi-turn
+    session over the wire against a real collector: the two offsets sat
+    5 ms apart with a near-instant mock ASR and 407 ms apart with 400 ms
+    of latency injected into it. The gap is the ASR stage, so it is
+    unbounded and different every turn. The injection is what makes the
+    measurement worth anything: a mock-only run rounds the two into the
+    same millisecond and reports a match that the field would not honour.
+  - **Candidate A, the store's own turn id, is dead as written**,
+    because at `turn_started` no store row exists yet and by the turn's
+    end there may be two.
+  - **Why there may be two, which is the finding underneath both.** The
+    store's turn and the exporter's turn are different concepts, and
+    both are right. The exporter opens one turn span per USER
+    UTTERANCE. The store writes one row per (turn x conversation):
+    `_record_turn` has exactly two call sites, the reply's `finally`
+    (once per reply, however it ended) and the handover boundary. So
+    records per turn = 1 + handovers, and `switches_left` is 1 per turn
+    with a second switch refused, which bounds it at two rows per turn.
+    Measured directly: a barge-in does NOT split the record (two turns,
+    one record and one turn span each, in two distinct traces) and
+    neither does a reply that failed mid-stream (one record). Only a
+    handover splits it.
+  - **And nothing links a handover's two rows.** The second comes from
+    `_seeded_turn`, a fresh turn state whose `at` is a new clock
+    reading, on another thread, with another agent, carrying no
+    utterance of its own. So the join is genuinely many-to-one and no
+    field either side already holds can express it.
+- **The key: an utterance handle, minted at the turn's open.** The
+  pipeline mints an opaque identifier where `turn_started` is emitted,
+  declares it on that event so the exporter can key its retention by
+  it, and carries it on the turn state into every `TurnRecord` that
+  turn produces, so a handover's two rows carry the same one. A
+  post-close reader joins a store row to its turn's pinned context
+  through it.
+  It is named for the UTTERANCE rather than for the turn, deliberately.
+  The store models a handover as two turns on two threads and is right
+  to: the seeded turn has nothing heard on it. A handle claiming those
+  rows are one turn would contradict a model that is correct for its
+  own purpose, where what is actually true of them is that they answer
+  one utterance. Pointing the seeded row at the utterance on the other
+  thread is exactly the new information #506 needs to parent it.
+  Lawful as metadata for the reason candidate A would have been: a
+  server-minted identifier is not content.
+  The store column it lands in needs no migration path for rows written
+  before it existed. The compatibility stance is recorded and was
+  reaffirmed for this change: no existing installation is supported
+  across it, provided the changelog says so. Without that, every
+  consumer of this key would have inherited a permanent
+  "row older than the key" branch in a read path.
+  What this plan must NOT do is key on an ordinal counted independently
+  on each side. The transcript export's ordinal counts the turns it
   actually wrote, so a session holding a turn with no stored text
   shifts every later number on one side and not the other, which is a
   join that works in every test with complete turns and misfiles
@@ -731,7 +763,7 @@ a stated type, not a store row and not a provider object.
 | M1 | the content-and-telemetry record, the observability map | nothing | (documentation) |
 | M2 | `telemetry.py` (four tables, one fold, one retained fact) | nothing | that a tool call, a board's name and a prompt's provenance reach a trace at all |
 | M3 | `events/catalog.py`, `events/assembly.py`, `runtime/pipeline.py`, `telemetry.py` | nothing | that a voice and an ear report usage the way a generator does |
-| M4a | `telemetry.py` (retention generalized), `capture_upload.py` | nothing | that a post-close job's trace context can age out under it |
+| M4a | `telemetry.py` (retention generalized), `capture_upload.py`, and the handle's path: `events/catalog.py`, `runtime/{pipeline,turns}.py`, `conversations/{records,store}.py` | nothing | that a post-close job's trace context can age out under it, and which utterance a stored turn row answers |
 | M4b | `config/models.py`, `boundary.py`'s callers | nothing | that a collector on the LAN is reachable without declaring the internet |
 | M5 | `telemetry.py` (one method, one seam type), `runtime/pipeline.py` (staging at both call shapes), `device/session.py` (hand-over, factory), composition | `llm_input_export.py` | the sentence in "The M5 module is its own" above |
 
@@ -831,6 +863,15 @@ What is new per milestone:
   asserting that the oldest turn reports no trace while the newest
   still resolves; and a case that a turn context is captured at the
   turn's open rather than its close, driven by a turn a barge-in ended.
+  For the handle: a handover case pinning that both its rows carry the
+  one handle its single turn span was retained under, which is the
+  many-to-one the measurement found and the case every ordinal-based
+  key passes wrongly; a barge-in case pinning that two turns get two
+  handles, since the same measurement found the record does NOT split
+  there; and a regression case that a second `turn_started` arriving
+  before its predecessor's `reply_finished` does not silently discard
+  the second turn's span, which is today's behavior and is guarded only
+  by an emission order nothing tests.
 - **M4b**: refusal and admission cases per feature at each reach, the
   absent-key case pinning that today's behavior is unchanged (which is
   the upgrade proof), a case that one asserted reach governs all three
@@ -892,11 +933,17 @@ is straight-line logic one run is the honest proof and more is noise.
   field), the observability map's row, and a new operator section of
   `vinga-server/README.md` carrying the pricing procedure and its
   table. Fragment `changelog.d/502-usage-accounting.md` (### Added).
-- **M4a**: none beyond the implementation doc; the mechanism is
-  internal. Fragment `changelog.d/502-capture-pin.md` (### Fixed): what
-  changes for an operator is that an admitted capture job stops
-  reporting `no_trace` under eviction pressure, which is whether a
-  recording appears on its trace.
+- **M4a**: none beyond the implementation doc for the retention
+  itself; the mechanism is internal. Fragment
+  `changelog.d/502-capture-pin.md` (### Fixed): what changes for an
+  operator is that an admitted capture job stops reporting `no_trace`
+  under eviction pressure, which is whether a recording appears on its
+  trace. The stored column needs a second fragment (### Changed)
+  carrying the compatibility flag: the turn table gains a column and no
+  existing installation is carried across it, which is the stance this
+  change was authorized under and is inert for a deployment that starts
+  fresh. The declared event field regenerates the events reference
+  through its generator.
 - **M4b**: `docs/reference/server-config.md` through its generator,
   both example configs, the observability map's Retention and access
   paragraph in each of the three exporting surfaces' sections, and
@@ -960,9 +1007,15 @@ the manifest with its own generator when stale.
   `trace_of` and `reference_media` re-addressed from a session id to
   the pinned context, their session-keyed spellings removed, and the
   capture uploader pinning at admission the way the transcript exporter
-  does, which closes the exposure #495's plan named and declined.
+  does, which closes the exposure #495's plan named and declined. And
+  the utterance handle the retention is keyed by, settled by
+  measurement above: minted where `turn_started` is emitted, declared
+  on that event, and carried on the turn state into every `TurnRecord`
+  that turn produces so a handover's two rows carry the same one.
   Design footprint: the retention deepened in place and one addressing
-  mode instead of two, with the two call sites the change reaches.
+  mode instead of two, with the two call sites the change reaches, plus
+  one declared event field and one stored column that give the two
+  sides a name for the same utterance.
 - [ ] **M4b: the operator's collector reach**. The reach assertion
   #493's implementation doc named, in the shape settled under "M4b is
   one key on the telemetry section": `server.telemetry.reach` in the
