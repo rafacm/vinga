@@ -240,10 +240,24 @@ read-back, the schema command, the generated reference and the
 credential rule all read one declaration.
 
 `providers/openai_asr.py` keeps its factory and its `transcribe`, and
-loses the `OptionsReader` ladder and the temperature range check to
-the model above. The module docstring's third paragraph, which is
-today a careful explanation of why this provider cannot report
-language, is replaced by what it now does and under which condition.
+loses the `OptionsReader` ladder to the model above. It keeps the
+temperature range check, and that is a decision rather than an
+oversight: the rule is conditional on whether the endpoint is OpenAI
+itself, `providers/openai_endpoint.py` is the one home for deciding
+that, and `config/provider_options.py` states an import contract with
+three committed pins behind it, that it weighs "pydantic and
+`config.models` and nothing else: no provider package, no engine, no
+database driver, no cryptography". `openai_endpoint` imports
+`providers.base` and `providers.kit`, so a model that imported it
+would break `test_the_configuration_cli_loads_none_of_this_package`,
+and a model that restated its URL rules would be the second home for
+them. What the model can own is the shape of a temperature; what it
+cannot own is which endpoint's rules apply. So the builder keeps the
+range check, after typed validation, which is also where
+`elevenlabs_tts.build` keeps the one translation its model cannot do.
+The module docstring's third paragraph, which is today a careful
+explanation of why this provider cannot report language, is replaced
+by what it now does and under which condition.
 
 No seam moves. `AsrResult` already carries the field; the pipeline
 already reads it; the telemetry map already names it.
