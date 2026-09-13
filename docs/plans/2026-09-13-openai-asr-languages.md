@@ -420,7 +420,7 @@ transcription of a real conversation.
   and `docs/reference/cli.md`, each through its own generator.
   Changelog: Changed.
 - [x] **[M2: report the language the model heard](2026-09-13-openai-asr-languages-implementation.md#m2-report-the-language-the-model-heard)**
-  (PR TBD). `transcribe` fills `AsrResult.language` from the response's
+  (PR #513). `transcribe` fills `AsrResult.language` from the response's
   `languages` when nothing told the model a single answer, normalized
   so that anything malformed answers None rather than reaching event
   assembly. Reshapes
