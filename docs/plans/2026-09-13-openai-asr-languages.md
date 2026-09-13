@@ -224,57 +224,71 @@ already reads it; the telemetry map already names it.
 ## Milestones
 
 Cut so that the one behaviour change every existing deployment feels,
-the default model, sits alone in its own review.
+the default model, sits alone in its own review, and so that no
+milestone ships an option the milestone's own default model refuses.
+That ordering is the plan review's first finding: `languages` landing
+while the default is still `gpt-4o-mini-transcribe` would let an
+operator apply a configuration that boots and then fails on the first
+transcription of a real conversation.
 
 - [ ] **M1: declare the type's options.** `OpenaiAsrOptions` in
   `config/provider_options.py` carrying today's six options with their
   descriptions, registered in `PROVIDER_TYPES`, and `build` rewritten
   to take the validated model the way `elevenlabs_tts.build` does. The
-  temperature range check moves into the model as an
-  `is_openai`-conditional model validator. Behaviour-preserving except
-  for refusal wording, which moves from this module's sentences to the
-  shared validation rendering, so it is pinned before and after per the
-  pin-before-reshaping lens: every refusal this factory can raise gets
-  a characterization pin committed green first. Design footprint:
-  deepens `config/provider_options.py`, adds no seam. Documentation
-  footprint: `docs/reference/domain-config.md` is generated and changes
-  in two places, the declared-models paragraph and a new
-  `asr` options section; `vinga-server/examples/asr-openai.yaml` keeps
-  its prose but stops being the only home for the field descriptions.
+  endpoint-conditional temperature range check stays in the builder,
+  after typed validation. Behaviour-preserving for every configuration
+  that boots today, which is a claim M1 has to earn rather than assert:
+  refusal wording moves from this module's sentences to the shared
+  validation rendering, and the read-back gate tightens. Both are
+  pinned before and after per the pin-before-reshaping lens. Design
+  footprint: deepens `config/provider_options.py`, adds no seam.
+  Documentation footprint: three generated references move together,
+  `docs/reference/domain-config.md`, `docs/reference/api-openapi.json`
+  and `docs/reference/cli.md`, each through its own generator.
   Changelog: Changed.
 - [ ] **M2: report the language the model heard.**
   `transcribe` fills `AsrResult.language` from the response's
-  `languages` when nothing told the model a single answer, read
-  defensively off `model_extra`. Reshapes
+  `languages` when nothing told the model a single answer, normalized
+  so that anything malformed answers None rather than reaching event
+  assembly. Reshapes
   `test_no_language_is_reported_and_no_session_lock_is_asked_for`,
   which is the pin that says today's behaviour, into the pair of pins
   that say the new one. `lock_language` is still never asked for: the
   lock exists to spare a local encoder pass, and there is none here.
   Design footprint: deepens `providers/openai_asr.py`; callers of
   `AsrResult` learn nothing new. Documentation footprint: the module
-  docstring's language paragraph, and the closing paragraph of
+  docstring's language paragraph; the closing paragraph of
   `examples/asr-openai.yaml`, which today states there is no language
-  reporting at all. Changelog: Added.
-- [ ] **M3: the `languages` option.** The list on the model, mutually
+  reporting at all; and two claims in `vinga-server/README.md`, that
+  the local engine is the only engine that reports what it heard and
+  the "No language is reported back" paragraph. Changelog: Added.
+- [ ] **M3: move the default model.** The default becomes
+  `gpt-transcribe`, alone, so the one change every unconfigured
+  deployment feels is reviewed by itself, and so that the option M4
+  adds arrives on a model that accepts it. After M1 the default's one
+  home is the `model` field on `OpenaiAsrOptions`, so that is what
+  moves. Design footprint: none, one field default. Documentation
+  footprint: the three generated references again, since the default
+  is rendered into all of them; the example fragment's model
+  paragraph, which recommends against `whisper-1` and describes a
+  default that has moved; and the `vinga-server/README.md` options
+  table's displayed default and its model comparisons, found by
+  reading the pages rather than by grepping the model name, since a
+  claim can be false without naming it. Changelog: Changed, with the
+  compatibility note that a deployment which never set `model` changes
+  model, and that a self-hosted compatible endpoint should set `model`
+  explicitly if it has not.
+- [ ] **M4: the `languages` option.** The list on the model, mutually
   exclusive with `language` through a model validator raising
   `FieldProblemsError`, sent through `extra_body` when set, and
   honoured by the report rule from M2. Design footprint: the
   cross-field rule lands beside the fields it is about, in the model,
-  not in the factory. Documentation footprint: the generated reference
-  carries the field description; `examples/asr-openai.yaml` gains the
-  paragraph on when to reach for which spelling, including that
-  neither pins a decode on this model. Changelog: Added.
-- [ ] **M4: move the default model.** `DEFAULT_MODEL` becomes
-  `gpt-transcribe`, alone, so the one change every unconfigured
-  deployment feels is reviewed by itself. Design footprint: none, a
-  constant. Documentation footprint: the example fragment's model
-  paragraph, which today recommends against `whisper-1` and describes
-  a default that has moved, and the root `README.md` and
-  `vinga-server/README.md` if either names the model by name, which
-  M4 verifies by grep rather than by memory. Changelog: Changed, with
-  the compatibility note that a deployment which never set `model`
-  changes model, and that a self-hosted compatible endpoint should set
-  `model` explicitly if it has not.
+  not in the factory. Documentation footprint: the generated
+  references carry the field description; `examples/asr-openai.yaml`
+  gains the paragraph on when to reach for which spelling, including
+  that neither pins a decode on this model; `vinga-server/README.md`'s
+  options table gains the row and the prose gains the one-language,
+  several-languages and unset cases. Changelog: Added.
 
 ## Tests
 
@@ -327,10 +341,15 @@ them.
   in measurement. So the report is a signal in aggregate rather than a
   verdict per turn, and the example fragment says so rather than
   promising more than was measured.
-- **`gpt-transcribe` may not exist on a compatible endpoint.** M4's
-  changelog note tells such a deployment to set `model`, and the
-  failure it would otherwise meet is a startup-time provider error
-  naming the entry, not a silent one.
+- **`gpt-transcribe` may not exist on a compatible endpoint.** M3's
+  changelog note tells such a deployment to set `model`. The failure
+  it would otherwise meet is NOT a startup error, which this plan
+  first claimed and the review corrected: `build` constructs a client
+  and speaks to nothing, so an entry naming a model the endpoint does
+  not have applies cleanly and fails on the first transcription of a
+  real conversation. That is the reason the default moves before the
+  option that depends on it, and the reason the changelog note is the
+  mitigation rather than a nicety.
 - **The SDK may later declare `languages` and `gpt-transcribe`.** Then
   `extra_body` and the string model still work, and the read still
   works because a declared field is reachable by attribute where
