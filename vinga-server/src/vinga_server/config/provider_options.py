@@ -132,6 +132,42 @@ PCM_FORMAT_PATTERN = r"^pcm_[0-9]+$"
 
 _PCM_FORMAT = re.compile(PCM_FORMAT_PATTERN)
 
+# What a list of spoken languages has to be, and what each entry in it
+# has to look like.
+#
+# A shape rather than a membership test, and that is the decision rather
+# than a shortcut. `events/values.py::LanguageTag` is the type these
+# codes become downstream, and it accepts `not-a-language` and `de-DE`
+# and refuses only what fails its syntax; a rule here claiming to check
+# ISO 639-1 membership would claim more than the repository's own value
+# type does, and a registry copied into this file goes stale silently
+# while reading as authority.
+#
+# The empty list and the duplicate are refused for one reason: neither
+# is something the endpoint can act on, and an operator who wrote one
+# meant something. Order is kept and sent as written, since the endpoint
+# is free to weigh it, and case is left alone for the same reason: both
+# are the endpoint's to decide and normalizing either here would be this
+# repository inventing a policy on its behalf.
+LANGUAGE_RULE = "must be a language code, such as sv or en-US"
+
+LANGUAGES_RULE = "must be a non-empty list of language codes, each written once"
+
+# The `LANGUAGE` syntax from `events/values.py`, restated for the reason
+# `base_url`'s default is restated below: that module is not on this
+# one's import list. The events catalog is deliberately outside the
+# written-down set of modules the configuration CLI may load
+# (`test_cli_import_weight.py`, where widening the inventory is "a
+# review event with a name"), so importing it to reach one regular
+# expression would buy the constant and pay for the tier. Pinned against
+# the syntax it restates by a case in `test_providers_openai_asr.py`,
+# which is on the side that may import both.
+LANGUAGE_PATTERN = r"^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{1,8})*$"
+
+LANGUAGE_MAX_LENGTH = 16
+
+_LANGUAGE = re.compile(LANGUAGE_PATTERN)
+
 
 def _as_number(value: object) -> object:
     """A number the way the reader took one: an int or a float, never a
@@ -178,6 +214,27 @@ def _as_pcm_format(value: str) -> str:
     than by quoting what was written."""
     if _PCM_FORMAT.match(value) is None:
         raise ValueError(PCM_FORMAT_RULE)
+    return value
+
+
+def _as_languages(value: list[str] | None) -> list[str] | None:
+    """A non-empty list of distinct language codes, or nothing written at
+    all, refused by the rule rather than by quoting a code back.
+
+    Three refusals and one of them is the syntax, asked of the pattern
+    above rather than of a membership list, for the reason stated there.
+    The other two are about a list that says nothing: an empty one gives
+    the endpoint nothing to weigh, and a repeated code is a set written
+    twice, and in both cases the operator meant something the value does
+    not say.
+    """
+    if value is None:
+        return None
+    if not value or len(set(value)) != len(value):
+        raise ValueError(LANGUAGES_RULE)
+    for code in value:
+        if len(code) > LANGUAGE_MAX_LENGTH or _LANGUAGE.match(code) is None:
+            raise ValueError(LANGUAGE_RULE)
     return value
 
 
@@ -236,6 +293,35 @@ PcmFormat = Annotated[
     StrictStr,
     AfterValidator(_as_pcm_format),
     WithJsonSchema({"type": "string", "pattern": PCM_FORMAT_PATTERN}),
+]
+
+# The list rule with the schema that states it, which for this one is
+# four keywords rather than a pattern: what a document has to carry is
+# the non-empty half, the each-written-once half and the shape of an
+# entry, because a client generating from it would otherwise send the
+# three values the model refuses. The published pattern is anchored
+# because the rule is a full match; `NONBLANK_PATTERN` above is not, and
+# the difference is the rule rather than an inconsistency.
+Languages = Annotated[
+    list[StrictStr] | None,
+    AfterValidator(_as_languages),
+    WithJsonSchema(
+        {
+            "anyOf": [
+                {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "pattern": LANGUAGE_PATTERN,
+                        "maxLength": LANGUAGE_MAX_LENGTH,
+                    },
+                    "minItems": 1,
+                    "uniqueItems": True,
+                },
+                {"type": "null"},
+            ]
+        }
+    ),
 ]
 
 
@@ -449,6 +535,36 @@ class FasterWhisperOptions(BaseModel):
     )
 
 
+# The one combination the API itself calls invalid, said where it is
+# written.
+#
+# Two sentences rather than one repeated at two locations, because a
+# model-level validator's error is located at the MODEL: the rendering
+# puts no field name in front of these lines, so each has to name its
+# own field, exactly as the reserved-passthrough rule above does. The
+# first carries the rule and the second carries the guidance the issue
+# asks for, which is which model wants which form.
+#
+# Models are named one by one rather than by family, and that is a
+# measurement rather than a style. Three were tested against the live
+# endpoint on 2026-09-13: `gpt-transcribe` accepted `languages`,
+# `whisper-1` and `gpt-4o-mini-transcribe` each answered 400 with a
+# message of its own, and all three refused a request naming both.
+# `gpt-4o-transcribe` and every compatible endpoint were not tested, so
+# nothing here speaks for them.
+BOTH_LANGUAGES_RULE = (
+    '"language" and "languages" cannot both be set: every model measured answers '
+    "400 to a request naming both, so an entry writing both would apply cleanly "
+    "and fail on the first real transcription"
+)
+
+LANGUAGES_MODEL_RULE = (
+    '"languages" is the form gpt-transcribe takes, and it is the one model '
+    'measured to accept it; whisper-1 and gpt-4o-mini-transcribe answered 400 to '
+    'it and take "language" instead'
+)
+
+
 class OpenaiAsrOptions(BaseModel):
     """The options the `openai` ASR type accepts.
 
@@ -468,6 +584,40 @@ class OpenaiAsrOptions(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _one_language_or_a_set_of_them(self) -> "OpenaiAsrOptions":
+        """The two ways of describing what will be spoken, and the rule
+        that an entry writes one of them.
+
+        The API's own rule rather than this repository's taxonomy: a
+        request carrying both answers 400 on every model measured, and
+        `build` speaks to nothing, so an entry writing both applies
+        cleanly and fails on the first real transcription of a
+        conversation, which is the failure no log explains. Refused
+        where it is written instead.
+
+        Raised as `FieldProblemsError` for the reason the reserved-name
+        rule above is: a model-level validator's error is located at the
+        model, and this is the one place that knows both fields are
+        involved, so several problems arrive as one error and the names
+        reach the pointers as well as the sentences.
+
+        What counts as set is what was WRITTEN, which is the question a
+        written entry can answer. `language: ""` names no language on
+        the wire, and the request-time rules below read the value rather
+        than the key for exactly that reason; but two options written on
+        one entry is one of them too many whatever either holds, and
+        the remedy is the same line either way.
+        """
+        if self.language is not None and self.languages is not None:
+            raise FieldProblemsError(
+                [
+                    FieldProblem(json_pointer(("language",)), BOTH_LANGUAGES_RULE),
+                    FieldProblem(json_pointer(("languages",)), LANGUAGES_MODEL_RULE),
+                ]
+            )
+        return self
 
     # OpenAI's current transcription model, and the one of the three that
     # says which language it heard. The gpt-4o pair it replaced as the
@@ -519,6 +669,25 @@ class OpenaiAsrOptions(BaseModel):
             "deployment that is not English: detection happens inside the model at "
             "no measurable cost, but far-field microphone audio through Opus gives "
             "it far less to go on than clean audio does."
+        ),
+    )
+    # The plural, for a household that speaks more than one. Only
+    # `gpt-transcribe` was measured to accept it, and the other two
+    # models tested answered 400, which is the endpoint's decision to
+    # make and not one this file second-guesses with a table: what this
+    # model owns is the refusal of the combination the API itself calls
+    # invalid, which is a fact about the request rather than about any
+    # model's current feature list.
+    languages: Languages = Field(
+        default=None,
+        description=(
+            "The languages spoken here, when there is more than one (ISO 639-1, "
+            "such as [sv, en]). Accepted by gpt-transcribe and refused by whisper-1 "
+            "and gpt-4o-mini-transcribe, which take language instead; the two "
+            "options cannot both be set. A list of one is a way of writing "
+            "language, and reports the language heard no more than language does; "
+            "a list of two or more leaves the model a choice, and what it chose is "
+            "reported."
         ),
     )
     prompt: StrictStr | None = Field(
