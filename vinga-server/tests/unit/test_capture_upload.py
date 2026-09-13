@@ -1689,3 +1689,86 @@ def _no_lease_outlives_its_case() -> Iterator[None]:
     yield
     assert _QUIETING.held() == 0, "a case left an uploader holding the silence"
     assert logging.getLogger("langfuse").propagate is not False
+
+
+# --- the two windows a pinned context closes ---------------------------
+#
+# Both of these failed before M4a, and they failed for one reason: the
+# uploader asked the exporter its two questions from its own worker,
+# keyed by session id, so the answers depended on what the retention
+# still held by the time the worker got there rather than on what it
+# held when the job was admitted. The retention is bounded and evicts
+# oldest-first, so a busy server could age a queued job's context out
+# from under it and a healthy upload would report `no_trace`.
+#
+# The double's `evicting` set is what makes the window explicit: those
+# sessions lose their retained entry the instant after they are pinned.
+# A caller that pinned still resolves; one that only kept a session id
+# has nothing left to ask with.
+
+
+@pytest.mark.asyncio
+async def test_a_job_admitted_before_an_eviction_still_finds_its_trace(
+    tmp_path: Path, endpoint: str
+) -> None:
+    """The first window: between the close that made the job and the
+    worker that reached it.
+
+    The context is taken at admission, so what the retention does
+    afterwards cannot turn this into `no_trace`.
+    """
+    from tests.support.uploads import Traced
+
+    traced = Traced({"s1": TRACE}, evicting={"s1"})
+    uploads = CaptureUpload(
+        tmp_path / "captures",
+        sdk=fake_sdk()[0],
+        telemetry=traced,  # type: ignore[arg-type]
+        backlog=4,
+        retries=0,
+        shutdown_timeout_s=10.0,
+    )
+    store = capture_store(tmp_path, uploads=uploads)
+
+    a_recording(store, "s1")
+    store.session_closed("s1")
+    await drained(uploads)
+
+    # It uploaded rather than reporting that the server had no id to
+    # name, which is the whole claim.
+    assert traced.referenced, "the job lost its trace to an eviction it outlived"
+
+
+@pytest.mark.asyncio
+async def test_a_job_whose_upload_outlives_an_eviction_still_writes_its_reference(
+    tmp_path: Path, endpoint: str
+) -> None:
+    """The second window, and a separate one: the reference is written
+    AFTER the bytes have gone, so an upload slow enough to outlive the
+    eviction used to land its bytes and then fail to point at them.
+
+    `unreferenced` is what that reported, which is a stored recording no
+    reader can reach. Pinned, the write has its target whatever the
+    retention has done since.
+    """
+    from tests.support.uploads import Traced
+
+    traced = Traced({"s1": TRACE}, evicting={"s1"})
+    uploads = CaptureUpload(
+        tmp_path / "captures",
+        sdk=fake_sdk()[0],
+        telemetry=traced,  # type: ignore[arg-type]
+        backlog=4,
+        retries=0,
+        shutdown_timeout_s=10.0,
+    )
+    store = capture_store(tmp_path, uploads=uploads)
+
+    a_recording(store, "s1")
+    store.session_closed("s1")
+    await drained(uploads)
+
+    assert len(traced.referenced) == 1
+    session, references = traced.referenced[0]
+    assert session == "s1"
+    assert sorted(references) == ["capture_audio", "capture_manifest"]

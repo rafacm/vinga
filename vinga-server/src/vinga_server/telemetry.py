@@ -458,6 +458,13 @@ TURN_ATTRIBUTES = {
     DEVICE_FIELD: "vinga.device.id",
     "agent": "vinga.agent",
     "conversation": "vinga.conversation.id",
+    # The name this turn is addressed by after it is over, and the one
+    # the store writes on every row the turn produces. On the span as
+    # well as in the retention because a correlation id that lives only
+    # in this process's memory is one a reader of the trace cannot use:
+    # a backend holding a stored row and this trace can find one from
+    # the other only if both of them say it.
+    "utterance": "vinga.utterance.id",
     "speech_ms": "vinga.turn.speech_ms",
     "barge_in": "vinga.turn.barge_in",
 }

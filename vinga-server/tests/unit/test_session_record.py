@@ -827,3 +827,156 @@ async def test_a_recorder_that_fails_does_not_break_the_reply(
     # this line's to repeat.
     assert "RuntimeError" in skipped.getMessage()
     assert "unrepeatable" not in skipped.getMessage()
+
+
+# What the two sides call the same turn
+#
+# The exporter opens one turn span per utterance; this store writes one
+# row per turn and conversation. A handover is therefore two rows here
+# against one span there, and the utterance is the one name both sides
+# hold. These say that the name survives the move and does not survive
+# anything that is genuinely a second turn.
+#
+# Driven through `start_reply` rather than `drive_reply`, and that is
+# load-bearing: `drive_reply` calls the reply body directly and so emits
+# no `turn_started`, which is where the utterance is minted. A suite
+# about the name has to come in at the door that names it.
+
+
+class HangsOnce(LlmProvider):
+    """A first reply that speaks and then hangs, so it can be cancelled
+    at a known point, and a second that answers normally."""
+
+    def __init__(self) -> None:
+        self.replies = 0
+        self.hanging = asyncio.Event()
+
+    async def stream(
+        self,
+        system: str,
+        history: Sequence[Turn],
+        tools: Sequence[ToolDef] = (),
+        tool_choice: ToolChoice = "auto",
+    ) -> AsyncIterator[LlmEvent]:
+        self.replies += 1
+        if self.replies == 1:
+            yield TextDelta("Interrupted.")
+            self.hanging.set()
+            await asyncio.sleep(30)
+            return
+        yield TextDelta("Answered.")
+
+
+async def test_a_handovers_two_rows_answer_one_utterance() -> None:
+    """The many-to-one the join is for, and the case an ordinal-based
+    key passes wrongly.
+
+    A reply that moves is recorded twice, on two threads, with two
+    agents and two readings. Nothing else those rows carry says they
+    came from one thing the user said: the second is a fresh turn with
+    nothing heard on it and a clock reading of its own. The utterance is
+    what says it, and both rows carry the same one.
+    """
+    poet = ScriptedLlm(
+        [[call("switch_agent", agent="tutor"), Usage(prompt_tokens=5, completion_tokens=1)]]
+    )
+    tutor = ScriptedLlm([["Tutor here."]])
+    session, spy, _ = recording_session(mac=BOTH_MAC, scripts={"poet": poet, "tutor": tutor})
+
+    start_reply(session, UTTERANCE)
+    await wait_for_reply(session)
+
+    asked, greeted = both_records(spy)
+    assert asked.utterance is not None
+    assert asked.utterance == greeted.utterance
+    # And the rows really are the two-turn shape, so this is the join
+    # doing work rather than two readings of one row.
+    assert greeted.conversation != asked.conversation
+    assert greeted.heard is None
+    assert greeted.at != asked.at
+
+
+async def test_two_turns_answer_two_utterances() -> None:
+    """The other half, without which the first would pass on a constant.
+
+    Two ordinary turns in one session are two things the user said, and
+    a key that could not tell them apart would file every artifact of
+    the second onto the first.
+    """
+    session, spy, _ = recording_session(
+        scripts={"poet": ScriptedLlm(["First.", "Second."])}
+    )
+
+    start_reply(session, UTTERANCE)
+    await wait_for_reply(session)
+    start_reply(session, UTTERANCE)
+    await wait_for_reply(session)
+
+    first, second = both_records(spy)
+    assert first.utterance is not None and second.utterance is not None
+    assert first.utterance != second.utterance
+
+
+async def test_a_barge_in_starts_an_utterance_of_its_own() -> None:
+    """A barge-in does NOT split a record the way a handover does: the
+    interrupted reply records what its `finally` saw, and the utterance
+    that interrupted it is a new turn with a new name.
+
+    Measured before it was built: the record splits at a handover
+    boundary and nowhere else, so this is the case that keeps the key
+    from being given to a second turn by mistake.
+    """
+    llm = HangsOnce()
+    session, spy, _ = recording_session(scripts={"poet": cast(Any, llm)})
+
+    start_reply(session, UTTERANCE)
+    await asyncio.wait_for(llm.hanging.wait(), 5)
+    await session.runtime.cancel_reply(ReplyOutcome.BARGED_IN)
+    # The utterance that interrupted it becomes the next turn.
+    start_reply(session, UTTERANCE)
+    await wait_for_reply(session)
+
+    interrupted, interrupting = both_records(spy)
+    assert interrupted.utterance is not None
+    assert interrupting.utterance is not None
+    assert interrupted.utterance != interrupting.utterance
+
+
+async def test_a_reply_finishes_before_the_turn_that_interrupted_it_starts(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The ordering the exporter's turn span silently depends on.
+
+    `_open_turn` drops a `turn_started` that arrives while a turn span is
+    still open. That is deliberate and it is safe only because
+    `reply_finished` is the reply `finally`'s FIRST statement and a
+    barge-in awaits the cancelled reply through it, so the open turn is
+    always closed before the interrupting one begins.
+
+    Probed directly against the exporter, two `turn_started`s with no
+    `reply_finished` between them produce ONE span and lose the second
+    turn without saying so. Nothing failed if this order changed, which
+    is why it is pinned here, in the module that decides it, rather than
+    left as a remark in the module that relies on it.
+    """
+    caplog.set_level(logging.INFO)
+    llm = HangsOnce()
+    session, _, _ = recording_session(scripts={"poet": cast(Any, llm)})
+
+    start_reply(session, UTTERANCE)
+    await asyncio.wait_for(llm.hanging.wait(), 5)
+    await session.runtime.cancel_reply(ReplyOutcome.BARGED_IN)
+    start_reply(session, UTTERANCE)
+    await wait_for_reply(session)
+
+    order = [
+        record.event
+        for record in caplog.records
+        if getattr(record, "event", None) in ("turn_started", "reply_finished")
+    ]
+    assert order == [
+        "turn_started",
+        "reply_finished",
+        "turn_started",
+        "reply_finished",
+    ], "a turn began while the one before it was still open"

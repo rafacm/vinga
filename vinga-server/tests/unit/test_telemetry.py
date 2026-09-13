@@ -33,6 +33,7 @@ import sys
 import threading
 import time
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 
@@ -2078,3 +2079,197 @@ def test_a_server_event_keeps_the_server_clock_it_was_stamped_with(
     held = session.events[0]
     assert held.name == "capture_started"
     assert abs(held.timestamp / 1e9 - time.time()) < NEAR_ENOUGH_S
+
+
+# --- a turn's own context ----------------------------------------------
+#
+# A turn span is a root trace of its own linked to the session, so the
+# session's retained context does not address it. The turns are kept
+# inside that session's entry all the same, under the utterance each one
+# answered, so one pin at the close carries the session and every turn
+# beneath it. What follows is what a reader after the close can and
+# cannot reach.
+
+AN_UTTERANCE = "0123456789abcdef0123456789abcdef"
+ANOTHER_UTTERANCE = "fedcba9876543210fedcba9876543210"
+
+
+def a_turn_under(events: Any, clock: Clock, utterance: str, **finish: Any) -> None:
+    """One whole turn, opened on a named utterance and ended.
+
+    Ended by default because `_open_turn` refuses to open a second turn
+    while one is still open, so a case about several turns has to close
+    each of them to be driving what it thinks it is.
+    """
+    start_turn(events, utterance=utterance)
+    clock.tick(0.5)
+    finish_reply(events, **finish)
+    clock.tick(0.1)
+
+
+def test_a_turn_is_addressable_under_the_utterance_it_answered() -> None:
+    """The join the whole milestone exists for, from the exporter's
+    side: the name the store writes on a turn's rows is the name this
+    exporter kept that turn's context under."""
+    clock = Clock()
+    telemetry, _ = exporting()
+    events = session_events(clock, telemetry, session=SESSION)
+    open_session(events)
+    clock.tick(1.0)
+    a_turn_under(events, clock, AN_UTTERANCE)
+    close_session(events)
+
+    context = telemetry.retained_context(SESSION)
+    assert telemetry.turn_context(context, AN_UTTERANCE) is not None
+
+
+def test_a_turn_is_pinned_in_a_trace_of_its_own_not_its_sessions() -> None:
+    """Which is why turn contexts exist at all. A turn span is a root
+    trace linked to the session rather than a child inside it, so an
+    artifact belonging to one turn cannot be addressed by the session's
+    context without landing in the wrong trace."""
+    clock = Clock()
+    telemetry, _ = exporting()
+    events = session_events(clock, telemetry, session=SESSION)
+    open_session(events)
+    clock.tick(1.0)
+    a_turn_under(events, clock, AN_UTTERANCE)
+    close_session(events)
+
+    context = telemetry.retained_context(SESSION)
+    turn = telemetry.turn_context(context, AN_UTTERANCE)
+
+    assert turn.trace != context.trace
+    assert turn.trace_id != context.trace_id
+    # And it still knows which session it belongs to, which is what lets
+    # a span written into it say so without the caller carrying an id.
+    assert turn.session == context.session
+
+
+def test_a_turn_a_barge_in_ended_is_pinned_all_the_same() -> None:
+    """Captured at the turn's OPEN and not at its close, which is the
+    difference that matters: a turn an interruption ended early still
+    ran an ASR stage whose clip an artifact issue wants, and a turn
+    pinned only when it ended cleanly would be missing exactly where the
+    interesting cases are."""
+    clock = Clock()
+    telemetry, _ = exporting()
+    events = session_events(clock, telemetry, session=SESSION)
+    open_session(events)
+    clock.tick(1.0)
+    a_turn_under(events, clock, AN_UTTERANCE, outcome=ReplyOutcome.BARGED_IN)
+    close_session(events)
+
+    context = telemetry.retained_context(SESSION)
+    assert telemetry.turn_context(context, AN_UTTERANCE) is not None
+
+
+def test_a_turn_still_open_is_already_addressable() -> None:
+    """The strongest form of the same claim: pinned at the open means
+    pinned before anything has ended it, so a turn that never ends at
+    all is still reachable."""
+    clock = Clock()
+    telemetry, _ = exporting()
+    events = session_events(clock, telemetry, session=SESSION)
+    open_session(events)
+    clock.tick(1.0)
+    start_turn(events, utterance=AN_UTTERANCE)
+
+    context = telemetry.retained_context(SESSION)
+    assert telemetry.turn_context(context, AN_UTTERANCE) is not None
+
+
+def test_an_utterance_this_session_never_ran_has_no_turn_context() -> None:
+    """Absent rather than invented, the rule `trace_of` keeps: an
+    artifact with no target is reported, never attached to the session's
+    own trace as a consolation."""
+    clock = Clock()
+    telemetry, _ = exporting()
+    events = session_events(clock, telemetry, session=SESSION)
+    open_session(events)
+    clock.tick(1.0)
+    a_turn_under(events, clock, AN_UTTERANCE)
+    close_session(events)
+
+    context = telemetry.retained_context(SESSION)
+    assert telemetry.turn_context(context, ANOTHER_UTTERANCE) is None
+    assert telemetry.turn_context(None, AN_UTTERANCE) is None
+
+
+def test_the_turn_retention_keeps_the_last_turns_and_evicts_the_oldest() -> None:
+    """Bounded per session and oldest-first, the same posture the
+    session map keeps. The bound is deliberately not derived from
+    `max_sessions`: that number bounds how many sessions talk at once
+    and says nothing about how many turns one of them takes, so a single
+    long session would otherwise grow this map without limit.
+
+    The boundary is asserted on both sides of itself, so a bound that
+    kept one too few or one too many fails rather than passing on a
+    range.
+    """
+    from vinga_server.telemetry import RETAINED_TURNS
+
+    clock = Clock()
+    telemetry, _ = exporting()
+    events = session_events(clock, telemetry, session=SESSION)
+    open_session(events)
+    clock.tick(1.0)
+    utterances = [f"{index:032x}" for index in range(RETAINED_TURNS + 1)]
+    for one in utterances:
+        a_turn_under(events, clock, one)
+    close_session(events)
+
+    context = telemetry.retained_context(SESSION)
+    assert telemetry.turn_context(context, utterances[0]) is None, (
+        "the oldest turn survived its eviction"
+    )
+    assert telemetry.turn_context(context, utterances[1]) is not None
+    assert telemetry.turn_context(context, utterances[-1]) is not None
+
+
+def test_a_turns_context_survives_the_sessions_own_eviction() -> None:
+    """One pin at the close carries the session and every turn under it,
+    which is the whole reason the turns live inside the session's entry
+    rather than in a map of their own: a turn-keyed map would need its
+    own eviction policy and would age out under exactly the pressure the
+    session bound was built to survive."""
+    clock = Clock()
+    telemetry, _ = exporting()
+    events = session_events(clock, telemetry, session=SESSION)
+    open_session(events)
+    clock.tick(1.0)
+    a_turn_under(events, clock, AN_UTTERANCE)
+    close_session(events)
+    context = telemetry.retained_context(SESSION)
+
+    from vinga_server.telemetry import RETAINED_TRACES
+
+    for index in range(RETAINED_TRACES + 4):
+        a_session(telemetry, f"{index:032x}")
+    assert telemetry.retained_context(SESSION) is None, "the retention never moved"
+
+    assert telemetry.turn_context(context, AN_UTTERANCE) is not None
+    assert telemetry.trace_of(telemetry.turn_context(context, AN_UTTERANCE)) is not None
+
+
+def test_a_reference_written_on_a_turn_lands_in_that_turns_trace() -> None:
+    """The mechanism the artifact issues are built on, proved here
+    rather than in each of them: a media reference addressed by a turn's
+    pinned context is written into the turn's own trace and as a child
+    of the turn's own span, not the session's."""
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry, session=SESSION)
+    open_session(events)
+    clock.tick(1.0)
+    a_turn_under(events, clock, AN_UTTERANCE)
+    close_session(events)
+
+    context = telemetry.retained_context(SESSION)
+    turn = telemetry.turn_context(context, AN_UTTERANCE)
+    assert telemetry.reference_media(turn, {"capture_audio": A_REFERENCE}) is True
+
+    written = named(finished(telemetry, memory), "capture")
+    assert written.context.trace_id == turn.trace_id
+    assert written.parent.span_id == turn.span_id
+    assert written.context.trace_id != context.trace_id

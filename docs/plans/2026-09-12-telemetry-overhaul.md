@@ -868,10 +868,16 @@ What is new per milestone:
   many-to-one the measurement found and the case every ordinal-based
   key passes wrongly; a barge-in case pinning that two turns get two
   handles, since the same measurement found the record does NOT split
-  there; and a regression case that a second `turn_started` arriving
-  before its predecessor's `reply_finished` does not silently discard
-  the second turn's span, which is today's behavior and is guarded only
-  by an emission order nothing tests.
+  there; and a case pinning the emission ORDER the exporter's early
+  return depends on. `_open_turn` drops a `turn_started` that arrives
+  while a turn span is still open, which is deliberate and is safe only
+  because `reply_finished` is the reply `finally`'s first statement and
+  a barge-in awaits the cancelled reply through it. Probed directly, two
+  `turn_started`s with no `reply_finished` between them yield ONE span
+  and lose the second turn silently, so what protects the second turn is
+  an ordering in another module that nothing tests. The case drives a
+  real barge-in and asserts that order, which is where the invariant
+  actually lives.
 - **M4b**: refusal and admission cases per feature at each reach, the
   absent-key case pinning that today's behavior is unchanged (which is
   the upgrade proof), a case that one asserted reach governs all three
