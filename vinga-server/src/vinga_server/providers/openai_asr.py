@@ -60,8 +60,9 @@ decided, not what was said, and the clip this work started from, a
 spoken German "Hallo", was transcribed `Hello.` and reported `en`.
 
 **A request names a language in one of two spellings, and the second
-one is a set.** `language` is what every model here takes; `languages`
-is a list for a household that speaks more than one, and only
+one is a set.** `language` is the one this type has always sent, and
+all three measured models take it; `languages` is a list for a
+household that speaks more than one, and only
 `gpt-transcribe` was measured to accept it, `whisper-1` and
 `gpt-4o-mini-transcribe` each answering 400 in their own words. The two
 cannot be written on one entry, which the API decides rather than this
