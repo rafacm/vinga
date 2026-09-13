@@ -131,6 +131,68 @@ first written as `providers["asr"]["ears"]` and the section is a model
 with a field per stage, so the read is `providers.asr["ears"]`. Noted
 because the failure names the type rather than the line's intent.
 
+### PR review round, PR #512
+
+External review: codex CLI 0.154.0, model gpt-5.6-sol, read-only
+sandbox, 2026-09-13, runtime 6m58s, reviewing main...3384d3ee. Verdict
+as received: **mergeable after the listed fixes**. Two findings, one
+adopted whole and one adopted with a stated partial rejection, each
+fixed in a commit of its own.
+
+1. **P2: the upgrade notes and tests understate which legacy rows now
+   block boot.** The plan claimed an unknown option "cannot boot today
+   either" because `OptionsReader.finish()` refuses it at build time.
+   False for an unreferenced entry: `providers/world.py::build_world`
+   walks `config.agents` and resolves each agent's four stages, so a
+   provider row no agent names was never constructed and `finish()`
+   never saw it. Such a row booted. After this milestone every stored
+   row is validated on read, so any model-invalid legacy `openai` ASR
+   row is a boot refusal, not only the two nulls the changelog named.
+
+   *Resolution.* Adopted, and the error was the plan's rather than the
+   implementation's: the reasoning came from the plan's own amendment
+   for the plan review's finding 10, which got the existence of the
+   tightening right and its scope wrong. Corrected in `1e0aa98b` as a
+   correction that quotes the sentence it replaces, since the plan is
+   a record; the changelog fragment widened in `3f83f7df` to name
+   every refused shape with the recovery path unchanged; and the
+   stored-row test parameterized in `04d2fcbc` over seven cases
+   (`model: null`, `base_url: null`, `timeout_s: null`, `language: 5`,
+   `temperature: "warm"`, an unknown key, and a credential-shaped
+   unknown key), each asserting what the refusal must say and each
+   asserting the planted secret and the invented key name absent from
+   the whole chain. Falsified by taking the declaration back out of
+   `PROVIDER_TYPES`: six of the seven then fail with
+   `DID NOT RAISE StorageError`, and the pre-milestone behaviour was
+   reproduced directly, an unreferenced row holding `beam_size: 1`,
+   `timeout_s: null` and `language: 5` loading and handing all three
+   keys back.
+
+   *Partial rejection, on one requested case.* The review asked for an
+   unknown secret-shaped key as a case for the new gate. A
+   credential-shaped key never reaches this type's model:
+   `_check_no_inline_secrets` refuses it on `ProviderConfig` itself,
+   which every type passes through before its own contract is
+   consulted, so that row is refused identically with and without this
+   milestone and is the one case of the seven that still passes when
+   the declaration is removed. It is kept, because it proves the more
+   dangerous rule reaches the row first and quotes nothing of it, but
+   an ordinary invented key (`beam_size`) was added beside it and that
+   is the case carrying the proof. The table's comment says so, so the
+   credential-shaped case cannot later be read as evidence it cannot
+   give.
+
+2. **P3: the new no-leak test's docstring describes the opposite
+   unknown-key policy.** It said an unknown key "is deliberately named
+   back", which is the pre-conversion answer and the opposite of what
+   this milestone establishes a few hundred lines above it, stale text
+   carried across the move.
+
+   *Resolution.* Adopted, fixed in `e7028896`. The docstring now says
+   the sentinel is planted in a declared field's rejected value and
+   points at the unknown-option case and the refusal table for the
+   name-withholding half, naming the claim it replaces.
+
 ### Verification
 
 Ruff, the unit lane, the integration lane, and the drift checks the
