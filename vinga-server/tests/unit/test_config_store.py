@@ -1333,6 +1333,121 @@ def test_verify_secrets_names_the_entity_and_slot_it_cannot_open(
         engine.dispose()
 
 
+# A row written before its type declared what it accepts
+#
+# `_stored_option_types` validates every stored provider row on read, so
+# a type joining the #88 conversion tightens a gate that used to let
+# these rows through: what was only checked when a provider was built,
+# and only for an entry some agent referenced, is now checked for every
+# entry at load. The `openai` ASR type is the fourth to convert and the
+# first whose reader had spellings of absence worth enumerating.
+#
+# The spellings below are read off `registry.OptionsReader`, call by
+# call, rather than guessed at. `string(key, default)` popped with the
+# default and answered whatever it found when that was a string or
+# None, so a blank travelled as a blank; `string(key)` with no default
+# made absent, null and blank three ways of writing nothing, and the
+# builder's `self._language or language_hint` made the blank behave as
+# the other two; `optional_number` took a null as "leave the knob out
+# of the request"; and `number(key, default)` measured whatever it
+# popped, so a whole number is an ordinary spelling of a float.
+#
+# Every one of them is planted as a row rather than written through the
+# store, which is the scenario: a row this deployment has held since
+# before the declaration existed. What it proves is that the read gate
+# lets it through, which is what a server booting on an existing
+# database depends on.
+LEGACY_OPENAI_ASR: list[tuple[str, dict[str, object]]] = [
+    ("a blank model", {"model": ""}),
+    ("a blank language", {"language": ""}),
+    ("a null language", {"language": None}),
+    ("a blank prompt", {"prompt": ""}),
+    ("a null prompt", {"prompt": None}),
+    ("a null temperature", {"temperature": None}),
+    ("a whole-number temperature", {"temperature": 1}),
+    ("a whole-number timeout", {"timeout_s": 7}),
+    (
+        "every one of them at once",
+        {
+            "model": "",
+            "language": "",
+            "prompt": None,
+            "temperature": None,
+            "timeout_s": 7,
+        },
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "options",
+    [options for _, options in LEGACY_OPENAI_ASR],
+    ids=[name for name, _ in LEGACY_OPENAI_ASR],
+)
+def test_an_openai_asr_row_written_before_the_declaration_still_reads(
+    store: ConfigStore, options: dict[str, object]
+) -> None:
+    """The read-back gate, against the rows the declaration could have
+    broken.
+
+    Planted rather than written, because a row the current write path
+    produced would prove nothing about a row that predates it. Asserted
+    on the values as well as on the load: a spelling that survived
+    validation by being silently rewritten would be a different
+    compatibility break wearing this one's green tick.
+    """
+    planted(
+        store,
+        insert(schema.providers).values(
+            stage="asr",
+            name="ears",
+            body=json.dumps({"type": "openai", "api_key_env": "OPENAI_KEY", **options}),
+            secrets={},
+        ),
+    )
+
+    entry = store.load().domain.providers.asr["ears"]
+
+    assert entry.type == "openai"
+    assert {name: entry.options[name] for name in options} == options
+
+
+def test_an_openai_asr_row_the_builder_never_accepted_is_refused_on_read(
+    store: ConfigStore,
+) -> None:
+    """The half of the tightening that is not behaviour-preserving, said
+    out loud rather than discovered on somebody's upgrade.
+
+    `model: null` and `base_url: null` never built: `string()` answered
+    None and the builder's own assertion caught it, which reached an
+    operator as "the openai provider would not build". But that happened
+    when the entry was CONSTRUCTED, so a row nothing referenced sat in
+    the database unread. The declaration moves the refusal to load time,
+    where it is a storage failure for the whole configuration.
+
+    What the refusal may say is the other half: the entry and the field,
+    never the value, exactly as an unreadable row says it.
+    """
+    planted(
+        store,
+        insert(schema.providers).values(
+            stage="asr",
+            name="ears",
+            body=json.dumps(
+                {"type": "openai", "api_key_env": "OPENAI_KEY", "model": None, "prompt": SECRET}
+            ),
+            secrets={},
+        ),
+    )
+
+    with pytest.raises(StorageError) as caught:
+        store.load()
+
+    assert "providers.asr.ears" in str(caught.value)
+    assert "model" in str(caught.value)
+    assert SECRET not in _chain(caught.value)
+
+
 def test_a_row_that_is_not_loadable_is_reported_as_a_config_error(
     tmp_path: Path, keys: MultiFernet
 ) -> None:
