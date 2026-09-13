@@ -449,6 +449,101 @@ class FasterWhisperOptions(BaseModel):
     )
 
 
+class OpenaiAsrOptions(BaseModel):
+    """The options the `openai` ASR type accepts.
+
+    Six knobs and a door that stays shut, which is what the
+    `OptionsReader` ladder in `providers/openai_asr.py` had: every key
+    that builder did not read ended its build with `finish()` naming it.
+
+    Two rules are deliberately NOT here, and both live in the builder
+    because both are facts about the endpoint rather than about a value.
+    `base_url` has to be a URL with a scheme and a host, which
+    `providers/openai_endpoint.py` decides for all three types speaking
+    this dialect; and `temperature` has to be inside OpenAI's own range
+    only when the endpoint IS OpenAI, which is the same module's
+    question. This file weighs pydantic and `config.models` and nothing
+    else, so it cannot ask it, and restating those URL rules here would
+    make this the second home for them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # The current transcription family, and the reason to reach for this
+    # type at all: both gpt-4o models transcribe more accurately than
+    # `whisper-1`, which is the same Whisper V2 an operator could run
+    # locally. `mini` is the cheaper and faster of the pair, and the
+    # difference between them is small on the short utterances a voice
+    # assistant hears.
+    #
+    # Declared here and nowhere else. The builder used to keep a
+    # `DEFAULT_MODEL` constant and read the option through it, and two
+    # statements of one default is the version of that bug where the
+    # stale one looks authoritative.
+    model: StrictStr = Field(
+        default="gpt-4o-mini-transcribe",
+        description=(
+            "The transcription model, in OpenAI's own vocabulary. gpt-4o-transcribe "
+            "is the larger sibling of the default and holds up better on the "
+            "noisiest input; whisper-1 is the same Whisper V2 as the local engine, "
+            "at roughly twice the latency of the gpt-4o pair."
+        ),
+    )
+    # `https://api.openai.com/v1`, which is `openai_endpoint`'s own
+    # constant and cannot be imported here for the reason the docstring
+    # gives. Stated as the string and pinned against that constant by a
+    # case in `test_providers_openai_asr.py`, which is on the side that
+    # may import both, exactly as the elevenlabs timeout is.
+    base_url: StrictStr = Field(
+        default="https://api.openai.com/v1",
+        description=(
+            "The transcription endpoint. Any server implementing "
+            "/v1/audio/transcriptions works here, the same way openai_compatible "
+            "opens the LLM stage to local models; a keyless self-hosted one can "
+            "leave api_key_env out. This is also what decides whether the audio "
+            "leaves the host, so the type cannot declare its own reach."
+        ),
+    )
+    language: StrictStr | None = Field(
+        default=None,
+        description=(
+            "Spoken language (ISO 639-1, such as sv or en). Set it for any "
+            "deployment that is not English: detection happens inside the model at "
+            "no measurable cost, but far-field microphone audio through Opus gives "
+            "it far less to go on than clean audio does."
+        ),
+    )
+    prompt: StrictStr | None = Field(
+        default=None,
+        description=(
+            "Words the transcriber should expect (names, places, the assistant's "
+            "own name), and not the agent's instruction, which is the agent's own "
+            "entry. Keep it to plain vocabulary: on short or low-content audio the "
+            "model hands this string back as the transcript instead of hearing "
+            "anything."
+        ),
+    )
+    temperature: OptionalNumber = Field(
+        default=None,
+        description=(
+            "Decoding temperature, which OpenAI itself takes between 0.0 and 1.0. "
+            "Raise it only to loosen a decode that is stuck; unset leaves the API "
+            "its own default."
+        ),
+    )
+    # 30 seconds is `providers/kit.py`'s default patience, and it cannot
+    # be imported here either: the kit speaks httpx. Stated as the
+    # number and pinned against the kit's constant beside the base URL.
+    timeout_s: Number = Field(
+        default=30.0,
+        description=(
+            "Seconds before a transcription request is abandoned, and a real bound "
+            "because the client's own retries are off: the SDK would otherwise try "
+            "a failed request three times while the user waits for an answer."
+        ),
+    )
+
+
 class VoiceSettings(BaseModel):
     """The vendor's own voice tuning, forwarded as written.
 
@@ -864,7 +959,7 @@ PROVIDER_TYPES: dict[str, dict[str, ProviderType]] = {
         # No extra to guard, for the reason the openai TTS type has none:
         # the openai client is a core dependency and transcription is a
         # method on it.
-        "openai": ProviderType("openai_asr"),
+        "openai": ProviderType("openai_asr", options=OpenaiAsrOptions),
     },
     "tts": {
         "mock": ProviderType("mock", "build_tts"),
@@ -993,6 +1088,7 @@ __all__ = [
     "RESERVED_RULE",
     "ElevenlabsOptions",
     "FasterWhisperOptions",
+    "OpenaiAsrOptions",
     "OpenaiCompatibleOptions",
     "OptionsRefused",
     "VadParameters",

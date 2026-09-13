@@ -213,9 +213,20 @@ async def test_an_unset_api_key_variable_fails_the_build(monkeypatch: pytest.Mon
 
 
 async def test_an_unknown_option_fails_the_build(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A typo fails the build rather than silently configuring nothing,
+    which is what `finish()` was for and what the closed door on
+    `OpenaiAsrOptions` is for now.
+
+    What the refusal no longer does is quote the key back. The reader
+    named it, because there was no declared set to list instead; a type
+    that declares its options has one, and a key that is not in it is a
+    key an operator invented, which is as good a place to paste a
+    credential as a value. The exact sentence is in the table below."""
     monkeypatch.setenv("OPENAI_KEY", "secret")
-    with pytest.raises(ProviderError, match="unknown option"):
+    with pytest.raises(ProviderError, match="an unrecognized key is not permitted") as caught:
         await build_asr(type="openai", api_key_env="OPENAI_KEY", beam_size=1)
+
+    assert "beam_size" not in str(caught.value)
 
 
 async def test_the_defaults_build(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -346,16 +357,30 @@ async def test_a_local_endpoint_needs_no_key(monkeypatch: pytest.MonkeyPatch) ->
 #
 # Every way this type's factory can refuse an entry, pinned as the whole
 # sentence rather than as a fragment of one. The conversion to a
-# declared options model (#88) moves several of these from hand-built
+# declared options model (#88) moved four of these from hand-built
 # sentences in the builder to the shared validation rendering, and a
-# `match=` against a few words cannot show which ones moved or what they
-# became. So the pins are exact and they are all here together: what a
-# reader compares across that change is one table before and the same
-# table after.
+# `match=` against a few words could not have shown which ones moved or
+# what they became. So the pins are exact and they are all here
+# together: what a reader compares across that change is one table
+# before and the same table after.
+#
+# Four moved and four did not, and which is which is the design read off
+# a diff. What moved is everything that is a fact about a VALUE: an
+# option this type does not declare, and a type the model refuses. What
+# stayed is everything that is a fact about the ENDPOINT or about the
+# environment: the missing key, the unset variable, the base_url that
+# cannot be classified, and the temperature range, which is OpenAI's own
+# and therefore conditional on the endpoint being OpenAI.
+#
+# The one thing lost in the move is the name of an unknown option, and
+# it is lost on purpose rather than by accident: a key this repository
+# did not declare is a key an operator invented, and printing it back
+# is how a pasted credential reaches a boot log. The three types
+# converted before this one answer the same way.
 #
 # The label in front of every one of them is the entry's own, which is
-# what makes a bad option a five-second fix, and it is the half that
-# does not move.
+# what makes a bad option a five-second fix, and it is the half nothing
+# here moves.
 
 ENTRY = "providers.asr.ears"
 
@@ -378,17 +403,17 @@ REFUSED: list[tuple[str, dict[str, object], str]] = [
     (
         "an option this type does not have",
         {"api_key_env": "OPENAI_KEY", "beam_size": 1},
-        f"{ENTRY}: unknown option(s): beam_size",
+        f"invalid {ENTRY}:\n  - an unrecognized key is not permitted",
     ),
     (
         "a number where a string belongs",
         {"api_key_env": "OPENAI_KEY", "language": 5},
-        f'{ENTRY}: option "language" must be a string',
+        f"invalid {ENTRY}:\n  - language: Input should be a valid string",
     ),
     (
         "a string where a number belongs",
         {"api_key_env": "OPENAI_KEY", "timeout_s": "soon"},
-        f'{ENTRY}: option "timeout_s" must be a number',
+        f"invalid {ENTRY}:\n  - timeout_s: must be a number",
     ),
     (
         "a temperature outside the API's range, on OpenAI",
@@ -404,10 +429,7 @@ REFUSED: list[tuple[str, dict[str, object], str]] = [
     (
         "a null where a string with a default belongs",
         {"api_key_env": "OPENAI_KEY", "model": None},
-        f"{ENTRY}: the openai provider would not build (AssertionError). What it "
-        f"said is not repeated here, because a library failing to start can quote "
-        f"the endpoint or the credential this entry names; check this entry's "
-        f"options and the service it points at",
+        f"invalid {ENTRY}:\n  - model: Input should be a valid string",
     ),
 ]
 

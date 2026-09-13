@@ -15,6 +15,14 @@ same dialect. It defaults to OpenAI itself, and it is what decides
 whether this provider sends anything off the host, which is why the
 type cannot declare its own reach.
 
+What this type accepts is declared once, as `OpenaiAsrOptions` in
+`config/provider_options.py`, and reaches the builder below already
+validated (#88). What did not move there is the pair of rules that are
+about the endpoint rather than about a value: that `base_url` is a URL
+this repository can classify, and that `temperature` is inside OpenAI's
+own range when the endpoint is OpenAI. Both are `openai_endpoint`'s
+question, and the model is on a path that cannot import it.
+
 **This provider does not stream, and does not need to.** #11 asks a
 network provider to stream or to justify not streaming. The stage's
 interface is one whole utterance in, one whole transcript out, because
@@ -47,6 +55,7 @@ import wave
 from openai import NOT_GIVEN, APITimeoutError, AsyncOpenAI, Omit
 
 from vinga_server.config.models import ProviderConfig
+from vinga_server.config.provider_options import OpenaiAsrOptions
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import (
     EchoConfirmed,
@@ -74,7 +83,6 @@ from vinga_server.providers.openai_endpoint import (
     endpoint_host,
     parse_base_url,
 )
-from vinga_server.providers.registry import OptionsReader
 
 logger = logging.getLogger(__name__)
 
@@ -87,14 +95,6 @@ events = ServerEvents(__name__)
 # How this provider names itself in the message a failed request
 # carries.
 LABEL = "openai asr"
-
-# The current transcription family, and the reason to reach for this
-# type at all: both gpt-4o models transcribe more accurately than
-# `whisper-1`, which is the same Whisper V2 an operator could run
-# locally. `mini` is the cheaper and faster of the pair, and the
-# difference between them is small on the short utterances a voice
-# assistant hears; an operator who wants the larger one sets `model`.
-DEFAULT_MODEL = "gpt-4o-mini-transcribe"
 
 # The API's own range for `temperature`.
 TEMPERATURE_RANGE = (0.0, 1.0)
@@ -437,30 +437,40 @@ class OpenAiAsr(AsrProvider):
         return _normalized(text) == _normalized(self._prompt)
 
 
-def build(label: str, config: ProviderConfig) -> OpenAiAsr:
-    options = OptionsReader(label, config)
-    model = options.string("model", DEFAULT_MODEL)
-    base_url = options.string("base_url", DEFAULT_BASE_URL)
-    language = options.string("language")
-    prompt = options.string("prompt")
-    temperature = options.optional_number("temperature")
-    timeout_s = options.number("timeout_s", DEFAULT_TIMEOUT_S)
-    options.finish()
-    assert model is not None and base_url is not None  # defaults are strings
-    is_openai = parse_base_url(label, base_url)
+def build(label: str, config: ProviderConfig, options: OpenaiAsrOptions) -> OpenAiAsr:
+    """The entry's validated options as the provider's own arguments.
+
+    What is left at this seam is what an options model cannot answer:
+    which endpoint this entry speaks to, the two rules that follow from
+    that, and the credential.
+
+    The temperature range is one of those two, and it stays here rather
+    than moving onto the field. The range is OpenAI's own, so it applies
+    only when the endpoint is OpenAI, and `openai_endpoint` is the one
+    home for deciding that; `config/provider_options.py` weighs pydantic
+    and `config.models` and nothing else, so a model that asked the
+    question would break that contract and a model that restated the
+    URL rules would be a second home for them. What the model owns is
+    the shape of a temperature; what it cannot own is whose rules apply.
+
+    Nothing here refuses an option for its type. Every one of them was
+    checked against `OpenaiAsrOptions` before this was called, which is
+    the ordering the reader's `finish()` used to hold.
+    """
+    is_openai = parse_base_url(label, options.base_url)
     low, high = TEMPERATURE_RANGE
     # Only on OpenAI itself, for the reason the TTS type checks its
     # steering knobs only there: the range is a fact about OpenAI's
     # models, and a compatible server is free to accept another.
-    if is_openai and temperature is not None and not low <= temperature <= high:
+    if is_openai and options.temperature is not None and not low <= options.temperature <= high:
         raise ProviderError(f'{label}: option "temperature" must be between {low} and {high}')
     return OpenAiAsr(
-        model=model,
+        model=options.model,
         api_key=endpoint_api_key(label, config.type, config.api_key_env, is_openai),
-        base_url=base_url,
-        language=language,
-        prompt=prompt,
-        temperature=temperature,
-        timeout_s=timeout_s,
+        base_url=options.base_url,
+        language=options.language,
+        prompt=options.prompt,
+        temperature=options.temperature,
+        timeout_s=options.timeout_s,
         min_audio_s=MIN_AUDIO_S if is_openai else 0.0,
     )
