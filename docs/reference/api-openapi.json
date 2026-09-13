@@ -9531,8 +9531,8 @@
         "description": "The options the `openai` ASR type accepts.\n\nSix knobs and a door that stays shut, which is what the\n`OptionsReader` ladder in `providers/openai_asr.py` had: every key\nthat builder did not read ended its build with `finish()` naming it.\n\nTwo rules are deliberately NOT here, and both live in the builder\nbecause both are facts about the endpoint rather than about a value.\n`base_url` has to be a URL with a scheme and a host, which\n`providers/openai_endpoint.py` decides for all three types speaking\nthis dialect; and `temperature` has to be inside OpenAI's own range\nonly when the endpoint IS OpenAI, which is the same module's\nquestion. This file weighs pydantic and `config.models` and nothing\nelse, so it cannot ask it, and restating those URL rules here would\nmake this the second home for them.",
         "properties": {
           "model": {
-            "default": "gpt-4o-mini-transcribe",
-            "description": "The transcription model, in OpenAI's own vocabulary. gpt-4o-transcribe is the larger sibling of the default and holds up better on the noisiest input; whisper-1 is the same Whisper V2 as the local engine, at roughly twice the latency of the gpt-4o pair.",
+            "default": "gpt-transcribe",
+            "description": "The transcription model, in OpenAI's own vocabulary. The default is the one that reports which language it heard; gpt-4o-transcribe and gpt-4o-mini-transcribe report none, and whisper-1 is the same Whisper V2 as the local engine, at roughly twice the latency. A self-hosted endpoint serves its own names and should be told one here.",
             "title": "Model",
             "type": "string"
           },
