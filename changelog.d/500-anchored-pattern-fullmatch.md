@@ -1,0 +1,3 @@
+### Fixed
+
+- Two option rules that are published as JSON Schema patterns were checked more loosely than they were published. Python's `$` matches immediately before a terminal newline where a JSON Schema `$` means end of input, so a trailing newline was accepted by the server and would have been refused by a client generated from the same document: `languages` on the `openai` ASR type took a code the value type it becomes downstream rejects, and `output_format` on the `elevenlabs` TTS type took a format string it then sent to the vendor with the newline in it. Both are now held to the whole string. A value of either shape is one an API caller or an explicitly quoted YAML scalar could write, and no ordinary configuration produces one.
