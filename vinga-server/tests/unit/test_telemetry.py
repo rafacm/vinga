@@ -2333,5 +2333,18 @@ async def test_the_handle_the_store_writes_is_the_one_the_trace_is_keyed_by() ->
     # The span a backend reads.
     assert turn.attributes["vinga.utterance.id"] == minted
     # And the key the retention actually answers to, which is what a
-    # post-close consumer will hand it.
-    assert telemetry.turn_context(context, minted) is not None
+    # post-close consumer will hand it. Identified rather than merely
+    # present: a pin that stored the SESSION's span, or any other span,
+    # under the right key would satisfy every assertion above and would
+    # file this turn's artifacts into the wrong observation.
+    pinned = telemetry.turn_context(context, minted)
+    assert pinned is not None
+    assert (pinned.trace_id, pinned.span_id) == (
+        turn.context.trace_id,
+        turn.context.span_id,
+    )
+    assert pinned.trace_id != context.trace_id, "the turn was pinned in its session's trace"
+
+    # And the null a pre-correlation row carries is the same no-target
+    # answer, so a reader of a stored row has one path and not two.
+    assert telemetry.turn_context(context, None) is None
