@@ -126,6 +126,15 @@ PCM_FORMAT_RULE = "must be one of the pcm_<rate> formats, since this stage strea
 # non-whitespace character", which is `value.strip()` being truthy. The
 # format one anchors itself and has no capture group: the rate is read
 # off the validated string with `removeprefix`, so nothing needs one.
+#
+# Both anchored patterns here are read with `fullmatch` rather than
+# `match`, and that is the rule rather than a habit. Python's `$` also
+# matches immediately before a terminal newline, where a JSON Schema
+# `$` means end of input, so `match` against a `$`-anchored pattern
+# makes the validator LOOSER than the document it is published as. This
+# file's whole point about these constants is that a rule a document
+# states and a rule a validator runs are one contract; `match` is the
+# seam they come apart at, and it had come apart at both of them.
 NONBLANK_PATTERN = r"\S"
 
 PCM_FORMAT_PATTERN = r"^pcm_[0-9]+$"
@@ -224,7 +233,7 @@ def _nonblank(value: str) -> str:
 def _as_pcm_format(value: str) -> str:
     """An output format this stage can stream, refused by the rule rather
     than by quoting what was written."""
-    if _PCM_FORMAT.match(value) is None:
+    if _PCM_FORMAT.fullmatch(value) is None:
         raise ValueError(PCM_FORMAT_RULE)
     return value
 

@@ -223,6 +223,13 @@ ELEVENLABS_PARITY: list[tuple[str, object, bool]] = [
     ("output_format", "pcm_44100", True),
     ("output_format", "mp3_44100_128", False),
     ("output_format", "pcm_", False),
+    # The same boundary the language rule got wrong, asked of the other
+    # pattern in that file that is anchored and matched: Python's `$`
+    # admits a terminal newline where a JSON Schema `$` does not, so
+    # this value was legal to the server and illegal to a client
+    # generated from the published pattern. The rule is one contract in
+    # two renderings, and this is the row that says they agree.
+    ("output_format", "pcm_16000\n", False),
     ("output_format", 24000, False),
     ("output_format", None, False),
     # Refused by the format rule then, refused by it now, and not a
