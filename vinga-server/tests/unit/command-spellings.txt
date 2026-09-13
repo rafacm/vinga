@@ -295,6 +295,7 @@ historical  vinga-server config reload
 historical  vinga-server config schema
 historical  vinga-server config schema provider
 historical  vinga-server config schema provider asr
+historical  vinga-server config schema provider asr openai
 historical  vinga-server config session show
 historical  vinga-server config set
 historical  vinga-server config set agent
