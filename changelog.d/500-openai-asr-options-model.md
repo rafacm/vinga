@@ -17,16 +17,20 @@
   number, `"30"` is still not a timeout, and every blank spelling the
   reader passed on (`model: ""`, `language: ""`, `language: null`,
   `prompt: ""`, `prompt: null`, `temperature: null`) is still accepted
-  and still means what it meant. Two things change. A stored entry the
-  model refuses is now refused on read as well as on write, so a row
-  written before this declaration meets a deployment as a boot refusal
-  naming the entry and the field; the rows that reach it are `model:
-  null` and `base_url: null`, which never built either, but whose
-  refusal used to arrive only when some agent's provider was
-  constructed. The way out is the recovery procedure in
-  `docs/reference/cli.md`: boot on an empty database and apply a kept
-  export, or take the row out with ordinary database tooling. And an
-  unknown option is no longer quoted back by name, which is what a type
+  and still means what it meant. Two things change. Any stored `openai`
+  ASR entry the model refuses is now refused on read as well as on
+  write, so such a row meets a deployment as a boot refusal naming the
+  entry and the field. That is wider than it sounds, and it is the half
+  worth reading twice: an entry was only ever built when some agent
+  named it, so an entry no agent references was never checked at all
+  and could hold anything. A null where a string or a number belongs
+  (`model`, `base_url`, `timeout_s`), a value of the wrong type
+  (`language: 5`), or a key this type does not have all loaded before
+  and refuse the boot now, referenced or not. The way out is the
+  recovery procedure in `docs/reference/cli.md`: boot on an empty
+  database and apply a kept export, or take the row out with ordinary
+  database tooling. And an unknown option is no longer quoted back by
+  name, which is what a type
   with a declared set of fields answers: a key this repository did not
   declare is a key an operator invented, and as good a place to paste a
   credential as a value. A `base_url` that is not a URL and a
