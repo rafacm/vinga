@@ -685,7 +685,16 @@ def test_the_language_syntax_the_model_restates_is_the_one_that_ships() -> None:
     # what the option accepts is what the value type holds, including
     # `not-a-language`, which both accept and which is the whole of why
     # this is a shape rather than a membership test.
-    for code in ("sv", "en-US", "de_DE", "not-a-language", "s", "sv" * 9, "not a language"):
+    # Boundary cases carry this claim, not ordinary ones. The first
+    # version of this case ran seven plain codes and passed while the
+    # two homes genuinely disagreed: the restated pattern was anchored
+    # with `$` and read with `match`, which admits a terminal newline
+    # where the value type's `\Z` does not. So the list leads with the
+    # whitespace edges, which is where two spellings of one rule come
+    # apart.
+    boundaries = ("en\n", "en\r", "en\n\n", "\nen", "en ", " en", "en\t")
+    ordinary = ("sv", "en-US", "de_DE", "not-a-language", "s", "sv" * 9, "not a language")
+    for code in boundaries + ordinary:
         held = True
         try:
             LanguageTag(code)
