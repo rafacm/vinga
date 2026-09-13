@@ -59,6 +59,31 @@ attempts are logged with the gate that stopped them. The design
 decision is recorded in
 [the barge-in ADR](adr/2026-08-05-replies-cancel-only-on-evidence-of-speech.md).
 
+### Backend (telemetry backend)
+
+The deployment that RECEIVES vinga's exported traces, never vinga
+itself. Every sentence in this project that says "the backend owns
+retention", "the backend prices it" or "the backend ingests no span
+events" is about that deployment, which is a Langfuse or another
+OpenTelemetry collector's store, run by whoever runs it and reached
+over the standard `OTEL_EXPORTER_OTLP_*` variables.
+
+The distinction is load-bearing rather than pedantic, because the
+whole export design rests on it. vinga computes no cost, stores no
+trace and enforces no retention on what has left: usage leaves as raw
+integers and the receiving deployment multiplies them by a model
+definition it owns, at ingestion, storing the result on the
+observation. So "how long is a trace kept", "who may read it" and
+"what did this conversation cost" are all questions about the backend
+and none of them are answerable here. What vinga owns is what it
+sends and under which switch, which is
+[the export ladder](architecture/observability-surfaces.md#the-export-ladder).
+
+vinga's own server is not a backend in this vocabulary, and neither is
+the Postgres it stores conversations in: that one is the conversation
+store, and it is a different row of
+[the surfaces table](architecture/observability-surfaces.md#the-eight-surfaces).
+
 ### Binding
 
 The link between a device and the agents reachable from
