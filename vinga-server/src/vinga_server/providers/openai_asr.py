@@ -33,24 +33,44 @@ deliver text deltas nothing downstream can consume, a turn's worth of
 latency earlier than the turn can use them. The TTS stage is the
 opposite case, and streams.
 
-**This provider does not detect language, and that costs nothing it
-would otherwise buy.** The model still recognises whatever is spoken
-when `language` is unset; what is missing is the *report* of which
-language that was, because the transcription response only carries one
-for `whisper-1` asked for `verbose_json`, as an English name
-("swedish") rather than the ISO code the rest of the pipeline speaks,
-and no model reports a confidence at all. `AsrResult`'s language fields
-are therefore left empty rather than filled with a guess, and the
-session-scoped lock (`lock_language`) is never asked for. The lock
-exists to spare faster-whisper a constant encoder pass per utterance
-(#22); here detection happens inside the model at no measurable cost,
-so there is nothing to spare.
+**This provider reports the language it heard, where it was not told
+one.** The response carries `languages: [{"code": "de"}]` on the plain
+`json` format, an ISO 639 code rather than the English name
+`whisper-1` answers with under `verbose_json`, and a clip with no
+speech in it answers an empty list. Which models answer at all is
+theirs to decide: `gpt-transcribe` does on every transcription, the
+gpt-4o pair never does, and a response carrying nothing leaves the
+field empty without a rule of ours.
+
+The condition is the whole of the rule. Measured against the live
+endpoint on 2026-09-13: told a single language, the model hands that
+code straight back rather than saying what it heard, so a reported code
+is evidence about the audio only where this provider named no single
+language, and reporting it regardless would put an entry's own
+configuration into a metric under the name of a measurement. That is
+the rule the pipeline already states where it builds the `heard` event,
+"a mock or a pinned language adds no noise to the record", and this is
+the first type for which it has teeth. Read what does arrive in
+aggregate rather than as a verdict per turn: given candidates to choose
+between, the model chose wrongly on a one-word clip in the same
+measurements.
+
+No model reports a confidence, so `language_confidence` stays empty,
+and a code is asked of `LanguageTag` before it travels, because
+`events/assembly.py` constructs one with nothing catching it and a code
+this module could not vouch for would break a turn that had already
+been transcribed. The session-scoped lock (`lock_language`) is still
+never asked for. The lock exists to spare faster-whisper a constant
+encoder pass per utterance (#22); here detection happens inside the
+model at no measurable cost, so there is nothing to spare.
 """
 
 import asyncio
 import io
 import logging
 import wave
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 from openai import NOT_GIVEN, APITimeoutError, AsyncOpenAI, Omit
 
@@ -64,7 +84,13 @@ from vinga_server.events.catalog import (
     EchoRetryTimedOut,
     EchoSkipped,
 )
-from vinga_server.events.values import Identifier, Real, Whole
+from vinga_server.events.values import (
+    EventValueError,
+    Identifier,
+    LanguageTag,
+    Real,
+    Whole,
+)
 from vinga_server.providers.base import (
     AsrProvider,
     AsrResult,
@@ -141,6 +167,69 @@ def _normalized(text: str) -> str:
     """A transcript reduced to what makes it the same words as another:
     surrounding space, sentence-final punctuation, and case."""
     return text.strip().rstrip(TRAILING).strip().casefold()
+
+
+@dataclass(frozen=True)
+class _Hearing:
+    """What one request heard: a transcript, and the language reported
+    with it or None.
+
+    One value rather than two, because the echo retry below replaces a
+    first response's answer with a second response's and the two halves
+    have to be replaceable together. A language assigned beside the text
+    could be the discarded response's, which is a turn labelled with a
+    language nothing in it was heard in; the outcomes that discard
+    answer no language because they answer no text.
+    """
+
+    text: str
+    language: str | None = None
+
+
+def _code_of(entry: object) -> object:
+    """One reported entry's `code`, however the SDK models the entry.
+
+    A mapping today and a typed object the day the SDK declares the
+    field, which is one name read one way rather than two shapes to
+    branch on twice. Anything carrying no such name answers None, which
+    is what a list of bare strings does.
+    """
+    if isinstance(entry, Mapping):
+        return entry.get("code")
+    return getattr(entry, "code", None)
+
+
+def _reported_language(response: object) -> str | None:
+    """The one language code a transcription response reports, or None
+    for anything this server cannot hand on as one.
+
+    Read through `getattr` rather than off `model_extra`, so a field the
+    SDK declares later and an extra one today are the same read, and
+    read defensively at every step: no key, a value that is not a list,
+    an empty list (which is the endpoint's own spelling of "I heard no
+    language", on silence and on laughter), more than one entry, an
+    entry with no `code`, and a `code` that is not a string all answer
+    None.
+
+    The code itself is asked of `LanguageTag` rather than of a pattern
+    written here, the way `events/catalog.py::_named` asks `EventName`
+    and for the same reason: that is the type this value becomes in
+    `events/assembly.py`, which constructs it with nothing catching the
+    refusal, so a code accepted here and refused there would break a
+    turn that had already been transcribed. A far-side value decides
+    what one field says and never whether the turn survives.
+    """
+    reported = getattr(response, "languages", None)
+    if not isinstance(reported, list) or len(reported) != 1:
+        return None
+    code = _code_of(reported[0])
+    if not isinstance(code, str):
+        return None
+    try:
+        LanguageTag(code)
+    except EventValueError:
+        return None
+    return code
 
 
 def wav_bytes(pcm: bytes, sample_rate: int) -> bytes:
@@ -258,12 +347,10 @@ class OpenAiAsr(AsrProvider):
         clip_ms = round(len(pcm) / 2 / sample_rate * 1000)
         submitted_ms = 0
         try:
-            text = await self._request(pcm, sample_rate, pinned, self._prompt)
+            heard = await self._request(pcm, sample_rate, pinned, self._prompt)
             submitted_ms = clip_ms
-            if self._is_echoed_prompt(text):
-                text, resent = await self._retry_without_prompt(
-                    pcm, sample_rate, pinned, deadline
-                )
+            if self._is_echoed_prompt(heard.text):
+                heard, resent = await self._retry_without_prompt(pcm, sample_rate, pinned, deadline)
                 if resent:
                     submitted_ms += clip_ms
         except OPENAI_FAILURES as exc:
@@ -274,8 +361,12 @@ class OpenAiAsr(AsrProvider):
         # what it can carry is the reason the message is metadata only.
         if failure is not None:
             raise failure from None
-        # Language fields stay empty: this provider does not detect.
-        return AsrResult(text=text, submitted_ms=submitted_ms)
+        # The transcript and the language as one hearing answered them,
+        # never one of them beside the other's: where the retry replaced
+        # the text it replaced the language with it. No confidence,
+        # because no model reports one, and no lock, because there is no
+        # encoder pass here to spare.
+        return AsrResult(text=heard.text, language=heard.language, submitted_ms=submitted_ms)
 
     async def _request(
         self,
@@ -284,16 +375,21 @@ class OpenAiAsr(AsrProvider):
         pinned: str | None,
         prompt: str | None,
         timeout_s: float | None = None,
-    ) -> str:
+    ) -> _Hearing:
+        # The single language this request names, or None where it names
+        # none. Read below as well as sent here, so what suppresses the
+        # report is exactly what the model was told: a blank `language`
+        # puts no field on the wire and is therefore not a pin.
+        single = pinned if pinned else None
         response = await self._client.audio.transcriptions.create(
             file=(UPLOAD_NAME, wav_bytes(pcm, sample_rate), "audio/wav"),
             model=self.model,
             # The one format every model and every compatible server
-            # answers in. `verbose_json` is whisper-1 only, and what it
-            # adds beyond the text is not usable here: see the module
-            # docstring on language.
+            # answers in, and the one the language report arrives on:
+            # `verbose_json` is whisper-1 only and adds nothing usable
+            # here. See the module docstring on language.
             response_format="json",
-            language=pinned if pinned else Omit(),
+            language=single if single is not None else Omit(),
             prompt=prompt if prompt else Omit(),
             temperature=self._temperature if self._temperature is not None else Omit(),
             # The client's own timeout, unless this request is a retry
@@ -304,13 +400,25 @@ class OpenAiAsr(AsrProvider):
             # timeout and fails every call at connect time (#75).
             timeout=timeout_s if timeout_s is not None else NOT_GIVEN,
         )
-        return response.text.strip()
+        # A reported code is evidence about the audio only where this
+        # request named no single language: told one, the model hands
+        # that code back rather than saying what it heard. See the
+        # module docstring for the measurement.
+        return _Hearing(
+            response.text.strip(),
+            None if single is not None else _reported_language(response),
+        )
 
     async def _retry_without_prompt(
         self, pcm: bytes, sample_rate: int, pinned: str | None, deadline: float
-    ) -> tuple[str, bool]:
+    ) -> tuple[_Hearing, bool]:
         """A second hearing for a clip whose transcript was the prompt
         handed back, and whether the clip was actually sent again.
+
+        What it answers replaces the first response's hearing whole, the
+        transcript and the language together, and the four outcomes that
+        discard answer an empty hearing: they answer no text, so they
+        answer no language either.
 
         The flag is what the caller bills on. Four of the five ways this
         ends put the clip on the wire a second time, the deadline timeout
@@ -354,7 +462,7 @@ class OpenAiAsr(AsrProvider):
                     remaining_s=Real(remaining_s),
                 )
             )
-            return "", False
+            return _Hearing(""), False
         logger.warning(
             "openai asr: the transcript came back as the configured prompt, "
             "retrying %.2f s of audio without it",
@@ -384,9 +492,9 @@ class OpenAiAsr(AsrProvider):
                     remaining_s=Real(remaining_s),
                 )
             )
-            return "", True
+            return _Hearing(""), True
         retry_ms = round((loop.time() - started) * 1000)
-        if self._is_echoed_prompt(retry):
+        if self._is_echoed_prompt(retry.text):
             events.emit(
                 lambda: EchoConfirmed(
                     duration_s=Real(duration_s),
@@ -394,8 +502,8 @@ class OpenAiAsr(AsrProvider):
                     retry_ms=Whole(retry_ms),
                 )
             )
-            return "", True
-        if not retry:
+            return _Hearing(""), True
+        if not retry.text:
             events.emit(
                 lambda: EchoConfirmedEmpty(
                     duration_s=Real(duration_s),
@@ -403,7 +511,7 @@ class OpenAiAsr(AsrProvider):
                     retry_ms=Whole(retry_ms),
                 )
             )
-            return "", True
+            return _Hearing(""), True
         # The recovered transcript is not in the sentence, and naming
         # that one exists would add no diagnostic the fields lack.
         # Conversation-derived text is banned on the events without
