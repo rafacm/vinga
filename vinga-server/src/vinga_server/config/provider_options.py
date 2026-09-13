@@ -473,11 +473,15 @@ class OpenaiAsrOptions(BaseModel):
     # says which language it heard. The gpt-4o pair it replaced as the
     # default reports none ever and `whisper-1` reports one only in a
     # format this provider does not ask for, so on any of those the
-    # `heard` event and the conversation record carry no language at all,
-    # which is what an operator gives up by pinning one. It is also
-    # billed by duration rather than by audio token, which is the unit
-    # the `asr` span already reports, and published at $0.0045 per
-    # minute of audio (read 2026-09-13).
+    # `heard` event and the conversation record carry no language at
+    # all. That is the one thing an entry naming
+    # `gpt-4o-mini-transcribe` gives up: everything else about that
+    # model, its accuracy and its per-audio-token billing included, is
+    # what a deployment had before this default moved.
+    #
+    # This model is billed by duration rather than by audio token, which
+    # is the unit the `asr` span already reports, and published at
+    # $0.0045 per minute of audio (read 2026-09-13).
     #
     # Declared here and nowhere else. The builder used to keep a
     # `DEFAULT_MODEL` constant and read the option through it, and two
