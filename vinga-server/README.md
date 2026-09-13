@@ -289,7 +289,7 @@ fixed it outright, and no `prompt` rescued it while unpinned.
 [sv, en]` describes a set the model chooses inside, where `language`
 describes one it is told, and it is the middle answer between pinning
 the wrong language and pinning none. Three cases, and the third is the
-one worth doing on purpose:
+one most deployments skip:
 
 - **One language spoken here.** Set `language`, which is what the
   device session above earned. The report goes quiet, and the trade is
@@ -311,10 +311,10 @@ one worth doing on purpose:
 on 2026-09-13 it accepted the option, and `whisper-1` and
 `gpt-4o-mini-transcribe` each answered 400 to it in their own words.
 `gpt-4o-transcribe` and compatible endpoints were not tested and decide
-it for themselves. Nothing checks this at startup, because `build`
-speaks to nothing: an entry naming a model that refuses the option
-applies cleanly and fails on the first real transcription, so the model
-and the option are worth reading together. A list of exactly one is
+it for themselves. Nothing checks this at startup, because applying an
+entry contacts no endpoint: one naming a model that refuses the option
+applies cleanly and then fails on the first real transcription, so the
+model and the option are worth reading together. A list of exactly one is
 accepted, and it is a pin: the model hands a single language straight
 back whichever way it was named.
 
