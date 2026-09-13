@@ -682,12 +682,12 @@ class OpenaiAsrOptions(BaseModel):
         default=None,
         description=(
             "The languages spoken here, when there is more than one (ISO 639-1, "
-            "such as [sv, en]). Accepted by gpt-transcribe and refused by whisper-1 "
-            "and gpt-4o-mini-transcribe, which take language instead; the two "
-            "options cannot both be set. A list of one is a way of writing "
-            "language, and reports the language heard no more than language does; "
-            "a list of two or more leaves the model a choice, and what it chose is "
-            "reported."
+            "such as [sv, en]), accepted by gpt-transcribe and answered with a 400 "
+            "by whisper-1 and gpt-4o-mini-transcribe. Those take language instead, "
+            "and the two options cannot both be set. A list of one is another way "
+            "of writing language and reports the language heard no more than "
+            "language does; a list of two or more leaves the model a choice, and "
+            "what it chose is reported."
         ),
     )
     prompt: StrictStr | None = Field(

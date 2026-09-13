@@ -9555,6 +9555,26 @@
             "description": "Spoken language (ISO 639-1, such as sv or en). Set it for any deployment that is not English: detection happens inside the model at no measurable cost, but far-field microphone audio through Opus gives it far less to go on than clean audio does.",
             "title": "Language"
           },
+          "languages": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 16,
+                  "pattern": "^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{1,8})*$",
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array",
+                "uniqueItems": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The languages spoken here, when there is more than one (ISO 639-1, such as [sv, en]), accepted by gpt-transcribe and answered with a 400 by whisper-1 and gpt-4o-mini-transcribe. Those take language instead, and the two options cannot both be set. A list of one is another way of writing language and reports the language heard no more than language does; a list of two or more leaves the model a choice, and what it chose is reported.",
+            "title": "Languages"
+          },
           "prompt": {
             "anyOf": [
               {
