@@ -595,15 +595,31 @@ def test_the_two_constants_the_model_restates_are_the_ones_that_ship() -> None:
     assert OpenaiAsrOptions.model_fields["timeout_s"].default == DEFAULT_TIMEOUT_S
 
 
+@pytest.mark.parametrize(
+    ("entry", "asked_for"),
+    [
+        pytest.param({}, "gpt-transcribe", id="an entry naming no model"),
+        pytest.param({"model": "whisper-1"}, "whisper-1", id="an entry naming one"),
+    ],
+)
 @pytest.mark.usefixtures("environment")
-async def test_the_declared_default_model_is_the_one_on_the_wire() -> None:
-    """The default's one home, read from the end that matters.
+async def test_the_model_on_the_wire_is_the_default_or_the_one_that_was_named(
+    entry: dict[str, object], asked_for: str
+) -> None:
+    """The default's one home, read from the end that matters, and the
+    entry that overrides it beside the entry that does not.
 
     The builder used to keep a `DEFAULT_MODEL` constant beside the
     field's job, and what makes the deletion safe is not that nothing
     imports it: it is that an entry naming no model still asks the API
     for the model the field declares. A second copy left behind would
     have kept this green while going stale.
+
+    The default is spelled out here rather than read off the field,
+    because the value is what every unconfigured deployment sends and
+    an assertion against the field would agree with any rename. The
+    field is asserted to be that same value in the line below, so the
+    one-home claim survives alongside the literal.
     """
     seen: list[httpx.Request] = []
 
@@ -611,12 +627,14 @@ async def test_the_declared_default_model_is_the_one_on_the_wire() -> None:
         seen.append(request)
         return httpx.Response(200, json={"text": "Hej"})
 
-    built = await build_asr(type="openai", api_key_env="OPENAI_KEY")
+    built = await build_asr(type="openai", api_key_env="OPENAI_KEY", **entry)
     assert isinstance(built, OpenAiAsr)
     await transported(built, handler).transcribe(ONE_SECOND, 16000)
 
     (request,) = seen
-    assert form_field(request, "model") == OpenaiAsrOptions.model_fields["model"].default
+    assert form_field(request, "model") == asked_for
+    if not entry:
+        assert OpenaiAsrOptions.model_fields["model"].default == asked_for
 
 
 @pytest.mark.usefixtures("environment")
