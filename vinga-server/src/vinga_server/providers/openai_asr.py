@@ -36,11 +36,13 @@ opposite case, and streams.
 **This provider reports the language it heard, where it was not told
 one.** The response carries `languages: [{"code": "de"}]` on the plain
 `json` format, an ISO 639 code rather than the English name
-`whisper-1` answers with under `verbose_json`, and a clip with no
-speech in it answers an empty list. Which models answer at all is
-theirs to decide: `gpt-transcribe` does on every transcription, the
-gpt-4o pair never does, and a response carrying nothing leaves the
-field empty without a rule of ours.
+`whisper-1` answers with under `verbose_json`. Which models answer at
+all is theirs to decide: `gpt-transcribe` answers whenever it makes out
+a language and the gpt-4o pair answers nothing ever. And a model that
+does answer says so only where there was something to hear: silence and
+laughter both came back `languages: []`, which is the endpoint's own
+spelling of "I heard no language" and leaves the field empty without a
+rule of ours, exactly as a response carrying no key at all does.
 
 The condition is the whole of the rule. Measured against the live
 endpoint on 2026-09-13: told a single language, the model hands that

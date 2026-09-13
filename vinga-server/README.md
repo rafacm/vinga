@@ -279,13 +279,16 @@ nonsense. So a wrong value is fairly harmless, and it is leaving it
 *empty* that costs you.
 
 **The language it heard is reported back, where the model answers one
-and you named none.** `gpt-transcribe` answers a code on every
-transcription, so the `heard` log line carries `language`, the
+and you named none.** `gpt-transcribe` answers a code whenever it
+makes out a language, so the `heard` log line carries `language`, the
 conversation record keeps it, and an operator can finally see a
 household's language being misheard instead of inferring it from odd
-replies. The `gpt-4o` models answer no language at all and `whisper-1`
-answers only in a format this server does not ask for, so with either
-of those the field stays empty as it always did.
+replies. Not every turn carries one: a clip the model makes no language
+out of comes back with an empty list, which silence and laughter both
+did, and that turn's field is simply absent. The `gpt-4o` models answer
+no language at all and `whisper-1` answers only in a format this server
+does not ask for, so with either of those the field stays empty as it
+always did.
 
 Setting `language` above, or a session handing one over from another
 engine, suppresses the report: told a single language, the model hands

@@ -6,11 +6,13 @@
   conversation record, the `/api` read surface and the
   `vinga.asr.language` span attribute, every one of which has carried
   the field for the local engine all along. Which models report one is
-  theirs to decide: `gpt-transcribe` answers a code on every
-  transcription, the `gpt-4o` models answer none, and `whisper-1`
+  theirs to decide: `gpt-transcribe` answers a code whenever it makes
+  out a language, the `gpt-4o` models answer none ever, and `whisper-1`
   answers only in a format this server does not ask for, so a
   deployment on the default model sees no change until the default
-  moves. The field is filled only where the request named no language:
+  moves. A clip a reporting model makes no language out of, which
+  silence and laughter both were, comes back with an empty list and
+  leaves the field absent for that turn. The field is filled only where the request named no language:
   told one, the model hands that code straight back rather than saying
   what it heard, so an entry with `language` set, or a session whose
   language another engine locked, leaves it empty as before and a
