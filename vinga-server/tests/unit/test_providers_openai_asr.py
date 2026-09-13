@@ -282,6 +282,28 @@ def form_field(request: httpx.Request, name: str) -> str | None:
     return request.content[start : request.content.index(b"\r\n", start)].decode()
 
 
+def form_fields(request: httpx.Request, name: str) -> list[str]:
+    """Every text field of a multipart body written under one name, in
+    the order the parts arrive.
+
+    The helper beside it finds exactly one part by exact name, which is
+    right for every scalar this provider sends and blind to the one
+    thing it sends as a list: a `languages` list is serialized as
+    repeated parts named `languages[]`, one per element, never one
+    comma-joined field. A test written on `form_field` would look for
+    `languages`, find nothing, and pass while asserting nothing at all.
+    """
+    marker = f'name="{name}"\r\n\r\n'.encode()
+    body = request.content
+    found: list[str] = []
+    start = body.find(marker)
+    while start != -1:
+        value = start + len(marker)
+        found.append(body[value : body.index(b"\r\n", value)].decode())
+        start = body.find(marker, value)
+    return found
+
+
 # --- options ---------------------------------------------------------
 
 
@@ -515,6 +537,43 @@ REFUSED: list[tuple[str, dict[str, object], str]] = [
         {"api_key_env": "OPENAI_KEY", "model": None},
         f"invalid {ENTRY}:\n  - model: Input should be a valid string",
     ),
+    # The plural's own three, which are all facts about a value that
+    # says nothing the endpoint can act on.
+    (
+        "an empty list of languages",
+        {"api_key_env": "OPENAI_KEY", "languages": []},
+        f"invalid {ENTRY}:\n  - languages: must be a non-empty list of language "
+        f"codes, each written once",
+    ),
+    (
+        "a language written twice",
+        {"api_key_env": "OPENAI_KEY", "languages": ["sv", "sv"]},
+        f"invalid {ENTRY}:\n  - languages: must be a non-empty list of language "
+        f"codes, each written once",
+    ),
+    (
+        "an entry that is not a language code",
+        {"api_key_env": "OPENAI_KEY", "languages": ["not a language"]},
+        f"invalid {ENTRY}:\n  - languages: must be a language code, such as sv or en-US",
+    ),
+    # And the cross-field one, which is the API's rule rather than this
+    # repository's. Two lines because a model-level validator's error is
+    # located at the model, so the rendering puts no field name in front
+    # of either and each sentence names its own field. The write gate is
+    # where this refusal matters and `test_config_store.py` is where
+    # that is asserted; here it is the wording, beside the wording of
+    # everything else this factory can say.
+    (
+        "both spellings of the language on one entry",
+        {"api_key_env": "OPENAI_KEY", "language": "sv", "languages": ["sv", "en"]},
+        f"invalid {ENTRY}:\n"
+        f'  - "language" and "languages" cannot both be set: every model measured '
+        f"answers 400 to a request naming both, so an entry writing both would "
+        f"apply cleanly and fail on the first real transcription\n"
+        f'  - "languages" is the form gpt-transcribe takes, and it is the one model '
+        f"measured to accept it; whisper-1 and gpt-4o-mini-transcribe answered 400 "
+        f'to it and take "language" instead',
+    ),
 ]
 
 
@@ -554,6 +613,10 @@ ACCEPTED: list[tuple[str, dict[str, object]]] = [
     ("a blank prompt", {"api_key_env": "OPENAI_KEY", "prompt": ""}),
     ("a null prompt", {"api_key_env": "OPENAI_KEY", "prompt": None}),
     ("a null temperature", {"api_key_env": "OPENAI_KEY", "temperature": None}),
+    # The plural on its own, which is the whole of what an entry that
+    # describes a household writes.
+    ("a list of languages", {"api_key_env": "OPENAI_KEY", "languages": ["sv", "en"]}),
+    ("a list of one language", {"api_key_env": "OPENAI_KEY", "languages": ["sv"]}),
     # And the two knobs written as integers where the reader answered a
     # float, which is how an operator writes a whole number.
     ("a whole-number temperature", {"api_key_env": "OPENAI_KEY", "temperature": 1}),
@@ -593,6 +656,46 @@ def test_the_two_constants_the_model_restates_are_the_ones_that_ship() -> None:
     """
     assert OpenaiAsrOptions.model_fields["base_url"].default == DEFAULT_BASE_URL
     assert OpenaiAsrOptions.model_fields["timeout_s"].default == DEFAULT_TIMEOUT_S
+
+
+def test_the_language_syntax_the_model_restates_is_the_one_that_ships() -> None:
+    """The third restatement, and the one whose other home is not a
+    provider module.
+
+    `languages` holds each code to the same syntax `LanguageTag` does,
+    because that is the type a reported code becomes downstream and a
+    second expression of one rule is a bug pending. The rule cannot be
+    imported where it is enforced: `events/values.py` is deliberately
+    outside the inventory of modules `config.cli` may load
+    (`test_cli_import_weight.py`), so reaching for it would widen a set
+    whose whole point is that widening it is a review event. This file
+    may import both, which makes it the place the two statements can be
+    held against each other, exactly as the base URL and the timeout
+    above are.
+    """
+    from vinga_server.config import provider_options
+    from vinga_server.config.provider_options import OptionsRefused, checked_options
+    from vinga_server.events.values import LANGUAGE, EventValueError, LanguageTag
+
+    assert provider_options.LANGUAGE_PATTERN == f"^{LANGUAGE.pattern}$"
+    assert provider_options.LANGUAGE_MAX_LENGTH == LANGUAGE.max_length
+
+    # And the claim in its own terms, so a pattern rewritten to spell
+    # the same rule passes and one rewritten to spell another does not:
+    # what the option accepts is what the value type holds, including
+    # the two that show this is a shape rather than a membership test.
+    for code in ("sv", "en-US", "de_DE", "not-a-language", "s", "sv" * 9, "not a language"):
+        held = True
+        try:
+            LanguageTag(code)
+        except EventValueError:
+            held = False
+        accepted = True
+        try:
+            checked_options("invalid x:", "asr", "openai", {"languages": [code]})
+        except OptionsRefused:
+            accepted = False
+        assert accepted is held, code
 
 
 @pytest.mark.parametrize(
@@ -1367,6 +1470,112 @@ async def test_a_discarded_hearing_answers_no_language(outcome: str) -> None:
 
     assert result.text == ""
     assert result.language is None
+
+
+# --- the languages a household speaks ---------------------------------
+
+
+async def test_the_languages_list_is_sent_as_repeated_parts_in_the_order_written() -> None:
+    """How the list reaches the endpoint, asserted on the bytes.
+
+    Three claims, and the first two need the repeated-part reader
+    because the SDK serializes `extra_body={"languages": [...]}` into
+    one part per element named `languages[]`. There is no scalar
+    `languages` part and no comma-joined one, which is what a test built
+    on `form_field` would have failed to notice; and the order is the
+    order the entry wrote, since the endpoint is free to weigh it and
+    reordering here would be this provider inventing a policy.
+
+    The third is that no singular `language` part is sent beside them.
+    That is the combination the endpoint refuses, and it is the one an
+    entry with this option set must never produce.
+    """
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"text": "Hej"})
+
+    # Written in an order that is not the sorted one, which is what
+    # makes the order claim say anything: with [de, en] a provider that
+    # sorted on the way out would agree with this case.
+    await provider(handler, languages=["sv", "de"]).transcribe(ONE_SECOND, 16000)
+
+    (request,) = seen
+    assert form_fields(request, "languages[]") == ["sv", "de"]
+    assert form_field(request, "languages") is None
+    assert form_field(request, "language") is None
+    # And not one field holding both, which is the shape a hand-rolled
+    # serialization would have produced and the endpoint would refuse.
+    assert b"sv,de" not in request.content
+
+
+async def test_a_session_hint_is_not_sent_beside_a_configured_list() -> None:
+    """The precedence the options model cannot enforce, because the hint
+    is not written anywhere it can see.
+
+    `language_hint` arrives per call from the session, and the lock that
+    sets it is session-scoped and deliberately survives an agent switch,
+    so a session whose first agent transcribes with `faster_whisper`
+    hands one to an agent using this type. Sent as `language` beside a
+    `languages` list it would be exactly the pair the endpoint refuses,
+    which is a conversation failing for a reason no log explains. So
+    while `languages` is set the hint is not sent at all, in either
+    spelling.
+
+    Asserted on the echo retry as well as on the first request, because
+    the retry composes its own call: a precedence written once in
+    `transcribe` and forgotten in the retry would 400 only on the clips
+    the echo guard already found suspicious.
+    """
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        text = "vinga" if len(seen) == 1 else "Ja tack"
+        return httpx.Response(200, json={"text": text})
+
+    asr = provider(handler, languages=["sv", "de"], prompt="vinga")
+    result = await asr.transcribe(ONE_SECOND, 16000, language_hint="en")
+
+    assert result.text == "Ja tack"
+    assert len(seen) == 2, "the echo guard did not retry, so the retry is untested"
+    for request in seen:
+        assert form_field(request, "language") is None
+        assert form_fields(request, "languages[]") == ["sv", "de"]
+
+
+@pytest.mark.parametrize(
+    ("languages", "reported"),
+    [
+        pytest.param(["de"], None, id="a list of one is a pin"),
+        pytest.param(["de", "en"], "de", id="a list of two is a choice"),
+    ],
+)
+async def test_what_a_set_reports_depends_on_how_many_it_names(
+    languages: list[str], reported: str | None
+) -> None:
+    """The report rule, extended by this option rather than rewritten.
+
+    The rule is about what the request NAMED. Told a single language the
+    model hands that code straight back rather than saying what it
+    heard, and a list of exactly one is such a single language however
+    it is spelled: a legitimate way to write "this household speaks
+    German", and what an operator migrating from `language` writes. Told
+    two or more the model chooses between them, and what comes back is
+    which one it chose, which is a detection inside a declared set.
+
+    Both ids answer the same `languages: [{"code": "de"}]`, so what
+    separates them is the rule and not the response.
+    """
+    asr = provider(reporting_handler([{"code": "de"}]), languages=languages)
+    result = await asr.transcribe(ONE_SECOND, 16000)
+    seen, record = downstream(asr, result)
+
+    assert result.language == reported
+    assert only_heard(seen).payload.get("language") == reported
+    assert record is not None
+    assert record.language == reported
 
 
 # --- audio too short to send -----------------------------------------

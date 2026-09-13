@@ -366,6 +366,33 @@ OPENAI_ASR_PARITY: list[tuple[str, object, bool]] = [
     ("timeout_s", None, False),
     ("timeout_s", "15", False),
     ("timeout_s", True, False),
+    # the plural, which is the one option of this type with no reader
+    # behind it: it arrived with the model, so these rows are the
+    # contract itself rather than a behaviour being preserved.
+    ("languages", ["sv", "en"], True),
+    ("languages", ["sv"], True),
+    ("languages", None, True),
+    # A tagged form is a code, which is what the syntax says and what
+    # the value type these become downstream accepts.
+    ("languages", ["de-DE", "en_GB"], True),
+    # And this one, which is the whole of why the rule is a SHAPE. The
+    # value type accepts `not-a-language` too, so a validator here
+    # refusing it would claim a membership test this repository does not
+    # have anywhere, and a copy of somebody else's registry goes stale
+    # while reading as authority.
+    ("languages", ["not-a-language"], True),
+    # A list that says nothing the endpoint can act on, in the two ways
+    # an operator can write one.
+    ("languages", [], False),
+    ("languages", ["sv", "sv"], False),
+    # And the entries that are not codes: too short for the syntax, over
+    # its length, punctuation it does not admit, and not a string at
+    # all. The scalar is the fifth: a bare code is not a list of one.
+    ("languages", ["s"], False),
+    ("languages", ["sv" * 9], False),
+    ("languages", ["not a language"], False),
+    ("languages", ["sv", 5], False),
+    ("languages", "sv", False),
     # and the key that is not an option of this type at all, which is
     # what `finish()` refused.
     ("beam_size", 1, False),
@@ -952,6 +979,7 @@ def test_the_openai_asr_defaults_are_the_ones_the_builder_had() -> None:
     assert options.model == "gpt-transcribe"
     assert options.base_url == "https://api.openai.com/v1"
     assert options.language is None
+    assert options.languages is None
     assert options.prompt is None
     assert options.temperature is None
     assert options.timeout_s == 30.0
