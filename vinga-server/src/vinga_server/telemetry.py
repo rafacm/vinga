@@ -1157,9 +1157,17 @@ RETAINED_TRACES = 64
 # that number bounds how many sessions talk at once and says nothing
 # about how many turns any one of them takes, so a single long session
 # would otherwise grow this map without limit. Total exposure is the
-# session bound times this one, and what is retained per turn is two
-# identifiers rather than a span, so it can be generous without being
-# unbounded.
+# session bound times this one, and what is retained per turn is a
+# handful of integers rather than a span, so it can be generous without
+# being unbounded.
+#
+# Two hundred and fifty six because it is past the length of any real
+# conversation with a device in a room: a turn is an utterance and the
+# reply to it, so this is a session that has gone back and forth for
+# hours. What the number bounds is the pathological case, a session
+# nothing ever closes, rather than one anyone actually has, and the cost
+# of being wrong about that is a few kilobytes rather than a lost
+# artifact.
 #
 # A session past the cap loses its oldest turns' targets. The issue that
 # wanted one says so with the closed reason it already has for a missing
