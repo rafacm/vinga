@@ -25,6 +25,7 @@ builder.
 | The stored-row upgrade | `vinga-server/tests/unit/test_config_store.py`: every legacy spelling planted as a row and booted, and the one spelling that is not preserved pinned as a load refusal |
 | The three generated references | `docs/reference/domain-config.md`, `docs/reference/api-openapi.json`, `docs/reference/cli.md`, each through its own generator |
 | The fourth statement of which types are declared | `vinga-server/examples/README.md`, which is prose and is held by a case rather than generated |
+| The committed body | `vinga-server/tests/unit/data/domain-bodies/provider/openai-asr-options.json`, written out rather than sparse |
 | The changelog fragment | `changelog.d/500-openai-asr-options-model.md`, two entries under Changed |
 
 ### Deviations from the plan
@@ -98,6 +99,15 @@ set on this milestone. It passed unchanged, which is worth recording
 because it is the case that would have caught a fragment documenting a
 key the model does not declare.
 
+**A declared type owes a committed body, and the suite says so
+without being told which type.** `test_every_declared_type_has_a_body_of_its_own`
+reads the declared set off the registry and holds it against the
+fixtures under `tests/unit/data/domain-bodies/provider/`, so declaring
+this type failed that case until the fixture existed. Worth recording
+because it is the shape the #88 batch aimed for: the assertion travels
+with the declaration rather than with a list somebody has to remember
+to extend.
+
 **A `ProvidersConfig` is not subscriptable.** The stored-row test was
 first written as `providers["asr"]["ears"]` and the section is a model
 with a field per stage, so the read is `providers.asr["ears"]`. Noted
@@ -105,8 +115,23 @@ because the failure names the type rather than the line's intent.
 
 ### Verification
 
-Ruff, the unit lane, the integration lane, and the three drift checks
-the server workflow runs, each regenerated and diffed. The claims that
+Ruff, the unit lane, the integration lane, and the drift checks the
+server workflow runs, each regenerated and diffed: the domain
+reference, the server reference, the OpenAPI document, the CLI page
+through its marker-preserving recipe, and the recipes inside it
+against their own renderer.
+
+One honest note about how the unit lane was run here. Serially it is
+green (7260 passed, 19 skipped). Distributed the way CI runs it,
+`-n auto --dist loadfile`, this machine's Postgres drops connections
+under the worker count: every failure in those runs is
+`psycopg.OperationalError: server closed the connection unexpectedly`,
+the set differs run to run, none of it overlaps this milestone's
+territory, and each one passes when re-run on its own. That is a fact
+about this machine rather than about the change, and it is recorded
+rather than presented as a green run.
+
+The claims that
 were made were watched failing first: `model: Nonblank` and a
 non-optional `temperature` break exactly the parity rows and the
 planted rows they are about, a base URL default of `/v2` breaks the
