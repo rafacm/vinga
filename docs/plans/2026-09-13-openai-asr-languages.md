@@ -381,7 +381,7 @@ operator apply a configuration that boots and then fails on the first
 transcription of a real conversation.
 
 - [x] **[M1: declare the type's options](2026-09-13-openai-asr-languages-implementation.md#m1-declare-the-types-options)**
-  (PR TBD). `OpenaiAsrOptions` in
+  (PR #512). `OpenaiAsrOptions` in
   `config/provider_options.py` carrying today's six options with their
   descriptions, registered in `PROVIDER_TYPES`, and `build` rewritten
   to take the validated model the way `elevenlabs_tts.build` does. The
