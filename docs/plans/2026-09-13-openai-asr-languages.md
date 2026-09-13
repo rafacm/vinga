@@ -397,7 +397,21 @@ records; nothing new is needed to see a request or a log line.
   and does not; and a session hint alongside a configured `languages`
   sends no `language` part, asserted on the first request and on the
   echo retry.
-- **M4**: the default is the new model, and an entry that sets `model`
+- **M4, at the write gate rather than at the builder.** The refusal
+  the issue asks for is a write-time refusal, and the provider tests
+  cannot see it: their `build_asr` helper constructs a provider and
+  never touches the configuration store, so a refusal asserted there
+  would be the builder's, raised too late to stop a bad row being
+  stored. So the mutual-exclusion tests live where the gate does, in
+  the store's tests: the write is refused before persistence, the
+  previously stored row is unchanged afterwards, the refusal's field
+  locations are the safe ones, and the sentence carries the guidance
+  the issue requires, which model wants which form, rather than only
+  naming the two fields. The no-leak sentinel rides the same test: a
+  credential-shaped code is planted in the rejected fragment and its
+  absence asserted across the sentence, `record.args`, the
+  `FieldProblem` paths, both log formats and the exception chain.
+- **M3**: the default is the new model, and an entry that sets `model`
   still sends what it set.
 
 Beyond the unit lane, every milestone that touches the declaration or
