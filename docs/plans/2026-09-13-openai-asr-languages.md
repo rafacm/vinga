@@ -128,6 +128,29 @@ half of the URL-credential rule, which today can name no option of
 this type because it computes printable names from the declared
 model.
 
+**What happens to a row stored before the type declared anything?**
+This is the half of M1 that is not behaviour-preserving, and the plan
+says so rather than claiming otherwise. `_stored_option_types`
+validates every stored provider row on read, and its own docstring
+gives the reason it exists: "an entry written before its type declared
+a model can hold a key that model refuses, and a server that read it
+back happily would be serving a configuration its own write path would
+no longer accept". So the declaration tightens a gate that today lets
+these rows through, and a refusal there is a `StorageError` at boot,
+for an entry no conversation need ever have used.
+
+Unknown keys are the smaller half: `OptionsReader.finish()` already
+refuses those when the provider is built, so such a row cannot boot
+today either, and what changes is which error it gets and how early.
+The real surface is the spellings of absence the reader accepts that a
+strict model would not, which is why `FasterWhisperOptions` carries an
+explicit `_blank_reads_as_unwritten` validator for its own five. M1
+therefore enumerates the current reader's behaviour option by option,
+by reading `OptionsReader` rather than by assuming, preserves every
+spelling that boots today, proves it with a stored-row upgrade test
+that writes the legacy forms and boots them, and carries a changelog
+compatibility note for anything deliberately not preserved.
+
 **How does a cross-field refusal name both fields without quoting
 what was written?** Through `FieldProblemsError`, which
 `config/models.py::_error_problems` already unpacks: a model-level
