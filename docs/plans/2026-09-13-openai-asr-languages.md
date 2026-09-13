@@ -210,6 +210,29 @@ here except what one field says.
   plan owns is the refusal of the combination the API itself calls
   invalid, which is the one that is a fact about the request rather
   than about a model.
+- **The `languages` contract, settled.** A non-empty list of strings,
+  each one matching the same syntax `LanguageTag` enforces, which is a
+  shape rather than a membership test: `LanguageTag` accepts
+  `not-a-language` and `de-DE` and rejects only what fails its syntax,
+  so a model validator claiming to check ISO 639-1 membership would be
+  claiming more than the repository's own value type does, and a
+  membership list is a copy of someone else's registry that goes stale
+  silently. An empty list is refused at write time, because it means
+  nothing the endpoint can act on and an operator who wrote it meant
+  something. Duplicates are refused for the same reason. Order is
+  preserved and sent as written, since the endpoint is free to weigh
+  it and reordering would be this plan inventing a policy; no
+  normalization of case, since the endpoint takes the codes as given
+  and lowercasing them is another invented policy.
+- **The wire shape is repeated parts, and it is measured.** The SDK
+  serializes `extra_body={"languages": ["de", "en"]}` into a multipart
+  request as two parts both named `languages[]`, one per element,
+  never one comma-joined field. Captured through a mock transport, and
+  it is the encoding the live endpoint accepted in the measurements
+  above. This is a test-design fact as much as a wire fact: the
+  existing `form_field` helper finds exactly one part by exact name,
+  so a test written on it would look for `languages`, find nothing,
+  and pass while asserting nothing at all.
 - **Precedence is stated, because the validator cannot see the runtime
   hint.** The mutual-exclusion rule is a fact about one written entry,
   and `language_hint` arrives per call from the session. Today
@@ -363,14 +386,17 @@ records; nothing new is needed to see a request or a log line.
   a mapping with no `code`) leaves it empty and raises nothing; the
   value reaches the `heard` event through the pipeline's existing
   path, asserted at the event rather than re-asserted on the result.
-- **M3**: `languages` reaches the request body as a list; `language`
-  and `languages` together are refused at write time, by field name,
-  with neither code in the sentence, the args or the problems, which
-  is the no-leak sentinel for this refusal (a code shaped like a
-  credential is planted and its absence asserted across sentence,
-  `args`, `FieldProblem` paths and both log formats); a one-element
-  list is accepted and suppresses the report; a two-element list is
-  accepted and does not.
+- **M4**: a repeated-part helper beside `form_field`, since the list
+  is sent as two parts named `languages[]` and the existing helper
+  cannot see them; with it, that both codes arrive, in the written
+  order, that no scalar or comma-joined `languages` part exists, and
+  that no singular `language` part is sent beside them. Then the
+  contract: an empty list, a duplicate, and an element failing the
+  syntax are each refused at write time; a one-element list is
+  accepted and suppresses the report; a two-element list is accepted
+  and does not; and a session hint alongside a configured `languages`
+  sends no `language` part, asserted on the first request and on the
+  echo retry.
 - **M4**: the default is the new model, and an entry that sets `model`
   still sends what it set.
 
