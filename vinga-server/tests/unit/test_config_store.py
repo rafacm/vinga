@@ -1613,9 +1613,9 @@ def test_an_openai_asr_entry_that_misdescribes_its_language_is_refused_at_the_wr
         )
 
     # The row this deployment already had is the row it still has, said
-    # as the value as well as as the equality: a gate that refused after
-    # persisting would leave the operator's working entry replaced by
-    # the one that was rejected, and an equality against a variable
+    # as a value as well as through the equality: a gate that refused
+    # after persisting would leave the operator's working entry replaced
+    # by the one that was rejected, and an equality against a variable
     # nobody reads could agree with that.
     stored = store.read_provider("asr", "ears").entry
     assert stored == before
