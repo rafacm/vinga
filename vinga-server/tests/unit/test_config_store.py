@@ -1553,6 +1553,39 @@ REFUSED_LANGUAGES: list[tuple[str, dict[str, object], tuple[str, ...], tuple[str
             "gpt-4o-mini-transcribe",
         ),
     ),
+    # The same rule met through the other spelling of a written key. An
+    # explicit null is a key an operator wrote, the store deliberately
+    # keeps it (`_to_row` does not use `exclude_none`, because a null
+    # inside a provider's options is a value somebody meant), and a
+    # stored row therefore carries BOTH options. The rule is about what
+    # was written, so all three permutations are refused, and the pair
+    # below is what makes that consistent rather than arbitrary:
+    # `language: ""` beside a list is refused, and a null beside one had
+    # been allowed, while both are keys on the entry.
+    (
+        "a null language beside a list",
+        {"language": None, "languages": ["sv", "en"], "prompt": SECRET},
+        ("/language", "/languages"),
+        ('"language" and "languages" cannot both be set', "gpt-transcribe"),
+    ),
+    (
+        "a language beside a null list",
+        {"language": "sv", "languages": None, "prompt": SECRET},
+        ("/language", "/languages"),
+        ('"language" and "languages" cannot both be set', "gpt-transcribe"),
+    ),
+    (
+        "both written as nulls",
+        {"language": None, "languages": None, "prompt": SECRET},
+        ("/language", "/languages"),
+        ('"language" and "languages" cannot both be set', "gpt-transcribe"),
+    ),
+    (
+        "a blank language beside a list",
+        {"language": "", "languages": ["sv", "en"], "prompt": SECRET},
+        ("/language", "/languages"),
+        ('"language" and "languages" cannot both be set', "gpt-transcribe"),
+    ),
     (
         "an empty list",
         {"languages": [], "prompt": SECRET},

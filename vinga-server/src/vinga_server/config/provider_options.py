@@ -615,15 +615,28 @@ class OpenaiAsrOptions(BaseModel):
         involved, so several problems arrive as one error and the names
         reach the pointers as well as the sentences.
 
-        What counts as set is what was WRITTEN, which is the question a
-        written entry can answer. `language: ""` names no language on
-        the wire, and the request-time rules in `providers/openai_asr.py`
-        read the value rather than the key for exactly that reason; but
-        two options written on one entry is one of them too many
-        whatever either holds, and the remedy is the same line either
-        way.
+        What counts as set is what was WRITTEN, read off
+        `model_fields_set` rather than off the resolved values. That is
+        this repository's own answer to "which keys did the caller
+        write": `_to_row` dumps a stored entry with `exclude_unset` and
+        so keeps the same distinction across the round trip, and an
+        explicit null is deliberately preserved there because a null
+        inside a provider's options is a value somebody meant. So a
+        stored row that wrote `language: null` beside a list really does
+        carry both options, and a rule reading the values would have
+        called that entry single-spelled while the row held two keys.
+
+        Comparing against None instead is what this validator did first,
+        and it made the rule disagree with itself: `language: ""` beside
+        a list was refused and `language: null` beside one was not,
+        while both are keys on the entry and neither puts a language on
+        the wire. Found in review. The request-time rules in
+        `providers/openai_asr.py` read the VALUE, and that difference is
+        deliberate rather than an oversight: suppression is a fact about
+        one request, and this is a fact about one written entry, whose
+        remedy is the same line either way.
         """
-        if self.language is not None and self.languages is not None:
+        if {"language", "languages"} <= self.model_fields_set:
             raise FieldProblemsError(
                 [
                     FieldProblem(json_pointer(("language",)), BOTH_LANGUAGES_RULE),
