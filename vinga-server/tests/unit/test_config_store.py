@@ -8,6 +8,7 @@ without the first agent and default_agent deadlocking on each other.
 """
 
 import json
+import logging
 import threading
 from pathlib import Path
 
@@ -30,6 +31,7 @@ from vinga_server.config.models import (
 from vinga_server.config.secrets import MASK, SecretLocation, generate_key
 from vinga_server.config.store import ConfigStore, verify_secrets
 from vinga_server.db import open_database, schema
+from vinga_server.logs import TEXT_FORMAT, JsonFormatter
 
 # Not a real credential, and shaped so a substring check for it cannot
 # match by accident.
@@ -1509,6 +1511,144 @@ def test_an_openai_asr_row_the_model_refuses_is_refused_on_read(
     # `beam_size` and as the sentinel, and neither is this repository's
     # word.
     assert "beam_size" not in str(caught.value)
+
+
+# What an entry may not say about the language it expects
+#
+# The refusal issue #500 asks for is a WRITE-time refusal, and that is
+# the whole reason these cases are here rather than beside the builder:
+# the provider suite's `build_asr` constructs a provider and never
+# touches this store, so a refusal asserted there is the builder's,
+# raised too late to stop a bad row being stored and read back. The
+# gate is `_check_option_types`, which the write funnel calls before it
+# persists anything.
+#
+# Four shapes, and the first is the one the issue is about. A request
+# naming both `language` and `languages` is a 400 on every model
+# measured, and `build` speaks to nothing, so an entry writing both
+# applies cleanly and fails on the first real transcription of a
+# conversation: a failure no log explains, which is exactly what a
+# write-time refusal is for. The other three are the list's own
+# contract, each a value that says nothing the endpoint can act on.
+#
+# Each case carries what the refusal has to SAY and where it has to
+# POINT, and each plants the sentinel in a value: in the `prompt` an
+# entry legitimately carries where the rejected value is not itself
+# secret-shaped, and as the rejected code where it is. A
+# credential-shaped KEY would prove nothing here, since
+# `_check_no_inline_secrets` refuses one on `ProviderConfig` before any
+# type's own contract is consulted.
+REFUSED_LANGUAGES: list[tuple[str, dict[str, object], tuple[str, ...], tuple[str, ...]]] = [
+    (
+        "both spellings on one entry",
+        {"language": "sv", "languages": ["sv", "en"], "prompt": SECRET},
+        ("/language", "/languages"),
+        # The rule, and the guidance the issue requires: which model
+        # wants which form, named model by model because three were
+        # measured and the rest were not.
+        (
+            '"language" and "languages" cannot both be set',
+            "gpt-transcribe",
+            "whisper-1",
+            "gpt-4o-mini-transcribe",
+        ),
+    ),
+    (
+        "an empty list",
+        {"languages": [], "prompt": SECRET},
+        ("/languages",),
+        ("must be a non-empty list of language codes, each written once",),
+    ),
+    (
+        "a language written twice",
+        {"languages": ["sv", "sv"], "prompt": SECRET},
+        ("/languages",),
+        ("must be a non-empty list of language codes, each written once",),
+    ),
+    (
+        "a code that is not one",
+        {"languages": [SECRET]},
+        ("/languages",),
+        ("must be a language code, such as sv or en-US",),
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("options", "points", "says"),
+    [(options, points, says) for _, options, points, says in REFUSED_LANGUAGES],
+    ids=[name for name, _, _, _ in REFUSED_LANGUAGES],
+)
+def test_an_openai_asr_entry_that_misdescribes_its_language_is_refused_at_the_write(
+    store: ConfigStore,
+    options: dict[str, object],
+    points: tuple[str, ...],
+    says: tuple[str, ...],
+) -> None:
+    """Refused before anything is persisted, which is the claim a
+    builder-side test cannot make.
+
+    A good entry is written first and read back afterwards, so what is
+    asserted is not only that the write raised but that the row this
+    deployment already had is the row it still has: a gate that refused
+    after writing would leave the operator's working entry replaced by
+    the one that was rejected.
+
+    The no-leak lens rides the same case. A rejected fragment is exactly
+    where a pasted credential lands, and this refusal is printed by the
+    CLI, answered by the API and, for a stored row, written to a boot
+    log, so the planted value is looked for in the sentence, in the
+    arguments a logger would be handed, in the `FieldProblem` messages,
+    in both shipped log formats and through every cause and context a
+    renderer could walk.
+    """
+    store.set_provider(
+        "asr", "ears", {"type": "openai", "api_key_env": "OPENAI_KEY", "language": "sv"}
+    )
+    before = store.read_provider("asr", "ears").entry
+
+    with pytest.raises(ConfigError) as caught:
+        store.set_provider(
+            "asr", "ears", {"type": "openai", "api_key_env": "OPENAI_KEY", **options}
+        )
+
+    # The row this deployment already had is the row it still has, said
+    # as the value as well as as the equality: a gate that refused after
+    # persisting would leave the operator's working entry replaced by
+    # the one that was rejected, and an equality against a variable
+    # nobody reads could agree with that.
+    stored = store.read_provider("asr", "ears").entry
+    assert stored == before
+    assert stored.options == {"language": "sv"}
+
+    refusal = str(caught.value)
+    assert "providers.asr.ears" in refusal
+    for sentence in says:
+        assert sentence in refusal
+    # The fields, addressed by the pointers a form acts on, and they are
+    # names this repository declared rather than anything the caller
+    # wrote.
+    assert {problem.path for problem in caught.value.problems} == set(points)
+
+    # What a logger would be handed, which is the exception itself: an
+    # object travelling as a `%` argument reaches every consumer as
+    # itself, so a clean sentence is not on its own a clean surface.
+    record = logging.LogRecord(
+        "vinga_server.config", logging.ERROR, __file__, 0, "%s", (caught.value,), None
+    )
+    rendered = "\n".join(
+        [
+            refusal,
+            repr(caught.value),
+            record.getMessage(),
+            repr(record.args),
+            logging.Formatter(TEXT_FORMAT).format(record),
+            JsonFormatter().format(record),
+            *(f"{problem.path} {problem.message}" for problem in caught.value.problems),
+            _chain(caught.value),
+        ]
+    )
+    assert SECRET not in rendered
 
 
 def test_a_row_that_is_not_loadable_is_reported_as_a_config_error(
