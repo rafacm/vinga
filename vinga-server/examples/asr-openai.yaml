@@ -85,8 +85,8 @@ api_key_env: OPENAI_API_KEY
 # vocabulary, not language, and a hint carrying a language's flavour can
 # pull an unpinned detection toward that language instead, which is the
 # other half of why this is worth setting. On the default it is a hint
-# rather than a hard pin: gpt-transcribe was sent German speech with
-# language: sv on 2026-09-13 and transcribed it as German anyway, and
+# rather than a hard pin: gpt-transcribe was sent German speech under
+# a value of sv on 2026-09-13 and transcribed it as German anyway, and
 # the gpt-4o pair answered in the language it heard in an earlier
 # measurement. whisper-1 and a compatible endpoint were not measured
 # and decide this for themselves. So on the default a wrong value is
@@ -102,6 +102,53 @@ api_key_env: OPENAI_API_KEY
 # for a while on a deployment whose transcripts already look right, read
 # the codes that arrive, and pin afterwards.
 language: sv
+
+# A household that speaks more than one writes the plural instead. The
+# spelling is `languages: [sv, en]`, and what it names is a SET the
+# model chooses inside rather than one language it is told. The two
+# cannot both be set: the API refuses a request naming both, so an
+# entry writing both is refused where it is written rather than on the
+# first real conversation. That is also why there is no commented line
+# for it beside this one, and the reason is worth knowing before you
+# copy this file: uncommenting every documented key here is something
+# the test suite does, and a commented plural sitting under a live
+# singular would be exactly the entry this type refuses.
+#
+# Only gpt-transcribe was measured to accept the plural, on 2026-09-13.
+# whisper-1 and gpt-4o-mini-transcribe each answered 400 to it, in
+# their own words, and neither gpt-4o-transcribe nor any compatible
+# endpoint was tested. `build` speaks to nothing, so an entry naming a
+# model that refuses the plural applies cleanly and then fails on the
+# first real transcription.
+#
+# Which to reach for, and it is a choice between three entries rather
+# than two. One language spoken in this house: keep the singular
+# above, which is what this fragment ships with and what the device
+# session earned. Two or three spoken here: the plural, which asks the
+# model to choose among the languages actually spoken instead of among
+# all of them. One clip says that helps, and it is the clip this whole
+# feature started from. Spoken German "Hallo" came back as "Hello."
+# unhinted and as "Hallo." with [de, en] set, which is a reason to try
+# the option rather than a number to expect. What it certainly keeps
+# is the report, which says which of the declared languages was
+# chosen, so the codes arriving say how often each is picked. Nothing
+# known about what is spoken: leave both unset for a while and read
+# the report, which is the only one of the three that measures rather
+# than tells.
+#
+# A list of exactly one is the plural written as a pin. It is accepted
+# and sent, and it switches the report off exactly as the singular
+# does, because the model hands a single language straight back. What
+# it buys over the singular is nothing except the shape you will edit
+# when the second language arrives.
+#
+# Neither spelling forces a decode on the default model, which the
+# paragraph above measures for the singular, and a set is a weaker
+# statement than that one. With two hints the model chooses, and on a
+# very short clip it can choose wrongly: spoken German "Hallo" sent as
+# [de, en] transcribed correctly and reported English. So read what
+# arrives from a set as a rate rather than as a verdict on a turn, the
+# same way the closing paragraph says to read the report at all.
 
 # 0.0 to 1.0. Raise it only to loosen a decode that is stuck; the
 # default is the API's own.
@@ -127,6 +174,13 @@ language: sv
 # arrive as a rate to watch rather than a verdict on one turn, since it
 # says what the model decided rather than what was said: a spoken German
 # "Hallo" came back as "Hello." and reported as English.
+#
+# A set of two or more is the one description that does not switch the
+# report off, and it is the same rule rather than an exception to it.
+# Told one language the model hands that code back; handed a choice it
+# reports which one it made, which is a detection inside what you
+# declared. A set of exactly one is a single language however it is
+# written, and suppresses like the line above.
 #
 # There is still no confidence and no language_detect option, unlike
 # the local engine: no model reports a confidence at all, and the

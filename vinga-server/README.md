@@ -227,6 +227,7 @@ Keys are named, never written, exactly as for the TTS types above.
 | `base_url` | `https://api.openai.com/v1` | Point it at any server implementing `/v1/audio/transcriptions` |
 | `prompt` | unset | Vocabulary the engine would not otherwise guess: names, places, the assistant's own. Never agent names or anything imperative: see below |
 | `language` | unset | Spoken language (ISO 639-1). Set it for any non-English deployment: see below |
+| `languages` | unset | The languages spoken here, when there is more than one. Only `gpt-transcribe` was measured to accept it, and it cannot be set beside `language`: see below |
 | `temperature` | unset | 0.0 to 1.0, the API's own default when unset |
 | `timeout_s` | `30` | Seconds before a transcription is abandoned, and a real bound: retries are off |
 
@@ -284,6 +285,39 @@ audio through Opus gives detection much less to go on than a clean
 file, and the model appears to fall back on English phonetics. Pinning
 fixed it outright, and no `prompt` rescued it while unpinned.
 
+**A household that speaks more than one names them all.** `languages:
+[sv, en]` describes a set the model chooses inside, where `language`
+describes one it is told, and it is the middle answer between pinning
+the wrong language and pinning none. Three cases, and the third is the
+one worth doing on purpose:
+
+- **One language spoken here.** Set `language`, which is what the
+  device session above earned. The report goes quiet, and the trade is
+  in the next section.
+- **Two or three spoken here.** Set `languages`, and leave `language`
+  out: the two cannot both be set, and writing both is refused when the
+  entry is written rather than discovered on a conversation. One clip
+  says it helps, which is the clip this whole feature started from:
+  spoken German "Hallo" came back as "Hello." unhinted and as "Hallo."
+  with `[de, en]` set. That is one clip and not a table, so read it as
+  the reason to try the option rather than as a number. What you
+  definitely keep is the report, which now says which of the declared
+  languages the model chose per turn.
+- **You do not know yet.** Leave both unset for a while on a deployment
+  whose transcripts already look right, and read the codes that arrive.
+  That is the only one of the three that measures rather than tells.
+
+`languages` is `gpt-transcribe`'s, as far as anyone here has measured:
+on 2026-09-13 it accepted the option, and `whisper-1` and
+`gpt-4o-mini-transcribe` each answered 400 to it in their own words.
+`gpt-4o-transcribe` and compatible endpoints were not tested and decide
+it for themselves. Nothing checks this at startup, because `build`
+speaks to nothing: an entry naming a model that refuses the option
+applies cleanly and fails on the first real transcription, so the model
+and the option are worth reading together. A list of exactly one is
+accepted, and it is a pin: the model hands a single language straight
+back whichever way it was named.
+
 Setting it is a hint rather than a hard pin on the two models that were
 measured: a `gpt-4o` model given Swedish audio and `language: en`
 answers in Swedish anyway, and `gpt-transcribe`, the default, did the
@@ -310,9 +344,13 @@ Setting `language` above, or a session handing one over from another
 engine, suppresses the report: told a single language, the model hands
 that code straight back rather than saying what it heard, and echoing
 a configured value into a metric would read as a measurement of the
-room. Read what does arrive as a rate to watch rather than a verdict on
-one turn, since it says what the model decided rather than what was
-said: a spoken German "Hallo" came back as "Hello." and reported as
+room. A `languages` set of two or more does not suppress it, and that
+is the same rule rather than an exception: handed a choice, the model
+reports which one it made, which is a detection inside what you
+declared. A set of exactly one is a single language however it is
+written, and suppresses like the line above. Read what does arrive as a
+rate to watch rather than a verdict on one turn, since it says what the
+model decided rather than what was said: a spoken German "Hallo" came back as "Hello." and reported as
 English, which is the mishearing this reporting exists to make
 visible. There is still no confidence, because no model reports one,
 and no `language_detect` option: the local engine's
