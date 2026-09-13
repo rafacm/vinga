@@ -1,0 +1,10 @@
+{
+  "type": "openai",
+  "api_key_env": "OPENAI_API_KEY",
+  "model": "gpt-4o-transcribe",
+  "base_url": "https://api.openai.com/v1",
+  "language": "sv",
+  "prompt": "vinga, Stockholm",
+  "temperature": 0.0,
+  "timeout_s": 30
+}
