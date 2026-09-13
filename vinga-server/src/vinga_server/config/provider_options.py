@@ -541,7 +541,7 @@ class FasterWhisperOptions(BaseModel):
 # Two sentences rather than one repeated at two locations, because a
 # model-level validator's error is located at the MODEL: the rendering
 # puts no field name in front of these lines, so each has to name its
-# own field, exactly as the reserved-passthrough rule above does. The
+# own field, exactly as the reserved-passthrough rule below does. The
 # first carries the rule and the second carries the guidance the issue
 # asks for, which is which model wants which form.
 #
@@ -598,17 +598,18 @@ class OpenaiAsrOptions(BaseModel):
         where it is written instead.
 
         Raised as `FieldProblemsError` for the reason the reserved-name
-        rule above is: a model-level validator's error is located at the
+        rule below is: a model-level validator's error is located at the
         model, and this is the one place that knows both fields are
         involved, so several problems arrive as one error and the names
         reach the pointers as well as the sentences.
 
         What counts as set is what was WRITTEN, which is the question a
         written entry can answer. `language: ""` names no language on
-        the wire, and the request-time rules below read the value rather
-        than the key for exactly that reason; but two options written on
-        one entry is one of them too many whatever either holds, and
-        the remedy is the same line either way.
+        the wire, and the request-time rules in `providers/openai_asr.py`
+        read the value rather than the key for exactly that reason; but
+        two options written on one entry is one of them too many
+        whatever either holds, and the remedy is the same line either
+        way.
         """
         if self.language is not None and self.languages is not None:
             raise FieldProblemsError(
