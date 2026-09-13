@@ -188,6 +188,18 @@ the better of the two but neither was perfect:
 | "Vad heter Sveriges huvudstad?" | exact | "Vad heter Sveriges Hubbetsstad?" |
 | "Vad heter din vingasassistent?" | "Vad hette ditt vingasassistent?" | "Men hejter den vingaassistenten." |
 
+**None of the cloud columns above is what you get by default, which is
+worth saying plainly.** Every one of those measurements was taken on the
+`gpt-4o` pair or on `whisper-1`, before `gpt-transcribe` became this
+type's default, and none was re-run against it. So read them as the
+shape of a cloud transcription against a local decode rather than as a
+number this server promises, and measure your own, which is the advice
+this whole section already gives. What is known about the default is
+narrower and recorded where it belongs: it reports the language it
+heard, which is the section below, and OpenAI publishes it at $0.0045
+per minute of audio against $0.006 for `whisper-1`, which is the cost
+table near the end of this page.
+
 What the local engine still wins: it is the only one that keeps the
 audio on your host, the only one that says how sure it was of the
 language it heard, and the only one that can hold a session to that
@@ -211,7 +223,7 @@ Keys are named, never written, exactly as for the TTS types above.
 | Option | Default | What it does |
 | ------ | ------- | ------------ |
 | `api_key_env` | required for OpenAI itself | Name of the variable holding the key |
-| `model` | `gpt-4o-mini-transcribe` | `gpt-4o-transcribe` is the larger sibling; `whisper-1` is the same Whisper V2 you could run locally |
+| `model` | `gpt-transcribe` | The one that reports which language it heard; the `gpt-4o` pair reports none, and `whisper-1` is the same Whisper V2 you could run locally. Name one here if `base_url` is a self-hosted server |
 | `base_url` | `https://api.openai.com/v1` | Point it at any server implementing `/v1/audio/transcriptions` |
 | `prompt` | unset | Vocabulary the engine would not otherwise guess: names, places, the assistant's own. Never agent names or anything imperative: see below |
 | `language` | unset | Spoken language (ISO 639-1). Set it for any non-English deployment: see below |
@@ -272,23 +284,25 @@ audio through Opus gives detection much less to go on than a clean
 file, and the model appears to fall back on English phonetics. Pinning
 fixed it outright, and no `prompt` rescued it while unpinned.
 
-Setting it is still a hint rather than a hard pin: a `gpt-4o` model
-given Swedish audio and `language: en` answers in Swedish anyway, where
-the local engine would have forced the wrong language and produced
-nonsense. So a wrong value is fairly harmless, and it is leaving it
-*empty* that costs you.
+Setting it is still a hint rather than a hard pin, on every model this
+type reaches: a `gpt-4o` model given Swedish audio and `language: en`
+answers in Swedish anyway, and the default does the same, measured with
+German speech sent as Swedish and transcribed as German. The local
+engine would have forced the wrong language and produced nonsense. So a
+wrong value is fairly harmless, and it is leaving it *empty* that costs
+you.
 
 **The language it heard is reported back, where the model answers one
-and you named none.** `gpt-transcribe` answers a code whenever it
-makes out a language, so the `heard` log line carries `language`, the
-conversation record keeps it, and an operator can finally see a
-household's language being misheard instead of inferring it from odd
-replies. Not every turn carries one: a clip the model makes no language
-out of comes back with an empty list, which silence and laughter both
-did, and that turn's field is simply absent. The `gpt-4o` models answer
-no language at all and `whisper-1` answers only in a format this server
-does not ask for, so with either of those the field stays empty as it
-always did.
+and you named none.** `gpt-transcribe`, the default, answers a code
+whenever it makes out a language, so the `heard` log line carries
+`language`, the conversation record keeps it, and an operator can
+finally see a household's language being misheard instead of inferring
+it from odd replies. Not every turn carries one: a clip the model makes
+no language out of comes back with an empty list, which silence and
+laughter both did, and that turn's field is simply absent. The `gpt-4o`
+models answer no language at all and `whisper-1` answers only in a
+format this server does not ask for, so with either of those the field
+stays empty as it always did.
 
 Setting `language` above, or a session handing one over from another
 engine, suppresses the report: told a single language, the model hands

@@ -12,12 +12,17 @@ type: openai
 
 api_key_env: OPENAI_API_KEY
 
-# Default: gpt-4o-mini-transcribe. gpt-4o-transcribe is the larger
-# sibling, holds up better on the noisiest input, and costs about the
-# same in latency; whisper-1 is the same Whisper V2 as the local engine,
-# roughly twice the latency of the gpt-4o pair, and there is little
-# reason to choose it.
-# model: gpt-4o-transcribe
+# Default: gpt-transcribe, which is the model that says which language
+# it heard. gpt-4o-transcribe and gpt-4o-mini-transcribe are the
+# previous family and report no language at all, so pinning one of them
+# gives up the report below and nothing else; whisper-1 is the same
+# Whisper V2 as the local engine, at roughly twice the latency, and
+# reports a language only in a format this provider does not ask for.
+#
+# Set this if base_url points at a self-hosted server: the default is an
+# OpenAI model name, and an endpoint that does not serve it answers the
+# first real transcription with an error rather than refusing the entry.
+# model: gpt-4o-mini-transcribe
 
 # Any server implementing /v1/audio/transcriptions works here, the same
 # way openai_compatible opens the LLM stage to local models. A keyless
@@ -61,10 +66,10 @@ api_key_env: OPENAI_API_KEY
 # detecting rather than told, and a field session had short clips
 # detected as the hint's language and answered in it. What that reaches
 # an operator as is the agent replying in a language nobody configured,
-# with nothing in the log tying it to this field. Pinning `language`
-# takes the question away from detection outright; trimming the hint
-# back to the bare words whose spelling needs protecting is what fixed
-# it in that session.
+# with nothing in the log tying it to this field. Naming `language`
+# below is what settles it, though on the default model that is a strong
+# prior rather than a lock: trimming the hint back to the bare words
+# whose spelling needs protecting is what fixed it in that session.
 # prompt: vinga, Stockholm
 
 # Spoken language (ISO 639-1). SET THIS for any deployment that is not
@@ -76,9 +81,12 @@ api_key_env: OPENAI_API_KEY
 # fixed it outright. `prompt` above does not compensate; it fixes
 # vocabulary, not language, and a hint carrying a language's flavour can
 # pull an unpinned detection toward that language instead, which is the
-# other half of why this is worth setting. The gpt-4o models still treat
-# this as a hint and will answer in the language they hear, so a wrong
-# value is fairly harmless and an empty one is what costs you.
+# other half of why this is worth setting. No model this type reaches
+# treats it as a hard pin: the gpt-4o pair answers in the language it
+# hears whatever this says, and the default does the same, measured on
+# 2026-09-13 with German speech sent as Swedish and transcribed as
+# German. So a wrong value is fairly harmless and an empty one is what
+# costs you.
 language: sv
 
 # 0.0 to 1.0. Raise it only to loosen a decode that is stuck; the
@@ -91,19 +99,19 @@ language: sv
 # timeout_s: 30
 
 # The language the model heard is reported back, on the models that
-# report one: gpt-transcribe answers a code whenever it makes out a
-# language, the gpt-4o pair answers none ever, and whisper-1 answers
-# only in a format this provider does not ask for. A clip with nothing
-# to hear reports nothing either way, silence and laughter both came
-# back as an empty list, so an absent language is a turn the model made
-# no language out of rather than a fault. It reaches the `heard` event and the
-# conversation record, and only where nothing named a language: told
-# one, the model hands that code straight back rather than saying what
-# it heard, so `language` above suppresses the report as surely as it
-# steadies the transcription. Read what does arrive as a rate to watch
-# rather than a verdict on one turn, since it says what the model
-# decided rather than what was said: a spoken German "Hallo" came back
-# as "Hello." and reported as English.
+# report one: gpt-transcribe, which is the default, answers a code
+# whenever it makes out a language, the gpt-4o pair answers none ever,
+# and whisper-1 answers only in a format this provider does not ask
+# for. A clip with nothing to hear reports nothing either way, silence
+# and laughter both came back as an empty list, so an absent language is
+# a turn the model made no language out of rather than a fault. It
+# reaches the `heard` event and the conversation record, and only where
+# nothing named a language: told one, the model hands that code straight
+# back rather than saying what it heard, so `language` above suppresses
+# the report as surely as it steadies the transcription. Read what does
+# arrive as a rate to watch rather than a verdict on one turn, since it
+# says what the model decided rather than what was said: a spoken German
+# "Hallo" came back as "Hello." and reported as English.
 #
 # There is still no confidence and no language_detect option, unlike
 # the local engine: no model reports a confidence at all, and the

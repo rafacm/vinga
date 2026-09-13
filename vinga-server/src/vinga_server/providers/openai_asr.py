@@ -37,8 +37,10 @@ opposite case, and streams.
 one.** The response carries `languages: [{"code": "de"}]` on the plain
 `json` format, an ISO 639 code rather than the English name
 `whisper-1` answers with under `verbose_json`. Which models answer at
-all is theirs to decide: `gpt-transcribe` answers whenever it makes out
-a language and the gpt-4o pair answers nothing ever. And a model that
+all is theirs to decide, which is why the default is one that does:
+`gpt-transcribe` answers whenever it makes out a language, and the
+gpt-4o pair, which it replaced as the default, answers nothing ever, so
+an entry pinning one of those keeps the old silence. And a model that
 does answer says so only where there was something to hear: silence and
 laughter both came back `languages: []`, which is the endpoint's own
 spelling of "I heard no language" and leaves the field empty without a
