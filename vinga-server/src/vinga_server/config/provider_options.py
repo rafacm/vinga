@@ -580,9 +580,11 @@ LANGUAGES_MODEL_RULE = (
 class OpenaiAsrOptions(BaseModel):
     """The options the `openai` ASR type accepts.
 
-    Six knobs and a door that stays shut, which is what the
-    `OptionsReader` ladder in `providers/openai_asr.py` had: every key
-    that builder did not read ended its build with `finish()` naming it.
+    Seven knobs and a door that stays shut. Six of them are what the
+    `OptionsReader` ladder in `providers/openai_asr.py` had, every key
+    that builder did not read having ended its build with `finish()`
+    naming it; `languages` is the one this type gained here rather than
+    inherited, and the validator below is the rule that comes with it.
 
     Two rules are deliberately NOT here, and both live in the builder
     because both are facts about the endpoint rather than about a value.
