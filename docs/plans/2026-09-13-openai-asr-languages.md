@@ -452,6 +452,11 @@ records; nothing new is needed to see a request or a log line.
   base_url that is not a URL), committed green before the move and
   compared after. The comparison is the point, so the pins assert
   `record.msg` and typed args rather than a normalized rendering.
+- **M1, the stored row**: the upgrade test its amendment names, which
+  writes each legacy spelling of absence the current reader accepts
+  into a stored `openai` ASR row, then boots and reads it back through
+  `_stored_option_types`, so the gate that tightens is the gate under
+  test rather than the builder beside it.
 - **M2**: a response carrying `languages: [{"code": "de"}]` with
   nothing configured fills the field; the same response with
   `language: sv` configured leaves it empty; with a session
@@ -472,6 +477,8 @@ records; nothing new is needed to see a request or a log line.
   response's code and not the discarded one's, which is the test that
   distinguishes a pair returned together from two values assigned
   separately.
+- **M3**: the default is the new model, and an entry that sets `model`
+  still sends what it set.
 - **M4**: a repeated-part helper beside `form_field`, since the list
   is sent as two parts named `languages[]` and the existing helper
   cannot see them; with it, that both codes arrive, in the written
@@ -497,8 +504,6 @@ records; nothing new is needed to see a request or a log line.
   credential-shaped code is planted in the rejected fragment and its
   absence asserted across the sentence, `record.args`, the
   `FieldProblem` paths, both log formats and the exception chain.
-- **M3**: the default is the new model, and an entry that sets `model`
-  still sends what it set.
 
 Beyond the unit lane, every milestone that touches the declaration or
 the default runs the three drift checks the server workflow runs, in
