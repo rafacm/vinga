@@ -1699,76 +1699,168 @@ def _no_lease_outlives_its_case() -> Iterator[None]:
 # still held by the time the worker got there rather than on what it
 # held when the job was admitted. The retention is bounded and evicts
 # oldest-first, so a busy server could age a queued job's context out
-# from under it and a healthy upload would report `no_trace`.
+# from under it.
 #
-# The double's `evicting` set is what makes the window explicit: those
-# sessions lose their retained entry the instant after they are pinned.
-# A caller that pinned still resolves; one that only kept a session id
-# has nothing left to ask with.
+# Driven against the REAL retention, with a real eviction forced by
+# opening more sessions than it keeps, and with the worker held inside
+# the far side so the eviction lands in the window each case is about.
+# A double that evicted on request would not do: it could not tell a
+# context pinned at admission from one looked up on the worker, and
+# telling those two apart is the whole of this milestone.
+
+
+@pytest.fixture
+def real_exporter() -> Iterator[Any]:
+    """A real `Telemetry`, given back at the end of the case.
+
+    The SDK's silence is one process-wide lease, so an exporter nobody
+    released holds it for the rest of the run.
+    """
+    from tests.support.telemetry import exporting as build_exporter
+    from tests.support.telemetry import released
+
+    telemetry, _ = build_exporter()
+    yield telemetry
+    released()
+
+
+def an_exported_session(telemetry: Any, session: str) -> None:
+    """One whole session through the real exporter, so its retention
+    holds a context for that session."""
+    from tests.support.telemetry import Clock, close_session, open_session, session_events
+
+    clock = Clock()
+    events = session_events(clock, telemetry, session=session)
+    open_session(events)
+    clock.tick(1.0)
+    close_session(events)
+
+
+def evicted(telemetry: Any, session: str) -> None:
+    """Open later sessions until the retention has genuinely dropped
+    this one, rather than assuming a bound this case does not own."""
+    for index in range(512):
+        if telemetry.retained_context(session) is None:
+            return
+        an_exported_session(telemetry, f"filler-{index:026x}")
+    raise AssertionError("the retention never evicted the session under test")
+
+
+def gate_at(call: int) -> tuple[Any, threading.Event, threading.Event]:
+    """A client factory that blocks the Nth construction until released.
+
+    The uploader builds its client inside `_send`, which is after the
+    trace has been resolved and before the reference is written, so
+    which construction is gated decides which of the two windows a case
+    is driving.
+    """
+    held = threading.Event()
+    release = threading.Event()
+    built, _ = fake_sdk()
+    made = 0
+
+    def gated(**options: Any) -> Any:
+        nonlocal made
+        made += 1
+        if made == call:
+            held.set()
+            release.wait(30.0)
+        # `built.client` is already the factory the fake seam hands out,
+        # so this delegates rather than constructing a second kind.
+        return built.client(**options)
+
+    return type(built)(client=gated, error=built.error, content_type=str), held, release
 
 
 @pytest.mark.asyncio
 async def test_a_job_admitted_before_an_eviction_still_finds_its_trace(
-    tmp_path: Path, endpoint: str
+    tmp_path: Path, endpoint: str, caplog: pytest.LogCaptureFixture, real_exporter: Any
 ) -> None:
     """The first window: between the close that made the job and the
     worker that reached it.
 
-    The context is taken at admission, so what the retention does
-    afterwards cannot turn this into `no_trace`.
+    A job ahead of it holds the only worker, the target is admitted
+    behind that job, and the retention is then genuinely emptied. The
+    context was taken at admission, so the upload proceeds. An uploader
+    that resolved on its worker would find nothing left and report
+    `no_trace`, which is what this case failed with before M4a.
     """
-    from tests.support.uploads import Traced
+    caplog.set_level(logging.INFO)
+    an_exported_session(real_exporter, "ahead")
+    an_exported_session(real_exporter, "target")
 
-    traced = Traced({"s1": TRACE}, evicting={"s1"})
+    seam, held, release = gate_at(1)
     uploads = CaptureUpload(
         tmp_path / "captures",
-        sdk=fake_sdk()[0],
-        telemetry=traced,  # type: ignore[arg-type]
-        backlog=4,
+        sdk=seam,
+        telemetry=real_exporter,
+        backlog=8,
         retries=0,
-        shutdown_timeout_s=10.0,
+        shutdown_timeout_s=20.0,
     )
-    store = capture_store(tmp_path, uploads=uploads)
+    store = capture_store(tmp_path / "dir", uploads=uploads)
 
-    a_recording(store, "s1")
-    store.session_closed("s1")
+    a_recording(store, "ahead")
+    store.session_closed("ahead")
+    assert held.wait(10.0), "the first job never reached the far side"
+
+    # Admitted while the only worker is wedged, so it waits in the queue
+    # with its context already taken.
+    a_recording(store, "target")
+    store.session_closed("target")
+    evicted(real_exporter, "target")
+
+    release.set()
     await drained(uploads)
 
-    # It uploaded rather than reporting that the server had no id to
-    # name, which is the whole claim.
-    assert traced.referenced, "the job lost its trace to an eviction it outlived"
+    assert "no_trace" not in reasons(caplog), (
+        "the job lost its trace to an eviction it outlived"
+    )
+    assert sorted(
+        str(fields_of(record)["session"]) for record in uploads_said(caplog)
+    ) == ["ahead", "target"]
 
 
 @pytest.mark.asyncio
 async def test_a_job_whose_upload_outlives_an_eviction_still_writes_its_reference(
-    tmp_path: Path, endpoint: str
+    tmp_path: Path, endpoint: str, caplog: pytest.LogCaptureFixture, real_exporter: Any
 ) -> None:
     """The second window, and a separate one: the reference is written
-    AFTER the bytes have gone, so an upload slow enough to outlive the
-    eviction used to land its bytes and then fail to point at them.
+    AFTER the bytes have gone.
 
-    `unreferenced` is what that reported, which is a stored recording no
-    reader can reach. Pinned, the write has its target whatever the
-    retention has done since.
+    So the eviction here lands between the trace being resolved and the
+    reference being written, which is the state an upload slow enough to
+    outlive its own context used to reach. It landed its bytes and then
+    had nothing to point at them with, reported as `unreferenced`: a
+    stored recording no reader can reach.
     """
-    from tests.support.uploads import Traced
+    caplog.set_level(logging.INFO)
+    an_exported_session(real_exporter, "target")
 
-    traced = Traced({"s1": TRACE}, evicting={"s1"})
+    seam, held, release = gate_at(1)
     uploads = CaptureUpload(
         tmp_path / "captures",
-        sdk=fake_sdk()[0],
-        telemetry=traced,  # type: ignore[arg-type]
-        backlog=4,
+        sdk=seam,
+        telemetry=real_exporter,
+        backlog=8,
         retries=0,
-        shutdown_timeout_s=10.0,
+        shutdown_timeout_s=20.0,
     )
-    store = capture_store(tmp_path, uploads=uploads)
+    store = capture_store(tmp_path / "dir", uploads=uploads)
 
-    a_recording(store, "s1")
-    store.session_closed("s1")
+    a_recording(store, "target")
+    store.session_closed("target")
+    # Inside `_send`, so the trace is already resolved and the reference
+    # has not been written yet.
+    assert held.wait(10.0), "the upload never reached the far side"
+    evicted(real_exporter, "target")
+
+    release.set()
     await drained(uploads)
 
-    assert len(traced.referenced) == 1
-    session, references = traced.referenced[0]
-    assert session == "s1"
-    assert sorted(references) == ["capture_audio", "capture_manifest"]
+    assert "unreferenced" not in reasons(caplog), (
+        "the bytes landed and nothing was left to point at them"
+    )
+    assert [str(fields_of(record)["session"]) for record in uploads_said(caplog)] == [
+        "target"
+    ]
