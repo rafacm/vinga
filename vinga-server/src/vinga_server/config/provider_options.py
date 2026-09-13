@@ -469,24 +469,28 @@ class OpenaiAsrOptions(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # The current transcription family, and the reason to reach for this
-    # type at all: both gpt-4o models transcribe more accurately than
-    # `whisper-1`, which is the same Whisper V2 an operator could run
-    # locally. `mini` is the cheaper and faster of the pair, and the
-    # difference between them is small on the short utterances a voice
-    # assistant hears.
+    # OpenAI's current transcription model, and the one of the three that
+    # says which language it heard. The gpt-4o pair it replaced as the
+    # default reports none ever and `whisper-1` reports one only in a
+    # format this provider does not ask for, so on any of those the
+    # `heard` event and the conversation record carry no language at all,
+    # which is what an operator gives up by pinning one. It is also
+    # billed by duration rather than by audio token, which is the unit
+    # the `asr` span already reports, and published at $0.0045 per
+    # minute of audio (read 2026-09-13).
     #
     # Declared here and nowhere else. The builder used to keep a
     # `DEFAULT_MODEL` constant and read the option through it, and two
     # statements of one default is the version of that bug where the
     # stale one looks authoritative.
     model: StrictStr = Field(
-        default="gpt-4o-mini-transcribe",
+        default="gpt-transcribe",
         description=(
-            "The transcription model, in OpenAI's own vocabulary. gpt-4o-transcribe "
-            "is the larger sibling of the default and holds up better on the "
-            "noisiest input; whisper-1 is the same Whisper V2 as the local engine, "
-            "at roughly twice the latency of the gpt-4o pair."
+            "The transcription model, in OpenAI's own vocabulary. The default is "
+            "the one that reports which language it heard; gpt-4o-transcribe and "
+            "gpt-4o-mini-transcribe report none, and whisper-1 is the same Whisper "
+            "V2 as the local engine, at roughly twice the latency. A self-hosted "
+            "endpoint serves its own names and should be told one here."
         ),
     )
     # `https://api.openai.com/v1`, which is `openai_endpoint`'s own

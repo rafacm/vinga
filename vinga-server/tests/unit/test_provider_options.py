@@ -949,7 +949,7 @@ def test_the_openai_asr_defaults_are_the_ones_the_builder_had() -> None:
     where it lives now."""
     options = openai_asr()
 
-    assert options.model == "gpt-4o-mini-transcribe"
+    assert options.model == "gpt-transcribe"
     assert options.base_url == "https://api.openai.com/v1"
     assert options.language is None
     assert options.prompt is None
