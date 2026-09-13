@@ -332,10 +332,17 @@ class OpenAiAsr(AsrProvider):
             # where an absent measurement would be a fact about the
             # engine.
             return AsrResult(text="", submitted_ms=0)
-        # A configured language always beats the hint, as elsewhere. The
-        # hint can only be a lock some provider asked for, and this one
-        # never does, so in practice it is the configured language or
-        # nothing.
+        # A configured language always beats the hint, as elsewhere, and
+        # the hint is reachable here rather than theoretical even though
+        # this provider never sets a lock of its own. The lock is
+        # session-scoped and deliberately survives an agent switch
+        # (`runtime/pipeline.py`, "the speaker does not change on an
+        # agent switch"), so a session whose first agent transcribes
+        # with `faster_whisper`, the type that does lock, carries that
+        # language into an agent using this one. Either way it is a
+        # language this request names, which is what decides whether the
+        # code the model answers with is a report or an echo of what it
+        # was told: see `_request` below.
         pinned = self._language or language_hint
         # One deadline for the whole call, echo retry included. The
         # client's retries are off (MAX_RETRIES) precisely so timeout_s
