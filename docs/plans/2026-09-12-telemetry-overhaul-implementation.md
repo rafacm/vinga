@@ -618,17 +618,45 @@ with the observation JSON that shows it. What did not change is the
 conventions' attribute: it stays on both spans as the vinga-native
 spelling a backend that has never heard of this project can read.
 
-**The acceptance criterion, qualified as the plan settles it.** Against
-a backend with the documented definitions entered, the per-session
-per-stage cost query returns nonzero rows for `asr`, `llm` and
-`tts_stream`. The gate showed `llm` and `tts_stream` priced and the
-`asr` observation priced against a definition in the same shape.
+**The acceptance criterion, met, and qualified as the plan settles
+it.** Against a backend with the documented definitions entered, the
+per-session per-stage cost query returns nonzero rows for `asr`, `llm`
+and `tts_stream`. One session, every stage priced, each figure the
+arithmetic it should be:
 
-**Two things this milestone must not claim.** The four definitions in
-that project are the maintainer's, and two of them carried the wrong
-unit while this was written, as a direct consequence of the seconds
-finding above: correcting them is the maintainer's to do and is being
-asked for separately, so a reader of that project's settings may find
-them mid-correction. And no definition was created, updated or deleted
-by this milestone, in that project or any other: pricing is the
-operator's, which is the whole of what the plan decided here.
+```json
+{"name": "asr",        "usageDetails": {"input": 4019},
+                       "costDetails": {"input": 0.0004019}}
+{"name": "llm",        "usageDetails": {"input": 1462, "output": 13},
+                       "costDetails": {"total": 0.0002271}}
+{"name": "llm",        "usageDetails": {"input": 1489, "output": 9},
+                       "costDetails": {"total": 0.00022875}}
+{"name": "tts_stream", "usageDetails": {"input": 27},
+                       "costDetails": {"input": 0.000405}}
+```
+
+4019 milliseconds at 1e-7 is 0.0004019, and 27 characters at 0.000015
+is 0.000405. The ear and the voice are priced from this project's own
+definitions; the generation stage is priced by the backend's managed
+one, which is the subsection above demonstrated rather than asserted.
+
+**How the wrong unit was corrected, which is worth recording.** Two
+definitions were entered before the gate proved the integer rule, in
+`SECONDS`, and the API refuses a second definition under an existing
+model NAME. It does not refuse a second definition under an existing
+match PATTERN, and a definition carries a `startDate`, which is the
+backend's own mechanism for a price that changes on a date. So the
+corrected one was added beside the superseded one under a display name
+of its own and a start date, and the gate above is what proves it takes
+precedence: the `asr` row is priced per millisecond and not per second.
+Nothing was deleted and nothing was overwritten, which also means the
+observations recorded under the old rate keep the cost they were
+ingested with, and that is the honest history rather than a number
+rewritten after the fact.
+
+**What this milestone did not do.** It created no definition and it
+deleted none: the four in that project are the maintainer's, entered by
+hand outside this branch, and pricing stays the operator's, which is
+the whole of what the plan decided here. A deployment that enters none
+of them sees usage and no cost, which the README says where an operator
+will look.
