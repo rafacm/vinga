@@ -342,6 +342,153 @@ async def test_a_local_endpoint_needs_no_key(monkeypatch: pytest.MonkeyPatch) ->
     assert isinstance(built, OpenAiAsr)
 
 
+# --- the refusals, word for word -------------------------------------
+#
+# Every way this type's factory can refuse an entry, pinned as the whole
+# sentence rather than as a fragment of one. The conversion to a
+# declared options model (#88) moves several of these from hand-built
+# sentences in the builder to the shared validation rendering, and a
+# `match=` against a few words cannot show which ones moved or what they
+# became. So the pins are exact and they are all here together: what a
+# reader compares across that change is one table before and the same
+# table after.
+#
+# The label in front of every one of them is the entry's own, which is
+# what makes a bad option a five-second fix, and it is the half that
+# does not move.
+
+ENTRY = "providers.asr.ears"
+
+# A variable this deployment does not have, for the one refusal that is
+# about the environment rather than about the options.
+UNSET_VARIABLE = "VINGA_OPENAI_ASR_PIN_UNSET"
+
+REFUSED: list[tuple[str, dict[str, object], str]] = [
+    (
+        "no api_key_env at all",
+        {},
+        f'{ENTRY}: type "openai" needs an API key when it speaks to api.openai.com; '
+        f'name the environment variable holding it with "api_key_env"',
+    ),
+    (
+        "api_key_env naming nothing",
+        {"api_key_env": UNSET_VARIABLE},
+        f"{ENTRY}: api_key_env references an unset environment variable",
+    ),
+    (
+        "an option this type does not have",
+        {"api_key_env": "OPENAI_KEY", "beam_size": 1},
+        f"{ENTRY}: unknown option(s): beam_size",
+    ),
+    (
+        "a number where a string belongs",
+        {"api_key_env": "OPENAI_KEY", "language": 5},
+        f'{ENTRY}: option "language" must be a string',
+    ),
+    (
+        "a string where a number belongs",
+        {"api_key_env": "OPENAI_KEY", "timeout_s": "soon"},
+        f'{ENTRY}: option "timeout_s" must be a number',
+    ),
+    (
+        "a temperature outside the API's range, on OpenAI",
+        {"api_key_env": "OPENAI_KEY", "temperature": 2.0},
+        f'{ENTRY}: option "temperature" must be between 0.0 and 1.0',
+    ),
+    (
+        "a base_url that is not a URL",
+        {"api_key_env": "OPENAI_KEY", "base_url": "not-a-url"},
+        f'{ENTRY}: option "base_url" must be a URL with a scheme and a host, '
+        f'such as "https://api.openai.com/v1"',
+    ),
+    (
+        "a null where a string with a default belongs",
+        {"api_key_env": "OPENAI_KEY", "model": None},
+        f"{ENTRY}: the openai provider would not build (AssertionError). What it "
+        f"said is not repeated here, because a library failing to start can quote "
+        f"the endpoint or the credential this entry names; check this entry's "
+        f"options and the service it points at",
+    ),
+]
+
+
+@pytest.fixture
+def environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The environment every refusal below is judged against: one
+    variable holding a key, and one name nothing holds."""
+    monkeypatch.setenv("OPENAI_KEY", "secret")
+    monkeypatch.delenv(UNSET_VARIABLE, raising=False)
+
+
+@pytest.mark.parametrize(
+    ("options", "sentence"),
+    [(options, sentence) for _, options, sentence in REFUSED],
+    ids=[name for name, _, _ in REFUSED],
+)
+@pytest.mark.usefixtures("environment")
+async def test_a_refused_entry_says_exactly_this(
+    options: dict[str, object], sentence: str
+) -> None:
+    with pytest.raises(ProviderError) as caught:
+        await build_asr(type="openai", **options)
+
+    assert str(caught.value) == sentence
+
+
+ACCEPTED: list[tuple[str, dict[str, object]]] = [
+    # Nothing but the key, which is the entry an operator writes first.
+    ("nothing but a key", {"api_key_env": "OPENAI_KEY"}),
+    # The spellings of absence this type's reader took, one per option
+    # that has one. A deployment that wrote one of these has an entry
+    # that builds today, so it is the compatibility surface the
+    # conversion has to leave alone.
+    ("a blank model", {"api_key_env": "OPENAI_KEY", "model": ""}),
+    ("a blank language", {"api_key_env": "OPENAI_KEY", "language": ""}),
+    ("a null language", {"api_key_env": "OPENAI_KEY", "language": None}),
+    ("a blank prompt", {"api_key_env": "OPENAI_KEY", "prompt": ""}),
+    ("a null prompt", {"api_key_env": "OPENAI_KEY", "prompt": None}),
+    ("a null temperature", {"api_key_env": "OPENAI_KEY", "temperature": None}),
+    # And the two knobs written as integers where the reader answered a
+    # float, which is how an operator writes a whole number.
+    ("a whole-number temperature", {"api_key_env": "OPENAI_KEY", "temperature": 1}),
+    ("a whole-number timeout", {"api_key_env": "OPENAI_KEY", "timeout_s": 7}),
+    # The range is OpenAI's, so a compatible endpoint keeps its own.
+    (
+        "a temperature outside OpenAI's range, off OpenAI",
+        {"base_url": "http://localhost:8000/v1", "temperature": 2.0, "reach": "host"},
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "options",
+    [options for _, options in ACCEPTED],
+    ids=[name for name, _ in ACCEPTED],
+)
+@pytest.mark.usefixtures("environment")
+async def test_an_entry_written_this_way_builds(options: dict[str, object]) -> None:
+    """The other half of the pin, and the half a refusal table cannot
+    carry: what a deployment may have written and must go on being able
+    to write."""
+    assert isinstance(await build_asr(type="openai", **options), OpenAiAsr)
+
+
+@pytest.mark.usefixtures("environment")
+async def test_a_refused_option_carries_nothing_of_what_was_written() -> None:
+    """The no-leak lens on this factory's own refusals.
+
+    A rejected option is exactly where a pasted credential lands, so the
+    value is looked for in the sentence, in the repr, and through every
+    cause and context a renderer could walk. Planted as a value rather
+    than as a key, because an unknown key is deliberately named back:
+    there is no closed set to list instead, so a refusal naming nothing
+    would leave an operator with a typo they cannot see."""
+    with pytest.raises(ProviderError) as caught:
+        await build_asr(type="openai", api_key_env="OPENAI_KEY", temperature=SENTINEL)
+
+    assert SENTINEL not in f"{caught.value!r}{chain(caught.value)}"
+
+
 # --- the request -----------------------------------------------------
 
 
