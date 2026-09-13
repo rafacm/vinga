@@ -861,6 +861,16 @@ the review's word.
    split, since `languages` is the one option this type gained here
    rather than inherited.
 
+   It also moved a committed document, which is worth recording because
+   nothing about a P3 wording fix suggests it would. The OpenAPI
+   component carries a declared model's CLASS docstring in full, so
+   editing that docstring makes `docs/reference/api-openapi.json`
+   stale; the domain reference and the CLI page render only its first
+   line and did not move. Regenerated in the commit this note ships in.
+   The rule that
+   generalizes: on a type that declares options, any prose in the
+   module reaches a diffed document, not only a field description.
+
 **The file-wide anchor check, and what it found.** The review's second
 finding invited a sweep rather than a point fix, and the sweep found
 one more. This module declares three patterns and matches two of them:
