@@ -188,6 +188,22 @@ here except what one field says.
   plan owns is the refusal of the combination the API itself calls
   invalid, which is the one that is a fact about the request rather
   than about a model.
+- **Precedence is stated, because the validator cannot see the runtime
+  hint.** The mutual-exclusion rule is a fact about one written entry,
+  and `language_hint` arrives per call from the session. Today
+  `pinned = self._language or language_hint`, so an entry with
+  `languages` set would put `language` in the same request whenever a
+  hint existed, which is exactly the combination the endpoint refuses.
+  The order is: a configured `language` wins; then a configured
+  `languages`, and while it is set the session hint is not sent at all,
+  as either spelling; then the session hint, as `language`, which is
+  what happens today. The hint is a suggestion a provider may ignore,
+  which the stage contract already says, and an entry that has
+  described its household is a better description than a lock another
+  engine set. The path is reachable rather than theoretical: the lock
+  is session-scoped and survives an agent switch on purpose, so an
+  agent transcribing with `faster_whisper` can hand a session over to
+  one using this type.
 - **The echo retry resends `languages` unchanged.** It is the same
   clip being heard again under the same description; withholding the
   prompt is the point of that retry, and withholding the language
