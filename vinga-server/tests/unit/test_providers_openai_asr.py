@@ -1148,6 +1148,29 @@ async def test_a_language_this_request_named_is_never_reported_back(
     assert "language" not in heard_payload(asr, result)
 
 
+async def test_a_blank_language_names_nothing_and_suppresses_nothing() -> None:
+    """`language: ""` is a spelling this type has always accepted, and
+    it puts no field on the wire: the request names no language, so what
+    comes back is a detection like any other.
+
+    The claim under it is that the suppression is read off the value the
+    request sent rather than off the configured one. Those are two
+    structures that have to agree, and this is the case where a rule
+    written over the configuration instead would disagree with the
+    request it is about.
+    """
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"text": "Hej hej", "languages": [{"code": "de"}]})
+
+    result = await provider(handler, language="").transcribe(ONE_SECOND, 16000)
+
+    assert form_field(seen[0], "language") is None
+    assert result.language == "de"
+
+
 async def test_a_clip_with_no_speech_in_it_reports_no_language() -> None:
     """An empty list is the endpoint's own spelling of "I heard no
     language", answered on silence and on laughter, and it maps onto the
