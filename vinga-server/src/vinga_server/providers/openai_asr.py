@@ -50,10 +50,10 @@ language, and reporting it regardless would put an entry's own
 configuration into a metric under the name of a measurement. That is
 the rule the pipeline already states where it builds the `heard` event,
 "a mock or a pinned language adds no noise to the record", and this is
-the first type for which it has teeth. Read what does arrive in
-aggregate rather than as a verdict per turn: given candidates to choose
-between, the model chose wrongly on a one-word clip in the same
-measurements.
+the first type for which it has teeth. What arrives is a signal in
+aggregate rather than a verdict per turn: the code says what the model
+decided, not what was said, and the clip this work started from, a
+spoken German "Hallo", was transcribed `Hello.` and reported `en`.
 
 No model reports a confidence, so `language_confidence` stays empty,
 and a code is asked of `LanguageTag` before it travels, because

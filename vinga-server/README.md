@@ -189,9 +189,12 @@ the better of the two but neither was perfect:
 | "Vad heter din vingasassistent?" | "Vad hette ditt vingasassistent?" | "Men hejter den vingaassistenten." |
 
 What the local engine still wins: it is the only one that keeps the
-audio on your host, and it is the only one that reports which language
-it heard. It is also free per utterance, which a busy household
-notices.
+audio on your host, the only one that says how sure it was of the
+language it heard, and the only one that can hold a session to that
+language. It is also free per utterance, which a busy household
+notices. Which language it heard is no longer one of them: the cloud
+type reports that too, on a model that answers it and where nothing
+named a language. The section below says when that is.
 
 ### OpenAI transcription
 
@@ -275,12 +278,25 @@ the local engine would have forced the wrong language and produced
 nonsense. So a wrong value is fairly harmless, and it is leaving it
 *empty* that costs you.
 
-**No language is reported back.** `AsrResult`'s language fields stay
-empty, so the `heard` log line carries no `language`, and there is no
-`language_detect` option. The API returns a language only for
-`whisper-1` asked for a format the other models do not support, as an
-English name rather than an ISO code, and never a confidence. An empty
-field beats a guess, and nothing is lost: the local engine's
+**The language it heard is reported back, where the model answers one
+and you named none.** `gpt-transcribe` answers a code on every
+transcription, so the `heard` log line carries `language`, the
+conversation record keeps it, and an operator can finally see a
+household's language being misheard instead of inferring it from odd
+replies. The `gpt-4o` models answer no language at all and `whisper-1`
+answers only in a format this server does not ask for, so with either
+of those the field stays empty as it always did.
+
+Setting `language` above, or a session handing one over from another
+engine, suppresses the report: told a single language, the model hands
+that code straight back rather than saying what it heard, and echoing
+a configured value into a metric would read as a measurement of the
+room. Read what does arrive as a rate to watch rather than a verdict on
+one turn, since it says what the model decided rather than what was
+said: a spoken German "Hallo" came back as "Hello." and reported as
+English, which is the mishearing this reporting exists to make
+visible. There is still no confidence, because no model reports one,
+and no `language_detect` option: the local engine's
 `language_detect: once` exists to skip a detection pass that costs
 seconds of CPU, and here detection is free.
 
