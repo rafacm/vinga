@@ -827,6 +827,12 @@ async def test_optional_fields_are_sent_only_when_configured() -> None:
     assert form_field(seen[0], "language") is None
     assert form_field(seen[0], "prompt") is None
     assert form_field(seen[0], "temperature") is None
+    # The plural is the one that has to be absent rather than empty:
+    # whisper-1 and gpt-4o-mini-transcribe answer 400 to the key itself,
+    # so an unset option that still put something on the wire would
+    # break every entry naming one of them.
+    assert form_fields(seen[0], "languages[]") == []
+    assert form_field(seen[0], "languages") is None
 
     configured = provider(handler, language="sv", prompt="vinga", temperature=0.2)
     await configured.transcribe(ONE_SECOND, 16000)
