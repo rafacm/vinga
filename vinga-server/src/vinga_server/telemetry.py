@@ -1996,7 +1996,7 @@ class Telemetry:
         """
         return context.trace if isinstance(context, _Pinned) else None
 
-    def turn_context(self, context: Any, utterance: str) -> Any | None:
+    def turn_context(self, context: Any, utterance: str | None) -> Any | None:
         """The pinned context of one turn under a pinned session, or
         None where that turn is not among the ones kept.
 
@@ -2008,16 +2008,25 @@ class Telemetry:
 
         None is the honest answer for a session that ran more turns than
         `RETAINED_TURNS`, for an utterance this exporter never opened a
-        turn for, and for anything that is not a pinned context at all.
-        A caller that gets one reports its artifact unattached rather
-        than filing it against the session, because an artifact under
-        the wrong observation is worse than one that says it could not
-        be filed.
+        turn for, for anything that is not a pinned context at all, and
+        for no utterance at all. A caller that gets one reports its
+        artifact unattached rather than filing it against the session,
+        because an artifact under the wrong observation is worse than
+        one that says it could not be filed.
+
+        That last case is why `utterance` is optional rather than
+        required. A turn recorded before this correlation existed has
+        `null` in its stored column, and a signature that refused it
+        would make every consumer narrow the type first and then ask,
+        which is two branches reaching one outcome. Taking it here means
+        a reader of a stored row has one no-target path however the
+        target came to be missing, which is the claim the column's own
+        documentation makes.
 
         Safe to call from any thread: it reads a frozen record the
         caller already holds.
         """
-        if not isinstance(context, _Exported):
+        if utterance is None or not isinstance(context, _Exported):
             return None
         with self._retained_lock:
             return context.turns.get(utterance)

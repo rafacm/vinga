@@ -949,12 +949,14 @@ is straight-line logic one run is the honest proof and more is noise.
   `changelog.d/502-capture-pin.md` (### Fixed): what changes for an
   operator is that an admitted capture job stops reporting `no_trace`
   under eviction pressure, which is whether a recording appears on its
-  trace. The stored column needs a second fragment (### Changed)
-  carrying the compatibility flag: the turn table gains a column and no
-  existing installation is carried across it, which is the stance this
-  change was authorized under and is inert for a deployment that starts
-  fresh. The declared event field regenerates the events reference
-  through its generator.
+  trace. The stored column needs a second fragment (### Added): the
+  turn table gains a column, the event and the turn span gain the
+  field, and an `/api` turn read gains it too, all of which are
+  additions rather than changes of behavior. It carries the
+  compatibility note in its own text, which is that an existing
+  database upgrades and keeps its rows while the pre-upgrade ones
+  cannot name a trace. The declared event field regenerates the events
+  reference through its generator.
 - **M4b**: `docs/reference/server-config.md` through its generator,
   both example configs, the observability map's Retention and access
   paragraph in each of the three exporting surfaces' sections, and

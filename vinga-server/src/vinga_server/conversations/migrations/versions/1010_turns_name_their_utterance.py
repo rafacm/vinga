@@ -24,10 +24,14 @@ which covers a turn recorded before this column existed, a store
 driven by a suite that mints no utterances, and the turn a session
 installs at its first activation before anything has been heard.
 
-No existing installation is carried across this change; the changelog
-says so. That is what keeps the column simple rather than growing a
-"row older than the correlation" branch in every reader that joins on
-it.
+An existing database upgrades and keeps every row. What the recorded
+compatibility stance licenses is the absence of a backfill, not a
+refusal to boot: a pre-upgrade row reads null here and cannot name a
+trace, which is the same "no target" answer the correlation already
+gives for a context that has aged out of the exporter's retention.
+`Telemetry.turn_context` takes the null as readily as a key it has
+never seen, so a reader that joins on this column has one no-target
+path rather than a legacy branch beside it.
 
 The comment is spelled out below rather than imported from
 `conversations.schema`, for the reason 1003, 1004, 1006 and 1007 give:

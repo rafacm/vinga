@@ -764,7 +764,12 @@ utterance.
   three reasons. A null here is not a new state for a reader: it is the
   same "no target" the correlation already answers with for a context
   that has aged out of the retention, and it is handled by the same one
-  path, so there is no branch to inherit. Non-null would force every
+  path, so there is no branch to inherit. The re-review was right that
+  this last part was a claim and not yet a fact, because
+  `turn_context` took `str` and a consumer would have had to narrow the
+  type before it could ask. It now takes `str | None`, so the claim is
+  true of the code rather than of the prose around it: one call, one
+  no-target answer, however the target came to be missing. Non-null would force every
   store-driving suite and every double to mint telemetry-adjacent ids
   for rows that have no utterance, which weakens exactly the
   content-and-telemetry separation that made this design preferable to
