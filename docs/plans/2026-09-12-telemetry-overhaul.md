@@ -898,15 +898,16 @@ is straight-line logic one run is the honest proof and more is noise.
   reporting `no_trace` under eviction pressure, which is whether a
   recording appears on its trace.
 - **M4b**: `docs/reference/server-config.md` through its generator,
-  both example configs, the observability map's retention-and-access
-  columns for the three exporting surfaces, and
+  both example configs, the observability map's Retention and access
+  paragraph in each of the three exporting surfaces' sections, and
   `vinga-server/README.md` where the boundary's refusals are
   described. Fragment `changelog.d/502-collector-reach.md`
   (### Added).
 - **M5**: `docs/reference/server-config.md` through its generator,
-  both example configs, the observability map (a ninth surface row and
-  the class table), the ADR's class note cited rather than restated.
-  Fragment `changelog.d/502-export-llm-input.md` (### Added).
+  both example configs, the observability map (a ninth surface: its
+  index row and its own section, plus the class table), the ADR's
+  class note cited rather than restated. Fragment
+  `changelog.d/502-export-llm-input.md` (### Added).
 
 Every milestone that edits, moves or adds a document runs
 `tests/unit/test_command_spellings.py` before its PR and regenerates
@@ -1277,3 +1278,24 @@ anything new. One finding; verdict **ready after the amendment**.
    names `_Exported` as the source the three post-close writers read,
    and says explicitly that M4a changes how that record is addressed
    rather than what it carries, so M2 stands alone.
+
+## Amendment, 2026-09-13: the observability map's shape
+
+`docs/architecture/observability-surfaces.md` was reshaped after M3
+merged and before M4a began: the eight-surfaces table, whose five
+paragraph-columns made the conversation-store row a single
+3199-character line, became a four-column index plus one section per
+surface, each carrying the same four facts as labelled paragraphs. No
+word of it changed and both linked anchors are unchanged.
+
+Two lines of the documentation footprint above are amended to match,
+and nothing else in this plan is affected: M4b writes into each
+exporting surface's Retention and access paragraph rather than into a
+column, and M5 adds a ninth surface as an index row plus its own
+section rather than as a table row. The class table in the export
+ladder, which M5 also amends, kept its shape.
+
+The reshape was done at this point deliberately. Nothing for M4a, M4b
+or M5 existed in any branch or worktree, so there was nothing in flight
+to conflict with, and the four milestones and issues still to amend
+this page get a diff a reviewer can read.
