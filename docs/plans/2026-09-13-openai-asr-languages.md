@@ -139,17 +139,40 @@ no longer accept". So the declaration tightens a gate that today lets
 these rows through, and a refusal there is a `StorageError` at boot,
 for an entry no conversation need ever have used.
 
-Unknown keys are the smaller half: `OptionsReader.finish()` already
-refuses those when the provider is built, so such a row cannot boot
-today either, and what changes is which error it gets and how early.
-The real surface is the spellings of absence the reader accepts that a
-strict model would not, which is why `FasterWhisperOptions` carries an
-explicit `_blank_reads_as_unwritten` validator for its own five. M1
-therefore enumerates the current reader's behaviour option by option,
-by reading `OptionsReader` rather than by assuming, preserves every
-spelling that boots today, proves it with a stored-row upgrade test
-that writes the legacy forms and boots them, and carries a changelog
-compatibility note for anything deliberately not preserved.
+**Correction, from M1's own PR review round (#512, finding 1).** This
+paragraph said, before the correction below it: "Unknown keys are the
+smaller half: `OptionsReader.finish()` already refuses those when the
+provider is built, so such a row cannot boot today either, and what
+changes is which error it gets and how early." That is false, and it
+made the blast radius look smaller than it is. `finish()` runs inside a
+factory, and a factory runs only for an entry some agent references:
+`providers/world.py::build_world` walks `config.agents` and resolves
+each one's four stages, so a provider row no agent names is never
+constructed and `finish()` never sees it. Confirmed by running it
+against this branch with the declaration removed: an unreferenced
+`openai` ASR row holding an unknown key, a null `timeout_s` and a
+number under `language` loaded without complaint.
+
+So the correct statement is wider. Before the declaration, an
+unreferenced row could hold anything; after it, EVERY stored `openai`
+ASR row is validated on read, so any row the model refuses becomes a
+`StorageError` at boot, referenced or not. Unknown keys are not the
+smaller half, they are the half nothing checked at all.
+
+That does not change what M1 does, which is the reason the correction
+is recorded here rather than acted on: the work was always to enumerate
+the current reader's behaviour option by option, by reading
+`OptionsReader` rather than by assuming, to preserve every spelling
+that boots today, to prove it with a stored-row upgrade test that
+writes the legacy forms and boots them, and to carry a changelog
+compatibility note for anything deliberately not preserved. What the
+correction changes is the scope of that note and of the refusal test
+beside it, which the review asked for and M1 now carries: every
+model-invalid legacy row, not two nulls. The spellings of absence the
+reader accepted remain the surface worth preserving, which is why
+`FasterWhisperOptions` carries an explicit `_blank_reads_as_unwritten`
+validator for its own five, and why this type turned out to need
+none.
 
 **How does a cross-field refusal name both fields without quoting
 what was written?** Through `FieldProblemsError`, which
