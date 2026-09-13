@@ -1007,7 +1007,7 @@ the manifest with its own generator when stale.
   cost query returns nonzero rows for `asr`, `llm` and `tts_stream`.
   Design footprint: one declared field through the catalog's own
   machinery, two table entries.
-- [ ] **M4a: post-close retention and pinning**. Turn-level trace
+- [x] **[M4a: post-close retention and pinning](2026-09-12-telemetry-overhaul-implementation.md#m4a-post-close-retention-and-pinning)** (PR #516). Turn-level trace
   context captured at each turn's open into its session's retained
   entry, under the per-session `RETAINED_TURNS` cap settled above;
   `trace_of` and `reference_media` re-addressed from a session id to
