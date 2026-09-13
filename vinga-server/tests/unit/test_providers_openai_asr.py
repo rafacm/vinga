@@ -224,9 +224,9 @@ def downstream(asr: OpenAiAsr, result: AsrResult) -> tuple[Tap, TurnRecord | Non
     refusal reported, so what a malformed value costs is that event and
     not the reply. The record is the `TurnRecord` the store writes field
     for field (`conversations/store.py` maps `language` straight into a
-    nullable `Text` column), and nothing on that path checks a value at
-    all: a code the event would decline is a code the record would
-    keep.
+    nullable `Text` column, and the `/api` turn model publishes it as a
+    bare `str | None`), and nothing on that path checks a value at all:
+    a code the event would decline is a code the record would keep.
     """
     events = SessionEvents(SESSION, clock=lambda: 1.0)
     consumer = Tap()
