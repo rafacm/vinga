@@ -479,7 +479,8 @@ transcription of a real conversation.
   compatibility note that a deployment which never set `model` changes
   model, and that a self-hosted compatible endpoint should set `model`
   explicitly if it has not.
-- [ ] **M4: the `languages` option.** The list on the model, mutually
+- [x] **[M4: the `languages` option](2026-09-13-openai-asr-languages-implementation.md#m4-the-languages-option)**
+  (PR TBD). The list on the model, mutually
   exclusive with `language` through a model validator raising
   `FieldProblemsError`, sent through `extra_body` when set, and
   honoured by the report rule from M2. Design footprint: the

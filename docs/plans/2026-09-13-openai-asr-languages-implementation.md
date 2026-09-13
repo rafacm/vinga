@@ -586,3 +586,219 @@ wire case reported `gpt-4o-mini-transcribe` where `gpt-transcribe` was
 asserted, and the defaults case failed on the same string. The entry
 naming `whisper-1` passed at that point too, which is the evidence that
 the override case is not carried by the default.
+
+## M4: the `languages` option
+
+The plural lands on the options model, mutually exclusive with
+`language` through a model validator, sent through `extra_body` when
+set, and honoured by the report rule M2 built.
+
+### What landed
+
+| Piece | Where |
+| --- | --- |
+| The field, its contract, and the syntax it restates | `vinga-server/src/vinga_server/config/provider_options.py`: `languages` on `OpenaiAsrOptions`, `_as_languages`, the `Languages` annotation with the schema that publishes the same rule, `LANGUAGE_PATTERN` and `LANGUAGE_MAX_LENGTH` |
+| The cross-field refusal, beside the fields it is about | the same module: `_one_language_or_a_set_of_them`, raising `FieldProblemsError` with one problem per field |
+| The list on the wire, and the precedence the model cannot see | `vinga-server/src/vinga_server/providers/openai_asr.py`: `extra_body` in `_request`, `pinned` in `transcribe`, `languages` threaded through `_retry_without_prompt` |
+| The report rule extended rather than rewritten | the same module: `named` and `single` in `_request` |
+| The repeated-part reader and what it reads | `vinga-server/tests/unit/test_providers_openai_asr.py`: `form_fields`, the wire case, the hint case across both requests, the pin-or-choice pair, the syntax pin, the unset case added to `test_optional_fields_are_sent_only_when_configured`, four new refusal rows and two new accepted ones |
+| The contract, row by row | `vinga-server/tests/unit/test_provider_options.py`: twelve `OPENAI_ASR_PARITY` rows and the defaults case |
+| The write gate, which is where the issue's refusal lives | `vinga-server/tests/unit/test_config_store.py`: `test_an_openai_asr_entry_that_misdescribes_its_language_is_refused_at_the_write`, four cases |
+| The three generated references | `docs/reference/domain-config.md`, `docs/reference/api-openapi.json`, `docs/reference/cli.md`, each through its own generator |
+| The maintained pages | `vinga-server/examples/asr-openai.yaml`: the when-to-reach-for-which prose and the report paragraph; `vinga-server/README.md`: the options table row, the three cases, and the report paragraph |
+| The changelog fragment | `changelog.d/500-asr-languages-option.md`, one entry under Added |
+
+### Deviations from the plan
+
+One, and it is about the example fragment rather than about the
+option.
+
+The plan's documentation footprint says the fragment "gains the
+paragraph on when to reach for which spelling". It does, and what it
+does NOT gain is a commented `# languages:` key beside the other five,
+which is what a reader of that footprint would expect and what every
+other documented option of this type has.
+
+It cannot have one. `test_every_documented_option_of_a_typed_type_installs`
+uncomments every documented key in a typed type's fragment and installs
+the result, and this fragment ships `language: sv` live, a decision M3
+made deliberately and recorded. A commented plural under that live
+singular would uncomment into exactly the entry this milestone teaches
+the type to refuse, so the fragment would fail its own suite. Either
+the singular goes quiet, which would undo M3's recorded reasoning and
+the device session behind it, or the plural is documented in prose. The
+prose was chosen, and the fragment says why in the file rather than
+leaving a reader to wonder where the line went.
+
+### Resolutions the plan left to this milestone
+
+**Where the language syntax lives, and how it gets here.** The plan
+says the codes match "the same syntax `LanguageTag` enforces", and
+`LanguageTag` cannot be imported at the address the contract lives at.
+`events/values.py` imports `config.models` and `memory/scopes.py`, and
+the set of modules `config.cli` may load is an exact inventory in
+`test_cli_import_weight.py` whose own comment says widening it is "a
+review event with a name". The events catalog is deliberately outside
+it. So the pattern and the length bound are restated in
+`provider_options.py`, exactly as `base_url`'s default and the timeout
+are, and `test_the_language_syntax_the_model_restates_is_the_one_that_ships`
+holds the restatement against `LANGUAGE` from the side that may import
+both. It asserts the equality and then the claim in its own terms: for
+seven codes, what the option accepts is what the value type holds,
+including `not-a-language`, which both accept and which is the whole
+of why this is a shape and not a membership test.
+
+**What "both are set" means, and why it is not what suppression
+means.** The two questions look alike and are answered differently, on
+purpose. Suppression is a fact about one REQUEST, so M2 reads the value
+that went on the wire, and `language: ""` names nothing and suppresses
+nothing. The exclusion is a fact about one written ENTRY, which is what
+the validator can see, so it reads the key: `language: ""` beside a
+`languages` list is refused, because two options written on one entry
+is one of them too many whatever either holds, and the remedy is the
+same line either way. The docstring on the validator says both halves,
+so the difference reads as a decision rather than as an inconsistency.
+
+**What the refusal says, given where it is located.** A model-level
+validator's error is located at the model, so `validation_problems`
+renders its lines with no field name in front of them. Two problems
+carrying one repeated sentence would therefore read as the same
+sentence twice with nothing to tell them apart. So each sentence names
+its own field: the first carries the rule and the second carries the
+guidance the issue asks for, which model wants which form. The pointers
+are `/language` and `/languages`, which is what a form acts on and what
+the store case asserts.
+
+**Where the contract refusals are pinned.** At all three surfaces that
+consult `checked_options`, because each says something the others
+cannot. `test_provider_options.py` carries the value rules as parity
+rows, which is where every other type's are. The refusal table in
+`test_providers_openai_asr.py` carries the exact sentences, which is
+what that table promises for every way this factory can refuse an
+entry. And `test_config_store.py` carries the write gate, which is the
+refusal the issue actually asks for and the only one that can say the
+row was not persisted.
+
+### Discoveries
+
+**A fragment cannot document two options that exclude each other, and
+M3 had already written one line that proved it.** The uncommenting scan
+reads a comment whose content is a `key:` line as a documented key, and
+the fragment carried `# language: sv on 2026-09-13 and transcribed it
+as German anyway, and`, a sentence M3 wrapped so that it began with the
+word `language` followed by a colon. It uncomments into a YAML key,
+and it survived only because the live `language: sv` further down the
+file won the duplicate. Harmless today and a trap with the second
+option in the file, so the line was rewrapped. The general lesson is
+the one the scan's own docstring states and this file now has two
+instances of: prose in these fragments must never begin a line with a
+lowercase word and a colon.
+
+**A mutation survived the first round, and the claim it survived was
+the order of the list.** The wire case was first written with
+`languages=["de", "en"]`, and a provider that sorted the list on the
+way out passed it: `["de", "en"]` is already sorted, so the assertion
+said nothing about order at all. The case now writes `["sv", "de"]`,
+and the sorting mutation fails it. Recorded rather than quietly fixed
+because it is the shape the plan warns about in a different place: a
+test that agrees with anything.
+
+**A credential-shaped VALUE does reach this type's model, where a
+credential-shaped KEY does not.** M1's round established the second
+half: `_check_no_inline_secrets` refuses a secret-shaped key on
+`ProviderConfig` before any type's own contract is consulted. A value
+is not refused there, so `languages: [<sentinel>]` reaches
+`_as_languages`, is refused by the syntax rule, and is the sharpest
+plant this milestone has: the rejected value IS the sentinel rather
+than a bystander field carrying one. The mutation that makes the rule
+quote the code it refused fails exactly that case.
+
+**`safe_location` descends into a list's items, so a bad element is
+addressed by position.** `languages: ["sv", 5]` is refused at
+`languages.1`, not at `languages`. That is the walk doing what it
+documents, a position descends into a list's item type, and it is worth
+recording because the position is a number this repository may print
+where a mapping key would not be.
+
+**The failure mode the three review rounds share turned up again, in
+this milestone's own first draft.** Both pages first said that a set
+"keeps most of what pinning buys", which no measurement supports: what
+exists is one clip, the issue's own, transcribed as "Hello." unhinted
+and as "Hallo." with `[de, en]` set. A one-clip result stated as a
+general property of the option is the same sentence the rounds caught
+three times, and the fix is the one they taught: name the clip, say it
+is a clip and not a table, and separate it from what is certain, which
+is that the report stays on. Recorded rather than quietly corrected
+because the useful fact is that the reflex survives knowing about it.
+
+**The fragment's own prose caught the key-line trap a second time, in
+a line this milestone wrote.** A sentence wrapped so that it began
+`from: spoken German "Hallo" ...` failed
+`test_every_documented_option_of_a_typed_type_installs` the moment it
+was written, which is the same shape as M3's `language:` line above
+and the reason that one is worth fixing rather than leaving. The check
+is cheap and worth running by hand on any edit to a typed type's
+fragment: read every comment line, strip the marker, and look for a
+lowercase word followed by a colon.
+
+**The CLI reference still renders one sentence, and that decided the
+description's order.** M3 discovered the trim; this milestone had to
+spend it. The fact an operator cannot afford to miss about this option
+is which model accepts it, since sending it to one that does not is a
+400 on the first real transcription rather than a refusal at the write.
+So the model constraint is inside the first sentence rather than in the
+second, and the CLI page carries it.
+
+### Verification
+
+Run from `vinga-server/` with `PYTHONDONTWRITEBYTECODE=1` outside
+pytest. `uv run ruff check .` clean; `uv run mypy` clean; the unit lane
+serially green (7310 passed, 19 skipped, up from M3's 7283); the
+integration lane green (341 passed); `scripts/check_doc_links.py` clean (241 files) and
+`scripts/fold_changelog.py check` clean (2 fragments); the
+command-spellings census unchanged by the documentation edits.
+
+The drift checks the server workflow runs, each with the workflow's
+own recipe: the domain reference, the server reference, the
+conversations schema, the metrics views, the event reference, the
+OpenAPI document, the CLI page through its marker-preserving rebuild,
+and the recipes inside it against their own renderer. Three moved and
+are committed; the rest are unchanged, which is the expected answer for
+pages that render no provider option.
+
+The distributed lane (`-n auto --dist loadfile`) was not run. It fails
+on this machine for a reason unrelated to any change, recorded in M1's
+verification: Postgres drops connections under the worker count and
+every failure is `psycopg.OperationalError`. Not chased and not
+claimed.
+
+Every claim was watched failing first, against twelve mutations of the
+merged implementation:
+
+| Mutation | What broke |
+| --- | --- |
+| The list comma-joined into one field | the wire case and the hint case |
+| The list sorted on the way out | the wire case and the hint case, after the order claim was made able to see it |
+| The precedence step dropped (`self._language or language_hint`) | the hint case |
+| The retry composing its own call without the list | the hint case, on its second request |
+| `single` reading only the singular | the one-element pin |
+| Any list suppressing, whatever its length | the two-element choice |
+| The cross-field rule removed | the refusal table's row and the store's first case |
+| The non-empty and each-written-once rules removed | two refusal rows, two store cases and two parity rows |
+| The syntax check removed | one refusal row, the syntax pin, one store case and three parity rows |
+| The refusal quoting the code it refused | the store's sentinel case |
+| Both problems located at one field | the store's pointer assertion |
+| The guidance dropped from the sentence | the store's guidance assertion |
+| The key sent whatever the option holds | the unset case |
+
+### The milestone checklist, and what is left
+
+All four milestones are ticked, which makes this the last section this
+plan needs. Nothing in it is left dangling: the eleven plan-review
+findings were each assigned to a milestone and each is resolved in the
+one that owns it, findings 2, 6 and 7 being this one's; the three
+generated references were regenerated by every milestone that moved
+them; and the one documentation surface the plan deliberately does not
+touch, `docs/features/2026-08-06-openai-asr.md`, is still deliberately
+untouched, because `docs/README.md` puts `features/` under dated
+execution records that are not rewritten when the code moves on.
