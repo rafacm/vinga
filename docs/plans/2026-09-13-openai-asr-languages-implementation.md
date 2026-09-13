@@ -791,6 +791,109 @@ merged implementation:
 | The guidance dropped from the sentence | the store's guidance assertion |
 | The key sent whatever the option holds | the unset case |
 
+The review round below added two more claims and both were watched
+failing first: a code carrying a terminal newline, and each explicit-null
+spelling of the two language keys written together.
+
+### PR review round, PR #515
+
+External review: codex CLI 0.154.0, model gpt-5.6-sol, read-only
+sandbox, 2026-09-13, runtime 13m38s, reviewing main...fa7061e6. Verdict
+as received: **mergeable after the listed fixes**. Three findings, two
+P2 and one P3, all adopted, each fixed in a commit of its own, and each
+of the two P2s reproduced before it was touched rather than accepted on
+the review's word.
+
+1. **P2: the new validator accepts a code `LanguageTag` rejects.**
+   `_as_languages` read a `$`-anchored pattern with `re.match`, and
+   Python's `$` also matches immediately before a terminal newline
+   where `\Z` does not, so `languages: ["en\n"]` passed here and
+   `LanguageTag("en\n")` raised. Reproduced exactly: the model accepted
+   it, the value type refused it, `fullmatch` refused it. Only the
+   single terminal newline diverged; `"en\r"`, `"en\n\n"` and
+   `"en\nx"` were refused by both.
+
+   *Resolution.* Adopted in `93197fe1`, with `fullmatch`. The anchors
+   stay in the constant because it is also published as a JSON Schema
+   pattern, which is unanchored and whose ECMA-262 `$` does mean end of
+   input, so after the fix the document and the validator say the same
+   thing where before the document was the stricter of the two.
+
+   The interesting half is why the equivalence case missed it. It ran
+   seven ordinary codes, and two spellings of one rule agree on every
+   ordinary value and part company on a boundary, so the claim was
+   true of everything it asked and false of the thing it was for. It
+   now leads with the whitespace edges, and the parity table carries
+   the terminal newline as a row of its own.
+
+2. **P2: an explicit null bypassed the exclusivity rule.** The
+   validator compared resolved values against None, so
+   `{"language": null, "languages": [...]}` and
+   `{"language": "sv", "languages": null}` both passed the write gate.
+   Reproduced through the store as well as the model, which is what
+   makes it a defect rather than a curiosity: `_to_row` dumps with
+   `exclude_unset` and deliberately does not use `exclude_none`, and
+   both rows came back holding both keys.
+
+   The defect is the inconsistency more than either case, and the
+   review says so. This validator's own docstring said the rule reads
+   the written key "whatever either holds", and on that reading
+   `language: ""` beside a list was refused while `language: null`
+   beside one was not, though both are keys an operator wrote and
+   neither puts a language on the wire.
+
+   *Resolution.* Adopted in `8d508945`, resolved in the direction the
+   docstring already claimed, by reading `model_fields_set`. That is
+   this repository's own answer to which keys a caller wrote and the
+   same distinction the store round trip preserves, so the model and
+   the row now agree about what an entry says. The matrix afterwards:
+   both keys written is refused in every spelling (filled, blank, null,
+   and both null); either key alone is accepted in every spelling. The
+   three null permutations are new write-gate cases and the
+   blank-beside-a-list case sits with them although it already passed,
+   so the pair that was inconsistent is pinned together.
+
+3. **P3: the class docstring still counted six knobs.**
+
+   *Resolution.* Adopted in `8cf46e3d`, and not as a bare substitution:
+   the sentence tied the count to what the `OptionsReader` ladder had,
+   and the ladder had six. The count is seven and the provenance is
+   split, since `languages` is the one option this type gained here
+   rather than inherited.
+
+**The file-wide anchor check, and what it found.** The review's second
+finding invited a sweep rather than a point fix, and the sweep found
+one more. This module declares three patterns and matches two of them:
+`NONBLANK_PATTERN` is published in schemas only, since its validator is
+`value.strip()`, so it has no matcher to get wrong; `LANGUAGE_PATTERN`
+is finding 2; and `PCM_FORMAT_PATTERN` had the identical defect and
+predates this milestone. `output_format: "pcm_16000\n"` was accepted
+and forwarded to the vendor with the newline in it. Fixed the same way
+in `b659e03a`, with a boundary row and a `Fixed` changelog entry, since
+an `/api` caller or an explicitly quoted YAML scalar can write one.
+
+That one is worth separating from the restate decision rather than
+filed under it. `PCM_FORMAT_PATTERN` has no second home, so nothing was
+diverging from anything: the `match`-versus-`fullmatch` mistake is its
+own hazard, and restating a pattern only decides how expensive the
+mistake is when it happens.
+
+**On whether the restate decision is still the right one.** It is, and
+this round is evidence for it rather than against it, though not
+comfortably. The hazard it carries is real and it fired: two spellings
+of one rule can agree on every value anybody thinks to try. What makes
+it survivable is that the guard is the equivalence case, and the fix is
+to write that case the way this kind of claim has to be written, from
+the boundaries inward. The alternative is importing `events.values`
+here, which widens the exact module inventory in
+`test_cli_import_weight.py` whose whole purpose is that widening it is
+a review event with a name, and which would buy one regular expression.
+The decision stands with a stronger guard, and the comment above the
+constant now names the hazard so the next hand meets it before the
+next reviewer does. It remains reversible, and the honest summary is
+that it costs a boundary-first test and a comment to keep safe, which
+is a price worth naming rather than one worth hiding.
+
 ### The milestone checklist, and what is left
 
 All four milestones are ticked, which makes this the last section this
