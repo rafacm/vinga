@@ -233,7 +233,7 @@ anything that is not exactly one syntactically valid code.
 | The suppression, derived from the value the request sent | the same module: `single` is computed once, put on the wire as `language`, and read back to decide whether a reported code is evidence |
 | The normalization, asked of the type the code becomes | the same module: `_reported_language` and `_code_of`, answering None for every malformed shape |
 | The module docstring's language paragraph, replaced by what the provider now does | the same module's docstring |
-| The pins that say the new behaviour | `vinga-server/tests/unit/test_providers_openai_asr.py`: the filled case, the three suppressed cases, the empty list, the eight malformed shapes through event assembly, the retry's provenance and the discarding outcomes |
+| The pins that say the new behaviour | `vinga-server/tests/unit/test_providers_openai_asr.py`: the filled case, the three suppressed cases, the blank that suppresses nothing, the empty list, the eight malformed shapes through event assembly, the retry's provenance and the discarding outcomes |
 | The two README claims this falsifies | `vinga-server/README.md`: the local engine's remaining wins, and the paragraph that said no language is reported |
 | The example fragment's closing paragraph | `vinga-server/examples/asr-openai.yaml` |
 | The changelog fragment | `changelog.d/500-asr-language-report.md`, one entry under Added |
@@ -257,14 +257,22 @@ changes what is claimed:
 ### Resolutions the plan left to this milestone
 
 **What "was told a single language" means, in terms the request can
-answer.** The plan states the rule over what was sent rather than over
+answer.** The plan states the rule over what was SENT rather than over
 what was configured, and that distinction has teeth here: a blank
-`language` is a spelling M1 preserved, and `language=pinned if pinned
-else Omit()` puts no field on the wire for it. So the suppression is
-read off the value the request actually carried, computed once as
-`single` and used twice, rather than from `self._language` beside it.
-An entry with `language: ""` therefore gets the report, which is
-correct, because the model was told nothing.
+`language` is a spelling M1 preserved, and the request has always put
+no field on the wire for it. So the suppression is read off the value
+the request actually carried, computed once as `single` and used twice,
+rather than off `self._language` beside it. An entry with
+`language: ""` therefore gets the report, which is correct, because the
+model was told nothing.
+
+The two spellings happen to coincide today, since
+`pinned = self._language or language_hint` already collapses a blank to
+None, and that is exactly why the case is pinned rather than left to
+the reading: `test_a_blank_language_names_nothing_and_suppresses_nothing`
+asserts both halves at once, that no `language` part is sent and that
+the report survives, and a suppression written over the configuration
+(`self._language is not None`) fails it along with the hinted case.
 
 **Where the syntax check lives.** In the provider, and asked of
 `LanguageTag` itself rather than of a pattern restated here.
@@ -330,3 +338,4 @@ merged implementation:
 | Report unconditionally (the suppression removed) | all three suppressed cases |
 | The naive read (`reported[0]["code"]`) | all seven malformed shapes that carry a key, and the empty list; the empty and the overlong code as `EventValueError: a language matches the language syntax`, raised out of event assembly, which is the turn this normalization exists to save |
 | The language kept beside the text across the retry | the provenance case and both discarding ones |
+| The suppression written over the configuration (`self._language is not None`) | the blank-language case and the hinted one |
