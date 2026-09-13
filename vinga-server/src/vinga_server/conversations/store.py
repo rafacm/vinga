@@ -1881,6 +1881,14 @@ class ConversationStore:
             "conversation": record.conversation,
             "t_ms": item.t_ms,
             "agent": agent,
+            # Ungated, unlike the measurements below it. `telemetry` here
+            # is whether this store keeps a turn's timings, and `text`
+            # whether it keeps what was said; this is neither. It is the
+            # server-minted name the trace knows the turn by, and gating
+            # it on the timings would break the correlation for a
+            # deployment that stopped storing durations while still
+            # exporting traces, which are two unrelated decisions.
+            "utterance": record.utterance,
             "heard": record.heard if self.text else None,
             "heard_duration_s": record.heard_duration_s if self.telemetry else None,
             "language": record.language,

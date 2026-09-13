@@ -6028,6 +6028,18 @@
             "title": "Agent",
             "description": "The agent that owns this turn, which is the one it started with and therefore the one whose thread it is on. A handover makes it different from the session's and from the agent that finished the reply; the legs below are where a split reply comes apart."
           },
+          "utterance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Utterance",
+            "description": "The utterance this turn answers, by its uuid hex, as the server minted it when the turn opened. The name a trace knows the turn by: one turn span is exported per utterance, so this is what joins a row here to the trace it went out under. A handover records two turns and both carry this same value, since both answer one utterance. Null for a row recorded before the correlation existed."
+          },
           "heard": {
             "anyOf": [
               {
@@ -6213,6 +6225,7 @@
           "conversation",
           "t_ms",
           "agent",
+          "utterance",
           "heard",
           "heard_duration_s",
           "language",
@@ -7854,6 +7867,18 @@
             "title": "Agent",
             "description": "The agent that owns this turn, which is the one it started with and therefore the one whose thread it is on. A handover makes it different from the session's and from the agent that finished the reply; the legs below are where a split reply comes apart."
           },
+          "utterance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Utterance",
+            "description": "The utterance this turn answers, by its uuid hex, as the server minted it when the turn opened. The name a trace knows the turn by: one turn span is exported per utterance, so this is what joins a row here to the trace it went out under. A handover records two turns and both carry this same value, since both answer one utterance. Null for a row recorded before the correlation existed."
+          },
           "heard": {
             "anyOf": [
               {
@@ -8034,6 +8059,7 @@
           "conversation",
           "t_ms",
           "agent",
+          "utterance",
           "heard",
           "heard_duration_s",
           "language",

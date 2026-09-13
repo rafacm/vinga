@@ -230,6 +230,19 @@ CONVERSATION_ID = Syntax(
     "bytes whoever chose it.",
 )
 
+UTTERANCE_ID = Syntax(
+    "utterance_id",
+    r"[0-9A-Za-z_-]{1,64}",
+    64,
+    "A token this server minted for one utterance, which is one turn as "
+    "the device edge sees it: what the user said and the reply it was "
+    "answered with. Production ids are `uuid4().hex`, the same bounded "
+    "machine form a session and a conversation id take. It names the "
+    "utterance rather than the turn because a handover records two turns "
+    "on two threads for one of these, and what is true of both rows is "
+    "that they answer the same utterance.",
+)
+
 EVENT_NAME = Syntax(
     "event_name",
     r"[a-z][a-z0-9_]{0,63}",
@@ -641,6 +654,29 @@ class ConversationId(MachineId):
     """
 
     SYNTAX: ClassVar[Syntax | None] = CONVERSATION_ID
+
+
+@dataclass(frozen=True)
+class UtteranceId(MachineId):
+    """The id this server minted for one utterance: what the user said
+    and the reply it was answered with, which is one turn as the device
+    edge and the trace both see it.
+
+    Its own type rather than a reuse of `ConversationId`, for the reason
+    that one is not a `SessionId`: the three identify different entities
+    and the vocabulary split exists so a record cannot quietly name one
+    under another's type. A trusted server-minted identifier and
+    therefore metadata; what was said during the utterance is content
+    and lives in the store.
+
+    It is the name the two sides of a turn share. The exporter opens one
+    turn span per utterance and retains that span's context under this
+    id; the store writes one row per turn and conversation, so a
+    handover writes two rows and both carry this same id. That is the
+    join, and it is many-to-one by construction rather than by accident.
+    """
+
+    SYNTAX: ClassVar[Syntax | None] = UTTERANCE_ID
 
 
 @dataclass(frozen=True)
@@ -1865,5 +1901,6 @@ __all__ = [
     "TranscriptExportFailure",
     "UNIDENTIFIED_DEVICE",
     "UnnamedToolSource",
+    "UtteranceId",
     "Whole",
 ]

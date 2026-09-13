@@ -97,6 +97,7 @@ from vinga_server.events.values import (
     PromptSources,
     Real,
     ReplyOutcome,
+    UtteranceId,
     Whole,
 )
 from vinga_server.filler import FallbackClip, FillerClips
@@ -737,6 +738,12 @@ class PipelineRuntime:
         # boundary is decided at the activation seam and the id has to
         # exist before the first turn it stamps.
         self._conversations: dict[str, str] = {}
+        # The utterance the turn being assembled answers, minted at
+        # `start_reply` and read by `_fresh_turn`. None until the first
+        # one: the turn installed at the activation below belongs to no
+        # utterance yet, and records nothing because nothing was heard
+        # on it.
+        self._utterance: str | None = None
         # The turn being assembled, replaced at the start of every reply
         # and read once at the end of it. Always present rather than
         # optional: the reply path writes into it from half a dozen
@@ -991,14 +998,19 @@ class PipelineRuntime:
         after it reads the snapshot, which is what keeps a handover turn
         on the thread it started on rather than the one it ended on.
 
-        Both halves are asserted rather than defaulted: an agent is
-        activated before this runtime can be asked for anything, and the
-        thread is minted in that same activation, so a turn beginning
-        without either is a defect here and not a row for the store to
-        make sense of.
+        Both halves of the pair are asserted rather than defaulted: an
+        agent is activated before this runtime can be asked for anything,
+        and the thread is minted in that same activation, so a turn
+        beginning without either is a defect here and not a row for the
+        store to make sense of.
+
+        The utterance beside them is not asserted, because the turn
+        installed at that first activation precedes every utterance.
+        That turn records nothing, since `record` answers None where
+        nothing was heard, so the absence never reaches a row.
         """
         assert self._conversation is not None and self._agent is not None
-        return TurnUnderway(self._conversation, self._agent)
+        return TurnUnderway(self._conversation, self._agent, self._utterance)
 
     def _seeded_turn(self) -> TurnUnderway:
         """The first turn of the thread a reply has just moved onto.
@@ -3150,10 +3162,18 @@ class PipelineRuntime:
         # line runs, while a body that cleared its own latch would clear
         # it whenever the loop got round to starting the task.
         self._outcome = None
+        # Minted here because here is where the turn begins, and read by
+        # `_fresh_turn` below rather than passed down: the reply task is
+        # created after this emit, so the id has to be somewhere the turn
+        # it opens can find it. It outlives a handover on purpose, which
+        # is what makes the two rows a moved reply records say they
+        # answer one utterance.
+        self._utterance = uuid.uuid4().hex
         self._events.emit(
             lambda: TurnStarted(
                 agent=Identifier(self._agent),
                 conversation=ConversationId(self._conversation),
+                utterance=UtteranceId(self._utterance),
                 speech_ms=Whole(utterance.speech_ms),
                 barge_in=Flag(utterance.barge_in),
             ),

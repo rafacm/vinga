@@ -674,6 +674,7 @@ session %s: answering %d ms of speech
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `agent` | `IDENTIFIER` | yes | no |  |  |
 | `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
+| `utterance` | `ID` | yes | no | the `utterance_id` syntax | The id this turn is addressed by after it is over, minted here because here is where the turn begins. The exporter retains this turn's trace context under it and the store writes it on every row the turn produces, which is what lets a reader that has only a row find the trace the turn went out under. A handover writes two rows carrying this one id, since both answer the same utterance. |
 | `speech_ms` | `INT` | yes | no |  | How much of what was fed the endpointer classified as speech. |
 | `barge_in` | `BOOL` | yes | no |  | Whether this turn interrupted a reply in flight, which is true for a confirmed barge-in, a mid-ASR merge and a manual stop that cut one short. |
 

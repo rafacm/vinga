@@ -125,6 +125,7 @@ from vinga_server.events.values import (
     ToolSource,
     TranscriptExportFailure,
     UnnamedToolSource,
+    UtteranceId,
     Whole,
 )
 
@@ -1312,6 +1313,17 @@ class TurnStarted(Variant):
             "activation that stamped the agent. A server-minted id and "
             "therefore metadata; what was said on the thread is the "
             "store's."
+        )
+    )
+    utterance: UtteranceId = value(
+        note=(
+            "The id this turn is addressed by after it is over, minted "
+            "here because here is where the turn begins. The exporter "
+            "retains this turn's trace context under it and the store "
+            "writes it on every row the turn produces, which is what "
+            "lets a reader that has only a row find the trace the turn "
+            "went out under. A handover writes two rows carrying this "
+            "one id, since both answer the same utterance."
         )
     )
     speech_ms: Whole = value(
