@@ -1137,12 +1137,30 @@ PENDING_PROMPTS = 64
 # construction means no live session's context is evicted by concurrent
 # opens and the after-close window keeps the depth it always had.
 #
-# It narrows the capture uploader's own exposure incidentally and is
-# claimed to do no more: a capture job does not pin a context and
-# resolves `trace_of` later on its own worker, so a blocked capture
-# worker under `max_sessions > 64` can still find older contexts gone.
-# Closing that is the capture uploader's follow-up.
+# It narrows the capture uploader's own exposure incidentally, and since
+# M4a that exposure is closed rather than narrowed: a capture job pins
+# its context at admission and carries it to its worker, so how long the
+# worker takes no longer decides whether the context is still there.
 RETAINED_TRACES = 64
+
+# How many of one session's turn contexts are kept for a reader that
+# comes after the close, oldest dropped first.
+#
+# A per-session bound and deliberately NOT derived from `max_sessions`:
+# that number bounds how many sessions talk at once and says nothing
+# about how many turns any one of them takes, so a single long session
+# would otherwise grow this map without limit. Total exposure is the
+# session bound times this one, and what is retained per turn is two
+# identifiers rather than a span, so it can be generous without being
+# unbounded.
+#
+# A session past the cap loses its oldest turns' targets. The issue that
+# wanted one says so with the closed reason it already has for a missing
+# trace, per artifact: an artifact with no target is reported, never
+# attached to the session trace as a consolation, because a clip filed
+# under the wrong observation is worse than one that says it could not
+# be filed.
+RETAINED_TURNS = 256
 
 
 def build_telemetry(
@@ -1536,7 +1554,7 @@ def _priceable(spoken: dict[str, Any], name: str) -> dict[str, Any]:
     }
 
 
-def _named(exported: "_Exported") -> dict[str, Any]:
+def _named(pinned: "_Pinned") -> dict[str, Any]:
     """The board's name for a span written after its session closed, or
     nothing at all.
 
@@ -1546,8 +1564,12 @@ def _named(exported: "_Exported") -> dict[str, Any]:
     copies of one absence rule, and the rule is exactly the one
     `_attributes` keeps for a live span, that an unnamed board
     contributes no attribute rather than a null.
+
+    Takes any pinned context, a turn's as readily as its session's: the
+    name is a fact about the board the session ran on, and a turn under
+    it was spoken on the same board.
     """
-    return {} if exported.name is None else {DEVICE_NAME: exported.name}
+    return {} if pinned.name is None else {DEVICE_NAME: pinned.name}
 
 
 def _before(end: int, ms: Any) -> int:
@@ -1673,7 +1695,46 @@ class Delivery(Enum):
 
 
 @dataclass(frozen=True)
-class _Exported:
+class _Pinned:
+    """One span a writer that runs after the close may need to reach:
+    which trace it went out under, which span it was, and what the board
+    was called at the time.
+
+    The unit of addressing on this surface. A session has one and, since
+    M4a, so does every turn under it, because a turn span is a root
+    trace of its own linked to the session rather than a child inside
+    it, so the session's own context does not address it.
+
+    The spelled id is what `trace_of` answers and what a backend's API
+    takes back. The two numbers are what a LATER span in that same trace
+    has to be given, which is the whole reason this is a record rather
+    than the string it used to be: a reference written after the session
+    closed is a child of the span it names, and a child needs its
+    parent's identity rather than a rendering of half of it.
+
+    And the board's name as `session_open` carried it, or nothing,
+    because the writers that run after the close build their attributes
+    by hand and have no live session to read an identity from. Here
+    rather than looked up when one of them writes, for the same reason
+    the trace id is here: what a post-close span says is a fact about
+    the session that ran, and a board renamed since would otherwise
+    rename a conversation that is already over.
+    """
+
+    trace: str
+    trace_id: int
+    span_id: int
+    # The session these spans belong to. Here so that a holder of one of
+    # these needs nothing else to write a span that says where it
+    # belongs: the whole point of addressing by a pinned context is that
+    # the caller stops carrying a session id beside it and stops being
+    # able to pair the wrong two.
+    session: str
+    name: str | None = None
+
+
+@dataclass(frozen=True)
+class _Exported(_Pinned):
     """Which trace a session's spans went out under, and which span was
     its root.
 
@@ -1684,19 +1745,17 @@ class _Exported:
     closed is a child of the session span, and a child needs its parent's
     identity rather than a rendering of half of it.
 
-    And the board's name as `session_open` carried it, or nothing,
-    because the three writers that run after the close build their
-    attributes by hand and have no live session to read an identity
-    from. Here rather than looked up when one of them writes, for the
-    same reason the trace id is here: what a post-close span says is a
-    fact about the session that ran, and a board renamed since would
-    otherwise rename a conversation that is already over.
+    A session's own `_Pinned`, and the turns under it by the utterance
+    each one answered. The turns live HERE rather than in a map of their
+    own, which is what makes the retention question answerable at all: a
+    turn-keyed map would need its own eviction policy and would age out
+    under exactly the pressure the session bound was built to survive.
+    One pin at the close therefore carries the session and every turn
+    it holds, and a caller that pinned cannot lose a turn to a later
+    session's open.
     """
 
-    trace: str
-    trace_id: int
-    span_id: int
-    name: str | None = None
+    turns: dict[str, _Pinned] = field(default_factory=dict)
 
 
 class Telemetry:
@@ -1887,9 +1946,9 @@ class Telemetry:
         """
         return _Tap(self._server_event)
 
-    def trace_of(self, session: str) -> str | None:
-        """The trace one session's spans were exported under, or None
-        where this exporter never saw that session.
+    def trace_of(self, context: Any) -> str | None:
+        """The trace the spans of a pinned context were exported under,
+        or None where nothing was pinned.
 
         The whole of the correlation surface, and deliberately one
         method: what a reader outside this module may know about the
@@ -1902,20 +1961,55 @@ class Telemetry:
         reader wants to name the trace beside (the capture's WAV and its
         manifest) are only final after that close, so an id that lived
         as long as the span would never be readable at the moment it is
-        wanted. The retention is bounded (`RETAINED_TRACES`) and oldest
-        first, so the answer for a session long gone is None, which is a
-        reader's cue that the correlation cannot be established rather
-        than an invitation to invent one.
+        wanted.
 
-        Safe to call from any thread.
+        It takes the pinned context rather than a session id, and that
+        addressing is the whole of M4a: a caller that pinned at
+        admission holds an answer decided at the moment it pinned, so
+        how long its own worker then took cannot turn a healthy export
+        into `no_trace`. The session-keyed spelling is gone rather than
+        left beside this one, so there is one way to address a trace
+        after its session closed and no way to accidentally ask a
+        question whose answer depends on when it was asked.
+
+        None where nothing was pinned, which is a reader's cue that the
+        correlation cannot be established rather than an invitation to
+        invent one.
+
+        Safe to call from any thread: it reads a frozen record the
+        caller already holds.
         """
-        with self._retained_lock:
-            exported = self._retained.get(session)
-        return None if exported is None else exported.trace
+        return context.trace if isinstance(context, _Pinned) else None
 
-    def reference_media(self, session: str, references: dict[str, str]) -> bool:
-        """Put backend-minted media references on the trace this session
-        was exported under, and answer whether it was done.
+    def turn_context(self, context: Any, utterance: str) -> Any | None:
+        """The pinned context of one turn under a pinned session, or
+        None where that turn is not among the ones kept.
+
+        The turn-level half of the same addressing, and the reason a
+        session's pin carries its turns rather than being a second map:
+        a caller pins once at the close and can then reach the session
+        and any turn it held, with no second window to age out between
+        the two reads.
+
+        None is the honest answer for a session that ran more turns than
+        `RETAINED_TURNS`, for an utterance this exporter never opened a
+        turn for, and for anything that is not a pinned context at all.
+        A caller that gets one reports its artifact unattached rather
+        than filing it against the session, because an artifact under
+        the wrong observation is worse than one that says it could not
+        be filed.
+
+        Safe to call from any thread: it reads a frozen record the
+        caller already holds.
+        """
+        if not isinstance(context, _Exported):
+            return None
+        with self._retained_lock:
+            return context.turns.get(utterance)
+
+    def reference_media(self, context: Any, references: dict[str, str]) -> bool:
+        """Put backend-minted media references on the trace a pinned
+        context was exported under, and answer whether it was done.
 
         The second half of an attachment, and the half that makes it
         playable. Uploading a recording associates it with a trace; what
@@ -1933,10 +2027,12 @@ class Telemetry:
         queue every other span goes into, and a saturated exporter drops
         it rather than delaying anything.
 
-        False where nothing could be written: a session this exporter
-        never saw, one whose id has aged out of the retention, or an
-        exporter that has stopped accepting because the server is
-        shutting down. What a caller does with a False is say so, because
+        False where nothing could be written: anything that is not a
+        pinned context, or an exporter that has stopped accepting
+        because the server is shutting down. Aging out is no longer
+        among the reasons, which is the point of taking the context: a
+        caller that pinned at admission holds its target whatever has
+        happened to the retention since. What a caller does with a False is say so, because
         a recording that is stored and cannot be found is the gap the
         attachment exists to close.
 
@@ -1945,18 +2041,14 @@ class Telemetry:
         span map not at all and the retention under its lock, and the
         SDK's tracer and batch processor are themselves thread-safe.
         """
-        if not self._accepting:
-            return False
-        with self._retained_lock:
-            exported = self._retained.get(session)
-        if exported is None:
+        if not self._accepting or not isinstance(context, _Pinned):
             return False
         span = self._tracer.start_span(
             CAPTURE_SPAN,
-            context=self._continuing(exported),
+            context=self._continuing(context),
             attributes={
-                **dict.fromkeys(SESSION_ID_NAMES, session),
-                **_named(exported),
+                **dict.fromkeys(SESSION_ID_NAMES, context.session),
+                **_named(context),
                 **{
                     f"{OBSERVATION_METADATA_PREFIX}{name}": token
                     for name, token in references.items()
@@ -2115,20 +2207,24 @@ class Telemetry:
             return Delivery.DELIVERED
         return Delivery.UNDELIVERED
 
-    def _continuing(self, exported: _Exported) -> Any:
+    def _continuing(self, pinned: _Pinned) -> Any:
         """The context a span written after a session closed belongs in.
 
         Every span of that trace has ended, so what continues it is the
-        session span's identity rather than a span this process still
+        pinned span's identity rather than a span this process still
         holds. One home for it because two writers need it now, the
         media reference and the upload outcomes, and a second spelling
         of a parentage is a second trace waiting to happen.
+
+        A turn's pin continues that turn's own trace, which is what an
+        artifact belonging to one turn rather than to the whole session
+        is written into.
         """
         return self._within(
             self._orphan(
                 self._identity(
-                    trace_id=exported.trace_id,
-                    span_id=exported.span_id,
+                    trace_id=pinned.trace_id,
+                    span_id=pinned.span_id,
                     is_remote=True,
                     trace_flags=self._sampled,
                 )
@@ -2522,6 +2618,7 @@ class Telemetry:
                 trace=self._spelled(context.trace_id),
                 trace_id=context.trace_id,
                 span_id=context.span_id,
+                session=session,
                 name=name if isinstance(name, str) else None,
             )
             while len(self._retained) > self._retention:
@@ -2596,6 +2693,44 @@ class Telemetry:
             # instant the event was said.
             start_time=self._at(emission),
         )
+        self._pin_turn(session, emission.payload.get("utterance"), trace.turn)
+
+    def _pin_turn(self, session: str, utterance: Any, span: Any) -> None:
+        """Keep this turn's context where a post-close reader can reach
+        it, under the utterance it answers.
+
+        At the turn's OPEN, beside the session's own pin and for the
+        same reason, and deliberately not at its close: a turn that a
+        barge-in or a failure ended early still ran an ASR stage whose
+        clip an artifact issue wants, and a turn pinned only when it
+        ended cleanly would be missing exactly where the interesting
+        cases are.
+
+        The utterance is what the two sides share. The exporter opens
+        one turn span per utterance and the store writes one row per turn
+        and conversation, so a reply that hands over is two rows against
+        this one span; both rows carry this key and both resolve here,
+        which is the many-to-one the join is FOR. A turn whose event
+        carried no utterance is not pinned at all rather than pinned
+        under a name nothing will ask for.
+        """
+        if not isinstance(utterance, str):
+            return
+        context = span.get_span_context()
+        with self._retained_lock:
+            exported = self._retained.get(session)
+            if exported is None:
+                return
+            exported.turns[utterance] = _Pinned(
+                trace=self._spelled(context.trace_id),
+                trace_id=context.trace_id,
+                span_id=context.span_id,
+                session=session,
+                name=exported.name,
+            )
+            while len(exported.turns) > RETAINED_TURNS:
+                # Oldest first, the hold's own rule one level down.
+                exported.turns.pop(next(iter(exported.turns)))
 
     def _close_turn(self, session: str, emission: Emission) -> None:
         trace = self._sessions.get(session)
