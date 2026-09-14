@@ -194,7 +194,7 @@ jobs:
         working-directory: .
         run: |
           set -eu
-          trap 'rm -f .env' EXIT
+          trap 'rm -f .env deploy/telemetry/.env' EXIT
 
           services=$(docker compose config --services | sort | tr '\n' ' ')
           [ "$services" = "postgres " ] || {
@@ -223,6 +223,48 @@ jobs:
             echo "::error::the server profile no longer resolves to both services: $services"
             exit 1
           }
+
+          # Both optional telemetry paths compose with that exact root
+          # stack. Their credential files are deliberately different:
+          # .env belongs to vinga, while deploy/telemetry/.env belongs
+          # only to the Collector.
+          printf '%s\n' \
+            'LANGFUSE_OTLP_ENDPOINT=http://langfuse.invalid/api/public/otel' \
+            'LANGFUSE_PUBLIC_KEY=pk-lf-not-real' \
+            'LANGFUSE_SECRET_KEY=sk-lf-not-real' \
+            > deploy/telemetry/.env
+          docker compose -f docker-compose.yml \
+            -f deploy/telemetry/docker-compose.jaeger.yml \
+            --profile server config --quiet
+          docker compose -f docker-compose.yml \
+            -f deploy/telemetry/docker-compose.fanout.yml \
+            --profile server config --quiet
+
+          # Inspect the fully resolved graph, since source YAML alone
+          # cannot prove which env_file values reach which service.
+          docker compose -f docker-compose.yml \
+            -f deploy/telemetry/docker-compose.fanout.yml \
+            --profile server config --format json \
+            | python3 -c 'import json,sys; graph=json.load(sys.stdin)["services"]; collector=graph["otel-collector"]["environment"]; vinga=graph["vinga"]["environment"]; expected={"LANGFUSE_OTLP_ENDPOINT","LANGFUSE_PUBLIC_KEY","LANGFUSE_SECRET_KEY"}; assert expected <= set(collector); assert not expected & set(vinga)'
+
+      # Schema validation by the binary that runs the file, not by a
+      # generic YAML reader. The image reference comes from the compose
+      # artifact so the test and deployment cannot silently use
+      # different Collector releases.
+      - name: The telemetry Collector configuration validates
+        working-directory: .
+        run: |
+          set -eu
+          image=$(awk '$1 == "image:" && $2 ~ /^otel\/opentelemetry-collector-contrib:/ {print $2}' deploy/telemetry/docker-compose.fanout.yml)
+          [ -n "$image" ]
+          docker run --rm \
+            -e LANGFUSE_PUBLIC_KEY=pk-lf-not-real \
+            -e LANGFUSE_SECRET_KEY=sk-lf-not-real \
+            -e LANGFUSE_OTLP_ENDPOINT=http://langfuse.invalid \
+            -e JAEGER_OTLP_ENDPOINT=http://jaeger.invalid \
+            -e TELEMETRY_SAMPLE_PERCENTAGE=100 \
+            -v "$PWD/deploy/telemetry/collector.yml:/etc/otelcol-contrib/config.yaml:ro" \
+            "$image" validate --config=/etc/otelcol-contrib/config.yaml
 
       # The production compose file, held to the promise its guards
       # make. It is a separate file from the trial one above and it
@@ -1363,6 +1405,10 @@ jobs:
 
       - name: Start the container
         run: |
+          docker run -d --name vinga-jaeger \
+            -p 16686:16686 \
+            --network "$SMOKE_NETWORK" \
+            jaegertracing/jaeger:2.20.0@sha256:46a886260e04002d8f45e213fc39063fa11a50446048fdaa64786fc0840cb9f8
           docker run -d --name vinga-smoke \
             -p 8003:8003 \
             --network "$SMOKE_NETWORK" \
@@ -1370,6 +1416,11 @@ jobs:
             -e VINGA_API_SECRET \
             -e VINGA_DB_HOST -e VINGA_DB_PORT -e VINGA_DB_USER -e VINGA_DB_PASSWORD \
             -e VINGA_DB_NAME=vinga_smoke \
+            -e OTEL_EXPORTER_OTLP_ENDPOINT=http://vinga-jaeger:4318 \
+            -e OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
+            -e OTEL_TRACES_SAMPLER=always_on \
+            -e VINGA_SERVER__TELEMETRY__ENABLED=true \
+            -e VINGA_SERVER__TELEMETRY__REACH=network \
             -v smoke-data:/data \
             -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
             vinga-server:ci-amd64
@@ -1413,13 +1464,33 @@ jobs:
             exit 1
           fi
 
+      # The pull-request gate uses the source tree. This non-PR image
+      # repetition proves both published variants carry the same direct
+      # OTLP/HTTP path through the pinned Jaeger v2 backend.
+      - name: Check the built image reached direct Jaeger
+        run: |
+          set -eu
+          url='http://127.0.0.1:16686/api/traces?service=vinga-server&lookback=1h&limit=20'
+          for _ in $(seq 60); do
+            if curl -fsS "$url" \
+                | python3 -c 'import json,sys; required={"session","turn","asr","llm","tts_stream","playback"}; traces=json.load(sys.stdin)["data"]; names={span["operationName"] for trace in traces for span in trace["spans"]}; raise SystemExit(0 if required <= names else 1)'; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::the built image topology did not reach Jaeger"
+          docker logs vinga-jaeger
+          exit 1
+
       - name: Container logs
         if: always()
         run: docker logs vinga-smoke || true
 
       - name: Remove the container
         if: always()
-        run: docker rm -f vinga-smoke || true
+        run: |
+          docker rm -f vinga-smoke || true
+          docker rm -f vinga-jaeger || true
 
       # And the database the three scenarios shared, with the network it
       # was on. `always()` because a job that failed part way still has
