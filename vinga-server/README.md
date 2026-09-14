@@ -2185,8 +2185,8 @@ how far this section's destinations lie, and there are three of them:
   reading it.
 
 One key covers all three and means the outermost of them, so the tracing,
-the transcript export and the recording upload are refused together
-rather than the one that would have been caught. That third bullet is
+the transcript export, the recording upload and the LLM input export are
+refused together rather than the one that would have been caught. That third bullet is
 what makes this an assertion and not a formality: a LAN collector and a
 LAN Langfuse are not enough to declare `network` unless that Langfuse's
 object storage stays on your network too, and if you cannot say where
