@@ -22,7 +22,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import get_default_environment, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
-from vinga_server.config import McpServerConfig
+from vinga_server.config import McpServerConfig, ResolvedValues
 from vinga_server.config.secrets import SecretStore, resolve_mcp_values
 from vinga_server.protocol.mcp import spoken_content
 
@@ -111,11 +111,18 @@ def quiet_sdk_loggers() -> None:
 
 def _resolve(
     name: str, config: McpServerConfig, secrets: SecretStore | None, group: str
-) -> dict[str, str]:
+) -> ResolvedValues:
     """This server's env or headers, as the process or the request
-    should see them. Called per connection, and the result is never
-    stored: the values it holds are the only plaintext secrets the
-    server ever materializes."""
+    should see them, and the secrets that went into them. Called per
+    connection, and the result is never stored: the values it holds are
+    the only plaintext secrets the server ever materializes.
+
+    Both halves travel together because a materialized value is not
+    always its own secret: a composed `Bearer $TOKEN` carries a token a
+    far side can hand back on its own, and the consumer that takes this
+    deployment's credentials out of a server's text needs the token as
+    well as the header (#504).
+    """
     values = config.env if group == "env" else config.headers
     return resolve_mcp_values(name, group, values, secrets)
 
@@ -148,7 +155,10 @@ async def _connect(
             args=list(config.args),
             # Merged rather than replaced: a spawned server still
             # needs a PATH and a HOME to find its own tools.
-            env={**get_default_environment(), **_resolve(name, config, secrets, "env")},
+            env={
+                **get_default_environment(),
+                **_resolve(name, config, secrets, "env").values,
+            },
         )
         # The child's stderr goes nowhere. The SDK's default hands it
         # this process's own stderr, which makes a spawned server's
@@ -181,7 +191,7 @@ async def _connect(
         # transport first and the client after it, in this one task.
         client = await stack.enter_async_context(
             httpx.AsyncClient(
-                headers=_resolve(name, config, secrets, "headers") or None,
+                headers=_resolve(name, config, secrets, "headers").values or None,
                 follow_redirects=True,
                 timeout=httpx.Timeout(30.0, read=300.0),
             )

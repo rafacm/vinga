@@ -100,10 +100,23 @@ _UNDECLARED_SECRET_KEY_FRAGMENTS = (*_SECRET_KEY_FRAGMENTS, "auth")
 # withdrawing `max_tokens` as a slot (#277) did not come back.
 _SECRET_KEY_EXEMPT_NAMES = ("max_tokens",)
 
-# An environment reference in an MCP server's env or headers: the whole
-# value is $NAME, which is resolved from the server's own environment at
-# boot. A value that must begin with a literal $ is not supported.
-_ENV_REFERENCE_RE = re.compile(r"^\$([A-Za-z_][A-Za-z0-9_]*)$")
+# An environment reference in an MCP server's env or headers: $NAME,
+# resolved from the server's own environment at boot. Unanchored, and
+# that is the whole of what makes a reference composable: it may be the
+# entire value, and it may sit inside a larger one, so
+# `Authorization: Bearer $TOKEN` sends the header the vendor asks for
+# without the word Bearer having to be stored inside the secret.
+#
+# Asked two ways rather than written twice. "Does this value contain a
+# reference" is `search`, which is the secret-bearing rule and the
+# display rule; "is this value nothing but a reference" is `fullmatch`,
+# which is `_env_reference` below. A second anchored pattern beside this
+# one would be two structures that must agree.
+#
+# A value that must carry a literal $ followed by a name is not
+# supported, and no escape is spelled: one has never been asked for, and
+# it would be a second syntax to document and to test.
+_ENV_REFERENCE_RE = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
 
 # What a key ending in _env may hold: the name of an environment
 # variable, and nothing else. The same shape as the reference above
@@ -2377,33 +2390,94 @@ class ProvidersConfig(BaseModel):
     )
 
 
+def references_environment(value: str) -> bool:
+    """Whether this value names an environment variable anywhere in it.
+
+    The one rule the write path and the display path both read. A
+    secret-bearing key's value must satisfy it, and a stored value that
+    satisfies it may be displayed, because what it holds is the name of
+    a variable rather than what the variable holds. Two readers of one
+    predicate rather than two patterns: a display that disagreed with a
+    write about the same value is how a mask became a keep marker over a
+    value shown in full (#277).
+    """
+    return _ENV_REFERENCE_RE.search(value) is not None
+
+
 def _env_reference(value: str) -> str | None:
-    """The variable name behind a `$VAR` value, or None for a literal."""
-    match = _ENV_REFERENCE_RE.match(value.strip())
+    """The variable name behind a value that is nothing but `$VAR`, or
+    None for a literal and for a value that composes a reference with
+    other text.
+
+    `fullmatch` over the stripped value, deliberately, and never
+    `match` with a `$` appended: that spelling accepts a terminal
+    newline and this one does not. The strip makes the difference moot
+    here, which is exactly why it is worth writing down: the next reader
+    of this pattern will not have the strip in view.
+    """
+    match = _ENV_REFERENCE_RE.fullmatch(value.strip())
     return match.group(1) if match else None
 
 
-def resolve_env_references(location: str, values: Mapping[str, str]) -> dict[str, str]:
-    """A `$VAR` mapping with its secrets read from the server's own
-    environment. Literal values for non-secret keys pass through. An
-    unset variable raises, naming where it was written, because at call
-    time it would fail every conversation that reaches the server.
+class ResolvedValues(NamedTuple):
+    """A group of values as the process or the request should see them,
+    and the secrets that went into them.
+
+    Two fields rather than one, because a materialized value is not
+    always its own secret: `Bearer $TOKEN` resolves to `Bearer <token>`,
+    and what a far side can hand back on its own is the token alone. A
+    consumer that has to take this deployment's credentials out of
+    somebody else's text needs both, and the secrets are collected here
+    because this is the only place they exist as themselves. Anywhere
+    further out they could only be recovered by reading the environment
+    a second time or by diffing strings, which is a second derivation of
+    a fact one function already holds.
+    """
+
+    values: dict[str, str]
+    secrets: frozenset[str]
+
+
+def resolve_env_values(location: str, values: Mapping[str, str]) -> ResolvedValues:
+    """A mapping with its `$VAR` references read from the server's own
+    environment, and the secrets that were put into it.
+
+    A value that is nothing but a reference resolves to the variable's
+    contents, its surrounding whitespace dropped, which is the oldest
+    behavior here and the one a padded reference is pinned on. Any other
+    value is scanned and every reference in it is substituted where it
+    stands, so `Bearer $TOKEN` composes rather than forcing the word
+    Bearer into the secret. A value holding no reference passes through
+    byte for byte.
+
+    An unset variable raises, naming where it was written, because at
+    call time it would fail every conversation that reaches the server.
 
     Kept out of the model so the parsed configuration never holds a
     secret: resolution happens at boot, where the value is used."""
     resolved: dict[str, str] = {}
-    for key, value in values.items():
-        name = _env_reference(value)
-        if name is None:
-            resolved[key] = value
-            continue
+    secrets: set[str] = set()
+
+    def read(key: str, name: str) -> str:
         secret = os.environ.get(name, "")
         if not secret:
             raise ValueError(
                 f"{location}.{key}: references ${name}, but it is not set in the environment"
             )
-        resolved[key] = secret
-    return resolved
+        secrets.add(secret)
+        return secret
+
+    for key, value in values.items():
+        whole = _env_reference(value)
+        if whole is not None:
+            resolved[key] = read(key, whole)
+            continue
+
+        def substitute(match: re.Match[str], key: str = key) -> str:
+            return read(key, match.group(1))
+
+        resolved[key] = _ENV_REFERENCE_RE.sub(substitute, value)
+    return ResolvedValues(resolved, frozenset(secrets))
 
 
 class McpServerConfig(BaseModel):
@@ -2444,10 +2518,12 @@ class McpServerConfig(BaseModel):
     env: dict[str, str] = Field(
         default_factory=dict,
         description=(
-            "Environment variables for the spawned stdio command. A value of $NAME "
-            "is read from the server's own environment at startup, and any "
-            "secret-bearing key (token, api_key, authorization, ...) must use that "
-            "form."
+            "Environment variables for the spawned stdio command. $NAME is read "
+            "from the server's own environment at startup, either as the whole "
+            "value or inside a larger one (`--token=$NAME`), and any "
+            "secret-bearing key (token, api_key, authorization, ...) must "
+            "reference a variable somewhere in its value. A literal $ followed by "
+            "a name cannot be written: there is no escape for it."
         ),
     )
 
@@ -2461,9 +2537,11 @@ class McpServerConfig(BaseModel):
     headers: dict[str, str] = Field(
         default_factory=dict,
         description=(
-            "Headers sent with every streamable_http request. A value of $NAME is "
-            "read from the server's own environment at startup, and any "
-            "secret-bearing key must use that form."
+            "Headers sent with every streamable_http request. $NAME is read from "
+            "the server's own environment at startup, either as the whole value or "
+            "inside a larger one (`Bearer $NAME`), and any secret-bearing key must "
+            "reference a variable somewhere in its value. A literal $ followed by a "
+            "name cannot be written: there is no escape for it."
         ),
     )
 
@@ -2643,9 +2721,16 @@ class McpServerConfig(BaseModel):
         return self
 
     def _secret_problems(self) -> list[FieldProblem]:
-        """Secret-bearing env and header keys must name an environment
-        variable, the same rule that keeps provider secrets out of the
-        configuration file.
+        """Secret-bearing env and header keys must reference an
+        environment variable somewhere in their value, the same rule
+        that keeps provider secrets out of the configuration file.
+
+        Somewhere in it rather than as the whole of it, because a header
+        a vendor asks for is often a word and a credential
+        (`Bearer $TOKEN`), and a rule that admitted only the whole value
+        would put the word inside the secret, where a token that already
+        carries the prefix composes `Bearer Bearer ...` and reads back as
+        a bad key (#504).
 
         Both maps are keyed by whatever was written, so a key here is
         request bytes: the refusal names the group, which is a declared
@@ -2659,14 +2744,15 @@ class McpServerConfig(BaseModel):
         for group, values in (("env", self.env), ("headers", self.headers)):
             for key, value in values.items():
                 fragment = mcp_secret_fragment(key)
-                if fragment is None or _env_reference(value) is not None:
+                if fragment is None or references_environment(value):
                     continue
                 problem = FieldProblem(
                     json_pointer((group,)),
-                    f'a key in {group} containing "{fragment}" looks like an inline '
-                    f"secret, which is not allowed; reference an environment variable "
-                    f"instead, for example $MY_SERVER_SECRET. The key is not quoted "
-                    f"back",
+                    f'a key in {group} containing "{fragment}" references no '
+                    f"environment variable, and a secret-bearing key must reference "
+                    f"one somewhere in its value: $MY_SERVER_SECRET on its own, or "
+                    f'inside a larger value such as "Bearer $MY_SERVER_SECRET". The '
+                    f"key is not quoted back",
                 )
                 if problem not in problems:
                     problems.append(problem)

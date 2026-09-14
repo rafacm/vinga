@@ -479,7 +479,7 @@ async def test_a_resolved_secret_reaches_the_spawned_server(
     # and `test_secret_resolution.py` spawns one to read it; here the
     # question is the reference rather than the store, and the resolver
     # is asked with the entry the manager was built from.
-    assert transport._resolve("tools", config.mcp_servers["tools"], None, "env") == {
+    assert transport._resolve("tools", config.mcp_servers["tools"], None, "env").values == {
         "API_TOKEN": "sk-test"
     }
     # And the configuration itself never held the secret.
