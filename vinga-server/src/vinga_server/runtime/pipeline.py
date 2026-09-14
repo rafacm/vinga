@@ -1776,7 +1776,16 @@ class PipelineRuntime:
             # Before the closing tts stop: an unfired timer is stood
             # down, and a clip already sounding finishes rather than
             # being cut mid-word by the stop.
-            await self._filler.settle()
+            try:
+                await self._filler.settle()
+            except BaseException:
+                # This is the only await between the reply-finished
+                # event and the turn record. A cancellation delivered
+                # here must still close the transcript collaborator's
+                # utterance, including the no-row case that releases
+                # its held root.
+                self._record_turn(spoken, final=True)
+                raise
             self._turntaking.clear_pending()
             # After the filler settles, because a clip still sounding is
             # more of this reply's audio, and before the awaits below,

@@ -127,6 +127,7 @@ def device_session(
     devices: Any = None,
     device_access: Any = None,
     llm_input: Any = None,
+    transcripts: Any = None,
 ) -> session_module.DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one: the agents resolved from the binding, then the
@@ -204,9 +205,14 @@ def device_session(
         view,
         device_access,
         llm_input,
+        transcripts,
     )
     session = session_module.DeviceSession(
-        cast(Any, websocket), generations, factory, llm_input=llm_input
+        cast(Any, websocket),
+        generations,
+        factory,
+        transcripts=transcripts,
+        llm_input=llm_input,
     )
     # White-box, deliberately, and the only four sites in this file that
     # are. These lines are `run`'s own, transcribed: it reads the device
@@ -260,6 +266,7 @@ def session_for(
     devices: Any = None,
     device_access: Any = None,
     llm_input: Any = None,
+    transcripts: Any = None,
 ) -> DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one, with the named agents' LLMs replaced by
@@ -280,6 +287,7 @@ def session_for(
         devices,
         device_access,
         llm_input,
+        transcripts,
     )
 
 
