@@ -338,6 +338,15 @@ ordinary declared word, never key material.
   or in any `__cause__`/`__context__` chain reachable from the boot.
   The partially-resolved intermediate is included in that claim, which
   is what the issue's third verification box asks for.
+- And the surface the plan first forgot: a server tap is ATTACHED while
+  both paths run, the connection that succeeds and the one that
+  refuses, and the sentinel is absent from every `Emission` payload and
+  every typed argument on it. The events tap is its own retained
+  transport in the observability contract and a claim about logs is not
+  a claim about it. The suite reads every record through the existing
+  all-record rendering helper rather than filtering by logger, so a
+  foreign library's record cannot be silently excluded from the
+  assertion.
 - `Authorization: pasted-token-here`, with no reference anywhere in it,
   is still refused, and the refusal still quotes no key material.
 - `mask` still returns the mask for a composed value, which is the
@@ -535,6 +544,11 @@ plan should attach a server tap across both the connecting and the
 refusing path and assert the sentinel is absent from every payload and
 typed argument, using the existing all-record rendering helper so a
 foreign logger's records are not silently excluded.
+
+*Resolution* (commit below): taken. The sentinel suite now attaches a
+tap across the connecting and the refusing path, asserts absence from
+every emission payload and typed argument, and reads records through
+the all-record helper rather than by logger.
 
 ### 7 (P2): M2's recovery has no answer when no export exists
 
