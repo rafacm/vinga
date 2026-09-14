@@ -728,5 +728,61 @@ model `claude-opus-5`, 2026-09-14, runtime 5m18s.
     metadata-only and reports that class's content omission; it never targets
     an operation still running or infers a bound from `max_sessions`.
 
+## Plan re-review round
+
+External re-review of amended commit `c89c58db`: Claude CLI 2.1.270,
+read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 9m08s.
+
+1. **P1: alias ownership contradicts itself and the masking claim is false.**
+   Vinga must keep aliases for direct Langfuse compatibility, so the Collector
+   common processor sees raw canonical values and raw aliases. The plan must
+   give aliases one home and mask both forms before fanout.
+2. **P1: the shared batch processor cannot preserve per-content delivery
+   answers.** Today's processorless private exporter reports on the exact
+   content batch. A process-wide `force_flush` neither attributes rejection nor
+   prevents a saturated queue from dropping the span. The plan must keep an
+   answerable transport or explicitly retire and replace the guarantee.
+3. **P1: holding every turn and LLM span until session close delays live
+   observability and loses the whole session's canonical metadata on SIGKILL.**
+   The trade must be explicit or the hold must be per operation and shorter.
+4. **P1: composing with the root stack can put Langfuse credentials into the
+   vinga container.** The root `.env` is mounted whole by vinga. The telemetry
+   stack needs a distinct explicit env file and a resolved-environment test.
+5. **P2: recap timeout bypasses `provider_failed`.** Cancellation becomes
+   `TimeoutError` only outside `_watched_stream`, after the helper's catch, so
+   the plan must instrument this third recap outcome explicitly.
+6. **P2: using ordinary `_llm_round_done` for recap changes stored turn
+   accounting and metrics.** The plan must decide whether recap advances the
+   reply ordinal or `TurnRecord.round_done`, and document any metrics change.
+7. **P2: ASR failure still lacks canonical `error.type`.** M1 names only the
+   other three stages even though the issue and contract require all four.
+8. **P2: `telemetry_deferred.py` still fails the deletion test.** Its exporters
+   call only through `Telemetry`, and telemetry already owns the same bounded
+   map shape. Fold it in unless a real second responsibility exists.
+9. **P2: M2 misses the transcript field prose, `TelemetryConfig` docstring and
+   exported-transcripts observability section that its mechanism falsifies.**
+10. **P2: the changelog omits removed transcript attributes, per-agent leg
+    attribution and the removed session-parent fallback.** The plan must keep
+    or explicitly remove each capability.
+11. **P2: shared batching removes the transcript page's OTLP body bound.** A
+    batch can combine many unbounded transcript values and 256 KiB LLM values.
+    The replacement needs a per-content and per-export body bound with a wire
+    assertion.
+12. **P2: direct-to-Langfuse remains supported but never receives the v4
+    ingestion header in the plan.** Its README recipe and live gate must cover
+    both Basic Auth and the version header.
+13. **P3: slim-image boot is not a pull-request gate.** Only the no-extra unit
+    refusal runs on PRs; image verification is workflow-dispatch or post-merge.
+14. **P3: the cross-thread deferred map has no stated concurrency boundary.**
+    The plan must name its lock and the point at which the session loop hands
+    sole span ownership to it.
+15. **P3: the plan does not say whether `provider_failed` remains as a duplicate
+    span event.** LLM and TTS must match the ASR and tool precedent: one failed
+    span, no duplicate event.
+
+Verdict: not ready. Findings 1 through 4 are load-bearing; findings 5 through
+12 require concrete amendments, and findings 13 through 15 should be folded
+in while the design is open.
+
 Verdict: not ready. Findings 1 through 6 are load-bearing; findings 7, 10 and
 the rest of the P2 set require concrete amendments before implementation.
