@@ -2679,10 +2679,10 @@ This index is the other half: what exists, and when it fires.
 | `capture_disabled` | capture is configured but off |
 | `capture_uploaded` | a closed session's recording is beside its trace in the telemetry backend, with its sizes and how long it took |
 | `capture_upload_failed` | a recording is not beside its trace, and why, from a closed set of reasons; also what a restart says about a job it found still staged |
-| `transcripts_exported` | a closed session's turns are in the telemetry backend, one observation each under the turn it describes, with how many went and how long it took |
-| `transcript_export_failed` | a session's turns are not in the telemetry backend, and why, from a closed set of reasons |
-| `llm_input_exported` | a closed session's assembled LLM requests are in the telemetry backend, one observation each, with how many went and how many went missing under each of the three headings |
-| `llm_input_export_failed` | a session's assembled requests are not in the telemetry backend, and why, from a closed set of reasons |
+| `transcripts_exported` | acknowledged content was attached to an original turn root and enqueued for ordinary OTLP processing, with how long settlement took |
+| `transcript_export_failed` | turn content was omitted before enqueue, and why, from a closed set of reasons |
+| `llm_input_exported` | a complete input and raw-output pair was attached to its actual generation span and enqueued for ordinary OTLP processing |
+| `llm_input_export_failed` | generation content was omitted before enqueue, and why, from a closed set of reasons |
 | `conversations_enabled` | the conversation store opens at startup, which means this server is recording what is said to it (no session or device: it is said once, before anything connects) |
 | `conversations_dropped` | the store is behind and events for one session are being dropped, said once per session at its first drop; the total lands on that session's row |
 | `conversations_failed` | a write to the store failed and its batch was dropped, or a prune could not run |
@@ -2788,14 +2788,25 @@ the failed operation.
 OpenTelemetry names are the canonical attributes. The existing
 `langfuse.observation.usage_details` fields for ASR and TTS remain derived
 copies of the canonical whole-number usage values so direct-to-Langfuse
-deployments keep their pricing behavior. The transcript and assembled-request
-exporters still use their existing Langfuse rendering attributes in this
-release; moving that optional content onto the canonical turn and generation
-operations is a separate compatibility migration.
+deployments keep their pricing behavior. With `export_transcripts`, acknowledged
+text and ordered handover legs enrich the original turn root as
+`vinga.turn.input`, `vinga.turn.output` and `vinga.turn.legs`. With
+`export_llm_input`, the actual generation span receives
+`gen_ai.system_instructions`, `gen_ai.input.messages`,
+`gen_ai.output.messages`, `vinga.llm.tools` and `vinga.llm.tool_choice`.
+Generated output is captured before speech filtering, so text withheld from the
+user also leaves. Direct Langfuse input, output and legs aliases are derived
+from those canonical values. The former `transcript` and `llm_input` child
+spans no longer exist.
 
 The ordinary trace path still has one bounded batch queue. A full queue drops
 spans instead of delaying a reply, and a bounded shutdown gives the exporter a
-last chance to flush. Standard `OTEL_EXPORTER_OTLP_*` variables own the
+last chance to flush. It holds 2,048 spans, schedules every five seconds and
+exports at most eight spans per request. Each turn or generation content
+projection is limited to 256 KiB, keeping a maximal request below 3 MiB.
+`transcripts_exported` and `llm_input_exported` report attachment and enqueue,
+not backend acknowledgement; ordinary exporter health owns downstream
+delivery. Standard `OTEL_EXPORTER_OTLP_*` variables own the
 destination, protocol and credentials; none becomes span content. This
 milestone changes no deployment recipe.
 

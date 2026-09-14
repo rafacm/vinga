@@ -323,35 +323,23 @@ trace, no audio and no way to learn any was meant to be there.
 
 `vinga_server/transcript_export.py`.
 
-**Carries.** Content, and the second surface here that sends any off the
-host: a closed session's turns, one observation each under the turn it
-describes and inside that turn's own trace, carrying what was heard and
-what was replied with per-agent attribution where a handover split the
-reply. A turn that cannot be addressed keeps the parent this surface
-shipped with, the session span: a row carrying no utterance, an
-utterance no turn span was opened for, and a turn evicted past the
-exporter's per-session turn retention. Both halves are the contract, and
-the un-nested case is legible as itself rather than announced, since a
-transcript under `session` rather than under `turn` is visibly the one
-that could not be filed. Every observation carries the session under
-both spellings either way, so the backend's session view groups the
-words with the turns whichever parent they found.
-Conversation-level text exactly, read post hoc from the conversation
-store's own rows. The assembled model request, the tool arguments and
-results, and the per-request audio are not in it: the first is a
-[content class of its own](#exported-llm-input) behind
-`export_llm_input`, which a deployment switches on separately and which
-contains what this surface contains, and the last is an `export_audio`
-artifact when something needs it. What it
-carries is therefore the conversation-store surface above, narrowed to
-its text, sent to where the exported-traces surface already sends
-metadata.
+**Carries.** Content on the original `turn` root: the acknowledged text
+heard for one utterance, the complete reply across any handover rows,
+and ordered per-agent legs with their text and token attribution. The
+canonical attributes are `vinga.turn.input`, `vinga.turn.output` and
+`vinga.turn.legs`. Direct Langfuse compatibility aliases are derived
+from those same values. No separate `transcript` span, row index, row
+database id, row-relative timestamp, or session-parent fallback remains.
+The assembled model request, tool arguments and results, and per-request
+audio are separate content classes.
 
 **Serves.** Needs 1, 2 (off-host) and 5 (evals).
 
-**Retention and access.** **The backend owns retention, and vinga owns
-none of it.** This surface keeps nothing: the turns are read, exported
-and let go. **Exported text outlives erasure on this side**, which is
+**Retention and access.** **The backend owns retention.** A logically
+finished turn root is held only until every live conversation-store
+acknowledgement for that utterance settles. The held-root ledger is
+globally capped at 4,096; overflow releases the oldest finished root
+metadata-only. **Exported text outlives erasure on this side**, which is
 the boundary an operator has to know before switching it on: deleting a
 session or a conversation under `/api`, or letting retention prune one,
 removes it from this deployment's store and reaches nothing that already
@@ -370,23 +358,22 @@ a household said leaving the deployment is its own decision. With
 conversations absent, off, or storing no text it is a no-op, under a
 `server.data_boundary` narrower than the section's declared reach it is
 refused, and with telemetry off the boot is refused. It needs no extra
-and no second credential, because the turns travel as spans over the
-transport the traces already use. It runs on a worker of its own after a
-session closed, never on the audio path, and every failure is a warning
-event (`transcripts_exported`, `transcript_export_failed` with a reason
-from a closed set), because a transcript that silently failed to export
-would leave a reader with a trace, the stage timings, none of the words
-and no way to learn any were meant to be there.
+and no second credential. The worker waits for acknowledgements off the
+reply path, attaches an allowlisted projection, and ends the root at its
+original reply-finished timestamp. A false or missing acknowledgement,
+timeout, overflow, size refusal or shutdown ends that same root
+metadata-only. `transcripts_exported` means attachment and enqueue into
+the ordinary OTLP processor, not backend acknowledgement.
 
 ### Exported LLM input
 
 `vinga_server/llm_input_export.py`.
 
-**Carries.** Content, the third surface here that sends any off the
-host, and the widest of the three: the request this server assembled for
-each of a closed session's LLM rounds, one observation each on the trace
-that session was exported under, rendered as the observation's own
-input. It is the request as vinga ASSEMBLED it and not the bytes any one
+**Carries.** Content on each actual `llm` span, and the widest of the
+three classes: the request this server assembled and the raw semantic
+output the model generated before any speech filtering. This includes
+text withheld from the user. It is the request as vinga assembled it
+and not the bytes any one
 vendor put on the wire, which is a boundary chosen rather than conceded:
 the system prompt with its memory and know-how blocks, the message
 history as the model was given it, the tool schemas offered, the tool
@@ -395,14 +382,18 @@ the tool choice. Vendor framing, the generation parameters, the
 endpoint, headers and credentials are not in it, because the snapshot is
 taken at this server's own provider seam, which is the one place a
 request exists once rather than once per vendor and the one place that
-never sees a credential.
+never sees a credential. The canonical attributes are
+`gen_ai.system_instructions`, `gen_ai.input.messages`,
+`gen_ai.output.messages`, `vinga.llm.tools` and
+`vinga.llm.tool_choice`; direct Langfuse input and output aliases are
+derived from them.
 
 **It contains what the transcripts surface contains.** An assembled
 request holds the dialogue as the model saw it, so this class is
 content-wise a superset of that one, and the switches are nonetheless
 independent: neither turns the other on. Both call shapes are here, the
 reply's rounds and the recap's summarization, each labelled with its
-purpose. One observation is one logical ROUND and not one provider
+purpose. One span is one logical round and not one provider
 attempt: the first-token watchdog re-sends content fixed before the
 first attempt, so a retried round is one request that was made twice.
 
@@ -412,20 +403,18 @@ first attempt, so a retried round is one request that was made twice.
 makes this the strictest retention answer on the page and the quietest
 loss. The two content surfaces above export from something durable, the
 capture directory's files and the conversation store's rows; a session
-assembles a request because it is about to make it, so what this exports
-exists for the session, then in a bounded delivery job until it is
-delivered or dropped, and nowhere after that. A process that dies with
-exports queued loses them, with no ledger to recover from. What that
+assembles a request because it is about to make it. Its content exists
+through the invocation and then only in the ordinary bounded OTLP span
+queue. A process that dies with spans queued loses them, with no ledger
+to recover from. What that
 costs is bounded and is why the answer is acceptable: a lost export is a
 missing observation, never a lost conversation, because what was said is
 in the store when `server.conversations` is recording it. **What one
-session may stage is bounded in bytes**, per request and for the session
-as a whole: a request over the ceiling is dropped whole rather than
-truncated, past the budget whole requests go oldest first, and both
-absences are counted with their two reasons told apart on the export's
-own event, so a partial export says so; a third count beside them
-reports a round this server could not render at all, which is a defect
-here rather than a bound anybody reached. **Exported requests outlive
+operation may attach is bounded to 256 KiB**, with a bounded pending
+budget per session: a pair over the ceiling is dropped whole rather than
+truncated, and past the budget whole unfinished requests go oldest
+first. A pre-enqueue omission is reported as a warning rather than
+being misreported as a backend delivery failure. **Exported requests outlive
 erasure on this side**, the way exported text does: deleting a session
 or a conversation under `/api` reaches nothing that already left, and
 retention is then the receiving deployment's policy, configured there,
@@ -443,13 +432,12 @@ is refused. It answers to no second switch, unlike the two exports above
 it: there is no local surface behind it that could be off, so it is
 never a no-op, and `server.conversations` and `server.capture` are
 irrelevant to it. It needs no extra and no second credential, because
-the requests travel as spans over the transport the traces already use.
-Staging is a render and an append on the session loop; the delivery runs
-on a worker of its own after a session closed, never on the audio path,
-and every failure is a warning event (`llm_input_exported`,
-`llm_input_export_failed` with a reason from a closed set), because on
-this surface an export that silently failed leaves nothing anywhere to
-go back and read.
+the content travels on the actual generation span over the transport
+the traces already use. Pairing finishes synchronously immediately
+before the matching `llm_round` or `provider_failed` event creates and
+ends that span. `llm_input_exported` means attachment and enqueue into
+the ordinary OTLP processor, not backend acknowledgement; a pre-enqueue
+omission is `llm_input_export_failed`.
 
 ### Audit
 
@@ -485,8 +473,8 @@ own terms.
 | Class | What leaves | Flag | Today |
 | --- | --- | --- | --- |
 | **Audio** | Recordings, all of them. Today a closed session's stereo WAV and its manifest, from the capture directory; the per-utterance clips a provider heard and the per-turn reply audio are artifacts of this class rather than switches beside it | `server.telemetry.export_audio` | Landed (#67) |
-| **Transcripts** | The dialogue text: a closed session's turns as the conversation store holds them, which is the surface this class's retention is answered by | `server.telemetry.export_transcripts` | Landed (#495) |
-| **LLM input** | The model's assembled request as vinga assembled it: the system prompt with its memory and know-how blocks, the message history as the model was given it, the tool schemas offered, the tool arguments asked for and the results handed back, and the tool choice. Not vendor framing, generation parameters, endpoints, headers or credentials. Its local surface is the session's own working state, which no second switch governs, so this class has no no-op arm: what it exports exists for the session, then in a bounded delivery job until it is delivered or dropped, and nowhere after that | `server.telemetry.export_llm_input` | Landed (#502) |
+| **Transcripts** | A live utterance's acknowledged conversation rows, composed onto its original turn root with ordered per-leg attribution | `server.telemetry.export_transcripts` | Landed (#495, topology changed by #523) |
+| **LLM input and output** | The model's assembled request and raw semantic output before speech filtering, including withheld text, tool schemas, arguments, results and choice. Not vendor framing, generation parameters, endpoints, headers or credentials. Its local surface is invocation memory and then the ordinary bounded OTLP queue | `server.telemetry.export_llm_input` | Landed (#502, widened by #523) |
 
 Two things are true of the classes rather than of any one flag. **A
 class may gain an artifact**, which widens what an already-on flag
@@ -497,12 +485,11 @@ the model saw it, so `export_llm_input` is content-wise a superset of
 `export_transcripts`, while the switches stay independent and neither
 implies the other.
 
-Content escalations ride content taps (the capture store's files, the
-conversation store's rows, a session's own working state). The
-emit-to-span fold stays content-free at every tier, so a fold-time
-content tap is rejected policy rather than a deferral: a transcript
-observation is a content tap's delivery vehicle, not the fold gaining
-content.
+Content escalations ride registered content taps (the capture store's
+files, acknowledged conversation rows, or invocation working state).
+The event fold never reads content. A tap may enrich a fold-made span
+only behind its explicit flag, through a server-minted correlation key
+and an allowlisted projection.
 
 ## The invariants
 

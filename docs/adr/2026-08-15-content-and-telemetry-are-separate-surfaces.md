@@ -171,13 +171,14 @@ decided against a rule instead of relitigating the first:
   answer the audio escalation gave and it is now the ladder's, so a
   future tier inherits the obligation to say it rather than
   rediscovering it.
-- **Content escalations ride content taps, and the fold stays
-  content-free.** A content flag reaches the local artifact (the
-  capture's files, the store's rows) and never the emit-to-span fold,
-  which continues to carry only what `events/catalog.py` declares. A
-  fold-time content tap is rejected policy rather than a deferral. A
-  transcript observation is a content tap's delivery vehicle, not the
-  fold gaining content.
+- **The event fold never reads content, and a registered content tap may
+  enrich the span the fold creates.** The fold continues to read only
+  what `events/catalog.py` declares. A content collaborator may attach
+  an allowlisted projection to that existing span only when its own
+  explicit, off-by-default flag is enabled and the join uses a
+  server-minted correlation key. The content stays outside event
+  payloads and log records; the canonical turn and generation spans are
+  its delivery vehicle.
 - **The promise side is rule 5 of the enumerated-baseline record.**
   [That record](2026-09-12-the-local-baseline-is-enumerated.md) says
   the boundary bounds defaults rather than capabilities, and that a
@@ -188,7 +189,8 @@ decided against a rule instead of relitigating the first:
   which is this record's subject and not that one's.
 
 In one sentence: content leaves by class, behind a flag of its own,
-bounded by what was kept and never through the metadata fold.
+bounded by what was kept, never read from an event payload, and attached
+only through a registered content tap.
 
 ### Amendment: the content classes are three under one prefix (2026-09-12)
 
