@@ -155,6 +155,27 @@ every exception chain. The existing reflection coverage uses a
 whole-value reference and would stay green through this defect, which
 is why the new case is written to fail first.
 
+### #504: an encrypted slot still holds the finished header
+
+A stored secret replaces its slot's whole value: `secrets.py` removes
+the key from reference resolution and puts the ciphertext's plaintext
+in. So an encrypted `headers.Authorization` slot filled with the
+vendor's raw token sends the raw token, not `Bearer <token>`, and an
+example that offers the encrypted slot beside the composed reference
+without saying so would walk an operator into a 401 that looks like a
+bad key.
+
+The example says it: the encrypted slot holds the FINISHED header
+value, the composed reference is the other way of getting there, and
+the two are not interchangeable halves of one recipe. Composing inside
+an encrypted slot is not in this milestone, and the plan says that
+rather than leaving it implied: it is a different design question, with
+a template holding several references as its hard case.
+
+The precedence is pinned at the wire rather than in the resolver: with
+both a written reference and a stored secret for one key, what the
+server is handed is the stored one, whole.
+
 ### #504: a value that contained a literal `$word` changes meaning
 
 This is the upgrade trap and it is the reason the changelog entry
@@ -461,6 +482,11 @@ A stored secret replaces the whole slot value, so an encrypted
 raw token and not `Bearer <token>`. The example must say the encrypted
 slot holds the FINISHED header value, keep that separate from raw-token
 interpolation, and pin the precedence at the wire.
+
+*Resolution* (commit below): taken. The example states that an
+encrypted slot holds the finished header value, keeps it apart from the
+composed reference, and the precedence is pinned at the wire. Composing
+inside an encrypted slot is named as out of scope with its reason.
 
 ### 5 (P2): the `fullmatch` and newline reasoning does not describe observable behavior
 
