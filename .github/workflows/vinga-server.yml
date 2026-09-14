@@ -1409,6 +1409,15 @@ jobs:
             -p 16686:16686 \
             --network "$SMOKE_NETWORK" \
             jaegertracing/jaeger:2.20.0@sha256:46a886260e04002d8f45e213fc39063fa11a50446048fdaa64786fc0840cb9f8
+          for _ in $(seq 60); do
+            curl -fsS http://127.0.0.1:16686/api/services >/dev/null && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:16686/api/services >/dev/null || {
+            echo "::error::Jaeger did not become ready for the built-image smoke"
+            docker logs vinga-jaeger
+            exit 1
+          }
           docker run -d --name vinga-smoke \
             -p 8003:8003 \
             --network "$SMOKE_NETWORK" \
