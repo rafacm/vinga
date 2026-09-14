@@ -118,8 +118,9 @@ records link it.
   under [Board guides](#board-guides) below.
 - [**deployment.md**](deployment.md): the worked path from a published
   image to a running deployment, in a Docker Compose lane and a
-  Kubernetes lane. The contract both implement as a table of links into
-  the section that owns each fact, the artifacts under
+  Kubernetes lane, plus optional direct Jaeger and processed Jaeger plus
+  Langfuse telemetry paths. The contract both deployment lanes implement
+  as a table of links into the section that owns each fact, the artifacts under
   [`../deploy/`](../deploy/) that implement it, the routing boundary a
   public deployment draws, the provisioning transaction an upgrade
   reruns, and how to tell that it worked. The server README stays the

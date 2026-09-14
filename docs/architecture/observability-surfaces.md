@@ -270,6 +270,21 @@ media writer. Transcript and assembled-request workers report such an
 intentional source-sampling omission as `no_trace` without attempting OTLP,
 not as an `undelivered` batch.
 
+The maintained runnable destinations are direct Jaeger v2, direct Langfuse
+v4, and a Collector Contrib fanout to both. The fanout graph masks every
+canonical content field and derived content alias, makes one trace-id sampling
+decision, and batches before two forward connectors. Jaeger's sink drops all
+`langfuse.*` attributes and the Langfuse-only `capture` reference span;
+Langfuse's sink retains the already-masked aliases and adds only its transport
+authentication and ingestion-version header. The source sampler is
+`always_on`, so the Collector is the one population decision. Partial sampling
+acts on each independent turn trace, not on a whole session, and can leave a
+link whose other trace was dropped. One common pipeline guarantees identical
+records attempted at both exporters, not atomic storage in two independent
+backends. The runnable graph and walkthrough are
+[`deploy/telemetry/`](../../deploy/telemetry/README.md) and
+[`deployment.md`](../deployment.md#telemetry-backends).
+
 ### Exported capture media
 
 `vinga_server/capture_upload.py`.
@@ -282,6 +297,10 @@ local, and no transcript, no event payload and no identifier from the
 far side travels either way. What it carries is therefore the capture
 surface above, minus the track, sent to where the exported-traces
 surface already sends metadata.
+Its `capture` reference span is an explicit Langfuse-only OTLP exception. The
+Collector removes it from the Jaeger branch, while the WAV and manifest bytes
+continue to use Langfuse REST and the object-storage URL it returns. Jaeger
+receives neither the reference nor the media.
 
 **Serves.** Need 1 (deep diagnosis, off-host).
 
