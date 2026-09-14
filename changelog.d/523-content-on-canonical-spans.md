@@ -11,3 +11,4 @@
 ### Removed
 
 - Remove the separate `transcript` and `llm_input` spans, their private exact-delivery transport, the `undelivered` outcome, transcript row index, database id and relative-time attributes, and the session-parent fallback for unaddressable transcript rows. Per-agent attribution remains on `vinga.turn.legs`.
+- Remove the always-zero `elapsed_ms`, `oversized`, `over_budget` and `unrenderable` fields from `llm_input_exported`; omissions remain individual `llm_input_export_failed` outcomes.
