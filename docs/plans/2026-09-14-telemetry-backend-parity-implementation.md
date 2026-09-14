@@ -282,18 +282,27 @@ were removed.
 
 ### Deviations and decisions
 
-There are no deviations from the reviewed M2 plan.
+PR review made one deliberate event-schema deviation from the reviewed M2
+plan. `llm_input_exported` retains only `session` and the measured `rounds`
+count. Its four legacy `elapsed_ms`, `oversized`, `over_budget` and
+`unrenderable` fields were always emitted as zero, so the implementation could
+not support the measurements their generated notes promised. Individual
+omissions continue to use `llm_input_export_failed` with their exact closed
+reason. The generated event reference and changelog fragment record the
+smaller truthful schema.
 
 The existing content modules remain because their responsibilities are deep:
 LLM input and raw-output rendering plus operation bounds belong together, while
 transcript acknowledgement truth, handover composition and worker admission
 belong together. Telemetry alone owns span lifecycle and SDK mechanics.
 
-The content outcome variants retain their existing field schema for consumer
-compatibility. Successful events are emitted per settled operation with a count
-of one and zero legacy drop counters; omissions use the remaining closed reason
-set. Their source notes and generated reference now define attachment and
-enqueue semantics exactly.
+The transcript content outcome variants retain their existing field schema for
+consumer compatibility. Successful content events are emitted per settled
+operation, and omissions use the remaining closed reason set. Their source
+notes and generated reference define attachment and enqueue semantics exactly.
+All four content outcomes remain metadata-only spans beside the retained
+session after it closes, as well as structured log events, so a trace with
+intentionally absent content still explains the omission.
 
 The content-and-telemetry ADR replaces its former separate-span invariant. The
 event fold still never reads content, but a built and explicitly flagged content
@@ -348,3 +357,165 @@ tests in the same lane were green. The final complete invocation kept the
 synced server environment first while retaining the local `uv` and `psql`
 directories, exercised all 343 integration cases, and passed without a source
 change.
+
+## PR review round, M2 (PR #525)
+
+Automated external review of the PR diff `origin/main...773efd8c`: claude CLI
+2.1.270, read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 12m25s,
+[posted on the PR](https://github.com/rafacm/vinga/pull/525#issuecomment-5670383145).
+Verdict: mergeable after the listed fixes. The reviewer found seven P2 and
+eight P3 issues. It required the following corrections.
+
+1. **P2: the four content outcomes had disappeared from traces without a
+   recorded surface change.** Removing them from the after-close fold also
+   left five unreachable attribute mappings and made the observability map's
+   trace-diagnosis promise false.
+
+   *Resolution* (`49043480`): all four outcomes remain metadata-only
+   after-close spans beside the session, the event fold documents that rule,
+   and the observability surface records both trace and structured-log
+   visibility.
+
+2. **P2: `llm_input_exported` claimed four measurements its emitter always
+   reported as zero.** The generated event reference therefore described
+   durations and omission counters the implementation never measured.
+
+   *Resolution* (`00709f82`, `d7bc2a57`): the success event now carries only
+   `session` and measured `rounds`; the dead attribute mappings, source notes,
+   generated reference and changelog contract were updated. Per-operation
+   omission detail remains on `llm_input_export_failed`.
+
+3. **P2: cancellation between `reply_finished` and the final transcript
+   notification could strand a held turn beyond session close.** A zero-row
+   root was invisible to transcript grouping and otherwise lived until
+   overflow or process shutdown.
+
+   *Resolution* (`83503eec`): the reply boundary now reports `turn_missing`
+   from the cancellation path before re-raising. The earlier acceptance fix in
+   `ca093e50` already settled a final no-row boundary when a prior handover row
+   existed; the review found the distinct skipped-boundary path and added its
+   runtime regression test.
+
+4. **P2: each generated text delta re-rendered all accumulated output.** That
+   made streaming accounting quadratic on the reply path.
+
+   *Resolution* (`58597dc1`): staged rounds count each text or tool delta once,
+   then perform one authoritative render and full projection-size check at
+   `finish()`.
+
+5. **P2: the `ASR_STAGE` comment had reverted to the deleted M1 failure-fold
+   rule.** It contradicted the real LLM and TTS failure spans immediately
+   below it.
+
+   *Resolution* (`04befd4c`): the comment again states the three substitutive
+   provider stages and reserves the ordinary span-event fold for an unknown
+   future stage. The prior `a752ea0b` correction covered a separate stage-span
+   parentage comment, not this reverted constant comment.
+
+6. **P2: the receiving agent's handover attribution was absent from the
+   canonical turn legs.** A row with no nested legs contributed reply text but
+   no agent, despite the changelog's preservation claim.
+
+   *Resolution* (`066e0fe0`, `9733d572`): a contributing row without nested
+   legs now supplies one leg from its own agent and reply. Unit and decoded-wire
+   tests cover both handover sides and an ordinary single-agent turn.
+
+7. **P2: malformed tool arguments were silently replaced by an empty value in
+   exported model content.** That erased the exact provider output needed to
+   diagnose a schema mismatch.
+
+   *Resolution* (`5890587f`): input and output tool-call projections retain the
+   provider's malformed argument string when parsed arguments are unavailable.
+
+8. **P3: the held-root concurrency test raced two callers of the same seam,
+   not worker settlement against overflow or shutdown ownership.** It could
+   not falsify a missing cross-site lifecycle guard.
+
+   *Resolution* (`f0cc96b3`, `4993ec2b`): shutdown waits for roots whose worker
+   or overflow contender already claimed ownership under the lifecycle lock
+   before the provider stops. A repeated real shutdown-versus-settlement race
+   proves one terminal end, with each iteration's contenders bound explicitly.
+   The earlier `ca093e50` overflow test continues to prove a queued job cannot
+   emit a second failure outcome after eviction.
+
+9. **P3: `Telemetry.release()` stopped the provider without releasing held
+   roots or staged LLM content.** Only the ordinary `shutdown()` door performed
+   that cleanup.
+
+   *Resolution* (`3027be6a`): shared completion now releases held roots and
+   clears staged generation content for both doors, including thread-start
+   failure, with a release-path regression test.
+
+10. **P3: duplicate invocation staging could desynchronize the LLM maps and
+    make budget eviction loop forever.** The ordered list could retain an id
+    after its single map entry was removed.
+
+    *Resolution* (`f92e2068`): synchronous staging refuses a duplicate server
+    invocation, preserves the first snapshot and reports the second operation
+    as dropped.
+
+11. **P3: two transcript failure member comments described the retired store
+    read seam and retention model.** They no longer matched the decisions that
+    emit `unreadable` and `no_trace`.
+
+    *Resolution* (`ac3eb9d9`): the comments now name conflicting handover
+    acknowledgement and a missing held root respectively.
+
+12. **P3: transcript and LLM exporter builders accepted retired bounds and
+    dependencies, then discarded them.** Tests could appear to exercise a
+    configured seam that no longer existed.
+
+    *Resolution* (`7690b9a8`, `83bcb1e6`): the dead LLM backlog and shutdown
+    arguments and transcript database, read and batch arguments were removed
+    from builders, constructors and all callers.
+
+13. **P3: two telemetry tests passed canonical attribute names where the
+    projection seam expects `input` and `output`.** They attached no content
+    while asserting only unrelated device metadata.
+
+    *Resolution* (`15dcdecd`): the tests now exercise the caller-facing keys
+    and assert the resulting `vinga.turn.input` and `vinga.turn.output`
+    attributes.
+
+14. **P3: an empty transcript projection still emitted
+    `transcripts_exported` with `turns=1`.** The event falsely claimed that a
+    root received complete acknowledged content.
+
+    *Resolution* (`f26c5501`): an empty projection releases its root
+    metadata-only, consumes any overflow cancellation token and emits no
+    success or failure outcome.
+
+15. **P3: transcript legs were walked generically and their size was measured
+    before the downstream allowlist.** A future dataclass field could affect
+    the 256 KiB decision without ever reaching the span.
+
+    *Resolution* (`066e0fe0`): transcript composition now projects the four
+    published leg fields explicitly and weighs exactly the JSON sent to
+    telemetry.
+
+### Review-fix verification
+
+Run from `vinga-server/` unless noted otherwise:
+
+- Combined LLM, transcript, telemetry, turn-lifecycle and decoded-wire
+  falsification suite: 241 passed.
+- `uv run ruff check .`: clean.
+- `uv run mypy`: clean, 5 source files checked.
+- Full four-worker unit lane: 7,425 passed, 19 skipped.
+- `uv run pytest tests/integration -q`: 344 passed with the synced M2 server
+  environment and the PostgreSQL client first on `PATH`.
+- Generated domain, server, conversation schema, metrics view, event and
+  OpenAPI reference drift tests: 152 passed.
+- Command-spellings census: 52 passed.
+- Documentation links and anchors: 247 files checked, 0 failures.
+- Changelog fragment validation: 1 fragment checked, 0 failures.
+
+The first CI-shaped unit attempt used `-n auto` against the shared default
+PostgreSQL service. It reached 86 percent before that service terminated
+connections across workers, followed by cascading storage-fixture failures.
+The isolated four-worker rerun on port 55523 completed cleanly. The first full
+integration attempt put the plan worktree's client-only executable first on
+`PATH` and omitted the local `psql` directory, so packaging and provisioning
+tests refused their environment. After `uv sync --frozen`, the complete rerun
+used this M2 worktree's own server environment and the local libpq directory,
+and all 344 cases passed without a source change.
