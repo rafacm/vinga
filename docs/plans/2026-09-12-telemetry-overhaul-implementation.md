@@ -983,3 +983,148 @@ property (this URL is a secret) does not answer a question about
 another (where does this URL point), and a page describing a data
 boundary has to trace the bytes rather than the request that asks about
 them.
+
+## M5: `export_llm_input`
+
+The plan settled this milestone in four sections of its own (the
+fidelity boundary, the bound, what is staged and where, and the module's
+own shape), so there was nothing left to decide here beyond the two
+things a milestone always decides: what each new sentence says, and
+which mutation each new case is held against.
+
+### What landed
+
+| Piece | Where |
+| --- | --- |
+| `server.telemetry.export_llm_input`, with its prose and its refusal order | `config/models.py` `TelemetryConfig` |
+| The module: the stage, the byte bound, the drop accounting, the worker, the events | `llm_input_export.py` |
+| `Telemetry.export_llm_input`, `LlmInputRound`, the span's attribute names | `telemetry.py` |
+| The two outcome events and their closed reason set of three | `events/catalog.py`, `events/values.py` |
+| Staging at both LLM call shapes, each labelled with its purpose | `runtime/pipeline.py` `_tool_loop` and `_summarized` |
+| The hand-over at the close, and the constructor argument | `device/session.py` |
+| The collaborator closed over, and the shutdown registered | `runtime/pipeline.py` `bespoke_runtime_factory`, `app.py`, `composition.py`, `ws.py` |
+| The suites | `tests/unit/test_llm_input_export.py`, `tests/unit/test_telemetry_llm_input.py`, `tests/unit/test_session_llm_input.py`, `tests/integration/test_llm_input_export.py` |
+| The ninth surface | `docs/architecture/observability-surfaces.md` |
+
+### Deviations from the plan
+
+- **The staging seam is two verbs rather than one taking a purpose.**
+  The plan says both call shapes are staged, "each labelled with its
+  purpose", without saying how the label crosses. It is
+  `stage_reply` and `stage_recap`, because the alternative was a
+  vocabulary the pipeline would have to import: the purpose becomes a
+  span attribute, so an enumeration for it belongs to the exporter, and
+  a caller passing one would be the reply path learning how this
+  surface spells its own words. Both forward to one private `_stage`,
+  so the accounting exists once.
+- **The seam type carries the request already serialized.**
+  `TranscriptTurn` carries the store's columns and lets `telemetry.py`
+  render them; `LlmInputRound` carries a string. That is the bound's
+  own requirement rather than a preference: the ceilings are measured
+  on the serialized form that would actually be exported, so the
+  rendering has to happen before the bound can be applied, and a type
+  carrying provider objects would be rendered twice, once to measure
+  and once to write. Two renderings that must agree are the trap this
+  repository has a rule about.
+- **The observations answer to the SESSION span rather than to a
+  turn.** The plan's live gate says "on the trace the session was
+  exported under" and the milestone says nothing else about the parent,
+  so this is the plan implemented rather than a departure from it, but
+  it is worth the sentence because #506 moved the transcripts the other
+  way. The reason it stays here: a recap round belongs to no turn at
+  all, a reply round is several requests inside one turn, and the
+  question a reader arrives with is what the model saw in this
+  conversation.
+- **One bounded call per job rather than the transcript export's page
+  loop.** That module alternates a page read with a page export because
+  nothing bounds a session's turn count. What this holds was weighed
+  against a byte budget before it was held at all, so a job is a
+  bounded request by construction and paging it would be machinery
+  guarding a number that is already guarded.
+- **The round cap reports `over_budget`.** The plan asks for two
+  reasons and three limits. The cap is the entry half of the same
+  budget, so a round it evicts is reported as the session holding more
+  than it may, and the two reasons stay the two the plan named: one
+  request was too large to carry, or the conversation outgrew what may
+  be held for it.
+- **A rendering that fails is a third absence, and it is not counted.**
+  `_stage` contains every exception, because it runs inside a reply.
+  The two counts are the bound's own vocabulary and mean something
+  exact to a reader; a request that could not be rendered at all is a
+  defect in this server rather than a conversation that outgrew its
+  budget, so it is one value-free warning line and no count.
+- **M4b's `reach` prose gained a word.** Its field description said
+  "all three features are refused"; there are four exports behind that
+  one assertion now. The count is corrected in the model, in
+  `config.example.yaml` and in the server README, and nothing about the
+  key's mechanism is touched.
+- **`_private_tracer` is an extraction.** The lazily built
+  processor-less provider was inline in `_transcript_spans`; two
+  content exporters need the same object for the same reason now, and a
+  provider built twice would be two resources to keep in step. The
+  lock's name moved with it, from `_transcript_lock` to `_private_lock`.
+
+### What the mutations found
+
+Every new case was watched failing, and each is held against a mutation
+that makes the specific mistake it exists to catch.
+
+The bound: admitting oversized requests fails four cases; dropping
+newest-first fails both ordering cases; counting an oversized drop as
+over budget fails three. The containment: logging the assembled request
+fails all three sentinel cases. The transport: routing the spans
+through the shared `self._tracer` puts two spans on the session trace
+and fails the batch-queue case. The attributes: copying the request
+into a metadata field as well fails the pinned-attribute case and the
+one-attribute sentinel.
+
+**The one-observation-per-round claim is held against a mutation that
+stages per attempt**, which is the shape the plan's finding is about:
+moving the staging call inside the partial the first-token watchdog
+re-invokes. Two cases fail, the watchdog one and the failed-provider
+one, which is what says the claim is about where the call sits rather
+than about how many rounds a reply has.
+
+Two mutations SURVIVED, and both are findings rather than reliefs.
+
+- **Replacing the close's `pop` with a `get`** left a session holding
+  the whole of what its model saw for the life of the process, and
+  passed everything: the case asserted that nothing was exported, which
+  is true of a held stage too. It is now driven by closing twice, which
+  is the only way to ask from outside whether anything is still held,
+  on the clean path and on the traceless one, and the mutation fails
+  both.
+- **Removing the device session's hand-over entirely** passed the whole
+  unit lane, because the unit case called `session_closed` itself. That
+  proved the exporter and not the wiring. The integration lane is where
+  it is proved now: a real server, a real conversation, a real close,
+  and an OTLP collector on a socket, with nothing in the file reaching
+  into the server. The mutation fails two of its three cases.
+
+### Verification
+
+`ruff check`, `mypy`, the unit lane, the integration lane, the
+generated-document drift checks, `scripts/check_doc_links.py` and
+`scripts/fold_changelog.py check` all run and pass. The command
+spellings census was run after every documentation edit.
+
+### Left alone deliberately
+
+- **The live gate.** The plan asks whether an assembled request arrives
+  rendered as an observation's input, with tool arguments and results
+  present, on the trace the session was exported under. It is not run
+  here and the PR box stays unchecked with that reason: the collector
+  and the backend the gate wants are the one piece of the rig that is
+  not in the worktree. What IS certified is the same attributes on the
+  same encoding, one hop short of a backend: the integration lane runs
+  a real server against a real OTLP receiver in-process and decodes the
+  protobuf it received.
+- **Per-turn parentage.** #506 moved the transcripts under their turns
+  and this could follow, but the two have different shapes: a recap
+  round has no turn, and a reply's rounds are several inside one. An
+  issue that wants them nested is a decision of its own.
+- **The vendor's own request body.** The plan rejects a provider-side
+  snapshot with a reason of its own, and nothing here revisits it: a
+  content surface built out of an SDK's call arguments would put the
+  no-leak contract behind a per-adapter exclusion list maintained
+  forever.
