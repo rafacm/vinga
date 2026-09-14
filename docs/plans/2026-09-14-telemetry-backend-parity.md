@@ -163,6 +163,16 @@ ordered legs of a handover exactly once, not the response of any one LLM
 round. Empty input or output remains absent rather than becoming an empty
 string.
 
+Per-agent attribution is preserved on the same root as canonical JSON in
+`vinga.turn.legs`, rendered from an allowlisted ordered array of agent, text and
+token-count fields. The existing `langfuse.observation.metadata.legs` value is
+derived from that canonical value for direct compatibility and is included in
+the common content mask. The retired row-observation attributes
+`vinga.turn.index`, `vinga.turn.id` and `vinga.turn.t_ms` have no truthful
+root-level meaning and are removed. Legacy rows without an utterance also lose
+their old session-parent content fallback; live turns with server-minted
+utterances are the only rows that can enrich a canonical root.
+
 A handover writes one row per conversation under the same utterance, so the
 transcript exporter composes by utterance before it releases a root. Rows stay
 in store-id order. The first non-null heard value becomes the one input; the
@@ -460,8 +470,10 @@ the existing Langfuse REST and object-storage destinations in that assertion.
   content locations under `### Changed`, and removal of the
   `transcript` and `llm_input` span names under `### Removed`. The Changed entry
   tells direct-to-Langfuse operators that their path remains supported and
-  tells saved-view owners to select `turn` and `llm` instead. `CHANGELOG.md` is
-  not edited.
+  tells saved-view owners to select `turn` and `llm` instead. The Removed entry
+  also names the row-only index, id and time attributes and the legacy
+  session-parent fallback. Per-agent legs are explicitly retained on
+  `vinga.turn.legs`, not silently lost. `CHANGELOG.md` is not edited.
 
 ## Tests and verification
 
@@ -853,6 +865,11 @@ read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 9m08s.
 10. **P2: the changelog omits removed transcript attributes, per-agent leg
     attribution and the removed session-parent fallback.** The plan must keep
     or explicitly remove each capability.
+
+    *Resolution:* Per-agent attribution is retained as canonical
+    `vinga.turn.legs` on the root, with the existing Langfuse alias derived from
+    it. The plan and Removed entry now name the three row-only attributes and
+    the unaddressable legacy-row fallback that genuinely disappear.
 11. **P2: shared batching removes the transcript page's OTLP body bound.** A
     batch can combine many unbounded transcript values and 256 KiB LLM values.
     The replacement needs a per-content and per-export body bound with a wire
