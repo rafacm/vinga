@@ -2761,10 +2761,14 @@ level.
 `server.telemetry.enabled` sends one backend-neutral OpenTelemetry model over
 OTLP/HTTP protobuf. A session is the root of its own trace. Each conversation
 turn is a separate root trace linked to that session and grouped with it by
-`session.id`. The stable children of a turn are `asr`, `llm`, `tool`,
-`tts_stream` and the existing playback operation. The exporter keeps the
-trace flags and trace state each root received; a later post-close writer does
-not turn an unsampled trace back on.
+`session.id`. The semantic operations are `asr`, `llm`, `tool`, `tts_stream`
+and the existing playback operation. They are children of the open turn, or
+of the session when provider work such as a recap happens between turns. The
+exporter keeps the trace flags and trace state each root received; a later
+post-close writer does not turn an unsampled trace back on. Transcript and
+assembled-request exporters report that case as `no_trace` without asking the
+OTLP transport, rather than calling a deliberate sampling decision a failed
+delivery.
 
 Each model call gets a server-minted `vinga.llm.invocation.id` before its
 request is assembled. A retry keeps that identity, while the next logical

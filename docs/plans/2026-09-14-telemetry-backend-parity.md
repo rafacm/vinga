@@ -840,6 +840,9 @@ model `claude-opus-5`, 2026-09-14, runtime 5m18s.
     metadata-only and reports that class's content omission; it never targets
     an operation still running or infers a bound from `max_sessions`.
 
+Verdict: not ready. Findings 1 through 6 are load-bearing; findings 7, 10 and
+the rest of the P2 set require concrete amendments before implementation.
+
 ## Plan re-review round
 
 External re-review of amended commit `c89c58db`: Claude CLI 2.1.270,
@@ -972,6 +975,3 @@ read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 9m08s.
 Verdict: not ready. Findings 1 through 4 are load-bearing; findings 5 through
 12 require concrete amendments, and findings 13 through 15 should be folded
 in while the design is open.
-
-Verdict: not ready. Findings 1 through 6 are load-bearing; findings 7, 10 and
-the rest of the P2 set require concrete amendments before implementation.

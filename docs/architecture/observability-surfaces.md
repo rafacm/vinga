@@ -266,7 +266,9 @@ which is what makes the derivation structural: no emit site moves for
 it, and it can say nothing `events/catalog.py` does not declare. Retained
 post-close parent contexts preserve their original trace flags, trace state
 and remoteness; an unsampled root is never resurrected by a later content or
-media writer.
+media writer. Transcript and assembled-request workers report such an
+intentional source-sampling omission as `no_trace` without attempting OTLP,
+not as an `undelivered` batch.
 
 ### Exported capture media
 
