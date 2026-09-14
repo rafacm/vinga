@@ -203,7 +203,11 @@ this surface can hold nothing that one cannot. A session is one
 span, each turn a trace of its own linked to it, and inside a turn the
 stages that took the time: the transcription and how it ended, each
 generation round, each tool call the model asked for, each sentence's
-synthesis stream, and the paced playback interval. The three a provider
+synthesis stream, and the paced playback interval. A recap is a generation
+too, with a purpose of `recap` and no reply-local round number, so its provider
+latency is visible without changing the stored turn's accounting. Each logical
+generation carries a server-minted invocation id, reused by a first-token
+retry and never derived from a provider value. The three a provider
 ran carry the entry that ran them, under the OpenTelemetry GenAI
 attribute names for the facts those conventions have a name for, and
 each says what it was given in the unit it is billed in: tokens for a
@@ -219,6 +223,15 @@ those numbers cost is the backend's own definitions to say, and this
 server never writes one. The fields are the ones in
 [`reference/events.md`](../reference/events.md), under attribute names
 this module chooses.
+
+A failed ASR, LLM, TTS or tool operation is the same real stage span with
+OpenTelemetry `ERROR` status, no status description and a safe `error.type`.
+The type is the exception class name at an exception boundary, or the closed
+`tool_error` token for a tool that returned an error result. Exception prose,
+tracebacks, tool arguments and results do not enter the span, and the fold does
+not add a duplicate failure event to the turn. OpenTelemetry attributes remain
+canonical. The existing Langfuse usage aliases are derived compatibility
+copies for the direct exporter path, not a second source of telemetry facts.
 
 **Serves.** Needs 1 and 5.
 
@@ -250,7 +263,10 @@ narrower than the section's declared reach, and refused with the extra
 to install when the packages are missing.
 It is an `EventTap` on the seam the events package already documents,
 which is what makes the derivation structural: no emit site moves for
-it, and it can say nothing `events/catalog.py` does not declare.
+it, and it can say nothing `events/catalog.py` does not declare. Retained
+post-close parent contexts preserve their original trace flags, trace state
+and remoteness; an unsampled root is never resurrected by a later content or
+media writer.
 
 ### Exported capture media
 

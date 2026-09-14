@@ -2756,6 +2756,45 @@ is what a latency brief reads, which is every duration, every count and
 every identifier they ever carried. Tokens are never logged, at any
 level.
 
+## Exporting traces
+
+`server.telemetry.enabled` sends one backend-neutral OpenTelemetry model over
+OTLP/HTTP protobuf. A session is the root of its own trace. Each conversation
+turn is a separate root trace linked to that session and grouped with it by
+`session.id`. The stable children of a turn are `asr`, `llm`, `tool`,
+`tts_stream` and the existing playback operation. The exporter keeps the
+trace flags and trace state each root received; a later post-close writer does
+not turn an unsampled trace back on.
+
+Each model call gets a server-minted `vinga.llm.invocation.id` before its
+request is assembled. A retry keeps that identity, while the next logical
+generation gets another. `vinga.llm.round` remains the reply-local ordinal.
+A recap is also an `llm` operation, marked with
+`vinga.llm.purpose=recap`, but has no reply ordinal and changes none of the
+turn record's round, latency or token totals.
+
+Failed ASR, LLM, TTS and tool work is represented by the semantic operation
+span itself. It has OpenTelemetry `ERROR` status with no description and an
+`error.type` containing only an exception class name. A tool that returned an
+error without raising uses the fixed `tool_error` value. Exception messages,
+tracebacks, tool arguments and tool results do not become failure metadata,
+and there is no duplicate `provider_failed` or `tool_call` span event beside
+the failed operation.
+
+OpenTelemetry names are the canonical attributes. The existing
+`langfuse.observation.usage_details` fields for ASR and TTS remain derived
+copies of the canonical whole-number usage values so direct-to-Langfuse
+deployments keep their pricing behavior. The transcript and assembled-request
+exporters still use their existing Langfuse rendering attributes in this
+release; moving that optional content onto the canonical turn and generation
+operations is a separate compatibility migration.
+
+The ordinary trace path still has one bounded batch queue. A full queue drops
+spans instead of delaying a reply, and a bounded shutdown gives the exporter a
+last chance to flush. Standard `OTEL_EXPORTER_OTLP_*` variables own the
+destination, protocol and credentials; none becomes span content. This
+milestone changes no deployment recipe.
+
 ## Capturing a session
 
 **This records room audio to disk.** It is off by default and off until
