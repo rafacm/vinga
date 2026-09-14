@@ -405,7 +405,9 @@ session may stage is bounded in bytes**, per request and for the session
 as a whole: a request over the ceiling is dropped whole rather than
 truncated, past the budget whole requests go oldest first, and both
 absences are counted with their two reasons told apart on the export's
-own event, so a partial export says so. **Exported requests outlive
+own event, so a partial export says so; a third count beside them
+reports a round this server could not render at all, which is a defect
+here rather than a bound anybody reached. **Exported requests outlive
 erasure on this side**, the way exported text does: deleting a session
 or a conversation under `/api` reaches nothing that already left, and
 retention is then the receiving deployment's policy, configured there,
