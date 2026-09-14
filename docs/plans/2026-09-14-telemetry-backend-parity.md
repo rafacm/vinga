@@ -381,6 +381,10 @@ the existing Langfuse REST and object-storage destinations in that assertion.
 - `llm_input_export.py` keeps neutral-seam rendering and byte budgets, adds
   schema-shaped semantic output pairing, and enriches generation spans rather
   than creating observations.
+- `config/models.py` widens the `export_llm_input` field description to say
+  that each round's generated output, including model text withheld from
+  speech, leaves with its assembled request. This is a disclosure widening of
+  an existing flag, not a new switch.
 - `runtime/pipeline.py`, `runtime/turns.py` and the event catalog/assembly/value
   modules expose the safe round output and failure type at the decision sites.
 - `device/session.py`, `composition.py` and `app.py` retain the shutdown and
@@ -400,8 +404,9 @@ the existing Langfuse REST and object-storage destinations in that assertion.
   if implementation changes a standing policy rather than its mechanism.
 - `docs/reference/server-config.md`, `docs/reference/domain-config.md` and
   `docs/reference/events.md` are regenerated only from their generators. The
-  first two should remain byte-identical because no configuration field is
-  added; the events reference changes with the safe failure metadata.
+  first two change with the widened `export_llm_input` description even though
+  no field is added; the events reference changes with the safe correlation and
+  failure metadata.
 - `changelog.d/523-telemetry-backend-parity.md` records the completed operator
   feature under `### Added`; `CHANGELOG.md` is not edited.
 
@@ -514,9 +519,12 @@ fixtures are extended rather than replaced.
   decoded OTLP wire. Design footprint: add `telemetry_deferred.py`, whose
   callers stop knowing delayed SDK record identity and release, and deepen the
   two existing content exporters and pipeline content seams. Documentation
-  footprint: update the server exporter contract, observability map, generated
-  configuration prose and examples whose current post-close observation
-  descriptions become false.
+  footprint: widen the flag's source description in `config/models.py` to name
+  generated and withheld model output, update the server exporter contract and
+  LLM-input row of the observability map, and regenerate both configuration
+  references plus examples whose current post-close observation descriptions
+  become false. The changelog announces the existing flag's wider disclosure
+  under `### Changed`.
 - [ ] **M3, direct Jaeger and one processed fanout.** Add the pinned direct
   Jaeger and Collector examples, common masking and sampling, boundary-only
   Langfuse adaptation, Basic Auth and v4 ingestion header, static validation,
@@ -629,6 +637,11 @@ model `claude-opus-5`, 2026-09-14, runtime 5m18s.
 11. **P2: generated output widens `export_llm_input`.** The flag prose and
     generated server reference must change, including the fact that withheld
     model text leaves, and the changelog must announce that widening.
+
+    *Resolution:* M2 now updates the `export_llm_input` source description,
+    both generated configuration references and the observability ladder to
+    name generated output, including withheld text. The changelog records the
+    disclosure widening under `### Changed`.
 12. **P2: a built server image does not exist on pull-request runs.** The PR
     direct-Jaeger smoke must run the server from source in the integration lane;
     an image variant can only run in the existing non-PR image job.
