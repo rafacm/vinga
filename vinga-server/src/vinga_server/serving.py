@@ -83,19 +83,40 @@ UVICORN_GRACEFUL_SHUTDOWN_S = 5
 # It does not name the table by taking the location apart. The location
 # is printed directly above it, and a sentence that re-derives half of
 # one is a second spelling of an identity.
+#
+# What it does not do either, since the PR round caught it, is promise
+# an identity the refusal above may not have. Three of the classified
+# failures name a SECTION and no entry: an invalid stage, an invalid
+# MAC and the assembly refusal all report `providers` or `devices` or
+# `mcp_servers` alone, deliberately, because in each of them the
+# unreadable value IS what an entry would have been addressed by. A
+# sentence saying the location addresses one row would be this
+# milestone's own defect committed inside its fix.
+#
+# And the pointer is a pointer. `docs/reference/cli.md` writes the
+# rebuild out step by step and NAMES the SQL door without writing it,
+# which is the state this milestone found and deliberately does not
+# change; the sentence says which is which rather than claiming both.
 STORED_CONFIG_RECOVERY = (
-    "The row is in the domain half of this deployment's database, and the location "
-    "named above addresses it. `vinga mcp-server delete` and `vinga provider delete` "
-    "remove such a row by identity without having to understand it, but every command "
-    "is a request to the configuration API, and that API is behind this boot: there is "
-    "nobody to answer one until the server starts. So there are two ways back. With a "
-    "`vinga-server config export` taken while this deployment was healthy: start a "
-    "server on an empty domain schema, import that document, run the secret set "
-    "commands it lists to enter each stored credential again, since an export "
-    "deliberately carries none of them, and apply it. Without one: correct or delete "
-    "the addressed row with SQL as the role this server connects as, which is the "
-    "surgical door this project keeps outside the command grammar. Both procedures "
-    "are written out in docs/reference/cli.md."
+    "The unreadable state is in the domain half of this deployment's database. The "
+    "location above names one entry, as a section and the name it is filed under, or "
+    "the section alone when the value that will not read is what an entry would have "
+    "been addressed by: a stage, a MAC or an entry name that nothing accepts leaves "
+    "nothing to address, so the row has to be found inside the section named. No "
+    "command reaches it either way. `vinga mcp-server delete` and `vinga provider "
+    "delete` remove a named entry without having to understand it, but every command "
+    "is a request to the configuration API, and that API is behind this boot: there "
+    "is nobody to answer one until the server starts. So there are two ways back, and "
+    "both cover a section as well as an entry. With a `vinga-server config export` "
+    "taken while this deployment was healthy: start a server on an empty domain "
+    "schema, import that document, run the secret set commands it lists to enter each "
+    "stored credential again, since an export deliberately carries none of them, and "
+    "apply it. That is a rebuild rather than a repair, so it puts back what the "
+    "export says whatever the unreadable state was, and docs/reference/cli.md writes "
+    "the steps out. Without an export: correct or delete the offending row with SQL "
+    "against the domain schema, as the role this server connects as. The same "
+    "document names that door rather than writing it out, since it is outside this "
+    "project's command grammar."
 )
 
 

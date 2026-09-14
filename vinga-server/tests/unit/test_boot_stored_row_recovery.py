@@ -58,6 +58,10 @@ TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 ENTRY = "weather"
 LOCATION = f"mcp_servers.{ENTRY}"
 
+# A body the model accepts, for the rows whose defect is their address
+# rather than their contents.
+LAWFUL_BODY = json.dumps({"transport": "stdio", "command": "uvx"})
+
 # The value no build of this project ever wrote, which is the shape the
 # issue reports: `reach` is three words, and a restore, a hand edit or
 # another build's row can hold a fourth. Distinctive rather than
@@ -70,6 +74,26 @@ STORED_REACH = "anywhere-at-all-9f3c"
 # so a body dumped from a model could never carry it, and what is under
 # test is the reader.
 BODY = json.dumps({"transport": "stdio", "command": "uvx", "reach": STORED_REACH})
+
+# The two shapes whose refusal names a SECTION and no entry, because in
+# each of them the unreadable value is what an entry would have been
+# addressed BY. They are the cases the PR round found the first wording
+# false of, and they are why it stopped promising an identity.
+#
+# A stage nothing declares, in a provider row whose name is perfectly
+# lawful: the name is not what is wrong, and the refusal still cannot
+# use it, because a row filed under a stage this build does not have is
+# a row no `providers.<stage>.<name>` addresses.
+STORED_STAGE = "sideways-9f3c"
+PROVIDER_NAME = "claude"
+PROVIDER_BODY = json.dumps({"type": "mock"})
+
+# And the assembly refusal, which is about the whole document rather
+# than one row: an MCP entry name that the model refuses on the way out
+# as well as on the way in, since a name becomes a tool-name prefix.
+# The name is the unreadable value, so it is the one thing the refusal
+# may not repeat, and what is left to say is the section.
+STORED_MCP_NAME = "not a lawful prefix 9f3c"
 
 # A port on loopback nothing listens on, which is the cheapest genuine
 # connection failure there is: the kernel refuses it immediately, so the
@@ -196,6 +220,61 @@ def test_a_reach_no_build_wrote_refuses_the_boot_and_says_what_to_do(
     # restored or hand-edited database that is this issue's own path.
     assert "vinga-server config export" in printed.err
     assert "SQL" in printed.err
+
+
+@pytest.mark.parametrize(
+    ("plant", "location", "unaddressable"),
+    [
+        pytest.param(
+            insert(schema.providers).values(
+                stage=STORED_STAGE, name=PROVIDER_NAME, body=PROVIDER_BODY
+            ),
+            "providers: ",
+            STORED_STAGE,
+            id="a-stage-nothing-declares",
+        ),
+        pytest.param(
+            insert(schema.mcp_servers).values(name=STORED_MCP_NAME, body=LAWFUL_BODY),
+            "the stored configuration cannot be read:",
+            STORED_MCP_NAME,
+            id="a-name-the-assembly-refuses",
+        ),
+    ],
+)
+def test_a_refusal_that_can_name_no_entry_still_says_what_to_do(
+    store: ConfigStore,
+    plant: object,
+    location: str,
+    unaddressable: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The shapes the first wording was false of, driven rather than
+    argued.
+
+    Both refuse the boot through the same class as the row above, and
+    neither can name an entry: what will not read is the stage, or the
+    name, which is exactly what an entry would have been addressed by.
+    So the refusal names the section, the value stays unquoted, and the
+    recovery has to be true of a location that identifies nothing.
+
+    The token asserted for that is `section`, which the fixed text
+    carries because of these two cases and carried nothing of before
+    them. Asserted on what reaches stderr rather than on the constant,
+    because a sentence an operator never reads is not a recovery.
+    """
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+    planted(store, plant)
+
+    assert serving.run(None) == 1
+
+    printed = capsys.readouterr()
+    assert location in printed.err
+    # Nothing identifies the row, which is the whole point: the value
+    # that would have addressed it is the value that will not read.
+    assert unaddressable not in printed.err
+    assert STORED_CONFIG_RECOVERY in printed.err
+    assert "section" in printed.err
 
 
 def test_a_configuration_failure_that_is_not_a_storage_one_gets_no_recovery(
