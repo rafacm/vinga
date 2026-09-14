@@ -37,7 +37,7 @@ from tests.support.tools_mcp import serving
 from vinga_server.config import Config
 from vinga_server.config.boot import load_boot_config
 from vinga_server.events import Emission, attach_server_tap, detach_server_tap
-from vinga_server.tools.mcp import CONNECTED, McpServers
+from vinga_server.tools.mcp import CONNECTED, REDACTED, McpServers
 
 # Not a real credential, and shaped so a substring check for it cannot
 # match by accident. It is what the environment variable HOLDS: the
@@ -53,6 +53,14 @@ MISSING_ENV = "VINGA_TEST_COMPOSED_MISSING"
 
 COMPOSED = f"Bearer ${SECRET_ENV}"
 EXPECTED = f"Bearer {SENTINEL}"
+
+# A credential shorter than the redaction floor, which is eight. A
+# generic configured value this short is not treated as a secret, on
+# purpose; a substituted atom this short is one, because it came out of
+# the variable a secret-bearing key referenced. Shaped to be findable
+# rather than memorable, since six characters cannot be shaped to be
+# unmistakable.
+SHORT = "q7v3zx"
 
 pytestmark = pytest.mark.filterwarnings("ignore:Unclosed <MemoryObject:ResourceWarning")
 
@@ -88,6 +96,42 @@ def recording_server() -> FastMCP:
         description="A fingerprint of the named header this request carried.",
     )
     return server
+
+
+def shipping_server(guidance: str) -> FastMCP:
+    """A streamable_http server that ships one sentence about itself.
+
+    The sentence is arranged rather than observed, as the HTTP half of
+    `test_mcp_status_reflection.py` arranges its own: a server cannot
+    read the header it was given while it is being constructed, and what
+    is under test here is this side's redaction rather than the far
+    side's ingenuity.
+    """
+    server = FastMCP("vinga-test-http-shipping", instructions=guidance)
+
+    def forecast() -> str:
+        return "sunny"
+
+    server.add_tool(forecast, name="forecast", description="The forecast.")
+    return server
+
+
+def opted_in(url: str, header: str) -> dict[str, object]:
+    """An entry that asks for what the server ships, which is the
+    channel a reflected credential would travel on."""
+    return http_entry(url, header) | {"use_server_instructions": True}
+
+
+async def shipped(config: Config) -> str:
+    """What one connection captured of the server's own guidance, as the
+    agent granted the entry would be given it."""
+    servers = McpServers.build(config)
+    await servers.start_all()
+    try:
+        assert servers.status()["weather"]["state"] == CONNECTED
+        return "\n".join(block.text for block in servers.guidance_for_agent("assistant"))
+    finally:
+        await servers.stop_all()
 
 
 def config_with(entry: dict[str, object]) -> Config:
@@ -225,6 +269,41 @@ async def test_a_value_with_no_reference_reaches_the_server_byte_for_byte(
     async with serving(recording_server()) as url:
         entry = http_entry(url, written, key="X-Region")
         assert await fingerprint(config_with(entry), "x-region") == digest(written)
+
+
+# --- what the far side hands back -------------------------------------
+
+
+async def test_a_reflected_token_below_the_redaction_floor_is_taken_out(
+    tap: Tap, watched: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A six-character credential, handed back on its own.
+
+    The redaction floor exists because a short CONFIGURED value is a
+    port or a locale and replacing it would mangle the guidance for
+    nothing. It must not reach an atom: a short atom came out of the
+    variable a secret-bearing key referenced, so it is a short
+    credential, and a server that hands it back gets it redacted
+    whatever its length.
+
+    Composed on purpose, because composition is what makes the bare
+    token a separate string from the header: `Bearer q7v3zx` is over the
+    floor and would have been replaced, and it is not what the server
+    wrote.
+    """
+    monkeypatch.setenv(SECRET_ENV, SHORT)
+
+    async with serving(shipping_server(f"Call the forecast tool with {SHORT}.")) as url:
+        captured = await shipped(config_with(opted_in(url, COMPOSED)))
+
+    # The opt-in did what it says and the sentence arrived, so what
+    # follows is a redaction rather than a block that never came.
+    assert f"Call the forecast tool with {REDACTED}." in captured
+    # And the tap was handed something, so its absence is an absence
+    # from a transport that ran.
+    assert tap.seen
+    for surface in (captured, every_format(watched), tap.rendered()):
+        assert SHORT not in surface
 
 
 # --- what an unset variable refuses, and what it does not say ---------
