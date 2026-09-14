@@ -27,9 +27,11 @@ import logging
 import threading
 import time
 from collections.abc import Iterator
+from dataclasses import replace
 from typing import Any
 
 import pytest
+from opentelemetry.trace import TraceFlags
 
 from tests.support.events import both_formats
 from tests.support.telemetry import (
@@ -245,6 +247,22 @@ def test_a_delivery_that_raises_answers_undelivered_too() -> None:
         telemetry.export_llm_input(SESSION, context, [a_round()])
         is Delivery.UNDELIVERED
     )
+
+
+def test_an_unsampled_parent_is_no_trace_without_a_delivery_attempt() -> None:
+    """Source sampling is an intentional omission, not a transport failure."""
+    deliveries = Deliveries()
+    telemetry, _ = exporting(transcripts=deliveries)
+    a_session(telemetry)
+    context = telemetry.retained_context(SESSION)
+    assert context is not None
+    unsampled = replace(context, trace_flags=TraceFlags(TraceFlags.DEFAULT))
+
+    assert (
+        telemetry.export_llm_input(SESSION, unsampled, [a_round()])
+        is Delivery.NO_TRACE
+    )
+    assert deliveries.batches == []
 
 
 def test_an_exporter_that_has_stopped_accepting_attempts_nothing() -> None:

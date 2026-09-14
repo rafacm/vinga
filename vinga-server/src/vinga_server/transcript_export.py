@@ -629,6 +629,8 @@ class TranscriptExport:
             answer = self._telemetry.export_transcript(
                 job.session, job.context, turns
             )
+            if answer is Delivery.NO_TRACE:
+                return TranscriptExportFailure.NO_TRACE, ordinal
             if answer is Delivery.STOPPED:
                 return TranscriptExportFailure.DROPPED, ordinal
             if answer is Delivery.UNDELIVERED:

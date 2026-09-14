@@ -149,14 +149,15 @@ class _Synthesis:
             # the call actually failed at.
             self._report_failure(exc, asyncio.get_running_loop().time() - started)
         finally:
-            if not cancelled and self._failure is None:
-                # A successful stream is over. Both numbers go together
+            if not cancelled:
+                # The stream is over. Both numbers go together
                 # because only together are they honest: the first is the
                 # provider's own latency, taken before a paced consumer
                 # could hold anything back, and the second is the whole
                 # life of the stream, which a paced consumer is part of.
-                # A failed stream was already reported above and must not
-                # also emit the success event that creates a second span.
+                # A failed stream was already reported above. The event
+                # remains on the declared log surface with these timings;
+                # telemetry consumes it after the failed operation span.
                 self._report_stream(
                     first_chunk_ms,
                     round((asyncio.get_running_loop().time() - started) * 1000),

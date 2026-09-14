@@ -26,11 +26,27 @@ import time
 
 import pytest
 import uvicorn
+from opentelemetry.proto.trace.v1.trace_pb2 import Status
 from xiaozhi_sdk import XiaoZhiWebsocket
 
 from tests.integration.conftest import booted
-from tests.support.telemetry import Receiver, attributes, named
+from tests.support.telemetry import (
+    Clock,
+    Receiver,
+    attributes,
+    call_tool,
+    close_session,
+    finish_reply,
+    named,
+    open_session,
+    provider_failed,
+    session_events,
+    start_turn,
+)
 from vinga_server.config import Config
+from vinga_server.config.models import TelemetryConfig
+from vinga_server.events.values import ReplyOutcome
+from vinga_server.telemetry import build_telemetry
 
 pytestmark = pytest.mark.asyncio
 
@@ -281,6 +297,49 @@ async def test_the_session_id_arrives_under_the_grouping_alias_too(
         carried = attributes(span)
         assert carried["session.id"], span.name
         assert carried["session.id"] == carried["vinga.session.id"], span.name
+
+
+async def test_failed_operations_replace_their_turn_events_on_the_wire(
+    receiver: Receiver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A collector receives each failure once, as the operation itself.
+
+    This drives the fold directly so both failure variants can share one
+    decoded trace without teaching the server fixture test-only provider
+    behavior. The exporter and HTTP receiver are the real transport: the
+    assertions below are against the protobuf a backend receives.
+    """
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", receiver.endpoint)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_HEADERS", raising=False)
+    telemetry = build_telemetry(TelemetryConfig(enabled=True))
+    assert telemetry is not None
+    events = session_events(Clock(), telemetry)
+
+    try:
+        open_session(events)
+        start_turn(events)
+        provider_failed(events, stage="llm")
+        call_tool(events, which="mcp", is_error=True)
+        finish_reply(events, outcome=ReplyOutcome.FAILED, sentences=0)
+        close_session(events)
+    finally:
+        telemetry.release()
+
+    spans = receiver.spans()
+    assert spans, "nothing reached the collector at all"
+    turn = named(spans, "turn")
+    llm, tool = named(spans, "llm"), named(spans, "tool")
+
+    assert llm.parent_span_id == turn.span_id
+    assert tool.parent_span_id == turn.span_id
+    assert llm.status.code == Status.STATUS_CODE_ERROR
+    assert tool.status.code == Status.STATUS_CODE_ERROR
+    assert attributes(llm)["error.type"] == "TimeoutError"
+    assert attributes(tool)["error.type"] == "tool_error"
+    assert not {event.name for event in turn.events} & {
+        "provider_failed",
+        "tool_call",
+    }
 
 
 async def test_the_resource_that_arrives_is_the_servers_own(

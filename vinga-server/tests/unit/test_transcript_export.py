@@ -750,6 +750,22 @@ async def test_a_backend_that_will_not_take_the_spans_is_undelivered(
 
 
 @pytest.mark.asyncio
+async def test_a_sampled_away_page_is_reported_as_no_trace(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A source decision is not described as a refusal by the backend."""
+    exporter, _, _ = an_exporter(
+        {SESSION: [a_row(1)]},
+        telemetry=Exported({SESSION: A_CONTEXT}, answer=Delivery.NO_TRACE),
+    )
+
+    exporter.session_closed(SESSION, settled())
+    await drained(exporter, lambda: reasons(caplog))
+
+    assert reasons(caplog) == [TranscriptExportFailure.NO_TRACE]
+
+
+@pytest.mark.asyncio
 async def test_a_full_backlog_drops_the_job_and_says_so(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
