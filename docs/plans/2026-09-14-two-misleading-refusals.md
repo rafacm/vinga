@@ -51,17 +51,43 @@ value has the same problem the issue reports for a header the moment a
 server wants `--token=$TOKEN`, and the rule that made `headers` the
 reported case is the secret-bearing check, not the resolution.
 
-### #504: one pattern, asked two ways
+### #504: one pattern, asked two ways, and the trimming stays
 
-`_ENV_REFERENCE_RE` stops being anchored and becomes the scanner.
-"Is this value exactly a reference" is then the same pattern asked with
+`_ENV_REFERENCE_RE` stops being anchored and becomes the scanner. "Is
+this value exactly a reference" is then the same pattern asked with
 `fullmatch`, so the two questions cannot drift apart.
 
-`fullmatch` deliberately, never `match` with a `$` appended: `re.match(p + "$")`
-accepts a terminal newline where `fullmatch` does not, which broke a
-same-syntax contract in #500 M4 and was a live bug in `PCM_FORMAT_PATTERN`
-beside it. A header value ending in a newline is exactly the shape a
-copy-paste produces.
+**The trimming stays exactly where it is, and that is the whole of the
+compatibility story here.** `_env_reference` matches against
+`value.strip()` today, so `"$TOKEN "` and `"$TOKEN\n"` are accepted and
+resolve to the secret with no padding, which a round-trip case already
+pins. The resolver therefore keeps asking the whole-value question
+first, against the stripped value, and answers it exactly as it does
+now; only a value that is NOT a whole reference is scanned and
+substituted as written. A padded reference keeps resolving to the bare
+secret rather than quietly becoming a composed value with whitespace in
+it, which is what dropping the strip would have done.
+
+So `_env_reference` keeps a production caller and is not deleted. If
+the implementation finds it has none, it is deleted rather than kept
+and tested privately: a private helper with a test and no caller is a
+test of nothing.
+
+`fullmatch` deliberately, never `match` with a `$` appended:
+`re.match(p + "$")` accepts a terminal newline where `fullmatch` does
+not. Here the strip makes that moot for the whole-value question, which
+is precisely why it is worth writing down rather than relying on: the
+next reader of this pattern will not have the strip in view.
+
+**What a newline inside a COMPOSED value does is a question this
+milestone answers by measurement, not by assertion.** `Bearer $TOKEN\n`
+is not a whole reference, so it is substituted as written and a value
+with a newline in it reaches the HTTP client. The milestone writes the
+case, observes what the client does with it, and records the answer: if
+the client refuses it, that is the behavior and the case pins it; if it
+passes it through, the milestone adds the refusal, because a header
+value carrying CR or LF is header injection and not a configuration
+style. Either way the plan does not claim an answer it has not seen.
 
 ### #504: what may be stored is what may be displayed
 
