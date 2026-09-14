@@ -423,10 +423,12 @@ server:
   #   # it and the next startup sweeps what was left behind.
   #   export_audio: false
   #   # EXPORTS WHAT WAS SAID to the telemetry backend, one observation
-  #   # per turn on the trace the session was exported under, carrying
-  #   # what was heard and what was replied. Off by default and its own
-  #   # decision: telemetry being on and `conversations.text` being on
-  #   # do not imply that the text leaves.
+  #   # per turn under the turn it describes, in that turn's own trace,
+  #   # carrying what was heard and what was replied. A turn the
+  #   # exporter can no longer address keeps the session's trace
+  #   # instead. Off by default and its own decision: telemetry being on
+  #   # and `conversations.text` being on do not imply that the text
+  #   # leaves.
   #   #
   #   # Conversation-level text only. The user's transcript, the reply,
   #   # and per-agent attribution where a handover split it; the
@@ -444,8 +446,8 @@ server:
   #   # no-op rather than a misconfiguration, said once at startup.
   #   # `capture` is irrelevant to it either way. With `enabled` above
   #   # off it is refused at boot, since an observation is written onto
-  #   # a trace, and under a `data_boundary` narrower than internet it
-  #   # is refused too.
+  #   # a trace this server exported, and under a `data_boundary`
+  #   # narrower than internet it is refused too.
   #   #
   #   # It needs no extra and no second credential: the turns travel as
   #   # OTLP spans over the same OTEL_EXPORTER_OTLP_* transport the

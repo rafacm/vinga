@@ -891,9 +891,10 @@ class TelemetryConfig(BaseModel):
         default=False,
         description=(
             "Whether a closed session's turns are exported to the telemetry "
-            "backend and written onto the trace that session was exported under, "
-            "one observation per turn carrying what was heard and what was "
-            "replied. Off by default, and it is its own decision: **telemetry "
+            "backend, one observation per turn carrying what was heard and what "
+            "was replied, written under the turn it describes and inside that "
+            "turn's own trace; a turn the exporter can no longer address keeps "
+            "the session's trace instead. Off by default, and it is its own decision: **telemetry "
             "being on and conversation text being stored do not imply that the "
             "text leaves.** What goes is conversation-level text only, the user's "
             "transcript and the reply, with per-agent attribution where a handover "
@@ -908,7 +909,8 @@ class TelemetryConfig(BaseModel):
             "configured there, and a backend with no policy configured retains "
             "indefinitely. "
             "It needs `enabled` above, since an observation is written onto a "
-            "trace, and it is refused at boot without it. With "
+            "trace this server exported, and it is refused at boot without it. "
+            "With "
             "`server.conversations` absent, off, or storing no text it is a no-op "
             "rather than a misconfiguration: there is nothing recorded to export, "
             "and the server says so once at startup. Capture is irrelevant to it "

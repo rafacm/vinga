@@ -285,9 +285,18 @@ to learn any was meant to be there.
 `vinga_server/transcript_export.py`.
 
 **Carries.** Content, and the second surface here that sends any off the
-host: a closed session's turns, one observation each on the trace that
-session was exported under, carrying what was heard and what was replied
-with per-agent attribution where a handover split the reply.
+host: a closed session's turns, one observation each under the turn it
+describes and inside that turn's own trace, carrying what was heard and
+what was replied with per-agent attribution where a handover split the
+reply. A turn that cannot be addressed keeps the parent this surface
+shipped with, the session span: a row carrying no utterance, an
+utterance no turn span was opened for, and a turn evicted past the
+exporter's per-session turn retention. Both halves are the contract, and
+the un-nested case is legible as itself rather than announced, since a
+transcript under `session` rather than under `turn` is visibly the one
+that could not be filed. Every observation carries the session under
+both spellings either way, so the backend's session view groups the
+words with the turns whichever parent they found.
 Conversation-level text exactly, read post hoc from the conversation
 store's own rows. The assembled model request, the tool arguments and
 results, and the per-request audio are not in it: the first is a content
