@@ -133,14 +133,26 @@ async def _connect(
     secrets: SecretStore | None,
     stack: AsyncExitStack,
     reached: Callable[[str], None],
-) -> tuple[ClientSession, mcp.types.InitializeResult]:
-    """The connected session, and what the handshake answered with.
+) -> tuple[ClientSession, mcp.types.InitializeResult, ResolvedValues]:
+    """The connected session, what the handshake answered with, and what
+    this connection was actually given.
 
     The initialization result is returned rather than discarded
     because it is where a server describes itself: its `instructions`
     is one of the two channels this entry may opt into, and its
     capabilities are what says whether asking for prompts is a
     question this server answers at all.
+
+    The materialized values are returned for a narrower reason: they are
+    what the far side holds, and the only honest input to taking this
+    deployment's credentials back out of whatever it hands back. Reading
+    the environment a second time later would answer what the variables
+    say THEN, and a variable that moved between the connect and the
+    capture would leave the redactor hunting a credential this server
+    never sent while the one it did sent goes through (#504). One group
+    and not both, because one is all a connection uses: a transport is
+    given its own group and the model refuses an entry that names the
+    other's.
 
     `reached` is `_run`'s phase marker, advanced once here: bringing
     a transport up and speaking the handshake over it are two
@@ -150,15 +162,13 @@ async def _connect(
     """
     if config.transport == "stdio":
         assert config.command is not None
+        sent = _resolve(name, config, secrets, "env")
         parameters = StdioServerParameters(
             command=config.command,
             args=list(config.args),
             # Merged rather than replaced: a spawned server still
             # needs a PATH and a HOME to find its own tools.
-            env={
-                **get_default_environment(),
-                **_resolve(name, config, secrets, "env").values,
-            },
+            env={**get_default_environment(), **sent.values},
         )
         # The child's stderr goes nowhere. The SDK's default hands it
         # this process's own stderr, which makes a spawned server's
@@ -175,6 +185,7 @@ async def _connect(
         )
     else:
         assert config.url is not None
+        sent = _resolve(name, config, secrets, "headers")
         # The transport takes a caller-managed httpx client rather
         # than headers, a timeout and a redirect policy of its own,
         # so the HTTP policy is stated here. The values come from
@@ -191,7 +202,7 @@ async def _connect(
         # transport first and the client after it, in this one task.
         client = await stack.enter_async_context(
             httpx.AsyncClient(
-                headers=_resolve(name, config, secrets, "headers").values or None,
+                headers=sent.values or None,
                 follow_redirects=True,
                 timeout=httpx.Timeout(30.0, read=300.0),
             )
@@ -201,7 +212,7 @@ async def _connect(
         )
     reached(INITIALIZE_FAILED)
     session = await stack.enter_async_context(ClientSession(read, write))
-    return session, await session.initialize()
+    return session, await session.initialize(), sent
 
 
 # The entry fields that configure prompt text rather than the

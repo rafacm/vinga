@@ -23,7 +23,7 @@ import mcp.types
 from mcp import ClientSession
 
 from vinga_server.boundary import BoundaryRefusal, check_mcp_server
-from vinga_server.config import Config, McpServerConfig
+from vinga_server.config import Config, McpServerConfig, ResolvedValues
 from vinga_server.config.entities import descriptor, entity_location
 from vinga_server.config.secrets import SecretStore
 from vinga_server.events.catalog import (  # noqa: E402
@@ -487,7 +487,7 @@ class McpServerManager:
         try:
             async with AsyncExitStack() as stack:
                 async with asyncio.timeout(CONNECT_TIMEOUT_S):
-                    session, initialized = await _connect(
+                    session, initialized, sent = await _connect(
                         self._name, self._config, self._secrets, stack, reached
                     )
                     reached(DISCOVERY_FAILED)
@@ -536,7 +536,15 @@ class McpServerManager:
                 # `start()` still returns to a manager whose whole answer
                 # is in place, at the price of one discovery deadline on
                 # the boot and on a reload.
-                await self._capture(session, initialized)
+                try:
+                    await self._capture(session, initialized, sent)
+                finally:
+                    # And the plaintext goes here, before the wait
+                    # below, which is as long as the connection lasts.
+                    # This frame is the only reference to it left: the
+                    # transport keeps whatever it needs to talk, and
+                    # nothing of it is ever put on the manager.
+                    del sent
                 self._announce_shipped()
                 self._settled.set()
                 await self._stop.wait()
@@ -580,7 +588,10 @@ class McpServerManager:
             self._settled.set()
 
     async def _capture(
-        self, session: ClientSession, initialized: mcp.types.InitializeResult
+        self,
+        session: ClientSession,
+        initialized: mcp.types.InitializeResult,
+        sent: ResolvedValues,
     ) -> None:
         """Take what this server ships, with this deployment's own
         credentials taken back out of it.
@@ -590,10 +601,9 @@ class McpServerManager:
         prompt and on a gated read. That is the operator's decision about
         a third party's text and it stands; it is not a decision to let
         the server hand this deployment's own secrets back through a
-        surface the rest of the API refuses to read them from. So the
-        materialized values are resolved once here, every occurrence of
-        one is replaced before anything is stored, and only the redacted
-        text is kept.
+        surface the rest of the API refuses to read them from. So every
+        occurrence of what this connection was given is replaced before
+        anything is stored, and only the redacted text is kept.
 
         The secrets that went into those values are replaced too, and
         that is not the same set: a composed `Bearer $TOKEN` reaches the
@@ -602,33 +612,22 @@ class McpServerManager:
         answers with both halves because the resolver is the one place
         the credential exists as itself (#504).
 
-        The resolved values live for the length of this call and are
-        never held on the manager, which is the rule `__init__` already
-        follows and for the same reason: a manager lives as long as the
-        process.
+        `sent` is what `_connect` actually gave this connection, handed
+        down rather than resolved again here. Resolving again would
+        answer what the environment says now, and the gap is real: a
+        handshake and a tool listing sit between the two, so a variable
+        that moved in that window would leave this hunting a credential
+        the server never saw. What it did see is the only thing worth
+        replacing.
+
+        The values live for the length of this call. Nothing of them is
+        put on the manager, which is the rule `__init__` already follows
+        and for the same reason (a manager lives as long as the
+        process), and `_run` drops its own reference as soon as this
+        returns, so they do not outlive the capture into the wait that
+        holds a connection open.
         """
-        try:
-            groups = [
-                _resolve(self._name, self._config, self._secrets, group)
-                for group in ("env", "headers")
-            ]
-            redact = _redactor(
-                [value for resolved in groups for value in resolved.values.values()],
-                [atom for resolved in groups for atom in resolved.secrets],
-            )
-        except Exception as exc:
-            # Fail closed, and do not take the tools with it. Resolving
-            # succeeded a moment ago inside the connect or there would be
-            # no session here, so this is the environment moving under a
-            # running server; what it costs is the optional half, and the
-            # alternative is keeping text nothing was redacted from.
-            logger.warning(
-                "mcp server %s: its own configured values could not be resolved (%s), "
-                "so nothing this server ships is kept this time",
-                self._name,
-                _reason(exc),
-            )
-            return
+        redact = _redactor(sent.values.values(), sent.secrets)
         self._instructions = _injectable(
             self._name, redact(initialized.instructions), INSTRUCTIONS_CHANNEL
         )
