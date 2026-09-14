@@ -47,11 +47,23 @@ Refusing it HERE, by aborting the migration, was the other shape
 offered and is the wrong one. The boot is what runs this, and the
 configuration API an operator would fix the row through is behind the
 boot, so an abort locks them out of the one door to the row that is
-stopping them. It also takes the whole deployment down over one entry
-rather than the entry itself. A row that arrives as an invalid `reach`
-refuses at the surface every other unreadable row refuses at, naming
-the entry and quoting no value, and `vinga provider delete` and
-`vinga mcp-server delete` reach it by identity without understanding it.
+stopping them. That argument stands and is why the value crosses.
+
+What this paragraph used to say after it does not, and #507 is the
+correction. It claimed the consequence was bounded to the entry rather
+than the deployment, and that `vinga provider delete` and
+`vinga mcp-server delete` reach such a row by identity without
+understanding it. Both are true of a server that is already running and
+false of a boot, which is the case this migration is about: a single
+row here whose `reach` is not one of the three refuses the startup that
+reads it, and the configuration API those commands speak to is behind
+that startup, so there is nobody to ask. A row that arrives as an
+invalid `reach` still refuses at the surface every other unreadable row
+refuses at, naming the entry and quoting no value; what changed is that
+a refused boot now prints a second line under that refusal, saying that
+the row is in the domain half at the location above, that no command
+reaches it until the server starts, and what the two ways back are
+(`vinga_server.serving.STORED_CONFIG_RECOVERY`).
 
 Forward only, and nothing is lost that a downgrade would want back: an
 older build reading `reach` would refuse it for the same reason this
