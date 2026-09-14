@@ -211,10 +211,18 @@ CAPTURE_STARTED = "capture_started"
 # here.
 CAPTURE_UPLOADED = "capture_uploaded"
 CAPTURE_UPLOAD_FAILED = "capture_upload_failed"
+TRANSCRIPTS_EXPORTED = "transcripts_exported"
+TRANSCRIPT_EXPORT_FAILED = "transcript_export_failed"
+LLM_INPUT_EXPORTED = "llm_input_exported"
+LLM_INPUT_EXPORT_FAILED = "llm_input_export_failed"
 AFTER_THE_CLOSE = frozenset(
     {
         CAPTURE_UPLOADED,
         CAPTURE_UPLOAD_FAILED,
+        TRANSCRIPTS_EXPORTED,
+        TRANSCRIPT_EXPORT_FAILED,
+        LLM_INPUT_EXPORTED,
+        LLM_INPUT_EXPORT_FAILED,
     }
 )
 
@@ -2383,14 +2391,14 @@ class Telemetry:
         """One server-scoped event, folded where it belongs.
 
         Only the events that name a session have a destination in a
-        trace, and three do. `capture_started` arrives BEFORE its
+        trace, and seven do. `capture_started` arrives BEFORE its
         session's span exists, because a capture opens during the
         handshake and the handshake is ahead of `session_open`, so one
         that finds no span is held rather than dropped: the ordering is
-        the ordinary case rather than a race. The two upload outcomes
-        arrive AFTER the span has ended, because a recording's trip to
-        the backend runs on a worker of its own once the session is
-        over, so those find the retention instead.
+        the ordinary case rather than a race. The six export outcomes
+        may arrive AFTER the span has ended, because their work finishes
+        independently of the event loop, so those find the retention
+        instead.
         """
         if not self._accepting:
             return

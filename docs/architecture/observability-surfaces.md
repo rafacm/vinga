@@ -363,7 +363,10 @@ reply path, attaches an allowlisted projection, and ends the root at its
 original reply-finished timestamp. A false or missing acknowledgement,
 timeout, overflow, size refusal or shutdown ends that same root
 metadata-only. `transcripts_exported` means attachment and enqueue into
-the ordinary OTLP processor, not backend acknowledgement.
+the ordinary OTLP processor, not backend acknowledgement. It and the
+failure outcome remain metadata-only spans beside the retained session
+trace, so a trace reader can see that content was intended without the
+outcome carrying any of that content.
 
 ### Exported LLM input
 
@@ -437,7 +440,9 @@ the traces already use. Pairing finishes synchronously immediately
 before the matching `llm_round` or `provider_failed` event creates and
 ends that span. `llm_input_exported` means attachment and enqueue into
 the ordinary OTLP processor, not backend acknowledgement; a pre-enqueue
-omission is `llm_input_export_failed`.
+omission is `llm_input_export_failed`. Both outcomes remain metadata-only
+spans beside the retained session trace, so the trace keeps the export
+ledger without copying request or output content into the event surface.
 
 ### Audit
 
