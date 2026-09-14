@@ -19,8 +19,10 @@ Two runnable paths prove the contract from outside. A direct OTLP/HTTP
 protobuf path makes Jaeger a supported destination. A Collector path applies
 one masking and sampling decision before it splits the same trace population
 to Jaeger and Langfuse, adding the minimum Langfuse rendering hints and
-ingestion headers only on that branch. Recording upload remains the existing
-Langfuse-only media path and never joins the shared traces pipeline.
+ingestion headers only on that branch. Recording bytes remain on the existing
+Langfuse-only media path. The current Langfuse `capture` reference span does
+use the shared OTLP transport and is treated as an explicit backend-specific
+exception rather than canonical fanout telemetry.
 
 Local baseline: not applicable. No conversational capability changes. This
 plan changes an optional, off-by-default export surface already governed by
@@ -51,8 +53,9 @@ These are settled by #523 and are not re-litigated here.
   hints may be derived only at the export boundary and do not create a second
   instrumentation model.
 - The existing Langfuse recording upload, including its WAV and manifest,
-  stays separate and opt-in. Jaeger receives neither media nor upload
-  references.
+  stays separate and opt-in. Its `capture` reference span remains a
+  Langfuse-specific OTLP operation; the Collector Jaeger branch drops that
+  span, and Jaeger receives neither media nor upload references.
 - The existing data-boundary refusals, bounded non-blocking delivery, local
   conversation and capture retention, and content flags remain in force.
 
@@ -124,6 +127,13 @@ walkthrough and the two-backend comparison:
 | tool execution | child of turn | `tool` | none on the trace metadata surface |
 | synthesis | child of turn | `tts_stream` | none |
 | playback | child of turn | existing playback name | none |
+
+The existing `capture` span is deliberately outside this canonical table. It
+contains backend-minted media tokens and Langfuse observation attributes for
+the player, travels over the shared OTLP transport, and is routed only to the
+Langfuse branch. The canonical parity comparison excludes it by stable span
+name. Audio export against direct Jaeger is documented as inapplicable rather
+than a Jaeger media feature.
 
 Every span keeps its original trace id, span id, parent span id, links,
 start/end timestamps, status, trace flags and trace state. Every span keeps
@@ -271,8 +281,9 @@ does it split into Jaeger and Langfuse branches. Vinga is explicitly
 decision. Both branches receive the exact processed records. The Langfuse
 branch derives its observation aliases from the already-masked canonical
 attributes, then uses OTLP/HTTP with the Basic Auth client extension and the
-literal `x-langfuse-ingestion-version: 4` header. The Jaeger branch receives no
-Langfuse alias, credential or ingestion header.
+literal `x-langfuse-ingestion-version: 4` header. The Jaeger branch drops every
+`langfuse.*` attribute and the whole Langfuse-only `capture` span. It receives
+no Langfuse credential or ingestion header.
 
 The sample mask covers every canonical content-bearing attribute introduced
 here before the split. It includes a documented email-shaped rule so an
@@ -473,6 +484,11 @@ model `claude-opus-5`, 2026-09-14, runtime 5m18s.
    plan's claims that media never joins the common trace stream and that Jaeger
    sees no Langfuse alias are false. The capture exception and Jaeger-side
    filtering must be explicit.
+
+   *Resolution:* The plan now names `reference_media` and its `capture` span as
+   the one backend-specific OTLP exception. The Collector drops that entire
+   span and all `langfuse.*` attributes from the Jaeger branch, while the media
+   bytes remain on the separate Langfuse REST and object-storage path.
 3. **P1: there is no shared round key.** `vinga.llm.round` resets per reply,
    while the staged content index is session-local and advances even for
    dropped rounds. A server-minted correlation id visible at both seams is
