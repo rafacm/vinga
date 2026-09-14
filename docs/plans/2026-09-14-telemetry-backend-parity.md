@@ -273,6 +273,12 @@ status and `error.type`. The existing ASR failure mapping also writes canonical
 `error.type` beside `vinga.asr.error`; the vinga key remains as a compatibility
 attribute and is not the canonical substitute.
 
+The fold is substitutive, not additive. ASR, LLM and TTS `provider_failed`
+emissions create their failed stage span and do not also become a span event on
+the turn. A failed `tool_call` is likewise represented by its existing tool
+span with error status, not by a duplicate event. Unit and wire tests assert
+the absence of the second carrier.
+
 ## Per-operation content settlement
 
 Generation content is complete at the neutral provider seam before its event
@@ -517,6 +523,8 @@ fixtures are extended rather than replaced.
   safe `error.type` is absent. Credential-shaped exception messages are absent
   from the span, event, log record message, typed arguments and exception
   chains in both log formats.
+  They also assert that no `provider_failed` or failed `tool_call` span event
+  duplicates the real failed operation.
 - Held-turn unit tests pin original span identity, explicit end time,
   sampled and unsampled decisions, exact-once end, metadata-only release after every
   drop reason, the 4,097th-record oldest-finished overflow and shutdown races. The concurrency test
@@ -944,6 +952,10 @@ read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 9m08s.
 15. **P3: the plan does not say whether `provider_failed` remains as a duplicate
     span event.** LLM and TTS must match the ASR and tool precedent: one failed
     span, no duplicate event.
+
+    *Resolution:* M1 now states the folds are substitutive. Each failed ASR,
+    LLM, TTS or tool operation produces one failed span and no duplicate turn
+    event, with unit and decoded-wire absence assertions.
 
 Verdict: not ready. Findings 1 through 4 are load-bearing; findings 5 through
 12 require concrete amendments, and findings 13 through 15 should be folded
