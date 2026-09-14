@@ -16,7 +16,7 @@ from vinga_server.conversations.records import Acknowledgement, TurnRecord
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import TranscriptExportFailed, TranscriptsExported
 from vinga_server.events.values import Count, SessionId, TranscriptExportFailure, Whole
-from vinga_server.telemetry import DEFERRED_TURNS, Telemetry
+from vinga_server.telemetry import DEFERRED_TURNS, Telemetry, TurnSettlement
 
 logger = logging.getLogger(__name__)
 events = ServerEvents(__name__)
@@ -115,6 +115,7 @@ class TranscriptExport:
         del reads, batch_turns
         self._telemetry = telemetry
         self._groups: dict[tuple[str, str], list[_Row]] = {}
+        self._omitted: set[tuple[str, str]] = set()
         self._queue: queue.Queue[_Job] = queue.Queue(maxsize=max(1, backlog))
         self._acknowledgement_timeout_s = acknowledgement_timeout_s
         self._shutdown_timeout_s = shutdown_timeout_s
@@ -162,11 +163,27 @@ class TranscriptExport:
             self._omit(key[0], key[1], TranscriptExportFailure.DROPPED)
 
     def turn_missing(self, session: str, utterance: str) -> None:
-        """Release a root whose reply produced no storable row or content."""
-        self._telemetry.release_turn(session, utterance)
+        """Finish an earlier handover row, or release a wholly empty root."""
+        key = (session, utterance)
+        reason: TranscriptExportFailure | None = None
+        with self._admission:
+            rows = self._groups.pop(key, None)
+            if rows is not None:
+                reason = self._admit(_Job(session, utterance, tuple(rows)))
+        if rows is None:
+            settlement = self._telemetry.release_turn(session, utterance)
+            if settlement is not TurnSettlement.SETTLED:
+                self._was_omitted(session, utterance)
+        elif reason is not None:
+            self._omit(session, utterance, reason)
 
-    def omitted(self, session: str) -> None:
+    def omitted(self, session: str, utterance: str) -> None:
         """Report telemetry-ledger overflow without receiving span ownership."""
+        key = (session, utterance)
+        with self._admission:
+            self._omitted.add(key)
+        if not self._telemetry.acknowledge_turn_omission(session, utterance):
+            self._was_omitted(session, utterance)
         self._failed(session, TranscriptExportFailure.DROPPED)
 
     async def shutdown(self) -> None:
@@ -235,7 +252,15 @@ class TranscriptExport:
         if content_size > MAX_CONTENT_BYTES:
             self._omit(job.session, job.utterance, TranscriptExportFailure.DROPPED)
             return
-        if not self._telemetry.settle_turn(job.session, job.utterance, content):
+        settlement = self._telemetry.settle_turn(
+            job.session, job.utterance, content
+        )
+        if settlement is TurnSettlement.OMITTED:
+            self._was_omitted(job.session, job.utterance)
+            return
+        if settlement is TurnSettlement.MISSING:
+            if self._was_omitted(job.session, job.utterance):
+                return
             self._failed(job.session, TranscriptExportFailure.NO_TRACE)
             return
         elapsed = int((time.monotonic() - began) * 1000)
@@ -262,8 +287,23 @@ class TranscriptExport:
     def _omit(
         self, session: str, utterance: str, reason: TranscriptExportFailure
     ) -> None:
-        self._telemetry.release_turn(session, utterance)
+        settlement = self._telemetry.release_turn(session, utterance)
+        if settlement is TurnSettlement.OMITTED:
+            self._was_omitted(session, utterance)
+            return
+        if settlement is TurnSettlement.MISSING and self._was_omitted(
+            session, utterance
+        ):
+            return
         self._failed(session, reason)
+
+    def _was_omitted(self, session: str, utterance: str) -> bool:
+        key = (session, utterance)
+        with self._admission:
+            if key not in self._omitted:
+                return False
+            self._omitted.remove(key)
+        return True
 
     def _failed(self, session: str, reason: TranscriptExportFailure) -> None:
         events.emit(lambda: TranscriptExportFailed(session=SessionId(session), reason=reason))

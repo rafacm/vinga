@@ -13,7 +13,7 @@ from typing import Any
 
 from vinga_server.conversations.records import Acknowledgement
 from vinga_server.conversations.threads import Reads, Unreadable
-from vinga_server.telemetry import Telemetry
+from vinga_server.telemetry import Telemetry, TurnSettlement
 
 A_CONTEXT = "a-retained-context"
 
@@ -39,27 +39,39 @@ class Exported:
         *,
         answer: bool = True,
         answers: list[bool] | None = None,
+        settlement: TurnSettlement | None = None,
+        acknowledges_omission: bool = True,
     ) -> None:
         del contexts
         self.settled: list[tuple[str, str, dict[str, Any]]] = []
         self.released: list[tuple[str, str]] = []
         self._answer = answer
         self._answers = list(answers or [])
+        self._settlement = settlement
+        self._acknowledges_omission = acknowledges_omission
         self._lock = threading.Lock()
 
     def settle_turn(
         self, session: str, utterance: str, attributes: dict[str, Any]
-    ) -> bool:
+    ) -> TurnSettlement:
         with self._lock:
             self.settled.append((session, utterance, attributes))
             if self._answers:
-                return self._answers.pop(0)
-            return self._answer
+                accepted = self._answers.pop(0)
+            else:
+                accepted = self._answer
+            return self._settlement or (
+                TurnSettlement.SETTLED if accepted else TurnSettlement.MISSING
+            )
 
-    def release_turn(self, session: str, utterance: str) -> bool:
+    def release_turn(self, session: str, utterance: str) -> TurnSettlement:
         with self._lock:
             self.released.append((session, utterance))
-        return True
+        return TurnSettlement.SETTLED
+
+    def acknowledge_turn_omission(self, session: str, utterance: str) -> bool:
+        del session, utterance
+        return self._acknowledges_omission
 
 
 def exporting(

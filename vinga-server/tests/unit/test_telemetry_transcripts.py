@@ -1,10 +1,12 @@
 """Held turn roots receive acknowledged content exactly once."""
 
+import logging
 import threading
 from collections.abc import Iterator
 
 import pytest
 
+from tests.support.events import fields_of
 from tests.support.telemetry import (
     SESSION,
     Clock,
@@ -17,15 +19,19 @@ from tests.support.telemetry import (
     session_events,
     start_turn,
 )
+from tests.support.transcripts import pending
 from vinga_server import telemetry as telemetry_module
+from vinga_server.conversations.records import TurnRecord
+from vinga_server.events.values import TranscriptExportFailure
 from vinga_server.telemetry import (
     _QUIETING,
     TURN_INPUT,
     TURN_LEGS,
     TURN_OUTPUT,
     Telemetry,
+    TurnSettlement,
 )
-from vinga_server.transcript_export import MAX_CONTENT_BYTES
+from vinga_server.transcript_export import MAX_CONTENT_BYTES, TranscriptExport
 
 
 @pytest.fixture(autouse=True)
@@ -67,7 +73,7 @@ def test_a_registered_exporter_holds_then_enriches_the_root() -> None:
                 }
             ],
         },
-    )
+    ) is TurnSettlement.SETTLED
     turn = named(finished(telemetry, memory), "turn")
     assert turn.attributes[TURN_INPUT] == "heard words"
     assert turn.attributes[TURN_OUTPUT] == "spoken reply"
@@ -91,11 +97,11 @@ def test_worker_and_shutdown_contenders_end_once() -> None:
         utterance = f"{index:032x}"
         telemetry, memory = _held(utterance)
         barrier = threading.Barrier(3)
-        answers: list[bool] = []
+        answers: list[TurnSettlement] = []
 
         def settle(
             gate: threading.Barrier = barrier,
-            results: list[bool] = answers,
+            results: list[TurnSettlement] = answers,
             exporter: Telemetry = telemetry,
             identity: str = utterance,
         ) -> None:
@@ -104,7 +110,7 @@ def test_worker_and_shutdown_contenders_end_once() -> None:
 
         def release(
             gate: threading.Barrier = barrier,
-            results: list[bool] = answers,
+            results: list[TurnSettlement] = answers,
             exporter: Telemetry = telemetry,
             identity: str = utterance,
         ) -> None:
@@ -119,8 +125,8 @@ def test_worker_and_shutdown_contenders_end_once() -> None:
         first.join()
         second.join()
 
-        assert answers.count(True) == 1
-        assert answers.count(False) == 1
+        assert answers.count(TurnSettlement.SETTLED) == 1
+        assert answers.count(TurnSettlement.MISSING) == 1
         assert len([span for span in finished(telemetry, memory) if span.name == "turn"]) == 1
         telemetry.release()
 
@@ -129,9 +135,11 @@ def test_the_4097th_policy_evicts_the_oldest_finished_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(telemetry_module, "DEFERRED_TURNS", 2)
-    omitted: list[str] = []
+    omitted: list[tuple[str, str]] = []
     telemetry, memory = exporting()
-    telemetry.register_transcript_exporter(omitted.append)
+    telemetry.register_transcript_exporter(
+        lambda session, utterance: omitted.append((session, utterance))
+    )
     clock = Clock()
     emitted = session_events(clock, telemetry)
     open_session(emitted)
@@ -142,9 +150,62 @@ def test_the_4097th_policy_evicts_the_oldest_finished_root(
     turns = [span for span in finished(telemetry, memory) if span.name == "turn"]
     assert len(turns) == 1
     assert len(omitted) == 1
-    assert telemetry.release_turn(
-        SESSION, f"{0:032x}"
-    ) is False
+    assert (
+        telemetry.release_turn(SESSION, f"{0:032x}")
+        is TurnSettlement.OMITTED
+    )
+
+
+@pytest.mark.asyncio
+async def test_ledger_overflow_and_pending_job_report_one_terminal_outcome(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(telemetry_module, "DEFERRED_TURNS", 1)
+    caplog.set_level(logging.WARNING)
+    telemetry, memory = exporting()
+    exporter = TranscriptExport(
+        telemetry=telemetry,
+        backlog=2,
+        acknowledgement_timeout_s=30.0,
+        shutdown_timeout_s=2.0,
+    )
+    telemetry.register_transcript_exporter(exporter.omitted)
+    clock = Clock()
+    emitted = session_events(clock, telemetry)
+    open_session(emitted)
+    first = "1" * 32
+    second = "2" * 32
+    start_turn(emitted, utterance=first)
+    finish_reply(emitted)
+    acknowledgement = pending()
+    exporter.turn_recorded(
+        SESSION,
+        TurnRecord(
+            at=1.0,
+            conversation="a" * 32,
+            agent="household",
+            utterance=first,
+            heard="hello",
+            reply="hi",
+        ),
+        acknowledgement,
+        final=True,
+    )
+
+    start_turn(emitted, utterance=second)
+    finish_reply(emitted)
+    acknowledgement.settle(True)
+    await exporter.shutdown()
+    assert telemetry.release_turn(SESSION, second) is TurnSettlement.SETTLED
+
+    failures = [
+        fields_of(record)["reason"]
+        for record in caplog.records
+        if getattr(record, "event", None) == "transcript_export_failed"
+    ]
+    assert failures == [TranscriptExportFailure.DROPPED]
+    turns = [span for span in finished(telemetry, memory) if span.name == "turn"]
+    assert len([span for span in turns if span.attributes["vinga.utterance.id"] == first]) == 1
 
 
 def test_eight_maximal_content_spans_encode_below_three_mib() -> None:
@@ -160,7 +221,10 @@ def test_eight_maximal_content_spans_encode_below_three_mib() -> None:
         utterance = f"{index:032x}"
         start_turn(emitted, utterance=utterance)
         finish_reply(emitted)
-        assert telemetry.settle_turn(SESSION, utterance, {"input": content})
+        assert (
+            telemetry.settle_turn(SESSION, utterance, {"input": content})
+            is TurnSettlement.SETTLED
+        )
 
     turns = [span for span in finished(telemetry, memory) if span.name == "turn"]
     assert len(turns) == 8

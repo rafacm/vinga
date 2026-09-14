@@ -5,7 +5,9 @@ from collections.abc import Iterator
 import pytest
 
 from tests.support.telemetry import (
+    SESSION,
     Clock,
+    close_session,
     exporting,
     finish_reply,
     finished,
@@ -51,7 +53,7 @@ def _open(invocation: str) -> tuple[object, object, object]:
         OBSERVATION_INPUT: '[{"parts":[],"role":"user"}]',
         OBSERVATION_OUTPUT: '[{"parts":[],"role":"assistant"}]',
     }
-    assert telemetry.stage_llm_content(invocation, attributes)
+    assert telemetry.stage_llm_content(SESSION, invocation, attributes)
     return telemetry, memory, emitted
 
 
@@ -105,6 +107,7 @@ def test_invocation_is_the_only_join_key() -> None:
     open_session(emitted)
     start_turn(emitted)
     telemetry.stage_llm_content(
+        SESSION,
         "kept",
         {
             GEN_AI_INPUT_MESSAGES: "right",
@@ -112,6 +115,7 @@ def test_invocation_is_the_only_join_key() -> None:
         },
     )
     telemetry.stage_llm_content(
+        SESSION,
         "dropped",
         {
             GEN_AI_INPUT_MESSAGES: "wrong",
@@ -124,3 +128,44 @@ def test_invocation_is_the_only_join_key() -> None:
 
     llm = named(finished(telemetry, memory), "llm")
     assert llm.attributes[GEN_AI_INPUT_MESSAGES] == "right"
+
+
+def test_content_is_refused_without_a_live_session_trace() -> None:
+    invocation = "4" * 32
+    attributes = {GEN_AI_INPUT_MESSAGES: "must not survive"}
+    telemetry, memory = exporting()
+
+    assert not telemetry.stage_llm_content(SESSION, invocation, attributes)
+
+    clock = Clock()
+    emitted = session_events(clock, telemetry)
+    open_session(emitted)
+    start_turn(emitted)
+    round_done(emitted, invocation=invocation)
+    finish_reply(emitted)
+    llm = named(finished(telemetry, memory), "llm")
+    assert GEN_AI_INPUT_MESSAGES not in llm.attributes
+
+    close_session(emitted)
+    assert not telemetry.stage_llm_content(SESSION, "closed", attributes)
+
+
+@pytest.mark.parametrize("failed", [False, True], ids=["success", "failure"])
+def test_a_late_generation_event_discards_its_orphaned_snapshot(
+    failed: bool,
+) -> None:
+    invocation = "5" * 32
+    telemetry, memory, emitted = _open(invocation)
+    close_session(emitted)
+
+    if failed:
+        provider_failed(emitted, stage="llm", invocation=invocation)
+    else:
+        round_done(emitted, invocation=invocation)
+
+    open_session(emitted)
+    start_turn(emitted)
+    round_done(emitted, invocation=invocation)
+    finish_reply(emitted)
+    llm = named(finished(telemetry, memory), "llm")
+    assert GEN_AI_INPUT_MESSAGES not in llm.attributes

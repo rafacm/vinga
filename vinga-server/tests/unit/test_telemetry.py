@@ -102,6 +102,7 @@ from vinga_server.telemetry import (
     TELEMETRY_KEY,
     UNSUPPORTED_PROTOCOL,
     Telemetry,
+    TurnSettlement,
     build_telemetry,
 )
 
@@ -1318,7 +1319,10 @@ def test_an_enriched_turn_root_carries_the_board_s_name() -> None:
     start_turn(events, utterance=utterance)
     finish_reply(events)
 
-    assert telemetry.settle_turn(SESSION, utterance, {"vinga.turn.input": "a"})
+    assert (
+        telemetry.settle_turn(SESSION, utterance, {"vinga.turn.input": "a"})
+        is TurnSettlement.SETTLED
+    )
     close_session(events)
 
     written = named(finished(telemetry, memory), "turn")
@@ -1345,10 +1349,13 @@ def test_a_board_nobody_named_says_nothing_rather_than_null() -> None:
     hear(events)
     clock.tick(0.5)
     finish_reply(events, sentences=1)
-    assert telemetry.settle_turn(
-        SESSION,
-        utterance,
-        {"vinga.turn.input": "a", "vinga.turn.output": "b"},
+    assert (
+        telemetry.settle_turn(
+            SESSION,
+            utterance,
+            {"vinga.turn.input": "a", "vinga.turn.output": "b"},
+        )
+        is TurnSettlement.SETTLED
     )
     close_session(events)
     context = telemetry.retained_context(SESSION)

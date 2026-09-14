@@ -1707,6 +1707,14 @@ class _HeldTurn:
     session: str
 
 
+class TurnSettlement(Enum):
+    """The one terminal ownership answer for a held turn root."""
+
+    SETTLED = "settled"
+    MISSING = "missing"
+    OMITTED = "omitted"
+
+
 @dataclass(frozen=True)
 class _Pinned:
     """One span a writer that runs after the close may need to reach:
@@ -1907,9 +1915,10 @@ class Telemetry:
         self._llm_content: dict[str, dict[str, Any]] = {}
         self._llm_content_lock = threading.Lock()
         self._held_turns: dict[tuple[str, str], _HeldTurn] = {}
+        self._omitted_turns: dict[tuple[str, str], None] = {}
         self._held_turns_lock = threading.Lock()
         self._transcript_registered = False
-        self._transcript_omitted: Callable[[str], None] | None = None
+        self._transcript_omitted: Callable[[str, str], None] | None = None
         # How many of them, which is the configured session capacity
         # plus this module's own slack: see `RETAINED_TRACES`.
         self._retention = max(1, retained)
@@ -2088,7 +2097,7 @@ class Telemetry:
             return self._retained.get(session)
 
     def register_transcript_exporter(
-        self, omitted: Callable[[str], None] | None = None
+        self, omitted: Callable[[str, str], None] | None = None
     ) -> None:
         """Hold future turn roots for the built transcript collaborator.
 
@@ -2099,9 +2108,11 @@ class Telemetry:
         self._transcript_registered = True
         self._transcript_omitted = omitted
 
-    def stage_llm_content(self, invocation: str, attributes: dict[str, Any]) -> bool:
+    def stage_llm_content(
+        self, session: str, invocation: str, attributes: dict[str, Any]
+    ) -> bool:
         """Stage one allowlisted generation projection for its event fold."""
-        if not self._accepting:
+        if not self._accepting or session not in self._sessions:
             return False
         with self._llm_content_lock:
             self._llm_content[invocation] = dict(attributes)
@@ -2114,24 +2125,36 @@ class Telemetry:
 
     def settle_turn(
         self, session: str, utterance: str, attributes: dict[str, Any] | None
-    ) -> bool:
+    ) -> TurnSettlement:
         """Enrich and end one held root, or report that another path won.
 
         The pop is the ownership transition. Only its winner may mutate or end
         the span, and it does both after releasing the lock.
         """
+        key = (session, utterance)
         with self._held_turns_lock:
-            held = self._held_turns.pop((session, utterance), None)
+            held = self._held_turns.pop(key, None)
+            was_omitted = key in self._omitted_turns
+            self._omitted_turns.pop(key, None)
         if held is None:
-            return False
+            return TurnSettlement.OMITTED if was_omitted else TurnSettlement.MISSING
         if attributes:
             held.span.set_attributes(_turn_content_attributes(attributes))
         held.span.end(end_time=held.end_time)
-        return True
+        return TurnSettlement.SETTLED
 
-    def release_turn(self, session: str, utterance: str) -> bool:
+    def release_turn(self, session: str, utterance: str) -> TurnSettlement:
         """End one held root metadata-only."""
         return self.settle_turn(session, utterance, None)
+
+    def acknowledge_turn_omission(self, session: str, utterance: str) -> bool:
+        """Transfer an overflow tombstone to the transcript collaborator."""
+        key = (session, utterance)
+        with self._held_turns_lock:
+            if key not in self._omitted_turns:
+                return False
+            self._omitted_turns.pop(key)
+        return True
 
     def _release_held_turns(self) -> None:
         """End every unsettled root metadata-only during shutdown."""
@@ -2681,18 +2704,22 @@ class Telemetry:
         if not self._transcript_registered or utterance is None:
             turn.end(end_time=end_time)
             return
+        evicted_key: tuple[str, str] | None = None
         evicted: _HeldTurn | None = None
         with self._held_turns_lock:
             self._held_turns[(session, utterance)] = _HeldTurn(
                 span=turn, end_time=end_time, session=session
             )
             if len(self._held_turns) > DEFERRED_TURNS:
-                oldest = next(iter(self._held_turns))
-                evicted = self._held_turns.pop(oldest)
+                evicted_key = next(iter(self._held_turns))
+                evicted = self._held_turns.pop(evicted_key)
+                self._omitted_turns[evicted_key] = None
+                while len(self._omitted_turns) > DEFERRED_TURNS:
+                    self._omitted_turns.pop(next(iter(self._omitted_turns)))
         if evicted is not None:
             evicted.span.end(end_time=evicted.end_time)
-            if self._transcript_omitted is not None:
-                self._transcript_omitted(evicted.session)
+            if self._transcript_omitted is not None and evicted_key is not None:
+                self._transcript_omitted(*evicted_key)
 
     # --- the stage spans ----------------------------------------------
     #
@@ -2809,7 +2836,8 @@ class Telemetry:
 
     def _provider_failed(self, session: str, emission: Emission) -> None:
         """A provider failure as the failed semantic operation itself."""
-        stage = emission.payload.get("stage")
+        payload = emission.payload
+        stage = payload.get("stage")
         if stage == ASR_STAGE:
             self._asr_span(session, emission)
             return
@@ -2818,8 +2846,9 @@ class Telemetry:
             return
         trace = self._sessions.get(session)
         if trace is None:
+            if stage == LLM_STAGE:
+                self._take_llm_content(payload.get("invocation"))
             return
-        payload = emission.payload
         end = self._at(emission)
         spoken = _attributes(
             payload,
@@ -2859,10 +2888,11 @@ class Telemetry:
         gets no mark, which is a fact about the round rather than a
         missing measurement.
         """
+        payload = emission.payload
         trace = self._sessions.get(session)
         if trace is None:
+            self._take_llm_content(payload.get("invocation"))
             return
-        payload = emission.payload
         end = self._at(emission)
         start = _before(end, payload.get("duration_ms"))
         span = self._tracer.start_span(

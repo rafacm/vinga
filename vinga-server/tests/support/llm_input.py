@@ -22,8 +22,12 @@ class Exported:
         self.snapshots: list[tuple[str, dict[str, Any]]] = []
         self.discarded: list[str] = []
 
-    def stage_llm_content(self, invocation: str, attributes: dict[str, Any]) -> bool:
-        self.snapshots.append((invocation, dict(attributes)))
+    def stage_llm_content(
+        self, session: str, invocation: str, attributes: dict[str, Any]
+    ) -> bool:
+        del session
+        if self.accepts:
+            self.snapshots.append((invocation, dict(attributes)))
         return self.accepts
 
     def discard_llm_content(self, invocation: str) -> None:
