@@ -2144,13 +2144,17 @@ class Telemetry:
         retention) it stays a child of the session span, which is where
         every transcript used to go: a reader who cannot be told which
         turn is better served by the words under the session than by no
-        words at all. It carries the session under both
-        spellings so the query a reader already makes returns it beside
-        the turns, the turn's ordinal and the store's own row id, the
+        words at all.
+
+        It carries the session under both spellings so the query a
+        reader already makes returns it beside the turns, the utterance
+        it answers, the turn's ordinal and the store's own row id, the
         turn's offset and the agent it opened with, and the text in the
         two fields the backend renders as an observation's input and
         output. Where a handover split the reply, the per-leg
-        attribution rides one canonical-JSON string attribute.
+        attribution rides one canonical-JSON string attribute, and both
+        of that handover's rows answer one utterance and therefore land
+        under the one turn span.
 
         The spans do NOT ride the shared batch queue, and that is the
         design rather than an optimization: that queue drops on
