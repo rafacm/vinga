@@ -293,6 +293,32 @@ the absence of a pin.
 No event is added or changed, so `docs/reference/events.md` does not
 move.
 
+**And the contracts in the source, which are documentation the same
+way.** Every one of these says today that a transcript rides the trace
+its SESSION was exported under, and every one is false after the
+change. They are listed rather than left to a grep during the work
+because the review found them and a milestone that names three pages
+and leaves five sentences behind has not stated its footprint:
+
+- `transcript_export.py`'s module docstring, and step 3 of
+  `build_transcript_export`'s prose.
+- `TRANSCRIPTS_NEED_TELEMETRY`, which is operator-facing: it is the
+  sentence a refusing boot prints. The rewording is minimal, since what
+  the refusal is ABOUT is unchanged (no exporter, no trace), and the
+  pins and the generated reference that quote it move with it.
+- `Telemetry.export_transcript`'s docstring, which states the parentage
+  in its first paragraph.
+- `TranscriptTurn`'s "exactly these seven facts", which becomes eight.
+- The integration suite's module docstring and the parenting
+  assertions under it, which are the wire claim being restated.
+- Both event rows in `vinga-server/README.md`, the
+  `transcripts_exported` one and the `transcript_export_failed` one,
+  each of which says "its trace" meaning the session's.
+
+The rule the list applies: a sentence that is load-bearing about where
+a span goes moves in the change that moves the span, wherever it
+lives.
+
 ## Risks
 
 - **A session with more than 256 turns exports its oldest turns under
@@ -415,6 +441,10 @@ operator-facing `TRANSCRIPTS_NEED_TELEMETRY` refusal sentence,
 the integration suite's module docstring and its parenting assertions,
 and both `transcripts_exported` and `transcript_export_failed` rows in
 the server README.
+
+*Resolution* (commit below): taken in full. All eight are enumerated in
+the documentation footprint, with the note that the refusal sentence is
+operator-facing and carries pins and a generated reference with it.
 
 ### 5 (P2): required projection and fixture work is absent
 
