@@ -917,3 +917,69 @@ behind them, and in every emission an attached server tap was offered.
   that reason: what the gate would show is a boot that the unit lane
   drives at every one of its decision points, and the collector this
   gate wants is the one piece of the rig that is not in the worktree.
+
+### PR review round, PR #521
+
+External review: codex CLI 0.154.0, model gpt-5.6-sol, read-only
+sandbox, 2026-09-14, runtime 7m57s, reviewing main...6f48300c. Verdict
+as received: **not mergeable**. One finding, adopted, fixed across the
+commits below.
+
+1. **P1: the reach declaration omits the actual media-upload
+   destination.** `config/models.py:881-886` says there are only two
+   destinations and that recordings ride `LANGFUSE_HOST`, but
+   `capture_upload.py:868-901` obtains a presigned `upload_url` from
+   that host and sends the WAV or manifest directly to it. A
+   network-local Langfuse can therefore return an internet-hosted
+   object-storage URL; the new `reach: network` admission then sends
+   room audio beyond a `network` boundary despite the operator
+   following the documented assertion. Fix: keep the one-key design,
+   but define its value as the outermost reach of OTLP,
+   `LANGFUSE_HOST`, and every presigned media-upload target returned by
+   Langfuse. Correct the plan, generated reference, README, examples,
+   observability map, and changelog wherever they say "two"
+   destinations or imply the bytes are uploaded to `LANGFUSE_HOST`.
+
+   *Resolution.* Adopted whole, and confirmed against the code before
+   adopting: `_attach` calls `client.media.get_upload_url(...)`, reads
+   `upload_url` off the answer, and PUTs the payload to it with
+   `x-amz-checksum-sha256` and `x-ms-blob-type` headers, which are
+   object-storage headers and name the kind of place the bytes go. The
+   design does not move: one key, absent meaning `internet`, the
+   outermost of what the section sends, the refusal ordering and the
+   value-free sentence all stand, and this is not an argument for a key
+   per destination. What moves is the count, the case the rounding has
+   to survive, and the weight the "assertion, not a proof" framing
+   carries. The field's prose now says the third destination does not
+   exist until the backend names it, one request before the bytes go,
+   and says the consequence in the words the finding implies: an
+   operator who cannot say where their backend stores media has not got
+   a `network` deployment to declare. Corrected in the plan's M4b
+   section (amended, with a dated note, the plan review round
+   untouched), the field description and its regenerated reference,
+   `export_audio`'s own description, `capture_upload.py`'s refusal
+   helper, `boundary.py`'s `check_feature`, the server README, both
+   example configurations, the observability map in both surfaces that
+   describe this transport, and the changelog fragment.
+
+   *No test was added, deliberately.* The defect was prose and the fix
+   is prose: what the key means cannot be asserted against the code,
+   because the whole point of the correction is that the third
+   destination is a fact about the operator's backend that this server
+   cannot observe. A case pinning a sentence would pin the wording
+   without proving the claim, which is the shape this repository
+   rejects elsewhere.
+
+**What the round is really worth recording.** The presigned leg was not
+undocumented: `capture_upload.py`'s module docstring says the upload
+goes to a presigned URL, and `events/catalog.py` gives it as the reason
+the HTTP stack is quieted. Both say it as a CREDENTIAL fact, which is
+what it was needed for at the time, and neither draws the other
+consequence, that the bytes therefore have a destination no
+configuration of this server names. So every page that described where
+content goes had a hole in exactly the shape of the key M4b was adding.
+The lesson is narrow and worth keeping: a fact recorded for one
+property (this URL is a secret) does not answer a question about
+another (where does this URL point), and a page describing a data
+boundary has to trace the bytes rather than the request that asks about
+them.
