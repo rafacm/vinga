@@ -82,7 +82,7 @@ sends and under which switch, which is
 vinga's own server is not a backend in this vocabulary, and neither is
 the Postgres it stores conversations in: that one is the conversation
 store, and it is a different row of
-[the surfaces table](architecture/observability-surfaces.md#the-eight-surfaces).
+[the surfaces table](architecture/observability-surfaces.md#the-nine-surfaces).
 
 ### Binding
 

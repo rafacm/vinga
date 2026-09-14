@@ -1,6 +1,6 @@
 # Observability and conversation-data surfaces
 
-Where may this datum go? Eight surfaces answer it, and this page is the
+Where may this datum go? Nine surfaces answer it, and this page is the
 map of them: what each carries, which need it serves, how long it is
 kept and who may read it, and what is true of it in the code today.
 [The 2026-08-15 ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)
@@ -10,7 +10,7 @@ changes when the design does.
 
 ## On this page
 
-- [The eight surfaces](#the-eight-surfaces): the map this page exists
+- [The nine surfaces](#the-nine-surfaces): the map this page exists
   for, an index and then a section per surface, each with its current
   status.
 - [The export ladder](#the-export-ladder): the two tiers content may
@@ -25,7 +25,7 @@ changes when the design does.
   and the external practice the design was checked against, as they
   were written on the day the decision was taken.
 
-## The eight surfaces
+## The nine surfaces
 
 The index below is the whole map at a glance, and each surface then has
 its own section: what class of thing it carries, which needs it serves,
@@ -44,6 +44,7 @@ and are linked from the section.
 | [**Exported traces**](#exported-traces) | Metadata only, derived from the events surface | 1, 5 | Landed (#66) |
 | [**Exported capture media**](#exported-capture-media) | Content, off the host | 1 (deep diagnosis, off-host) | Landed (#67) |
 | [**Exported transcripts**](#exported-transcripts) | Content, off the host | 1, 2 (off-host), 5 (evals) | Landed (#495) |
+| [**Exported LLM input**](#exported-llm-input) | Content, off the host, and the widest of it | 1 (deep diagnosis, off-host), 5 (evals) | Landed (#502) |
 | [**Audit**](#audit) | Admin and config actions | 4 | Future |
 
 ### Structured events
@@ -357,6 +358,77 @@ from a closed set), because a transcript that silently failed to export
 would leave a reader with a trace, the stage timings, none of the words
 and no way to learn any were meant to be there.
 
+### Exported LLM input
+
+`vinga_server/llm_input_export.py`.
+
+**Carries.** Content, the third surface here that sends any off the
+host, and the widest of the three: the request this server assembled for
+each of a closed session's LLM rounds, one observation each on the trace
+that session was exported under, rendered as the observation's own
+input. It is the request as vinga ASSEMBLED it and not the bytes any one
+vendor put on the wire, which is a boundary chosen rather than conceded:
+the system prompt with its memory and know-how blocks, the message
+history as the model was given it, the tool schemas offered, the tool
+arguments the model asked for and the results it was handed back, and
+the tool choice. Vendor framing, the generation parameters, the
+endpoint, headers and credentials are not in it, because the snapshot is
+taken at this server's own provider seam, which is the one place a
+request exists once rather than once per vendor and the one place that
+never sees a credential.
+
+**It contains what the transcripts surface contains.** An assembled
+request holds the dialogue as the model saw it, so this class is
+content-wise a superset of that one, and the switches are nonetheless
+independent: neither turns the other on. Both call shapes are here, the
+reply's rounds and the recap's summarization, each labelled with its
+purpose. One observation is one logical ROUND and not one provider
+attempt: the first-token watchdog re-sends content fixed before the
+first attempt, so a retried round is one request that was made twice.
+
+**Serves.** Needs 1 (deep diagnosis, off-host) and 5 (evals).
+
+**Retention and access.** **There is no local store behind it**, which
+makes this the strictest retention answer on the page and the quietest
+loss. The two content surfaces above export from something durable, the
+capture directory's files and the conversation store's rows; a session
+assembles a request because it is about to make it, so what this exports
+exists for the session, then in a bounded delivery job until it is
+delivered or dropped, and nowhere after that. A process that dies with
+exports queued loses them, with no ledger to recover from. What that
+costs is bounded and is why the answer is acceptable: a lost export is a
+missing observation, never a lost conversation, because what was said is
+in the store when `server.conversations` is recording it. **What one
+session may stage is bounded in bytes**, per request and for the session
+as a whole: a request over the ceiling is dropped whole rather than
+truncated, past the budget whole requests go oldest first, and both
+absences are counted with their two reasons told apart on the export's
+own event, so a partial export says so. **Exported requests outlive
+erasure on this side**, the way exported text does: deleting a session
+or a conversation under `/api` reaches nothing that already left, and
+retention is then the receiving deployment's policy, configured there,
+with a deployment that has none retaining indefinitely. Where it goes
+and what credentials reach it are the same `OTEL_EXPORTER_OTLP_*`
+variables the traces use, under the same one `server.telemetry.reach`
+assertion described above.
+
+**Status.** Landed (#502), and off unless
+`server.telemetry.export_llm_input` says otherwise, which nothing above
+it or beside it implies: what a model was given leaving the deployment
+is its own decision. Under a `server.data_boundary` narrower than the
+section's declared reach it is refused, and with telemetry off the boot
+is refused. It answers to no second switch, unlike the two exports above
+it: there is no local surface behind it that could be off, so it is
+never a no-op, and `server.conversations` and `server.capture` are
+irrelevant to it. It needs no extra and no second credential, because
+the requests travel as spans over the transport the traces already use.
+Staging is a render and an append on the session loop; the delivery runs
+on a worker of its own after a session closed, never on the audio path,
+and every failure is a warning event (`llm_input_exported`,
+`llm_input_export_failed` with a reason from a closed set), because on
+this surface an export that silently failed leaves nothing anywhere to
+go back and read.
+
 ### Audit
 
 **Carries.** Admin and config actions, auth refusals, reload
@@ -382,7 +454,7 @@ where that record keeps its tables.
 | Tier | What leaves | On what terms | Today |
 | --- | --- | --- | --- |
 | **Metadata** | Timings, closed reasons, counts, server-minted identifiers: the structured-events vocabulary and nothing else | With telemetry at all. It is the prerequisite rather than a peer, which is why the switch is `server.telemetry.enabled` and not `export_metadata` | Landed (#66) |
-| **Conversation content** | What this deployment holds locally, by class: the three rows below | A flag per class, on the terms every class shares: it defaults off; where the class has a local surface with a switch of its own, that switch being off makes the flag a no-op said once at startup rather than a refusal, and that arm comes first; otherwise it requires `server.telemetry.enabled` and is refused under a `server.data_boundary` narrower than its reach; and it implies nothing about its siblings. Export follows retention: what the local surface holds is what may leave, never more, and what leaves outlives erasure here | Two classes of three landed (#67, #495) |
+| **Conversation content** | What this deployment holds locally, by class: the three rows below | A flag per class, on the terms every class shares: it defaults off; where the class has a local surface with a switch of its own, that switch being off makes the flag a no-op said once at startup rather than a refusal, and that arm comes first; otherwise it requires `server.telemetry.enabled` and is refused under a `server.data_boundary` narrower than its reach; and it implies nothing about its siblings. Export follows retention: what the local surface holds is what may leave, never more, and what leaves outlives erasure here | All three landed (#67, #495, #502) |
 
 The classes are what the second tier leaves by. Each names the local
 surface it follows, because export follows retention in that surface's
@@ -392,7 +464,7 @@ own terms.
 | --- | --- | --- | --- |
 | **Audio** | Recordings, all of them. Today a closed session's stereo WAV and its manifest, from the capture directory; the per-utterance clips a provider heard and the per-turn reply audio are artifacts of this class rather than switches beside it | `server.telemetry.export_audio` | Landed (#67) |
 | **Transcripts** | The dialogue text: a closed session's turns as the conversation store holds them, which is the surface this class's retention is answered by | `server.telemetry.export_transcripts` | Landed (#495) |
-| **LLM input** | The model's assembled request as vinga assembled it: the system prompt with its memory and know-how blocks, the message history as the model was given it, the tool schemas offered, the tool arguments asked for and the results handed back, and the tool choice. Not vendor framing, generation parameters, endpoints, headers or credentials. Its local surface is the session's own working state, which no second switch governs, so this class has no no-op arm: what it exports exists for the session, then in a bounded delivery job until it is delivered or dropped, and nowhere after that | `server.telemetry.export_llm_input` | Unlanded, in #502's fifth milestone |
+| **LLM input** | The model's assembled request as vinga assembled it: the system prompt with its memory and know-how blocks, the message history as the model was given it, the tool schemas offered, the tool arguments asked for and the results handed back, and the tool choice. Not vendor framing, generation parameters, endpoints, headers or credentials. Its local surface is the session's own working state, which no second switch governs, so this class has no no-op arm: what it exports exists for the session, then in a bounded delivery job until it is delivered or dropped, and nowhere after that | `server.telemetry.export_llm_input` | Landed (#502) |
 
 Two things are true of the classes rather than of any one flag. **A
 class may gain an artifact**, which widens what an already-on flag
