@@ -257,7 +257,9 @@ is copied into error metadata.
 `provider_failed` gains only the safe invocation id needed to pair an LLM
 failure with its staged logical round. The event remains content-free. The tool-call
 event gains only its already-decided error type, and the `tool` span maps it to
-status and `error.type`.
+status and `error.type`. The existing ASR failure mapping also writes canonical
+`error.type` beside `vinga.asr.error`; the vinga key remains as a compatibility
+attribute and is not the canonical substitute.
 
 ## Per-operation content settlement
 
@@ -572,8 +574,9 @@ fixtures are extended rather than replaced.
 - [ ] **M1, canonical metadata and real failed operations.** Preserve original
   trace flags and state, freeze the canonical topology and attribute contract,
   add the server-minted generation invocation id at reply and recap assembly,
-  make successful and failed recap calls symmetric real `llm` spans,
-  turn failed LLM/TTS/tool work into real `ERROR` spans with safe
+  make successful and failed recap calls symmetric real `llm` spans, add
+  canonical `error.type` beside the existing ASR compatibility key, and turn
+  failed LLM/TTS/tool work into real `ERROR` spans with safe
   `error.type`, pin the existing Langfuse usage aliases as derived compatibility
   output rather than canonical metadata, and regenerate the event reference.
   Design footprint: deepen `telemetry.py` and
@@ -822,6 +825,10 @@ read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 9m08s.
    visible recap span.
 7. **P2: ASR failure still lacks canonical `error.type`.** M1 names only the
    other three stages even though the issue and contract require all four.
+
+   *Resolution:* M1 now writes `error.type` on failed ASR spans beside the
+   retained `vinga.asr.error` compatibility attribute, and the same four-stage
+   unit table proves status plus safe type for every semantic failure.
 8. **P2: `telemetry_deferred.py` still fails the deletion test.** Its exporters
    call only through `Telemetry`, and telemetry already owns the same bounded
    map shape. Fold it in unless a real second responsibility exists.
