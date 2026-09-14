@@ -823,15 +823,23 @@ class TelemetryConfig(BaseModel):
     the no-leak rules already hold: timings, closed reasons and
     server-minted identifiers, never transcripts and never audio.
 
-    Three fields since #495, and this section is a DISCLOSURE LADDER
-    rather than a list of switches. `enabled` is the master switch and a
-    prerequisite rather than a peer: metadata leaves, which is why it is
-    not spelled `export_metadata`. The two below it are content
-    escalations, and each means the same thing in its own class: if this
-    content exists locally, it leaves. `export_audio` sends a recording
-    of a room, `export_transcripts` sends what was said. Each is its own
-    decision, each defaults off, and neither is implied by anything
-    above it.
+    Three switches since #495, and they are a DISCLOSURE LADDER rather
+    than a list. `enabled` is the master switch and a prerequisite
+    rather than a peer: metadata leaves, which is why it is not spelled
+    `export_metadata`. The two below it are content escalations, and
+    each means the same thing in its own class: if this content exists
+    locally, it leaves. `export_audio` sends a recording of a room,
+    `export_transcripts` sends what was said. Each is its own decision,
+    each defaults off, and neither is implied by anything above it.
+
+    `reach` is not a rung of that ladder and sits above all three: it
+    says where this section's destinations ARE, which is one fact about
+    two transports rather than one per switch, and splitting it per
+    class would let a deployment assert something about audio that is
+    untrue of the transcripts riding the same endpoint (#502). What it
+    governs is the data boundary's verdict on all three, and absent it
+    is `internet`, which is what the three builders passed before the
+    key existed.
 
     The rules that refuse them with `enabled` off are deliberately NOT
     validators, here or on `ServerConfig`, and the reason is boot
@@ -857,6 +865,34 @@ class TelemetryConfig(BaseModel):
             "the boot is refused if they are not; the collector's address comes "
             "from `OTEL_EXPORTER_OTLP_ENDPOINT`. A server whose telemetry is off "
             "constructs no exporter, starts no thread and does no per-event work."
+        ),
+    )
+
+    reach: Reach = Field(
+        default=Reach.INTERNET,
+        description=(
+            "How far the destinations this section sends to lie, asserted by the "
+            "operator: `host` for a collector on this machine, `network` for one "
+            "that stays on your own network, `internet` for anything else. "
+            "`internet` when the key is absent, which is what every deployment got "
+            "before the key existed, so writing nothing leaves a boot admitted and "
+            "refused in exactly the cases it was: this key widens what a "
+            "`data_boundary` allows and never narrows it. "
+            "One assertion covers EVERY destination this section sends to, and it "
+            "means the outermost of them, which is the shape `data_boundary` "
+            "itself has. There are two: the traces and the exported transcripts "
+            "ride `OTEL_EXPORTER_OTLP_*`, and the recording upload rides "
+            "`LANGFUSE_HOST`. A collector on your network beside a media host at a "
+            "vendor is therefore `internet`, and all three features are refused "
+            "rather than the one that would have been caught. "
+            "**It is an assertion, not a proof.** Nothing here reads either "
+            "endpoint, so a deployment that declares `network` and then points "
+            "`OTEL_EXPORTER_OTLP_ENDPOINT` at a vendor has contradicted its own "
+            "configuration and this server cannot tell: the mechanism admits "
+            "declarations, not behaviour, and is not a network sandbox. "
+            "A reach exceeding `server.data_boundary` refuses the boot before "
+            "anything is imported or constructed, and the refusal names this key "
+            "as where the reach came from."
         ),
     )
 
@@ -888,8 +924,9 @@ class TelemetryConfig(BaseModel):
             "different projects both halves succeed and the recording lands where "
             "the trace's reader will never look. "
             "Turning it on needs the `langfuse` extra, which both published images "
-            "carry, and the boot is refused if it is missing. Under a "
-            "`data_boundary` narrower than `internet` it is refused too. "
+            "carry, and the boot is refused if it is missing. "
+            "Under a `data_boundary` narrower than this section's `reach` it is "
+            "refused too. "
             "The upload runs on a worker of its own after the "
             "session closed, never on the audio path, and every failure is a "
             "warning event (`capture_upload_failed`) rather than a failed session. "
@@ -927,8 +964,8 @@ class TelemetryConfig(BaseModel):
             "`server.conversations` absent, off, or storing no text it is a no-op "
             "rather than a misconfiguration: there is nothing recorded to export, "
             "and the server says so once at startup. Capture is irrelevant to it "
-            "either way. Under a `data_boundary` narrower than `internet` it is "
-            "refused. "
+            "either way. Under a `data_boundary` narrower than this section's "
+            "`reach` it is refused. "
             "It needs no extra and no second credential: the turns travel as OTLP "
             "spans over the same `OTEL_EXPORTER_OTLP_*` transport the traces "
             "already use. The export runs on a worker of its own after the "
@@ -1239,10 +1276,11 @@ class ServerConfig(BaseModel):
             "`enabled` off, means no exporter is built and nothing leaves this "
             "process, and absent is the default. Where the collector is and what "
             "reaches it are the standard `OTEL_EXPORTER_OTLP_*` environment "
-            "variables; this switch is the only part that is configuration. An "
-            "exporter reaches the internet as far as this server can tell, since "
-            "nothing here knows where the collector is, so an enabled exporter is "
-            "refused at boot under any `data_boundary` narrower than `internet`."
+            "variables; this switch is the only part that is configuration. "
+            "Nothing here knows where the collector is, so how far this section "
+            "reaches is the operator's own assertion on its `reach` key, "
+            "`internet` where the key is absent, and an enabled exporter is "
+            "refused at boot under any `data_boundary` narrower than that."
         ),
     )
 

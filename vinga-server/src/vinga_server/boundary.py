@@ -41,11 +41,13 @@ functions here read attributes off a model and never construct one, so
 the annotations are quoted and the import costs nothing at run time.
 
 The sentences are operator-facing. They name the configuration entry,
-the type, the key to write and the operator's own declared boundary,
-and never a value read from an entry: the boundary is what the operator
-wrote about their whole server, so speaking it violates nothing and is
-what makes the sentence plain, while a base_url, a command or an
-endpoint stays out of every one of them.
+the type, the key to write, the operator's own declared boundary and,
+for a feature, the reach that boundary was weighed against. Both of
+those last two are members of the closed three-word set below, written
+about a whole server or a whole section rather than about one endpoint,
+so speaking them violates nothing and is what makes the sentence plain.
+What never appears is a value an operator typed freely: a base_url, a
+command, a host or an endpoint stays out of every one of them.
 """
 
 from enum import StrEnum
@@ -191,6 +193,20 @@ def _marking(label: str, config: "ProviderConfig", provider: object) -> Reach | 
     return marking
 
 
+# Where the reach the three feature call sites pass is declared, which
+# is what the refusal below names so an operator can see which of their
+# own statements produced it. One spelling, beside the rule rather than
+# in each caller, because the sentence is this module's.
+#
+# A constant rather than a fourth argument because every feature in this
+# shape lives on one section: the OTLP exporter, the transcript export
+# and the recording upload are the telemetry section's three
+# destinations, and one assertion covers them. A second section growing
+# a feature of this shape is what turns this into an argument, and it
+# will arrive with a caller that needs it rather than ahead of one.
+FEATURE_REACH_KEY = "server.telemetry.reach"
+
+
 def check_feature(label: str, reach: Reach, boundary: Reach | None) -> None:
     """Enforce the data boundary for one feature that is not a provider
     and not an MCP entry (#66).
@@ -205,28 +221,38 @@ def check_feature(label: str, reach: Reach, boundary: Reach | None) -> None:
     varies. A provider's marking is read off its class and an MCP
     entry's off the operator's configuration; a feature like the OTLP
     exporter has neither, because how far it reaches is a property of
-    what it IS rather than of how it was configured. All three callers
-    declare `Reach.INTERNET`, fixed and honest: vinga cannot know where
-    `OTEL_EXPORTER_OTLP_ENDPOINT` or `LANGFUSE_HOST` point, and there is
-    no per-feature entry to carry an operator's assertion about a
-    collector on the LAN. The consequence is stated rather than hidden:
-    a `network`-bounded server refuses telemetry even toward a LAN
-    collector. Taking the reach as an argument is what makes the
-    follow-up that gives those sections their own assertion a change of
-    argument rather than a change of shape.
+    where its transport POINTS, which nothing in this repository can
+    read: vinga never parses `OTEL_EXPORTER_OTLP_ENDPOINT` or
+    `LANGFUSE_HOST`, and could not vouch for either if it did. All three
+    callers passed a fixed `Reach.INTERNET` until #502, which was honest
+    and cost the deployment the key exists for: a `network`-bounded
+    server refused telemetry even toward a collector on its own network.
+    They now pass `FEATURE_REACH_KEY`'s value, the operator's own
+    assertion about where the section's destinations are, which is the
+    change of ARGUMENT this function was shaped to take rather than a
+    change of shape. Absent, that value is `internet`, so a deployment
+    that upgrades into the key and writes nothing is admitted and
+    refused in precisely the cases it was before.
+
+    An assertion and not a proof, which is the same limit the whole
+    mechanism carries: an operator who declares `network` and then
+    points the endpoint at a vendor has lied to their own configuration,
+    and nothing here can tell.
 
     Called before the feature is built, which is the caller's half of
     the contract and the only way the sentence can honestly say nothing
-    was constructed. The sentence names the switch, the boundary and the
-    key that widens it, and nothing about the endpoint the operator
-    wrote, which is exactly the string a refusal about distance must not
-    carry.
+    was constructed. The sentence names the switch, the reach, the
+    boundary and the declaration the reach came from, and nothing about
+    the endpoint the operator wrote, which is exactly the string a
+    refusal about distance must not carry.
     """
     if boundary is None or not _exceeds(reach, boundary):
         return
     raise BoundaryRefusal(
-        f"{label}: this sends session data to the {reach}, and this server's data "
-        f"boundary is {boundary}; widen server.data_boundary, or switch {label} off"
+        f"{label}: this sends session data to the {reach}, which is what "
+        f"{FEATURE_REACH_KEY} declares, and this server's data boundary is "
+        f"{boundary}; correct {FEATURE_REACH_KEY} if the destinations are nearer "
+        f"than that, widen server.data_boundary, or switch {label} off"
     )
 
 

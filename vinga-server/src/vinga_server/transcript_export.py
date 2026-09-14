@@ -171,7 +171,7 @@ def build_transcript_export(
        never run.
     4. **The data boundary.** Asked of `boundary.py` before any
        construction and any thread, so under a boundary narrower than
-       the internet nothing is built.
+       the telemetry section's declared reach nothing is built.
 
     There is no extra step and no credential step, which is the whole of
     what this surface costs less than the capture uploader: a transcript
@@ -214,7 +214,7 @@ def build_transcript_export(
         # to every session it was ever given.
         raise ConfigError(TRANSCRIPTS_NEED_AN_EXPORTER)
 
-    refusal = _boundary_refusal(boundary)
+    refusal = _boundary_refusal(telemetry_section.reach, boundary)
     if refusal is not None:
         raise ConfigError(refusal)
 
@@ -255,7 +255,7 @@ TRANSCRIPTS_NEED_AN_EXPORTER = (
 )
 
 
-def _boundary_refusal(boundary: Reach | None) -> str | None:
+def _boundary_refusal(reach: Reach, boundary: Reach | None) -> str | None:
     """What the data boundary says about a transcript export, or nothing.
 
     Asked before any construction and any thread, which is the caller's
@@ -264,12 +264,15 @@ def _boundary_refusal(boundary: Reach | None) -> str | None:
     module's own, and only the sentence crosses back: the exception type
     belongs to whichever surface asked, which here is `ConfigError`.
 
-    The reach is `internet`, fixed, for the reason the exporter's is:
-    the turns travel over the transport the traces use, whose endpoint
-    this server hands to the SDK without reading.
+    The reach is the telemetry section's own, for the reason the
+    exporter's is: the turns travel over the transport the traces use,
+    whose endpoint this server hands to the SDK without reading, so what
+    the section declares about that destination is what there is to go
+    on (#502). Absent, it is `internet`, which is what this call passed
+    fixed before the key existed.
     """
     try:
-        check_feature(TRANSCRIPTS_KEY, Reach.INTERNET, boundary)
+        check_feature(TRANSCRIPTS_KEY, reach, boundary)
     except BoundaryRefusal as refusal:
         return str(refusal)
     return None
