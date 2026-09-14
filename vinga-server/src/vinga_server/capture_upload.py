@@ -404,14 +404,19 @@ def _boundary_refusal(reach: Reach, boundary: Reach | None) -> str | None:
     `ConfigError`.
 
     The reach is the telemetry section's own, for the reason the
-    exporter's is: `LANGFUSE_HOST` is a transport credential this server
-    hands over without reading, so the operator's assertion about where
-    this section's destinations are is the only thing that can speak for
-    it (#502). One assertion covers both transports and means the
-    outermost of them, so a `network` declared beside a vendor media
-    host is a deployment contradicting itself rather than a narrower
-    answer for this one. Absent, it is `internet`, which is what this
-    call passed fixed before the key existed.
+    exporter's is and then for a stronger one of this surface's own
+    (#502). `LANGFUSE_HOST` is a transport credential this server hands
+    over without reading, so the operator's assertion is the only thing
+    that can speak for it; and the bytes do not go there anyway. They go
+    to the presigned URL `_attach` is handed one request earlier, which
+    is whatever object storage the backend is configured with, does not
+    exist until the backend names it, and may be at a vendor however
+    near the Langfuse answering is. So this call site is the reason the
+    section's one assertion has to mean the outermost of THREE
+    destinations rather than two, and the reason it is an assertion
+    rather than a proof: there is a leg of this upload nothing in this
+    repository could check even in principle. Absent, it is `internet`,
+    which is what this call passed fixed before the key existed.
     """
     try:
         check_feature(ATTACH_KEY, reach, boundary)
