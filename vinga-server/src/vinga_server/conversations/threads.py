@@ -621,6 +621,12 @@ def dialogue(
 # turn's tool invocations hang off it, and the token halves inside
 # `legs` are metadata the generations already spell). A reader that
 # names its columns cannot acquire one by somebody else's migration.
+#
+# `utterance` is here because a transcript is filed under the turn it
+# describes (#506), and this column is the name both sides already know
+# that turn by. It passes the projection's own rule rather than widening
+# it: a server-minted opaque identifier is metadata, which is the
+# reading the column's own comment records.
 TRANSCRIPT_COLUMNS = (
     turns.c.id,
     turns.c.t_ms,
@@ -628,6 +634,7 @@ TRANSCRIPT_COLUMNS = (
     turns.c.heard,
     turns.c.reply,
     turns.c.legs,
+    turns.c.utterance,
 )
 
 
