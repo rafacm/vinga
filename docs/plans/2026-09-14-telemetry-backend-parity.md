@@ -259,6 +259,13 @@ nothing and ends the same span. The ordinary registered batch processor is the
 only path after `Span.end()`, so a content-delivery failure cannot remove a
 canonical operation or create a duplicate identity.
 
+The module has no module-scope OpenTelemetry import. It stores an opaque span
+and calls only collaborators supplied after `telemetry._import_sdk()` has
+succeeded, following the existing `_Sdk` lazy-resolution boundary. Importing
+the application without the `otel` extra therefore remains valid, and the
+existing one-sentence missing-extra refusal and slim-image boot are explicit
+M2 regression checks.
+
 Holding is enabled by registration of an exporter instance, never by a config
 flag alone. A held class has a close protocol: when `session_closed` reaches
 telemetry, the ledger marks that session closed; each registered content
@@ -360,7 +367,7 @@ the existing Langfuse REST and object-storage destinations in that assertion.
 - New `vinga_server/telemetry_deferred.py` owns the lifecycle decision for
   logically finished live spans: the enrichable interval, explicit end time,
   bounded retention, class settlement and exactly-once end across both content
-  exporters and shutdown.
+  exporters and shutdown. It imports no OpenTelemetry name at module scope.
 - `transcript_export.py` keeps store acknowledgement, paging, admission and
   outcome reporting, but enriches turn roots rather than creating observations.
 - `llm_input_export.py` keeps neutral-seam rendering and byte budgets, adds
@@ -586,6 +593,10 @@ model `claude-opus-5`, 2026-09-14, runtime 5m18s.
 8. **P2: the deferred module can break no-extra and slim-image boots.** It must
    not import OpenTelemetry at module scope and must use the existing lazy SDK
    resolution pattern, with the slim boot pinned.
+
+   *Resolution:* The module now accepts opaque spans and SDK callbacks only
+   after `_import_sdk()` succeeds, with no module-scope SDK import. M2 adds the
+   no-extra import/refusal tests and the existing slim-image boot to its gates.
 9. **P2: telemetry is constructed before either content exporter.** The plan
    must name a pre-admission registration call and hold spans only for an
    exporter that was actually built, never on a config flag alone.
