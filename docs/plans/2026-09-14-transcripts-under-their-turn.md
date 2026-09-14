@@ -375,7 +375,7 @@ lives.
 
 ## Milestones
 
-- [x] **[M1: an addressable transcript is a child of its turn](2026-09-14-transcripts-under-their-turn-implementation.md#m1-an-addressable-transcript-is-a-child-of-its-turn)** (PR TBD). The
+- [x] **[M1: an addressable transcript is a child of its turn](2026-09-14-transcripts-under-their-turn-implementation.md#m1-an-addressable-transcript-is-a-child-of-its-turn)** (PR [#518](https://github.com/rafacm/vinga/pull/518)). The
   utterance joins the projection, the seam type and the span's
   attributes; the span is parented on the turn's pinned context where
   there is one and on the session's where there is not, which is the
