@@ -336,6 +336,15 @@ still running. Unknown or already-ended keys are an explicit omission result,
 never a second span. Unit tests exercise each transition and repeatedly race
 acknowledgement completion with shutdown.
 
+`Telemetry._held_turns_lock` guards the map and, more importantly, ownership
+of the terminal transition. At `reply_finished`, the session-loop fold records
+the explicit end time, moves the span into the held map and clears the live
+turn slot; the session loop never touches that span again. A worker, overflow
+or shutdown contender pops under the lock. Only the winner receives the held
+span and mutates or ends it after releasing the lock; every loser sees an
+already-settled key. This makes `set_attributes` plus `end` single-owner rather
+than assuming SDK span mutation is safe across threads.
+
 `transcript_export.py` keeps responsibility for store acknowledgement,
 bounded admission, handover composition, outcome reporting and retention
 truth, but its unit of work is a completed live utterance rather than a
@@ -512,6 +521,8 @@ fixtures are extended rather than replaced.
   sampled and unsampled decisions, exact-once end, metadata-only release after every
   drop reason, the 4,097th-record oldest-finished overflow and shutdown races. The concurrency test
   is run at least 100 times because one passing interleaving proves nothing.
+  It asserts one successful pop and one `Span.end` across worker, overflow and
+  shutdown contenders.
 - The pull-request unit lane imports the application with the OTel packages
   hidden and pins the existing one-sentence missing-extra refusal. The slim
   container boot remains an unchecked workflow-dispatch or post-merge image
@@ -925,6 +936,11 @@ read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 9m08s.
 14. **P3: the cross-thread deferred map has no stated concurrency boundary.**
     The plan must name its lock and the point at which the session loop hands
     sole span ownership to it.
+
+    *Resolution:* `_held_turns_lock` now owns the map and terminal handoff. The
+    session loop clears its live reference at `reply_finished`; contenders pop
+    under the lock, and only the winner mutates and ends the span outside it.
+    Repeated race tests prove one pop and one end.
 15. **P3: the plan does not say whether `provider_failed` remains as a duplicate
     span event.** LLM and TTS must match the ASR and tool precedent: one failed
     span, no duplicate event.
