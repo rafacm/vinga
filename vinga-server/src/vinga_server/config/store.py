@@ -53,6 +53,7 @@ from vinga_server.config.loader import (
     DeviceLocationBlankError,
     DeviceNameConflictError,
     StorageError,
+    StoredConfigUnreadableError,
     UnknownEntityError,
 )
 from vinga_server.config.models import (
@@ -1368,11 +1369,12 @@ def read_live_binding(engine: Engine, mac: str) -> LiveBinding:
     true: under read-committed each of the two statements would take a
     snapshot of its own, which is exactly the torn read.
 
-    Anything unreadable leaves as a `ConfigError`: a `StorageError` for a
-    row that does not validate, the usual busy or storage failure for the
-    database itself. The caller answers all of them the same way, by
-    falling back to the configuration it booted with, which is the only
-    safe reading of "this row cannot be understood".
+    Anything unreadable leaves as a `ConfigError`: a
+    `StoredConfigUnreadableError` for a row that does not validate, the
+    usual busy or storage failure for the database itself. The caller
+    answers all of them the same way, by falling back to the
+    configuration it booted with, which is the only safe reading of
+    "this row cannot be understood".
     """
     normalized = _mac(mac)
     problem: ConfigError | None = None
@@ -2735,7 +2737,9 @@ def _read_domain(connection: Connection) -> DomainConfig:
             # name. Neither column has passed anything at this point:
             # what they hold is what a hand edit, a restore or another
             # build put there.
-            raise StorageError(f"{_NOT_A_STAGE}; the row cannot be read as configuration")
+            raise StoredConfigUnreadableError(
+                f"{_NOT_A_STAGE}; the row cannot be read as configuration"
+            )
         providers[row.stage][row.name] = _from_row(_PROVIDER, row)
 
     # The rows are read one by one above and assembled here, and the
@@ -2779,7 +2783,7 @@ def _read_domain(connection: Connection) -> DomainConfig:
             _UNREADABLE_ROWS, DomainConfig, exc, stored=True
         )
     if domain is None:
-        raise StorageError(problem)
+        raise StoredConfigUnreadableError(problem)
 
     defaults = connection.execute(select(_table(_AGENT_DEFAULTS))).first()
     if defaults is not None:
@@ -2791,7 +2795,7 @@ def _read_domain(connection: Connection) -> DomainConfig:
     ).scalar()
     if default_agent is not None:
         if not isinstance(default_agent, str):
-            raise StorageError(
+            raise StoredConfigUnreadableError(
                 f"domain_settings.{schema.DEFAULT_AGENT_KEY}: the value column does not "
                 f"hold a string; the row cannot be read as configuration"
             )
@@ -2841,7 +2845,9 @@ def _device(row: Row) -> tuple[str, dict[str, object]]:
     except ValueError as exc:
         problem = str(exc)
     if problem is not None:
-        raise StorageError(f"devices: {problem}; the row cannot be read as configuration")
+        raise StoredConfigUnreadableError(
+            f"devices: {problem}; the row cannot be read as configuration"
+        )
     return row.mac, {
         "id": row.id,
         "name": row.name,
@@ -2914,10 +2920,12 @@ def _body[Model: BaseModel](model: type[Model], location: str, body: object) -> 
     except ValidationError as exc:
         problem, _ = validation_problems(f"{location}: {_UNREADABLE_ROW}", model, exc)
     if entry is None:
-        raise StorageError(problem)
+        raise StoredConfigUnreadableError(problem)
     unwritable = untransportable(entry.model_dump(), numbers_only=True)
     if unwritable is not None:
-        raise StorageError(f"{location}: {unwritable}; the row cannot be read as configuration")
+        raise StoredConfigUnreadableError(
+            f"{location}: {unwritable}; the row cannot be read as configuration"
+        )
     return entry
 
 
@@ -2943,7 +2951,9 @@ def _mapping(location: str, column: str, value: object) -> dict[str, object]:
     if value is None:
         return {}
     if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
-        raise StorageError(_shape_problem(location, column, "an object with string keys"))
+        raise StoredConfigUnreadableError(
+            _shape_problem(location, column, "an object with string keys")
+        )
     return dict(value)
 
 
@@ -2953,7 +2963,7 @@ def _list(location: str, column: str, value: object) -> list[object]:
     if value is None:
         return []
     if not isinstance(value, list):
-        raise StorageError(_shape_problem(location, column, "an array"))
+        raise StoredConfigUnreadableError(_shape_problem(location, column, "an array"))
     return list(value)
 
 
@@ -3015,12 +3025,19 @@ def _delete_row(
 
 def _readable_domain(connection: Connection) -> DomainConfig | None:
     """The remaining configuration, or None when it cannot be read as
-    configuration at all. Every such failure is a StorageError by
-    construction, which is what makes "cannot be read" a condition this
-    can ask about rather than a guess."""
+    configuration at all. Every such failure is a
+    StoredConfigUnreadableError by construction, which is what makes
+    "cannot be read" a condition this can ask about rather than a guess.
+
+    The subclass and not its parent, which is the question this asks
+    said exactly: a driver failure inside the read is no kind of
+    ConfigError and travels out of here either way, and a row this
+    build cannot load is the one thing a delete has to be allowed to
+    leave behind.
+    """
     try:
         return _read_domain(connection)
-    except StorageError:
+    except StoredConfigUnreadableError:
         return None
 
 
@@ -3387,7 +3404,7 @@ def _stored_option_types(
     except OptionsRefused as exc:
         problem = str(exc)
     if problem is not None:
-        raise StorageError(problem)
+        raise StoredConfigUnreadableError(problem)
 
 
 def _check_no_url_credentials(
@@ -4017,7 +4034,9 @@ def _stored[Model: BaseModel](
     """
     unwritable = untransportable(data, numbers_only=True)
     if unwritable is not None:
-        raise StorageError(f"{location}: {unwritable}; the row cannot be read as configuration")
+        raise StoredConfigUnreadableError(
+            f"{location}: {unwritable}; the row cannot be read as configuration"
+        )
     problem: str | None = None
     try:
         return model.model_validate(dict(data))
@@ -4027,7 +4046,7 @@ def _stored[Model: BaseModel](
         # than of anything this request sent, so there is nothing for a
         # structured entry to attach to.
         problem, _ = validation_problems(f"{location}: {_UNREADABLE_ROW}", model, exc)
-    raise StorageError(problem)
+    raise StoredConfigUnreadableError(problem)
 
 
 def _refuse_unresolved(domain: DomainConfig) -> None:
