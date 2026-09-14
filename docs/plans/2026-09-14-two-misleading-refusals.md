@@ -460,7 +460,7 @@ is reported as a finding about the test.
   reconstructed. Documentation footprint: two field
   descriptions with their regenerated references, the streamable_http
   example, and the README's MCP section if it states the old rule.
-- [ ] **M2 (#507): a refused boot says what to do**. An unreadable
+- [x] **[M2 (#507): a refused boot says what to do](2026-09-14-two-misleading-refusals-implementation.md#m2-a-refused-boot-says-what-to-do)** (PR TBD). An unreadable
   stored row gets a refusal class of its own, raised where the code
   already classifies it; `serving.py` catches that class ahead of
   `ConfigError` and prints both recoveries beside the refusal, while a

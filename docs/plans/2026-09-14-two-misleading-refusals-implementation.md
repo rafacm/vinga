@@ -351,3 +351,118 @@ to the environment for them anyway.
    their resolutions were not touched: they are a record of what was
    said, and the contradiction was in the body that had not been
    carried forward with them.
+## M2: a refused boot says what to do
+
+A stored row this build cannot read as configuration now refuses the
+boot with a second line under the refusal: where the row is, why no
+command reaches it, and the two ways back. Everything else a boot can
+refuse over prints exactly what it printed before.
+
+### What landed
+
+| Piece | Where |
+| --- | --- |
+| The classification the code was missing | `config/loader.py`: `StoredConfigUnreadableError`, a subclass of `StorageError` meaning a row is there, the database answered, and what the row holds will not load |
+| The decision sites that raise it | `config/store.py`: the per-row read (`_body`, `_from_row`'s stored option types, `_stored`), the assembly in `_read_domain`, the stage and MAC refusals beside it, the `domain_settings` value, and the two JSON shape guards. Eleven raises in all; `_database_problem` keeps its parent, which is the whole distinction |
+| The one question narrowed with them | `config/store.py`: `_readable_domain` catches the subclass, which is the question it was already asking said exactly |
+| The boot's second line | `serving.py`: `STORED_CONFIG_RECOVERY`, printed by an arm ahead of `except (ConfigError, ProviderError)` and only for the new class |
+| The migration's corrected docstring | `db/migrations/versions/3004_reach_replaces_egress.py`: the abort argument stands, the claim that is true of a running server and false of a boot is named as the correction, and the second line is named |
+| The one record that moved with the class | `tests/unit/test_config_api_reads.py`: the configuration API's `api_storage_error` event names `ClassName.of(exc)`, so an unreadable row now records the subclass |
+| The changelog fragment | `changelog.d/507-a-refused-boot-says-what-to-do.md`, `### Changed`, with what the failure looks like, what to do, and the one observability value that changed |
+
+Tests, by claim, all in `tests/unit/test_boot_stored_row_recovery.py`:
+
+| Claim | Case |
+| --- | --- |
+| An unreadable row is the subclass, and is still a `StorageError` | `test_an_unreadable_row_is_a_storage_failure_of_its_own_kind` |
+| A database that is not there is a `StorageError` and is NOT the subclass | `test_a_database_that_is_not_there_is_not_that_kind` |
+| The boot refuses, exits 1, keeps the entry's location, quotes no value, and names both recoveries | `test_a_reach_no_build_wrote_refuses_the_boot_and_says_what_to_do` |
+| A configuration failure that is not a storage one prints what it printed before | `test_a_configuration_failure_that_is_not_a_storage_one_gets_no_recovery` |
+| A database that is not there prints what it printed before | `test_a_database_that_is_not_there_gets_no_recovery` |
+| A schema privilege and a generic storage failure print what they printed before | `test_a_storage_failure_that_is_not_a_row_gets_no_recovery` |
+| The same row read through a running server still answers 500 with the store's own sentence and gains nothing | `test_the_same_row_read_through_a_running_server_answers_as_it_does_today` |
+
+### Deviations from the plan
+
+Two, both small.
+
+- **`_readable_domain` narrowed its catch with the raises.** The plan
+  says every other reader keeps what it has, and every reader outside
+  this module does. `_readable_domain` is inside it: its docstring
+  already said "every such failure is a `StorageError` by
+  construction", which is what let it ask "can this be read" rather
+  than guess, and after the raises moved the honest class is the
+  subclass. The behavior is identical, because `_read_domain` raises
+  nothing else and a driver failure inside it is no kind of
+  `ConfigError` either way; what changed is that the sentence in the
+  docstring is true again.
+- **The negative cases use a double for two of the four.** A database
+  that is not there is produced for real, by pointing the port at a
+  closed one, and so is the configuration failure that is not a storage
+  one. A schema privilege the role does not have is a provisioning
+  state rather than a row, and cannot be produced on a lane that owns
+  its instance, so those two raise `db`'s own constants at the seam the
+  boot opens its database on. The doubles stand in for the raise site
+  and not for the sentence: the sentences are imported rather than
+  respelled.
+
+### What the verification proved, and how each claim was falsified
+
+Two mutations, each cutting the branch from one side, because a branch
+has two ways to be wrong and one case cannot watch both.
+
+**Mutation 1, the arm removed** (`serving.run` back to the single
+`except (ConfigError, ProviderError)`, everything else in place). One
+case failed and seven passed: the boot case, because what reaches
+stderr is the refusal alone:
+
+```
+mcp_servers.weather: the row cannot be read as configuration:
+  - reach: Input should be 'host', 'network' or 'internet'
+```
+
+That is what an operator reads today, and it is the whole of the
+defect: the location is right, the value is not quoted, and there is
+nothing about the door being shut.
+
+**Mutation 2, the recovery appended to everything** (the line printed
+from the `ConfigError` arm as well, which is the mistake the plan names
+and the one a positive case cannot catch). All four negative cases
+failed and the boot case passed, which is the point of writing them:
+the file refusal, the unreachable database, the schema privilege and
+the generic storage failure each came back with a rebuild prescribed
+under it.
+
+The two classification cases survive both mutations, and they should:
+they are about the type rather than about the printing, and they are
+what the mutations above are testing THROUGH. Their own falsification
+is the change itself, since neither can be written at all against a
+tree with one storage class.
+
+### Discoveries
+
+- **One observability value moved with the class, and the lane found it
+  rather than the plan.** `config/api.py` records
+  `ApiStorageError(failure=ClassName.of(exc))`, so the one case that
+  changed class changed what that event carries:
+  `StoredConfigUnreadableError` where it said `StorageError`.
+  `test_a_row_that_cannot_be_read_is_500` was the only assertion on it
+  in the tree, and it was updated rather than worked around. Logging
+  the parent name to keep the spelling would have been describing the
+  failure by hand instead of by type, which is the thing this milestone
+  exists to stop; the status, the sentence and the body are unchanged,
+  which is what "no other reader changes" promised. The changelog says
+  so, since a consumer could be matching on the old value.
+- **The refusal an operator actually meets is two lines, not one.**
+  `validation_problems` renders the location and then the field
+  problems under it, so the location is on the first line and the
+  reason on the second. The recovery is therefore a third line rather
+  than a clause, which is what made a fixed constant the right shape:
+  there is nothing to interpolate into it.
+- **The file half's domain refusal was the better negative case.** The
+  first draft used an unrecognized key, which prints "an unrecognized
+  key is not permitted" and names nothing. A domain section left in the
+  file prints where the key moved to and the command that writes it,
+  which makes the case say what it means: this refusal already tells an
+  operator what to do, and appending a database rebuild to it would be
+  advice about the other half of the configuration.
