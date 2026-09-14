@@ -1680,7 +1680,7 @@ def llm_inputs(
     recorder behind the span writer."""
     telemetry, recorded = exporting_llm_input(contexts, accepts=accepts)
     return (
-        LlmInputExport(telemetry=telemetry, backlog=4, shutdown_timeout_s=10.0),
+        LlmInputExport(telemetry=telemetry),
         recorded,
     )
 

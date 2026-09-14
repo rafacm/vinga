@@ -35,7 +35,7 @@ def config(**telemetry: object) -> ServerConfig:
 
 def exporter(**bounds: object):
     telemetry, recorded = exporting()
-    return LlmInputExport(telemetry=telemetry, backlog=4, **bounds), recorded
+    return LlmInputExport(telemetry=telemetry, **bounds), recorded
 
 
 def test_builder_is_off_by_default() -> None:
@@ -152,7 +152,7 @@ def test_a_live_trace_refusal_drops_the_pair_truthfully(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     telemetry, recorded = exporting(accepts=False)
-    staged = LlmInputExport(telemetry=telemetry, backlog=4)
+    staged = LlmInputExport(telemetry=telemetry)
     staged.stage_reply(
         "missing-session",
         invocation="not-staged",
