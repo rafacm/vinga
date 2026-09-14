@@ -306,10 +306,14 @@ each round, enforce the byte bounds over the pair, and release the matching
 held `llm` record. Separate `transcript` and `llm_input` span creation is
 deleted.
 
-This is not a wrapper beside telemetry. It is the one owner of delayed span
-lifecycle, exact identity preservation and release. Inlining it into
-`telemetry.py` would put a second queueing and retention subsystem inside the
-event-to-span fold, which is the second responsibility the module removes.
+This is not a wrapper beside telemetry. It owns the one policy decision that
+would otherwise be spread across `telemetry.py`, `transcript_export.py` and
+`llm_input_export.py`: after a semantic operation's logical end, whether its
+original span may still be enriched, and the exact transition that ends it
+once. Inlining only the data structure into telemetry would still leave both
+exporters deciding deadlines, terminal paths and shutdown release separately;
+deleting the module would therefore make three callers coordinate one
+lifecycle invariant.
 
 ## Fanout, masking and backend adaptation
 
@@ -684,6 +688,11 @@ model `claude-opus-5`, 2026-09-14, runtime 5m18s.
     already the SDK-owning module. The real deep responsibility is deciding
     when an ended span remains enrichable and when it must be released exactly
     once across both exporters and shutdown.
+
+    *Resolution:* The deletion-test argument now rests only on the shared
+    lifecycle decision: the enrichable interval and one terminal end across
+    telemetry, both content exporters and shutdown. SDK mechanics and file
+    length are no longer offered as the module's reason to exist.
 16. **P3: trace-id sampling samples turns, not sessions.** Session and turn
     traces have independent ids, so partial sampling can leave either side of
     their link absent. The deployment guide must say so.
