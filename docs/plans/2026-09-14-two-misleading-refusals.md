@@ -314,9 +314,12 @@ No new module in either milestone.
 | Milestone | Module | Change |
 | --- | --- | --- |
 | M1 | `config/models.py` | `_ENV_REFERENCE_RE` becomes the scanner; `_env_reference` answers the whole-value question with `fullmatch`; a new `_env_references` substitutes every occurrence; `resolve_env_references` uses it; `_secret_problems` asks whether a value contains one; the `headers` and `env` field descriptions say what a value may hold |
-| M1 | `config/secrets.py` | one comment, which currently claims a mirror that will no longer exist |
+| M1 | `config/secrets.py` | `_DOLLAR_REFERENCE_RE` widens with the model's pattern, so the mirror its comment claims stays true and a composed value displays, exports and imports; the MCP resolution passes the substituted atoms through |
+| M1 | `tools/mcp/manager.py`, `tools/mcp/prompts.py` | `_capture` gives the redactor the atoms beside the materialized values, so a server reflecting a bare token is redacted too |
 | M1 | `examples/mcp-server-streamable-http.yaml` | the composed header as the example beside `Authorization`, with the doubled-prefix 401 named |
-| M2 | `serving.py` | `StorageError` caught ahead of `ConfigError` where the boot loads its configuration, printing the refusal and then what to do about it |
+| M2 | `config/loader.py` | a subclass of `StorageError` meaning "a stored row cannot be read as configuration", which is the classification the code was missing |
+| M2 | `config/store.py` | the per-row and assembly refusals raise the subclass at the sites that already classify them |
+| M2 | `serving.py` | that subclass caught ahead of `ConfigError` where the boot loads its configuration, printing the refusal and then both recoveries |
 | M2 | `db/migrations/versions/3004_reach_replaces_egress.py` | the docstring paragraph that is true of a running server and false of a boot |
 
 Design footprint, M1: one pattern asked two ways instead of two
@@ -430,21 +433,31 @@ is reported as a finding about the test.
 ## Milestones
 
 - [ ] **M1 (#504): a header may compose a reference**. `$NAME`
-  interpolates anywhere inside an `env` or `headers` value, the
-  secret-bearing check asks whether a value contains a reference, the
-  refusal says what is now allowed, the display path stays closed with
-  its comment corrected, and the example carries the composed header
-  and the doubled-prefix 401. The sentinel suite above. Design
-  footprint: one pattern asked two ways, one substitution beside the
-  resolver, no new seam. Documentation footprint: two field
+  interpolates anywhere inside an `env` or `headers` value while the
+  whole-value case keeps its trimming unchanged; the secret-bearing
+  check asks whether a value contains a reference and the display rule
+  follows it, so a composed value displays, exports and imports;
+  resolution answers with the atoms it substituted and the MCP manager
+  feeds them to the redactor; the refusal says what is now allowed; and
+  the example carries the composed header, the doubled-prefix 401 and
+  the encrypted slot's finished-value rule. The sentinel suite above,
+  the hostile reflecting server, and the export into an empty database
+  as the acceptance case. Design footprint: one pattern asked two ways,
+  one rule read by the write path and the display path, and the atoms
+  crossing the seam they are created on rather than being
+  reconstructed. Documentation footprint: two field
   descriptions with their regenerated references, the streamable_http
   example, and the README's MCP section if it states the old rule.
-- [ ] **M2 (#507): a refused boot says what to do**. `serving.py`
-  separates `StorageError` from its parent at the one site that can
-  tell them apart and prints the recovery beside the refusal; `3004`'s
-  docstring stops claiming a scoping that holds only while the server
-  runs. Design footprint: one refusal class separated at one site, no
-  other reader changed. Documentation footprint: the migration
+- [ ] **M2 (#507): a refused boot says what to do**. An unreadable
+  stored row gets a refusal class of its own, raised where the code
+  already classifies it; `serving.py` catches that class ahead of
+  `ConfigError` and prints both recoveries beside the refusal, while a
+  database outage, a schema privilege and a generic storage failure
+  print what they print today; `3004`'s docstring stops claiming a
+  scoping that holds only while the server runs. Design footprint: one
+  new class at the decision sites, no message parsing, and no other
+  reader changed because the class is still a `StorageError`.
+  Documentation footprint: the migration
   docstring, and nothing generated unless the recovery procedure's own
   wording moves, which it should not.
 
@@ -481,7 +494,7 @@ representation that is both non-leaking and replayable and require an
 end-to-end test: export `Bearer $TOKEN`, import into an empty database,
 prove identical wire output.
 
-*Resolution* (commit below): taken, and the decision reversed. The
+*Resolution* (b16475d8): taken, and the decision reversed. The
 display rule now follows the write rule: a value containing a reference
 displays, a value containing none masks. It restores export and import
 for composed values, fixes the same latent defect for a padded
@@ -505,6 +518,13 @@ secret atom as well as the wire values, feed both to the redactor, name
 the changes in `tools/mcp/manager.py` and `tools/mcp/prompts.py`, and
 test it with a hostile server that reflects the bare token.
 
+*Resolution* (7e590fcc): taken in full. Resolution now answers with
+the substituted atoms beside the wire values, the manager feeds both to
+the redactor, and the milestone carries a hostile-server case that
+reflects the bare token and asserts it absent from every surface. The
+plan says why the atoms cross the seam rather than being reconstructed:
+the resolver is the only place they exist.
+
 ### 3 (P1): `StorageError` does not distinguish an unreadable row from a broken database
 
 The plan catches every `StorageError` at boot, but that class covers an
@@ -516,7 +536,7 @@ assembly decision sites, catch only that at boot, and test the negative
 cases (database unreachable, schema privilege, generic storage
 failure), with no message parsing anywhere.
 
-*Resolution* (commit below): taken. The milestone now adds a subclass
+*Resolution* (446f11ef): taken. The milestone now adds a subclass
 of `StorageError` for an unreadable stored row, raised at the sites
 that already classify it and caught by name at the boot, with the
 negative cases (unreachable database, schema privilege, generic storage
@@ -532,7 +552,7 @@ raw token and not `Bearer <token>`. The example must say the encrypted
 slot holds the FINISHED header value, keep that separate from raw-token
 interpolation, and pin the precedence at the wire.
 
-*Resolution* (commit below): taken. The example states that an
+*Resolution* (f3c992d9): taken. The example states that an
 encrypted slot holds the finished header value, keeps it apart from the
 composed reference, and the precedence is pinned at the wire. Composing
 inside an encrypted slot is named as out of scope with its reason.
@@ -549,6 +569,14 @@ private helper, and say what it does about CR/LF in a header value. If
 `_env_reference` has no production caller after the scanner lands, it
 should be deleted rather than kept and tested privately.
 
+*Resolution* (7431c380): taken. The trimming stays, so no existing
+value changes meaning and the whole-value question is answered exactly
+as today; only a value that is not a whole reference is scanned. The
+helper keeps a caller and is deleted if it turns out not to. The CR/LF
+question is answered by measuring what the transport does with a
+composed value carrying a newline, with the refusal added if it passes
+one through, and the plan claims nothing it has not seen.
+
 ### 6 (P2): the sentinel plan omits the attached event consumer
 
 The suite checks sentences, `record.args`, both log formats, reads and
@@ -559,7 +587,7 @@ refusing path and assert the sentinel is absent from every payload and
 typed argument, using the existing all-record rendering helper so a
 foreign logger's records are not silently excluded.
 
-*Resolution* (commit below): taken. The sentinel suite now attaches a
+*Resolution* (144a33a2): taken. The sentinel suite now attaches a
 tap across the connecting and the refusing path, asserts absence from
 every emission payload and typed argument, and reads records through
 the all-record helper rather than by logger.
@@ -574,7 +602,7 @@ correcting or deleting the addressed row through SQL as the server
 role, which the CLI reference already names as the surgical
 alternative.
 
-*Resolution* (commit below): taken. The second line now names both
+*Resolution* (d8ff8b4f): taken. The second line now names both
 recoveries, the rebuild where an export exists and the SQL correction
 where none does, with the reason the second cannot be left out: the
 issue's own path is a restored or hand-edited database, which is the
