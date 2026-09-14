@@ -42,6 +42,7 @@ SECRET_KEY = "sk-lf-fanout-smoke-not-real"
 TRACE_COUNT = 64
 SAMPLE_PERCENTAGE = "25"
 DEADLINE_S = 30.0
+IMAGE_PULL_DEADLINE_S = 300.0
 
 CANONICAL_CONTENT = {
     "vinga.turn.input",
@@ -71,35 +72,46 @@ def _run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _pull(image: str) -> None:
+    subprocess.run(
+        ("docker", "pull", image),
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=IMAGE_PULL_DEADLINE_S,
+    )
+
+
 @contextlib.contextmanager
 def _collector(jaeger: Receiver, langfuse: Receiver) -> Iterator[tuple[str, str]]:
     name = f"vinga-fanout-{uuid.uuid4().hex[:12]}"
-    _run(
-        "docker",
-        "run",
-        "--detach",
-        "--name",
-        name,
-        "--add-host",
-        "host.docker.internal:host-gateway",
-        "--publish",
-        "127.0.0.1::4318",
-        "--env",
-        f"JAEGER_OTLP_ENDPOINT=http://host.docker.internal:{jaeger.port}",
-        "--env",
-        f"LANGFUSE_OTLP_ENDPOINT=http://host.docker.internal:{langfuse.port}",
-        "--env",
-        f"LANGFUSE_PUBLIC_KEY={PUBLIC_KEY}",
-        "--env",
-        f"LANGFUSE_SECRET_KEY={SECRET_KEY}",
-        "--env",
-        f"TELEMETRY_SAMPLE_PERCENTAGE={SAMPLE_PERCENTAGE}",
-        "--volume",
-        f"{CONFIG}:/etc/otelcol-contrib/config.yaml:ro",
-        IMAGE,
-        "--config=/etc/otelcol-contrib/config.yaml",
-    )
+    _pull(IMAGE)
     try:
+        _run(
+            "docker",
+            "run",
+            "--detach",
+            "--name",
+            name,
+            "--add-host",
+            "host.docker.internal:host-gateway",
+            "--publish",
+            "127.0.0.1::4318",
+            "--env",
+            f"JAEGER_OTLP_ENDPOINT=http://host.docker.internal:{jaeger.port}",
+            "--env",
+            f"LANGFUSE_OTLP_ENDPOINT=http://host.docker.internal:{langfuse.port}",
+            "--env",
+            f"LANGFUSE_PUBLIC_KEY={PUBLIC_KEY}",
+            "--env",
+            f"LANGFUSE_SECRET_KEY={SECRET_KEY}",
+            "--env",
+            f"TELEMETRY_SAMPLE_PERCENTAGE={SAMPLE_PERCENTAGE}",
+            "--volume",
+            f"{CONFIG}:/etc/otelcol-contrib/config.yaml:ro",
+            IMAGE,
+            "--config=/etc/otelcol-contrib/config.yaml",
+        )
         mapping = _run("docker", "port", name, "4318/tcp").stdout.strip()
         port = mapping.rsplit(":", 1)[1]
         endpoint = f"http://127.0.0.1:{port}/v1/traces"
