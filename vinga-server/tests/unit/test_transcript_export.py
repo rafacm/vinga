@@ -292,6 +292,7 @@ async def test_handover_rows_wait_independently_and_compose_once() -> None:
         "the transcript worker did not enter the final acknowledgement wait"
     )
     assert telemetry.settled == []
+    assert telemetry.released == []
     second.settle(True)
     await wait_for(lambda: bool(telemetry.settled))
     await exporter.shutdown()
