@@ -229,12 +229,20 @@ reply. How long a trace lives, who may read it and how it is deleted are
 the receiving backend's policy, configured there and not here. Where it
 goes and what credentials reach it are the standard
 `OTEL_EXPORTER_OTLP_*` variables, which are transport configuration and
-never become span content.
+never become span content. Nothing here reads them, so how far this
+destination lies is the operator's own assertion, written on
+`server.telemetry.reach`. That one key covers every destination the
+telemetry section sends to and means the outermost of them: the OTLP
+endpoint the traces and the transcripts ride, and the Langfuse REST host
+the recording upload uses. It is an assertion and not a proof, which is
+the limit the whole mechanism carries, and it is `internet` where the
+key is absent, so a deployment that writes nothing gets what every
+deployment had before it existed.
 
 **Status.** Landed (#66), and off unless `server.telemetry.enabled` says
 otherwise. Absent by default, refused under any `server.data_boundary`
-narrower than `internet` because nothing here knows where the collector
-is, and refused with the extra to install when the packages are missing.
+narrower than the section's declared reach, and refused with the extra
+to install when the packages are missing.
 It is an `EventTap` on the seam the events package already documents,
 which is what makes the derivation structural: no emit site moves for
 it, and it can say nothing `events/catalog.py` does not declare.
@@ -264,21 +272,23 @@ own recorded caution about self-hosted Langfuse. Where it goes and what
 credentials reach it are `LANGFUSE_HOST`, `LANGFUSE_PUBLIC_KEY` and
 `LANGFUSE_SECRET_KEY`, which the uploader reads from the environment and
 hands to the Langfuse REST client; no vinga configuration key holds one,
-nothing stores one, and nothing this server prints renders one. Erasure
-on this side is the operator's act on the backend; deleting a session
-under `/api` does not reach it.
+nothing stores one, and nothing this server prints renders one. How far
+that host lies is the telemetry section's one `reach` assertion
+described above, which covers this destination and the OTLP one
+together. Erasure on this side is the operator's act on the backend;
+deleting a session under `/api` does not reach it.
 
 **Status.** Landed (#67), and off unless `server.telemetry.export_audio`
 says otherwise, which neither `server.capture` nor
 `server.telemetry.enabled` implies: room audio leaving the pod is its
 own decision. With capture off it is a no-op, under a
-`server.data_boundary` narrower than `internet` it is refused, and
-without the `langfuse` extra the boot is refused. It runs on a worker of
-its own after a session closed, never on the audio path, and every
-failure is a warning event (`capture_uploaded`, `capture_upload_failed`
-with a reason from a closed set), because a recording that silently
-failed to attach would leave a reader with a trace, no audio and no way
-to learn any was meant to be there.
+`server.data_boundary` narrower than the section's declared reach it is
+refused, and without the `langfuse` extra the boot is refused. It runs
+on a worker of its own after a session closed, never on the audio path,
+and every failure is a warning event (`capture_uploaded`,
+`capture_upload_failed` with a reason from a closed set), because a
+recording that silently failed to attach would leave a reader with a
+trace, no audio and no way to learn any was meant to be there.
 
 ### Exported transcripts
 
@@ -319,22 +329,23 @@ deleted are the receiving deployment's policy, configured there, and a
 deployment with no policy configured retains indefinitely. Where it goes
 and what credentials reach it are the same `OTEL_EXPORTER_OTLP_*`
 variables the traces use, which are transport configuration and never
-become span content.
+become span content, under the same one `server.telemetry.reach`
+assertion described above.
 
 **Status.** Landed (#495), and off unless
 `server.telemetry.export_transcripts` says otherwise, which neither
 `server.telemetry.enabled` nor `server.conversations.text` implies: what
 a household said leaving the deployment is its own decision. With
 conversations absent, off, or storing no text it is a no-op, under a
-`server.data_boundary` narrower than `internet` it is refused, and with
-telemetry off the boot is refused. It needs no extra and no second
-credential, because the turns travel as spans over the transport the
-traces already use. It runs on a worker of its own after a session
-closed, never on the audio path, and every failure is a warning event
-(`transcripts_exported`, `transcript_export_failed` with a reason from a
-closed set), because a transcript that silently failed to export would
-leave a reader with a trace, the stage timings, none of the words and no
-way to learn any were meant to be there.
+`server.data_boundary` narrower than the section's declared reach it is
+refused, and with telemetry off the boot is refused. It needs no extra
+and no second credential, because the turns travel as spans over the
+transport the traces already use. It runs on a worker of its own after a
+session closed, never on the audio path, and every failure is a warning
+event (`transcripts_exported`, `transcript_export_failed` with a reason
+from a closed set), because a transcript that silently failed to export
+would leave a reader with a trace, the stage timings, none of the words
+and no way to learn any were meant to be there.
 
 ### Audit
 

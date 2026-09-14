@@ -381,11 +381,32 @@ server:
   # Turning it on needs the OpenTelemetry packages, which both published
   # images carry and a checkout gets from `uv sync`. A server told to
   # export without them refuses at startup and says which extra to
-  # install. Under a `data_boundary` above narrower than internet it is
-  # refused too: nothing here knows where the collector is, so an
-  # exporter reaches the internet as far as this server can tell.
+  # install. Under a `data_boundary` above narrower than this section's
+  # `reach` it is refused too.
   # telemetry:
   #   enabled: false
+  #   # WHERE THIS SECTION'S DESTINATIONS ARE, asserted by you: `host`
+  #   # for a collector on this machine, `network` for one that stays on
+  #   # your own network, `internet` for anything else. Left out, as
+  #   # here, it is `internet`, which is what every deployment got
+  #   # before this key existed, so writing nothing changes nothing: the
+  #   # key widens what a `data_boundary` above allows and never narrows
+  #   # it.
+  #   #
+  #   # ONE ASSERTION COVERS EVERY DESTINATION this section sends to,
+  #   # and it means the outermost of them. There are two: the traces
+  #   # and the exported transcripts ride OTEL_EXPORTER_OTLP_*, and the
+  #   # recording upload rides LANGFUSE_HOST. A collector on your
+  #   # network beside a media host at a vendor is therefore `internet`,
+  #   # and all three features below are refused rather than the one
+  #   # that would have been caught.
+  #   #
+  #   # IT IS AN ASSERTION, NOT A PROOF. Nothing here reads either
+  #   # endpoint, so declaring `network` and then pointing
+  #   # OTEL_EXPORTER_OTLP_ENDPOINT at a vendor contradicts your own
+  #   # configuration and this server cannot tell. The mechanism admits
+  #   # declarations, not behaviour, and is not a network sandbox.
+  #   reach: internet
   #   # ATTACHES A CLOSED SESSION'S RECORDING to the trace it was
   #   # exported under, which SENDS ROOM AUDIO OFF THIS HOST. Off by
   #   # default and its own decision: `capture` being on and `enabled`
@@ -414,7 +435,7 @@ server:
   #   #
   #   # It needs the `langfuse` extra, which both published images
   #   # carry, and is refused at boot without it and under a
-  #   # `data_boundary` narrower than internet.
+  #   # `data_boundary` narrower than this section's `reach`.
   #   # The upload runs on a worker of its own after the session closed,
   #   # never on the audio path, and a failure is a warning rather than
   #   # a failed session. A recording waiting for that worker is
@@ -447,7 +468,7 @@ server:
   #   # `capture` is irrelevant to it either way. With `enabled` above
   #   # off it is refused at boot, since an observation is written onto
   #   # a trace this server exported, and under a `data_boundary`
-  #   # narrower than internet it is refused too.
+  #   # narrower than this section's `reach` it is refused too.
   #   #
   #   # It needs no extra and no second credential: the turns travel as
   #   # OTLP spans over the same OTEL_EXPORTER_OTLP_* transport the

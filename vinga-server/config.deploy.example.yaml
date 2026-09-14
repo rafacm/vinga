@@ -162,6 +162,12 @@ server:
   # is in config.example.yaml.
   # telemetry:
   #   enabled: true
+  #   # Where this section's destinations are, asserted by you, covering
+  #   # both transports at once and meaning the outermost of them:
+  #   # `host`, `network` or `internet`. Left out it is `internet`,
+  #   # which is what a deployment got before the key existed. It is an
+  #   # assertion and not a proof: nothing here reads either endpoint.
+  #   reach: internet
   #   # Attaching a closed session's recording to its trace, which SENDS
   #   # ROOM AUDIO OFF THIS HOST and is its own decision: capture on and
   #   # telemetry on do not imply it. Retention is then the backend's,
