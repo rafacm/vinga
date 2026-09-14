@@ -471,7 +471,7 @@ class LlmInputExport:
         stage = self._staged.setdefault(session, _Stage())
         stage.index += 1
         try:
-            request = _rendered(purpose, system, turns, tools, choice)
+            request = _rendered(system, turns, tools, choice)
         except Exception:  # noqa: BLE001 - a reply never fails for this
             # Deliberately unbound, deliberately value-free, and NOT
             # counted as either bound's drop: the two counts are the
@@ -742,7 +742,6 @@ class LlmInputExport:
 
 
 def _rendered(
-    purpose: str,
     system: str,
     turns: "list[Turn]",
     tools: "list[ToolDef]",
@@ -774,16 +773,21 @@ def _rendered(
     keeps: a seam type that grew a field would otherwise reach the wire
     without anybody deciding it should.
 
+    Four keys and not five: which call shape assembled this is vinga's
+    own label rather than something the model was handed, so it rides
+    the span as an attribute and stays out of the request. A class whose
+    value is that it is exactly what was sent must not quietly grow a
+    field the model never saw.
+
     Canonical JSON, sorted and without padding, so the same round
-    renders to the same bytes on every run and the weighing below is a
-    fact rather than a reading. `default=str` is the totality clause: a
-    value that is not JSON at all cannot have come off a model's wire or
-    out of this server's own schemas, and rendering its text is a better
-    answer inside a reply than an exception.
+    renders to the same bytes on every run and the weighing in `_stage`
+    is a fact rather than a reading. `default=str` is the totality
+    clause: a value that is not JSON at all cannot have come off a
+    model's wire or out of this server's own schemas, and rendering its
+    text is a better answer inside a reply than an exception.
     """
     return json.dumps(
         {
-            "purpose": purpose,
             "system": system,
             "messages": [_message(turn) for turn in turns],
             "tools": [_tool(tool) for tool in tools],
