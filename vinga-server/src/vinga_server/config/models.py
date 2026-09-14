@@ -823,22 +823,32 @@ class TelemetryConfig(BaseModel):
     the no-leak rules already hold: timings, closed reasons and
     server-minted identifiers, never transcripts and never audio.
 
-    Three switches since #495, and they are a DISCLOSURE LADDER rather
+    Four switches since #502, and they are a DISCLOSURE LADDER rather
     than a list. `enabled` is the master switch and a prerequisite
     rather than a peer: metadata leaves, which is why it is not spelled
-    `export_metadata`. The two below it are content escalations, and
-    each means the same thing in its own class: if this content exists
-    locally, it leaves. `export_audio` sends a recording of a room,
-    `export_transcripts` sends what was said. Each is its own decision,
-    each defaults off, and neither is implied by anything above it.
+    `export_metadata`. The three below it are content escalations, one
+    per content class, and each means the same thing in its own class:
+    if this content exists locally, it leaves. `export_audio` sends a
+    recording of a room, `export_transcripts` sends what was said, and
+    `export_llm_input` sends the request the model was given. Each is
+    its own decision, each defaults off, and none is implied by anything
+    above it or beside it.
 
-    `reach` is not a rung of that ladder and sits above all three: it
+    A class may nonetheless CONTAIN what a narrower one contains, and
+    the third does: an assembled request holds the dialogue as the model
+    saw it, so `export_llm_input` is content-wise a superset of
+    `export_transcripts` while the two switches stay independent. That
+    is stated in the third field's own prose rather than left for an
+    operator to deduce from the switches, which is the
+    content-and-telemetry record's rule.
+
+    `reach` is not a rung of that ladder and sits above all of them: it
     says where this section's destinations ARE, which is one fact about
     every place this section's bytes end up rather than one per switch,
     and splitting it per class would let a deployment assert something
     about audio that is untrue of the transcripts riding the same
     endpoint (#502). What it governs is the data boundary's verdict on
-    all three, and absent it is `internet`, which is what the three
+    all four, and absent it is `internet`, which is what the three
     builders passed before the key existed.
 
     The rules that refuse them with `enabled` off are deliberately NOT
@@ -991,6 +1001,69 @@ class TelemetryConfig(BaseModel):
             "already use. The export runs on a worker of its own after the "
             "session closed, never on the audio path, and every failure is a "
             "warning event (`transcript_export_failed`) rather than a failed "
+            "session."
+        ),
+    )
+
+    export_llm_input: bool = Field(
+        default=False,
+        description=(
+            "Whether the request this server assembled for each of a closed "
+            "session's LLM rounds is exported to the telemetry backend, one "
+            "observation each on the trace that session was exported under, "
+            "carrying the request rendered as the observation's input. Off by "
+            "default, and it is its own decision: **neither `enabled` nor either "
+            "export beside it implies that the model's input leaves.** "
+            "**This is the widest of the three content classes, and it contains "
+            "what `export_transcripts` contains.** An assembled request holds the "
+            "dialogue as the model saw it, so switching this on sends the "
+            "conversation text off this host whether or not `export_transcripts` "
+            "is on; the two switches stay independent and neither turns the other "
+            "on. What goes is the request as vinga assembled it: the system "
+            "prompt with its memory and know-how blocks, the message history as "
+            "the model was given it, the tool schemas offered, the tool arguments "
+            "the model asked for and the results it was handed back, and the tool "
+            "choice. What does not go is vendor framing, the generation "
+            "parameters, the endpoint, any header and any credential: the "
+            "snapshot is taken at this server's own provider seam, which is one "
+            "translation short of the bytes on the wire and is the one place a "
+            "request exists once rather than once per vendor. "
+            "**There is no local store behind it**, which makes its retention "
+            "answer the strictest here and its loss the quietest: a session "
+            "assembles a request because it is about to make it, so what is "
+            "exported exists for the session, then in a bounded delivery job "
+            "until it is delivered or dropped, and nowhere after that. A process "
+            "that dies with exports queued loses them with no ledger to recover "
+            "from, unlike a recording's files and a conversation's rows. What "
+            "that costs is bounded: a lost export is a missing observation and "
+            "never a lost conversation, since what was said is in the store when "
+            "`server.conversations` is recording it. "
+            "**What one session may stage is bounded in bytes**, per request and "
+            "for the session as a whole, because a request carries the history, "
+            "the tool schemas, the arguments and the results and nothing here "
+            "chose their size. A request over the per-request ceiling is dropped "
+            "whole rather than truncated, since a shortened request is not the "
+            "request the model was given; over the session's budget, whole "
+            "requests go oldest first. Both absences are counted and both reasons "
+            "are reported on the export's own event (`llm_input_exported`), so a "
+            "partial export says so. "
+            "It needs `enabled` above, since an observation is written onto a "
+            "trace this server exported, and it is refused at boot without it. "
+            "Under a `data_boundary` narrower than this section's `reach` it is "
+            "refused. It answers to no second switch: unlike the two exports "
+            "above, there is no local surface that could be off, so it is never a "
+            "no-op and `server.conversations` and `server.capture` are irrelevant "
+            "to it. "
+            "**Exported requests outlive erasure on this side**, the way exported "
+            "text does: deleting a session or its conversation reaches nothing "
+            "that already left, and retention is then the backend's policy, "
+            "configured there, with a backend that has none retaining "
+            "indefinitely. "
+            "It needs no extra and no second credential: the requests travel as "
+            "OTLP spans over the same `OTEL_EXPORTER_OTLP_*` transport the traces "
+            "already use. The export runs on a worker of its own after the "
+            "session closed, never on the audio path, and every failure is a "
+            "warning event (`llm_input_export_failed`) rather than a failed "
             "session."
         ),
     )

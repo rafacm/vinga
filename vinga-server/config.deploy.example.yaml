@@ -194,6 +194,19 @@ server:
   #   # above, so it needs no extra and no second credential. Needs
   #   # `server.conversations` recording text to do anything.
   #   export_transcripts: false
+  #   # Exporting the request the model was given, one observation per
+  #   # LLM round, which SENDS THE ASSEMBLED PROMPT OFF THIS HOST and
+  #   # is its own decision. It is the widest of the three classes and
+  #   # contains what `export_transcripts` contains, since an assembled
+  #   # request holds the dialogue as the model saw it; the switches
+  #   # stay independent. Vendor framing, generation parameters,
+  #   # endpoints, headers and credentials are not in it. Nothing on
+  #   # this host keeps an assembled request once its session ended, so
+  #   # an export lost to a crash is lost, and what one session may
+  #   # stage is bounded in bytes with the drops counted on the event.
+  #   # It rides the OTEL_EXPORTER_OTLP_* transport above, so it needs
+  #   # no extra and no second credential.
+  #   export_llm_input: false
 
   # How long a shutdown waits for conversations in flight to finish
   # speaking. Set the orchestrator's grace period between SIGTERM and
