@@ -24,11 +24,15 @@
   lock an operator out of the one door to the row. Nothing here changes
   what refuses or when: a deployment that boots today goes on booting,
   and one that does not gets a second sentence.
-- **One observability value changes with it.** The configuration API
-  answers an unreadable stored row with the same 500 and the same
-  sentence it always has, but the `failure` field of the
-  `api_storage_error` event now names the more specific class
-  (`StoredConfigUnreadableError`) instead of `StorageError` for that
-  case. A consumer matching on the old spelling for this failure needs
-  the new one; `StorageError` still appears for a database that cannot
-  be reached.
+- **Two observability values change with it.** A stored row that cannot
+  be read as configuration is now classified as its own kind of storage
+  failure, and two events record the class of the failure they met, so
+  both name `StoredConfigUnreadableError` where they named
+  `StorageError`: `api_storage_error.failure`, when the configuration
+  API reads such a row (it answers the same 500 with the same sentence
+  it always has), and `device_bindings_unreadable.failure`, when a live
+  device binding or a stored default agent will not read and the server
+  falls back to the configuration it booted with. A consumer matching on
+  the old spelling for either needs the new one. `StorageError` still
+  appears on both, for a database that cannot be reached, and nothing
+  else in this server records the class of these failures.

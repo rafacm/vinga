@@ -37,6 +37,7 @@ from tests.support.registry import BINDINGS_DEVICE_MAC as DEVICE_MAC
 from vinga_server import logs
 from vinga_server.app import create_app
 from vinga_server.config import Config
+from vinga_server.config.loader import StoredConfigUnreadableError
 from vinga_server.config.models import API_MOUNT_PATH, DatabaseConfig
 from vinga_server.db import open_database, read_engine, schema
 from vinga_server.device.bindings import DeviceBindings
@@ -453,6 +454,33 @@ def test_a_failed_read_repeats_nothing_the_failure_carried(
     assert len(text.splitlines()) == len(caplog.records)
 
 
+def _fell_back_over_an_unreadable_row(caplog: pytest.LogCaptureFixture) -> None:
+    """The fallback said out loud, and the kind of failure it says.
+
+    The event's existence is not the whole claim, which is what the PR
+    round on #507 caught. `_warn` records `ClassName.of(exc)`, so this
+    field is the second place in the tree where the classification an
+    unreadable stored row now gets is visible from outside: a malformed
+    binding and a malformed default agent are read through `_list` and
+    `_stored`, both of which raise `StoredConfigUnreadableError` since
+    that milestone, and the value moved with them. A database that
+    cannot be reached goes on saying `StorageError`, which is the case
+    above this one.
+
+    Asserted rather than left to the changelog, because a value a
+    consumer can alert on is a contract whether or not anything in this
+    repository reads it.
+    """
+    _, objects = _rendered(caplog.records)
+    unreadable = [
+        payload for payload in objects if payload.get("event") == "device_bindings_unreadable"
+    ]
+    assert unreadable, "the fallback went unlogged"
+    assert [payload["failure"] for payload in unreadable] == [
+        StoredConfigUnreadableError.__name__
+    ] * len(unreadable)
+
+
 def _write_agents_column(mac: str, value: object) -> None:
     """A row put beyond what any write could have produced, which is the
     state a live reader has to have an answer for."""
@@ -502,10 +530,7 @@ def test_a_row_no_write_could_have_made_falls_back_rather_than_refusing(
         bindings.dispose()
 
     assert resolved.names == ("assistant",)
-    assert any(
-        getattr(record, "event", None) == "device_bindings_unreadable"
-        for record in caplog.records
-    )
+    _fell_back_over_an_unreadable_row(caplog)
 
 
 def test_a_default_agent_that_is_not_a_name_falls_back_too(
@@ -535,10 +560,7 @@ def test_a_default_agent_that_is_not_a_name_falls_back_too(
 
     # The snapshot's default agent, rather than silence.
     assert resolved.names == ("assistant",)
-    assert any(
-        getattr(record, "event", None) == "device_bindings_unreadable"
-        for record in caplog.records
-    )
+    _fell_back_over_an_unreadable_row(caplog)
 
 
 def test_the_fallback_is_the_snapshot_and_not_an_empty_answer() -> None:
