@@ -98,6 +98,9 @@ from tests.support.configs import (
     watchdog_config,
     world,
 )
+from tests.support.llm_input import A_CONTEXT as AN_LLM_CONTEXT
+from tests.support.llm_input import a_turn as an_assembled_turn
+from tests.support.llm_input import exporting as exporting_llm_input
 from tests.support.providers import (
     STALL_S,
     BrokenTts,
@@ -187,6 +190,7 @@ from vinga_server.device.session import DeviceSession
 from vinga_server.events import SessionEvents
 from vinga_server.events.catalog import CHANNELS
 from vinga_server.filler import FallbackClip, build_agent_fillers
+from vinga_server.llm_input_export import LlmInputExport
 from vinga_server.logs import _STANDARD_ATTRIBUTES
 from vinga_server.memory.store import NOTHING_PURGED, MemoryScope
 from vinga_server.ota import ACTIVATE_SEGMENT, OTA_PATH
@@ -1648,6 +1652,61 @@ async def drive_transcript_export_failed(directory: Path) -> None:
     await exporter.shutdown()
 
 
+# --- the LLM input exporter -------------------------------------------
+#
+# The one seam this module declares is faked and nothing else is: the
+# stage, the byte bound, the drop accounting, the bounded queue, the
+# daemon worker and the emit sites are the real ones.
+
+
+def llm_inputs(contexts: dict[str, Any]) -> tuple[LlmInputExport, Any]:
+    """An exporter over one closed session, with its seam faked and the
+    recorder behind the span writer."""
+    telemetry, recorded = exporting_llm_input(contexts)
+    return (
+        LlmInputExport(telemetry=telemetry, backlog=4, shutdown_timeout_s=10.0),
+        recorded,
+    )
+
+
+def a_staged_round(exporter: LlmInputExport, session: str) -> None:
+    exporter.stage_reply(
+        session,
+        agent="alpha",
+        system="You are a household assistant.",
+        turns=[an_assembled_turn()],
+        tools=[],
+        choice="auto",
+    )
+
+
+async def drive_llm_input_exported(directory: Path) -> None:
+    """A closed session whose assembled requests reach its trace.
+
+    The wait before the shutdown is what makes this a driver rather than
+    a race: a shutdown INTERRUPTS this exporter, so stopping it without
+    waiting would produce the drop event whatever the driver meant to
+    produce.
+    """
+    exporter, recorded = llm_inputs({"s1": AN_LLM_CONTEXT})
+    a_staged_round(exporter, "s1")
+    exporter.session_closed("s1")
+    deadline = time.monotonic() + 10.0
+    while not recorded.jobs and time.monotonic() < deadline:
+        await asyncio.sleep(0.01)
+    await exporter.shutdown()
+
+
+async def drive_llm_input_export_failed(directory: Path) -> None:
+    """A session this exporter never saw, so there is no trace to write
+    the requests onto and the ledger says so. Decided at admission,
+    which is why this needs no wait at all."""
+    exporter, _ = llm_inputs({})
+    a_staged_round(exporter, "s1")
+    exporter.session_closed("s1")
+    await exporter.shutdown()
+
+
 def api_raising(directory: Path, exc: Exception) -> FastAPI:
     api = build_api(API_TOKEN, DatabaseConfig())
 
@@ -2114,6 +2173,7 @@ ASR = "vinga_server.providers.openai_asr"
 WORLD = "vinga_server.providers.world"
 REGISTRY = "vinga_server.registry"
 TRANSCRIPT_EXPORT = "vinga_server.transcript_export"
+LLM_INPUT_EXPORT = "vinga_server.llm_input_export"
 MANAGER = "vinga_server.tools.mcp.manager"
 MCP_REGISTRY = "vinga_server.tools.mcp.registry"
 RELOAD = "vinga_server.tools.mcp.reload"
@@ -2163,6 +2223,16 @@ SERVER_DRIVERS: tuple[Driver, ...] = (
         (TRANSCRIPT_EXPORT, "TranscriptExport._failed", 1),
         drive_transcript_export_failed,
         "transcript_export_failed",
+    ),
+    Driver(
+        (LLM_INPUT_EXPORT, "LlmInputExport._attempt", 1),
+        drive_llm_input_exported,
+        "llm_input_exported",
+    ),
+    Driver(
+        (LLM_INPUT_EXPORT, "LlmInputExport._failed", 1),
+        drive_llm_input_export_failed,
+        "llm_input_export_failed",
     ),
     Driver((CONFIG_API, "_SanitizedErrors.__call__", 1), drive_api_error, "api_error"),
     Driver((CONFIG_API, "_refusal.handler", 1), drive_api_storage_error, "api_storage_error"),

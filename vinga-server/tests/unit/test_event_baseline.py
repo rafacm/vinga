@@ -125,10 +125,12 @@ def test_every_driver_names_a_path_of_its_own() -> None:
     backend (#67): the attachment that landed, the one that did not, and
     the job a restart found still staged. And a hundred and four since a
     closed session's turns can be written onto its trace (#495): the
-    export that landed and the one that did not."""
+    export that landed and the one that did not. And a hundred and six
+    since the requests a session assembled can go the same way (#502),
+    which is that same pair on the third post-close surface."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 104
+    assert len(set(claimed)) == len(claimed) == 106
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -889,6 +891,15 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     ),
     "vinga_server.transcript_export:TranscriptExport._failed #1": (
         ("TranscriptExportFailed", ("event", "reason", "session")),
+    ),
+    "vinga_server.llm_input_export:LlmInputExport._attempt #1": (
+        (
+            "LlmInputExported",
+            ("elapsed_ms", "event", "over_budget", "oversized", "rounds", "session"),
+        ),
+    ),
+    "vinga_server.llm_input_export:LlmInputExport._failed #1": (
+        ("LlmInputExportFailed", ("event", "reason", "session")),
     ),
     "vinga_server.config.api:_SanitizedErrors.__call__ #1": (
         ("ApiError", ("event",)),
