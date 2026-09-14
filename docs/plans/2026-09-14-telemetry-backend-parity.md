@@ -190,9 +190,16 @@ canonical JSON and the exact encoded bytes are both weighed and exported:
 The serializer follows the published schemas field by field and never walks
 provider or SDK objects generically. A tool or provider object gaining a
 credential-bearing field cannot therefore make it exportable by accident.
-The input and output of one logical round share its existing session-local
-round index. The first-token retry does not create a second logical round or a
-second content snapshot. A failed round retains its request and any partial
+The existing `vinga.llm.round` remains the reply-local display ordinal it is
+today and is not used as a join key. Each logical generation instead mints a
+server-owned opaque invocation id at the assembly point that can see both the
+content collaborator and the eventual `llm_round` or `provider_failed`
+emission. The event catalog carries it as declared metadata and the span maps
+it to `vinga.llm.invocation.id`; `LlmInputRound` carries the same value. That
+identity is session-unique, is consumed only for correlation, and contains no
+provider value. The first-token retry reuses it, so a retry does not create a
+second logical round or content snapshot. A dropped content snapshot consumes
+no later round's identity. A failed round retains its request and any partial
 semantic output admitted before failure, and has no invented completion.
 
 The existing per-request, per-session and maximum-round bounds apply to the
@@ -211,8 +218,8 @@ raising uses the closed token `tool_error`; a tool timeout uses
 No exception words, response body, traceback, tool arguments or tool result
 is copied into error metadata.
 
-`provider_failed` gains only the safe ordinal needed to pair an LLM failure
-with its staged logical round. The event remains content-free. The tool-call
+`provider_failed` gains only the safe invocation id needed to pair an LLM
+failure with its staged logical round. The event remains content-free. The tool-call
 event gains only its already-decided error type, and the `tool` span maps it to
 status and `error.type`.
 
@@ -373,7 +380,9 @@ fixtures are extended rather than replaced.
   and failed round has one actual `llm` span with its own matched standard
   input/output JSON. All three content attributes and both vinga extensions
   are absent when the flag is off. Bounds drop a whole pair, never half and
-  never its metadata span. There is no span named `llm_input`.
+  never its metadata span. Two turns with repeated reply-local ordinals, plus
+  an oversized round between retained rounds, prove that only the opaque
+  invocation id performs the join. There is no span named `llm_input`.
 - The existing OTLP protobuf integration receiver compares decoded wire data,
   not SDK objects, for topology, status, standard attributes and both flag
   combinations. A multi-round tool and handover conversation proves ordinal
@@ -435,6 +444,7 @@ fixtures are extended rather than replaced.
 
 - [ ] **M1, canonical metadata and real failed operations.** Preserve original
   trace flags and state, freeze the canonical topology and attribute contract,
+  add the server-minted generation invocation id at reply and recap assembly,
   turn failed LLM/TTS/tool work into real `ERROR` spans with safe
   `error.type`, pin the existing Langfuse usage aliases as derived compatibility
   output rather than canonical metadata, and regenerate the event reference.
@@ -493,6 +503,11 @@ model `claude-opus-5`, 2026-09-14, runtime 5m18s.
    while the staged content index is session-local and advances even for
    dropped rounds. A server-minted correlation id visible at both seams is
    required.
+
+   *Resolution:* M1 now mints a session-unique opaque invocation id at each
+   generation assembly point and carries it through the declared event and
+   content seams as `vinga.llm.invocation.id`. The existing round number stays
+   reply-local and tests deliberately repeat it across turns and content drops.
 4. **P1: successful recap generations have no `llm` span.** The recap path
    stages a request but emits no `llm_round`; a failed recap would gain a span
    through `provider_failed`, making the asymmetry worse. The plan must decide
