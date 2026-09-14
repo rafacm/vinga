@@ -7,6 +7,7 @@ backend adapters. The tests read that graph as committed so a second sampler,
 a missed content alias, or a credential mounted into vinga fails locally.
 """
 
+import ast
 import re
 from pathlib import Path
 from typing import Any
@@ -18,15 +19,6 @@ TELEMETRY = REPO / "deploy" / "telemetry"
 COLLECTOR_PATH = TELEMETRY / "collector.yml"
 DIRECT_PATH = TELEMETRY / "docker-compose.jaeger.yml"
 FANOUT_PATH = TELEMETRY / "docker-compose.fanout.yml"
-
-JAEGER_IMAGE = (
-    "jaegertracing/jaeger:2.20.0@"
-    "sha256:46a886260e04002d8f45e213fc39063fa11a50446048fdaa64786fc0840cb9f8"
-)
-COLLECTOR_IMAGE = (
-    "otel/opentelemetry-collector-contrib:0.160.0@"
-    "sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6"
-)
 
 CONTENT_ATTRIBUTES = {
     "vinga.turn.input",
@@ -61,13 +53,55 @@ def _services(path: Path) -> dict[str, Any]:
     return _load(path)["services"]
 
 
+def _string_constant(path: Path, name: str) -> str:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)
+            and isinstance(value := ast.literal_eval(node.value), str)
+        ):
+            return value
+    raise AssertionError(f"{path} has no string constant {name}")
+
+
 def test_images_are_versioned_and_immutable() -> None:
     direct = _services(DIRECT_PATH)
     fanout = _services(FANOUT_PATH)
+    jaeger = direct["jaeger"]["image"]
+    collector = fanout["otel-collector"]["image"]
 
-    assert direct["jaeger"]["image"] == JAEGER_IMAGE
-    assert fanout["jaeger"]["image"] == JAEGER_IMAGE
-    assert fanout["otel-collector"]["image"] == COLLECTOR_IMAGE
+    assert fanout["jaeger"]["image"] == jaeger
+    assert re.fullmatch(r"jaegertracing/jaeger:\d+\.\d+\.\d+@sha256:[0-9a-f]{64}", jaeger)
+    assert re.fullmatch(
+        r"otel/opentelemetry-collector-contrib:\d+\.\d+\.\d+@sha256:[0-9a-f]{64}",
+        collector,
+    )
+
+    assert (
+        _string_constant(
+            REPO / "vinga-server/tests/integration/test_telemetry_export.py",
+            "JAEGER_IMAGE",
+        )
+        == jaeger
+    )
+    assert (
+        _string_constant(
+            REPO / "vinga-server/tests/integration/test_telemetry_fanout.py", "IMAGE"
+        )
+        == collector
+    )
+    workflow = (REPO / ".github/workflows/vinga-server.yml").read_text(
+        encoding="utf-8"
+    )
+    assert jaeger in workflow
+
+    readme = (TELEMETRY / "README.md").read_text(encoding="utf-8")
+    for image in (jaeger, collector):
+        tagged, digest = image.split("@", 1)
+        version = tagged.rsplit(":", 1)[1]
+        assert f"`{version}`" in readme
+        assert f"`{digest}`" in readme
 
 
 def test_the_common_pipeline_owns_policy_before_both_forwards() -> None:
