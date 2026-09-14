@@ -677,9 +677,10 @@ fixtures are extended rather than replaced.
 - [x] **[M3, direct Jaeger and one processed fanout.](2026-09-14-telemetry-backend-parity-implementation.md#m3-direct-jaeger-and-one-processed-fanout)** (PR #526) Add the pinned direct
   Jaeger and Collector examples, common masking and sampling, boundary-only
   Langfuse adaptation, Basic Auth and v4 ingestion header, static validation,
-  direct Jaeger smoke, dual-receiver parity smoke, live Jaeger/Langfuse
-  walkthrough, deployment and index documentation, configuration-example
-  pointers, changelog fragment and final implementation record. Design
+  direct Jaeger smoke, dual-receiver parity smoke, live Jaeger walkthrough,
+  explicit unchecked Langfuse gates, deployment and index documentation,
+  configuration-example pointers, changelog fragment and final implementation
+  record. Design
   footprint: no server module; `deploy/telemetry/` owns the optional deployment
   graph so the server stops knowing backend topology or credentials.
   Documentation footprint: `docs/deployment.md`, `docs/README.md`, the server
