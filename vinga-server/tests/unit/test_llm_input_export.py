@@ -6,6 +6,7 @@ import logging
 import pytest
 
 from tests.support.llm_input import a_tool, a_turn, exporting
+from vinga_server import llm_input_export as export_module
 from vinga_server.boundary import Reach
 from vinga_server.config import ConfigError
 from vinga_server.config.models import ServerConfig
@@ -164,6 +165,37 @@ def test_output_growth_can_drop_the_whole_pair() -> None:
     staged.observe("grows", TextDelta("x" * 1000))
     staged.finish("grows")
     assert recorded.snapshots == []
+
+
+def test_streaming_output_is_rendered_once_at_finish(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    staged, recorded = exporter()
+    staged.stage_reply(
+        "session",
+        invocation="streamed",
+        agent=None,
+        system="small",
+        turns=[],
+        tools=[],
+        choice="none",
+    )
+    original = export_module._output
+    renders = 0
+
+    def counting_output(text: list[str], calls: list[ToolCall]) -> str:
+        nonlocal renders
+        renders += 1
+        return original(text, calls)
+
+    monkeypatch.setattr(export_module, "_output", counting_output)
+    for _ in range(100):
+        staged.observe("streamed", TextDelta("two UTF-8 bytes: é"))
+
+    assert renders == 0
+    staged.finish("streamed")
+    assert renders == 1
+    assert len(recorded.snapshots) == 1
 
 
 def test_session_budget_evicts_the_oldest_unfinished_round() -> None:
