@@ -180,7 +180,7 @@ allowed; reference an environment variable instead" to one that names
 what is now allowed, with the composed form as its example, and it
 still quotes neither the key nor the value.
 
-### #507: the recovery belongs at the boot, not in the refusal
+### #507: the recovery belongs at the boot, and to one refusal class
 
 The refusal itself is raised by `_body` through `_from_row`, and every
 kind and every reader shares it, the running server's API included.
@@ -190,11 +190,29 @@ it by identity, and telling an operator to rebuild from an export would
 be advice to do something drastic instead of something that works.
 
 What makes the boot different is the door being shut, and the boot is
-the one place that knows it. `serving.py` already catches
-`ConfigError` where it loads the configuration and prints one sentence;
-`StorageError` is a subclass, and catching it a line earlier is the
-whole seam. The stored-row refusal then prints with a second line
-saying what the running-server case does not need.
+the one place that knows it. So the second line is printed where the
+boot prints its refusal, in `serving.py`.
+
+**But not for every `StorageError`, which is the review's third P1 and
+a real misclassification.** That class covers an unreadable stored row
+AND a database that cannot be reached at all, a migration that failed,
+a superseded revision and a missing schema privilege; `db/__init__.py`
+raises it for several of those. A database outage answered with "your
+configuration is unreadable, rebuild from an export" would send an
+operator to destroy a healthy configuration over a network problem.
+
+So the milestone introduces the distinction the code is missing: a
+subclass of `StorageError` meaning "a stored row cannot be read as
+configuration", raised at the decision sites that already know it (the
+per-row refusal in `_body`/`_from_row`, the assembly refusal in
+`_read_domain`, and the sibling stored-state refusals beside them that
+name an entry), and caught by name at the boot. No message parsing
+anywhere: the classification is the type, decided where the code
+actually classifies.
+
+Every other reader keeps what it has. The subclass IS a `StorageError`,
+so the API's 500, the reload path and the diff path go on catching what
+they catch and answering what they answer.
 
 That also settles where the sentence must NOT go: not into `_body`, not
 into `_read_domain`, and not into the API's 500, each of which serves
@@ -427,6 +445,14 @@ plan should introduce a typed distinction raised at the row and
 assembly decision sites, catch only that at boot, and test the negative
 cases (database unreachable, schema privilege, generic storage
 failure), with no message parsing anywhere.
+
+*Resolution* (commit below): taken. The milestone now adds a subclass
+of `StorageError` for an unreadable stored row, raised at the sites
+that already classify it and caught by name at the boot, with the
+negative cases (unreachable database, schema privilege, generic storage
+failure) in the suite beside the positive one. No message parsing, and
+every other reader keeps the behavior it has because the new class is
+still a `StorageError`.
 
 ### 4 (P2): the documented encrypted alternative discards the composed prefix
 
