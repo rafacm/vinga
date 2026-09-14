@@ -541,6 +541,21 @@ passed 36 tests, and the four-worker transcript and lifecycle slice passed 56.
 The finalized decoded-wire case passed 10 consecutive runs, and its complete
 integration file passed 4 tests.
 
+Post-merge main workflow 34907373708, unit job 104187064933 found the remaining
+instance of the same assumption in
+`test_handover_rows_wait_independently_and_compose_once`; the other 7,430 tests
+passed. That test slept for 100 ms before settling its final handover row. Under
+load the worker's unchanged 250 ms acknowledgement bound expired first, so it
+correctly reported `unrecorded` and the test later found no attached input.
+
+*Resolution* (`87dd1592`): the final row now uses the existing observed
+acknowledgement and the test waits for its public `wait_entered` signal before
+asserting that nothing settled early and supplying the answer. No production
+code, sleep or acknowledgement bound changed. The exact test passed 25
+consecutive runs, the transcript unit file passed 36 tests, the four-worker
+transcript and lifecycle slice passed 56, and the complete four-worker unit
+lane passed 7,431 tests with 19 skips.
+
 ## M3: direct Jaeger and one processed fanout
 
 M3 makes Jaeger a supported direct OTLP/HTTP destination and adds one optional
