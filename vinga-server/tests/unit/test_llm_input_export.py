@@ -99,6 +99,32 @@ def test_one_pair_uses_the_standard_message_attributes() -> None:
     assert json.loads(attributes[LLM_TOOLS])[0]["input_schema"]["type"] == "object"
 
 
+def test_malformed_tool_arguments_remain_in_both_message_sides() -> None:
+    staged, recorded = exporter()
+    malformed = ToolCall(
+        id="call-broken",
+        name="remember",
+        malformed_arguments="{fact: tea",
+    )
+    staged.stage_reply(
+        "session",
+        invocation="malformed",
+        agent=None,
+        system="be concise",
+        turns=[a_turn("assistant", "", calls=(malformed,))],
+        tools=[a_tool()],
+        choice="auto",
+    )
+    staged.observe("malformed", malformed)
+    staged.finish("malformed")
+
+    [(_, attributes)] = recorded.snapshots
+    input_call = json.loads(attributes[GEN_AI_INPUT_MESSAGES])[0]["parts"][0]
+    output_call = json.loads(attributes[GEN_AI_OUTPUT_MESSAGES])[0]["parts"][0]
+    assert input_call["arguments"] == "{fact: tea"
+    assert output_call["arguments"] == "{fact: tea"
+
+
 def test_a_pair_over_the_operation_ceiling_is_dropped_whole(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
