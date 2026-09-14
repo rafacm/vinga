@@ -264,7 +264,7 @@ async def test_settlement_waits_for_the_store_acknowledgement() -> None:
 async def test_handover_rows_wait_independently_and_compose_once() -> None:
     exporter, telemetry = an_exporter()
     first = settled()
-    second = pending()
+    second = observed_pending()
     exporter.turn_recorded(
         SESSION,
         a_turn(
@@ -286,7 +286,9 @@ async def test_handover_rows_wait_independently_and_compose_once() -> None:
         final=True,
     )
 
-    await asyncio.sleep(0.1)
+    assert await asyncio.to_thread(second.wait_entered.wait, 5.0), (
+        "the transcript worker did not enter the final acknowledgement wait"
+    )
     assert telemetry.settled == []
     second.settle(True)
     await wait_for(lambda: bool(telemetry.settled))
