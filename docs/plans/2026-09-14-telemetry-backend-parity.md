@@ -128,8 +128,10 @@ walkthrough and the two-backend comparison:
 Every span keeps its original trace id, span id, parent span id, links,
 start/end timestamps, status, trace flags and trace state. Every span keeps
 `session.id`; turn and child spans keep the existing utterance correlation.
-The Collector may add Langfuse-only aliases after the common processing
-pipeline, but may not rewrite any of those facts or any canonical attribute.
+The OTLP export boundary may add the existing, documented Langfuse aliases as
+pure derivations for direct-to-Langfuse compatibility, but they may not become
+a second source of truth or rewrite any canonical fact. The Collector keeps
+those aliases on its Langfuse branch and removes them from its Jaeger branch.
 
 The parity assertion compares the canonical projection, not every backend
 extension: trace and span identifiers, parentage and links, names,
@@ -149,10 +151,12 @@ ordered legs of a handover exactly once, not the response of any one LLM
 round. Empty input or output remains absent rather than becoming an empty
 string.
 
-The Langfuse Collector branch copies these already-masked values to
-`langfuse.observation.input` and `langfuse.observation.output` so its UI renders
-the turn root as an observation. That copy is an export adapter, not a second
-source of truth. Direct Jaeger shows the canonical vinga names.
+The OTLP export mapping copies these values to
+`langfuse.observation.input` and `langfuse.observation.output` so an existing
+direct-to-Langfuse deployment still renders the turn root as an observation.
+That copy is an export adapter, not a second source of truth. The Collector's
+Jaeger branch removes the aliases after common masking; direct Jaeger may show
+the inert compatibility keys as additional attributes.
 
 ### Generation content
 
@@ -301,7 +305,9 @@ the existing Langfuse REST and object-storage destinations in that assertion.
 
 - `vinga_server/telemetry.py` keeps event-to-span topology, semantic attribute
   mapping, exporter construction and the public content release methods. It
-  loses Langfuse content and usage aliases and delegates held-span lifecycle.
+  keeps the existing Langfuse aliases, including `usage_details`, as derived
+  export-boundary compatibility attributes for direct-to-Langfuse deployments
+  and delegates held-span lifecycle.
 - New `vinga_server/telemetry_deferred.py` owns immutable delayed span records,
   original trace state, bounded retention, enrichment and exactly-once
   release. Its callers stop knowing OpenTelemetry SDK span-data mechanics.
@@ -419,8 +425,9 @@ fixtures are extended rather than replaced.
 - [ ] **M1, canonical metadata and real failed operations.** Preserve original
   trace flags and state, freeze the canonical topology and attribute contract,
   turn failed LLM/TTS/tool work into real `ERROR` spans with safe
-  `error.type`, remove backend-specific usage aliases from core telemetry, and
-  regenerate the event reference. Design footprint: deepen `telemetry.py` and
+  `error.type`, pin the existing Langfuse usage aliases as derived compatibility
+  output rather than canonical metadata, and regenerate the event reference.
+  Design footprint: deepen `telemetry.py` and
   the existing runtime/event seams; no new module. Documentation footprint:
   update the exporter contract in `vinga-server/README.md` and the exported
   traces entry in the observability map; no deployment procedure changes yet.
@@ -456,6 +463,11 @@ model `claude-opus-5`, 2026-09-14, runtime 5m18s.
    depend on the current input/output and `usage_details` aliases, especially
    for ASR and TTS pricing. The plan must either keep them in core or declare
    and fully document a breaking Collector-only migration with every mapping.
+
+   *Resolution:* Direct-to-Langfuse remains supported.
+   Existing input/output and usage aliases stay as derived OTLP export-boundary
+   compatibility fields, while canonical attributes remain authoritative. The
+   Collector preserves them only on the Langfuse branch.
 2. **P1: the recording-reference span is on the shared trace pipeline and
    carries Langfuse aliases.** `reference_media` uses the shared tracer, so the
    plan's claims that media never joins the common trace stream and that Jaeger
