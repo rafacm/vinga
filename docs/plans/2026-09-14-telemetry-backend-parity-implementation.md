@@ -647,18 +647,94 @@ Run from `vinga-server/` unless noted otherwise:
   and live Jaeger query API.
 - The existing decoded-wire topology case plus the fanout acceptance: 2
   passed, proving the shared source-server fixture still exports normally.
-- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 7,426 passed, 19
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 7,431 passed, 19
   skipped.
 - `uv run pytest tests/integration -q`: 346 passed, including both new Docker
   acceptances.
-- Configuration examples and command-spelling census: 67 passed.
+- Configuration examples, generated references and command-spelling census:
+  136 passed.
 - Generated-document drift checks ran inside the full unit and integration
   lanes and stayed byte-identical.
 - `python3 scripts/check_doc_links.py .` from the repository root: 247 files,
   0 failures.
-- `python3 scripts/fold_changelog.py check .`: 2 fragments, 0 failures.
+- `python3 scripts/fold_changelog.py check .`: 1 fragment, 0 failures.
 - Credential checks scanned both received protobuf streams, Collector output,
   the resolved service environments and the committed secret locations. Raw
   sentinels were absent and no Langfuse name reached vinga.
 - The built-image Jaeger repetition was not run locally because it belongs to
   the non-PR image job after an image build.
+
+## PR review round, M3 (PR #526)
+
+Automated external review of the PR diff `origin/main...cede7850`: claude CLI
+2.1.271, read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 14m40s,
+[posted on the PR](https://github.com/rafacm/vinga/pull/526#issuecomment-5671704462).
+Verdict: mergeable after the listed fixes. The reviewer found three P2 and
+four P3 issues. It confirmed that the pinned Collector config validated, the
+two-receiver fanout exercised the central policy and backend adapters, the
+resolved graph isolated credentials, and the mask inventory named every
+content alias, while requiring the following corrections.
+
+1. **P2: the behavioral fanout covered only two of eleven content masks.** The
+   raw-sentinel check was vacuous for nine fields, and the structural test
+   accepted any regex that still used the expected replacement token.
+
+   *Resolution* (`3ef9f381`): every synthetic span now plants the same email
+   and credential sentinels in all eleven canonical and compatibility content
+   attributes. Both branches assert every field they retain has both values
+   masked, and the structural test requires one identical email regex literal
+   across all eleven statements.
+
+2. **P2: the direct Jaeger stop instruction erased the trial volumes.** The
+   documented `down -v` removed both the database and downloaded-data volumes,
+   and the fanout walkthrough had no stop or reset guidance.
+
+   *Resolution* (`f9824f52`): both walkthroughs now use ordinary `down` to
+   remove containers and the network while preserving named volumes. They
+   identify `down -v` separately as an intentional full reset and name the
+   configuration, conversation, model and voice data it erases.
+
+3. **P2: direct Langfuse was called supported before its required live gates
+   ran.** The record said M3 had no deviation even though neither the direct
+   nor fanout Langfuse rendering gate had project credentials.
+
+   *Resolution* (`5344a1ea`): the implementation record now carries two named,
+   unchecked Langfuse acceptance items under deviations, and the plan names
+   them as unchecked. The server README calls the direct recipe maintained
+   while stating that the M2 turn-root and generation-content rendering has
+   not yet been re-verified against a live project.
+
+4. **P3: six independent image-pin copies could drift while tests stayed
+   green.** The workflow, integration tests and provenance README were not
+   cross-checked against the two Compose artifacts.
+
+   *Resolution* (`2667cfea`): the deployment test reads both Compose image
+   references, proves their versioned digest shapes, reads the two integration
+   constants through the Python syntax tree, and matches the workflow and
+   provenance README to those same references.
+
+5. **P3: direct Jaeger overstated its telemetry reach as `network`.** The only
+   destination is a container on the same machine, so the example would also
+   be refused under the tightest truthful `host` data boundary.
+
+   *Resolution* (`ced90a8a`): the direct overlay, built-image acceptance path,
+   structural assertion and deployment explanation now consistently declare
+   `host`. Fanout remains `internet` because its farthest destination is the
+   Langfuse backend.
+
+6. **P3: a cold image pull could time out and orphan a smoke container.** Both
+   tests let `docker run` perform a pull under the short readiness deadline,
+   before entering the cleanup scope.
+
+   *Resolution* (`110ab8c2`): both fixtures pre-pull their pinned image with a
+   five-minute download budget, then run the named container inside the
+   cleanup `try` so every start outcome reaches the forced removal.
+
+7. **P3: readiness checks could spin and hide container stderr.** An
+   unsuccessful HTTP response did not always sleep, and failure diagnostics
+   printed only stdout even though both images write their logs to stderr.
+
+   *Resolution* (`355f9f18`): every unsuccessful readiness iteration now
+   sleeps, and both early-exit and deadline diagnostics join stdout and stderr.
+   The direct Jaeger and exact-config fanout acceptances passed together after
+   the change.
