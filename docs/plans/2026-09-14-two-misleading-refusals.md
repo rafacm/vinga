@@ -293,3 +293,97 @@ is reported as a finding about the test.
 M1 first because #504 is the queue's order and because M2's diff is
 smaller and touches a file M1 does not. M2 stacks on M1's branch and
 starts when M1's pull request opens.
+
+## Plan review round
+
+External review: codex CLI 0.154.0, model gpt-5.6-sol, read-only
+sandbox, 2026-09-14, runtime 10m30s, reviewing commit 9514ec46.
+Verdict as received: **not ready** (three P1s; the masking and export
+conflict and the reflected-secret leak need redesign before
+implementation).
+
+Every finding was checked against the code before being accepted, and
+all seven hold. Two of the three P1s are about surfaces this plan never
+looked at, which is the value of the round: the plan reasoned about the
+write path and the display path and did not follow the value to the
+places it is materialized.
+
+Findings condensed but faithful; resolutions appended per amendment.
+
+### 1 (P1): anchored masking makes a composed reference unexportable
+
+The plan accepts that `Bearer $TOKEN` displays as the mask.
+`views._masked` masks every string under a secret-shaped name, and
+`store._keep` refuses a mask when the entity does not exist yet, which
+is every entry of an import into an empty database. So a valid composed
+reference exports as the mask and cannot be imported back, which
+contradicts the export-and-reapply promise and is exactly the recovery
+M2 tells an operator to perform. The plan should define a
+representation that is both non-leaking and replayable and require an
+end-to-end test: export `Bearer $TOKEN`, import into an empty database,
+prove identical wire output.
+
+### 2 (P1): interpolation defeats the MCP reflected-credential redactor
+
+`_capture` hands `_redactor` only the fully materialized `env` and
+`headers` values, and `_redactor` replaces those complete strings. With
+`TOKEN=secret`, `Bearer $TOKEN` materializes as `Bearer secret`, and a
+server that parses its own Authorization header can hand back `secret`
+alone in its instructions. That substring is in no redaction set, so it
+reaches stored guidance, the model's input, the prompt preview and the
+CLI. The existing reflection coverage uses a whole-value reference and
+stays green. The plan should make resolution expose every substituted
+secret atom as well as the wire values, feed both to the redactor, name
+the changes in `tools/mcp/manager.py` and `tools/mcp/prompts.py`, and
+test it with a hostile server that reflects the bare token.
+
+### 3 (P1): `StorageError` does not distinguish an unreadable row from a broken database
+
+The plan catches every `StorageError` at boot, but that class covers an
+unreachable database, a migration failure, a superseded revision and a
+missing schema privilege as well as an unreadable row. An ordinary
+database outage would be answered with destructive rebuild advice. The
+plan should introduce a typed distinction raised at the row and
+assembly decision sites, catch only that at boot, and test the negative
+cases (database unreachable, schema privilege, generic storage
+failure), with no message parsing anywhere.
+
+### 4 (P2): the documented encrypted alternative discards the composed prefix
+
+A stored secret replaces the whole slot value, so an encrypted
+`headers.Authorization` slot holding the vendor's raw token sends the
+raw token and not `Bearer <token>`. The example must say the encrypted
+slot holds the FINISHED header value, keep that separate from raw-token
+interpolation, and pin the precedence at the wire.
+
+### 5 (P2): the `fullmatch` and newline reasoning does not describe observable behavior
+
+`_env_reference` matches against `value.strip()`, so a padded reference
+is accepted today and is pinned by a round-trip case; `fullmatch` over
+a stripped value still accepts a terminal newline, and the scanner
+would substitute inside `Bearer $TOKEN\n` regardless. The plan should
+decide what happens to the trimming, test the decision through
+`resolve_env_references` and the real transport rather than through a
+private helper, and say what it does about CR/LF in a header value. If
+`_env_reference` has no production caller after the scanner lands, it
+should be deleted rather than kept and tested privately.
+
+### 6 (P2): the sentinel plan omits the attached event consumer
+
+The suite checks sentences, `record.args`, both log formats, reads and
+exception chains, but not the `Emission` handed to an attached tap,
+which is its own retained transport in the observability contract. The
+plan should attach a server tap across both the connecting and the
+refusing path and assert the sentinel is absent from every payload and
+typed argument, using the existing all-record rendering helper so a
+foreign logger's records are not silently excluded.
+
+### 7 (P2): M2's recovery has no answer when no export exists
+
+The line names only the rebuild from a kept export, and the procedure
+requires an export taken while healthy. A restored or hand-edited
+database may have none, which is the issue's own path. The output
+should cover both: the rebuild where an export exists, and otherwise
+correcting or deleting the addressed row through SQL as the server
+role, which the CLI reference already names as the surgical
+alternative.
