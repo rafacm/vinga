@@ -235,7 +235,27 @@ that already drives a handover.
 
 **Unit, `tests/unit/test_transcript_export.py`.** The projection's
 utterance reaches the seam type unchanged, including null, so a column
-the store grew cannot be dropped silently between the read and the span.
+the store grew cannot be dropped silently between the read and the
+span.
+
+**Unit, `tests/unit/test_conversations_threads.py`.** The projection
+case that asserts the authorized column set exactly
+(`test_the_transcript_projection_is_exactly_the_authorized_columns`)
+grows the new column, against a real store, with a non-null utterance
+read back from a recorded turn. That case is the one place the column
+set is authorized rather than inherited, so the column joins the export
+surface THERE or it has not joined it at all.
+
+**The fixtures, and what defaults.** `TranscriptTurn.utterance` is
+`str | None` with a default of `None`, last among the members, so the
+existing direct constructions in the suites keep working and only the
+cases that are about the utterance name it. The fake row builder
+`tests/support/transcripts.py::a_row` gains the key with a real
+utterance as its default, since a row the store wrote normally carries
+one: the fallback is what a case says explicitly, not what it gets by
+forgetting. `test_telemetry_transcripts.py::a_turn` follows the same
+rule, and the case that pins the exact attribute dictionary grows
+`vinga.utterance.id` with it.
 
 **Integration, `tests/integration/test_transcript_export.py`.** The
 wire claim, extended. The existing real-server, real-collector,
@@ -454,6 +474,12 @@ builds every fake row without an utterance, and `TranscriptTurn` is
 constructed directly in more than one suite. The plan should require a
 real-store projection case with a non-null utterance, name the fixture
 updates, and say whether the new member defaults.
+
+*Resolution* (commit below): taken. The real-store projection case, the
+`a_row` and `a_turn` fixture defaults and the exact-attribute pin are
+named, and the seam member defaults to `None` in last position so the
+direct constructions elsewhere stand. The default in the FIXTURES is a
+real utterance, so a case takes the fallback path by saying so.
 
 ### 6 (P2): the fallback's claimed equivalence to option 1 is false
 
