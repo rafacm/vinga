@@ -320,9 +320,12 @@ artifacts or make observability mandatory.
 The direct example runs a pinned Jaeger v2 image, exposes its UI on loopback,
 accepts OTLP HTTP/protobuf on 4318 and points vinga directly at it. The example
 sets the SDK sampler explicitly to `always_on`; no Collector exists on this
-path. A smoke drives the built server through the existing simulated
-conversation, shuts it down cleanly, polls Jaeger's query API under a fixed
-deadline and asserts the session, turn and semantic children.
+path. The pull-request smoke starts vinga from the source tree with the same
+`uvicorn.Server` fixture the integration suite already owns, drives the
+existing simulated conversation, shuts it down cleanly, polls the containerized
+Jaeger query API under a fixed deadline and asserts the session, turn and
+semantic children. An optional built-image repetition belongs only to the
+existing non-PR image job and is not claimed as the PR gate.
 
 The fanout example sends vinga to a pinned Collector Contrib image. Its graph
 has one common traces pipeline with, in order, content masking, one
@@ -394,7 +397,8 @@ the existing Langfuse REST and object-storage destinations in that assertion.
 - `deploy/telemetry/` adds the direct Jaeger and Collector fanout examples,
   pinned configurations, dummy environment template and smoke helpers.
 - `.github/workflows/vinga-server.yml` validates both configurations and runs
-  the direct Jaeger and two-receiver Collector smoke on pull requests.
+  the source-tree direct Jaeger and two-receiver Collector smoke on pull
+  requests. Its existing image job may repeat the direct check after building.
 - `vinga-server/README.md` owns the exporter contract and configuration
   consequences. `docs/deployment.md` owns runnable direct and fanout
   walkthroughs. `docs/architecture/observability-surfaces.md` owns the updated
@@ -456,8 +460,10 @@ fixtures are extended rather than replaced.
   exact canonical projections, absence of the raw content and credential
   sentinels, presence of the same mask marker, and Langfuse-only headers and
   aliases.
-- The direct Jaeger smoke runs the built server image, drives the existing
-  simulated conversation and queries Jaeger for the expected topology. The
+- The direct Jaeger PR smoke runs the source-tree server through the existing
+  integration fixture, drives the simulated conversation and queries Jaeger
+  for the expected topology. A built-image repetition, if added, runs only in
+  the non-PR image job. The
   live gate then sends one multi-round content-enabled conversation through
   the Collector to Jaeger and a real Langfuse v4 project, compares exact trace
   identifiers and canonical projections, and records the UI/API observations
@@ -645,6 +651,10 @@ model `claude-opus-5`, 2026-09-14, runtime 5m18s.
 12. **P2: a built server image does not exist on pull-request runs.** The PR
     direct-Jaeger smoke must run the server from source in the integration lane;
     an image variant can only run in the existing non-PR image job.
+
+    *Resolution:* The PR gate now starts the source-tree server with the
+    existing integration fixture against containerized Jaeger. A built-image
+    repetition is optional and explicitly limited to the non-PR image job.
 13. **P2: an Added-only changelog is incomplete.** Removing the `transcript`
     and `llm_input` span names and moving their content needs Removed and
     Changed entries with an upgrade note.
