@@ -365,6 +365,35 @@ class StorageError(ConfigError):
     could not be read or written at all. Not the caller's mistake."""
 
 
+class StoredConfigUnreadableError(StorageError):
+    """A stored row is there, the database answered, and what the row
+    holds is not something this build can load as configuration.
+
+    The half of `StorageError` that is about the CONTENT of a row, told
+    from the half that is about reaching the database at all. Its
+    parent covers both, and deliberately: every reader that answers a
+    status code, retries or gives up answers the two the same way, so a
+    subclass they had to know about would be a distinction bought and
+    not spent.
+
+    One reader spends it, and it is the boot. A server that cannot read
+    a row is a server whose configuration API never comes up, so the
+    command that would delete the row by identity has nobody to answer
+    it and the way out is a rebuild or SQL. A server that cannot reach
+    its database is a server with a healthy configuration behind a
+    network problem, and telling its operator to rebuild would be
+    telling them to destroy what is fine. `serving.py` prints the first
+    advice for this class and nothing extra for the parent.
+
+    Raised where the code already classifies: the per-row read in
+    `config/store.py` (`_body`, `_from_row` and the shape guards beside
+    them), the assembly in `_read_domain`, and the stored-state
+    refusals that name an entry. Nothing anywhere reads a message to
+    decide this, which is the whole point of it being a type: the
+    sentences are operator-facing prose and were never a contract.
+    """
+
+
 # The `.env` file, and what a `.env` that will not read says
 #
 # Both entry points read one before anything looks at the environment,
