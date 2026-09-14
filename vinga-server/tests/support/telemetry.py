@@ -527,12 +527,13 @@ def provider_failed(
     duration_ms: int = 1500,
     failure: BaseException | None = None,
     identity: Identity | None = None,
+    unbuilt: bool = False,
     invocation: str | None = None,
     purpose: str | None = None,
 ) -> float:
     """A provider call that failed, at whichever stage, naming whichever
     entry it ran on."""
-    provider = FakeProvider(identity=identity or Identity())
+    provider = FakeProvider(identity=None if unbuilt else (identity or Identity()))
     raised = TimeoutError() if failure is None else failure
     return events.emit(
         lambda: assembly.provider_failure(

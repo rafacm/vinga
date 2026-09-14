@@ -24,9 +24,11 @@ Three properties this file exists for, and each is provable only here:
 
 import json
 from collections.abc import Iterator
+from dataclasses import replace
 from typing import Any
 
 import pytest
+from opentelemetry.trace import TraceFlags
 
 from tests.support.telemetry import (
     SESSION,
@@ -498,6 +500,47 @@ def test_a_delivery_that_raises_answers_undelivered_too() -> None:
         telemetry.export_transcript(SESSION, context, [a_turn()])
         is Delivery.UNDELIVERED
     )
+
+
+def test_an_unsampled_parent_is_no_trace_without_a_delivery_attempt() -> None:
+    """Source sampling is an intentional omission, not a transport failure."""
+    deliveries = Deliveries()
+    telemetry, _ = exporting(transcripts=deliveries)
+    a_session(telemetry)
+    context = telemetry.retained_context(SESSION)
+    assert context is not None
+    unsampled = replace(context, trace_flags=TraceFlags(TraceFlags.DEFAULT))
+
+    assert (
+        telemetry.export_transcript(SESSION, unsampled, [a_turn()])
+        is Delivery.NO_TRACE
+    )
+    assert deliveries.batches == []
+
+
+def test_an_unsampled_turn_parent_is_dropped_before_otlp_encoding() -> None:
+    """Turn sampling is independent of the session root that retains it."""
+    deliveries = Deliveries()
+    telemetry, _ = exporting(transcripts=deliveries)
+    clock = Clock()
+    events = session_events(clock, telemetry)
+    open_session(events)
+    start_turn(events, utterance=UTTERANCE)
+    finish_reply(events)
+    close_session(events)
+    context = telemetry.retained_context(SESSION)
+    assert context is not None
+    pinned = context.turns[UTTERANCE]
+    context.turns[UTTERANCE] = replace(
+        pinned,
+        trace_flags=TraceFlags(TraceFlags.DEFAULT),
+    )
+
+    assert (
+        telemetry.export_transcript(SESSION, context, [a_turn()])
+        is Delivery.NO_TRACE
+    )
+    assert deliveries.batches == []
 
 
 def test_an_exporter_that_has_stopped_accepting_attempts_nothing() -> None:

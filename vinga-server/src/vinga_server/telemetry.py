@@ -75,6 +75,7 @@ from vinga_server.events.values import (
     PROVIDER_ENTRY_OPTIONAL,
     PROVIDER_ENTRY_REQUIRED,
     Kind,
+    LlmPurpose,
     PromptSources,
     ProviderEntries,
 )
@@ -239,11 +240,11 @@ NOTHING_HEARD = "nothing_heard"
 PROVIDER_FAILED = "provider_failed"
 TRANSCRIPTION_ABANDONED = "transcription_abandoned"
 
-# The stage a `provider_failed` has to name to be an ASR outcome. Every
-# other stage's failure folds as an ordinary span event onto the turn,
-# which is where a failed generation or a failed voice belongs: the LLM
-# and TTS spans are built from the events that SUCCEEDED, and a span
-# built from a failure would claim an interval nobody measured.
+# The three provider stages a `provider_failed` may end. For each one,
+# the failure event becomes the failed semantic stage span itself and
+# is consumed by that fold, so the turn never receives a duplicate
+# `provider_failed` span event. An undeclared future stage keeps the
+# default span-event fallback instead of disappearing.
 ASR_STAGE = "asr"
 
 # And the three stages a stage span can answer for ITSELF, which is why
@@ -442,7 +443,11 @@ LEG_FIELDS = ("agent", "text")
 # nobody is listening to yet; a reader asking "what did it see" wants
 # both, and wants to be able to tell them apart.
 LLM_ROUND_INDEX = "vinga.llm.round"
+# The generation and its optional content observation use the same
+# purpose vocabulary and invocation identity. One spelling for each is
+# what lets a backend join them without knowing which exporter wrote it.
 LLM_PURPOSE = "vinga.llm.purpose"
+LLM_INVOCATION_ID = "vinga.llm.invocation.id"
 
 # Which payload fields become attributes on which span, and under what
 # name. Written out rather than derived from the payload, so an event
@@ -1052,8 +1057,8 @@ LLM_ATTRIBUTES = {
     "conversation": "vinga.conversation.id",
     "round": "vinga.llm.round",
     "turns": "vinga.llm.turns",
-    "invocation": "vinga.llm.invocation.id",
-    "purpose": "vinga.llm.purpose",
+    "invocation": LLM_INVOCATION_ID,
+    "purpose": LLM_PURPOSE,
 }
 
 FAILED_PROVIDER_ATTRIBUTES = {
@@ -1063,8 +1068,8 @@ FAILED_PROVIDER_ATTRIBUTES = {
     "agent": "vinga.agent",
     "conversation": "vinga.conversation.id",
     "error": ERROR_TYPE,
-    "invocation": "vinga.llm.invocation.id",
-    "purpose": "vinga.llm.purpose",
+    "invocation": LLM_INVOCATION_ID,
+    "purpose": LLM_PURPOSE,
 }
 
 # The tool span, which is what a `tool_call` becomes instead of the
@@ -1724,6 +1729,11 @@ class _SessionTrace:
     turn: Any | None = None
     playback: Any | None = None
     transcribed: bool = False
+    # A failed TTS drain emits `provider_failed` and then the declared
+    # `sentence_synthesized` stream-lifetime event without yielding in
+    # between. The former makes the real failed span; this count makes
+    # the latter substitutive for telemetry while leaving it in logs.
+    tts_failures_awaiting_stream_end: int = 0
     identity: dict[str, Any] = field(default_factory=dict)
     providers: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
     prompts: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -1793,7 +1803,7 @@ class LlmInputRound:
 
     invocation: str
     index: int
-    purpose: str
+    purpose: LlmPurpose
     agent: str | None
     request: str
 
@@ -1801,7 +1811,7 @@ class LlmInputRound:
 class Delivery(Enum):
     """What became of one bounded post-close export.
 
-    Three answers, and the caller turns each into a word of its own
+    Four answers, and the caller turns each into a word of its own
     closed set. They are this module's own vocabulary rather than the
     event's, because what this knows is whether a batch of spans
     reached the far side; which reason an operator reads is the
@@ -1816,6 +1826,10 @@ class Delivery(Enum):
     # It did not, and trying again inside this call already happened:
     # the exporter's own bounded retry is the whole retry policy.
     UNDELIVERED = auto()
+    # The source sampler declined this trace, so there is no recording
+    # parent and no batch was offered to the transport. Both content
+    # callers report this with their existing `no_trace` reason.
+    NO_TRACE = auto()
     # Nothing was even attempted, because this exporter has stopped
     # accepting or the spans could not be built. Shutdown territory,
     # which is why it is not a delivery answer at all.
@@ -2305,10 +2319,11 @@ class Telemetry:
         happened at the turn's `t_ms` would be the one dishonest fact on
         a surface whose value is being checkable against the store.
 
-        Answers `STOPPED` where nothing was attempted (this exporter has
-        stopped accepting, or the spans would not build), and otherwise
-        whether the far side took the batch. It never raises, because
-        its caller is a worker whose failures are events.
+        Answers `STOPPED` where shutdown prevented an attempt,
+        `NO_TRACE` where the source sampler made every requested span
+        non-recording, and otherwise whether the far side took the
+        batch. It never raises, because its caller is a worker whose
+        failures are events.
 
         Safe to call from any thread, which is why it exists in this
         shape: it runs on the transcript exporter's own worker.
@@ -2323,7 +2338,11 @@ class Telemetry:
             # looked at cannot leak by accident later.
             return Delivery.STOPPED
         if not spans:
-            return Delivery.DELIVERED
+            return (
+                Delivery.NO_TRACE
+                if turns and isinstance(context, _Pinned)
+                else Delivery.DELIVERED
+            )
         return self._deliver(spans)
 
     def _transcript_spans(
@@ -2370,8 +2389,10 @@ class Telemetry:
                     **_transcript_attributes(session, turn),
                 },
             )
+            recording = span.is_recording()
             span.end()
-            spans.append(span)
+            if recording:
+                spans.append(span)
         return spans
 
     def export_llm_input(
@@ -2417,10 +2438,11 @@ class Telemetry:
         span claiming to have happened during a session that is already
         over would be the one dishonest fact on the surface.
 
-        Answers `STOPPED` where nothing was attempted (this exporter has
-        stopped accepting, or the spans would not build), and otherwise
-        whether the far side took the batch. It never raises, because
-        its caller is a worker whose failures are events.
+        Answers `STOPPED` where shutdown prevented an attempt,
+        `NO_TRACE` where the source sampler made every requested span
+        non-recording, and otherwise whether the far side took the
+        batch. It never raises, because its caller is a worker whose
+        failures are events.
 
         Safe to call from any thread, which is why it exists in this
         shape: it runs on the LLM input exporter's own worker.
@@ -2436,7 +2458,11 @@ class Telemetry:
             # whole of what a model was given.
             return Delivery.STOPPED
         if not spans:
-            return Delivery.DELIVERED
+            return (
+                Delivery.NO_TRACE
+                if rounds and isinstance(context, _Pinned)
+                else Delivery.DELIVERED
+            )
         return self._deliver(spans)
 
     def _llm_input_spans(
@@ -2480,8 +2506,10 @@ class Telemetry:
                     OBSERVATION_INPUT: staged.request,
                 },
             )
+            recording = span.is_recording()
             span.end()
-            spans.append(span)
+            if recording:
+                spans.append(span)
         return spans
 
     def _private_tracer(self) -> Any:
@@ -3070,6 +3098,7 @@ class Telemetry:
         # A new turn has not been transcribed yet, whatever the last one
         # did.
         trace.transcribed = False
+        trace.tts_failures_awaiting_stream_end = 0
         trace.turn = self._tracer.start_span(
             TURN_SPAN,
             # An empty context, which is what gives the turn a trace id
@@ -3168,9 +3197,10 @@ class Telemetry:
     # it, which is what lets a trace be assembled from a tap that
     # watches nothing: the pipeline already measured every interval
     # below, and the exporter's arithmetic is one subtraction against
-    # the session clock's one offset. A stage whose turn is not open
-    # falls through to the span-event fold, so nothing is ever
-    # silently dropped.
+    # the session clock's one offset. The turn is the parent while one
+    # is open and the session otherwise. A `provider_failed` for an
+    # unknown future stage alone keeps the default span-event fold, so
+    # nothing is silently dropped and no known failure is duplicated.
 
     def _context(
         self,
@@ -3230,7 +3260,7 @@ class Telemetry:
         failed = emission.payload.get(EVENT_FIELD) == PROVIDER_FAILED
         if trace is None:
             return
-        if not failed and (trace.turn is None or trace.transcribed):
+        if not failed and trace.turn is not None and trace.transcribed:
             # A turn has one accepted ASR outcome, and a second success
             # does not become a second transcription. A provider
             # failure is different: even a rejected barge-in
@@ -3281,16 +3311,20 @@ class Telemetry:
             self._asr_span(session, emission)
             return
         if stage not in {LLM_STAGE, TTS_STAGE}:
+            self._span_event(session, emission)
             return
         trace = self._sessions.get(session)
         if trace is None:
             return
         payload = emission.payload
         end = self._at(emission)
+        spoken = _attributes(
+            payload,
+            FAILED_PROVIDER_ATTRIBUTES | {"provider": _entry_name(stage)},
+        )
         attributes = {
-            **self._context(trace, payload, states=stage),
-            **_attributes(payload, FAILED_PROVIDER_ATTRIBUTES),
-            **_attributes(payload, {"provider": _entry_name(stage)}),
+            **self._context(trace, payload, states=_speaks_for(stage, spoken)),
+            **spoken,
         }
         span = self._tracer.start_span(
             LLM_SPAN if stage == LLM_STAGE else TTS_SPAN,
@@ -3300,6 +3334,8 @@ class Telemetry:
         )
         span.set_status(self._failed)
         span.end(end_time=end)
+        if stage == TTS_STAGE:
+            trace.tts_failures_awaiting_stream_end += 1
 
     def _llm_span(self, session: str, emission: Emission) -> None:
         """One generation, with the settled GenAI vocabulary on it.
@@ -3319,15 +3355,14 @@ class Telemetry:
         missing measurement.
         """
         trace = self._sessions.get(session)
-        if trace is None or trace.turn is None:
-            self._span_event(session, emission)
+        if trace is None:
             return
         payload = emission.payload
         end = self._at(emission)
         start = _before(end, payload.get("duration_ms"))
         span = self._tracer.start_span(
             LLM_SPAN,
-            context=self._within(trace.turn),
+            context=self._within(trace.turn if trace.turn is not None else trace.span),
             attributes={
                 **self._context(trace, payload, states=LLM_STAGE),
                 **_attributes(payload, LLM_ATTRIBUTES),
@@ -3403,8 +3438,10 @@ class Telemetry:
         attribute a backend can compare across voices.
         """
         trace = self._sessions.get(session)
-        if trace is None or trace.turn is None:
-            self._span_event(session, emission)
+        if trace is None:
+            return
+        if trace.tts_failures_awaiting_stream_end:
+            trace.tts_failures_awaiting_stream_end -= 1
             return
         payload = emission.payload
         end = self._at(emission)
@@ -3414,7 +3451,7 @@ class Telemetry:
         spoken = _attributes(payload, TTS_ATTRIBUTES)
         span = self._tracer.start_span(
             TTS_SPAN,
-            context=self._within(trace.turn),
+            context=self._within(trace.turn if trace.turn is not None else trace.span),
             attributes={
                 **self._context(trace, payload, states=_speaks_for(TTS_STAGE, spoken)),
                 **spoken,

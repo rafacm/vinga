@@ -86,7 +86,13 @@ from vinga_server.config import ConfigError
 from vinga_server.config.models import ServerConfig
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import LlmInputExported, LlmInputExportFailed
-from vinga_server.events.values import Count, LlmInputExportFailure, SessionId, Whole
+from vinga_server.events.values import (
+    Count,
+    LlmInputExportFailure,
+    LlmPurpose,
+    SessionId,
+    Whole,
+)
 from vinga_server.providers.base import ToolCall, ToolDef, ToolResult, Turn
 from vinga_server.quieting import Lease
 from vinga_server.telemetry import Delivery, LlmInputRound, Telemetry, quiet_the_sdk
@@ -105,8 +111,8 @@ LLM_INPUT_KEY = "server.telemetry.export_llm_input"
 # anybody has spoken. They are this module's own, which is why the two
 # staging verbs below are two verbs rather than one taking a string: a
 # caller says what it is doing, and never how this spells it.
-REPLY = "reply"
-RECAP = "recap"
+REPLY = LlmPurpose.REPLY
+RECAP = LlmPurpose.RECAP
 
 # The per-request ceiling, in bytes of the serialized request. A single
 # assembled request larger than this is dropped whole and counted.
@@ -456,7 +462,7 @@ class LlmInputExport:
         self,
         session: str,
         invocation: str,
-        purpose: str,
+        purpose: LlmPurpose,
         agent: str | None,
         system: str,
         turns: "list[Turn]",
@@ -776,6 +782,9 @@ class LlmInputExport:
             # surface has: what a failing export is holding is the whole
             # of what a model was given.
             answer = Delivery.UNDELIVERED
+        if answer is Delivery.NO_TRACE:
+            self._failed(job.session, LlmInputExportFailure.NO_TRACE)
+            return
         if answer is Delivery.STOPPED:
             self._failed(job.session, LlmInputExportFailure.DROPPED)
             return

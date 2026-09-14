@@ -40,6 +40,7 @@ import pytest
 
 from tests.support.configs import POET_MAC, base_config, config_with_agent
 from tests.support.events import both_formats
+from tests.support.events import events as logged_events
 from tests.support.providers import BrokenStreamingTts, ScriptedEndpointer, ScriptedLlm
 from tests.support.sessions import (
     drive_reply,
@@ -392,8 +393,25 @@ def test_a_tts_failure_is_one_real_failed_span() -> None:
     assert named(spans, TURN_SPAN).events == ()
 
 
-async def test_a_real_tts_failure_has_no_success_twin() -> None:
-    """The runtime emits one failure end, not failure plus success."""
+def test_an_unbuilt_failed_voice_keeps_the_retained_provider_context() -> None:
+    """An absent failure quartet cannot erase what the session opened against."""
+    telemetry, memory = exporting()
+    events = a_turn(Clock(), telemetry)
+
+    provider_failed(events, stage="tts", unbuilt=True)
+    finish_reply(events, outcome=ReplyOutcome.FAILED, sentences=0)
+    close_session(events)
+
+    carried = named(finished(telemetry, memory), TTS_SPAN).attributes
+    assert carried["vinga.provider.tts.name"] == "voice"
+    assert carried["vinga.provider.tts.type"] == "piper"
+    assert carried["vinga.provider.tts.model"] == "en_GB-alba-medium"
+
+
+async def test_a_real_tts_failure_keeps_its_event_without_a_span_twin(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The log keeps the stream measurements while telemetry substitutes."""
     telemetry, memory = exporting()
     session = session_for(
         base_config(),
@@ -408,7 +426,8 @@ async def test_a_real_tts_failure_has_no_success_twin() -> None:
     open_session(events, providers={}, keep_identities=True)
     start_turn(events)
 
-    await drive_reply(session, speech_pcm(600))
+    with caplog.at_level("DEBUG"):
+        await drive_reply(session, speech_pcm(600))
     close_session(events)
 
     spans = finished(telemetry, memory)
@@ -416,6 +435,10 @@ async def test_a_real_tts_failure_has_no_success_twin() -> None:
     assert tts.status.status_code.name == "ERROR"
     assert tts.attributes["error.type"] == "RuntimeError"
     assert named(spans, TURN_SPAN).events == ()
+    assert len(logged_events(caplog, "provider_failed")) == 1
+    synthesized = logged_events(caplog, "sentence_synthesized")
+    assert len(synthesized) == 1
+    assert synthesized[0].stream_ms >= 0
 
 
 def test_every_semantic_failure_is_one_safe_failed_span(
@@ -460,6 +483,19 @@ def test_every_semantic_failure_is_one_safe_failed_span(
     assert sentinel not in both_formats(caplog)
     assert all(sentinel not in repr(record.__dict__) for record in caplog.records)
     assert all(record.exc_info is None for record in caplog.records)
+
+
+def test_an_unknown_failed_stage_keeps_the_default_span_event() -> None:
+    """A catalog-valid future stage cannot disappear in an older exporter."""
+    telemetry, memory = exporting()
+    events = a_turn(Clock(), telemetry)
+
+    provider_failed(events, stage="embedding")
+    finish_reply(events, outcome=ReplyOutcome.FAILED, sentences=0)
+    close_session(events)
+
+    turn = named(finished(telemetry, memory), TURN_SPAN)
+    assert [event.name for event in turn.events] == ["provider_failed"]
 
 
 def test_a_returned_tool_error_uses_the_closed_category() -> None:
@@ -1346,11 +1382,8 @@ def test_one_turn_carries_its_four_stages_and_its_stragglers() -> None:
     assert named(spans, "session").events == ()
 
 
-def test_a_stage_event_with_no_turn_open_lands_on_the_session() -> None:
-    """The fallback that keeps every event with a destination. A stage
-    event between turns has no turn to hang a span inside, so it folds
-    as a span event rather than being dropped or opening a trace of its
-    own."""
+def test_semantic_operations_with_no_turn_are_spans_on_the_session() -> None:
+    """All four folds keep their span shape and use the same fallback parent."""
     clock = Clock()
     telemetry, memory = exporting()
     events = session_events(clock, telemetry)
@@ -1358,14 +1391,23 @@ def test_a_stage_event_with_no_turn_open_lands_on_the_session() -> None:
 
     clock.tick(1.0)
     hear(events)
+    round_done(events)
+    synthesize(events)
+    call_tool(events)
     clock.tick(0.5)
     finish_speaking(events, frames=3)
     close_session(events)
 
     spans = finished(telemetry, memory)
     session = named(spans, "session")
-    assert spans_of(ASR_SPAN, spans) == []
-    assert [event.name for event in session.events] == ["heard", "speaking_finished"]
+    operations = [
+        named(spans, ASR_SPAN),
+        named(spans, LLM_SPAN),
+        named(spans, TTS_SPAN),
+        named(spans, TOOL_SPAN),
+    ]
+    assert all(span.parent is session.context for span in operations)
+    assert [event.name for event in session.events] == ["speaking_finished"]
 
 
 # --- the one-shots, which keep their own names ------------------------

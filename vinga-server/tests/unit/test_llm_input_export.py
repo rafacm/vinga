@@ -1034,6 +1034,23 @@ async def test_a_delivery_the_far_side_refuses_is_reported(
 
 
 @pytest.mark.asyncio
+async def test_a_sampled_away_batch_is_reported_as_no_trace(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A source decision is not described as a refusal by the backend."""
+    caplog.set_level(logging.DEBUG)
+    exporter, _ = an_exporter(
+        telemetry=Exported({SESSION: A_CONTEXT}, answer=Delivery.NO_TRACE)
+    )
+    stage(exporter)
+
+    exporter.session_closed(SESSION)
+    await drained(exporter, lambda: reasons(caplog))
+
+    assert reasons(caplog) == [LlmInputExportFailure.NO_TRACE]
+
+
+@pytest.mark.asyncio
 async def test_a_delivery_that_raises_is_reported_too(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

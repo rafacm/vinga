@@ -94,6 +94,7 @@ from vinga_server.events.values import (
     Flag,
     Fragment,
     Identifier,
+    LlmPurpose,
     PromptSources,
     Real,
     ReplyOutcome,
@@ -1165,7 +1166,7 @@ class PipelineRuntime:
         events: AsyncIterator[Any],
         *,
         invocation: str,
-        purpose: str,
+        purpose: LlmPurpose,
     ) -> AsyncIterator[Any]:
         """An LLM stream, with a failure raised by the stream itself
         reported as that provider's.
@@ -1240,7 +1241,10 @@ class PipelineRuntime:
         loop = asyncio.get_running_loop()
         for attempt in ("first", "retry"):
             events = self._watched_stream(
-                provider, make_stream(), invocation=invocation, purpose="reply"
+                provider,
+                make_stream(),
+                invocation=invocation,
+                purpose=LlmPurpose.REPLY,
             )
             started = loop.time()
             try:
@@ -1262,7 +1266,7 @@ class PipelineRuntime:
                         failure,
                         elapsed,
                         invocation=invocation,
-                        purpose="reply",
+                        purpose=LlmPurpose.REPLY,
                     )
                     raise failure from exc
                 # The loop variable is read by a thunk the emitter calls
@@ -1294,7 +1298,7 @@ class PipelineRuntime:
         usage: Usage | None,
         *,
         invocation: str,
-        purpose: str = "reply",
+        purpose: LlmPurpose = LlmPurpose.REPLY,
         round_: int | None = None,
     ) -> None:
         """One `llm_round` event, which is where a slow reply becomes
@@ -1329,7 +1333,11 @@ class PipelineRuntime:
             None if first_token_at is None else round((first_token_at - began) * 1000)
         )
         inputs, outputs = _reported(usage)
-        reply_round = self._llm_round if round_ is None and purpose == "reply" else round_
+        reply_round = (
+            self._llm_round
+            if round_ is None and purpose is LlmPurpose.REPLY
+            else round_
+        )
         self._events.emit(
             lambda: assembly.llm_rounded(
                 self._agent,
@@ -1350,7 +1358,7 @@ class PipelineRuntime:
         # turn's rounds, its summed duration and its token totals all
         # describe one set of rounds: the ones that finished, which is
         # the set an `llm_round` row exists for.
-        if purpose == "reply":
+        if purpose is LlmPurpose.REPLY:
             self._turn.round_done(round(elapsed * 1000), first_token_ms, inputs, outputs)
 
     def _provider_failed(
@@ -1361,7 +1369,7 @@ class PipelineRuntime:
         elapsed: float,
         *,
         invocation: str | None = None,
-        purpose: str | None = None,
+        purpose: LlmPurpose | None = None,
     ) -> None:
         """One `provider_failed` event, and the sentence that goes with
         it. A timeout is worded as one, because where traffic is
@@ -2599,7 +2607,7 @@ class PipelineRuntime:
                     providers.llm,
                     providers.llm.stream(RECAP_INSTRUCTION, turns, (), "none"),
                     invocation=invocation,
-                    purpose="recap",
+                    purpose=LlmPurpose.RECAP,
                 ):
                     if isinstance(event, TextDelta):
                         if first_token_at is None and event.text.strip():
@@ -2615,7 +2623,7 @@ class PipelineRuntime:
                     exc,
                     loop.time() - began,
                     invocation=invocation,
-                    purpose="recap",
+                    purpose=LlmPurpose.RECAP,
                 )
             logger.warning(
                 "session %s: the recap could not be made: %s",
@@ -2640,7 +2648,7 @@ class PipelineRuntime:
             first_token_at,
             usage,
             invocation=invocation,
-            purpose="recap",
+            purpose=LlmPurpose.RECAP,
         )
         text = "".join(said).strip()
         return text or None
