@@ -340,9 +340,11 @@ The fanout example sends vinga to a pinned Collector Contrib image. Its graph
 has one common traces pipeline with, in order, content masking, one
 trace-id-based probabilistic sampler and batching. Its exporters are two named
 Contrib `forward` connectors, `forward/jaeger` and `forward/langfuse`; those
-same connectors are the receivers of separate sink pipelines. Only the
-Langfuse sink pipeline derives observation aliases, then uses OTLP/HTTP with
-the Basic Auth client extension and the literal
+same connectors are the receivers of separate sink pipelines. Vinga's OTLP
+mapping is the one home that derives the existing Langfuse aliases needed by
+direct-to-Langfuse deployments. The Langfuse sink preserves those already
+masked aliases without recreating them, then uses OTLP/HTTP with the Basic Auth
+client extension and the literal
 `x-langfuse-ingestion-version: 4` header. The Jaeger sink pipeline drops every
 `langfuse.*` attribute and the whole Langfuse-only `capture` span before its
 OTLP/HTTP exporter. Vinga is explicitly `always_on`, so the one sampler in the
@@ -360,7 +362,9 @@ two-receiver smoke alone uses a deterministic partial ratio to prove matching
 populations. The deployment guide states this tradeoff beside the sampler.
 
 The sample mask covers every canonical content-bearing attribute introduced
-here before the split. It includes a documented email-shaped rule so an
+here and every content-bearing alias Vinga derives from it, including
+`langfuse.observation.input`, `langfuse.observation.output` and the per-leg
+metadata alias, before the split. It includes a documented email-shaped rule so an
 automated sentinel can prove the raw value appears in neither receiver and the
 same replacement appears in both. Vinga's opt-in flags and allowlisted source
 projections remain the privacy guarantee. Collector masking is a defensive
@@ -520,9 +524,11 @@ fixtures are extended rather than replaced.
   trace-id-based Collector sampler the only population decision before split.
   The guide states that this samples independent turn traces rather than whole
   sessions and defaults the walkthrough to 100 percent.
-- **Masking can protect one alias but miss its source.** The common processor
-  masks the canonical names before aliases exist. The sentinel test scans both
-  complete protobuf payloads, not selected attributes.
+- **Masking can protect one spelling but miss its alias.** Vinga mints the
+  direct-Langfuse aliases before the Collector. The common processor therefore
+  masks canonical content keys and their content-bearing aliases explicitly.
+  The sentinel test scans both complete protobuf payloads, not selected
+  attributes.
 - **The two exporters can store different populations after an outage.** The
   guide distinguishes identical attempted populations from transactional
   delivery and gives a trace-id comparison procedure rather than claiming
@@ -737,6 +743,12 @@ read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 9m08s.
    Vinga must keep aliases for direct Langfuse compatibility, so the Collector
    common processor sees raw canonical values and raw aliases. The plan must
    give aliases one home and mask both forms before fanout.
+
+   *Resolution:* Vinga's OTLP mapping is now the single alias-minting home, as
+   direct Langfuse compatibility requires. The common Collector processor
+   explicitly masks every canonical content key and each derived
+   content-bearing alias before either forward connector; the Langfuse sink
+   only preserves them and the Jaeger sink drops them.
 2. **P1: the shared batch processor cannot preserve per-content delivery
    answers.** Today's processorless private exporter reports on the exact
    content batch. A process-wide `force_flush` neither attributes rejection nor
