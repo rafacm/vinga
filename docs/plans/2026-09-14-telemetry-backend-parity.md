@@ -202,6 +202,15 @@ second logical round or content snapshot. A dropped content snapshot consumes
 no later round's identity. A failed round retains its request and any partial
 semantic output admitted before failure, and has no invented completion.
 
+The recap path becomes a first-class generation rather than an exporter-only
+special case. `_summarized` mints the same invocation id, measures the same
+provider operation, and emits the same `llm_round` event with a declared
+low-cardinality purpose (`reply` or `recap`) on success. Failure carries that
+identity and purpose through `provider_failed`. Both outcomes therefore create
+one real `llm` span under the active turn, with `vinga.llm.purpose=recap`; the
+successful and failed shapes are symmetric, and the staged recap request has
+an operation to enrich.
+
 The existing per-request, per-session and maximum-round bounds apply to the
 combined canonical content. A round over the per-request bound is dropped
 whole. The session budget evicts whole rounds oldest first. Dropping content
@@ -445,6 +454,7 @@ fixtures are extended rather than replaced.
 - [ ] **M1, canonical metadata and real failed operations.** Preserve original
   trace flags and state, freeze the canonical topology and attribute contract,
   add the server-minted generation invocation id at reply and recap assembly,
+  make successful and failed recap calls symmetric real `llm` spans,
   turn failed LLM/TTS/tool work into real `ERROR` spans with safe
   `error.type`, pin the existing Langfuse usage aliases as derived compatibility
   output rather than canonical metadata, and regenerate the event reference.
@@ -512,6 +522,11 @@ model `claude-opus-5`, 2026-09-14, runtime 5m18s.
    stages a request but emits no `llm_round`; a failed recap would gain a span
    through `provider_failed`, making the asymmetry worse. The plan must decide
    and instrument recap explicitly.
+
+   *Resolution:* M1 now makes recap a normal semantic generation. It mints the
+   same invocation id, emits `llm_round` on success and `provider_failed` on
+   failure, and marks the span with the declared `recap` purpose so M2 has one
+   actual operation to enrich in either outcome.
 5. **P1: tying canonical-root release to content delivery can lose root spans
    and leaves no-release paths.** No store, no trace, builder no-op, an
    undelivered page, and stopped delivery can all bypass later rows. Canonical
