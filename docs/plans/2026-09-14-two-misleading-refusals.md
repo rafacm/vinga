@@ -432,7 +432,7 @@ is reported as a finding about the test.
 
 ## Milestones
 
-- [ ] **M1 (#504): a header may compose a reference**. `$NAME`
+- [x] **[M1 (#504): a header may compose a reference](2026-09-14-two-misleading-refusals-implementation.md#m1-a-header-may-compose-a-reference)** (PR TBD). `$NAME`
   interpolates anywhere inside an `env` or `headers` value while the
   whole-value case keeps its trimming unchanged; the secret-bearing
   check asks whether a value contains a reference and the display rule
