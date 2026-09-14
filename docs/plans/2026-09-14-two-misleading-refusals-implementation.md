@@ -18,12 +18,12 @@ configuration rather than inside the secret.
 | --- | --- |
 | The scanner | `config/models.py`: `_ENV_REFERENCE_RE` loses its anchors, and the whole-value question is the same pattern asked with `fullmatch` in `_env_reference`, which keeps its `value.strip()` and therefore its behavior |
 | The one rule both paths read | `config/models.py`: `references_environment(value)`, asked by the secret-bearing check and by the display path, so the mirror that used to sit in `secrets.py` cannot drift |
-| The substitution, and the atoms | `config/models.py`: `resolve_env_values` answers with `ResolvedValues(values, secrets)`; a value that is nothing but a reference resolves as it always did, any other value is scanned and every reference in it is substituted where it stands |
+| The substitution, and the atoms | `config/models.py`: `resolve_env_values` answers with `ResolvedValues(values, secrets, substituted)`, the last two split by whether the key that referenced them is secret-bearing; a value that is nothing but a reference resolves as it always did, any other value is scanned and every reference in it is substituted where it stands |
 | The widened write rule | `config/models.py`: `_secret_problems` asks whether a value contains a reference, and the refusal names what is now allowed with the composed form as its example, quoting neither the key nor the value |
 | The field descriptions | `config/models.py`: `env` and `headers` say a reference may be the whole value or sit inside a larger one, and that there is no escape for a literal `$` |
 | The display rule | `config/secrets.py`: `_DOLLAR_REFERENCE_RE` is gone and `mask` reads `references_environment`, so a composed value displays, exports and imports and a paste with no reference in it still masks |
 | The atoms crossing the seam | `config/secrets.py`: `resolve_mcp_values` answers with `ResolvedValues`, a stored secret joining the set as its own atom; `tools/mcp/transport.py`'s `_resolve` passes both halves on and `_connect` answers with the pair it actually sent |
-| The redactor | `tools/mcp/manager.py`'s `_capture` is handed what the connect sent and gives `tools/mcp/prompts.py`'s `_redactor` the materialized values and the atoms as two arguments, the length floor applying to the first and never to the second; the longest-first rule is unchanged |
+| The redactor | `tools/mcp/manager.py`'s `_capture` is handed what the connect sent and gives `tools/mcp/prompts.py`'s `_redactor` two buckets: the materialized values and the substitutions nothing has classified, where the length floor applies, and the substitutions a secret-bearing key made, where it never does; the longest-first rule is unchanged |
 | The example | `examples/mcp-server-streamable-http.yaml`: the composed header, the doubled-prefix 401 named, and the encrypted slot stated as holding the FINISHED header value with the precedence pinned at the wire |
 | The other three documents that stated the old rule | `examples/mcp-server-stdio.yaml`, `examples/README.md`, `vinga-server/README.md` |
 | The regenerated references | `docs/reference/domain-config.md` and `docs/reference/api-openapi.json`, through their generators; the other five committed references and the CLI page did not move |
@@ -46,6 +46,8 @@ Tests, by claim:
 | The acceptance case: written, exported, imported into an empty database, and the second deployment sends the byte-identical header | `tests/unit/test_mcp_composed_reference.py` |
 | A server reflecting the BARE token out of a composed value reaches no operator surface | `tests/unit/test_mcp_status_reflection.py`, with `tests/support/mcp_reflecting_server.py` stripping the composed prefix before it reflects |
 | A reflected token shorter than the redaction floor is taken out all the same | `tests/unit/test_mcp_composed_reference.py` |
+| A short reference under a key that is not secret-bearing keeps the floor and is left where it is | `tests/unit/test_mcp_composed_reference.py` |
+| What was substituted is split by what its key says | `tests/unit/test_config_tools.py` |
 | The capture redacts what the connection sent, not what the environment says by the time it runs | `tests/unit/test_mcp_composed_reference.py` |
 
 ### Deviations from the plan
@@ -233,18 +235,42 @@ to the environment for them anyway.
    non-empty atom whatever its length, and add an end-to-end case below
    the floor.
 
-   *Resolution.* Adopted whole. `_redactor` now takes the two
-   separately rather than as varargs over one set, and the docstring
-   says why they differ: the floor is about not knowing, and an atom is
-   not a guess. A short generic value is a port or a locale and might
-   be anybody's; a short atom came out of the variable a secret-bearing
-   key referenced, so it is a short credential, and a few mangled
-   occurrences of a short word is the cheaper mistake by a distance.
+   *Resolution.* Adopted, with one correction the integration lane
+   forced. `_redactor` now takes the two separately rather than as
+   varargs over one set, and the docstring says why they differ: the
+   floor is about not knowing, and a credential is not a guess.
+
+   The correction is which substitutions count as credentials. Taken
+   literally, "every substituted atom" was too wide, because
+   `resolve_env_values` called every substituted value a secret,
+   secret-bearing key or not. Exempting them all redacted a
+   three-character marker a test server ships back, which
+   `tests/integration/test_agent_guidance.py` pins by name and whose
+   comment states the floor's contract in so many words. The classifier
+   this configuration already has is the key: a secret-bearing key's
+   reference is a credential whatever it looks like, and every other
+   key's is a value out of the environment nothing has classified, so
+   it keeps the floor. `ResolvedValues` carries the two apart as
+   `secrets` and `substituted`, the manager hands the second to the
+   redactor beside the materialized values, and stored credentials join
+   the first because a slot written with `secret set` is a credential
+   by the same declaration. That also makes the finding's own
+   justification true, which it was not while every substitution was
+   called a secret.
+
    `test_a_reflected_token_below_the_redaction_floor_is_taken_out`
-   drives a six-character credential through a composed header and a
-   server that hands the bare token back, and was watched failing with
-   the floor left on the atoms: `'Call the forecast tool with
-   [redacted].' in 'Call the forecast tool with q7v3zx.'`
+   drives a six-character credential through a composed header under
+   `Authorization` and a server that hands the bare token back, and was
+   watched failing with the floor left on the atoms: `'Call the
+   forecast tool with [redacted].' in 'Call the forecast tool with
+   q7v3zx.'` Its opposite,
+   `test_a_short_value_under_an_ordinary_key_is_left_where_it_is`,
+   fails the other way when every substitution is called a credential
+   (`'Deployed in q7v3zx.' in 'Deployed in [redacted].'`), and the
+   hostile reflection case fails when `substituted` is withheld from
+   the redactor, its entry key not being secret-bearing and its bare
+   token reachable no other way. Both halves of the split are
+   load-bearing and each is pinned by a case that dies without it.
 
 2. **P1: the capture re-resolves instead of redacting with what was
    sent.** `_connect` resolves, sends, and discards its
