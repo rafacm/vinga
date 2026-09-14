@@ -971,7 +971,7 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     "vinga_server.transcript_export:TranscriptExport._failed #1": (
         ("TranscriptExportFailed", ("event", "reason", "session")),
     ),
-    "vinga_server.llm_input_export:LlmInputExport._attempt #1": (
+    "vinga_server.llm_input_export:LlmInputExport.finish #1": (
         (
             "LlmInputExported",
             (

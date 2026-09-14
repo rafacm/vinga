@@ -54,7 +54,6 @@ from tests.support.telemetry import (
     OTHER_AGENT,
     SESSION,
     Clock,
-    Deliveries,
     assemble_prompt,
     barge_in,
     call_tool,
@@ -103,7 +102,6 @@ from vinga_server.telemetry import (
     TELEMETRY_KEY,
     UNSUPPORTED_PROTOCOL,
     Telemetry,
-    TranscriptTurn,
     build_telemetry,
 )
 
@@ -923,24 +921,14 @@ def test_a_failed_upload_says_why_on_the_trace() -> None:
     assert "reason" not in held
 
 
-def test_a_transcript_export_outcome_carries_the_same_names() -> None:
-    """One table for all four after-close outcomes, not one per pair.
-
-    `elapsed_ms` means the same thing on a recording's trip and on a
-    transcript's, so it keeps one attribute name across both: the two
-    spans are told apart by their own names, which is the catalog's
-    job rather than the prefix's.
-    """
+def test_a_content_attachment_outcome_does_not_make_a_transport_span() -> None:
     telemetry, memory = exporting()
     a_session(telemetry, SESSION)
 
     with watching_the_server(telemetry):
         transcripts_exported(transcript_emitter())
 
-    held = dict(named(finished(telemetry, memory), "transcripts_exported").attributes or {})
-    assert held["vinga.export.turns"] == 7
-    assert held["vinga.export.elapsed_ms"] == 96
-    assert [key for key in held if not key.count(".")] == []
+    assert [span.name for span in finished(telemetry, memory)] == ["session"]
 
 
 def test_an_outcome_for_a_session_this_exporter_never_saw_writes_nothing() -> None:
@@ -1320,25 +1308,21 @@ def test_an_outcome_after_the_close_carries_the_board_s_name() -> None:
     assert written.attributes["vinga.device.name"] == BOARD
 
 
-def test_a_transcript_span_carries_the_board_s_name() -> None:
-    """The third, which builds its attributes from a projection of the
-    conversation store and reads the name from the context the job was
-    admitted on."""
-    deliveries = Deliveries()
-    telemetry, _ = exporting(transcripts=deliveries)
-    a_named_session(telemetry)
-    context = telemetry.retained_context(SESSION)
-    assert context is not None
+def test_an_enriched_turn_root_carries_the_board_s_name() -> None:
+    telemetry, memory = exporting()
+    telemetry.register_transcript_exporter()
+    clock = Clock()
+    events = session_events(clock, telemetry)
+    open_session(events, device_name=BOARD)
+    utterance = "a" * 32
+    start_turn(events, utterance=utterance)
+    finish_reply(events)
 
-    telemetry.export_transcript(
-        SESSION,
-        context,
-        [TranscriptTurn(index=1, id=7, t_ms=120, agent=AGENT, heard="a", reply="b")],
-    )
+    assert telemetry.settle_turn(SESSION, utterance, {"vinga.turn.input": "a"})
+    close_session(events)
 
-    written = deliveries.spans()
-    assert len(written) == 1
-    assert written[0].attributes["vinga.device.name"] == BOARD
+    written = named(finished(telemetry, memory), "turn")
+    assert written.attributes["vinga.device.name"] == BOARD
 
 
 def test_a_board_nobody_named_says_nothing_rather_than_null() -> None:
@@ -1349,37 +1333,36 @@ def test_a_board_nobody_named_says_nothing_rather_than_null() -> None:
     Every constructor in the enumeration in one case, because what is
     being pinned is the absence rule rather than one span's behavior.
     """
-    deliveries = Deliveries()
-    telemetry, memory = exporting(transcripts=deliveries)
+    telemetry, memory = exporting()
+    telemetry.register_transcript_exporter()
     clock = Clock()
     events = session_events(clock, telemetry)
     open_session(events)
     clock.tick(1.0)
-    start_turn(events)
+    utterance = "b" * 32
+    start_turn(events, utterance=utterance)
     clock.tick(0.3)
     hear(events)
     clock.tick(0.5)
     finish_reply(events, sentences=1)
+    assert telemetry.settle_turn(
+        SESSION,
+        utterance,
+        {"vinga.turn.input": "a", "vinga.turn.output": "b"},
+    )
     close_session(events)
     context = telemetry.retained_context(SESSION)
     assert context is not None
     telemetry.reference_media(telemetry.retained_context(SESSION), {"capture_audio": A_REFERENCE})
     with watching_the_server(telemetry):
         capture_uploaded(upload_emitter())
-    telemetry.export_transcript(
-        SESSION,
-        context,
-        [TranscriptTurn(index=1, id=7, t_ms=120, agent=AGENT, heard="a", reply="b")],
-    )
-
-    spans = [*finished(telemetry, memory), *deliveries.spans()]
+    spans = finished(telemetry, memory)
     assert {span.name for span in spans} == {
         "session",
         "turn",
         "asr",
         "capture",
         "capture_uploaded",
-        "transcript",
     }
     for span in spans:
         assert "vinga.device.name" not in span.attributes, span.name

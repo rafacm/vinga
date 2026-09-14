@@ -1615,10 +1615,12 @@ def drive_capture_upload_abandoned(directory: Path) -> None:
 # sentence.
 
 
-def transcripts(contexts: dict[str, Any]) -> tuple[TranscriptExport, Any]:
+def transcripts(
+    contexts: dict[str, Any], *, answer: bool = True
+) -> tuple[TranscriptExport, Any]:
     """An exporter over one closed session, with both seams faked, and
     the recorder behind the span writer."""
-    telemetry, recorded = exporting_transcripts(contexts)
+    telemetry, recorded = exporting_transcripts(contexts, answer=answer)
     reads, _ = reading({"s1": [a_row(1), a_row(2)]})
     return (
         TranscriptExport(
@@ -1641,9 +1643,11 @@ async def drive_transcripts_exported(directory: Path) -> None:
     produce.
     """
     exporter, recorded = transcripts({"s1": A_CONTEXT})
-    exporter.session_closed("s1", settled())
+    exporter.turn_recorded(
+        "s1", dataclass_replace(a_turn(), utterance="utterance"), settled(), final=True
+    )
     deadline = time.monotonic() + 10.0
-    while not recorded.pages and time.monotonic() < deadline:
+    while not recorded.settled and time.monotonic() < deadline:
         await asyncio.sleep(0.01)
     await exporter.shutdown()
 
@@ -1652,8 +1656,13 @@ async def drive_transcript_export_failed(directory: Path) -> None:
     """A session this exporter never saw, so there is no trace to write
     the turns onto and the ledger says so. Decided at admission, which
     is why this needs no wait at all."""
-    exporter, _ = transcripts({})
-    exporter.session_closed("s1", settled())
+    exporter, recorded = transcripts({}, answer=False)
+    exporter.turn_recorded(
+        "s1", dataclass_replace(a_turn(), utterance="utterance"), settled(), final=True
+    )
+    deadline = time.monotonic() + 10.0
+    while not recorded.settled and time.monotonic() < deadline:
+        await asyncio.sleep(0.01)
     await exporter.shutdown()
 
 
@@ -1664,10 +1673,12 @@ async def drive_transcript_export_failed(directory: Path) -> None:
 # daemon worker and the emit sites are the real ones.
 
 
-def llm_inputs(contexts: dict[str, Any]) -> tuple[LlmInputExport, Any]:
+def llm_inputs(
+    contexts: dict[str, Any], *, accepts: bool = True
+) -> tuple[LlmInputExport, Any]:
     """An exporter over one closed session, with its seam faked and the
     recorder behind the span writer."""
-    telemetry, recorded = exporting_llm_input(contexts)
+    telemetry, recorded = exporting_llm_input(contexts, accepts=accepts)
     return (
         LlmInputExport(telemetry=telemetry, backlog=4, shutdown_timeout_s=10.0),
         recorded,
@@ -1696,10 +1707,8 @@ async def drive_llm_input_exported(directory: Path) -> None:
     """
     exporter, recorded = llm_inputs({"s1": AN_LLM_CONTEXT})
     a_staged_round(exporter, "s1")
-    exporter.session_closed("s1")
-    deadline = time.monotonic() + 10.0
-    while not recorded.jobs and time.monotonic() < deadline:
-        await asyncio.sleep(0.01)
+    exporter.finish("0123456789abcdef0123456789abcdef")
+    assert recorded.snapshots
     await exporter.shutdown()
 
 
@@ -1707,9 +1716,9 @@ async def drive_llm_input_export_failed(directory: Path) -> None:
     """A session this exporter never saw, so there is no trace to write
     the requests onto and the ledger says so. Decided at admission,
     which is why this needs no wait at all."""
-    exporter, _ = llm_inputs({})
+    exporter, _ = llm_inputs({}, accepts=False)
     a_staged_round(exporter, "s1")
-    exporter.session_closed("s1")
+    exporter.finish("0123456789abcdef0123456789abcdef")
     await exporter.shutdown()
 
 
@@ -2231,7 +2240,7 @@ SERVER_DRIVERS: tuple[Driver, ...] = (
         "transcript_export_failed",
     ),
     Driver(
-        (LLM_INPUT_EXPORT, "LlmInputExport._attempt", 1),
+        (LLM_INPUT_EXPORT, "LlmInputExport.finish", 1),
         drive_llm_input_exported,
         "llm_input_exported",
     ),

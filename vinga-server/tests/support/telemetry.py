@@ -751,7 +751,7 @@ class Receiver:
     timing.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_body_bytes: int | None = None) -> None:
         self.bodies: list[bytes] = []
         received = self.bodies
 
@@ -763,7 +763,11 @@ class Receiver:
                     body = gzip.decompress(body)
                 if self.path.endswith("/v1/traces"):
                     received.append(body)
-                self.send_response(200)
+                self.send_response(
+                    413
+                    if max_body_bytes is not None and len(body) >= max_body_bytes
+                    else 200
+                )
                 self.send_header("content-type", "application/x-protobuf")
                 self.send_header("content-length", "0")
                 self.end_headers()
@@ -830,44 +834,3 @@ def attributes(carrier: Any) -> dict[str, Any]:
         which = pair.value.WhichOneof("value")
         flat[pair.key] = getattr(pair.value, which) if which else None
     return flat
-
-
-
-
-class Deliveries:
-    """The dedicated exporter a transcript export delivers through, as a
-    test holds it (#495).
-
-    The seam `build_telemetry(transcripts=...)` exists for, and it is a
-    different object from the in-memory one `exporting()` puts behind
-    the batch queue on purpose: what the two prove are opposite claims.
-    The batch queue is where a transcript span must NOT go, because that
-    queue drops on saturation and cannot answer for delivery; this is
-    where it does go, and its recorded batches are what a case reads.
-
-    `answer` is what the far side says, so a case drives a failing
-    backend by handing back the SDK's own FAILURE rather than by
-    inventing a shape. `raises` is the other half: an exporter whose
-    construction or call blows up is a contained delivery failure.
-    """
-
-    def __init__(self, answer: bool = True, raises: BaseException | None = None) -> None:
-        self.batches: list[list[Any]] = []
-        self.closed = False
-        self._answer = answer
-        self._raises = raises
-
-    def export(self, spans: Any) -> Any:
-        from opentelemetry.sdk.trace.export import SpanExportResult
-
-        self.batches.append(list(spans))
-        if self._raises is not None:
-            raise self._raises
-        return SpanExportResult.SUCCESS if self._answer else SpanExportResult.FAILURE
-
-    def shutdown(self) -> None:
-        self.closed = True
-
-    def spans(self) -> list[Any]:
-        """Every span of every batch, in the order they were delivered."""
-        return [span for batch in self.batches for span in batch]
