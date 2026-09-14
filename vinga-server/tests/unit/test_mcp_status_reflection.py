@@ -36,7 +36,7 @@ from fastapi.testclient import TestClient
 from mcp.server.fastmcp import FastMCP
 
 from tests.support.configs import world
-from tests.support.mcp_reflecting_server import REFLECTED_ENV
+from tests.support.mcp_reflecting_server import REFLECTED_ENV, REFLECTED_PREFIX
 from tests.support.stores import memory as lane_memory
 from tests.support.tools_mcp import serving
 from vinga_server import logs
@@ -386,6 +386,68 @@ async def test_what_a_server_ships_reaches_no_operator_surface(
     # value travels: an exception's chain is rendered by the formatter
     # above, and none of these records has one to render.
     assert all(record.exc_info is None for record in watched.records)
+
+
+async def test_a_server_reflecting_the_token_out_of_a_composed_value_reaches_nothing(
+    tmp_path: Path,
+    watched: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The hostile shape a composed reference adds, and the one the case
+    above cannot see.
+
+    With the whole value a reference, what the server holds IS the
+    credential and replacing the materialized values covers it. With
+    `Bearer $TOKEN` the server holds `Bearer <token>` and can hand back
+    the token alone, which is a substring no set of whole values holds.
+    So this server strips the prefix before it reflects, and the
+    resolution the connection ran hands the redactor the secrets it
+    substituted as well as the values it built.
+
+    Non-vacuous by construction: the opt-in is on and the shipped
+    guidance arrives, so the sentence the server wrote is asserted
+    present with the placeholder standing where the token was, rather
+    than the whole block being absent for some other reason.
+    """
+    monkeypatch.setenv("VINGA_TEST_REFLECTED_SECRET", SENTINEL)
+    ours = "Ask before unlocking the door."
+    entry = {
+        "transport": "stdio",
+        "command": sys.executable,
+        "args": [str(REFLECTING_SERVER)],
+        # The composed form: the word this vendor wants in front of the
+        # credential lives in the configuration, not inside the secret.
+        "env": {REFLECTED_ENV: f"{REFLECTED_PREFIX}$VINGA_TEST_REFLECTED_SECRET"},
+        "instructions": ours,
+        "use_server_instructions": True,
+        "inject_prompts": [f"{SENTINEL}\x1b[2J"],
+    }
+    servers = McpServers.build(config_with(entry))
+    await servers.start_all()
+    try:
+        status = servers.status()
+        assert status["weather"]["state"] == CONNECTED
+        printed = cli_status(tmp_path / "db", servers, monkeypatch, capsys)
+        answered = api_prompt(tmp_path / "db", servers, entry)
+        shown = cli_prompt(tmp_path / "db", servers, entry, monkeypatch, capsys)
+    finally:
+        await servers.stop_all()
+
+    blocks = {block["provenance"]: block for block in answered["blocks"]}
+    # The opt-in did what it says, and the redaction happened where the
+    # bare token was: the server's own sentence arrived with the
+    # placeholder in it rather than not arriving at all.
+    assert ours in blocks["instructions:weather"]["text"]
+    assert (
+        f"Call the forecast tool with {REDACTED}."
+        in blocks["server_instructions:weather"]["text"]
+    )
+    assert REDACTED in blocks["server_prompt:weather:1"]["text"]
+
+    for surface in (json.dumps(status), printed, json.dumps(answered), shown):
+        assert SENTINEL not in surface
+    assert SENTINEL not in rendered(watched)
 
 
 async def test_an_http_server_cannot_reflect_its_credential_onto_the_surfaces(

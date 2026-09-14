@@ -16,7 +16,7 @@ import asyncio
 import functools
 import logging
 import time
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 
 import mcp.types
@@ -120,7 +120,7 @@ class _PromptsUnreadable(Exception):
 _Redactor = Callable[[str | None], str | None]
 
 
-def _redactor(*groups: Mapping[str, str]) -> _Redactor:
+def _redactor(*groups: Iterable[str]) -> _Redactor:
     """A function that takes this deployment's own values back out of
     whatever a server hands it.
 
@@ -130,18 +130,22 @@ def _redactor(*groups: Mapping[str, str]) -> _Redactor:
     not a decision to let that server hand back the credential this
     deployment gave it, through a surface the rest of the API refuses to
     read a stored secret from. So the values that were materialized for
-    this connection, and only those, are replaced.
+    this connection, and the secrets that went into them, are replaced.
+
+    Both, because a materialized value is not always its own secret. A
+    composed `Bearer $TOKEN` is handed to the server as `Bearer <token>`,
+    and a server that reads its own Authorization header can hand back
+    the token alone, which is a string no set of whole header values
+    holds (#504).
 
     Longest first, so that a value which contains another is replaced
     whole rather than left holding a placeholder in the middle of it.
+    That rule is what makes a token inside its own composed value come
+    out right: the header goes first and the bare token catches whatever
+    the header did not.
     """
     values = sorted(
-        {
-            value
-            for group in groups
-            for value in group.values()
-            if len(value) >= REDACTION_FLOOR
-        },
+        {value for group in groups for value in group if len(value) >= REDACTION_FLOOR},
         key=len,
         reverse=True,
     )

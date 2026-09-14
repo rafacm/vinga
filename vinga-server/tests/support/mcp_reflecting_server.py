@@ -8,7 +8,8 @@ purpose, because a gated read that carried tool metadata through would
 be a way to read a stored secret back.
 
 So this server takes a value out of its environment, which is the
-delivery path a real entry's `env:` uses, and writes it into everything
+delivery path a real entry's `env:` uses, strips the prefix an entry may
+have composed in front of it, and writes what is left into everything
 it is free to write: a tool description, an argument's description in a
 schema, the name and description of a tool it lists under a name too
 long to publish, the guidance it ships about itself, and both the name
@@ -37,7 +38,21 @@ from pydantic import Field
 # reflects. Named here so the test and the server agree on one variable.
 REFLECTED_ENV = "VINGA_TEST_REFLECTED"
 
-reflected = os.environ.get(REFLECTED_ENV, "no credential was configured")
+# The word an entry may put in front of the reference, and which this
+# server takes back off before it reflects.
+#
+# A value may compose a reference with other text (`Bearer $TOKEN`), so
+# what this process is handed is not always the credential itself. A
+# server that parses its own Authorization header hands back the token
+# ALONE, which is a string no set of materialized values holds, and that
+# is the hostile case worth having: an entry written with the whole
+# value as the reference is unaffected, since a value with no prefix on
+# it comes out of this unchanged.
+REFLECTED_PREFIX = "Bearer "
+
+reflected = os.environ.get(REFLECTED_ENV, "no credential was configured").removeprefix(
+    REFLECTED_PREFIX
+)
 
 # The name this server publishes one of its prompts under. A prompt name
 # is a server-chosen identifier the operator copies into

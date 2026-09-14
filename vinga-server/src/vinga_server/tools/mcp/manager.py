@@ -595,15 +595,26 @@ class McpServerManager:
         one is replaced before anything is stored, and only the redacted
         text is kept.
 
+        The secrets that went into those values are replaced too, and
+        that is not the same set: a composed `Bearer $TOKEN` reaches the
+        server as `Bearer <token>`, and a server that parses its own
+        Authorization header hands back the token by itself. Resolution
+        answers with both halves because the resolver is the one place
+        the credential exists as itself (#504).
+
         The resolved values live for the length of this call and are
         never held on the manager, which is the rule `__init__` already
         follows and for the same reason: a manager lives as long as the
         process.
         """
         try:
+            groups = [
+                _resolve(self._name, self._config, self._secrets, group)
+                for group in ("env", "headers")
+            ]
             redact = _redactor(
-                _resolve(self._name, self._config, self._secrets, "env"),
-                _resolve(self._name, self._config, self._secrets, "headers"),
+                *(resolved.values.values() for resolved in groups),
+                *(resolved.secrets for resolved in groups),
             )
         except Exception as exc:
             # Fail closed, and do not take the tools with it. Resolving
