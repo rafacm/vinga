@@ -289,9 +289,14 @@ bounded `force_flush` from that worker. A failed or timed-out flush is reported
 as today, but the spans have already entered the ordinary SDK path and are not
 discarded or rebuilt. Reply-serving code never waits on a flush.
 
-The ledger is globally bounded. On overflow it ends the selected held span
+The ledger is globally bounded at `DEFERRED_SPANS = 4096` logically finished
+spans for the process. This is a flat safety cap, not a value falsely derived
+from unbounded `max_sessions`, the per-session turn retention or byte-based LLM
+budgets. On overflow it ends the oldest logically finished span globally as
 metadata-only and reports the content omission through the owning exporter's
-existing closed outcome. Unknown or already-ended keys are an explicit
+existing closed outcome. It never evicts an operation still running, and it
+does not prefer one session merely because that session is still connected.
+Unknown or already-ended keys are an explicit
 non-delivery result, never a second span. Unit tests exercise each transition,
 all terminal paths above, and repeatedly race content completion with
 shutdown.
@@ -452,7 +457,7 @@ fixtures are extended rather than replaced.
   chains in both log formats.
 - Deferred-ledger unit tests pin original span identity, explicit end time,
   sampled and unsampled decisions, exact-once end, metadata-only release after every
-  drop reason, oldest-first overflow and shutdown races. The concurrency test
+  drop reason, the 4,097th-record oldest-finished overflow and shutdown races. The concurrency test
   is run at least 100 times because one passing interleaving proves nothing.
 - Transcript tests assert the actual `turn` root, not a child, carries the
   acknowledged heard/reply pair; ordinary, empty, cancelled and handover turns
@@ -507,8 +512,9 @@ fixtures are extended rather than replaced.
   target backends join by identifiers. The direct and dual-receiver smokes
   deliberately observe children before release, then assert the final topology.
 - **Content buffering can grow with a long session.** Existing request/session
-  budgets remain, the deferred record ledger adds a fixed global bound, and
-  overflow loses content rather than operation metadata.
+  budgets remain, the deferred ledger has a flat 4,096-span process cap, and
+  overflow ends the oldest logically finished span metadata-only rather than
+  losing operation metadata or selecting by session state.
 - **A sampling decision can fork.** Original trace flags and state are retained
   exactly. The fanout example fixes the source to `always_on` and makes one
   trace-id-based Collector sampler the only population decision before split.
@@ -716,6 +722,11 @@ model `claude-opus-5`, 2026-09-14, runtime 5m18s.
     `max_sessions`, per-session turn count and byte-based LLM bounds do not
     yield a global span count. The plan must state the formula or flat cap and
     the overflow cost.
+
+    *Resolution:* The ledger now has the explicit flat process cap 4,096. The
+    4,097th hold ends the globally oldest logically finished span
+    metadata-only and reports that class's content omission; it never targets
+    an operation still running or infers a bound from `max_sessions`.
 
 Verdict: not ready. Findings 1 through 6 are load-bearing; findings 7, 10 and
 the rest of the P2 set require concrete amendments before implementation.
