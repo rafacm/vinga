@@ -408,16 +408,21 @@ async def test_conflicting_heard_values_make_the_group_unreadable(
 
 
 @pytest.mark.asyncio
-async def test_empty_text_is_absent_from_the_settlement() -> None:
+async def test_an_empty_projection_releases_the_root_without_an_outcome(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     exporter, telemetry = an_exporter()
 
     exporter.turn_recorded(
         SESSION, a_turn(heard=None, reply=None), settled(), final=True
     )
-    await wait_for(lambda: bool(telemetry.settled))
+    await wait_for(lambda: bool(telemetry.released))
     await exporter.shutdown()
 
-    assert telemetry.settled == [(SESSION, UTTERANCE, {})]
+    assert telemetry.settled == []
+    assert telemetry.released == [(SESSION, UTTERANCE)]
+    assert event_records(caplog, "transcripts_exported") == []
+    assert event_records(caplog, "transcript_export_failed") == []
 
 
 @pytest.mark.asyncio

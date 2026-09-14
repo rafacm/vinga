@@ -249,6 +249,10 @@ class TranscriptExport:
         except Exception:  # noqa: BLE001 - content export never strands a root
             self._omit(job.session, job.utterance, TranscriptExportFailure.UNREADABLE)
             return
+        if not content:
+            self._telemetry.release_turn(job.session, job.utterance)
+            self._was_omitted(job.session, job.utterance)
+            return
         if content_size > MAX_CONTENT_BYTES:
             self._omit(job.session, job.utterance, TranscriptExportFailure.DROPPED)
             return
