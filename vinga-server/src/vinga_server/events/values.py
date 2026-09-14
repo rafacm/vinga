@@ -1602,11 +1602,11 @@ class TranscriptExportFailure(StrEnum):
     # assumed readable: dropped, stopped or timed out, which the
     # acknowledgement deliberately does not tell apart.
     UNRECORDED = "unrecorded"
-    # The store's read seam answered `Unreadable`.
+    # Handover rows disagreed about the utterance text they belong to,
+    # so their content cannot be composed as one exact turn.
     UNREADABLE = "unreadable"
-    # Nothing to name the trace by: telemetry never saw the session, or
-    # its context had aged out of the retention by the time the session
-    # closed.
+    # Telemetry no longer held the original turn root when settlement
+    # reached it, so there is no operation that may receive the content.
     NO_TRACE = "no_trace"
     # The backlog was full, so the job was never queued, or a shutdown
     # ended it before it completed, queued or in flight.
