@@ -627,7 +627,7 @@ class McpServerManager:
         returns, so they do not outlive the capture into the wait that
         holds a connection open.
         """
-        redact = _redactor(sent.values.values(), sent.secrets)
+        redact = _redactor([*sent.values.values(), *sent.substituted], sent.secrets)
         self._instructions = _injectable(
             self._name, redact(initialized.instructions), INSTRUCTIONS_CHANNEL
         )

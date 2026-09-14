@@ -335,6 +335,27 @@ async def test_a_reflected_token_below_the_redaction_floor_is_taken_out(
         assert SHORT not in surface
 
 
+async def test_a_short_value_under_an_ordinary_key_is_left_where_it_is(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other side of the floor, which the exemption must not eat.
+
+    A reference under a key that says nothing about secrecy is a value
+    out of the environment and nothing more: a region, a marker, a
+    build. Replacing a three-character one everywhere it appears would
+    mangle what a server ships and protect nothing, which is what the
+    floor is for, and the floor still stands there. Only a key this
+    configuration calls secret-bearing buys its references an exemption.
+    """
+    monkeypatch.setenv(SECRET_ENV, SHORT)
+
+    async with serving(shipping_server(f"Deployed in {SHORT}.")) as url:
+        entry = http_entry(url, f"${SECRET_ENV}", key="X-Region")
+        captured = await shipped(config_with(entry | {"use_server_instructions": True}))
+
+    assert f"Deployed in {SHORT}." in captured
+
+
 async def test_the_capture_redacts_what_was_sent_and_not_what_is_set_now(
     tap: Tap, watched: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:

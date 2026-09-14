@@ -232,6 +232,32 @@ def test_a_reference_resolves_where_it_stands_inside_a_larger_value(
     assert resolved.secrets == frozenset({"secret-value"})
 
 
+def test_what_was_substituted_is_split_by_what_its_key_says(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The key is the only classifier there is, and it is the one the
+    write-time check already uses.
+
+    A secret-bearing key's reference is a credential by this
+    configuration's own rule, whatever it looks like. Every other key's
+    is a value out of the environment that nothing here has said
+    anything about: a region, a marker, a locale. A consumer that treats
+    the second as a credential would be guessing, and guessing wrongly
+    in the direction that mangles what a server ships.
+    """
+    monkeypatch.setenv("VINGA_TEST_HA_TOKEN", "secret-value")
+    monkeypatch.setenv("VINGA_TEST_REGION", "eu")
+
+    resolved = resolve_env_values(
+        "mcp_servers.ha.env",
+        {"API_ACCESS_TOKEN": "$VINGA_TEST_HA_TOKEN", "REGION": "$VINGA_TEST_REGION"},
+    )
+
+    assert resolved.values == {"API_ACCESS_TOKEN": "secret-value", "REGION": "eu"}
+    assert resolved.secrets == frozenset({"secret-value"})
+    assert resolved.substituted == frozenset({"eu"})
+
+
 def test_every_reference_in_one_value_resolves(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VINGA_TEST_ONE", "first-value")
     monkeypatch.setenv("VINGA_TEST_TWO", "second-value")

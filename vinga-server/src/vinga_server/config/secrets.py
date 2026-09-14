@@ -586,7 +586,9 @@ def resolve_mcp_values(
     # deployment's credentials back out of a far side's text, and there
     # a credential is a credential whichever door it came through.
     return ResolvedValues(
-        {**resolved.values, **stored}, resolved.secrets | frozenset(stored.values())
+        {**resolved.values, **stored},
+        resolved.secrets | frozenset(stored.values()),
+        resolved.substituted,
     )
 
 
