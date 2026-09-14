@@ -178,10 +178,10 @@ transcript exporter composes by utterance before it releases a root. Rows stay
 in store-id order. The first non-null heard value becomes the one input; the
 non-empty reply values are concatenated in row order for the one output. A
 conflicting second heard value makes that utterance unreadable rather than
-choosing one. Keyset paging carries the final utterance group into the next
-page and releases it only after a different utterance or end of input proves
-the group complete. If a later page cannot be read or flushed, the partial
-group is released metadata-only and reported, never exported as half a reply.
+choosing one. The exporter stages consecutive live rows by utterance and the
+reply's final boundary proves the group complete. It waits for every staged
+row's acknowledgement before composing. A failed acknowledgement releases the
+group metadata-only and reports the omission, never exports half a reply.
 Rows without an utterance cannot address a canonical turn root and remain an
 explicit unaddressable omission rather than creating a session-level content
 span.
@@ -456,8 +456,9 @@ the existing Langfuse REST and object-storage destinations in that assertion.
   interface the transcript worker uses to register, enrich or release a turn;
   no new pass-through module is added and optional SDK imports stay behind the
   existing lazy boundary.
-- `transcript_export.py` keeps store acknowledgement, paging, admission and
-  outcome reporting, but enriches turn roots rather than creating observations.
+- `transcript_export.py` keeps store acknowledgement, bounded admission and
+  outcome reporting, but stages completed live utterances and enriches turn
+  roots rather than creating observations.
 - `llm_input_export.py` keeps neutral-seam rendering and byte budgets, adds
   schema-shaped semantic output pairing, and enriches generation spans rather
   than creating observations.
@@ -541,11 +542,11 @@ fixtures are extended rather than replaced.
   ungraceful-exit simulation proves generation spans were never held.
 - Transcript tests assert the actual `turn` root, not a child, carries the
   acknowledged heard/reply pair; ordinary, empty, cancelled and handover turns
-  are covered. A handover whose two rows straddle the 256-row page boundary
-  proves carryover and ordered, exactly-once composition; a failed following
-  page proves the partial group releases metadata-only. There is no span named
-  `transcript`. A flag-on, conversation-off build proves no exporter registers
-  and the root ends without delay.
+  are covered. A handover with two independently acknowledged rows proves
+  ordered, exactly-once composition; one false acknowledgement proves the
+  whole group releases metadata-only. There is no span named `transcript`. A
+  flag-on, conversation-off build proves no exporter registers and the root
+  ends without delay.
 - LLM tests assert every successful, tool-only, tool-result, handover, recap
   and failed round has one actual `llm` span with its own matched standard
   input/output JSON. All three content attributes and both vinga extensions
