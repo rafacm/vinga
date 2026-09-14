@@ -80,6 +80,7 @@ JAEGER_IMAGE = (
     "sha256:46a886260e04002d8f45e213fc39063fa11a50446048fdaa64786fc0840cb9f8"
 )
 JAEGER_DEADLINE_S = 30.0
+IMAGE_PULL_DEADLINE_S = 300.0
 
 
 def _run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -92,23 +93,34 @@ def _run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _pull(image: str) -> None:
+    subprocess.run(
+        ("docker", "pull", image),
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=IMAGE_PULL_DEADLINE_S,
+    )
+
+
 @pytest.fixture
 def jaeger():
     """The pinned v2 backend used by the committed direct overlay."""
     name = f"vinga-jaeger-{uuid.uuid4().hex[:12]}"
-    _run(
-        "docker",
-        "run",
-        "--detach",
-        "--name",
-        name,
-        "--publish",
-        "127.0.0.1::4318",
-        "--publish",
-        "127.0.0.1::16686",
-        JAEGER_IMAGE,
-    )
+    _pull(JAEGER_IMAGE)
     try:
+        _run(
+            "docker",
+            "run",
+            "--detach",
+            "--name",
+            name,
+            "--publish",
+            "127.0.0.1::4318",
+            "--publish",
+            "127.0.0.1::16686",
+            JAEGER_IMAGE,
+        )
         otlp = _run("docker", "port", name, "4318/tcp").stdout.strip().rsplit(":", 1)[1]
         query = _run("docker", "port", name, "16686/tcp").stdout.strip().rsplit(":", 1)[1]
         origin = f"http://127.0.0.1:{query}"
