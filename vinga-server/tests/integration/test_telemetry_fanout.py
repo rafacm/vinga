@@ -82,6 +82,11 @@ def _pull(image: str) -> None:
     )
 
 
+def _container_logs(name: str) -> str:
+    result = _run("docker", "logs", name, check=False)
+    return result.stdout + result.stderr
+
+
 @contextlib.contextmanager
 def _collector(jaeger: Receiver, langfuse: Receiver) -> Iterator[tuple[str, str]]:
     name = f"vinga-fanout-{uuid.uuid4().hex[:12]}"
@@ -129,13 +134,16 @@ def _wait_for_collector(endpoint: str, name: str) -> None:
             "docker", "inspect", "--format", "{{.State.Running}}", name
         ).stdout.strip()
         if running != "true":
-            raise AssertionError(_run("docker", "logs", name, check=False).stdout)
+            raise AssertionError(_container_logs(name))
         try:
             _post(endpoint, empty)
             return
         except OSError:
-            time.sleep(0.1)
-    raise AssertionError(f"Collector did not accept OTLP within {DEADLINE_S}s")
+            pass
+        time.sleep(0.1)
+    raise AssertionError(
+        f"Collector did not accept OTLP within {DEADLINE_S}s\n{_container_logs(name)}"
+    )
 
 
 def _post(endpoint: str, body: bytes) -> None:

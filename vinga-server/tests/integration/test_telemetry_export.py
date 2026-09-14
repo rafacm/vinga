@@ -103,6 +103,11 @@ def _pull(image: str) -> None:
     )
 
 
+def _container_logs(name: str) -> str:
+    result = _run("docker", "logs", name, check=False)
+    return result.stdout + result.stderr
+
+
 @pytest.fixture
 def jaeger():
     """The pinned v2 backend used by the committed direct overlay."""
@@ -131,9 +136,10 @@ def jaeger():
                     if response.status == 200:
                         break
             except OSError:
-                time.sleep(0.1)
+                pass
+            time.sleep(0.1)
         else:
-            raise AssertionError(_run("docker", "logs", name, check=False).stdout)
+            raise AssertionError(_container_logs(name))
         yield f"http://127.0.0.1:{otlp}", origin
     finally:
         _run("docker", "rm", "--force", name, check=False)
