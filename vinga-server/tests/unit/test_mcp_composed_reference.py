@@ -351,7 +351,6 @@ def _grant(run) -> None:
     assert run("default-agent", "set", "assistant") == 0
 
 
-
 async def test_a_composed_header_survives_an_export_into_an_empty_database(
     spare_database: str,
     monkeypatch: pytest.MonkeyPatch,
