@@ -395,7 +395,7 @@ fixtures are extended rather than replaced.
 
 - Unit pins freeze the current stable operation names, one-turn-one-trace
   topology, session link, all canonical standard attributes, timestamps and
-  content-off absence before the internal span routing changes.
+  content-off absence before the internal span-lifecycle changes.
 - Failure tests falsify each new claim first: remove the failure fold and prove
   ASR, LLM, TTS and tool cases fail because the real span, `ERROR` status or
   safe `error.type` is absent. Credential-shaped exception messages are absent
@@ -577,6 +577,12 @@ model `claude-opus-5`, 2026-09-14, runtime 5m18s.
 7. **P2: registering a router beside the batch processor exports held spans
    twice.** OpenTelemetry calls every registered processor. The router must own
    the ordinary batch processor and be the only provider registration.
+
+   *Resolution:* The routing processor has been deleted from the design. The
+   original SDK span remains live until content settlement, then its one
+   `Span.end(end_time=...)` call reaches the unchanged, sole batch processor.
+   A provider-wiring pin asserts that only the existing batch processor is
+   registered.
 8. **P2: the deferred module can break no-extra and slim-image boots.** It must
    not import OpenTelemetry at module scope and must use the existing lazy SDK
    resolution pattern, with the slim boot pinned.
