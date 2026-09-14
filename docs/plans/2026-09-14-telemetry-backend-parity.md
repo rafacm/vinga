@@ -367,9 +367,14 @@ exporter outage can still make stored populations diverge, and the deployment
 guide says so rather than claiming delivery parity the Collector cannot
 provide.
 
-Collector Langfuse credentials live only in an ignored environment file made
-from `deploy/telemetry/.env.example`. They never enter vinga configuration,
-the vinga container or a committed rendered compose file. The fanout smoke
+Collector Langfuse credentials live only in the ignored,
+root-relative `deploy/telemetry/.env`, made from the committed
+`deploy/telemetry/.env.example`. The override attaches that explicit file only
+to the Collector service; the Collector config reads its process environment
+with `${env:...}` expansion and the Compose file never interpolates those
+values. The root `.env` remains vinga's file and never receives a `LANGFUSE_*`
+name. Credentials therefore never enter vinga configuration, the vinga
+container or a committed rendered compose file. The fanout smoke
 substitutes two local OTLP receivers and dummy credentials, checks headers at
 the receiver boundary, and plants credential-shaped sentinels in errors and
 content to assert their absence from both protobuf bodies, Collector output
@@ -483,6 +488,8 @@ fixtures are extended rather than replaced.
   masking and the graph's only sampler precede both `forward` connectors, and
   prove neither sink pipeline contains either processor. They also prove Basic Auth, the v4
   ingestion header and Langfuse aliases exist only on the Langfuse boundary.
+  The fully resolved fanout graph is also inspected service by service: the
+  Collector has the dummy `LANGFUSE_*` names and the vinga service has none.
 - A Docker-backed fanout smoke sends deterministic traces through the exact
   committed Collector configuration to two local OTLP receivers. With partial
   sampling it asserts a nonempty proper subset, identical trace-id populations,
@@ -774,6 +781,12 @@ read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 9m08s.
 4. **P1: composing with the root stack can put Langfuse credentials into the
    vinga container.** The root `.env` is mounted whole by vinga. The telemetry
    stack needs a distinct explicit env file and a resolved-environment test.
+
+   *Resolution:* The overlay now attaches root-relative
+   `deploy/telemetry/.env` only to the Collector and uses Collector-side
+   `${env:...}` expansion, with no credential interpolation in Compose. The
+   walkthrough never adds Langfuse names to the root `.env`, and a resolved
+   graph test asserts no `LANGFUSE_*` name enters vinga's environment.
 5. **P2: recap timeout bypasses `provider_failed`.** Cancellation becomes
    `TimeoutError` only outside `_watched_stream`, after the helper's catch, so
    the plan must instrument this third recap outcome explicitly.
