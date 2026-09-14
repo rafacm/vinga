@@ -51,7 +51,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from types import MappingProxyType
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from vinga_server.audio.resample import Resampler
 from vinga_server.config import Config
@@ -133,6 +133,14 @@ from vinga_server.tools.source import (
     no_such_tool,
     withheld,
 )
+
+if TYPE_CHECKING:
+    # The post-close surface this runtime hands each assembled request
+    # to, named rather than imported: `llm_input_export.py` imports
+    # `telemetry.py`, which nothing here does, and a runtime import
+    # would make the reply path pay for a module it only ever holds.
+    # The device edge names its own collaborator the same way.
+    from vinga_server.llm_input_export import LlmInputExport
 
 # How many times one reply may stream, call tools, and stream again.
 # The last permitted round forbids calling, so a reply always ends in
@@ -636,6 +644,7 @@ class PipelineRuntime:
         devices: DeviceRecords | None = None,
         device_access: builtin.DeviceAccess | None = None,
         device: LiveDevice | None = None,
+        llm_input: "LlmInputExport | None" = None,
     ) -> None:
         self._output = output
         # The world this runtime reads its configuration out of, asked
@@ -698,6 +707,13 @@ class PipelineRuntime:
         # the store is wired, and the reply path then behaves exactly as
         # it did before the channel existed.
         self._recorder = recorder
+        # And where each round's assembled request goes, when a
+        # deployment asked for that (#502). An optional collaborator
+        # exactly like the recorder above, compared `is not None`, and
+        # the reason the comparison is at the two call sites rather than
+        # once: with this absent nothing is rendered at all, which is
+        # what "the flag off stages nothing" means concretely.
+        self._llm_input = llm_input
         # How this session's threads lose their memory when it closes,
         # and absent wherever a thread outlives its connection. Present
         # only on a deployment that records nothing, where a closed
@@ -2068,6 +2084,23 @@ class PipelineRuntime:
             # Resolved before the request is built, and per round rather
             # than per reply, because that is the memory block's clock.
             system = await self._system_prompt()
+            if self._llm_input is not None:
+                # Staged HERE, where the round is assembled, and
+                # deliberately not inside the partial below. The
+                # first-token watchdog calls that partial a second time
+                # over arguments fixed before the first attempt, so a
+                # retry sends byte-identical content: staging there
+                # would put the same bytes on the trace twice and claim
+                # the model was given two things. What a reader wants
+                # about a retry is already on the trace as `llm_retry`.
+                self._llm_input.stage_reply(
+                    self.session_id,
+                    agent=self._agent,
+                    system=system,
+                    turns=working,
+                    tools=tools,
+                    choice=choice,
+                )
             try:
                 async for event in self._watchdog_stream(
                     providers.llm,
@@ -2483,6 +2516,21 @@ class PipelineRuntime:
         providers = self._providers
         said: list[str] = []
         turns = [*made.input, Turn("user", RECAP_REQUEST)]
+        if self._llm_input is not None:
+            # The second call shape, staged for the same reason the
+            # reply's rounds are: this is a thing a model was given, and
+            # a reader asking what it saw wants the summarization as
+            # much as the answer. Before the call rather than after it,
+            # so a recap that failed or timed out is still on the trace
+            # as something the model was handed.
+            self._llm_input.stage_recap(
+                self.session_id,
+                agent=self._agent,
+                system=RECAP_INSTRUCTION,
+                turns=turns,
+                tools=[],
+                choice="none",
+            )
         try:
             async with asyncio.timeout(RECAP_ROUND_TIMEOUT_S):
                 async for event in self._watched_stream(
@@ -3250,6 +3298,7 @@ def bespoke_runtime_factory(
     threads: resumption.ThreadReads | None = None,
     devices: DeviceRecords | None = None,
     device_access: builtin.DeviceAccess | None = None,
+    llm_input: "LlmInputExport | None" = None,
 ) -> RuntimeFactory:
     """The composition root's half of the seam: everything this runtime
     needs that outlives one connection, closed over once at startup.
@@ -3325,6 +3374,13 @@ def bespoke_runtime_factory(
     (#449). Everything the conversation later reads about its device is
     addressed by the identity in it.
 
+    `llm_input` is closed over for the reason `memory` is: it is one
+    object per server, it outlives every connection, and what a
+    conversation does with it is tell it about each round it is about to
+    send. None is a deployment that did not ask for the export, and it
+    is the default, which is what makes the flag off cost a reply
+    nothing at all rather than a render nobody reads.
+
     Deliberately one function rather than a config-selectable registry:
     one runtime exists, and a selection mechanism with one option is
     surface without a reader. This is the seam a second runtime plugs
@@ -3354,6 +3410,7 @@ def bespoke_runtime_factory(
             devices,
             device_access,
             device,
+            llm_input,
         )
 
     return build

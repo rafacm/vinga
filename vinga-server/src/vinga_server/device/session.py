@@ -118,12 +118,12 @@ from vinga_server.telemetry import Telemetry
 from vinga_server.tools.device import DeviceToolClient
 
 if TYPE_CHECKING:  # the registry names this class the same way
+    # And the two post-close surfaces this hands a closed session to,
+    # named rather than imported: each imports `telemetry.py`, which
+    # nothing here does, and a runtime import would make this edge pay
+    # for a module it only ever holds.
+    from vinga_server.llm_input_export import LlmInputExport
     from vinga_server.registry import SessionRegistry
-
-    # And the post-close surface this hands a barrier to, named rather
-    # than imported: `transcript_export.py` imports `telemetry.py`,
-    # which nothing here does, and a runtime import would make this
-    # edge pay for a module it only ever holds.
     from vinga_server.transcript_export import TranscriptExport
 
 # What the server speaks: TTS output is resampled to this rate, encoded
@@ -189,6 +189,7 @@ class DeviceSession:
         live: LiveEvents | None = None,
         telemetry: "Telemetry | None" = None,
         transcripts: "TranscriptExport | None" = None,
+        llm_input: "LlmInputExport | None" = None,
     ) -> None:
         self.websocket = websocket
         # The world this server is serving, asked rather than kept: a
@@ -219,6 +220,12 @@ class DeviceSession:
         # the one thing it cannot get for itself: the handle the store
         # returns when this session's record is closed.
         self._transcripts = transcripts
+        # And the third post-close surface beside it (#502), which is
+        # handed nothing but the fact that this session ended: what it
+        # exports it has been holding since the rounds were assembled,
+        # so the close is where it lets go rather than where it learns
+        # anything.
+        self._llm_input = llm_input
         # Where this connection reports which world it ended up talking
         # through, and where the slot it took goes back. Optional for
         # the caller with no server around it, which is a test driving a
@@ -682,6 +689,14 @@ class DeviceSession:
             # and everything else happens on a worker of its own (#495).
             if self._transcripts is not None:
                 self._transcripts.session_closed(self.session_id, recorded)
+            # And the third, which needs no barrier and no handle: what
+            # it exports was staged as the conversation went, so this
+            # is a dictionary pop, a read of a map and a put on a
+            # bounded queue. Last of the three because it is the widest,
+            # and a close that failed part way through should have let
+            # the narrower surfaces go first.
+            if self._llm_input is not None:
+                self._llm_input.session_closed(self.session_id)
             if self._cancelled is not None:
                 # A cleanup step was cancelled, and now that the record
                 # is complete the cancellation goes on its way: the

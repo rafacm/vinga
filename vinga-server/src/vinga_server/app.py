@@ -54,6 +54,7 @@ from vinga_server.events.live import LiveEvents
 from vinga_server.events.values import ConfiguredPath
 from vinga_server.filler import build_agent_fillers
 from vinga_server.generation import Generation, Generations
+from vinga_server.llm_input_export import build_llm_input_export
 from vinga_server.memory.store import MemoryStore, open_memory, purge
 from vinga_server.providers import ProviderError, build_world
 from vinga_server.registry import SessionRegistry
@@ -564,6 +565,27 @@ async def _build_composition(
     # conversation is happening. One view for both questions, so there
     # is one engine over those rows and one place a failed read of them
     # is logged and fallen back from.
+    #
+    # And the third post-close surface goes in with them, which is the
+    # one that has to be built HERE rather than beside its two siblings
+    # below: what it exports is staged while a conversation runs, so the
+    # factory has to close over it. Built from the whole server section
+    # for the shape's sake rather than for a no-op arm, because this
+    # class has none: there is no local surface behind it that could be
+    # switched off.
+    #
+    # Its shutdown is registered in the same breath, behind every
+    # teardown it has to unwind in front of. The stack unwinds last in
+    # first out, and everything this one needs is registered above it:
+    # the event tap it speaks through and the exporter it writes into
+    # both come off later, which is exactly what its contract needs,
+    # since a worker interrupted mid-job says what became of that job
+    # through the tap and onto the trace.
+    llm_input = build_llm_input_export(
+        config.server, telemetry=telemetry, boundary=config.server.data_boundary
+    )
+    if llm_input is not None:
+        stack.push_async_callback(llm_input.shutdown)
     runtime_factory = bespoke_runtime_factory(
         generations,
         mcp_servers,
@@ -572,6 +594,7 @@ async def _build_composition(
         None if conversations is None else threads.Reads(database),
         bindings,
         device_access,
+        llm_input,
     )
     # What a device says about itself at OTA check-in, kept for the
     # session that follows: a capture manifest needs the firmware
@@ -734,6 +757,7 @@ async def _build_composition(
         live=live,
         telemetry=telemetry,
         transcripts=transcripts,
+        llm_input=llm_input,
         api=api_runtime,
     )
     # Connected last, and closed first on the way out so stdio child
