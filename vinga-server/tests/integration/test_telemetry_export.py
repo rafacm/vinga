@@ -20,9 +20,15 @@ deadline, and none of them is a bare `while True`.
 """
 
 import asyncio
+import contextlib
+import json
 import math
 import struct
+import subprocess
 import time
+import urllib.parse
+import urllib.request
+import uuid
 
 import pytest
 import uvicorn
@@ -69,6 +75,57 @@ SHUTDOWN_DEADLINE_S = 30.0
 # half from now".
 NOW_ENOUGH_S = 60.0
 
+JAEGER_IMAGE = (
+    "jaegertracing/jaeger:2.20.0@"
+    "sha256:46a886260e04002d8f45e213fc39063fa11a50446048fdaa64786fc0840cb9f8"
+)
+JAEGER_DEADLINE_S = 30.0
+
+
+def _run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        args,
+        check=check,
+        capture_output=True,
+        text=True,
+        timeout=JAEGER_DEADLINE_S,
+    )
+
+
+@pytest.fixture
+def jaeger():
+    """The pinned v2 backend used by the committed direct overlay."""
+    name = f"vinga-jaeger-{uuid.uuid4().hex[:12]}"
+    _run(
+        "docker",
+        "run",
+        "--detach",
+        "--name",
+        name,
+        "--publish",
+        "127.0.0.1::4318",
+        "--publish",
+        "127.0.0.1::16686",
+        JAEGER_IMAGE,
+    )
+    try:
+        otlp = _run("docker", "port", name, "4318/tcp").stdout.strip().rsplit(":", 1)[1]
+        query = _run("docker", "port", name, "16686/tcp").stdout.strip().rsplit(":", 1)[1]
+        origin = f"http://127.0.0.1:{query}"
+        deadline = time.monotonic() + JAEGER_DEADLINE_S
+        while time.monotonic() < deadline:
+            try:
+                with urllib.request.urlopen(f"{origin}/api/services", timeout=2) as response:
+                    if response.status == 200:
+                        break
+            except OSError:
+                time.sleep(0.1)
+        else:
+            raise AssertionError(_run("docker", "logs", name, check=False).stdout)
+        yield f"http://127.0.0.1:{otlp}", origin
+    finally:
+        _run("docker", "rm", "--force", name, check=False)
+
 
 @pytest.fixture
 def receiver():
@@ -89,7 +146,16 @@ async def exporting_server(receiver: Receiver, monkeypatch: pytest.MonkeyPatch):
     stop is what flushes, since the lifespan's release shuts the
     exporter down and the shutdown flushes what the batch queue holds.
     """
-    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", receiver.endpoint)
+    async with _exporting_server(receiver.endpoint, monkeypatch) as served:
+        yield served
+
+
+@contextlib.asynccontextmanager
+async def _exporting_server(endpoint: str, monkeypatch: pytest.MonkeyPatch):
+    """One source-tree server exporting directly to the supplied OTLP host."""
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", endpoint)
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+    monkeypatch.setenv("OTEL_TRACES_SAMPLER", "always_on")
     monkeypatch.delenv("OTEL_EXPORTER_OTLP_HEADERS", raising=False)
     config = Config(
         providers=MOCK_PROVIDERS,
@@ -115,10 +181,12 @@ async def exporting_server(receiver: Receiver, monkeypatch: pytest.MonkeyPatch):
         server.should_exit = True
         await asyncio.wait_for(task, SHUTDOWN_DEADLINE_S)
 
-    yield port, stop
-    if not task.done():
-        server.should_exit = True
-        await asyncio.wait_for(task, SHUTDOWN_DEADLINE_S)
+    try:
+        yield port, stop
+    finally:
+        if not task.done():
+            server.should_exit = True
+            await asyncio.wait_for(task, SHUTDOWN_DEADLINE_S)
 
 
 def speech_pcm(duration_ms: int) -> bytes:
@@ -232,6 +300,51 @@ async def test_one_turn_arrives_at_a_collector_as_the_trace_it_is(
     assert attributes(turn)["vinga.provider.asr.name"] == "mock"
     assert attributes(turn)["vinga.turn.outcome"] == "completed"
     assert attributes(named(spans, "asr"))["vinga.asr.outcome"] == "heard"
+
+
+async def test_one_source_tree_turn_arrives_directly_in_jaeger(
+    jaeger: tuple[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The supported direct path terminates in the pinned Jaeger v2 API."""
+    endpoint, query_origin = jaeger
+    async with _exporting_server(endpoint, monkeypatch) as (port, stop):
+        await one_turn(port)
+        await stop()
+
+    query = urllib.parse.urlencode(
+        {"service": "vinga-server", "lookback": "1h", "limit": "20"}
+    )
+    deadline = time.monotonic() + JAEGER_DEADLINE_S
+    traces: list[dict] = []
+    while time.monotonic() < deadline:
+        with urllib.request.urlopen(
+            f"{query_origin}/api/traces?{query}", timeout=3
+        ) as response:
+            traces = json.load(response)["data"]
+        names = {
+            span["operationName"]
+            for trace in traces
+            for span in trace.get("spans", [])
+        }
+        if {"session", "turn", "asr", "llm", "tts_stream", "playback"} <= names:
+            break
+        await asyncio.sleep(0.1)
+    else:
+        raise AssertionError(f"Jaeger did not expose the source-tree topology: {traces!r}")
+
+    by_name = {
+        span["operationName"]: span
+        for trace in traces
+        for span in trace["spans"]
+    }
+    assert by_name["session"]["traceID"] != by_name["turn"]["traceID"]
+    turn_id = by_name["turn"]["spanID"]
+    for name in ("asr", "llm", "tts_stream", "playback"):
+        references = by_name[name]["references"]
+        assert any(
+            reference["refType"] == "CHILD_OF" and reference["spanID"] == turn_id
+            for reference in references
+        ), name
 
 
 async def test_the_gen_ai_keys_arrive_spelled_as_the_conventions_spell_them(
