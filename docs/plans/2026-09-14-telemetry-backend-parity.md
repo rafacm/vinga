@@ -267,7 +267,13 @@ existing one-sentence missing-extra refusal and slim-image boot are explicit
 M2 regression checks.
 
 Holding is enabled by registration of an exporter instance, never by a config
-flag alone. A held class has a close protocol: when `session_closed` reaches
+flag alone. After each builder returns a non-null collaborator, `app.py` calls
+`telemetry.register_transcript_exporter()` or
+`telemetry.register_llm_input_exporter()` immediately. Both calls occur during
+application construction, before the lifespan can admit a device session. A
+flag-on transcript no-op because conversation storage or text is off registers
+nothing, so its turn roots end immediately. A held class has a close protocol:
+when `session_closed` reaches
 telemetry, the ledger marks that session closed; each registered content
 exporter must then settle every held key in its class as enriched or
 metadata-only. The ledger ends a class's remaining spans metadata-only when
@@ -376,7 +382,9 @@ the existing Langfuse REST and object-storage destinations in that assertion.
 - `runtime/pipeline.py`, `runtime/turns.py` and the event catalog/assembly/value
   modules expose the safe round output and failure type at the decision sites.
 - `device/session.py`, `composition.py` and `app.py` retain the shutdown and
-  ownership ordering while wiring the deepened collaborators.
+  ownership ordering while wiring the deepened collaborators. `app.py`
+  registers only successfully built exporters with telemetry before session
+  admission.
 - `deploy/telemetry/` adds the direct Jaeger and Collector fanout examples,
   pinned configurations, dummy environment template and smoke helpers.
 - `.github/workflows/vinga-server.yml` validates both configurations and runs
@@ -417,7 +425,8 @@ fixtures are extended rather than replaced.
   are covered. A handover whose two rows straddle the 256-row page boundary
   proves carryover and ordered, exactly-once composition; a failed following
   page proves the partial group releases metadata-only. There is no span named
-  `transcript`.
+  `transcript`. A flag-on, conversation-off build proves no exporter registers
+  and the root ends without delay.
 - LLM tests assert every successful, tool-only, tool-result, handover, recap
   and failed round has one actual `llm` span with its own matched standard
   input/output JSON. All three content attributes and both vinga extensions
@@ -600,6 +609,11 @@ model `claude-opus-5`, 2026-09-14, runtime 5m18s.
 9. **P2: telemetry is constructed before either content exporter.** The plan
    must name a pre-admission registration call and hold spans only for an
    exporter that was actually built, never on a config flag alone.
+
+   *Resolution:* The plan now names two telemetry registration methods, called
+   by `app.py` only after the corresponding builder returns a non-null exporter
+   and before the lifespan admits sessions. A documented transcript no-op does
+   not register and therefore never delays turn roots.
 10. **P2: branch-specific Collector processing needs a connector.** One
     receiver pipeline with two exporters cannot add aliases to only one branch;
     two independent pipelines sample twice. The plan must name a Contrib
