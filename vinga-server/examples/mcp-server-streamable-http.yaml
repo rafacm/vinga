@@ -17,14 +17,27 @@ transport: streamable_http
 
 url: http://localhost:8000/mcp
 
-# A value of $NAME is read from that environment variable at startup,
-# and any secret-bearing key must use that form. The encrypted
-# alternative addresses the same slot by its dotted path:
+# $NAME is read from that environment variable at startup, and any
+# secret-bearing key must reference a variable somewhere in its value. A
+# reference may be the whole value or sit inside a larger one, which is
+# what lets the word the vendor wants in front of the credential live
+# here, where you can read it, instead of inside the secret. A token
+# that already carries the prefix would otherwise be sent as
+# `Bearer Bearer ...`, and the 401 that comes back reads like a bad key.
+#
+# The encrypted alternative addresses the same slot by its dotted path:
 #
 #   vinga mcp-server secret set weather headers.Authorization
 #
+# It is not the other half of this recipe, it is the other way of doing
+# the whole of it: a stored secret REPLACES the slot's value, so what
+# you enter there is the finished header, `Bearer <token>` and not the
+# token on its own. With both written for one key, the stored one is
+# what the server is sent.
+#
+# There is no escape for a literal $ followed by a name.
 headers:
-  Authorization: $WEATHER_TOKEN
+  Authorization: Bearer $WEATHER_TOKEN
 
 # Tool arguments carry conversation-derived data, and no transport can
 # know where they end up: a url may name localhost and it may name a
