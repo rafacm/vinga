@@ -658,7 +658,7 @@ fixtures are extended rather than replaced.
   update the exporter contract in `vinga-server/README.md` and the exported
   traces entry in the observability map, plus an M1 changelog fragment; no
   deployment procedure changes yet.
-- [x] **[M2, content on the operations it describes](2026-09-14-telemetry-backend-parity-implementation.md#m2-content-on-the-operations-it-describes).** (PR TBD) Add the bounded held-turn
+- [x] **[M2, content on the operations it describes](2026-09-14-telemetry-backend-parity-implementation.md#m2-content-on-the-operations-it-describes).** (PR #525) Add the bounded held-turn
   lifecycle beside telemetry's existing retention maps, enrich acknowledged
   turn roots and paired generation spans,
   remove the `transcript` and `llm_input` observation topology, and prove flags
