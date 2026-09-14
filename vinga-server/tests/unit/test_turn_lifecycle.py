@@ -48,6 +48,7 @@ from tests.support.providers import (
     StallingLlm,
     Unreachable,
 )
+from tests.support.records import SpyStore
 from tests.support.sessions import (
     end_utterance,
     events_of,
@@ -517,27 +518,35 @@ async def test_the_playback_window_opens_at_the_frame_and_not_before_it() -> Non
 
 
 async def test_a_cancellation_inside_the_filler_settle_reports_once() -> None:
-    """The finding the emit's placement answers.
+    """The event and transcript boundaries both survive the tail await.
 
-    The reply's `finally` opens with an await, and a cancellation
-    delivered into that await would once have skipped the record
-    entirely. The emit is the first statement now and `emit` is
-    synchronous, so the record is already out when the settle is
-    reached; a cancellation landing there changes neither how many
-    records there are nor what the one says, which stays the outcome
-    latched where the reply actually ended.
+    The reply tail opens with an await, and a cancellation delivered
+    into that await would once have skipped both records entirely. The
+    event is emitted synchronously before the await. The cancellation
+    arm now closes the transcript utterance too, so the root held by
+    that event cannot survive the session.
     """
     settling = asyncio.Event()
+    class Transcripts:
+        def __init__(self) -> None:
+            self.missing: list[tuple[str, str]] = []
+
+        def turn_missing(self, session: str, utterance: str) -> None:
+            self.missing.append((session, utterance))
+
+    transcripts = Transcripts()
     session = talking(
-        stages={"asr": cast(Any, Unreachable("asr", ConnectionRefusedError("no route")))}
+        stages={"asr": cast(Any, Unreachable("asr", ConnectionRefusedError("no route")))},
+        conversations=SpyStore(),
+        transcripts=transcripts,
     )
     tap = watching(session)
     calls: list[int] = []
 
     async def settle() -> None:
         # The failure arm settles once before the notice and the
-        # `finally` settles again; it is the second that is under test,
-        # because the record has been made by then.
+        # reply tail settles again; it is the second that is under test,
+        # because both terminal records have to survive it.
         calls.append(1)
         if len(calls) < 2:
             return None
@@ -551,6 +560,9 @@ async def test_a_cancellation_inside_the_filler_settle_reports_once() -> None:
     await session.runtime.cancel_reply(ReplyOutcome.BARGED_IN)
 
     assert outcomes(tap) == ["failed"]
+    [(missing_session, utterance)] = transcripts.missing
+    assert missing_session == session.session_id
+    assert utterance
 
 
 # --- the window that is never opened -----------------------------------
