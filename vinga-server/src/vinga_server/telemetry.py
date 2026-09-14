@@ -2700,9 +2700,10 @@ class Telemetry:
     # it, which is what lets a trace be assembled from a tap that
     # watches nothing: the pipeline already measured every interval
     # below, and the exporter's arithmetic is one subtraction against
-    # the session clock's one offset. A stage whose turn is not open
-    # falls through to the span-event fold, so nothing is ever
-    # silently dropped.
+    # the session clock's one offset. The turn is the parent while one
+    # is open and the session otherwise. A `provider_failed` for an
+    # unknown future stage alone keeps the default span-event fold, so
+    # nothing is silently dropped and no known failure is duplicated.
 
     def _context(
         self,
