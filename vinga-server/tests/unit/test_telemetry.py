@@ -1326,13 +1326,14 @@ def test_an_enriched_turn_root_carries_the_board_s_name() -> None:
     finish_reply(events)
 
     assert (
-        telemetry.settle_turn(SESSION, utterance, {"vinga.turn.input": "a"})
+        telemetry.settle_turn(SESSION, utterance, {"input": "a"})
         is TurnSettlement.SETTLED
     )
     close_session(events)
 
     written = named(finished(telemetry, memory), "turn")
     assert written.attributes["vinga.device.name"] == BOARD
+    assert written.attributes["vinga.turn.input"] == "a"
 
 
 def test_a_board_nobody_named_says_nothing_rather_than_null() -> None:
@@ -1359,7 +1360,7 @@ def test_a_board_nobody_named_says_nothing_rather_than_null() -> None:
         telemetry.settle_turn(
             SESSION,
             utterance,
-            {"vinga.turn.input": "a", "vinga.turn.output": "b"},
+            {"input": "a", "output": "b"},
         )
         is TurnSettlement.SETTLED
     )
@@ -1379,6 +1380,9 @@ def test_a_board_nobody_named_says_nothing_rather_than_null() -> None:
     }
     for span in spans:
         assert "vinga.device.name" not in span.attributes, span.name
+    turn = named(spans, "turn")
+    assert turn.attributes["vinga.turn.input"] == "a"
+    assert turn.attributes["vinga.turn.output"] == "b"
 
 
 # --- a prompt's provenance, on every turn the agent spoke --------------
