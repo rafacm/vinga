@@ -24,3 +24,11 @@
   lock an operator out of the one door to the row. Nothing here changes
   what refuses or when: a deployment that boots today goes on booting,
   and one that does not gets a second sentence.
+- **One observability value changes with it.** The configuration API
+  answers an unreadable stored row with the same 500 and the same
+  sentence it always has, but the `failure` field of the
+  `api_storage_error` event now names the more specific class
+  (`StoredConfigUnreadableError`) instead of `StorageError` for that
+  case. A consumer matching on the old spelling for this failure needs
+  the new one; `StorageError` still appears for a database that cannot
+  be reached.

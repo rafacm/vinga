@@ -24,6 +24,7 @@ from sqlalchemy import update
 from tests.support.problems import PROBLEM_KEYS, refused
 from tests.support.stores import body, holding_the_write_lock, planted, the_lock_held
 from vinga_server.config.api import build_api
+from vinga_server.config.loader import StoredConfigUnreadableError
 from vinga_server.config.models import PROVIDER_STAGES, DatabaseConfig, ProviderConfig
 from vinga_server.config.secrets import (
     MASK,
@@ -451,8 +452,15 @@ def test_a_row_that_cannot_be_read_is_500(
     # field is inspected, args included: a record holding the exception
     # itself would carry its message and its chain to anything that
     # walks the record, which is what a structured log handler does.
+    #
+    # The class named is the one the store actually raised, which since
+    # #507 is the subclass meaning a stored row will not read as
+    # configuration rather than its parent. The status and the sentence
+    # are the parent's still; what the record gained is which of the
+    # parent's two meanings this was, and recording the less specific
+    # name to keep a spelling would be describing the failure by hand.
     logged = [record for record in caplog.records if record.name.startswith("vinga_server")]
-    assert [record.args for record in logged] == [("StorageError",)]
+    assert [record.args for record in logged] == [(StoredConfigUnreadableError.__name__,)]
     for record in logged:
         assert record.exc_info is None
         assert "unreadable stored state" in record.getMessage()
