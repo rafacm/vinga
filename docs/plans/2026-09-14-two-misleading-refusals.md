@@ -366,10 +366,16 @@ ordinary declared word, never key material.
   assertion.
 - `Authorization: pasted-token-here`, with no reference anywhere in it,
   is still refused, and the refusal still quotes no key material.
-- `mask` still returns the mask for a composed value, which is the
-  decision above pinned rather than assumed.
-- The whole-value question keeps rejecting a terminal newline, which is
-  the `fullmatch` decision pinned as a boundary case, written FIRST.
+- `mask` returns a composed value as written, and a padded one too,
+  which is the reversal resolution 1 below settled pinned rather than
+  assumed. A value with no reference anywhere in it still masks, which
+  is what the mask was written for.
+- The whole-value question keeps the trimming it has, a terminal
+  newline included, so `"$TOKEN\n"` goes on resolving to the bare
+  secret. `fullmatch` rather than `match` with a `$` appended is the
+  spelling that makes that true of the pattern as well as of the strip,
+  and the boundary is pinned through the resolver rather than through
+  the private helper.
 
 **M2.** The boot printing is the behavior, so it is tested at the boot.
 
@@ -418,12 +424,18 @@ is reported as a finding about the test.
 
 ## Risks
 
-- **M1 widens what a secret-bearing key accepts.** A value containing a
-  reference and a pasted credential now passes the write-time check.
-  Accepted, with the boundary held elsewhere: the display path stays
-  closed, so such a value never renders, and the check was always a
-  guard against the obvious mistake rather than a guarantee about what
-  an operator can write. Named here so the review sees it was weighed.
+- **M1 widens what a secret-bearing key accepts, and what is shown.** A
+  value containing a reference and a pasted credential now passes the
+  write-time check, and under the settled display rule it also renders,
+  deliberately: one rule reads both paths, so literal text sitting
+  beside a reference is displayed along with it. Accepted. The check
+  was always a guard against the obvious mistake rather than a
+  guarantee about what an operator can write, and a display that
+  disagreed with the write about the same value is the shape that cost
+  this repository a mask standing in for a keep marker. What the mask
+  still catches is what it was written for: ciphertext, a malformed
+  envelope, and a paste with no reference in it. Named here so the
+  review sees it was weighed.
 - **M1 changes the meaning of an existing value.** Covered above; the
   failure is loud and the changelog says so.
 - **M2 prints more on a failing boot.** The added line is fixed text
