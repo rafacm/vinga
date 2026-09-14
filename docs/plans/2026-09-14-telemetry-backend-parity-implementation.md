@@ -129,3 +129,102 @@ by cascading fixture teardown errors. The container did not restart or run out
 of memory and was healthy immediately afterward. The complete four-worker
 distributed runs stayed inside that local service's concurrency envelope and
 finished green.
+
+## PR review round, M1 (PR #524)
+
+External review of the PR diff `origin/main...fb4b199d`: claude CLI 2.1.270,
+read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 11m53s,
+[posted on the PR](https://github.com/rafacm/vinga/pull/524#issuecomment-5668711562).
+Verdict: mergeable after the listed fixes. The reviewer found six P2 and five
+P3 issues. It confirmed the core invocation, retry, recap-accounting,
+outer-timeout and no-leak mechanics while requiring the following corrections.
+
+1. **P2: two telemetry comments described the deleted failure-fold rule.**
+   They still said non-ASR provider failures became turn events and that every
+   stage without an open turn fell through to an event.
+
+   *Resolution* (`9342992b`): both comments now state the substitutive
+   three-stage failure rule, the common missing-turn parent, and the explicit
+   unknown-stage fallback.
+
+2. **P2: an unknown `provider_failed.stage` was silently discarded.** The
+   event field admits any identifier, while the exporter returned for every
+   value outside `asr`, `llm` and `tts`.
+
+   *Resolution* (`9342992b`): an unknown stage now uses the default span-event
+   fold, with a regression test for a future `embedding` stage.
+
+3. **P2: sampled-away content was misreported as `undelivered`.** Preserving
+   retained trace flags lets the private tracer produce non-recording spans,
+   which the OTLP encoder could not accept and the containment mislabeled as a
+   transport failure.
+
+   *Resolution* (`9342992b`): both content exporters drop non-recording spans
+   before OTLP encoding and answer `Delivery.NO_TRACE`; their workers emit the
+   existing `no_trace` reasons. Tests cover unsampled session and independently
+   sampled turn roots. The operator contract is recorded in `a28c6bbb`.
+
+4. **P2: failed TTS spans could erase retained provider context.** Four absent
+   identity fields from an unbuilt voice suppressed the session's configured
+   TTS identity without replacing it.
+
+   *Resolution* (`9342992b`): failed LLM and TTS folds use `_speaks_for`, just
+   like the established ASR and successful TTS folds, so absent failure
+   identity preserves the retained provider quartet.
+
+5. **P2: the promised decoded-wire substitution assertion was missing.** Unit
+   tests covered the in-memory spans, but no integration test decoded OTLP and
+   proved the old turn events absent.
+
+   *Resolution* (`9342992b`): the real OTLP/HTTP protobuf receiver now asserts
+   failed `llm` and `tool` spans, their error status and safe `error.type`, and
+   the absence of `provider_failed` and `tool_call` events on the decoded turn.
+
+6. **P2: suppressing `sentence_synthesized` changed the declared log event
+   surface.** A stream that produced chunks and then failed lost its
+   first-chunk and whole-stream timings even when telemetry was disabled.
+
+   *Resolution* (`9342992b`): the runtime emits the stream-end event again.
+   Telemetry consumes it after the immediately preceding failed TTS operation,
+   preserving one trace carrier without removing the event from text or JSON
+   logs. `a28c6bbb` records why substitution belongs at the telemetry fold.
+
+7. **P3: successful and failed operations used different missing-turn
+   fallbacks.** Failed spans and tools could parent to the session, while
+   successful LLM and TTS work degraded to span events despite the documented
+   semantic-operation topology.
+
+   *Resolution* (`9342992b`): ASR, LLM, TTS and tool operations all remain real
+   spans and parent to the session when no turn is open. `a28c6bbb` states that
+   rule in the server contract and implementation record.
+
+8. **P3: LLM purpose and invocation attribute names were repeated as string
+   literals.** The purpose constant already existed, but the two attribute
+   tables bypassed it and no invocation constant existed.
+
+   *Resolution* (`9342992b`): both tables use `LLM_PURPOSE` and the new
+   `LLM_INVOCATION_ID`, beside a comment that generation and input spans share
+   the same correlation vocabulary.
+
+9. **P3: the reply-accounting switch used an unvalidated purpose string.** A
+   typo could skip `round_done` and fail event construction without static type
+   checking, despite the existing `LlmPurpose` enum.
+
+   *Resolution* (`9342992b`): runtime generation paths and LLM-input staging
+   carry `LlmPurpose`; the accounting branch compares directly with
+   `LlmPurpose.REPLY`.
+
+10. **P3: the plan placed both review verdicts after the re-review.** The first
+    review section had no verdict, and the re-review appeared to conclude
+    twice.
+
+    *Resolution* (`a28c6bbb`): the 17-finding verdict now closes the first plan
+    review, while the 15-finding verdict alone closes the re-review.
+
+11. **P3: the changelog omitted the removed turn span events.** It named the
+    replacement failed spans without warning operators that saved event
+    filters for `provider_failed` and failed `tool_call` would stop matching.
+
+    *Resolution* (`a28c6bbb`): the fragment has a `Removed` entry naming both
+    former turn events and directing readers to failed `asr`, `llm`,
+    `tts_stream` and `tool` spans.
