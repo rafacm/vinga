@@ -22,8 +22,8 @@ configuration rather than inside the secret.
 | The widened write rule | `config/models.py`: `_secret_problems` asks whether a value contains a reference, and the refusal names what is now allowed with the composed form as its example, quoting neither the key nor the value |
 | The field descriptions | `config/models.py`: `env` and `headers` say a reference may be the whole value or sit inside a larger one, and that there is no escape for a literal `$` |
 | The display rule | `config/secrets.py`: `_DOLLAR_REFERENCE_RE` is gone and `mask` reads `references_environment`, so a composed value displays, exports and imports and a paste with no reference in it still masks |
-| The atoms crossing the seam | `config/secrets.py`: `resolve_mcp_values` answers with `ResolvedValues`, a stored secret joining the set as its own atom; `tools/mcp/transport.py`'s `_resolve` passes both halves on |
-| The redactor | `tools/mcp/manager.py`'s `_capture` gives `_redactor` the substituted secrets beside the materialized values, and `tools/mcp/prompts.py`'s `_redactor` takes iterables of values, its longest-first rule unchanged |
+| The atoms crossing the seam | `config/secrets.py`: `resolve_mcp_values` answers with `ResolvedValues`, a stored secret joining the set as its own atom; `tools/mcp/transport.py`'s `_resolve` passes both halves on and `_connect` answers with the pair it actually sent |
+| The redactor | `tools/mcp/manager.py`'s `_capture` is handed what the connect sent and gives `tools/mcp/prompts.py`'s `_redactor` the materialized values and the atoms as two arguments, the length floor applying to the first and never to the second; the longest-first rule is unchanged |
 | The example | `examples/mcp-server-streamable-http.yaml`: the composed header, the doubled-prefix 401 named, and the encrypted slot stated as holding the FINISHED header value with the precedence pinned at the wire |
 | The other three documents that stated the old rule | `examples/mcp-server-stdio.yaml`, `examples/README.md`, `vinga-server/README.md` |
 | The regenerated references | `docs/reference/domain-config.md` and `docs/reference/api-openapi.json`, through their generators; the other five committed references and the CLI page did not move |
@@ -45,6 +45,8 @@ Tests, by claim:
 | A composed value carrying a newline never reaches the wire, and reaches no surface either | `tests/unit/test_mcp_composed_reference.py` |
 | The acceptance case: written, exported, imported into an empty database, and the second deployment sends the byte-identical header | `tests/unit/test_mcp_composed_reference.py` |
 | A server reflecting the BARE token out of a composed value reaches no operator surface | `tests/unit/test_mcp_status_reflection.py`, with `tests/support/mcp_reflecting_server.py` stripping the composed prefix before it reflects |
+| A reflected token shorter than the redaction floor is taken out all the same | `tests/unit/test_mcp_composed_reference.py` |
+| The capture redacts what the connection sent, not what the environment says by the time it runs | `tests/unit/test_mcp_composed_reference.py` |
 
 ### Deviations from the plan
 
@@ -205,3 +207,121 @@ asserted.
   an entry written with the whole value as the reference is unaffected
   (a value with no prefix comes out unchanged) and an entry that
   composes one is answered with the bare token.
+
+### PR review round, PR #519
+
+External review: codex CLI 0.154.0, model gpt-5.6-sol, read-only
+sandbox, 2026-09-14, runtime 8m43s, reviewing main...b232cdc0. Verdict
+as received: **mergeable after the listed fixes**. Five findings, four
+adopted and one rejected; each adopted one is fixed in a commit of its
+own.
+
+Both P1s are about the same half of the change, and neither is about
+the composition itself: they are about what the redactor is given. The
+milestone made the atoms cross the seam and then let two things undo
+it, a floor that swallowed the short ones and a capture that went back
+to the environment for them anyway.
+
+1. **P1: short substituted secrets bypass redaction.**
+   `resolve_env_values` classifies every substituted value as a secret,
+   but `_redactor` discards every string shorter than eight characters,
+   so `TOKEN=abc123` with `Authorization: Bearer $TOKEN` redacts
+   `Bearer abc123` and lets a hostile server's bare `abc123` reach
+   stored guidance, the prompt preview, the API and the CLI. Fix:
+   distinguish generic materialized values from known substituted
+   atoms, keep the floor only for the generic ones, redact every
+   non-empty atom whatever its length, and add an end-to-end case below
+   the floor.
+
+   *Resolution.* Adopted whole. `_redactor` now takes the two
+   separately rather than as varargs over one set, and the docstring
+   says why they differ: the floor is about not knowing, and an atom is
+   not a guess. A short generic value is a port or a locale and might
+   be anybody's; a short atom came out of the variable a secret-bearing
+   key referenced, so it is a short credential, and a few mangled
+   occurrences of a short word is the cheaper mistake by a distance.
+   `test_a_reflected_token_below_the_redaction_floor_is_taken_out`
+   drives a six-character credential through a composed header and a
+   server that hands the bare token back, and was watched failing with
+   the floor left on the atoms: `'Call the forecast tool with
+   [redacted].' in 'Call the forecast tool with q7v3zx.'`
+
+2. **P1: the capture re-resolves instead of redacting with what was
+   sent.** `_connect` resolves, sends, and discards its
+   `ResolvedValues`, and `_capture` reads the environment again on the
+   far side of a handshake and a tool listing. A variable that moves in
+   that window leaves the server holding secret A while the redactor
+   knows only B, so a reflected A leaks; it also contradicts the plan's
+   own requirement that the atoms cross the seam rather than be
+   reconstructed. Fix: return the active `ResolvedValues` from
+   `_connect`, pass them into `_capture`, release them afterwards, and
+   test with a variable that changes while discovery is blocked.
+
+   *Resolution.* Adopted whole, and the finding is right that this was
+   the rule half-followed. `_connect` answers with the values it used,
+   one group rather than both because one is all a connection uses (a
+   transport is given its own group and the model refuses an entry that
+   names the other's), `_capture` takes them as an argument, and `_run`
+   drops its reference in a `finally` before the wait that holds a
+   connection open, so the "never held on the manager" promise now
+   states its scope accurately. The fail-closed branch around the old
+   resolution went with it: nothing in `_capture` can raise where it
+   used to, because the values arrive already resolved by a connect
+   that could not otherwise have succeeded.
+   `test_the_capture_redacts_what_was_sent_and_not_what_is_set_now`
+   holds the window open from the far side, an ASGI wrapper on the test
+   server changing the variable when the handshake arrives, which is
+   deterministic rather than a sleep: the change lands strictly after
+   the values were resolved and sent and strictly before the listing
+   and the capture. Watched failing with the capture resolving again:
+   the credential that was actually sent stands unredacted in the
+   guidance while the variable holds the other one.
+
+3. **P2: the established resolver API was removed contrary to the
+   plan.** The plan requires `resolve_env_references` to keep its
+   mapping-returning signature; the PR removes the publicly exported
+   name and replaces it with `resolve_env_values`, and the absence of
+   an in-tree caller does not protect external importers of an
+   `__all__` export.
+
+   *Resolution.* **Rejected**, by the maintainer, who is answering it
+   on the pull request; the name stays deleted. The project has a
+   recorded pre-release compatibility stance: there are no third-party
+   installs to support. So the importer the finding protects is
+   hypothetical, and keeping a public name alive for a hypothetical
+   reader is exactly what the deletion test refuses. The deviation note
+   above stands as the record of the judgement.
+
+4. **P2: the hostile redaction test omits required no-leak surfaces.**
+   The composed-reflection case checks the response renderings and that
+   suite's own `rendered`, which does not inspect typed `record.args`;
+   it attaches no server tap and, unlike the whole-value case beside
+   it, makes no exception-chain assertion, while the governing plan
+   requires all-record rendering, event payloads and every exception
+   chain.
+
+   *Resolution.* Adopted. The case now reads every record through
+   `every_format`, asserts the sentinel absent from every emission an
+   attached tap was handed, and asserts no record carries an exception
+   to render. The tap is checked non-empty first, so the absence is an
+   absence from a transport that ran rather than from one nothing
+   reached, which is the guard that makes an absence assertion worth
+   reading at all.
+
+5. **P2: the governing plan still states the pre-review masking
+   behavior.** Its test section says a composed value remains masked
+   and that the whole-value question rejects a terminal newline, and
+   its risk section promises that a pasted credential beside a
+   reference never renders. All three contradict the round's own
+   resolution 1 and the implemented behavior.
+
+   *Resolution.* Adopted. The two test bullets now say that composed
+   and padded references display while a value with no reference still
+   masks, and that the whole-value question keeps the strip it has, a
+   terminal newline included, with `fullmatch` as the spelling that
+   makes that true of the pattern as well. The risk bullet now names
+   the display consequence as part of what was weighed rather than
+   promising the opposite of it. The recorded plan-review findings and
+   their resolutions were not touched: they are a record of what was
+   said, and the contradiction was in the body that had not been
+   carried forward with them.
