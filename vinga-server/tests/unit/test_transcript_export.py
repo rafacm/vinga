@@ -227,7 +227,11 @@ async def test_one_acknowledged_turn_settles_its_original_root(
         (
             SESSION,
             UTTERANCE,
-            {"input": "turn the light on", "output": "Done."},
+            {
+                "input": "turn the light on",
+                "output": "Done.",
+                "legs": [{"agent": "alpha", "text": "Done."}],
+            },
         )
     ]
     assert telemetry.released == []
