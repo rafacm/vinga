@@ -226,6 +226,14 @@ one real `llm` span under the active turn, with `vinga.llm.purpose=recap`; the
 successful and failed shapes are symmetric, and the staged recap request has
 an operation to enrich.
 
+The recap's outer `asyncio.timeout` is a third failure site: cancellation
+passes through `_watched_stream` and becomes `TimeoutError` only at the outer
+boundary. That `except TimeoutError` arm explicitly calls `_provider_failed`
+with the recap invocation id, `purpose=recap`, elapsed time and the safe
+`TimeoutError` type before returning its existing no-recap result. It does not
+rely on the inner helper to catch `CancelledError`, and it consumes the staged
+request onto the failed generation span.
+
 The existing per-request, per-session and maximum-round bounds apply to the
 combined canonical content. A round over the per-request bound is dropped
 whole. The session budget evicts whole rounds oldest first. Dropping content
@@ -479,6 +487,9 @@ fixtures are extended rather than replaced.
   never its metadata span. Two turns with repeated reply-local ordinals, plus
   an oversized round between retained rounds, prove that only the opaque
   invocation id performs the join. There is no span named `llm_input`.
+  A recap outer-timeout test proves one failed `llm` span receives the staged
+  recap input and that neither a duplicate failure event nor an orphaned
+  snapshot remains.
 - The existing OTLP protobuf integration receiver compares decoded wire data,
   not SDK objects, for topology, status, standard attributes and both flag
   combinations. A multi-round tool and handover conversation proves ordinal
@@ -790,6 +801,11 @@ read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 9m08s.
 5. **P2: recap timeout bypasses `provider_failed`.** Cancellation becomes
    `TimeoutError` only outside `_watched_stream`, after the helper's catch, so
    the plan must instrument this third recap outcome explicitly.
+
+   *Resolution:* The recap's outer `except TimeoutError` now emits the one safe
+   provider failure with its invocation id, recap purpose and elapsed time
+   before preserving the existing no-recap return. A regression test proves
+   the staged request lands on that failed span and is not stranded.
 6. **P2: using ordinary `_llm_round_done` for recap changes stored turn
    accounting and metrics.** The plan must decide whether recap advances the
    reply ordinal or `TurnRecord.round_done`, and document any metrics change.
