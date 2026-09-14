@@ -85,8 +85,8 @@ Option 2 is what M4a already paid for. It costs the parenting argument
 and nothing else at the wire: the spans are built the same way, ride the
 same private tracer, deliver through the same bounded call.
 
-What this plan takes from option 1 anyway is the ATTRIBUTE, for the case
-option 2 cannot serve: see below.
+What this plan takes from option 1 is NOT option 1: it is one shared
+correlation key, and the difference is stated below.
 
 ### The key crosses on the seam the projection already is
 
@@ -152,12 +152,30 @@ that has the problem, which is where a reader is already looking.
 One attribute, `vinga.utterance.id`, the name the turn span already
 uses, on the transcript span too.
 
-It is what makes the fallback case still joinable: a reader holding a
-transcript that could not be nested can still find the turn trace by
-querying that id, exactly as option 1 promised, and a reader holding a
-stored row can find its transcript. It also makes the nesting
-self-describing rather than implicit in a parent pointer, and it is the
-attribute a wire test asserts to prove the two sides agree.
+This is a shared correlation key and deliberately not the issue's
+option 1, which carries the turn's own trace and span ids. The
+difference is what each can do for a transcript that could not be
+nested, and it is worth being exact about, because the three
+unaddressable cases are not equally reachable:
+
+- **An evicted turn** has a trace, and a reader can find it by
+  searching for this id, IF the backend can filter on an arbitrary
+  observation attribute. That is a capability of the deployment's
+  backend rather than a property of this change, and it is unverified
+  here.
+- **A turn telemetry never opened** has no trace at all, so no
+  attribute of any spelling would reach one.
+- **A row with a null utterance** carries no attribute, by the same
+  absence rule every other optional half follows.
+
+Option 1's ids are not available in any of those cases for the reason
+they are those cases: the pin that holds them is what is missing. So
+the honest claim for the attribute is the one it can keep, which is
+that a reader holding a stored row and a reader holding a transcript
+name the same turn, in the store, on the turn span and on the
+transcript span, in one vocabulary. It also makes the nesting
+self-describing rather than implicit in a parent pointer, and it is
+what a wire test asserts to prove the two sides agree.
 
 The name is spelled ONCE. It lives inline in `TURN_ATTRIBUTES` today;
 this change lifts it to a module constant that both the turn's table and
@@ -489,6 +507,13 @@ row carries no attribute at all, a turn telemetry never opened has no
 trace to find, and an evicted turn is reachable only if the backend can
 filter on that attribute. It should be called a shared correlation key,
 with the reachable cases named.
+
+*Resolution* (commit below): taken. The plan no longer calls the
+attribute option 1. It is a shared correlation key, and the three
+unaddressable cases are separated: an evicted turn is reachable only
+through a backend attribute filter this change does not verify, a turn
+no span was opened for has nothing to reach, and a null row carries no
+attribute at all.
 
 *Resolution* (commit below): taken. The live check is a completion
 gate on the issue rather than an optional extra: the lane gates the
