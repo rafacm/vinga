@@ -404,8 +404,13 @@ the existing Langfuse REST and object-storage destinations in that assertion.
   walkthroughs. `docs/architecture/observability-surfaces.md` owns the updated
   surface map. `docs/README.md` routes readers to the deployment procedures.
   The two server config examples link to the runnable add-ons without copying
-  their credentials. The content-and-telemetry ADR receives an amendment only
-  if implementation changes a standing policy rather than its mechanism.
+  their credentials. M2 amends the content-and-telemetry ADR because its
+  metadata-only fold and separate content-span mechanism become false. The
+  replacement invariant is: the event fold never reads content; a fold-made
+  span may receive content only from a successfully registered content
+  exporter, under that class's explicit flag, through a server-minted
+  correlation identity and an allowlisted projection. The observability map
+  derives its current-surface wording from that policy.
 - `docs/reference/server-config.md`, `docs/reference/domain-config.md` and
   `docs/reference/events.md` are regenerated only from their generators. The
   first two change with the widened `export_llm_input` description even though
@@ -671,6 +676,10 @@ model `claude-opus-5`, 2026-09-14, runtime 5m18s.
     metadata-only fold and separate content-span rule becomes false. It needs a
     replacement invariant that content reaches a fold-made span only through a
     registered, flagged content exporter keyed by server-minted identity.
+
+    *Resolution:* M2 now carries a required ADR amendment. The new checkable
+    invariant keeps events content-free and permits content on a fold-made span
+    only through a built, flagged exporter, a server identity and an allowlist.
 15. **P3: the deferred module's deletion-test reason is wrong.** Its caller is
     already the SDK-owning module. The real deep responsibility is deciding
     when an ended span remains enrichable and when it must be released exactly
