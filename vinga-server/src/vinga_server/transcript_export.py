@@ -709,6 +709,7 @@ def _turns(
                 heard=row["heard"],
                 reply=row["reply"],
                 legs=row["legs"],
+                utterance=row["utterance"],
             )
         )
     return turns, ordinal

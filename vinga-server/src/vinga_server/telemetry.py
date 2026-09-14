@@ -1669,7 +1669,7 @@ class TranscriptTurn:
 
     The seam between the transcript exporter and this module, stated as
     a type rather than implied by a mapping both sides index: what
-    crosses is exactly these seven facts, so a projection that grew a
+    crosses is exactly these eight facts, so a projection that grew a
     column cannot reach a span by accident and this module never learns
     that a database is behind it.
 
@@ -1677,6 +1677,14 @@ class TranscriptTurn:
     store's own row identity; `legs` is the column as the store holds
     it, allowlisted and encoded HERE, because what a span may carry is
     this module's question.
+
+    `utterance` is the name the turn is addressed by, and it is the one
+    member this module RESOLVES rather than renders: it decides which
+    turn's trace the span is written into, and rides the span beside it
+    so a reader holding a stored row and a reader holding a transcript
+    name the turn the same way (#506). Null for a row written before
+    that correlation existed, which is the un-nested case rather than a
+    reason to drop a turn.
     """
 
     index: int
@@ -1686,6 +1694,7 @@ class TranscriptTurn:
     heard: str | None
     reply: str | None
     legs: Any = None
+    utterance: str | None = None
 
 
 class Delivery(Enum):

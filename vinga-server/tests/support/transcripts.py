@@ -161,9 +161,16 @@ def a_row(
     agent: str | None = "alpha",
     legs: Any = None,
     t_ms: int | None = None,
+    utterance: str | None = "0f1e2d3c4b5a69780f1e2d3c4b5a6978",
 ) -> dict[str, Any]:
     """One row of the transcript projection, spelled exactly as
-    `threads.transcript_rows` answers it."""
+    `threads.transcript_rows` answers it.
+
+    `utterance` carries a real one by default, because a row the store
+    wrote normally does: the null a pre-correlation row holds is what a
+    case says out loud when it is about the un-nested path, never what
+    it gets by forgetting to say anything.
+    """
     return {
         "id": id,
         "t_ms": id * 100 if t_ms is None else t_ms,
@@ -171,4 +178,5 @@ def a_row(
         "heard": heard,
         "reply": reply,
         "legs": legs,
+        "utterance": utterance,
     }
