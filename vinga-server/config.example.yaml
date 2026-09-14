@@ -403,7 +403,7 @@ server:
   #   # storage your backend is configured with, which a Langfuse on
   #   # your own network may perfectly well answer with a URL at a cloud
   #   # vendor. Any one of the three outside your network makes this
-  #   # `internet`, and all three features below are then refused rather
+  #   # `internet`, and all four features below are then refused rather
   #   # than the one that would have been caught.
   #   #
   #   # IT IS AN ASSERTION, NOT A PROOF, and the third destination is
@@ -494,6 +494,53 @@ server:
   #   # the session closed, never on the audio path, and a failure is a
   #   # warning rather than a failed session.
   #   export_transcripts: false
+  #   # EXPORTS THE REQUEST THE MODEL WAS GIVEN to the telemetry
+  #   # backend, one observation per LLM round on the trace that
+  #   # session was exported under, rendered as the observation's
+  #   # input. Off by default and its own decision: neither `enabled`
+  #   # nor either switch above it implies that the model's input
+  #   # leaves.
+  #   #
+  #   # THIS IS THE WIDEST OF THE THREE CONTENT CLASSES AND CONTAINS
+  #   # WHAT `export_transcripts` CONTAINS. An assembled request holds
+  #   # the dialogue as the model saw it, so this sends conversation
+  #   # text off this host whether or not the switch above is on. The
+  #   # two stay independent; neither turns the other on.
+  #   #
+  #   # What goes is the request as this server assembled it: the
+  #   # system prompt with its memory and know-how blocks, the message
+  #   # history as the model was given it, the tool schemas offered,
+  #   # the tool arguments the model asked for and the results it was
+  #   # handed back, and the tool choice. What does not go is vendor
+  #   # framing, the generation parameters, the endpoint, any header
+  #   # and any credential.
+  #   #
+  #   # There is no local store behind it: a session assembles a
+  #   # request because it is about to make it, so what is exported
+  #   # exists for the session, then in a bounded delivery job until it
+  #   # is delivered or dropped, and nowhere after that. A process that
+  #   # dies with exports queued loses them, and nothing can recover
+  #   # them; what was said is still in the conversation store when
+  #   # that is recording.
+  #   #
+  #   # What one session may stage is bounded in bytes, per request and
+  #   # for the session as a whole. A request over the ceiling is
+  #   # dropped whole rather than truncated; over the budget, whole
+  #   # requests go oldest first. Both are counted and both reasons are
+  #   # reported on `llm_input_exported`, so a partial export says so.
+  #   #
+  #   # EXPORTED REQUESTS OUTLIVE ERASURE HERE, the way exported text
+  #   # does, and retention is then the backend's.
+  #   #
+  #   # With `enabled` above off it is refused at boot, and under a
+  #   # `data_boundary` narrower than this section's `reach` it is
+  #   # refused too. Nothing else can make it a no-op: there is no
+  #   # local surface behind it to switch off, so `conversations` and
+  #   # `capture` are irrelevant to it. It needs no extra and no second
+  #   # credential, rides the same OTEL_EXPORTER_OTLP_* transport, runs
+  #   # on a worker of its own after the session closed, and a failure
+  #   # is a warning rather than a failed session.
+  #   export_llm_input: false
 
   # Whether speech that arrives while a reply is playing interrupts it.
   # On by default: a device only keeps streaming its microphone through
