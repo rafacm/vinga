@@ -613,8 +613,8 @@ class McpServerManager:
                 for group in ("env", "headers")
             ]
             redact = _redactor(
-                *(resolved.values.values() for resolved in groups),
-                *(resolved.secrets for resolved in groups),
+                [value for resolved in groups for value in resolved.values.values()],
+                [atom for resolved in groups for atom in resolved.secrets],
             )
         except Exception as exc:
             # Fail closed, and do not take the tools with it. Resolving

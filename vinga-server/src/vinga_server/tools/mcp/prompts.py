@@ -74,10 +74,17 @@ REDACTED = "[redacted]"
 # And how long a materialized value has to be before it is treated as
 # one. Below this, an entry's env and headers hold things like a port, a
 # locale or `true`, and replacing every occurrence of a three-character
-# value would mangle the guidance without protecting anything: a secret
-# that short is not one. Everything at or above it is replaced, secret
-# or not, because whether a value is a credential is not knowable from
-# here and a redacted setting costs an operator nothing.
+# value would mangle the guidance without protecting anything: from
+# here, a short generic value is a string that might be anybody's.
+# Everything at or above it is replaced, secret or not, because whether
+# such a value is a credential is not knowable from here and a redacted
+# setting costs an operator nothing.
+#
+# The floor is about that not-knowing, so it does not apply to a value
+# this server knows IS a credential: a substituted atom came out of the
+# variable a secret-bearing key referenced, and a six-character token is
+# a token. Mangling a few innocent occurrences of a short credential is
+# the cheaper mistake by a distance (#504).
 REDACTION_FLOOR = 8
 
 # The two channels a server ships guidance in, as the warnings name
@@ -120,7 +127,7 @@ class _PromptsUnreadable(Exception):
 _Redactor = Callable[[str | None], str | None]
 
 
-def _redactor(*groups: Iterable[str]) -> _Redactor:
+def _redactor(values: Iterable[str], atoms: Iterable[str] = ()) -> _Redactor:
     """A function that takes this deployment's own values back out of
     whatever a server hands it.
 
@@ -138,6 +145,17 @@ def _redactor(*groups: Iterable[str]) -> _Redactor:
     the token alone, which is a string no set of whole header values
     holds (#504).
 
+    The two are taken separately rather than poured into one set,
+    because only one of them is guesswork. `values` is whatever an entry
+    configured, most of it ordinary settings, so the length floor stands
+    there: a short one is a string that might be anybody's, and
+    replacing it would mangle the guidance without protecting anything.
+    An atom is not a guess. It came out of a variable a secret-bearing
+    key referenced, so a six-character one is a six-character
+    credential, and every non-empty atom is replaced whatever its
+    length. What that costs, at worst, is a few mangled occurrences of a
+    short word; what the floor would cost is the credential.
+
     Longest first, so that a value which contains another is replaced
     whole rather than left holding a placeholder in the middle of it.
     That rule is what makes a token inside its own composed value come
@@ -145,7 +163,8 @@ def _redactor(*groups: Iterable[str]) -> _Redactor:
     the header did not.
     """
     values = sorted(
-        {value for group in groups for value in group if len(value) >= REDACTION_FLOOR},
+        {value for value in values if len(value) >= REDACTION_FLOOR}
+        | {atom for atom in atoms if atom},
         key=len,
         reverse=True,
     )
