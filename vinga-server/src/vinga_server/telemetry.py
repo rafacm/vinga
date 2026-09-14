@@ -2247,9 +2247,6 @@ class Telemetry:
         to read.
         """
         self._accepting = False
-        self._release_held_turns()
-        with self._llm_content_lock:
-            self._llm_content.clear()
         finished, mine = self._claim()
         if mine:
             try:
@@ -2276,6 +2273,7 @@ class Telemetry:
                 # thing this whole design refuses. What is lost is the
                 # SDK's own thread, which is a daemon and dies with the
                 # process.
+                self._release_content()
                 self._quieted.release()
                 finished.set()
                 logger.warning(
@@ -2350,6 +2348,8 @@ class Telemetry:
         going to say about a collector it cannot reach, it says between
         these two lines.
         """
+        self._accepting = False
+        self._release_content()
         try:
             self._provider.shutdown()
         except Exception:  # noqa: BLE001 - a teardown never raises at the operator
@@ -2360,6 +2360,12 @@ class Telemetry:
             self._quieted.release()
             if self._finished is not None:
                 self._finished.set()
+
+    def _release_content(self) -> None:
+        """Settle content state before the SDK can stop accepting spans."""
+        self._release_held_turns()
+        with self._llm_content_lock:
+            self._llm_content.clear()
 
     # --- the fold -----------------------------------------------------
 

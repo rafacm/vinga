@@ -91,6 +91,16 @@ def test_no_built_exporter_never_delays_a_root() -> None:
     named(finished(telemetry, memory), "turn")
 
 
+def test_blocking_release_ends_a_held_root_metadata_only() -> None:
+    telemetry, memory = _held()
+
+    telemetry.release()
+
+    turn = named(finished(telemetry, memory), "turn")
+    assert TURN_INPUT not in turn.attributes
+    assert TURN_OUTPUT not in turn.attributes
+
+
 def test_worker_and_shutdown_contenders_end_once() -> None:
     session = SESSION
     for index in range(100):
