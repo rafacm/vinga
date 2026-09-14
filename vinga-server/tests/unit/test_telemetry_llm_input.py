@@ -24,6 +24,8 @@ Three properties this file exists for, and each is provable only here:
 """
 
 import logging
+import threading
+import time
 from collections.abc import Iterator
 from typing import Any
 
@@ -42,11 +44,13 @@ from tests.support.telemetry import (
     released,
     session_events,
 )
+from vinga_server import telemetry as telemetry_module
 from vinga_server.telemetry import (
     _QUIETING,
     Delivery,
     LlmInputRound,
     Telemetry,
+    TranscriptTurn,
 )
 
 # A credential-shaped value planted in the request, because this is the
@@ -332,3 +336,227 @@ def test_a_failed_delivery_says_nothing_of_what_it_was_carrying(
 
     assert answer is Delivery.UNDELIVERED
     assert REQUEST_SENTINEL not in both_formats(caplog)
+
+
+# --- the transport both content exporters share ------------------------
+#
+# The second caller is what made this a question. One worker delivering
+# through a lazily built exporter was safe by having nobody to race;
+# this module's worker is a second, on a thread of its own, and the two
+# reach the same instance through the same path.
+
+# How many times the concurrent case is run. A concurrency claim proved
+# once is a claim about one interleaving, and the window here is the few
+# microseconds between a `None` check and the assignment after it, so
+# the case is repeated until a run that never widened it would be
+# remarkable rather than likely.
+CONCURRENT_RUNS = 50
+
+
+# How long one export stays inside the transport. Long enough that the
+# teardown, which runs behind the batch provider's own shutdown, is
+# still arriving while a delivery is in flight: a case whose deliveries
+# were over before the close began would drive the overlap it is named
+# for exactly never, which is what the first draft of it did.
+EXPORT_S = 0.02
+
+
+class Shared:
+    """The one OTLP exporter both workers reach, watching for the three
+    things that can go wrong when two of them do.
+
+    `built` catches the lost instance: two first calls that both see
+    `None` build two, and one of them is assigned over and never shut
+    down. `peak` catches the shared mutable client: the SDK's HTTP
+    exporter holds a session that is not safe to call from two threads
+    at once. `closed_while_exporting` catches the third, which is the
+    teardown: a shutdown that lands inside an export is the same race
+    wearing different clothes.
+
+    `entered` is what makes the third observable rather than lucky. The
+    teardown runs behind the batch provider's own shutdown, so a case
+    that released it the moment the barrier opened would find every
+    delivery already finished; the run waits for a delivery to be
+    genuinely inside before it tears anything down.
+    """
+
+    built: "list[Shared]" = []
+
+    def __init__(self) -> None:
+        # Wide enough that two callers arriving together genuinely
+        # overlap here, which is the window a lock has to close.
+        time.sleep(0.002)
+        self._lock = threading.Lock()
+        self.inside = 0
+        self.peak = 0
+        self.closed_while_exporting = False
+        self.entered = threading.Event()
+        Shared.built.append(self)
+
+    def export(self, spans: Any) -> Any:
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        with self._lock:
+            self.inside += 1
+            self.peak = max(self.peak, self.inside)
+        self.entered.set()
+        time.sleep(EXPORT_S)
+        with self._lock:
+            self.inside -= 1
+        return SpanExportResult.SUCCESS
+
+    def shutdown(self) -> None:
+        with self._lock:
+            if self.inside:
+                self.closed_while_exporting = True
+
+
+def an_export_in_flight(timeout_s: float = 10.0) -> None:
+    """Wait until a delivery is genuinely inside the transport.
+
+    Bounded and never asserted on: a run where the teardown won the race
+    outright is a legal interleaving and not a broken case, so this
+    returns either way and the invariants below are what carry the
+    claim.
+    """
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if Shared.built:
+            Shared.built[0].entered.wait(timeout_s)
+            return
+        time.sleep(0.001)
+
+
+def a_turn_row(index: int = 1) -> TranscriptTurn:
+    return TranscriptTurn(
+        index=index, id=4000 + index, t_ms=1200, agent="alpha", heard="hi", reply="ho"
+    )
+
+
+def deliver_both(telemetry: Telemetry, context: Any) -> list[Delivery]:
+    """Both content exporters delivering at once, with the teardown
+    landing in the middle rather than politely behind them, and what
+    each of them answered.
+
+    A function of its own rather than a loop body, so the two threads
+    close over arguments rather than over a loop variable, and so the
+    one thing a run is about, the overlap, has a name.
+    """
+    together = threading.Barrier(3)
+    answers: list[Delivery] = []
+    answered = threading.Lock()
+
+    def deliver(which: str) -> None:
+        together.wait(10.0)
+        answer = (
+            telemetry.export_transcript(SESSION, context, [a_turn_row()])
+            if which == "transcripts"
+            else telemetry.export_llm_input(SESSION, context, [a_round()])
+        )
+        with answered:
+            answers.append(answer)
+
+    threads = [
+        threading.Thread(target=deliver, args=(which,))
+        for which in ("transcripts", "llm_input")
+    ]
+    for one in threads:
+        one.start()
+    together.wait(10.0)
+    # The teardown lands while a delivery is inside the transport,
+    # which is the overlap this case is named for.
+    an_export_in_flight()
+    telemetry.release()
+    for one in threads:
+        one.join(10.0)
+    assert len(answers) == 2, "a delivery never came back at all"
+    return answers
+
+
+def test_two_workers_delivering_at_once_share_one_serialized_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Transcript and LLM-input delivery concurrently, with the teardown
+    overlapping them, run fifty times over.
+
+    The claim is one transport with one owner: at most one is ever
+    built, only one thread is ever inside it, and a shutdown never lands
+    in the middle of an export. Before this module existed the seam had
+    a single caller and none of that could be observed; the second
+    worker is what turned a safe laziness into a race, which is the fact
+    this case exists to keep true rather than to rediscover.
+
+    Driven through `build_telemetry` with no exporter handed in, because
+    the construction half of the claim is only reachable on the path
+    that actually constructs one.
+
+    **Which answer a delivery gets is deliberately not pinned.** A
+    teardown racing two deliveries may legitimately reach the transport
+    first, and a delivery that finds it closed says so: that is the
+    shutdown answer both callers turn into a drop, and demanding a
+    success would be pinning an interleaving rather than an invariant.
+    What IS pinned is that every answer is one of the two legal ones and
+    that the export path was genuinely exercised across the runs, so a
+    case that silently stopped delivering anything fails rather than
+    passes.
+    """
+    monkeypatch.setattr(telemetry_module, "_otlp_exporter", Shared)
+    delivered = 0
+    for run in range(CONCURRENT_RUNS):
+        Shared.built.clear()
+        telemetry, _ = exporting()
+        a_session(telemetry)
+        context = telemetry.retained_context(SESSION)
+        assert context is not None
+
+        answers = deliver_both(telemetry, context)
+
+        assert all(
+            answer in (Delivery.DELIVERED, Delivery.STOPPED) for answer in answers
+        ), f"run {run}: {answers}"
+        delivered += sum(answer is Delivery.DELIVERED for answer in answers)
+        assert len(Shared.built) <= 1, (
+            f"run {run}: {len(Shared.built)} transports were built, "
+            "so one was assigned over and never shut down"
+        )
+        for transport in Shared.built:
+            assert transport.peak <= 1, (
+                f"run {run}: {transport.peak} threads were inside one HTTP exporter"
+            )
+            assert not transport.closed_while_exporting, (
+                f"run {run}: the teardown shut the transport down mid-export"
+            )
+        released()
+
+    assert delivered, (
+        "no delivery in any run reached the transport, so the case proved nothing"
+    )
+
+
+def test_a_delivery_arriving_after_the_teardown_builds_no_second_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A closed transport stays closed.
+
+    The case the concurrent one above cannot reach, because it is not a
+    race at all: a worker left behind by its own bounded join arrives
+    here long after the teardown has been and gone. Without a flag
+    saying so it would find the field back at `None`, build a fresh HTTP
+    exporter after the shutdown, and leave a socket nobody owns and
+    nobody will ever close.
+
+    Shutdown territory rather than a delivery answer, because nothing
+    was attempted: both callers turn that into the drop it is.
+    """
+    monkeypatch.setattr(telemetry_module, "_otlp_exporter", Shared)
+    Shared.built.clear()
+    telemetry, _ = exporting()
+    a_session(telemetry)
+    context = telemetry.retained_context(SESSION)
+    assert telemetry.export_llm_input(SESSION, context, [a_round()]) is Delivery.DELIVERED
+    assert len(Shared.built) == 1
+
+    telemetry.release()
+
+    assert telemetry.export_llm_input(SESSION, context, [a_round()]) is Delivery.STOPPED
+    assert len(Shared.built) == 1, "a transport was built after the teardown"

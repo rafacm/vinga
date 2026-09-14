@@ -170,6 +170,17 @@ EXPORT_TIMEOUT_MS = 30000
 # same trade the queue makes.
 SHUTDOWN_TIMEOUT_S = 5.0
 
+# How long the teardown waits for whoever is inside the private provider
+# or the shared transport before leaving that half to close itself.
+#
+# Short, because what it is waiting for is a bounded call that has
+# already been given its own deadline by whoever made it, and what the
+# wait protects is a socket rather than anything anybody can lose. A
+# teardown that blocked behind a collector which had stopped answering
+# would cost a redeploy, which is the thing every bound on this surface
+# exists to prevent.
+CLOSE_WAIT_S = 1.0
+
 # The fixed service name. Not `OTEL_SERVICE_NAME`, deliberately: what
 # this process is, is this repository's word.
 SERVICE = "vinga-server"
@@ -1940,6 +1951,33 @@ class Telemetry:
         self._transcripts = transcripts
         self._private: Any | None = None
         self._private_lock = threading.Lock()
+        # And the transport's own owner, which is what makes "one
+        # transport" true rather than merely intended.
+        #
+        # It arrived with the SECOND worker and is a repository fact
+        # worth stating where it bit: a lazily constructed shared
+        # object is safe exactly as long as one thread reaches it, and
+        # this one was, until a second content exporter began
+        # delivering through the same path on a worker of its own
+        # (#502, M5). Two first calls could then both see `None`,
+        # build two exporters and assign one over the other, which
+        # leaks an HTTP client nobody will ever shut down; two later
+        # calls shared one mutable client across threads; and the
+        # teardown could shut it down from under an export in flight.
+        #
+        # The invariant this lock states, and the whole of it: **at
+        # most one thread at a time constructs this transport, exports
+        # through it, or shuts it down.** The next module to deliver on
+        # this seam inherits that rather than rediscovering it.
+        self._transport_lock = threading.Lock()
+        # And whether the teardown has already been through it. Under
+        # the same lock, because it is the other half of the same
+        # invariant: without it, a delivery that had been WAITING on the
+        # lock while the close took it would find the field back at
+        # `None`, build a fresh transport after the shutdown, and leave
+        # a socket nobody owns. A transport that has been closed stays
+        # closed.
+        self._transport_closed = False
         self._shutdown_timeout_s = shutdown_timeout_s
         # The release runs once, on a thread of its own, and this is
         # what says whether it has been started and whether it is over.
@@ -2470,11 +2508,35 @@ class Telemetry:
         same posture the uploader's client takes. Every exception is
         contained, and none of it is looked at: what a failing export
         holds is the endpoint and its credentials.
+
+        **Construction and export happen under the transport's own
+        lock**, which is what makes the instance one instance and its
+        use one thread's at a time. Two workers reach this now, the
+        transcript exporter's and the LLM input exporter's, each on a
+        daemon thread of its own, and the SDK's HTTP exporter holds a
+        session that is not safe to call from both at once.
+
+        What the lock costs is stated rather than hidden: a delivery
+        waits out another delivery, for that call's own bounded
+        deadline. Both callers are post-close workers off the audio
+        path, whose whole purpose is to be the place where waiting is
+        affordable, and the alternative (one transport each) would be a
+        second connection pool and a second thing to shut down for a
+        saving neither of them needs.
         """
         try:
-            if self._transcripts is None:
-                self._transcripts = _otlp_exporter()
-            answer = self._transcripts.export(spans)
+            with self._transport_lock:
+                if self._transport_closed:
+                    # The teardown got here first, which a worker left
+                    # behind by its own bounded join can lose to.
+                    # Shutdown territory rather than a delivery answer:
+                    # nothing was attempted, so nothing can be said
+                    # about the backend, and both callers turn this into
+                    # the drop it is.
+                    return Delivery.STOPPED
+                if self._transcripts is None:
+                    self._transcripts = _otlp_exporter()
+                answer = self._transcripts.export(spans)
         except Exception:  # noqa: BLE001 - a failure here is an event, not a raise
             return Delivery.UNDELIVERED
         if answer is self._sdk.result.SUCCESS:
@@ -2672,20 +2734,45 @@ class Telemetry:
         """Let the post-close content exporters' own half go, if it was
         ever built.
 
-        Both halves under one guard, on a path that is already finishing
-        however it ended. Nothing waits on it: each content exporter's
-        own shutdown is pushed onto the composition's exit stack behind
-        everything it has to unwind in front of, so by the time this
-        runs their workers have finished or have been left behind with
-        leases of their own.
+        Both halves on a path that is already finishing however it
+        ended, and each under the owner that built it, which is the
+        third thing the transport's lock covers: a shutdown landing
+        inside an export in flight is the same race as two exports, and
+        a worker left behind by its own bounded join is exactly the
+        thread that can still be in one.
+
+        **Each wait is bounded and an expired one skips that half**,
+        which is the honest answer rather than a teardown that hangs:
+        what a skipped shutdown costs is a socket the interpreter closes
+        moments later, where a teardown blocked behind a collector that
+        has stopped answering costs a redeploy. Nothing else waits on
+        this either: each content exporter's own shutdown is pushed onto
+        the composition's exit stack behind everything it has to unwind
+        in front of, so by the time this runs their workers have
+        finished or have been left behind with leases of their own.
         """
-        provider, self._private = self._private, None
-        transports, self._transcripts = self._transcripts, None
-        for closing in (provider, transports):
-            if closing is None:
+        for lock, taken in (
+            (self._private_lock, "provider"),
+            (self._transport_lock, "transport"),
+        ):
+            if not lock.acquire(timeout=CLOSE_WAIT_S):
+                # Left to the interpreter rather than shut down from
+                # under whoever is still inside it. Value-free and
+                # unbound, like every other line this teardown writes.
+                logger.debug("the %s was still in use and was left to close itself", taken)
                 continue
-            with contextlib.suppress(Exception):
-                closing.shutdown()
+            try:
+                closing = self._private if taken == "provider" else self._transcripts
+                if taken == "provider":
+                    self._private = None
+                else:
+                    self._transcripts = None
+                    self._transport_closed = True
+                if closing is not None:
+                    with contextlib.suppress(Exception):
+                        closing.shutdown()
+            finally:
+                lock.release()
 
     # --- the fold -----------------------------------------------------
 
