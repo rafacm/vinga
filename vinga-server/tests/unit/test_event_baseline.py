@@ -895,7 +895,15 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     "vinga_server.llm_input_export:LlmInputExport._attempt #1": (
         (
             "LlmInputExported",
-            ("elapsed_ms", "event", "over_budget", "oversized", "rounds", "session"),
+            (
+                "elapsed_ms",
+                "event",
+                "over_budget",
+                "oversized",
+                "rounds",
+                "session",
+                "unrenderable",
+            ),
         ),
     ),
     "vinga_server.llm_input_export:LlmInputExport._failed #1": (

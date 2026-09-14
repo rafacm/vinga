@@ -157,6 +157,31 @@ async def drained(
     await exporter.shutdown()
 
 
+class Unrenderable:
+    """A value no rendering can make sense of, which is what a defect in
+    this server looks like from the stage's side.
+
+    `default=str` is the rendering's totality clause, so what defeats it
+    has to defeat `str()` too. Deliberately not a value the provider
+    seam can actually carry: the reachable hostile value is the lone
+    surrogate above, and this one stands in for the class of bug the
+    third count exists to make visible.
+    """
+
+    def __str__(self) -> str:
+        raise RuntimeError(f"nothing about this is printable: {RESULT_SENTINEL}")
+
+    __repr__ = __str__
+
+
+def held_rounds(exporter: LlmInputExport, session: str = SESSION) -> list[Any]:
+    """What one session is holding right now, read the way the wiring
+    suite reads it: the claim in this section is about a call that had
+    to RETURN, so there is no close to read it through."""
+    stage = exporter._staged.get(session)  # noqa: SLF001
+    return [] if stage is None else [one.round for one in stage.rounds]
+
+
 def reasons(caplog: pytest.LogCaptureFixture) -> list[str]:
     """Every failure reason this run reported, in order."""
     return [
@@ -684,6 +709,142 @@ async def test_a_session_whose_every_round_was_dropped_still_says_so(
     assert said["rounds"] == 0
     assert said["oversized"] == 1
     assert telemetry.jobs == [(SESSION, A_CONTEXT, [])]
+
+
+# --- what the far side can put in a round ------------------------------
+#
+# A lone surrogate is reachable from outside this process: Python's JSON
+# decoder accepts a `\udXXX` escape, so an MCP server's tool result can
+# carry one, and a tool result is staged content. It is not encodable as
+# UTF-8, which makes it the one hostile value that can reach the
+# rendering and the one this section exists for.
+
+LONE_SURROGATE = json.loads(r'"a \ud800 b"')
+
+
+@pytest.mark.asyncio
+async def test_a_lone_surrogate_in_a_tool_result_never_reaches_the_caller() -> None:
+    """The standing posture of every surface on this ladder: **no
+    content export may fail a conversation.**
+
+    Staging runs on the reply path, before the provider call, so a
+    rendering that raised would take the reply with it. The value comes
+    in the way a real one would, as a tool result, and the assertion is
+    that the call returns at all.
+    """
+    exporter, _ = an_exporter()
+
+    stage(
+        exporter,
+        turns=[
+            a_turn(
+                role="tool",
+                content="",
+                results=(ToolResult(tool_call_id="c1", content=LONE_SURROGATE),),
+            )
+        ],
+    )
+
+    assert held_rounds(exporter), "the round vanished rather than being staged"
+
+
+@pytest.mark.asyncio
+async def test_a_lone_surrogate_rides_out_as_a_json_escape() -> None:
+    """And it is not lost either, which is the second half of the same
+    claim: what cannot be spelled as UTF-8 can be spelled as the JSON
+    escape the far side sent, so the round is exported exactly rather
+    than dropped for being awkward.
+    """
+    exporter, telemetry = an_exporter()
+    stage(
+        exporter,
+        turns=[
+            a_turn(
+                role="tool",
+                content="",
+                results=(ToolResult(tool_call_id="c1", content=LONE_SURROGATE),),
+            )
+        ],
+    )
+
+    exporter.session_closed(SESSION)
+    await drained(exporter, lambda: telemetry.jobs)
+
+    (one,) = telemetry.rounds
+    assert "\\ud800" in one.request, "the surrogate was not escaped into the request"
+    assert one.request.encode("utf-8"), "the request is still not encodable"
+    assert json.loads(one.request)["messages"][0]["tool_results"][0]["content"] == (
+        LONE_SURROGATE
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_round_this_server_could_not_render_is_counted(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The third absence, which is a defect in this server rather than a
+    conversation that outgrew its budget.
+
+    It gets a count of its own rather than being folded into either
+    bound's, because those two are the bound's vocabulary and mean
+    something exact to whoever is reading: reporting a ceiling that was
+    never reached would send an operator to tune a number that had
+    nothing to do with it. What it may NOT be is invisible, which is
+    what the plan's exhaustive accounting exists to prevent.
+    """
+    caplog.set_level(logging.INFO)
+    exporter, telemetry = an_exporter()
+    stage(exporter)
+    stage(exporter, turns=[a_turn(content=Unrenderable())])
+    stage(exporter)
+
+    exporter.session_closed(SESSION)
+    await drained(exporter, lambda: telemetry.jobs)
+
+    assert [one.index for one in telemetry.rounds] == [1, 3]
+    said = only_export(caplog)
+    assert said["rounds"] == 2
+    assert said["unrenderable"] == 1
+    assert said["oversized"] == 0
+    assert said["over_budget"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_session_whose_only_round_was_unrenderable_still_says_so(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The close's own half of the same rule. A session whose every
+    round vanished used to emit no outcome event at all, so the absence
+    was not merely unexplained: it was unreported."""
+    caplog.set_level(logging.INFO)
+    exporter, telemetry = an_exporter()
+    stage(exporter, turns=[a_turn(content=Unrenderable())])
+
+    exporter.session_closed(SESSION)
+    await drained(exporter, lambda: exports(caplog))
+
+    said = only_export(caplog)
+    assert said["rounds"] == 0
+    assert said["unrenderable"] == 1
+    assert telemetry.jobs == [(SESSION, A_CONTEXT, [])]
+
+
+@pytest.mark.asyncio
+async def test_nothing_of_an_unrenderable_round_is_said_out_loud(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The value-free rule holds on the one path that has a value in
+    hand and no way to render it: the line names the count and the
+    consequence, and nothing it was carrying."""
+    caplog.set_level(logging.DEBUG)
+    exporter, _ = an_exporter()
+
+    stage(exporter, system=SYSTEM_SENTINEL, turns=[a_turn(content=Unrenderable())])
+
+    written = both_formats(caplog)
+    assert "could not be rendered" in written
+    assert SYSTEM_SENTINEL not in written
+    assert RESULT_SENTINEL not in written
 
 
 # --- what the rendering contains ---------------------------------------

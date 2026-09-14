@@ -3844,7 +3844,7 @@ class LlmInputExported(Variant):
     LEVEL: ClassVar[int] = logging.INFO
     TEMPLATE: ClassVar[str] = (
         "session %s: %d assembled LLM requests exported to telemetry in %d ms "
-        "(%d too large, %d over the session budget)"
+        "(%d too large, %d over the session budget, %d unrenderable)"
     )
     ARGS: ClassVar[tuple[str, ...]] = (
         "session",
@@ -3852,6 +3852,7 @@ class LlmInputExported(Variant):
         "elapsed_ms",
         "oversized",
         "over_budget",
+        "unrenderable",
     )
 
     session: SessionId = value()
@@ -3886,8 +3887,22 @@ class LlmInputExported(Variant):
             "And how many were dropped, oldest first, because the "
             "session held more than its byte budget or more rounds than "
             "the entry cap behind it. A reader with a partial export "
-            "learns from these two counts that it is partial, and which "
-            "of the two bounds it met."
+            "learns from these counts that it is partial, and which of "
+            "the bounds it met."
+        )
+    )
+    unrenderable: Count = value(
+        note=(
+            "And how many this server could not render at all, which is "
+            "a defect here rather than a conversation that outgrew what "
+            "may be held for it. A count of its own rather than a fold "
+            "into either of the two above, because those are the "
+            "BOUND's vocabulary: reporting a ceiling that was never "
+            "reached would send an operator to tune a number that had "
+            "nothing to do with it. Nonzero is a bug report, and it is "
+            "here rather than nowhere because nothing on this host "
+            "keeps an assembled request, so a round that vanished from "
+            "this event vanished from everywhere."
         )
     )
 
@@ -4384,8 +4399,9 @@ LLM_INPUT_EXPORTED = declare(
     note=(
         "A closed session's assembled requests are in the telemetry "
         "backend, one observation each carrying the request as vinga "
-        "built it. How many went and how many the two bounds dropped, "
-        "and deliberately nothing of the requests themselves: the "
+        "built it. How many went and how many went missing under each "
+        "of the three headings, and deliberately nothing of the "
+        "requests themselves: the "
         "content rides the span the flag authorizes, and this says only "
         "that it went."
     ),
