@@ -158,7 +158,7 @@ from tests.support.tools_mcp import reload_config as mcp_config
 from tests.support.tools_mcp import running as mcp_running
 from tests.support.tools_mcp import started as mcp_started
 from tests.support.tools_mcp import stdio_entry as mcp_entry
-from tests.support.transcripts import A_CONTEXT, a_row, reading, settled
+from tests.support.transcripts import A_CONTEXT, settled
 from tests.support.transcripts import exporting as exporting_transcripts
 from tests.support.uploads import exporting as exporting_traces
 from tests.support.uploads import fake_sdk
@@ -1621,11 +1621,9 @@ def transcripts(
     """An exporter over one closed session, with both seams faked, and
     the recorder behind the span writer."""
     telemetry, recorded = exporting_transcripts(contexts, answer=answer)
-    reads, _ = reading({"s1": [a_row(1), a_row(2)]})
     return (
         TranscriptExport(
             telemetry=telemetry,
-            reads=reads,
             backlog=4,
             acknowledgement_timeout_s=2.0,
             shutdown_timeout_s=10.0,

@@ -621,7 +621,6 @@ async def _build_composition(
     transcripts = build_transcript_export(
         config.server,
         telemetry=telemetry,
-        database=database,
         boundary=config.server.data_boundary,
     )
     if transcripts is not None:

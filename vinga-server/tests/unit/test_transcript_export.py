@@ -13,7 +13,7 @@ from tests.support.events import both_formats, fields_of
 from tests.support.transcripts import Exported, exporting, pending, settled
 from vinga_server.boundary import Reach
 from vinga_server.config import ConfigError
-from vinga_server.config.models import DatabaseConfig, ServerConfig
+from vinga_server.config.models import ServerConfig
 from vinga_server.conversations.records import ToolInvocation, TurnLeg, TurnRecord
 from vinga_server.events.values import TranscriptExportFailure
 from vinga_server.telemetry import TurnSettlement
@@ -111,9 +111,7 @@ def reasons(caplog: pytest.LogCaptureFixture) -> list[str]:
 
 def test_no_telemetry_section_builds_nothing() -> None:
     assert (
-        build_transcript_export(
-            a_server(telemetry=None), telemetry=None, database=DatabaseConfig()
-        )
+        build_transcript_export(a_server(telemetry=None), telemetry=None)
         is None
     )
 
@@ -125,7 +123,6 @@ def test_the_flag_off_builds_nothing() -> None:
         build_transcript_export(
             a_server(telemetry={"enabled": True}),
             telemetry=held,
-            database=DatabaseConfig(),
         )
         is None
     )
@@ -149,7 +146,6 @@ def test_recording_nothing_is_a_logged_no_op(
         build_transcript_export(
             a_server(conversations=conversations),
             telemetry=held,
-            database=DatabaseConfig(),
         )
         is None
     )
@@ -168,7 +164,6 @@ def test_recording_off_resolves_before_the_boundary() -> None:
         build_transcript_export(
             config,
             telemetry=held,
-            database=DatabaseConfig(),
             boundary=Reach.NETWORK,
         )
         is None
@@ -179,7 +174,7 @@ def test_the_export_needs_enabled_telemetry() -> None:
     config = a_server(telemetry={"enabled": False, "export_transcripts": True})
 
     with pytest.raises(ConfigError, match=TRANSCRIPTS_NEED_TELEMETRY) as refusal:
-        build_transcript_export(config, telemetry=None, database=DatabaseConfig())
+        build_transcript_export(config, telemetry=None)
 
     assert refusal.value.__cause__ is None
     assert refusal.value.__context__ is None
@@ -187,9 +182,7 @@ def test_the_export_needs_enabled_telemetry() -> None:
 
 def test_the_export_needs_a_built_telemetry_exporter() -> None:
     with pytest.raises(ConfigError, match=TRANSCRIPTS_NEED_AN_EXPORTER):
-        build_transcript_export(
-            a_server(), telemetry=None, database=DatabaseConfig()
-        )
+        build_transcript_export(a_server(), telemetry=None)
 
 
 @pytest.mark.parametrize("boundary", [Reach.HOST, Reach.NETWORK])
@@ -200,7 +193,6 @@ def test_a_narrow_boundary_refuses_before_construction(boundary: Reach) -> None:
         build_transcript_export(
             a_server(data_boundary=boundary.value),
             telemetry=held,
-            database=DatabaseConfig(),
             boundary=boundary,
         )
 
@@ -215,9 +207,7 @@ def test_permissive_boundaries_build_the_live_collaborator(
 ) -> None:
     held, _ = exporting()
 
-    built = build_transcript_export(
-        a_server(), telemetry=held, database=DatabaseConfig(), boundary=boundary
-    )
+    built = build_transcript_export(a_server(), telemetry=held, boundary=boundary)
 
     assert built is not None
 

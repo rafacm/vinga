@@ -11,7 +11,7 @@ from typing import Any
 
 from vinga_server.boundary import BoundaryRefusal, Reach, check_feature
 from vinga_server.config import ConfigError
-from vinga_server.config.models import DatabaseConfig, ServerConfig
+from vinga_server.config.models import ServerConfig
 from vinga_server.conversations.records import Acknowledgement, TurnRecord
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import TranscriptExportFailed, TranscriptsExported
@@ -45,14 +45,11 @@ def build_transcript_export(
     config: ServerConfig,
     *,
     telemetry: Telemetry | None,
-    database: DatabaseConfig,
     boundary: Reach | None = None,
-    batch_turns: int = DEFERRED_TURNS,
     acknowledgement_timeout_s: float = ACKNOWLEDGEMENT_TIMEOUT_S,
     shutdown_timeout_s: float = SHUTDOWN_TIMEOUT_S,
 ) -> "TranscriptExport | None":
     """Build the collaborator only when recorded text and its flag exist."""
-    del database, batch_turns
     conversations = config.conversations
     section = config.telemetry
     exporting = section is not None and section.export_transcripts
@@ -109,10 +106,7 @@ class TranscriptExport:
         backlog: int,
         acknowledgement_timeout_s: float = ACKNOWLEDGEMENT_TIMEOUT_S,
         shutdown_timeout_s: float = SHUTDOWN_TIMEOUT_S,
-        reads: Any | None = None,
-        batch_turns: int = DEFERRED_TURNS,
     ) -> None:
-        del reads, batch_turns
         self._telemetry = telemetry
         self._groups: dict[tuple[str, str], list[_Row]] = {}
         self._omitted: set[tuple[str, str]] = set()
