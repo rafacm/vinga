@@ -2580,7 +2580,7 @@ on are the ones this session already named.
 #### Variant 1: `vinga_server.transcript_export` at INFO
 
 ```text
-session %s: %d turn transcripts exported to its trace in %d ms
+session %s: %d turn transcripts exported to telemetry in %d ms
 ```
 
 | # | Argument | Nullable | Constraint | Note |
@@ -2609,7 +2609,7 @@ carries.
 #### Variant 1: `vinga_server.transcript_export` at WARNING
 
 ```text
-session %s: transcripts not exported to its trace (%s)
+session %s: transcripts not exported to telemetry (%s)
 ```
 
 | # | Argument | Nullable | Constraint | Note |
@@ -2621,7 +2621,7 @@ session %s: transcripts not exported to its trace (%s)
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `reason` | `TOKEN` | yes | no | one of: `dropped`, `no_trace`, `undelivered`, `unreadable`, `unrecorded` | Which of the five ways this ends badly it was. Never the far side's words and never a count of what did get through: what an operator acts on is the class of the failure, and what a reader needs about a truncated export is already on the trace beside this. |
+| `reason` | `TOKEN` | yes | no | one of: `dropped`, `no_trace`, `undelivered`, `unreadable`, `unrecorded` | Which of the five ways this ends badly it was. Never the far side's words and never a count of what did get through: what an operator acts on is the class of the failure, and what a reader needs about a truncated export is already on the turns that did go out, as the highest index any of them carries. |
 
 ### `capture_enabled`
 

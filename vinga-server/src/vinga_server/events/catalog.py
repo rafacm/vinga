@@ -3756,7 +3756,7 @@ class TranscriptsExported(Variant):
     CHANNEL: ClassVar[str] = TRANSCRIPT_EXPORT_CHANNEL
     LEVEL: ClassVar[int] = logging.INFO
     TEMPLATE: ClassVar[str] = (
-        "session %s: %d turn transcripts exported to its trace in %d ms"
+        "session %s: %d turn transcripts exported to telemetry in %d ms"
     )
     ARGS: ClassVar[tuple[str, ...]] = ("session", "turns", "elapsed_ms")
 
@@ -3782,11 +3782,11 @@ class TranscriptsExported(Variant):
 
 @dataclass(frozen=True)
 class TranscriptExportFailed(Variant):
-    """A closed session's turns did not reach its trace."""
+    """A closed session's turns did not reach the telemetry backend."""
 
     CHANNEL: ClassVar[str] = TRANSCRIPT_EXPORT_CHANNEL
     LEVEL: ClassVar[int] = logging.WARNING
-    TEMPLATE: ClassVar[str] = "session %s: transcripts not exported to its trace (%s)"
+    TEMPLATE: ClassVar[str] = "session %s: transcripts not exported to telemetry (%s)"
     ARGS: ClassVar[tuple[str, ...]] = ("session", "reason")
 
     session: SessionId = value()
@@ -3796,7 +3796,8 @@ class TranscriptExportFailed(Variant):
             "far side's words and never a count of what did get "
             "through: what an operator acts on is the class of the "
             "failure, and what a reader needs about a truncated export "
-            "is already on the trace beside this."
+            "is already on the turns that did go out, as the highest "
+            "index any of them carries."
         )
     )
 

@@ -1553,7 +1553,8 @@ AttemptedUpload = Literal[
 
 
 class TranscriptExportFailure(StrEnum):
-    """Why a closed session's transcripts are not on its trace.
+    """Why a closed session's transcripts did not reach the telemetry
+    backend.
 
     The whole of what `transcript_export_failed` may say, and the reason
     that event exists: an export that quietly failed would leave a

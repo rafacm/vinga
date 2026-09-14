@@ -57,8 +57,9 @@ turn count, so the worker alternates one keyset page read with one
 bounded export of that page's spans. An arbitrarily long session
 therefore costs bounded memory, a bounded database result and a bounded
 request, however many pages it takes, and a page that fails to deliver
-ends the job: the pages already delivered stand, and the failure event
-beside them on the trace is what tells a reader the transcript stops
+ends the job: the pages already delivered stand, each under the turn it
+describes, and the failure event, which rides the session's own trace
+rather than any of theirs, is what tells a reader the transcript stops
 there.
 """
 
@@ -590,10 +591,11 @@ class TranscriptExport:
         happen to be and whatever the thread held before this session.
 
         A page that fails to deliver ends the job. The pages in front of
-        it stand, deliberately: a reader meets the leading turns and the
-        failure event on the same trace, and where the transcript stops
-        is the highest index they can see, which is why no count rides
-        the event.
+        it stand, deliberately: the leading turns are each under the turn
+        they describe and the failure event is on the session's own
+        trace, so a reader holding the event holds the session, and where
+        the transcript stops is the highest index those turns carry,
+        which is why no count rides the event.
 
         A shutdown ends it too, and the stop flag is read at both edges
         of the loop rather than at the top alone. Only the bounded call
