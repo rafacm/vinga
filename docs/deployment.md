@@ -538,7 +538,8 @@ to `always_on` explicitly.
 
 The direct path runs the pinned Jaeger v2 image, sends OTLP/HTTP protobuf to
 port 4318 and exposes its UI only on loopback at
-<http://127.0.0.1:16686>:
+<http://127.0.0.1:16686>. Its telemetry reach is `host` because the Jaeger
+container stays on the same machine:
 
 ```bash
 docker compose \

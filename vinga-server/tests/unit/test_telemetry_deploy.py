@@ -215,7 +215,7 @@ def test_vinga_is_always_on_in_both_runnable_paths() -> None:
 
     direct = _services(DIRECT_PATH)["vinga"]["environment"]
     fanout = _services(FANOUT_PATH)["vinga"]["environment"]
-    assert direct["VINGA_SERVER__TELEMETRY__REACH"] == "network"
+    assert direct["VINGA_SERVER__TELEMETRY__REACH"] == "host"
     assert fanout["VINGA_SERVER__TELEMETRY__REACH"] == "internet"
     assert _services(FANOUT_PATH)["otel-collector"]["environment"][
         "TELEMETRY_SAMPLE_PERCENTAGE"

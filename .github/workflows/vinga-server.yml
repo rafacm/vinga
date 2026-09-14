@@ -1429,7 +1429,7 @@ jobs:
             -e OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
             -e OTEL_TRACES_SAMPLER=always_on \
             -e VINGA_SERVER__TELEMETRY__ENABLED=true \
-            -e VINGA_SERVER__TELEMETRY__REACH=network \
+            -e VINGA_SERVER__TELEMETRY__REACH=host \
             -v smoke-data:/data \
             -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
             vinga-server:ci-amd64
