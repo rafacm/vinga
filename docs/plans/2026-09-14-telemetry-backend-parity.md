@@ -249,7 +249,9 @@ rely on the inner helper to catch `CancelledError`, and it consumes the staged
 request onto the failed generation span.
 
 The existing per-request, per-session and maximum-round bounds apply to the
-combined canonical content. A round over the per-request bound is dropped
+combined canonical content. `MAX_CONTENT_BYTES = 256 * 1024` is the maximum
+combined serialized content added to any one turn or generation span. A round
+or turn over that per-operation bound is dropped
 whole. The session budget evicts whole rounds oldest first. Dropping content
 always releases the operation span with metadata only; it never drops the
 fact that the operation happened.
@@ -314,6 +316,16 @@ which turn or generation content was attached to the canonical span or omitted
 before queueing, while ordinary telemetry exporter health owns downstream
 delivery. The old `undelivered` content reason and private `Delivery` API are
 removed, and that reporting change is a `### Changed` migration item.
+
+The shared processor's `max_export_batch_size` moves from 512 to
+`CONTENT_SAFE_BATCH_SIZE = 8`. Together with the 256 KiB per-operation content
+ceiling, one worst-case OTLP protobuf request stays below 3 MiB including
+resource and span overhead. The 2,048-span queue and five-second schedule do
+not change. A serializer test fills eight maximal content spans, encodes the
+actual `ExportTraceServiceRequest`, and asserts the body bound; the local OTLP
+receiver also rejects any request above it so the integration path proves the
+batcher did not combine a ninth. This replaces the transcript page's old
+request-size bound with one that applies to every canonical content span.
 
 The held-turn ledger is globally bounded at `DEFERRED_TURNS = 4096` logically
 finished roots for the process. This is a flat safety cap, not a value derived
@@ -516,7 +528,8 @@ fixtures are extended rather than replaced.
 - The existing OTLP protobuf integration receiver compares decoded wire data,
   not SDK objects, for topology, status, standard attributes and both flag
   combinations. A multi-round tool and handover conversation proves ordinal
-  pairing end to end.
+  pairing end to end. Its receiver records body sizes and enforces the 3 MiB
+  ceiling while eight maximal spans prove the worst-case batch.
 - Static deployment tests resolve both compose graphs, validate the exact
   committed Collector configuration with the pinned image, assert that common
   masking and the graph's only sampler precede both `forward` connectors, and
@@ -874,6 +887,11 @@ read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 9m08s.
     batch can combine many unbounded transcript values and 256 KiB LLM values.
     The replacement needs a per-content and per-export body bound with a wire
     assertion.
+
+    *Resolution:* Every turn and generation now has one 256 KiB combined
+    content ceiling, and the shared processor exports at most eight spans per
+    request. A worst-case protobuf serialization and the integration receiver
+    both enforce a 3 MiB body ceiling.
 12. **P2: direct-to-Langfuse remains supported but never receives the v4
     ingestion header in the plan.** Its README recipe and live gate must cover
     both Basic Auth and the version header.
