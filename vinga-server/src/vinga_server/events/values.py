@@ -1589,6 +1589,42 @@ class TranscriptExportFailure(StrEnum):
     DROPPED = "dropped"
 
 
+class LlmInputExportFailure(StrEnum):
+    """Why a closed session's assembled requests did not reach the
+    telemetry backend.
+
+    The whole of what `llm_input_export_failed` may say, and the reason
+    that event exists: this class has no local store behind it, so an
+    export that quietly failed leaves nothing anybody could go back and
+    read. The requests are gone with the session.
+
+    Three members rather than the transcript export's five, and the two
+    it does not have are the tell: there is no store to be unreadable
+    and no writer acknowledgement to go unsettled, because what is
+    exported was held in memory by the session that assembled it. Each
+    is decided at one site: this server had no trace to name, the
+    backend would not take the spans, or this server turned the job
+    away.
+
+    No `abandoned` member, for the reason the transcript set gives and
+    more strongly: nothing is persisted, so a process that dies with an
+    export queued loses it with no ledger to recover from, which is the
+    price the content-and-telemetry record states for a class whose
+    local surface is memory.
+    """
+
+    # Nothing to name the trace by: telemetry never saw the session, or
+    # its context had aged out of the retention by the time it closed.
+    NO_TRACE = "no_trace"
+    # The bounded export answered failure or ran out its own deadline.
+    # Deliberately not told apart further: the result is binary, and a
+    # sentence must never carry the far side's words.
+    UNDELIVERED = "undelivered"
+    # The backlog was full, so the job was never queued, or a shutdown
+    # ended it before it completed, queued or in flight.
+    DROPPED = "dropped"
+
+
 class EchoOutcome(StrEnum):
     """How the ASR prompt-echo guard's retry ended."""
 
@@ -1868,6 +1904,7 @@ __all__ = [
     "FromEntry",
     "Identifier",
     "LanguageTag",
+    "LlmInputExportFailure",
     "LoopbackHost",
     "MachineId",
     "McpConnectFailure",
