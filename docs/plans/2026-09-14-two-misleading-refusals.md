@@ -63,27 +63,54 @@ same-syntax contract in #500 M4 and was a live bug in `PCM_FORMAT_PATTERN`
 beside it. A header value ending in a newline is exactly the shape a
 copy-paste produces.
 
-### #504: the display path stays anchored, and a composed value shows as the mask
+### #504: what may be stored is what may be displayed
 
-`config/secrets.py` has its own `_DOLLAR_REFERENCE_RE`, and its comment
-says it mirrors the model's pattern. After this change it deliberately
-does not, and the comment must say so rather than be left as a claim
-that has quietly become false.
+The plan said the display path would stay anchored and a composed
+header would read back as the mask. The review showed what that costs
+and it is not a display detail: `views._masked` masks every string
+under a secret-shaped name and `store._keep` refuses a mask where
+nothing is stored yet, which is every entry of an import into an empty
+database. So a masked composed header exports as eight asterisks and
+cannot be imported back, and the export-and-reapply promise is exactly
+the recovery the other milestone tells an operator to perform. Worse,
+the operator's way out would be the encrypted slot, which replaces the
+whole value and therefore has to hold `Bearer <token>`: the workaround
+this issue exists to remove.
 
-It stays anchored because it answers a different question. `mask`
-decides what a stored secret slot may DISPLAY, and it fails closed: a
-value that is exactly `$TOKEN` is a variable name and not a secret, so
-it shows; anything else may be a pasted credential, so it becomes the
-mask. Widening it to "contains a reference" would display
-`sk-live-abc $UNUSED` in full, and the write-time check can no longer
-rule that value out, because after this change it contains a reference
-and passes. So the two moves are not symmetric, and only one of them is
-safe.
+So the display rule follows the write rule, and there is one rule
+rather than two: **a value that references an environment variable
+somewhere in it is a reference and displays; a value that references
+none is a paste or a ciphertext and masks.** `config/secrets.py`'s
+`_DOLLAR_REFERENCE_RE` widens with the model's pattern, and its comment
+saying the two mirror each other becomes true again rather than
+becoming a lie this plan has to explain.
 
-The consequence, stated because an operator will meet it: a composed
-header stored in a secret slot reads back as the mask rather than as
-`Bearer $TOKEN`. That is the display path answering "I cannot prove
-this is safe to print", which is the answer it exists to give.
+What the mask still catches is what it was written for: ciphertext, a
+malformed envelope, and a bare paste with no reference in it. Every
+other stored secret slot holds a bare uppercase name or ciphertext, and
+ciphertext contains no `$NAME`, so nothing else starts showing.
+
+What it stops catching, stated plainly because it is the cost: a row
+that was hand edited to hold a real credential BESIDE a reference, say
+`sk-live-abc $UNUSED`, now displays in full. That value is one the
+widened write check admits anyway, so the mask would have been hiding a
+value this project had already agreed to store; and a display and a
+write path that disagree about the same value is how a mask became a
+keep marker over a value shown in full, which this repository has
+already paid for once. One rule, read by both, is the remedy it settled
+on then.
+
+A side effect worth naming because it is a fix: a padded whole-value
+reference (`"$TOKEN "`), which the secret rule accepts today and the
+display rule masks, currently exports as a mask and cannot be imported
+into an empty database either. It is the same defect in a rarer shape,
+and it goes away with this.
+
+**The acceptance case, which is the reviewer's and is required:** a
+composed header is written, exported, imported into an EMPTY database,
+and the server built from the second database sends the byte-identical
+header the first one did. End to end, through the real export and
+import, not through the display alone.
 
 ### #504: a value that contained a literal `$word` changes meaning
 
@@ -322,6 +349,16 @@ M2 tells an operator to perform. The plan should define a
 representation that is both non-leaking and replayable and require an
 end-to-end test: export `Bearer $TOKEN`, import into an empty database,
 prove identical wire output.
+
+*Resolution* (commit below): taken, and the decision reversed. The
+display rule now follows the write rule: a value containing a reference
+displays, a value containing none masks. It restores export and import
+for composed values, fixes the same latent defect for a padded
+reference, removes the mirror that was about to become false, and costs
+the case where a hand-edited row holds a paste beside a reference,
+which the widened write check admits anyway. The end-to-end export,
+import into an empty database and identical wire output is now the
+milestone's acceptance case.
 
 ### 2 (P1): interpolation defeats the MCP reflected-credential redactor
 
