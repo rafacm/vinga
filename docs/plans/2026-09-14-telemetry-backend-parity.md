@@ -326,15 +326,17 @@ deadline and asserts the session, turn and semantic children.
 
 The fanout example sends vinga to a pinned Collector Contrib image. Its graph
 has one common traces pipeline with, in order, content masking, one
-trace-id-based probabilistic sampler and batching. Only after those processors
-does it split into Jaeger and Langfuse branches. Vinga is explicitly
-`always_on` in this example so the Collector sampler is the single population
-decision. Both branches receive the exact processed records. The Langfuse
-branch derives its observation aliases from the already-masked canonical
-attributes, then uses OTLP/HTTP with the Basic Auth client extension and the
-literal `x-langfuse-ingestion-version: 4` header. The Jaeger branch drops every
-`langfuse.*` attribute and the whole Langfuse-only `capture` span. It receives
-no Langfuse credential or ingestion header.
+trace-id-based probabilistic sampler and batching. Its exporters are two named
+Contrib `forward` connectors, `forward/jaeger` and `forward/langfuse`; those
+same connectors are the receivers of separate sink pipelines. Only the
+Langfuse sink pipeline derives observation aliases, then uses OTLP/HTTP with
+the Basic Auth client extension and the literal
+`x-langfuse-ingestion-version: 4` header. The Jaeger sink pipeline drops every
+`langfuse.*` attribute and the whole Langfuse-only `capture` span before its
+OTLP/HTTP exporter. Vinga is explicitly `always_on`, so the one sampler in the
+common pipeline is the only population decision. Neither sink pipeline may
+contain a sampler or content mask, and both receive the exact same processed
+records from the common pipeline before their documented backend adaptation.
 
 The sample mask covers every canonical content-bearing attribute introduced
 here before the split. It includes a documented email-shaped rule so an
@@ -440,7 +442,8 @@ fixtures are extended rather than replaced.
   pairing end to end.
 - Static deployment tests resolve both compose graphs, validate the exact
   committed Collector configuration with the pinned image, assert that common
-  masking and sampling precede both branches, and prove Basic Auth, the v4
+  masking and the graph's only sampler precede both `forward` connectors, and
+  prove neither sink pipeline contains either processor. They also prove Basic Auth, the v4
   ingestion header and Langfuse aliases exist only on the Langfuse boundary.
 - A Docker-backed fanout smoke sends deterministic traces through the exact
   committed Collector configuration to two local OTLP receivers. With partial
@@ -618,6 +621,11 @@ model `claude-opus-5`, 2026-09-14, runtime 5m18s.
     receiver pipeline with two exporters cannot add aliases to only one branch;
     two independent pipelines sample twice. The plan must name a Contrib
     `forward` connector and assert one sampler in the graph.
+
+    *Resolution:* The deployment graph now names two Contrib `forward`
+    connectors from one commonly processed pipeline into separate Jaeger and
+    Langfuse sink pipelines. Static tests count exactly one sampler and prove
+    all masking occurs before both connectors.
 11. **P2: generated output widens `export_llm_input`.** The flag prose and
     generated server reference must change, including the fact that withheld
     model text leaves, and the changelog must announce that widening.
