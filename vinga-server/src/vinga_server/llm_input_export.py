@@ -308,11 +308,24 @@ class _Stage:
     index: int = 0
     oversized: int = 0
     over_budget: int = 0
+    # And the third absence, which is neither of the bound's: a round
+    # this server could not render at all. Counted here so the close has
+    # something to report rather than a silence somebody would have to
+    # infer from a gap in the ordinals.
+    unrenderable: int = 0
 
     def anything(self) -> bool:
         """Whether this session has anything to say at its close, which
-        is a round that survived or an absence worth reporting."""
-        return bool(self.rounds) or bool(self.oversized) or bool(self.over_budget)
+        is a round that survived or an absence worth reporting.
+
+        All three absences, and the third is the one this question was
+        getting wrong: a session whose every round failed to render used
+        to answer False here, so the close said nothing at all and the
+        rounds were not merely unexplained but unreported.
+        """
+        return bool(
+            self.rounds or self.oversized or self.over_budget or self.unrenderable
+        )
 
 
 @dataclass(frozen=True)
@@ -336,6 +349,7 @@ class _Job:
     rounds: tuple[LlmInputRound, ...]
     oversized: int
     over_budget: int
+    unrenderable: int
 
 
 class LlmInputExport:
@@ -463,27 +477,43 @@ class LlmInputExport:
         over the budget therefore counts once, as over budget, which is
         the honest word for it: the session cannot hold it.
 
-        Never raises, whatever it was handed. This runs inside a reply,
-        a round away from the user, and a telemetry surface must never
-        cost a conversation. What a rendering that failed says is one
-        value-free line naming nothing it was carrying.
+        **Never raises, whatever it was handed**, and that is the
+        standing posture of every surface on this ladder rather than a
+        courtesy here: no content export may fail a conversation. This
+        runs on the reply path and BEFORE the provider call, so an
+        escape would not merely lose an observation, it would lose the
+        answer the user is waiting for. The rendering and the weighing
+        are therefore one operation inside one guard: an encode left
+        outside it is an escape hatch, which is what the review round
+        found, and the value that walks through it is reachable from a
+        tool result rather than hypothetical.
+
+        A round the rendering could not make at all is counted as
+        `unrenderable`, a third absence with a name of its own. Not
+        folded into either bound's count, because those two are the
+        bound's vocabulary and mean something exact to whoever reads
+        them: reporting a ceiling that was never reached would send an
+        operator to tune a number that had nothing to do with it. And
+        not left uncounted either, which is what it was: a round that
+        vanished from the ledger is the one thing the plan's exhaustive
+        accounting exists to prevent, and with no local store behind
+        this class there is nowhere else to notice it from.
         """
         stage = self._staged.setdefault(session, _Stage())
         stage.index += 1
         try:
-            request = _rendered(system, turns, tools, choice)
+            request, size = _rendered(system, turns, tools, choice)
         except Exception:  # noqa: BLE001 - a reply never fails for this
-            # Deliberately unbound, deliberately value-free, and NOT
-            # counted as either bound's drop: the two counts are the
-            # bound's own vocabulary and mean something exact to a
-            # reader, where this is a defect in this server rather than
-            # a conversation that outgrew what may be held for it.
+            # Deliberately unbound and deliberately value-free: the line
+            # names what happened and its consequence, and nothing it
+            # was holding. A defect in this server is still a round that
+            # carried the whole of a conversation.
+            stage.unrenderable += 1
             logger.warning(
                 "an assembled request could not be rendered for export, so this "
                 "round will not be among the ones exported"
             )
             return
-        size = len(request.encode("utf-8"))
         if size > self._max_request_bytes:
             # Dropped WHOLE rather than truncated, the plan's own words
             # and the reason this class exists: a shortened request is
@@ -549,6 +579,7 @@ class LlmInputExport:
                 rounds=tuple(held.round for held in stage.rounds),
                 oversized=stage.oversized,
                 over_budget=stage.over_budget,
+                unrenderable=stage.unrenderable,
             )
         )
         if reason is not None:
@@ -752,6 +783,7 @@ class LlmInputExport:
                 elapsed_ms=Whole(elapsed),
                 oversized=Count(job.oversized),
                 over_budget=Count(job.over_budget),
+                unrenderable=Count(job.unrenderable),
             )
         )
 
@@ -768,9 +800,9 @@ def _rendered(
     turns: "list[Turn]",
     tools: "list[ToolDef]",
     choice: str,
-) -> str:
+) -> tuple[str, int]:
     """One round's four provider arguments as the string that will be
-    exported.
+    exported, and the bytes that string is.
 
     The fidelity boundary, written out as a function: this is the
     request as vinga ASSEMBLED it, taken at the neutral seam every
@@ -802,24 +834,57 @@ def _rendered(
     field the model never saw.
 
     Canonical JSON, sorted and without padding, so the same round
-    renders to the same bytes on every run and the weighing in `_stage`
-    is a fact rather than a reading. `default=str` is the totality
-    clause: a value that is not JSON at all cannot have come off a
-    model's wire or out of this server's own schemas, and rendering its
-    text is a better answer inside a reply than an exception.
+    renders to the same bytes on every run. `default=str` is one
+    totality clause: a value that is not JSON at all cannot have come
+    off a model's wire or out of this server's own schemas, and
+    rendering its text is a better answer inside a reply than an
+    exception.
+
+    **The size comes back with the string**, and that is the second
+    totality clause rather than a convenience. The weighing has to
+    happen on the bytes this exact string would become, and doing it at
+    the call site put an encode OUTSIDE the guard that catches a
+    rendering this server could not make: a value that renders and then
+    will not encode would raise into a reply. Here the two are one
+    operation and the pair that comes back is the pair the bound is
+    applied to.
+
+    The escaping is the third, and it is the one a hostile far side can
+    reach. Python's JSON decoder accepts a lone-surrogate escape, so an MCP
+    server's tool result can carry a LONE SURROGATE, and a tool result
+    is staged content. `ensure_ascii=False` spells it back out as itself
+    and UTF-8 refuses to encode it, so the compact spelling is tried
+    first, for the size and the legibility it buys every ordinary
+    conversation, and a round that cannot be encoded is rendered again
+    with every non-ASCII code point escaped. That is always encodable,
+    it is what the far side itself sent, and it costs nothing to a
+    conversation that never carried one: the round is exported exactly
+    rather than dropped for being awkward.
     """
-    return json.dumps(
-        {
-            "system": system,
-            "messages": [_message(turn) for turn in turns],
-            "tools": [_tool(tool) for tool in tools],
-            "tool_choice": choice,
-        },
+    payload = {
+        "system": system,
+        "messages": [_message(turn) for turn in turns],
+        "tools": [_tool(tool) for tool in tools],
+        "tool_choice": choice,
+    }
+    compact = json.dumps(
+        payload,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
         default=str,
     )
+    try:
+        return compact, len(compact.encode("utf-8"))
+    except UnicodeEncodeError:
+        escaped = json.dumps(
+            payload,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        return escaped, len(escaped.encode("utf-8"))
 
 
 def _message(turn: "Turn") -> dict[str, Any]:

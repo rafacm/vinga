@@ -22,6 +22,7 @@ way:
 """
 
 import asyncio
+import json
 import logging
 import time
 from collections.abc import AsyncIterator, Sequence
@@ -64,6 +65,11 @@ STALL_S = 30.0
 # deliberately never carries and the half that makes this class the
 # widest one here.
 RESULT_SENTINEL = "tool-result-sk-live-0LLMINPUT-SENTINEL"
+
+# What a far side can put into a round that UTF-8 will not encode.
+# Python's JSON decoder accepts the escape, so an MCP server's tool
+# result can carry one and a tool result is staged content.
+LONE_SURROGATE = json.loads(r'"tell me \ud800 about it"')
 
 
 def staging(**bounds: Any) -> tuple[LlmInputExport, Any]:
@@ -278,6 +284,32 @@ async def test_the_usage_a_round_reported_is_not_in_what_was_staged() -> None:
     (one,) = held(exporter, session.session_id)
     assert "4242" not in one.request
     assert "All done." not in one.request
+
+
+async def test_a_reply_carrying_a_lone_surrogate_still_answers() -> None:
+    """The standing posture of this ladder, driven through a real reply:
+    **no content export may fail a conversation.**
+
+    Staging runs on the reply path and BEFORE the provider call, so a
+    rendering that raised would not merely lose an observation, it would
+    lose the answer the user is waiting for. A lone surrogate is the one
+    hostile value that reaches the rendering from outside this process,
+    since Python's JSON decoder accepts the escape and a tool result is
+    staged content, and it is not encodable as UTF-8.
+
+    The claim is the reply, which is why it is here and not beside the
+    exporter's own cases: what is asserted is that the user was
+    answered, and the round was staged anyway.
+    """
+    exporter, _ = staging()
+    session = session_for(
+        base_config(), POET_MAC, {"poet": ScriptedLlm(["All done."])}, llm_input=exporter
+    )
+
+    spoken = await run_reply(session, LONE_SURROGATE)
+
+    assert spoken == ["All done."], "the reply was lost to a telemetry surface"
+    assert len(held(exporter, session.session_id)) == 1
 
 
 async def test_the_flag_off_stages_nothing_at_all() -> None:

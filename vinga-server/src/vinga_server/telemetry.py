@@ -1139,6 +1139,7 @@ AFTER_THE_CLOSE_ATTRIBUTES = {
     "rounds": "vinga.export.rounds",
     "oversized": "vinga.export.oversized",
     "over_budget": "vinga.export.over_budget",
+    "unrenderable": "vinga.export.unrenderable",
     "reason": "vinga.export.reason",
 }
 
