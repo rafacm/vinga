@@ -367,8 +367,8 @@ refuse over prints exactly what it printed before.
 | The one question narrowed with them | `config/store.py`: `_readable_domain` catches the subclass, which is the question it was already asking said exactly |
 | The boot's second line | `serving.py`: `STORED_CONFIG_RECOVERY`, printed by an arm ahead of `except (ConfigError, ProviderError)` and only for the new class |
 | The migration's corrected docstring | `db/migrations/versions/3004_reach_replaces_egress.py`: the abort argument stands, the claim that is true of a running server and false of a boot is named as the correction, and the second line is named |
-| The one record that moved with the class | `tests/unit/test_config_api_reads.py`: the configuration API's `api_storage_error` event names `ClassName.of(exc)`, so an unreadable row now records the subclass |
-| The changelog fragment | `changelog.d/507-a-refused-boot-says-what-to-do.md`, `### Changed`, with what the failure looks like, what to do, and the one observability value that changed |
+| The two records that moved with the class | `tests/unit/test_config_api_reads.py` and `tests/unit/test_device_bindings.py`: `api_storage_error.failure` and `device_bindings_unreadable.failure` both record `ClassName.of(exc)`, so both name the subclass for an unreadable row |
+| The changelog fragment | `changelog.d/507-a-refused-boot-says-what-to-do.md`, `### Changed`, with what the failure looks like, what to do, and the two observability values that changed |
 
 Tests, by claim, all in `tests/unit/test_boot_stored_row_recovery.py`:
 
@@ -380,6 +380,7 @@ Tests, by claim, all in `tests/unit/test_boot_stored_row_recovery.py`:
 | A configuration failure that is not a storage one prints what it printed before | `test_a_configuration_failure_that_is_not_a_storage_one_gets_no_recovery` |
 | A database that is not there prints what it printed before | `test_a_database_that_is_not_there_gets_no_recovery` |
 | A schema privilege and a generic storage failure print what they printed before | `test_a_storage_failure_that_is_not_a_row_gets_no_recovery` |
+| A refusal that can name no entry (an unknown stage, and the assembly refusing a name) still refuses the boot and still says what to do | `test_a_refusal_that_can_name_no_entry_still_says_what_to_do` |
 | The same row read through a running server still answers 500 with the store's own sentence and gains nothing | `test_the_same_row_read_through_a_running_server_answers_as_it_does_today` |
 
 ### Deviations from the plan
@@ -441,18 +442,21 @@ tree with one storage class.
 
 ### Discoveries
 
-- **One observability value moved with the class, and the lane found it
-  rather than the plan.** `config/api.py` records
-  `ApiStorageError(failure=ClassName.of(exc))`, so the one case that
-  changed class changed what that event carries:
-  `StoredConfigUnreadableError` where it said `StorageError`.
-  `test_a_row_that_cannot_be_read_is_500` was the only assertion on it
-  in the tree, and it was updated rather than worked around. Logging
-  the parent name to keep the spelling would have been describing the
-  failure by hand instead of by type, which is the thing this milestone
-  exists to stop; the status, the sentence and the body are unchanged,
-  which is what "no other reader changes" promised. The changelog says
-  so, since a consumer could be matching on the old value.
+- **Two observability values moved with the class, and each was found
+  by a different reader.** Both record `ClassName.of(exc)`, so both
+  carry `StoredConfigUnreadableError` where they carried
+  `StorageError`: `config/api.py`'s `ApiStorageError`, found by the
+  unit lane when `test_a_row_that_cannot_be_read_is_500` went red, and
+  `device/bindings.py`'s `BindingsUnreadable`, found by the PR review
+  round because the malformed-row cases asserted only that an event
+  existed. Both assertions now read the class rather than a literal.
+  Logging the parent name to keep the spelling would have been
+  describing the failure by hand instead of by type, which is the thing
+  this milestone exists to stop; the status, the sentence and the
+  fallback are unchanged, which is what "no other reader changes"
+  promised. There is no third: the grep for `ClassName.of` and
+  `type(exc).__name__` is in the round's second resolution below, with
+  why each other site cannot see one of these.
 - **The refusal an operator actually meets is two lines, not one.**
   `validation_problems` renders the location and then the field
   problems under it, so the location is on the first line and the
@@ -466,3 +470,99 @@ tree with one storage class.
   which makes the case say what it means: this refusal already tells an
   operator what to do, and appending a database rebuild to it would be
   advice about the other half of the configuration.
+
+### PR review round
+
+External review of [#520](https://github.com/rafacm/vinga/pull/520)'s
+diff: codex CLI 0.154.0, model gpt-5.6-sol, read-only sandbox,
+2026-09-14, runtime 9m02s, reviewing the diff against the M1 branch at
+593a4c7f. Verdict as received: **mergeable after the listed fixes**
+(two P2s).
+
+Both were checked against the code before being accepted and both
+hold. The first is this milestone's own defect committed inside its
+fix, which is the finding worth the round on its own.
+
+Findings condensed but faithful; resolutions follow each.
+
+#### 1 (P2): the recovery promises a row address several failures do not have
+
+`store.py:2740`, `:2786` and `:2848` raise
+`StoredConfigUnreadableError` for an invalid stage, the assembly
+failure and an invalid MAC while deliberately reporting only a section
+(`providers`, `devices`), yet `serving.py` says the location
+"addresses" one row and that both recovery procedures are written out,
+while the SQL one is only mentioned at `docs/reference/cli.md:583-590`.
+The sole positive case uses an MCP body failure, which does have an
+exact identity, so it misses these shapes. Fix: make the wording
+accurate for section-level failures, document actionable SQL for them,
+and add boot tests for the invalid-stage and assembly failures.
+
+*Resolution*: taken, and the finding is exactly right about the
+mechanism. In all three of those shapes the unreadable value IS what an
+entry would have been addressed by, so there is no identity to promise:
+a stage this build does not have, a MAC nothing accepts, and a name the
+assembly refuses each leave the section as the honest location. The
+text now says so, and says what an operator does with a section: the
+row has to be found inside it, and both ways back cover a section as
+well as an entry, which is true because the rebuild puts back what the
+export says whatever the unreadable state was.
+
+The pointer became accurate rather than the procedure being written,
+which is the other half of the finding and the one place it is
+declined. The plan says this milestone "points AT that procedure
+rather than restating it", and the CLI reference's own reasoning for
+leaving SQL unwritten is that a second way in with its own vocabulary
+is a second thing to keep honest. So the sentence now says which is
+which: the rebuild is written out step by step in that document, and
+the SQL door is named there rather than written. Claiming both were
+written was the same defect one sentence further on, and that is what
+is fixed.
+
+`test_a_refusal_that_can_name_no_entry_still_says_what_to_do` drives
+both shapes through the whole entry point. Against the previous
+wording both fail, which is the falsification: the refusal reaches
+stderr with a sentence telling the operator to look at an identity the
+line above never gave them.
+
+#### 2 (P2): a second observability value changes undocumented
+
+Malformed live device bindings raise the subclass through `_list` and
+`_stored` (`store.py:1407-1410`), and `device/bindings.py:496-499`
+records the concrete class in `device_bindings_unreadable.failure`, so
+that field changes from `StorageError` to
+`StoredConfigUnreadableError` exactly as `api_storage_error` did. The
+fragment and this document name only the first, and the malformed-row
+cases assert only that an event exists. Fix: document both, and assert
+the new value for the malformed binding and default-agent rows.
+
+*Resolution*: taken in full. Both values are named in the fragment and
+in the deviation above, and
+`_fell_back_over_an_unreadable_row` now reads every
+`device_bindings_unreadable` payload a case logged and asserts the
+class on each, rather than that one was written. Against the two
+raises put back to the parent class, all seven of those cases fail with
+`['StorageError'] == ['StoredConfigUnreadableError']`.
+
+There is no third. Two readers found two, which is the count that is
+usually not two, so the tree was swept for every site that records an
+exception's class (`ClassName.of` and `type(exc).__name__`) and each
+was read rather than counted:
+
+- `device/placement.py:141` and `:203` DO log a class name of a failure
+  from this store, and neither can see this one: in both, the arm that
+  logs is `except Exception`, which runs only after `StorageError` (and
+  in the first, `ConfigError`) has already been caught by name and
+  answered with a fixed sentence.
+- `config/api.py:3356`'s `ApiError` is the unhandled-failure
+  middleware. Starlette resolves a handler by walking the exception's
+  MRO, so a `StorageError` subclass is answered by the handler
+  registered for `StorageError` and emits `ApiStorageError` before this
+  can see it.
+- `config/reload.py:459` logs a class name for `ProviderError` only.
+- `store.py:1613` records the class of the SQLAlchemy error, which is
+  the database failure this milestone deliberately left on the parent.
+- Everything else (`capture.py`, `filler.py`, `memory/store.py`,
+  `conversations/store.py`, `providers/*`, `runtime/*`,
+  `events/assembly.py`, `tools/mcp/transport.py`) records failures from
+  subsystems that never make a `config/store.py` read.
