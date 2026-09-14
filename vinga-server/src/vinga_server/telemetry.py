@@ -1213,8 +1213,8 @@ def build_telemetry(
 
     1. **The data boundary.** Asked of `boundary.py` before any
        OpenTelemetry import, any construction and any thread, so under a
-       boundary narrower than the internet the exporter's constructor is
-       provably never reached. The sentence is the boundary module's,
+       boundary narrower than this section's declared reach the
+       exporter's constructor is provably never reached. The sentence is the boundary module's,
        value-free, and it arrives here as `BoundaryRefusal`; what leaves
        is `ConfigError`, raised after the handler has closed so nothing
        is chained to it.
@@ -1256,7 +1256,7 @@ def build_telemetry(
     if config is None or not config.enabled:
         return None
 
-    refusal = _boundary_refusal(boundary)
+    refusal = _boundary_refusal(config.reach, boundary)
     if refusal is not None:
         # Raised here rather than inside the handler that read it, so
         # nothing is chained to it: `app.lifespan` follows the same
@@ -1363,7 +1363,7 @@ def _discard(provider: Any | None) -> None:
         pass
 
 
-def _boundary_refusal(boundary: Reach | None) -> str | None:
+def _boundary_refusal(reach: Reach, boundary: Reach | None) -> str | None:
     """What the data boundary says about an exporter, or nothing.
 
     Asked before any OpenTelemetry import, any construction and any
@@ -1372,15 +1372,17 @@ def _boundary_refusal(boundary: Reach | None) -> str | None:
     own, and only the sentence crosses back: the exception type belongs
     to whichever surface asked, which here is `ConfigError`.
 
-    The reach is `internet`, fixed and honest: where the collector is
-    lives in `OTEL_EXPORTER_OTLP_ENDPOINT`, which this server never
-    parses and could not vouch for if it did, and there is no telemetry
-    entry for an operator to assert a LAN collector on. The consequence
-    is stated rather than hidden: a `network`-bounded server refuses
-    tracing even toward a collector on its own network.
+    The reach is the telemetry section's own, because where the
+    collector is lives in `OTEL_EXPORTER_OTLP_ENDPOINT`, which this
+    server never parses and could not vouch for if it did (#502). What
+    the section declares is an assertion about that destination, and it
+    is `internet` when nothing is written, which is what this call
+    passed fixed until the key existed: a `network`-bounded deployment
+    that has not said where its collector is still refuses tracing,
+    exactly as it did.
     """
     try:
-        check_feature(TELEMETRY_KEY, Reach.INTERNET, boundary)
+        check_feature(TELEMETRY_KEY, reach, boundary)
     except BoundaryRefusal as refusal:
         return str(refusal)
     return None

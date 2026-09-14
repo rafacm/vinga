@@ -307,7 +307,8 @@ def build_capture_upload(
        therefore have been the one refusal shape that skipped the sweep.
     4. **The data boundary.** Asked of `boundary.py` before any import,
        any construction and any thread, so under a boundary narrower
-       than the internet the SDK is provably never reached.
+       than the telemetry section's declared reach the SDK is provably
+       never reached.
     5. **The extra.** Imported HERE rather than at module scope, the
        provider registry's `_resolved` pattern, which is what lets this
        module be imported by a server that does not have the SDK.
@@ -345,7 +346,7 @@ def build_capture_upload(
         # for a trace id.
         raise ConfigError(ATTACHMENT_NEEDS_AN_EXPORTER)
 
-    refusal = _boundary_refusal(boundary)
+    refusal = _boundary_refusal(telemetry_section.reach, boundary)
     if refusal is not None:
         raise ConfigError(refusal)
 
@@ -392,7 +393,7 @@ ATTACHMENT_NEEDS_AN_EXPORTER = (
 )
 
 
-def _boundary_refusal(boundary: Reach | None) -> str | None:
+def _boundary_refusal(reach: Reach, boundary: Reach | None) -> str | None:
     """What the data boundary says about an uploader, or nothing.
 
     Asked before any import, any construction and any thread, which is
@@ -402,13 +403,18 @@ def _boundary_refusal(boundary: Reach | None) -> str | None:
     exception type belongs to whichever surface asked, which here is
     `ConfigError`.
 
-    The reach is `internet`, fixed, for the reason the exporter's is:
-    `LANGFUSE_HOST` is a transport credential this server hands over
-    without reading, so nothing here can assert an upload stays on the
-    operator's network.
+    The reach is the telemetry section's own, for the reason the
+    exporter's is: `LANGFUSE_HOST` is a transport credential this server
+    hands over without reading, so the operator's assertion about where
+    this section's destinations are is the only thing that can speak for
+    it (#502). One assertion covers both transports and means the
+    outermost of them, so a `network` declared beside a vendor media
+    host is a deployment contradicting itself rather than a narrower
+    answer for this one. Absent, it is `internet`, which is what this
+    call passed fixed before the key existed.
     """
     try:
-        check_feature(ATTACH_KEY, Reach.INTERNET, boundary)
+        check_feature(ATTACH_KEY, reach, boundary)
     except BoundaryRefusal as refusal:
         return str(refusal)
     return None
