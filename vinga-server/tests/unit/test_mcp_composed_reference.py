@@ -25,8 +25,10 @@ substitution is a thing the refusal could have quoted and does not.
 import hashlib
 import json
 import logging
+import os
 import traceback
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from typing import Any
 
 import pytest
 from mcp.server.fastmcp import Context, FastMCP
@@ -61,6 +63,11 @@ EXPECTED = f"Bearer {SENTINEL}"
 # rather than memorable, since six characters cannot be shaped to be
 # unmistakable.
 SHORT = "q7v3zx"
+
+# And what the same variable holds after a case has moved it, which is
+# how a test tells "the value that was sent" from "the value that is
+# set now".
+MOVED = "sk-test-moved-2c8d10fa-never-a-real-credential"
 
 pytestmark = pytest.mark.filterwarnings("ignore:Unclosed <MemoryObject:ResourceWarning")
 
@@ -98,16 +105,38 @@ def recording_server() -> FastMCP:
     return server
 
 
-def shipping_server(guidance: str) -> FastMCP:
-    """A streamable_http server that ships one sentence about itself.
+def shipping_server(guidance: str, before: Callable[[], None] | None = None) -> FastMCP:
+    """A streamable_http server that ships one sentence about itself,
+    and optionally runs a callback in this process the moment a request
+    reaches it.
 
     The sentence is arranged rather than observed, as the HTTP half of
     `test_mcp_status_reflection.py` arranges its own: a server cannot
     read the header it was given while it is being constructed, and what
     is under test here is this side's redaction rather than the far
     side's ingenuity.
+
+    `before` is what makes the window measurable. It runs when the
+    handshake arrives and before the response goes back, so anything it
+    changes is changed after this connection was resolved and sent, and
+    before the tool listing and the capture that follow.
     """
-    server = FastMCP("vinga-test-http-shipping", instructions=guidance)
+
+    class Hooked(FastMCP):
+        def streamable_http_app(self) -> Any:
+            app = super().streamable_http_app()
+            ran = False
+
+            async def wrapper(scope: Any, receive: Any, send: Any) -> None:
+                nonlocal ran
+                if before is not None and scope["type"] == "http" and not ran:
+                    ran = True
+                    before()
+                await app(scope, receive, send)
+
+            return wrapper
+
+    server = Hooked("vinga-test-http-shipping", instructions=guidance)
 
     def forecast() -> str:
         return "sunny"
@@ -304,6 +333,42 @@ async def test_a_reflected_token_below_the_redaction_floor_is_taken_out(
     assert tap.seen
     for surface in (captured, every_format(watched), tap.rendered()):
         assert SHORT not in surface
+
+
+async def test_the_capture_redacts_what_was_sent_and_not_what_is_set_now(
+    tap: Tap, watched: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The window between the connect and the capture, held open.
+
+    A handshake and a tool listing sit between the values being
+    materialized and the guidance being taken, and an environment is a
+    thing that moves. This server changes the variable when the
+    handshake reaches it, so by the time the capture runs the variable
+    holds a credential this connection never sent while the far side
+    holds the one it did.
+
+    What must be redacted is what the server was given. A capture that
+    read the environment again would be hunting the new value and would
+    let the old one through, which is the leak, and this is the case
+    that can tell the two apart: both are credential-shaped, only one
+    was sent.
+    """
+    monkeypatch.setenv(SECRET_ENV, SENTINEL)
+
+    def move() -> None:
+        monkeypatch.setenv(SECRET_ENV, MOVED)
+
+    guidance = f"Call the forecast tool with {SENTINEL}."
+    async with serving(shipping_server(guidance, before=move)) as url:
+        captured = await shipped(config_with(opted_in(url, COMPOSED)))
+
+    # The window really opened, or this would be the ordinary case
+    # under a longer name.
+    assert os.environ[SECRET_ENV] == MOVED
+    assert f"Call the forecast tool with {REDACTED}." in captured
+    assert tap.seen
+    for surface in (captured, every_format(watched), tap.rendered()):
+        assert SENTINEL not in surface
 
 
 # --- what an unset variable refuses, and what it does not say ---------
