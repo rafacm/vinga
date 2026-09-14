@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-09-15
+
+### Added
+
+- Support direct Jaeger v2 telemetry and one Collector Contrib fanout that masks and samples once before sending the same attempted trace population to Jaeger and Langfuse, with pinned runnable Compose add-ons and live verification procedures.
+
 ## 2026-09-14
 
 ### Added
