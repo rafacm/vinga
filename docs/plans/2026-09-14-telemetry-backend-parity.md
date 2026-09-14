@@ -219,12 +219,16 @@ semantic output admitted before failure, and has no invented completion.
 
 The recap path becomes a first-class generation rather than an exporter-only
 special case. `_summarized` mints the same invocation id, measures the same
-provider operation, and emits the same `llm_round` event with a declared
-low-cardinality purpose (`reply` or `recap`) on success. Failure carries that
-identity and purpose through `provider_failed`. Both outcomes therefore create
-one real `llm` span under the active turn, with `vinga.llm.purpose=recap`; the
-successful and failed shapes are symmetric, and the staged recap request has
-an operation to enrich.
+provider operation, and emits `llm_round` through a metadata-only helper with
+a declared low-cardinality purpose (`reply` or `recap`) on success. For recap,
+the existing `round` field is absent: recap neither increments the reply-local
+ordinal nor calls `TurnUnderway.round_done`. Its latency and tokens therefore
+do not change stored turn totals or the metrics views derived from them.
+Failure carries that identity and purpose through `provider_failed`. Both
+outcomes create one real `llm` span under the active turn, with
+`vinga.llm.purpose=recap`; the successful and failed shapes are symmetric, and
+the staged recap request has an operation to enrich. Event and generated
+reference prose distinguish traced recap work from reply-round accounting.
 
 The recap's outer `asyncio.timeout` is a third failure site: cancellation
 passes through `_watched_stream` and becomes `TimeoutError` only at the outer
@@ -446,7 +450,8 @@ the existing Langfuse REST and object-storage destinations in that assertion.
   failure metadata.
 - `changelog.d/523-telemetry-backend-parity.md` records the supported Jaeger
   and Collector paths under `### Added`, the wider LLM-output disclosure and
-  new canonical content locations under `### Changed`, and removal of the
+  newly visible recap generation spans under `### Added`, the new canonical
+  content locations under `### Changed`, and removal of the
   `transcript` and `llm_input` span names under `### Removed`. The Changed entry
   tells direct-to-Langfuse operators that their path remains supported and
   tells saved-view owners to select `turn` and `llm` instead. `CHANGELOG.md` is
@@ -809,6 +814,12 @@ read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 9m08s.
 6. **P2: using ordinary `_llm_round_done` for recap changes stored turn
    accounting and metrics.** The plan must decide whether recap advances the
    reply ordinal or `TurnRecord.round_done`, and document any metrics change.
+
+   *Resolution:* Recap emits the semantic event through a helper that does not
+   advance the reply ordinal or call `round_done`; its `round` field is absent
+   and `purpose=recap` identifies it. Stored turn totals and metrics views stay
+   byte-for-byte unchanged, while the changelog Added entry names the newly
+   visible recap span.
 7. **P2: ASR failure still lacks canonical `error.type`.** M1 names only the
    other three stages even though the issue and contract require all four.
 8. **P2: `telemetry_deferred.py` still fails the deletion test.** Its exporters
