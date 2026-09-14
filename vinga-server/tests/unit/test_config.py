@@ -7,6 +7,7 @@ import yaml
 from pydantic import BaseModel
 
 from tests.support.configs import load_config_from_data
+from vinga_server.boundary import Reach
 from vinga_server.config import Config, ConfigError, docgen, load_file_config
 from vinga_server.config.entities import PROGRAM, SERVER_PROGRAM
 from vinga_server.config.loader import (
@@ -248,6 +249,37 @@ def test_the_old_attachment_key_is_refused_at_boot() -> None:
     assert PARSER_SENTINEL not in refusal
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+
+
+def test_a_telemetry_reach_outside_the_vocabulary_is_refused() -> None:
+    # The new key takes the closed `Reach` set and is refused like any
+    # other bad enum in this file: the location an operator reads, the
+    # three values that would have been accepted, and never the value
+    # they wrote. `reach` is the one telemetry key whose value is a
+    # string an operator types, so it is the one where a refusal could
+    # echo something back (#502).
+    with pytest.raises(ConfigError) as caught:
+        load_config_from_data(
+            {"server": {"telemetry": {"enabled": True, "reach": PARSER_SENTINEL}}}
+        )
+
+    refusal = str(caught.value)
+    assert "server.telemetry.reach" in refusal
+    assert "'host'" in refusal and "'network'" in refusal and "'internet'" in refusal
+    assert PARSER_SENTINEL not in refusal
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+def test_the_telemetry_reach_is_the_internet_when_nothing_says_otherwise() -> None:
+    # The upgrade contract as one assertion on the model: a section that
+    # writes no reach carries the one the three builders passed fixed
+    # before the key existed, so nothing about a boot moves (#502).
+    telemetry = load_config_from_data(
+        {"server": {"telemetry": {"enabled": True}}}
+    ).server.telemetry
+    assert telemetry is not None
+    assert telemetry.reach is Reach.INTERNET
 
 
 def test_the_example_config_leaves_the_conversation_store_off() -> None:
