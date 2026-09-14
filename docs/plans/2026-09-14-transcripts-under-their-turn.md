@@ -234,14 +234,29 @@ utterance reaches the seam type unchanged, including null, so a column
 the store grew cannot be dropped silently between the read and the span.
 
 **Integration, `tests/integration/test_transcript_export.py`.** The
-wire claim, extended: in the existing real-server, real-collector,
-real-handover case, the transcript span's trace id equals its turn
-span's trace id, its parent span id is that turn span's span id, and the
-two spans carry the same `vinga.utterance.id`. This is the cross-side
-join, performed end to end for the first time, and the reason the
-integration lane is where it belongs is that neither side is faked: the
-id on the span is the one the pipeline minted and the id in the row is
-the one the store wrote.
+wire claim, extended. The existing real-server, real-collector,
+real-handover case writes TWO transcript observations, and the reason
+matters for what this asserts: the mock-driven handover records two
+TURNS, the switch itself and the answer, not one turn's two rows (the
+case says so at its own assertion). So each observation is matched
+against the turn span carrying its own `vinga.utterance.id`, selected
+by that id rather than by span name, and both are asserted: same trace
+id as its turn, parent span id equal to that turn's span id, and the
+two observations in two DIFFERENT traces, which is the property a
+single passed context used to make impossible.
+
+The other half of the join, a handover's two rows resolving to one turn
+span, is many-to-one and cannot be produced by that case. The store
+side of it is already pinned through the real pipeline by M4a
+(`tests/unit/test_session_record.py::test_a_handovers_two_rows_answer_one_utterance`),
+and the exporter side is the unit case above, where two turns carrying
+one utterance land under one span. Naming both here is what keeps the
+integration case from being read as the proof of something it does not
+produce.
+
+The reason the integration lane is where the one-row join belongs is
+that neither side is faked: the id on the span is the one the pipeline
+minted and the id in the row is the one the store wrote.
 
 **Falsification.** Every new case is watched failing before it is
 believed. The nesting cases fail against the pre-change parenting with
@@ -363,6 +378,15 @@ integration case already produces two transcript observations and
 M4a's key exists to make a handover's rows resolve to one turn. Both
 should be asserted, and the turn should be selected by utterance id
 rather than by span name.
+
+*Resolution* (commit below): taken, with its premise corrected. Both
+observations are asserted and the turn is selected by utterance id.
+But the two observations that case produces are two TURNS rather than
+a handover's two rows, which the case's own comment states: the
+switching agent's reply spoke nothing and the second agent answered in
+a turn of its own. So the wire case proves two transcripts in two
+different traces, and the many-to-one is proved by the exporter unit
+case beside M4a's store-side case, both named in the plan now.
 
 ### 3 (P2): the stated goal is impossible under the plan's own fallback
 
