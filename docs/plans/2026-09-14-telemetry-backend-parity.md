@@ -506,16 +506,18 @@ the existing Langfuse REST and object-storage destinations in that assertion.
   first two change with the widened `export_llm_input` description even though
   no field is added; the events reference changes with the safe correlation and
   failure metadata.
-- `changelog.d/523-telemetry-backend-parity.md` records the supported Jaeger
-  and Collector paths under `### Added`, the wider LLM-output disclosure and
-  newly visible recap generation spans under `### Added`, the new canonical
-  content locations under `### Changed`, and removal of the
-  `transcript` and `llm_input` span names under `### Removed`. The Changed entry
-  tells direct-to-Langfuse operators that their path remains supported and
-  tells saved-view owners to select `turn` and `llm` instead. The Removed entry
-  also names the row-only index, id and time attributes and the legacy
+- Each releasable milestone carries its own issue-prefixed changelog fragment,
+  because every merge publishes a valid intermediate release. M1 records real
+  failed operations and recap tracing. M2 records the wider LLM-output
+  disclosure and reporting change under `### Changed`, the new canonical
+  content locations under `### Changed`, and removal of the `transcript` and
+  `llm_input` span names under `### Removed`. Its Changed entry tells
+  direct-to-Langfuse operators that their path remains supported and tells
+  saved-view owners to select `turn` and `llm` instead. Its Removed entry also
+  names the row-only index, id and time attributes and the legacy
   session-parent fallback. Per-agent legs are explicitly retained on
-  `vinga.turn.legs`, not silently lost. `CHANGELOG.md` is not edited.
+  `vinga.turn.legs`, not silently lost. M3 records the supported Jaeger and
+  Collector paths under `### Added`. `CHANGELOG.md` is never edited.
 
 ## Tests and verification
 
@@ -653,7 +655,8 @@ fixtures are extended rather than replaced.
   Design footprint: deepen `telemetry.py` and
   the existing runtime/event seams; no new module. Documentation footprint:
   update the exporter contract in `vinga-server/README.md` and the exported
-  traces entry in the observability map; no deployment procedure changes yet.
+  traces entry in the observability map, plus an M1 changelog fragment; no
+  deployment procedure changes yet.
 - [ ] **M2, content on the operations it describes.** Add the bounded held-turn
   lifecycle beside telemetry's existing retention maps, enrich acknowledged
   turn roots and paired generation spans,
@@ -668,7 +671,8 @@ fixtures are extended rather than replaced.
   observability section that describe per-row child spans and a session-parent
   fallback; and regenerate both configuration references plus examples whose
   current post-close observation descriptions become false. The changelog
-  announces the existing flag's wider disclosure under `### Changed`.
+  announces the existing flag's wider disclosure and topology migration in an
+  M2 fragment.
 - [ ] **M3, direct Jaeger and one processed fanout.** Add the pinned direct
   Jaeger and Collector examples, common masking and sampling, boundary-only
   Langfuse adaptation, Basic Auth and v4 ingestion header, static validation,
@@ -679,7 +683,7 @@ fixtures are extended rather than replaced.
   graph so the server stops knowing backend topology or credentials.
   Documentation footprint: `docs/deployment.md`, `docs/README.md`, the server
   README and observability map describe the supported current paths and their
-  non-transactional limit.
+  non-transactional limit, with an M3 changelog fragment.
 
 ## Plan review round
 
