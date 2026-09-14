@@ -605,7 +605,18 @@ Langfuse REST and object-storage path.
 
 ### Deviations and decisions
 
-There are no deviations from the reviewed M3 contract.
+Two reviewed live acceptance gates remain deviations because no Langfuse
+project credentials are available in this environment:
+
+- [ ] Direct Langfuse v4: send the M2 turn-root and generation-content model
+  with the maintained Basic Auth and ingestion-version header recipe, then
+  record its accepted generation and turn rendering.
+- [ ] Collector fanout to Langfuse v4: send the same model through the
+  committed common policy pipeline, then compare its real Langfuse rendering
+  and trace-ID population with Jaeger.
+
+Until those gates run, the direct Langfuse recipe is maintained but its
+rendering under the M2 content model is not claimed as live-verified.
 
 Jaeger's published latest release on the implementation date was 2.20.0 even
 though its upstream release schedule named later tentative versions. The pin
@@ -649,7 +660,5 @@ Run from `vinga-server/` unless noted otherwise:
 - Credential checks scanned both received protobuf streams, Collector output,
   the resolved service environments and the committed secret locations. Raw
   sentinels were absent and no Langfuse name reached vinga.
-- The real Langfuse v4 direct and fanout gates were not run because no project
-  credentials are available in this environment.
 - The built-image Jaeger repetition was not run locally because it belongs to
   the non-PR image job after an image build.

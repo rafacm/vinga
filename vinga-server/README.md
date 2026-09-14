@@ -2808,7 +2808,10 @@ projection is limited to 256 KiB, keeping a maximal request below 3 MiB.
 not backend acknowledgement; ordinary exporter health owns downstream
 delivery. Standard `OTEL_EXPORTER_OTLP_*` variables own the
 destination, protocol and credentials; none becomes span content. This
-repository supports three current trace paths:
+repository provides three current trace paths. The Jaeger and Collector paths
+are exercised in automated tests. The direct Langfuse v4 recipe is maintained,
+but its rendering under the M2 turn-root and generation-content model has not
+yet been re-verified against a live project:
 
 - direct Jaeger v2 over OTLP/HTTP protobuf;
 - direct Langfuse v4 over OTLP/HTTP with Basic Auth and its ingestion-version
