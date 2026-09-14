@@ -53,6 +53,12 @@ CANONICAL_CONTENT = {
     "vinga.llm.tools",
     "vinga.llm.tool_choice",
 }
+LANGFUSE_CONTENT = {
+    "langfuse.observation.input",
+    "langfuse.observation.output",
+    "langfuse.observation.metadata.legs",
+}
+CONTENT_ATTRIBUTES = CANONICAL_CONTENT | LANGFUSE_CONTENT
 
 
 def _run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -161,12 +167,9 @@ def _request() -> bytes:
             span.attributes.extend(
                 [
                     _attribute("session.id", "fanout-session"),
-                    _attribute(
-                        "vinga.turn.input", f"mail {RAW_EMAIL} token {SECRET_KEY}"
-                    ),
-                    _attribute(
-                        "langfuse.observation.input",
-                        f"mail {RAW_EMAIL} token {SECRET_KEY}",
+                    *(
+                        _attribute(key, f"mail {RAW_EMAIL} token {SECRET_KEY}")
+                        for key in sorted(CONTENT_ATTRIBUTES)
                     ),
                     _attribute("vinga.safe.error.type", "ProviderError"),
                 ]
@@ -236,17 +239,18 @@ def test_committed_collector_fans_out_one_masked_sampled_population() -> None:
             not any(key.startswith("langfuse.") for key in attributes(span))
             for span in jaeger.spans()
         )
+        expected = f"mail {MASKED_EMAIL} token {MASKED_CREDENTIAL}"
         assert all(
-            attributes(span)["vinga.turn.input"]
-            == f"mail {MASKED_EMAIL} token {MASKED_CREDENTIAL}"
+            {key: attributes(span)[key] for key in CANONICAL_CONTENT}
+            == dict.fromkeys(CANONICAL_CONTENT, expected)
             for span in jaeger.spans()
         )
         assert all(MASKED_CREDENTIAL in span.status.message for span in jaeger.spans())
         for span in langfuse.spans():
             carried = attributes(span)
-            expected = f"mail {MASKED_EMAIL} token {MASKED_CREDENTIAL}"
-            assert carried["vinga.turn.input"] == expected
-            assert carried["langfuse.observation.input"] == expected
+            assert {key: carried[key] for key in CONTENT_ATTRIBUTES} == dict.fromkeys(
+                CONTENT_ATTRIBUTES, expected
+            )
             assert MASKED_CREDENTIAL in span.status.message
 
         raw = b"".join(jaeger.bodies + langfuse.bodies)

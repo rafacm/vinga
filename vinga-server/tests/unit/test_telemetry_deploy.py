@@ -46,6 +46,7 @@ LANGFUSE_ENV = {
     "LANGFUSE_PUBLIC_KEY",
     "LANGFUSE_SECRET_KEY",
 }
+EMAIL_PATTERN = r"(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}"
 
 
 def _load(path: Path) -> Any:
@@ -110,6 +111,16 @@ def test_the_common_mask_names_every_content_field_and_alias() -> None:
     assert named == CONTENT_ATTRIBUTES
     assert all("replace_pattern" in statement for statement in content_statements)
     assert all('"[email]"' in statement for statement in content_statements)
+    patterns = {
+        match.group(1)
+        for statement in content_statements
+        if (
+            match := re.search(
+                r'replace_pattern\(attributes\["[^"]+"\], "([^"]+)"', statement
+            )
+        )
+    }
+    assert patterns == {EMAIL_PATTERN}
     assert any("replace_all_patterns(attributes" in statement for statement in statements)
     assert any("replace_pattern(status.message" in statement for statement in statements)
 
