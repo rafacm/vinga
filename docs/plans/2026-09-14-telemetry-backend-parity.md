@@ -81,9 +81,11 @@ and a multi-round tool reply cannot be read as matched generation pairs.
 
 An ended SDK span cannot be enriched. Reusing its identifiers in a second
 span, relying on a backend upsert, or keeping both the old and new span is not
-valid across OTLP destinations. The canonical span records therefore have to
-be held, boundedly, until the content exporter has either supplied the
-authorized content or declared it absent.
+valid across OTLP destinations. Where content is enabled, telemetry therefore
+keeps the original recording span open after the logical operation has ended,
+retains its already-known end timestamp, and calls `Span.end(end_time=...)`
+only after the content exporter has supplied authorized attributes or declared
+them absent. The exported interval is unchanged even though release is later.
 
 ### The event catalog remains metadata-only
 
@@ -91,7 +93,7 @@ The event tap is the source of span timing and safe metadata. It intentionally
 does not carry transcripts, LLM requests, model output, tool arguments or tool
 results. This plan does not weaken that boundary. Content continues through
 the dedicated collaborators that already exist, and the telemetry layer joins
-it to an ended span only by server-minted session, utterance and round
+it to a held span only by server-minted session, utterance and invocation
 identities.
 
 ### Failure coverage is uneven
@@ -234,31 +236,38 @@ status and `error.type`.
 
 ## The deferred-span seam
 
-A new `vinga_server.telemetry_deferred` module owns the lifecycle of canonical
-span records whose optional content is decided after `Span.end()`. Its callers
-stop knowing how an OpenTelemetry `ReadableSpan` becomes an immutable retained
-record, how the original sampling identity is preserved, how records are
-correlated, and how a held record is released through the bounded direct OTLP
-delivery path.
+A new `vinga_server.telemetry_deferred` module owns when an original recording
+span whose logical end time is already known remains enrichable and when it
+must be ended exactly once. Telemetry gives it live `turn` and `llm` spans,
+their explicit end timestamps, and server-minted correlation keys. Content
+exporters can add only an allowlisted attribute mapping, then the ledger ends
+the original span with its retained timestamp. A metadata-only release adds
+nothing and ends the same span. The ordinary registered batch processor is the
+only path after `Span.end()`, so a content-delivery failure cannot remove a
+canonical operation or create a duplicate identity.
 
-The module provides one routing span processor in front of the ordinary batch
-processor. Metadata-only spans pass straight through. When the corresponding
-content exporter exists, ended `turn` and `llm` spans are converted to
-immutable SDK span data and held by their server-minted correlation key. The
-transcript and LLM input workers later provide allowlisted attributes or a
-metadata-only release. The module creates one final record with the original
-identity, timing, topology, resource, instrumentation scope, events, links,
-status, trace flags and trace state, plus only those supplied attributes. It
-exports that record exactly once.
+Holding is enabled by registration of an exporter instance, never by a config
+flag alone. A held class has a close protocol: when `session_closed` reaches
+telemetry, the ledger marks that session closed; each registered content
+exporter must then settle every held key in its class as enriched or
+metadata-only. The ledger ends a class's remaining spans metadata-only when
+that exporter reports any terminal path: no recorded store, no retained trace,
+builder no-op, thread-start failure, queue overflow, unreadable rows,
+undelivered or stopped flush, a page that prevents later pages being read, or
+exporter shutdown. Telemetry shutdown is the final backstop and ends every
+remaining span metadata-only before the SDK provider is shut down.
 
-The ledger is globally bounded. Its fixed bound is derived from the existing
-session and LLM-round bounds rather than added as operator configuration. On
-overflow it releases the oldest held record metadata-only and counts the
-content omission in the owning exporter's existing closed outcome. Session
-close, exporter refusal, queue overflow, rendering failure and shutdown all
-release every addressable record exactly once. Unknown or already-released
-keys are an explicit non-delivery result, never a duplicate span. Unit tests
-exercise each transition and repeatedly race content completion with
+The content worker's bounded delivery result is preserved by ending the
+enriched spans onto the ordinary batch processor and calling the existing
+bounded `force_flush` from that worker. A failed or timed-out flush is reported
+as today, but the spans have already entered the ordinary SDK path and are not
+discarded or rebuilt. Reply-serving code never waits on a flush.
+
+The ledger is globally bounded. On overflow it ends the selected held span
+metadata-only and reports the content omission through the owning exporter's
+existing closed outcome. Unknown or already-ended keys are an explicit
+non-delivery result, never a second span. Unit tests exercise each transition,
+all terminal paths above, and repeatedly race content completion with
 shutdown.
 
 `transcript_export.py` keeps responsibility for waiting on the conversation
@@ -335,9 +344,10 @@ the existing Langfuse REST and object-storage destinations in that assertion.
   keeps the existing Langfuse aliases, including `usage_details`, as derived
   export-boundary compatibility attributes for direct-to-Langfuse deployments
   and delegates held-span lifecycle.
-- New `vinga_server/telemetry_deferred.py` owns immutable delayed span records,
-  original trace state, bounded retention, enrichment and exactly-once
-  release. Its callers stop knowing OpenTelemetry SDK span-data mechanics.
+- New `vinga_server/telemetry_deferred.py` owns the lifecycle decision for
+  logically finished live spans: the enrichable interval, explicit end time,
+  bounded retention, class settlement and exactly-once end across both content
+  exporters and shutdown.
 - `transcript_export.py` keeps store acknowledgement, paging, admission and
   outcome reporting, but enriches turn roots rather than creating observations.
 - `llm_input_export.py` keeps neutral-seam rendering and byte budgets, adds
@@ -378,8 +388,8 @@ fixtures are extended rather than replaced.
   safe `error.type` is absent. Credential-shaped exception messages are absent
   from the span, event, log record message, typed arguments and exception
   chains in both log formats.
-- Deferred-ledger unit tests pin immutable span identity, original sampled and
-  unsampled decisions, exact-once release, metadata-only release after every
+- Deferred-ledger unit tests pin original span identity, explicit end time,
+  sampled and unsampled decisions, exact-once end, metadata-only release after every
   drop reason, oldest-first overflow and shutdown races. The concurrency test
   is run at least 100 times because one passing interleaving proves nothing.
 - Transcript tests assert the actual `turn` root, not a child, carries the
@@ -421,7 +431,7 @@ fixtures are extended rather than replaced.
 ## Risks and mitigations
 
 - **A content exporter can strand a canonical span.** Every terminal exporter
-  outcome releases the held record, the ledger has its own oldest-first bound,
+  outcome ends the held span, the ledger has its own bound,
   and telemetry shutdown drains remaining records metadata-only before the SDK
   provider shuts down.
 - **A delayed root can arrive after its children.** OTLP permits this and both
@@ -532,6 +542,13 @@ model `claude-opus-5`, 2026-09-14, runtime 5m18s.
    undelivered page, and stopped delivery can all bypass later rows. Canonical
    metadata release must be independent from content delivery failure and have
    a deadline or close trigger.
+
+   *Resolution:* The design now holds the original live span before end rather
+   than intercepting an ended record. Class settlement is triggered by session
+   close and every enumerated exporter terminal path, with telemetry shutdown
+   as the final backstop. Ending the span puts it on the ordinary batch path;
+   bounded flush failure changes the outcome report but cannot delete or
+   rebuild the canonical span.
 6. **P1: a handover turn is two store rows that can straddle pages.** The plan
    does not say how those rows become one ordered root output before exactly-once
    release. Grouping and page-boundary carryover must be specified.
