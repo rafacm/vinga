@@ -512,6 +512,10 @@ fixtures are extended rather than replaced.
   sampled and unsampled decisions, exact-once end, metadata-only release after every
   drop reason, the 4,097th-record oldest-finished overflow and shutdown races. The concurrency test
   is run at least 100 times because one passing interleaving proves nothing.
+- The pull-request unit lane imports the application with the OTel packages
+  hidden and pins the existing one-sentence missing-extra refusal. The slim
+  container boot remains an unchecked workflow-dispatch or post-merge image
+  verification item because the image job does not run on pull requests.
 - A live-session test settles several turn acknowledgements without closing
   the session and proves each earlier root is already on the OTLP wire. A
   pending false acknowledgement releases only that root metadata-only, and an
@@ -914,6 +918,10 @@ read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 9m08s.
     Collector path before compatibility is claimed.
 13. **P3: slim-image boot is not a pull-request gate.** Only the no-extra unit
     refusal runs on PRs; image verification is workflow-dispatch or post-merge.
+
+    *Resolution:* M2's PR gate is now only the no-extra import and refusal unit
+    test. The slim-image boot is listed honestly as an unchecked dispatch or
+    post-merge image verification item.
 14. **P3: the cross-thread deferred map has no stated concurrency boundary.**
     The plan must name its lock and the point at which the session loop hands
     sole span ownership to it.
