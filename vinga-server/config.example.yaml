@@ -394,18 +394,28 @@ server:
   #   # it.
   #   #
   #   # ONE ASSERTION COVERS EVERY DESTINATION this section sends to,
-  #   # and it means the outermost of them. There are two: the traces
-  #   # and the exported transcripts ride OTEL_EXPORTER_OTLP_*, and the
-  #   # recording upload rides LANGFUSE_HOST. A collector on your
-  #   # network beside a media host at a vendor is therefore `internet`,
-  #   # and all three features below are refused rather than the one
-  #   # that would have been caught.
+  #   # and it means the outermost of them. There are THREE. The traces
+  #   # and the exported transcripts ride OTEL_EXPORTER_OTLP_*. The
+  #   # recording upload's REST calls go to LANGFUSE_HOST. And the
+  #   # recording's BYTES go somewhere neither of those names: the media
+  #   # API answers with a presigned upload URL and the WAV and the
+  #   # manifest are PUT to that, so they land in whatever object
+  #   # storage your backend is configured with, which a Langfuse on
+  #   # your own network may perfectly well answer with a URL at a cloud
+  #   # vendor. Any one of the three outside your network makes this
+  #   # `internet`, and all three features below are then refused rather
+  #   # than the one that would have been caught.
   #   #
-  #   # IT IS AN ASSERTION, NOT A PROOF. Nothing here reads either
-  #   # endpoint, so declaring `network` and then pointing
-  #   # OTEL_EXPORTER_OTLP_ENDPOINT at a vendor contradicts your own
-  #   # configuration and this server cannot tell. The mechanism admits
-  #   # declarations, not behaviour, and is not a network sandbox.
+  #   # IT IS AN ASSERTION, NOT A PROOF, and the third destination is
+  #   # why that is not a formality. Nothing here reads the OTLP
+  #   # endpoint or the Langfuse host, and the upload target does not
+  #   # exist until your backend names it, one request before the bytes
+  #   # go. So a LAN collector and a LAN Langfuse are not enough to
+  #   # declare `network` unless that Langfuse's object storage stays on
+  #   # your network too; if you cannot say where your backend stores
+  #   # media, you have not got a `network` deployment to declare. The
+  #   # mechanism admits declarations, not behaviour, and is not a
+  #   # network sandbox.
   #   reach: internet
   #   # ATTACHES A CLOSED SESSION'S RECORDING to the trace it was
   #   # exported under, which SENDS ROOM AUDIO OFF THIS HOST. Off by
@@ -432,6 +442,14 @@ server:
   #   # deployment and the SAME project: pointed at different ones both
   #   # halves succeed, and the recording lands where the trace's reader
   #   # will never look.
+  #   #
+  #   # THE BYTES GO TO A THIRD ADDRESS neither variable names. The
+  #   # media API is asked for an upload URL and the two files are PUT
+  #   # to the presigned one it answers with, so they land in whatever
+  #   # object storage the backend is configured with. A Langfuse on
+  #   # your own network can answer with a URL at a cloud vendor, and
+  #   # this server hands the bytes over without reading it, which is
+  #   # why `reach` above has to cover that address too.
   #   #
   #   # It needs the `langfuse` extra, which both published images
   #   # carry, and is refused at boot without it and under a

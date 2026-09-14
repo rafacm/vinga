@@ -232,12 +232,16 @@ goes and what credentials reach it are the standard
 never become span content. Nothing here reads them, so how far this
 destination lies is the operator's own assertion, written on
 `server.telemetry.reach`. That one key covers every destination the
-telemetry section sends to and means the outermost of them: the OTLP
-endpoint the traces and the transcripts ride, and the Langfuse REST host
-the recording upload uses. It is an assertion and not a proof, which is
-the limit the whole mechanism carries, and it is `internet` where the
-key is absent, so a deployment that writes nothing gets what every
-deployment had before it existed.
+telemetry section sends to and means the outermost of them, and there
+are three: the OTLP endpoint the traces and the transcripts ride, the
+Langfuse REST host the recording upload talks to, and the object storage
+that host hands out presigned upload URLs for, which is where the
+recording's bytes actually land (see the capture-media surface below).
+It is an assertion and not a proof, which is the limit the whole
+mechanism carries and which the third destination makes concrete rather
+than theoretical, and it is `internet` where the key is absent, so a
+deployment that writes nothing gets what every deployment had before it
+existed.
 
 **Status.** Landed (#66), and off unless `server.telemetry.enabled` says
 otherwise. Absent by default, refused under any `server.data_boundary`
@@ -272,11 +276,17 @@ own recorded caution about self-hosted Langfuse. Where it goes and what
 credentials reach it are `LANGFUSE_HOST`, `LANGFUSE_PUBLIC_KEY` and
 `LANGFUSE_SECRET_KEY`, which the uploader reads from the environment and
 hands to the Langfuse REST client; no vinga configuration key holds one,
-nothing stores one, and nothing this server prints renders one. How far
-that host lies is the telemetry section's one `reach` assertion
-described above, which covers this destination and the OTLP one
-together. Erasure on this side is the operator's act on the backend;
-deleting a session under `/api` does not reach it.
+nothing stores one, and nothing this server prints renders one. **The
+bytes do not go to that host.** The media API is asked for an upload URL
+and the two files are PUT to the presigned URL it answers with, so they
+land in whatever object storage the backend is configured with, which a
+Langfuse on the operator's own network may perfectly well answer with a
+URL at a vendor. That address is the third destination the telemetry
+section's one `reach` assertion has to cover, beside this host and the
+OTLP endpoint, and it is the one nothing here could check even in
+principle: it does not exist until the backend names it, one request
+before the bytes go. Erasure on this side is the operator's act on the
+backend; deleting a session under `/api` does not reach it.
 
 **Status.** Landed (#67), and off unless `server.telemetry.export_audio`
 says otherwise, which neither `server.capture` nor

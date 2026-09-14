@@ -2170,26 +2170,42 @@ any declared boundary every MCP server an agent references must carry
 its own `reach`, most often `reach: network`, asserting that whatever
 its command or URL reaches stays on your own network.
 
-The telemetry section carries one of its own. Where the collector is
-lives in `OTEL_EXPORTER_OTLP_ENDPOINT` and where a recording is uploaded
-in `LANGFUSE_HOST`, neither of which this server parses, so
-`server.telemetry.reach` is your assertion about where those
-destinations are. One key covers both transports and means the outermost
-of them, so a collector on your network beside a media host at a vendor
-is `internet`, and the tracing, the transcript export and the recording
-upload are then refused together rather than the one that would have
-been caught. Absent, it is `internet`, which is what a deployment got
-before the key existed: writing nothing changes nothing, and writing
-`host` or `network` is what lets a bounded server export to a collector
-it can reach without leaving your network.
+The telemetry section carries one of its own, and it is your assertion
+rather than anything this server checks. `server.telemetry.reach` says
+how far this section's destinations lie, and there are three of them:
+
+- the collector, in `OTEL_EXPORTER_OTLP_ENDPOINT`, which the traces and
+  the exported transcripts ride;
+- the Langfuse the recording upload talks to, in `LANGFUSE_HOST`;
+- and wherever that Langfuse keeps its media. The upload asks it for an
+  upload URL and PUTs the WAV and the manifest to the presigned URL it
+  answers with, so the bytes land in whatever object storage the backend
+  is configured with. **A Langfuse on your own network can answer with a
+  URL at a cloud vendor**, and this server hands the bytes over without
+  reading it.
+
+One key covers all three and means the outermost of them, so the tracing,
+the transcript export and the recording upload are refused together
+rather than the one that would have been caught. That third bullet is
+what makes this an assertion and not a formality: a LAN collector and a
+LAN Langfuse are not enough to declare `network` unless that Langfuse's
+object storage stays on your network too, and if you cannot say where
+your backend stores media then you have not got a `network` deployment
+to declare.
+
+Absent, it is `internet`, which is what a deployment got before the key
+existed: writing nothing changes nothing, and writing `host` or
+`network` is what lets a bounded server export to a collector it can
+reach without leaving your network.
 
 ```yaml
 server:
   data_boundary: network
   telemetry:
     enabled: true
-    # Your assertion about where OTEL_EXPORTER_OTLP_ENDPOINT and
-    # LANGFUSE_HOST point. Nothing here checks it.
+    # Your assertion about all three: the OTLP endpoint, the Langfuse
+    # host, and the object storage that Langfuse hands out upload URLs
+    # for. Nothing here checks any of them.
     reach: network
 ```
 
