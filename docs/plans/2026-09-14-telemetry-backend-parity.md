@@ -400,6 +400,9 @@ the existing Langfuse REST and object-storage destinations in that assertion.
   that each round's generated output, including model text withheld from
   speech, leaves with its assembled request. This is a disclosure widening of
   an existing flag, not a new switch.
+  The `export_transcripts` field says that a turn root is released after that
+  turn's rows are acknowledged, so an ungraceful process death can lose roots
+  still waiting on storage while already-acknowledged earlier turns have left.
 - `runtime/pipeline.py`, `runtime/turns.py` and the event catalog/assembly/value
   modules expose the safe round output and failure type at the decision sites.
 - `device/session.py`, `composition.py` and `app.py` retain the shutdown and
@@ -453,6 +456,10 @@ fixtures are extended rather than replaced.
   sampled and unsampled decisions, exact-once end, metadata-only release after every
   drop reason, the 4,097th-record oldest-finished overflow and shutdown races. The concurrency test
   is run at least 100 times because one passing interleaving proves nothing.
+- A live-session test settles several turn acknowledgements without closing
+  the session and proves each earlier root is already on the OTLP wire. A
+  pending false acknowledgement releases only that root metadata-only, and an
+  ungraceful-exit simulation proves generation spans were never held.
 - Transcript tests assert the actual `turn` root, not a child, carries the
   acknowledged heard/reply pair; ordinary, empty, cancelled and handover turns
   are covered. A handover whose two rows straddle the 256-row page boundary
@@ -502,6 +509,11 @@ fixtures are extended rather than replaced.
   outcome ends the held span, the ledger has its own bound,
   and telemetry shutdown drains remaining records metadata-only before the SDK
   provider shuts down.
+- **An ungraceful exit can lose a root waiting for its store acknowledgement.**
+  This is limited to currently pending turns rather than the whole session;
+  acknowledged earlier roots and every LLM span have already ended. The
+  4,096-turn ledger bounds the exposure, and the flag prose plus changelog state
+  it. A graceful shutdown ends any remainder metadata-only.
 - **A delayed root can arrive after its children.** OTLP permits this and both
   target backends join by identifiers. The direct and dual-receiver smokes
   deliberately observe children before release, then assert the final topology.
@@ -753,6 +765,12 @@ read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 9m08s.
 3. **P1: holding every turn and LLM span until session close delays live
    observability and loses the whole session's canonical metadata on SIGKILL.**
    The trade must be explicit or the hold must be per operation and shorter.
+
+   *Resolution:* LLM spans now settle synchronously at each generation end,
+   and a turn root waits only for that turn's acknowledgement. Tests prove
+   earlier roots leave during a still-open session. The config prose, risk and
+   changelog explicitly state that an ungraceful exit can lose only roots still
+   awaiting storage, while graceful shutdown releases them metadata-only.
 4. **P1: composing with the root stack can put Langfuse credentials into the
    vinga container.** The root `.env` is mounted whole by vinga. The telemetry
    stack needs a distinct explicit env file and a resolved-environment test.
