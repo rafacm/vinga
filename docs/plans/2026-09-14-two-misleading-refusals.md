@@ -112,6 +112,49 @@ and the server built from the second database sends the byte-identical
 header the first one did. End to end, through the real export and
 import, not through the display alone.
 
+### #504: the redactor is given the atoms, not only the wire values
+
+The review's second P1, and the plan had not followed the value this
+far. An opted-in MCP entry's instructions reach a system prompt and a
+gated read, and `_capture` takes this deployment's own credentials back
+out of them by handing `_redactor` the materialized `env` and `headers`
+values and replacing those complete strings. That works while a value
+IS the secret. It stops working the moment a value CONTAINS one: with
+`TOKEN=secret`, the materialized header is `Bearer secret`, and a
+server that reads its own Authorization header can hand back `secret`
+on its own, which is in no redaction set and reaches stored guidance,
+the model's input, the prompt preview and the CLI.
+
+So resolution answers with two things rather than one: the resolved
+mapping, and the set of secret values it substituted. The atoms are
+already in hand at the only place they exist, which is the resolver
+reading the environment; recovering them anywhere else would mean
+re-reading the environment or diffing strings, and both are a second
+derivation of a fact one function already holds.
+
+- `resolve_env_references` keeps its signature for every caller that
+  wants only the mapping, and a sibling answers with both. Which of the
+  two is the primitive and which is the thin one is the implementer's
+  call under the deletion test; what the plan fixes is that the atoms
+  cross the seam rather than being reconstructed.
+- `config/secrets.py`'s MCP resolution passes them through, since it is
+  what the manager calls.
+- `tools/mcp/manager.py`'s `_capture` gives the redactor the atoms
+  beside the materialized values, and `tools/mcp/prompts.py`'s
+  `_redactor` keeps its longest-first rule, which already handles one
+  value containing another and therefore handles an atom inside its own
+  composed value.
+- The stored credential path is unchanged: a slot holding ciphertext
+  resolves to the whole value, which is its own atom.
+
+**The case, and it is hostile by construction:** a server that reflects
+the BARE token, without the `Bearer ` prefix, in its instructions. The
+sentinel is asserted absent from stored guidance, the prompt preview,
+the API read, the CLI output, both log formats, the event payloads and
+every exception chain. The existing reflection coverage uses a
+whole-value reference and would stay green through this defect, which
+is why the new case is written to fail first.
+
 ### #504: a value that contained a literal `$word` changes meaning
 
 This is the upgrade trap and it is the reason the changelog entry
