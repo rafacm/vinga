@@ -317,11 +317,19 @@ backend, a multi-turn conversation with the conversation store and
 `export_transcripts` on, reading back whether the transcript really
 renders under its turn in the backend's own UI rather than merely
 arriving with the right parent id. The wire test is what gates the
-merge, because it is in CI and it is the stronger claim about what
-vinga emits. The live run answers the other half, which is whether the
-backend nests what it is sent, and its result is recorded in the
-implementation doc either way, including "not run" with the reason if
-the gate lane cannot host the conversation store.
+MERGE, because it is in CI and it is the stronger claim about what
+vinga emits.
+
+The live run gates the ISSUE. #506 is a report about reading a
+conversation in the backend's own UI, and a correct parent id does not
+prove that the backend accepts a child observation exported separately
+and long after its parent ended, nor that it renders it under the turn.
+So the milestone merges on a green lane and the issue closes on one of
+two things: a live run showing a transcript rendered under its turn,
+or a closing note that narrows the claim in writing to the topology
+vinga emits, naming the unproved half and leaving it open as its own
+issue. A recorded "not run" is an answer about the check and never
+about the defect.
 
 ## Plan review round
 
@@ -391,3 +399,9 @@ row carries no attribute at all, a turn telemetry never opened has no
 trace to find, and an evicted turn is reachable only if the backend can
 filter on that attribute. It should be called a shared correlation key,
 with the reachable cases named.
+
+*Resolution* (commit below): taken. The live check is a completion
+gate on the issue rather than an optional extra: the lane gates the
+merge, the live run gates the close, and where it cannot run the
+closing note narrows the claim to the emitted topology and leaves the
+rendering half open rather than implying it.
