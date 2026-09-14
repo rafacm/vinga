@@ -604,17 +604,17 @@ async def _build_composition(
     )
     if capture_upload is not None:
         stack.push_async_callback(capture_upload.shutdown)
-    # And the other post-close surface, when a deployment asked for it
-    # (#495). Built from the whole server section for the same reason
-    # the uploader is: the first thing it resolves is recording, and
-    # with nothing recorded it is a no-op rather than a refusal.
+    # And the live acknowledged-text surface, when a deployment asked
+    # for it (#495, #523). Built from the whole server section because
+    # the first thing it resolves is recording, and with nothing
+    # recorded it is a no-op rather than a refusal.
     #
     # Its shutdown is registered HERE, behind every teardown it has to
     # unwind in front of. The stack unwinds last in first out, so this
     # runs before the conversation writer stops, before the event tap
     # comes off and before telemetry is released, which is exactly what
-    # its contract needs: a worker interrupted mid-job says what became
-    # of that job, and it says it through the tap and onto the trace.
+    # its contract needs: a worker interrupted mid-settlement releases
+    # its held turn metadata-only and reports the omitted content.
     # The two registrations that come after this one release nothing (an
     # attribute is removed and the MCP managers are stopped), so being
     # the last TEARDOWN registered is what "last" has to mean here.

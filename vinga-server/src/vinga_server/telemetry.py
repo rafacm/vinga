@@ -2139,6 +2139,7 @@ class Telemetry:
             held, self._held_turns = list(self._held_turns.values()), {}
         for turn in held:
             turn.span.end(end_time=turn.end_time)
+
     def _continuing(self, pinned: _Pinned) -> Any:
         """The context a span written after a session closed belongs in.
 
