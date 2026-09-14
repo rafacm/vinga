@@ -247,78 +247,68 @@ failure with its staged logical round. The event remains content-free. The tool-
 event gains only its already-decided error type, and the `tool` span maps it to
 status and `error.type`.
 
-## The deferred-span seam
+## Per-operation content settlement
 
-A new `vinga_server.telemetry_deferred` module owns when an original recording
-span whose logical end time is already known remains enrichable and when it
-must be ended exactly once. Telemetry gives it live `turn` and `llm` spans,
-their explicit end timestamps, and server-minted correlation keys. Content
-exporters can add only an allowlisted attribute mapping, then the ledger ends
-the original span with its retained timestamp. A metadata-only release adds
-nothing and ends the same span. The ordinary registered batch processor is the
-only path after `Span.end()`, so a content-delivery failure cannot remove a
-canonical operation or create a duplicate identity.
+Generation content is complete at the neutral provider seam before its event
+is emitted. `llm_input_export.py` finishes its bounded snapshot there and
+stages one allowlisted attribute mapping in `Telemetry` under the invocation
+id. The immediately following `llm_round` or `provider_failed` fold consumes
+it while creating the actual `llm` span and ends the span normally. No
+generation span waits for session close, no second provider exists, and a
+missing or dropped snapshot changes only its content.
 
-The module has no module-scope OpenTelemetry import. It stores an opaque span
-and calls only collaborators supplied after `telemetry._import_sdk()` has
-succeeded, following the existing `_Sdk` lazy-resolution boundary. Importing
-the application without the `otel` extra therefore remains valid, and the
-existing one-sentence missing-extra refusal and slim-image boot are explicit
-M2 regression checks.
+Transcript truth becomes available one store acknowledgement later. The
+existing transcript worker changes from one post-close paging job into bounded
+per-turn settlement. Every `TurnRecord` and acknowledgement returned by the
+recorder is offered to it as the reply proceeds, including each handover row;
+the final reply boundary marks that utterance complete. The `reply_finished`
+fold retains only that one original `turn` span with its already-known end
+timestamp. The worker waits for all rows in the completed utterance to be
+acknowledged, composes them, adds the allowlisted root attributes and calls
+`Span.end(end_time=...)`. A false acknowledgement, missing record, overflow or
+shutdown ends the same root metadata-only. Earlier turns of a long session are
+therefore released as their own writes land rather than waiting for session
+close.
 
-Holding is enabled by registration of an exporter instance, never by a config
-flag alone. After each builder returns a non-null collaborator, `app.py` calls
-`telemetry.register_transcript_exporter()` or
-`telemetry.register_llm_input_exporter()` immediately. Both calls occur during
-application construction, before the lifespan can admit a device session. A
-flag-on transcript no-op because conversation storage or text is off registers
-nothing, so its turn roots end immediately. A held class has a close protocol:
-when `session_closed` reaches
-telemetry, the ledger marks that session closed; each registered content
-exporter must then settle every held key in its class as enriched or
-metadata-only. The ledger ends a class's remaining spans metadata-only when
-that exporter reports any terminal path: no recorded store, no retained trace,
-builder no-op, thread-start failure, queue overflow, unreadable rows,
-undelivered or stopped flush, a page that prevents later pages being read, or
-exporter shutdown. Telemetry shutdown is the final backstop and ends every
-remaining span metadata-only before the SDK provider is shut down.
+Holding a turn is enabled by registration of a built transcript exporter,
+never by a config flag alone. `app.py` calls
+`telemetry.register_transcript_exporter()` immediately after the builder
+returns a non-null collaborator, during application construction and before a
+session can be admitted. A flag-on transcript no-op because conversation
+storage or text is off registers nothing, so its roots end immediately.
+Session close settles an incomplete utterance group; transcript-exporter
+shutdown and telemetry shutdown are successive metadata-only backstops before
+the SDK provider shuts down.
 
-The content worker's bounded delivery result is preserved by ending the
-enriched spans onto the ordinary batch processor and calling the existing
-bounded `force_flush` from that worker. A failed or timed-out flush is reported
-as today, but the spans have already entered the ordinary SDK path and are not
-discarded or rebuilt. Reply-serving code never waits on a flush.
+Moving content onto canonical spans deliberately retires the private,
+processorless post-close transport and its per-content-batch
+`DELIVERED`/`UNDELIVERED` answer. The ordinary BatchSpanProcessor retains its
+2,048-span queue, five-second schedule, finite HTTP timeout, non-blocking reply
+path and bounded shutdown. Content events stop claiming that a far-side
+backend accepted an exact page. Their generated schema and documentation say
+which turn or generation content was attached to the canonical span or omitted
+before queueing, while ordinary telemetry exporter health owns downstream
+delivery. The old `undelivered` content reason and private `Delivery` API are
+removed, and that reporting change is a `### Changed` migration item.
 
-The ledger is globally bounded at `DEFERRED_SPANS = 4096` logically finished
-spans for the process. This is a flat safety cap, not a value falsely derived
-from unbounded `max_sessions`, the per-session turn retention or byte-based LLM
-budgets. On overflow it ends the oldest logically finished span globally as
-metadata-only and reports the content omission through the owning exporter's
-existing closed outcome. It never evicts an operation still running, and it
-does not prefer one session merely because that session is still connected.
-Unknown or already-ended keys are an explicit
-non-delivery result, never a second span. Unit tests exercise each transition,
-all terminal paths above, and repeatedly race content completion with
-shutdown.
+The held-turn ledger is globally bounded at `DEFERRED_TURNS = 4096` logically
+finished roots for the process. This is a flat safety cap, not a value derived
+from unbounded `max_sessions`, per-session turn retention or byte-based LLM
+budgets. On overflow it ends the oldest logically finished root globally as
+metadata-only and reports the content omission. It never evicts an operation
+still running. Unknown or already-ended keys are an explicit omission result,
+never a second span. Unit tests exercise each transition and repeatedly race
+acknowledgement completion with shutdown.
 
-`transcript_export.py` keeps responsibility for waiting on the conversation
-writer's acknowledgement, paging the store, bounded admission, delivery
-reporting and retention truth. Instead of asking telemetry to mint a
-`transcript` span, it supplies `vinga.turn.input` and
-`vinga.turn.output` to the held turn root. `llm_input_export.py` deepens its
-existing staging responsibility to pair schema-shaped input and output for
-each round, enforce the byte bounds over the pair, and release the matching
-held `llm` record. Separate `transcript` and `llm_input` span creation is
-deleted.
-
-This is not a wrapper beside telemetry. It owns the one policy decision that
-would otherwise be spread across `telemetry.py`, `transcript_export.py` and
-`llm_input_export.py`: after a semantic operation's logical end, whether its
-original span may still be enriched, and the exact transition that ends it
-once. Inlining only the data structure into telemetry would still leave both
-exporters deciding deadlines, terminal paths and shutdown release separately;
-deleting the module would therefore make three callers coordinate one
-lifecycle invariant.
+`transcript_export.py` keeps responsibility for store acknowledgement,
+bounded admission, handover composition, outcome reporting and retention
+truth, but its unit of work is a completed live utterance rather than a
+post-close store page. It supplies root attributes instead of minting a
+`transcript` span. `llm_input_export.py` deepens its existing staging
+responsibility to pair schema-shaped input and output synchronously for each
+round, enforce the byte bounds over the pair, and stage matching attributes
+before the event fold. Separate `transcript` and `llm_input` span creation and
+their private OTLP transport are deleted.
 
 ## Fanout, masking and backend adaptation
 
@@ -754,6 +744,12 @@ read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 9m08s.
    content batch. A process-wide `force_flush` neither attributes rejection nor
    prevents a saturated queue from dropping the span. The plan must keep an
    answerable transport or explicitly retire and replace the guarantee.
+
+   *Resolution:* The plan explicitly retires the private exact-batch answer and
+   `undelivered` content reason. Content events now report attachment or
+   pre-queue omission, while the unchanged bounded BatchSpanProcessor owns
+   downstream delivery for canonical spans. The config, event reference,
+   observability map and changelog carry that reporting migration.
 3. **P1: holding every turn and LLM span until session close delays live
    observability and loses the whole session's canonical metadata on SIGKILL.**
    The trade must be explicit or the hold must be per operation and shorter.
