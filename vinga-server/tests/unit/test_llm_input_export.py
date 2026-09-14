@@ -241,6 +241,45 @@ def test_session_budget_evicts_the_oldest_unfinished_round() -> None:
     assert [identity for identity, _ in recorded.snapshots] == ["second"]
 
 
+def test_a_duplicate_invocation_is_rejected_without_replacing_the_first(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    staged, recorded = exporter()
+    staged.stage_reply(
+        "first-session",
+        invocation="same",
+        agent=None,
+        system="original",
+        turns=[],
+        tools=[],
+        choice="none",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        staged.stage_reply(
+            "second-session",
+            invocation="same",
+            agent=None,
+            system="replacement",
+            turns=[],
+            tools=[],
+            choice="none",
+        )
+
+    failures = [
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "llm_input_export_failed"
+    ]
+    assert [(failure.session, failure.reason) for failure in failures] == [
+        ("second-session", LlmInputExportFailure.DROPPED.value)
+    ]
+    staged.finish("same")
+    [(_, attributes)] = recorded.snapshots
+    assert "original" in attributes[GEN_AI_SYSTEM_INSTRUCTIONS]
+    assert "replacement" not in attributes[GEN_AI_SYSTEM_INSTRUCTIONS]
+
+
 def test_a_lone_surrogate_is_escaped_without_escaping_the_reply() -> None:
     staged, recorded = exporter()
     awkward = json.loads(r'"\ud800"')

@@ -153,6 +153,9 @@ class LlmInputExport:
         tools: list[ToolDef],
         choice: str,
     ) -> None:
+        if invocation in self._rounds:
+            self._failed(session, LlmInputExportFailure.DROPPED)
+            return
         try:
             system_json = _json([{"type": "text", "content": system}])
             input_json = _json([_message(turn) for turn in turns])
