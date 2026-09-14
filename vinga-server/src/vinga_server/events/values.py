@@ -1581,19 +1581,19 @@ AttemptedUpload = Literal[
 
 
 class TranscriptExportFailure(StrEnum):
-    """Why a closed session's transcripts did not reach the telemetry
-    backend.
+    """Why acknowledged turn content was omitted from its telemetry root.
 
     The whole of what `transcript_export_failed` may say, and the reason
     that event exists: an export that quietly failed would leave a
     reader looking at a trace with stage timings, no words, and no way
     to learn that any were meant to be there.
 
-    Five members, each named by what an operator would do about it, and
+    Four members, each named by what an operator would do about it, and
     each decided at one site: the store could not be trusted to have the
-    session's turns, the store would not answer, this server had no
-    trace to name, the backend would not take the spans, or this server
-    turned the job away. No `abandoned` member, because nothing is
+    turn's rows, the rows conflicted, this server no longer held the
+    root, or this server turned the content away before settlement.
+    Downstream delivery is ordinary telemetry exporter health. No
+    `abandoned` member, because nothing is
     persisted: a process that dies with an export queued loses an
     export and nothing else, and the turns stay in the store.
     """
@@ -1608,31 +1608,25 @@ class TranscriptExportFailure(StrEnum):
     # its context had aged out of the retention by the time the session
     # closed.
     NO_TRACE = "no_trace"
-    # The bounded export answered failure or ran out its own deadline.
-    # Deliberately not told apart further: the result is binary, and a
-    # sentence must never carry the far side's words.
-    UNDELIVERED = "undelivered"
     # The backlog was full, so the job was never queued, or a shutdown
     # ended it before it completed, queued or in flight.
     DROPPED = "dropped"
 
 
 class LlmInputExportFailure(StrEnum):
-    """Why a closed session's assembled requests did not reach the
-    telemetry backend.
+    """Why a generation content pair was omitted from its actual span.
 
     The whole of what `llm_input_export_failed` may say, and the reason
     that event exists: this class has no local store behind it, so an
     export that quietly failed leaves nothing anybody could go back and
     read. The requests are gone with the session.
 
-    Three members rather than the transcript export's five, and the two
+    One member rather than the transcript export's four, and the three
     it does not have are the tell: there is no store to be unreadable
     and no writer acknowledgement to go unsettled, because what is
     exported was held in memory by the session that assembled it. Each
-    is decided at one site: this server had no trace to name, the
-    backend would not take the spans, or this server turned the job
-    away.
+    is decided at the content bound or the invocation-keyed attachment.
+    Downstream delivery is ordinary telemetry exporter health.
 
     No `abandoned` member, for the reason the transcript set gives and
     more strongly: nothing is persisted, so a process that dies with an
@@ -1641,15 +1635,8 @@ class LlmInputExportFailure(StrEnum):
     local surface is memory.
     """
 
-    # Nothing to name the trace by: telemetry never saw the session, or
-    # its context had aged out of the retention by the time it closed.
-    NO_TRACE = "no_trace"
-    # The bounded export answered failure or ran out its own deadline.
-    # Deliberately not told apart further: the result is binary, and a
-    # sentence must never carry the far side's words.
-    UNDELIVERED = "undelivered"
-    # The backlog was full, so the job was never queued, or a shutdown
-    # ended it before it completed, queued or in flight.
+    # The complete pair exceeded its content ceiling, lost a bounded
+    # pending slot, could not be rendered, or missed its invocation.
     DROPPED = "dropped"
 
 

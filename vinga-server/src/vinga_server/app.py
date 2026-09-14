@@ -586,16 +586,6 @@ async def _build_composition(
     )
     if llm_input is not None:
         stack.push_async_callback(llm_input.shutdown)
-    runtime_factory = bespoke_runtime_factory(
-        generations,
-        mcp_servers,
-        memory,
-        conversations,
-        None if conversations is None else threads.Reads(database),
-        bindings,
-        device_access,
-        llm_input,
-    )
     # What a device says about itself at OTA check-in, kept for the
     # session that follows: a capture manifest needs the firmware
     # version, and the websocket handshake never carries it.
@@ -635,7 +625,20 @@ async def _build_composition(
         boundary=config.server.data_boundary,
     )
     if transcripts is not None:
+        assert telemetry is not None
+        telemetry.register_transcript_exporter(transcripts.omitted)
         stack.push_async_callback(transcripts.shutdown)
+    runtime_factory = bespoke_runtime_factory(
+        generations,
+        mcp_servers,
+        memory,
+        conversations,
+        None if conversations is None else threads.Reads(database),
+        bindings,
+        device_access,
+        llm_input,
+        transcripts,
+    )
     capture = (
         None
         if capture_section is None or not capture_section.enabled

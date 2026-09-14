@@ -142,6 +142,7 @@ if TYPE_CHECKING:
     # would make the reply path pay for a module it only ever holds.
     # The device edge names its own collaborator the same way.
     from vinga_server.llm_input_export import LlmInputExport
+    from vinga_server.transcript_export import TranscriptExport
 
 # How many times one reply may stream, call tools, and stream again.
 # The last permitted round forbids calling, so a reply always ends in
@@ -647,6 +648,7 @@ class PipelineRuntime:
         device_access: builtin.DeviceAccess | None = None,
         device: LiveDevice | None = None,
         llm_input: "LlmInputExport | None" = None,
+        transcripts: "TranscriptExport | None" = None,
     ) -> None:
         self._output = output
         # The world this runtime reads its configuration out of, asked
@@ -716,6 +718,7 @@ class PipelineRuntime:
         # once: with this absent nothing is rendered at all, which is
         # what "the flag off stages nothing" means concretely.
         self._llm_input = llm_input
+        self._transcripts = transcripts
         # How this session's threads lose their memory when it closes,
         # and absent wherever a thread outlives its connection. Present
         # only on a deployment that records nothing, where a closed
@@ -1338,6 +1341,8 @@ class PipelineRuntime:
             if round_ is None and purpose is LlmPurpose.REPLY
             else round_
         )
+        if self._llm_input is not None:
+            self._llm_input.finish(invocation)
         self._events.emit(
             lambda: assembly.llm_rounded(
                 self._agent,
@@ -1397,6 +1402,8 @@ class PipelineRuntime:
         else. What the class does not say, the fields do: the stage,
         the entry, its type, and the host.
         """
+        if stage == "llm" and invocation is not None and self._llm_input is not None:
+            self._llm_input.finish(invocation)
         self._events.emit(
             lambda: assembly.provider_failure(
                 self._agent,
@@ -1838,7 +1845,7 @@ class PipelineRuntime:
             # that moved to another conversation closed the record it
             # began with at that boundary, and what this line hands over
             # is the one the seeded round opened on the other side.
-            self._record_turn(spoken)
+            self._record_turn(spoken, final=True)
             # Broad on purpose, and narrow in what it covers: the one
             # statement inside is a device send, so the `RuntimeError`
             # half can only be the transport's, and this closing pair
@@ -1851,7 +1858,7 @@ class PipelineRuntime:
                 # could strand a device.
                 await self._output.finish_speaking()
 
-    def _record_turn(self, spoken: Sequence[str]) -> None:
+    def _record_turn(self, spoken: Sequence[str], *, final: bool = False) -> None:
         """Hand the finished turn to the content channel.
 
         Called at each end of a turn, which is the end of the reply and,
@@ -1869,6 +1876,8 @@ class PipelineRuntime:
             return
         record = self._turn.record(self._agent, spoken)
         if record is None:
+            if final and self._transcripts is not None and self._turn.utterance is not None:
+                self._transcripts.turn_missing(self.session_id, self._turn.utterance)
             return
         try:
             # The handle is kept and never waited on here: what it is
@@ -1879,7 +1888,15 @@ class PipelineRuntime:
             landed = self._recorder.record_turn(record)
             if landed is not None:
                 self._acknowledged[record.conversation] = landed
+            if self._transcripts is not None:
+                self._transcripts.turn_recorded(
+                    self.session_id, record, landed, final=final
+                )
         except Exception as exc:  # noqa: BLE001 - a consumer never breaks a reply
+            if self._transcripts is not None:
+                self._transcripts.turn_recorded(
+                    self.session_id, record, None, final=final
+                )
             logger.warning(
                 "session %s: the turn recorder failed and was skipped: %s",
                 self.session_id,
@@ -2163,6 +2180,8 @@ class PipelineRuntime:
                     functools.partial(providers.llm.stream, system, working, tools, choice),
                     invocation=invocation,
                 ):
+                    if self._llm_input is not None:
+                        self._llm_input.observe(invocation, event)
                     match event:
                         case TextDelta(text=text):
                             # Speech only, and speech that is not just
@@ -2182,7 +2201,7 @@ class PipelineRuntime:
                                 )
                         case Usage():
                             usage = event
-                        case _:
+                        case ToolCall():
                             calls.append(event)
                 # The earliest point the model's calls exist: both
                 # adapters assemble them after their stream has ended.
@@ -2609,6 +2628,8 @@ class PipelineRuntime:
                     invocation=invocation,
                     purpose=LlmPurpose.RECAP,
                 ):
+                    if self._llm_input is not None:
+                        self._llm_input.observe(invocation, event)
                     if isinstance(event, TextDelta):
                         if first_token_at is None and event.text.strip():
                             first_token_at = loop.time()
@@ -3408,6 +3429,7 @@ def bespoke_runtime_factory(
     devices: DeviceRecords | None = None,
     device_access: builtin.DeviceAccess | None = None,
     llm_input: "LlmInputExport | None" = None,
+    transcripts: "TranscriptExport | None" = None,
 ) -> RuntimeFactory:
     """The composition root's half of the seam: everything this runtime
     needs that outlives one connection, closed over once at startup.
@@ -3520,6 +3542,7 @@ def bespoke_runtime_factory(
             device_access,
             device,
             llm_input,
+            transcripts,
         )
 
     return build

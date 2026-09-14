@@ -3800,53 +3800,47 @@ class CaptureUploadAbandoned(Variant):
 
 @dataclass(frozen=True)
 class TranscriptsExported(Variant):
-    """A closed session's turns are in the telemetry backend."""
+    """Acknowledged content was attached to one original turn root."""
 
     CHANNEL: ClassVar[str] = TRANSCRIPT_EXPORT_CHANNEL
     LEVEL: ClassVar[int] = logging.INFO
     TEMPLATE: ClassVar[str] = (
-        "session %s: %d turn transcripts exported to telemetry in %d ms"
+        "session %s: %d turn transcripts attached to telemetry in %d ms"
     )
     ARGS: ClassVar[tuple[str, ...]] = ("session", "turns", "elapsed_ms")
 
     session: SessionId = value()
     turns: Count = value(
         note=(
-            "How many turns went, which is what a reader compares "
-            "against what the session's own record holds. Turns rather "
-            "than spans because they are the same number: one turn is "
-            "one observation."
+            "How many original turn roots received their complete "
+            "acknowledged content projection. Emitted once per settled "
+            "utterance, so this is currently one."
         )
     )
     elapsed_ms: Whole = value(
         note=(
-            "How long the whole export took, measured off the audio "
-            "path: this happens on a worker of its own after the "
-            "session closed, so it is a fact about the store, the "
-            "backend and the link to it rather than about any reply's "
-            "latency."
+            "How long acknowledgement and content assembly took off the "
+            "audio path. It excludes delivery by the ordinary OTLP "
+            "processor and is not a backend acknowledgement."
         )
     )
 
 
 @dataclass(frozen=True)
 class TranscriptExportFailed(Variant):
-    """A closed session's turns did not reach the telemetry backend."""
+    """Acknowledged content was omitted from an original turn root."""
 
     CHANNEL: ClassVar[str] = TRANSCRIPT_EXPORT_CHANNEL
     LEVEL: ClassVar[int] = logging.WARNING
-    TEMPLATE: ClassVar[str] = "session %s: transcripts not exported to telemetry (%s)"
+    TEMPLATE: ClassVar[str] = "session %s: turn transcript not attached to telemetry (%s)"
     ARGS: ClassVar[tuple[str, ...]] = ("session", "reason")
 
     session: SessionId = value()
     reason: TranscriptExportFailure = value(
         note=(
-            "Which of the five ways this ends badly it was. Never the "
-            "far side's words and never a count of what did get "
-            "through: what an operator acts on is the class of the "
-            "failure, and what a reader needs about a truncated export "
-            "is already on the turns that did go out, as the highest "
-            "index any of them carries."
+            "Which of the four omission classes applied. Never the "
+            "content itself and never a backend-delivery verdict, which "
+            "belongs to ordinary telemetry exporter health."
         )
     )
 
@@ -3883,13 +3877,12 @@ class TranscriptExportFailed(Variant):
 
 @dataclass(frozen=True)
 class LlmInputExported(Variant):
-    """A closed session's assembled requests are in the telemetry
-    backend."""
+    """One complete input and output pair was attached to its LLM span."""
 
     CHANNEL: ClassVar[str] = LLM_INPUT_EXPORT_CHANNEL
     LEVEL: ClassVar[int] = logging.INFO
     TEMPLATE: ClassVar[str] = (
-        "session %s: %d assembled LLM requests exported to telemetry in %d ms "
+        "session %s: %d LLM content pairs attached to telemetry in %d ms "
         "(%d too large, %d over the session budget, %d unrenderable)"
     )
     ARGS: ClassVar[tuple[str, ...]] = (
@@ -3904,7 +3897,7 @@ class LlmInputExported(Variant):
     session: SessionId = value()
     rounds: Count = value(
         note=(
-            "How many rounds went, which is one observation each. A "
+            "How many actual generation spans received a complete pair. A "
             "logical round rather than a provider attempt: the "
             "first-token watchdog re-sends content fixed before the "
             "first try, so a retried round is one request that was made "
@@ -3913,10 +3906,9 @@ class LlmInputExported(Variant):
     )
     elapsed_ms: Whole = value(
         note=(
-            "How long the whole export took, measured off the audio "
-            "path: this happens on a worker of its own after the "
-            "session closed, so it is a fact about the backend and the "
-            "link to it rather than about any reply's latency."
+            "How long synchronous pairing and attachment took. It "
+            "excludes delivery by the ordinary OTLP processor and is "
+            "not a backend acknowledgement."
         )
     )
     oversized: Count = value(
@@ -3955,25 +3947,22 @@ class LlmInputExported(Variant):
 
 @dataclass(frozen=True)
 class LlmInputExportFailed(Variant):
-    """A closed session's assembled requests did not reach the telemetry
-    backend."""
+    """A generation content pair was omitted from its LLM span."""
 
     CHANNEL: ClassVar[str] = LLM_INPUT_EXPORT_CHANNEL
     LEVEL: ClassVar[int] = logging.WARNING
     TEMPLATE: ClassVar[str] = (
-        "session %s: assembled LLM requests not exported to telemetry (%s)"
+        "session %s: LLM content pair not attached to telemetry (%s)"
     )
     ARGS: ClassVar[tuple[str, ...]] = ("session", "reason")
 
     session: SessionId = value()
     reason: LlmInputExportFailure = value(
         note=(
-            "Which of the three ways this ends badly it was. Never the "
-            "far side's words and never a count of what did get "
-            "through: what an operator acts on is the class of the "
-            "failure, and what this class loses to a failure is gone "
-            "either way, since nothing on this host holds an assembled "
-            "request once its session has ended."
+            "Why this server omitted the pair before the matching span "
+            "ended. Never the content itself and never a backend "
+            "delivery verdict, which belongs to ordinary telemetry "
+            "exporter health."
         )
     )
 
