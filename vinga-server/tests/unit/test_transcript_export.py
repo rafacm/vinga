@@ -520,6 +520,30 @@ async def test_the_legs_cross_the_seam_as_the_store_holds_them() -> None:
 
 
 @pytest.mark.asyncio
+async def test_the_utterance_crosses_the_seam_as_the_store_holds_it() -> None:
+    """The name the turn is addressed by, carried rather than looked up:
+    the span writer decides which trace a transcript is filed in, and
+    what it decides from is this column.
+
+    A second read that asked the store for a session's utterances and
+    zipped them against these rows would be two queries that must agree,
+    which is the shape the projection exists to avoid.
+    """
+    exporter, telemetry, _ = an_exporter(
+        {SESSION: [a_row(1, utterance="an-utterance"), a_row(2, utterance=None)]}
+    )
+
+    exporter.session_closed(SESSION, settled())
+    await drained(exporter, lambda: telemetry.pages)
+
+    first, second = telemetry.turns
+    assert first.utterance == "an-utterance"
+    # Unchanged rather than defaulted: a null is the un-nested case and
+    # the span writer has to meet it as a null.
+    assert second.utterance is None
+
+
+@pytest.mark.asyncio
 async def test_the_captured_context_is_what_every_page_is_written_with() -> None:
     """Read once, at admission, and carried: the whole point of the
     handle is that eviction between the close and the worker cannot
