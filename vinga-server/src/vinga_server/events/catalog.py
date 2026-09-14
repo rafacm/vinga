@@ -3881,18 +3881,8 @@ class LlmInputExported(Variant):
 
     CHANNEL: ClassVar[str] = LLM_INPUT_EXPORT_CHANNEL
     LEVEL: ClassVar[int] = logging.INFO
-    TEMPLATE: ClassVar[str] = (
-        "session %s: %d LLM content pairs attached to telemetry in %d ms "
-        "(%d too large, %d over the session budget, %d unrenderable)"
-    )
-    ARGS: ClassVar[tuple[str, ...]] = (
-        "session",
-        "rounds",
-        "elapsed_ms",
-        "oversized",
-        "over_budget",
-        "unrenderable",
-    )
+    TEMPLATE: ClassVar[str] = "session %s: %d LLM content pairs attached to telemetry"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "rounds")
 
     session: SessionId = value()
     rounds: Count = value(
@@ -3904,47 +3894,6 @@ class LlmInputExported(Variant):
             "twice and not two requests."
         )
     )
-    elapsed_ms: Whole = value(
-        note=(
-            "How long synchronous pairing and attachment took. It "
-            "excludes delivery by the ordinary OTLP processor and is "
-            "not a backend acknowledgement."
-        )
-    )
-    oversized: Count = value(
-        note=(
-            "How many rounds were dropped whole for exceeding the "
-            "per-request ceiling. Dropped rather than truncated, "
-            "because a shortened request is not the request the model "
-            "was given and this class is the one whose whole value is "
-            "that it is exact."
-        )
-    )
-    over_budget: Count = value(
-        note=(
-            "And how many were dropped, oldest first, because the "
-            "session held more than its byte budget or more rounds than "
-            "the entry cap behind it. A reader with a partial export "
-            "learns from these counts that it is partial, and which of "
-            "the bounds it met."
-        )
-    )
-    unrenderable: Count = value(
-        note=(
-            "And how many this server could not render at all, which is "
-            "a defect here rather than a conversation that outgrew what "
-            "may be held for it. A count of its own rather than a fold "
-            "into either of the two above, because those are the "
-            "BOUND's vocabulary: reporting a ceiling that was never "
-            "reached would send an operator to tune a number that had "
-            "nothing to do with it. Nonzero is a bug report, and it is "
-            "here rather than nowhere because nothing on this host "
-            "keeps an assembled request, so a round that vanished from "
-            "this event vanished from everywhere."
-        )
-    )
-
-
 @dataclass(frozen=True)
 class LlmInputExportFailed(Variant):
     """A generation content pair was omitted from its LLM span."""
@@ -4404,12 +4353,10 @@ CAPTURE_UPLOAD_FAILED = declare(
 TRANSCRIPTS_EXPORTED = declare(
     "transcripts_exported",
     note=(
-        "A closed session's turns are in the telemetry backend, one "
-        "observation each under the turn it describes, carrying what was "
-        "heard and what was replied. How many and how long it took, and "
-        "deliberately nothing the far side minted: what a reader needs is "
-        "that it happened and how much went, and the traces they are on "
-        "are the ones this session already named."
+        "One acknowledged content projection was attached to its original "
+        "turn root and admitted to ordinary OTLP processing. How many and "
+        "how long local settlement took, and deliberately nothing of the "
+        "projection itself or anything the far side minted."
     ),
     variants=(TranscriptsExported,),
 )
@@ -4417,14 +4364,11 @@ TRANSCRIPTS_EXPORTED = declare(
 TRANSCRIPT_EXPORT_FAILED = declare(
     "transcript_export_failed",
     note=(
-        "A closed session's turns are not in the telemetry backend, and "
-        "why, from a closed set of five reasons. The other half of the "
-        "ledger: an export that silently failed would leave a reader with "
-        "a trace, the stage timings, none of the words, and no way to "
-        "learn that any were meant to be there. It carries no count of "
-        "what did get through, because an export truncated part way is "
-        "visible in the session's own turns, as the highest exported turn "
-        "index any of them carries."
+        "One turn's acknowledged content was omitted before ordinary OTLP "
+        "processing, and why, from a closed set of four reasons. The other "
+        "half of the ledger: an omission that stayed silent would leave a "
+        "reader with stage timings, none of the words, and no way to learn "
+        "that any were meant to be there."
     ),
     variants=(TranscriptExportFailed,),
 )
@@ -4432,13 +4376,11 @@ TRANSCRIPT_EXPORT_FAILED = declare(
 LLM_INPUT_EXPORTED = declare(
     "llm_input_exported",
     note=(
-        "A closed session's assembled requests are in the telemetry "
-        "backend, one observation each carrying the request as vinga "
-        "built it. How many went and how many went missing under each "
-        "of the three headings, and deliberately nothing of the "
-        "requests themselves: the "
-        "content rides the span the flag authorizes, and this says only "
-        "that it went."
+        "One complete assembled request and raw output pair was attached "
+        "to its actual generation span and admitted to ordinary OTLP "
+        "processing. Deliberately nothing of the pair itself: content "
+        "rides the span the flag authorizes, and this says only that it "
+        "went."
     ),
     variants=(LlmInputExported,),
 )
@@ -4446,12 +4388,10 @@ LLM_INPUT_EXPORTED = declare(
 LLM_INPUT_EXPORT_FAILED = declare(
     "llm_input_export_failed",
     note=(
-        "A closed session's assembled requests are not in the telemetry "
-        "backend, and why, from a closed set of three reasons. The other "
-        "half of the ledger, and the half that matters most on this "
-        "surface: the requests were held in the session's own memory and "
-        "are gone with it, so an export that failed silently would leave "
-        "nothing anywhere to go back to."
+        "One assembled request and raw output pair was omitted before its "
+        "generation span reached ordinary OTLP processing. The other half "
+        "of the ledger, and the half that matters most on this surface: "
+        "there is no local copy to read after the operation ends."
     ),
     variants=(LlmInputExportFailed,),
 )

@@ -15,7 +15,6 @@ from vinga_server.events.values import (
     LlmInputExportFailure,
     LlmPurpose,
     SessionId,
-    Whole,
 )
 from vinga_server.providers.base import TextDelta, ToolCall, ToolDef, ToolResult, Turn
 from vinga_server.telemetry import (
@@ -234,10 +233,6 @@ class LlmInputExport:
             lambda: LlmInputExported(
                 session=SessionId(staged.session),
                 rounds=Count(1),
-                elapsed_ms=Whole(0),
-                oversized=Count(0),
-                over_budget=Count(0),
-                unrenderable=Count(0),
             )
         )
 
