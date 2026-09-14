@@ -2170,6 +2170,29 @@ any declared boundary every MCP server an agent references must carry
 its own `reach`, most often `reach: network`, asserting that whatever
 its command or URL reaches stays on your own network.
 
+The telemetry section carries one of its own. Where the collector is
+lives in `OTEL_EXPORTER_OTLP_ENDPOINT` and where a recording is uploaded
+in `LANGFUSE_HOST`, neither of which this server parses, so
+`server.telemetry.reach` is your assertion about where those
+destinations are. One key covers both transports and means the outermost
+of them, so a collector on your network beside a media host at a vendor
+is `internet`, and the tracing, the transcript export and the recording
+upload are then refused together rather than the one that would have
+been caught. Absent, it is `internet`, which is what a deployment got
+before the key existed: writing nothing changes nothing, and writing
+`host` or `network` is what lets a bounded server export to a collector
+it can reach without leaving your network.
+
+```yaml
+server:
+  data_boundary: network
+  telemetry:
+    enabled: true
+    # Your assertion about where OTEL_EXPORTER_OTLP_ENDPOINT and
+    # LANGFUSE_HOST point. Nothing here checks it.
+    reach: network
+```
+
 The checks run at boot, never at request time: a server that starts
 inside its boundary stays inside it, and a config edit that would break
 the promise stops the server from coming up instead of quietly shipping
