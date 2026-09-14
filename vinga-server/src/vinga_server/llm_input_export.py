@@ -59,10 +59,8 @@ def build_llm_input_export(
     max_request_bytes: int = MAX_CONTENT_BYTES,
     session_budget_bytes: int = SESSION_BUDGET_BYTES,
     max_rounds: int = MAX_STAGED_ROUNDS,
-    shutdown_timeout_s: float = 5.0,
 ) -> "LlmInputExport | None":
     """Build the collaborator only after its flag and policy checks."""
-    del shutdown_timeout_s
     section = config.telemetry
     if section is None or not section.export_llm_input:
         return None
@@ -76,7 +74,6 @@ def build_llm_input_export(
         raise ConfigError(str(refusal)) from None
     return LlmInputExport(
         telemetry=telemetry,
-        backlog=config.limits.max_sessions,
         max_request_bytes=max_request_bytes,
         session_budget_bytes=session_budget_bytes,
         max_rounds=max_rounds,
@@ -101,13 +98,10 @@ class LlmInputExport:
         self,
         *,
         telemetry: Telemetry,
-        backlog: int,
         max_request_bytes: int = MAX_CONTENT_BYTES,
         session_budget_bytes: int = SESSION_BUDGET_BYTES,
         max_rounds: int = MAX_STAGED_ROUNDS,
-        shutdown_timeout_s: float = 5.0,
     ) -> None:
-        del backlog, shutdown_timeout_s
         self._telemetry = telemetry
         self._max_content_bytes = max(1, max_request_bytes)
         self._session_budget_bytes = max(1, session_budget_bytes)

@@ -540,7 +540,7 @@ async def test_a_failed_recap_keeps_one_safe_generation_identity(
     from vinga_server.llm_input_export import LlmInputExport
 
     telemetry, exported = exporting_llm_input({})
-    staging = LlmInputExport(telemetry=telemetry, backlog=4, shutdown_timeout_s=10.0)
+    staging = LlmInputExport(telemetry=telemetry)
     session.runtime._llm_input = staging
     session._llm_input = staging
     tap = Tap()
@@ -593,7 +593,7 @@ async def test_a_summarization_round_that_ran_long_falls_back(
     from vinga_server.llm_input_export import LlmInputExport
 
     telemetry, exported = exporting_llm_input({})
-    staging = LlmInputExport(telemetry=telemetry, backlog=4, shutdown_timeout_s=10.0)
+    staging = LlmInputExport(telemetry=telemetry)
     session.runtime._llm_input = staging
     session._llm_input = staging
     tap = Tap()
@@ -706,7 +706,7 @@ async def test_the_summarization_round_is_staged_as_a_recap_round() -> None:
     from vinga_server.llm_input_export import LlmInputExport
 
     telemetry, exported = exporting_llm_input({})
-    staging = LlmInputExport(telemetry=telemetry, backlog=4, shutdown_timeout_s=10.0)
+    staging = LlmInputExport(telemetry=telemetry)
     voice = RecordingTts()
     kept = Kept().watching(voice)
     session, _ = consenting(voice, a_long_thread(), kept)

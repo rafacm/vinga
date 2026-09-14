@@ -29,7 +29,7 @@ RESULT_SENTINEL = "tool-result-sk-live-0LLMINPUT-SENTINEL"
 
 def staging(**bounds: Any) -> tuple[LlmInputExport, Any]:
     telemetry, recorded = exporting()
-    return LlmInputExport(telemetry=telemetry, backlog=8, **bounds), recorded
+    return LlmInputExport(telemetry=telemetry, **bounds), recorded
 
 
 def speaking(session: Any) -> Any:
