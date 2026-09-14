@@ -322,3 +322,72 @@ vinga emits. The live run answers the other half, which is whether the
 backend nests what it is sent, and its result is recorded in the
 implementation doc either way, including "not run" with the reason if
 the gate lane cannot host the conversation store.
+
+## Plan review round
+
+External review: codex CLI 0.154.0, model gpt-5.6-sol, read-only
+sandbox, 2026-09-14, runtime 7m00s, reviewing commit 078e65ef. Verdict
+as received: **ready after the P1/P2 amendments** (six findings, all
+P2, no P1).
+
+The prompt pasted every load-bearing excerpt inline and told the
+reviewer to reach the two large files only through `grep` and narrow
+windows, which is the shape the #502 round settled after two runs
+exhausted their context and returned nothing.
+
+Findings condensed but faithful; resolutions appended per amendment.
+Every one was checked against the code before being accepted, and one
+is accepted with its premise corrected.
+
+### 1 (P2): the user-visible acceptance check is optional
+
+The live backend check is written as recordable "not run", although the
+issue is about reading a conversation in the backend's own UI. Correct
+OTLP parent ids do not prove that the backend accepts a late,
+separately exported child or renders it beneath the turn. The plan
+should make the live check a completion gate, or narrow the goal
+explicitly to the topology vinga emits.
+
+### 2 (P2): the wire test does not cover both rows of the handover join
+
+The plan compares one transcript span with one turn span, while the
+integration case already produces two transcript observations and
+M4a's key exists to make a handover's rows resolve to one turn. Both
+should be asserted, and the turn should be selected by utterance id
+rather than by span name.
+
+### 3 (P2): the stated goal is impossible under the plan's own fallback
+
+The goal promises "each transcript" is a child of its turn, and the
+plan then leaves null, unknown and evicted turns on the session span.
+The promise should be nesting for every ADDRESSABLE transcript, with
+the fallback stated in the goal and in the milestone's acceptance.
+
+### 4 (P2): the impact inventory leaves false contracts behind
+
+Beyond the three documentation edits the milestone names, the claim
+that a transcript rides its session's trace is also made by
+`transcript_export.py`'s module docstring, its builder's step 3, the
+operator-facing `TRANSCRIPTS_NEED_TELEMETRY` refusal sentence,
+`export_transcript`'s own docstring, `TranscriptTurn`'s "seven facts",
+the integration suite's module docstring and its parenting assertions,
+and both `transcripts_exported` and `transcript_export_failed` rows in
+the server README.
+
+### 5 (P2): required projection and fixture work is absent
+
+`test_the_transcript_projection_is_exactly_the_authorized_columns`
+asserts the projection's column set exactly, `tests/support/transcripts.py`
+builds every fake row without an utterance, and `TranscriptTurn` is
+constructed directly in more than one suite. The plan should require a
+real-store projection case with a non-null utterance, name the fixture
+updates, and say whether the new member defaults.
+
+### 6 (P2): the fallback's claimed equivalence to option 1 is false
+
+Option 1 in the issue carries the turn's trace and span ids. The plan
+carries `vinga.utterance.id` and calls it option 1's attribute. A null
+row carries no attribute at all, a turn telemetry never opened has no
+trace to find, and an evicted turn is reachable only if the backend can
+filter on that attribute. It should be called a shared correlation key,
+with the reachable cases named.
