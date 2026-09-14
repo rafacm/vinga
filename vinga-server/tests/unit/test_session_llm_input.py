@@ -283,9 +283,14 @@ async def test_the_usage_a_round_reported_is_not_in_what_was_staged() -> None:
 async def test_the_flag_off_stages_nothing_at_all() -> None:
     """Not stages and discards: a runtime with no exporter renders
     nothing, which is what makes the default cost a reply no work rather
-    than work nobody reads. Driven by holding a whole conversation with
-    no exporter and asking the one thing that can be asked from outside,
-    which is that the surface has nothing.
+    than work nobody reads.
+
+    The exporter is built and then NOT handed over, which is what a
+    deployment with the flag off has: the composition answers None and
+    the runtime holds nothing. A whole reply runs, its close is handed
+    to the exporter anyway, and the exporter has never heard of the
+    session, so there is nothing to stage, nothing to export and nothing
+    to report.
     """
     exporter, telemetry = staging()
     session = session_for(
@@ -293,7 +298,6 @@ async def test_the_flag_off_stages_nothing_at_all() -> None:
     )
 
     await run_reply(session, "are you there")
-    session.runtime = None
     exporter.session_closed(session.session_id)
 
     assert held(exporter, session.session_id) == []
