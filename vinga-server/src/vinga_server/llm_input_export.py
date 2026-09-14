@@ -658,6 +658,25 @@ class LlmInputExport:
         given back in the `finally`, which is the moment the work is
         genuinely over rather than the moment somebody stopped waiting
         for it.
+
+        **The binding goes the instant the attempt is over**, and on
+        this surface that is a retention rule rather than tidiness. The
+        frame that polls is the frame that holds: a bare
+        `self._attempt(job)` leaves `job` bound while the worker sits in
+        its next `get`, and a `get` that times out rebinds nothing, so
+        an idle server would hold the whole of the last session's
+        assembled requests until another session closed or the process
+        ended. This class promises "delivered or dropped, and nowhere
+        after that", which is the strictest retention answer in this
+        repository and the reason it was allowed to exist with no store
+        behind it, so the `finally` below is part of that promise and
+        not part of the loop's shape.
+
+        Its sibling's worker keeps the same shape and needs no such
+        line, which is the difference between the two surfaces rather
+        than an omission there: a transcript job holds a session id, a
+        pinned context and an acknowledgement, and the turns it exports
+        are read from the store and let go inside `_attempt`.
         """
         self._quieted = quiet_the_sdk()
         try:
@@ -666,7 +685,10 @@ class LlmInputExport:
                     job = self._queue.get(timeout=POLL_S)
                 except queue.Empty:
                     continue
-                self._attempt(job)
+                try:
+                    self._attempt(job)
+                finally:
+                    del job
             self._drain()
         finally:
             lease, self._quieted = self._quieted, None

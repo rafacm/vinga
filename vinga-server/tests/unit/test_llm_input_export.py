@@ -23,9 +23,12 @@ chain on the way, and with the flag off it must not be assembled at all.
 """
 
 import asyncio
+import gc
 import json
 import logging
+import threading
 import time
+import weakref
 from typing import Any
 
 import pytest
@@ -45,6 +48,7 @@ from vinga_server.events.values import LlmInputExportFailure
 from vinga_server.llm_input_export import (
     LLM_INPUT_KEY,
     LLM_INPUT_NEEDS_TELEMETRY,
+    POLL_S,
     LlmInputExport,
     build_llm_input_export,
 )
@@ -470,6 +474,72 @@ async def test_a_session_that_staged_nothing_says_nothing(
     assert telemetry.jobs == []
     assert exports(caplog) == []
     assert reasons(caplog) == []
+
+
+# --- what the worker keeps between jobs --------------------------------
+
+
+class Forgetful(Exported):
+    """A seam that keeps a WEAK reference to what crossed it and no
+    strong one.
+
+    The only way to ask from outside whether the worker let go. The
+    recorder above deliberately keeps every round it was handed, which
+    is what makes every other claim in this file assertable and what
+    makes this one unaskable through it: a job the worker had released
+    would still be alive because the recorder was holding it.
+    """
+
+    def __init__(self, contexts: dict[str, Any] | None = None) -> None:
+        super().__init__(contexts)
+        self.witness: weakref.ref[Any] | None = None
+        self.delivered = threading.Event()
+
+    def export_llm_input(self, session: str, context: Any, rounds: Any) -> Delivery:
+        held = list(rounds)
+        self.witness = weakref.ref(held[0])
+        self.delivered.set()
+        # Deliberately NOT `super()`, which would keep the rounds: this
+        # seam is the one place a strong reference would defeat the
+        # question being asked.
+        return Delivery.DELIVERED
+
+
+@pytest.mark.asyncio
+async def test_an_idle_worker_holds_no_part_of_the_last_export() -> None:
+    """The retention boundary, driven rather than described.
+
+    "For the session, then in a bounded delivery job until it is
+    delivered or dropped, and nowhere after that" is the strictest
+    retention answer in this repository and the reason this class was
+    allowed to exist with no store behind it. A worker that left its
+    last job bound while it sat in its next poll would hold the whole of
+    what a model saw for as long as the server stayed quiet, which is
+    exactly the case an idle household produces.
+
+    Asked through a weak reference, because the claim is about what is
+    NOT held and there is nothing to read: the export is waited for, the
+    worker is given a moment to return to polling, and what the model
+    saw has to be collectible with the worker still alive and still
+    idle.
+    """
+    telemetry = Forgetful({SESSION: A_CONTEXT})
+    exporter, _ = an_exporter(telemetry=telemetry)
+    stage(exporter)
+
+    exporter.session_closed(SESSION)
+    assert telemetry.delivered.wait(10.0), "the worker never took the job"
+    # Long enough for the attempt to return and the next `get` to time
+    # out at least once, which is the moment a leaked binding would
+    # still be holding.
+    await asyncio.sleep(POLL_S * 4)
+    gc.collect()
+
+    assert telemetry.witness is not None
+    assert telemetry.witness() is None, (
+        "the idle worker is still holding the last session's assembled request"
+    )
+    await exporter.shutdown()
 
 
 # --- the bound ---------------------------------------------------------
