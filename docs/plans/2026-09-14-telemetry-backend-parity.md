@@ -445,3 +445,75 @@ fixtures are extended rather than replaced.
   Documentation footprint: `docs/deployment.md`, `docs/README.md`, the server
   README and observability map describe the supported current paths and their
   non-transactional limit.
+
+## Plan review round
+
+External review of commit `afcf50c8`: Claude CLI 2.1.270, read-only tool set,
+model `claude-opus-5`, 2026-09-14, runtime 5m18s.
+
+1. **P1: removing Langfuse aliases in M1 breaks the only Langfuse path that
+   exists today, and M3 never restores it.** Direct-to-Langfuse deployments
+   depend on the current input/output and `usage_details` aliases, especially
+   for ASR and TTS pricing. The plan must either keep them in core or declare
+   and fully document a breaking Collector-only migration with every mapping.
+2. **P1: the recording-reference span is on the shared trace pipeline and
+   carries Langfuse aliases.** `reference_media` uses the shared tracer, so the
+   plan's claims that media never joins the common trace stream and that Jaeger
+   sees no Langfuse alias are false. The capture exception and Jaeger-side
+   filtering must be explicit.
+3. **P1: there is no shared round key.** `vinga.llm.round` resets per reply,
+   while the staged content index is session-local and advances even for
+   dropped rounds. A server-minted correlation id visible at both seams is
+   required.
+4. **P1: successful recap generations have no `llm` span.** The recap path
+   stages a request but emits no `llm_round`; a failed recap would gain a span
+   through `provider_failed`, making the asymmetry worse. The plan must decide
+   and instrument recap explicitly.
+5. **P1: tying canonical-root release to content delivery can lose root spans
+   and leaves no-release paths.** No store, no trace, builder no-op, an
+   undelivered page, and stopped delivery can all bypass later rows. Canonical
+   metadata release must be independent from content delivery failure and have
+   a deadline or close trigger.
+6. **P1: a handover turn is two store rows that can straddle pages.** The plan
+   does not say how those rows become one ordered root output before exactly-once
+   release. Grouping and page-boundary carryover must be specified.
+7. **P2: registering a router beside the batch processor exports held spans
+   twice.** OpenTelemetry calls every registered processor. The router must own
+   the ordinary batch processor and be the only provider registration.
+8. **P2: the deferred module can break no-extra and slim-image boots.** It must
+   not import OpenTelemetry at module scope and must use the existing lazy SDK
+   resolution pattern, with the slim boot pinned.
+9. **P2: telemetry is constructed before either content exporter.** The plan
+   must name a pre-admission registration call and hold spans only for an
+   exporter that was actually built, never on a config flag alone.
+10. **P2: branch-specific Collector processing needs a connector.** One
+    receiver pipeline with two exporters cannot add aliases to only one branch;
+    two independent pipelines sample twice. The plan must name a Contrib
+    `forward` connector and assert one sampler in the graph.
+11. **P2: generated output widens `export_llm_input`.** The flag prose and
+    generated server reference must change, including the fact that withheld
+    model text leaves, and the changelog must announce that widening.
+12. **P2: a built server image does not exist on pull-request runs.** The PR
+    direct-Jaeger smoke must run the server from source in the integration lane;
+    an image variant can only run in the existing non-PR image job.
+13. **P2: an Added-only changelog is incomplete.** Removing the `transcript`
+    and `llm_input` span names and moving their content needs Removed and
+    Changed entries with an upgrade note.
+14. **P2: the content-and-telemetry ADR must be amended.** Its current
+    metadata-only fold and separate content-span rule becomes false. It needs a
+    replacement invariant that content reaches a fold-made span only through a
+    registered, flagged content exporter keyed by server-minted identity.
+15. **P3: the deferred module's deletion-test reason is wrong.** Its caller is
+    already the SDK-owning module. The real deep responsibility is deciding
+    when an ended span remains enrichable and when it must be released exactly
+    once across both exporters and shutdown.
+16. **P3: trace-id sampling samples turns, not sessions.** Session and turn
+    traces have independent ids, so partial sampling can leave either side of
+    their link absent. The deployment guide must say so.
+17. **P3: the ledger bound is not actually derived.** The existing unlimited
+    `max_sessions`, per-session turn count and byte-based LLM bounds do not
+    yield a global span count. The plan must state the formula or flat cap and
+    the overflow cost.
+
+Verdict: not ready. Findings 1 through 6 are load-bearing; findings 7, 10 and
+the rest of the P2 set require concrete amendments before implementation.
