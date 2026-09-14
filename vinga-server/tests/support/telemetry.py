@@ -751,9 +751,13 @@ class Receiver:
     timing.
     """
 
-    def __init__(self, max_body_bytes: int | None = None) -> None:
+    def __init__(
+        self, max_body_bytes: int | None = None, *, bind: str = "127.0.0.1"
+    ) -> None:
         self.bodies: list[bytes] = []
+        self.headers: list[dict[str, str]] = []
         received = self.bodies
+        received_headers = self.headers
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self) -> None:  # noqa: N802 (the stdlib's spelling)
@@ -763,6 +767,9 @@ class Receiver:
                     body = gzip.decompress(body)
                 if self.path.endswith("/v1/traces"):
                     received.append(body)
+                    received_headers.append(
+                        {name.lower(): value for name, value in self.headers.items()}
+                    )
                 self.send_response(
                     413
                     if max_body_bytes is not None and len(body) >= max_body_bytes
@@ -775,14 +782,18 @@ class Receiver:
             def log_message(self, *args: Any) -> None:
                 """Silence: this lane's output is the test's."""
 
-        self._server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self._server = http.server.ThreadingHTTPServer((bind, 0), Handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
 
     @property
     def endpoint(self) -> str:
-        host, port = self._server.server_address[:2]
-        return f"http://{host}:{port}"
+        return f"http://127.0.0.1:{self.port}"
+
+    @property
+    def port(self) -> int:
+        """The receiver port, for a container addressing the host."""
+        return int(self._server.server_address[1])
 
     def close(self) -> None:
         self._server.shutdown()
