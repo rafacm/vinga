@@ -2421,21 +2421,30 @@ def _env_reference(value: str) -> str | None:
 
 class ResolvedValues(NamedTuple):
     """A group of values as the process or the request should see them,
-    and the secrets that went into them.
+    and what was substituted into them.
 
-    Two fields rather than one, because a materialized value is not
-    always its own secret: `Bearer $TOKEN` resolves to `Bearer <token>`,
-    and what a far side can hand back on its own is the token alone. A
+    More than the mapping, because a materialized value is not always
+    its own secret: `Bearer $TOKEN` resolves to `Bearer <token>`, and
+    what a far side can hand back on its own is the token alone. A
     consumer that has to take this deployment's credentials out of
-    somebody else's text needs both, and the secrets are collected here
-    because this is the only place they exist as themselves. Anywhere
-    further out they could only be recovered by reading the environment
-    a second time or by diffing strings, which is a second derivation of
-    a fact one function already holds.
+    somebody else's text needs the pieces as well as the whole, and they
+    are collected here because this is the only place they exist as
+    themselves. Anywhere further out they could only be recovered by
+    reading the environment a second time or by diffing strings, which
+    is a second derivation of a fact one function already holds.
+
+    The pieces come in two sets, because they are two different claims.
+    `secrets` is what a secret-bearing key referenced, so it is a
+    credential by this configuration's own classification, whatever it
+    looks like and however short it is. `substituted` is what every
+    other key referenced, which may be a credential and may as easily be
+    a marker, a locale or a port: nothing here can tell, and a consumer
+    that must guess should go on guessing the way it already does.
     """
 
     values: dict[str, str]
     secrets: frozenset[str]
+    substituted: frozenset[str]
 
 
 def resolve_env_values(location: str, values: Mapping[str, str]) -> ResolvedValues:
@@ -2450,6 +2459,13 @@ def resolve_env_values(location: str, values: Mapping[str, str]) -> ResolvedValu
     Bearer into the secret. A value holding no reference passes through
     byte for byte.
 
+    What is substituted is answered beside the mapping, split by what
+    the key it went into says about it: a credential-bearing key's
+    references are credentials, and every other key's are values from
+    the environment that this configuration has said nothing about. The
+    key is the only classifier there is, and it is the one the
+    write-time check already uses.
+
     An unset variable raises, naming where it was written, because at
     call time it would fail every conversation that reaches the server.
 
@@ -2457,6 +2473,7 @@ def resolve_env_values(location: str, values: Mapping[str, str]) -> ResolvedValu
     secret: resolution happens at boot, where the value is used."""
     resolved: dict[str, str] = {}
     secrets: set[str] = set()
+    substituted: set[str] = set()
 
     def read(key: str, name: str) -> str:
         secret = os.environ.get(name, "")
@@ -2464,7 +2481,8 @@ def resolve_env_values(location: str, values: Mapping[str, str]) -> ResolvedValu
             raise ValueError(
                 f"{location}.{key}: references ${name}, but it is not set in the environment"
             )
-        secrets.add(secret)
+        into = secrets if mcp_secret_fragment(key) is not None else substituted
+        into.add(secret)
         return secret
 
     for key, value in values.items():
@@ -2477,7 +2495,7 @@ def resolve_env_values(location: str, values: Mapping[str, str]) -> ResolvedValu
             return read(key, match.group(1))
 
         resolved[key] = _ENV_REFERENCE_RE.sub(substitute, value)
-    return ResolvedValues(resolved, frozenset(secrets))
+    return ResolvedValues(resolved, frozenset(secrets), frozenset(substituted))
 
 
 class McpServerConfig(BaseModel):

@@ -127,7 +127,7 @@ class _PromptsUnreadable(Exception):
 _Redactor = Callable[[str | None], str | None]
 
 
-def _redactor(values: Iterable[str], atoms: Iterable[str] = ()) -> _Redactor:
+def _redactor(values: Iterable[str], secrets: Iterable[str] = ()) -> _Redactor:
     """A function that takes this deployment's own values back out of
     whatever a server hands it.
 
@@ -147,14 +147,17 @@ def _redactor(values: Iterable[str], atoms: Iterable[str] = ()) -> _Redactor:
 
     The two are taken separately rather than poured into one set,
     because only one of them is guesswork. `values` is whatever an entry
-    configured, most of it ordinary settings, so the length floor stands
-    there: a short one is a string that might be anybody's, and
-    replacing it would mangle the guidance without protecting anything.
-    An atom is not a guess. It came out of a variable a secret-bearing
-    key referenced, so a six-character one is a six-character
-    credential, and every non-empty atom is replaced whatever its
-    length. What that costs, at worst, is a few mangled occurrences of a
-    short word; what the floor would cost is the credential.
+    configured and whatever it referenced under a key that says nothing
+    about secrecy, so the length floor stands there: a short one is a
+    string that might be anybody's, a marker or a locale as easily as a
+    credential, and replacing it would mangle the guidance without
+    protecting anything. `secrets` is not a guess. Each came out of a
+    variable a SECRET-BEARING key referenced, which is this
+    configuration's own classification, so a six-character one is a
+    six-character credential and every non-empty one is replaced
+    whatever its length. What that costs, at worst, is a few mangled
+    occurrences of a short word under a key whose name says token or
+    password; what the floor would cost there is the credential.
 
     Longest first, so that a value which contains another is replaced
     whole rather than left holding a placeholder in the middle of it.
@@ -164,7 +167,7 @@ def _redactor(values: Iterable[str], atoms: Iterable[str] = ()) -> _Redactor:
     """
     values = sorted(
         {value for value in values if len(value) >= REDACTION_FLOOR}
-        | {atom for atom in atoms if atom},
+        | {secret for secret in secrets if secret},
         key=len,
         reverse=True,
     )
