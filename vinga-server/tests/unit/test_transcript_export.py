@@ -247,11 +247,13 @@ async def test_one_acknowledged_turn_settles_its_original_root(
 
 @pytest.mark.asyncio
 async def test_settlement_waits_for_the_store_acknowledgement() -> None:
-    exporter, telemetry = an_exporter()
-    acknowledgement = pending()
+    exporter, telemetry = an_exporter(acknowledgement_timeout_s=30.0)
+    acknowledgement = observed_pending()
 
     exporter.turn_recorded(SESSION, a_turn(), acknowledgement, final=True)
-    await asyncio.sleep(0.1)
+    assert await asyncio.to_thread(acknowledgement.wait_entered.wait, 5.0), (
+        "the transcript worker did not enter the acknowledgement wait"
+    )
     assert telemetry.settled == []
     assert telemetry.released == []
 
