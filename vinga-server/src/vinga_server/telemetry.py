@@ -189,22 +189,28 @@ TURN_STARTED = "turn_started"
 REPLY_FINISHED = "reply_finished"
 CAPTURE_STARTED = "capture_started"
 
-# And the four that arrive after it closed: a recording's trip to the
+# And the six that arrive after it closed: a recording's trip to the
 # backend happens on a worker of its own, off the session's loop and
-# after the span map has let the session go (#67), and a transcript
-# export reads the store on a worker of its own for the same reason
-# (#495). Both pairs reach the trace through one mechanism, which is
-# what "the machinery generalizes and the sentences do not" means here.
+# after the span map has let the session go (#67); a transcript export
+# reads the store on a worker of its own for the same reason (#495); and
+# the assembled requests a session staged are delivered on a third
+# (#502). All three pairs reach the trace through one mechanism, which
+# is what "the machinery generalizes and the sentences do not" means
+# here.
 CAPTURE_UPLOADED = "capture_uploaded"
 CAPTURE_UPLOAD_FAILED = "capture_upload_failed"
 TRANSCRIPTS_EXPORTED = "transcripts_exported"
 TRANSCRIPT_EXPORT_FAILED = "transcript_export_failed"
+LLM_INPUT_EXPORTED = "llm_input_exported"
+LLM_INPUT_EXPORT_FAILED = "llm_input_export_failed"
 AFTER_THE_CLOSE = frozenset(
     {
         CAPTURE_UPLOADED,
         CAPTURE_UPLOAD_FAILED,
         TRANSCRIPTS_EXPORTED,
         TRANSCRIPT_EXPORT_FAILED,
+        LLM_INPUT_EXPORTED,
+        LLM_INPUT_EXPORT_FAILED,
     }
 )
 
@@ -261,12 +267,16 @@ SPEAKING_FINISHED = "speaking_finished"
 # refused to be false when it named `stream_ms`. The provider's own
 # latency, the number that is backpressure-free, is the attribute.
 SESSION_SPAN = "session"
-# The two spans this module makes that are not a stage of a
+# The three spans this module makes that are not a stage of a
 # conversation: the reference that makes an uploaded recording playable
-# (#67), and one turn's transcript (#495), both put on the trace after
-# the session closed.
+# (#67), one turn's transcript (#495), and one round's assembled request
+# (#502), all put on the trace after the session closed.
 CAPTURE_SPAN = "capture"
 TRANSCRIPT_SPAN = "transcript"
+# Named for what it carries rather than for the round it came from: a
+# backend groups its list by this name, and what a reader is looking for
+# is the input the model was given.
+LLM_INPUT_SPAN = "llm_input"
 TURN_SPAN = "turn"
 # What the model asked a tool for, inside the turn it asked in. Short
 # like the rest and deliberately not the tool's own name: a span name
@@ -409,6 +419,20 @@ TRANSCRIPT_LEGS = f"{OBSERVATION_METADATA_PREFIX}legs"
 # observation adds.
 LEG_FIELDS = ("agent", "text")
 
+# And what one staged LLM round's span carries besides the request
+# itself (#502).
+#
+# `vinga.llm.round` is the session-local ordinal of the round, counting
+# every round this session staged in the order it assembled them, so a
+# reader can put the observations back in the order the model saw them
+# whatever the two bounds dropped. `vinga.llm.purpose` is which of the
+# two call shapes assembled it, which is the difference between a
+# request made to answer somebody and one made to summarize a thread
+# nobody is listening to yet; a reader asking "what did it see" wants
+# both, and wants to be able to tell them apart.
+LLM_ROUND_INDEX = "vinga.llm.round"
+LLM_PURPOSE = "vinga.llm.purpose"
+
 # Which payload fields become attributes on which span, and under what
 # name. Written out rather than derived from the payload, so an event
 # that gains a field does not silently gain an attribute: what a span
@@ -426,8 +450,8 @@ LEG_FIELDS = ("agent", "text")
 #
 # On EVERY span, which is an enumeration rather than a table entry: the
 # session span reads it here, the turn and the stage spans read it off
-# the retained identity below, and the three spans written after the
-# close read it off the retained `_Exported` record. A dashboard
+# the retained identity below, and the four spans written after the
+# close read it off the pinned context they were handed. A dashboard
 # grouped by a household's rooms is what this is for, and a stage span
 # that carried only a MAC is a span nobody groups.
 #
@@ -1112,6 +1136,9 @@ AFTER_THE_CLOSE_ATTRIBUTES = {
     "audio_bytes": "vinga.export.audio_bytes",
     "manifest_bytes": "vinga.export.manifest_bytes",
     "turns": "vinga.export.turns",
+    "rounds": "vinga.export.rounds",
+    "oversized": "vinga.export.oversized",
+    "over_budget": "vinga.export.over_budget",
     "reason": "vinga.export.reason",
 }
 
@@ -1710,14 +1737,49 @@ class TranscriptTurn:
     utterance: str | None = None
 
 
+@dataclass(frozen=True)
+class LlmInputRound:
+    """One assembled LLM request on its way onto a trace (#502).
+
+    The seam between the LLM input exporter and this module, stated as a
+    type rather than implied by a mapping both sides index, and for the
+    same reason `TranscriptTurn` is one: what crosses is exactly these
+    four facts, so a stage that grew a field cannot reach a span by
+    accident and this module never learns what a provider seam looks
+    like.
+
+    `request` is the request ALREADY SERIALIZED, which is the one place
+    this type differs from its sibling in kind rather than in content.
+    The bound the exporter enforces is measured in bytes on the
+    serialized form, so the rendering has to happen before the bound can
+    be applied; a type carrying provider objects would have to be
+    rendered twice, once to measure and once to write, and two
+    renderings that must agree are the trap this repository has a rule
+    about. What reaches the wire is therefore exactly the string that
+    was weighed.
+
+    `index` is the session-local ordinal of the round, `purpose` is
+    which call shape assembled it, and `agent` is who was speaking, or
+    nothing for a runtime that was talking as nobody.
+    """
+
+    index: int
+    purpose: str
+    agent: str | None
+    request: str
+
+
 class Delivery(Enum):
-    """What became of one bounded transcript export.
+    """What became of one bounded post-close export.
 
     Three answers, and the caller turns each into a word of its own
     closed set. They are this module's own vocabulary rather than the
     event's, because what this knows is whether a batch of spans
     reached the far side; which reason an operator reads is the
-    exporter's to decide.
+    exporter's to decide. Two exporters answer to it now, the
+    transcripts and the assembled requests, and each keeps a closed set
+    of its own: what the two share is the transport's answer and not
+    the words an operator reads.
     """
 
     # The far side took the batch.
@@ -1861,15 +1923,22 @@ class Telemetry:
         self._tracer = provider.get_tracer(SERVICE)
         self._sdk = sdk
         self._quieted = quieted
-        # The transcript export's own half, all of it lazy, because a
-        # deployment that exports no transcripts must pay for none of
-        # it: no second provider, no second exporter, no second socket.
-        # Built on the WORKER's thread at its first job, which is where
-        # the only user of it runs and where a construction failure is a
+        # The post-close content exporters' own half, all of it lazy,
+        # because a deployment that exports no content must pay for none
+        # of it: no second provider, no second exporter, no second
+        # socket. Built on the WORKER's thread at its first job, which
+        # is where its users run and where a construction failure is a
         # contained delivery failure rather than a boot event.
+        #
+        # One provider and one transport for both content classes
+        # rather than a pair each, and the argument is still spelled
+        # `transcripts` because that is the seam a lane substitutes at:
+        # what the two exports share is a transport and a resource, and
+        # a second of either would be a second row in every backend's
+        # service list for spans of the same service.
         self._transcripts = transcripts
         self._private: Any | None = None
-        self._transcript_lock = threading.Lock()
+        self._private_lock = threading.Lock()
         self._shutdown_timeout_s = shutdown_timeout_s
         # The release runs once, on a thread of its own, and this is
         # what says whether it has been started and whether it is over.
@@ -2227,17 +2296,7 @@ class Telemetry:
         contrivance: it is the parent this surface shipped with, and a
         turn that cannot be addressed keeps it.
         """
-        with self._transcript_lock:
-            if self._private is None:
-                self._private = self._sdk.provider(
-                    resource=self._sdk.resource(
-                        attributes={
-                            self._sdk.name_key: SERVICE,
-                            self._sdk.version_key: revision(),
-                        }
-                    )
-                )
-            tracer = self._private.get_tracer(SERVICE)
+        tracer = self._private_tracer()
         spans = []
         for turn in turns:
             pinned = self.turn_context(context, turn.utterance) or context
@@ -2257,6 +2316,148 @@ class Telemetry:
             span.end()
             spans.append(span)
         return spans
+
+    def export_llm_input(
+        self, session: str, context: Any, rounds: "Sequence[LlmInputRound]"
+    ) -> Delivery:
+        """A closed session's assembled LLM requests, as observations on
+        the trace that session was exported under, delivered and
+        answered for (#502).
+
+        One span per logical round, named `llm_input`, a child of the
+        session span and inside the session's own trace. The session's
+        rather than each round's turn, and that is the addressing this
+        class asks for: a recap round belongs to no turn at all, a reply
+        round is several requests inside one turn, and what a reader
+        comes here with is the question "what did the model see in this
+        conversation", which the session trace is the place to answer.
+
+        It carries the session under both spellings so the query a
+        reader already makes returns it beside the turns, the round's
+        session-local ordinal, which of the two call shapes assembled
+        it, the agent that was speaking, and the request itself in the
+        field the backend renders as an observation's input.
+
+        What the request contains was decided at the seam it was staged
+        from and is not re-decided here: this writes the string it was
+        handed. What this module owns is that the string reaches exactly
+        one attribute on exactly one span, and that nothing of it is
+        looked at anywhere else, which is why the delivery below
+        contains every exception without reading it.
+
+        The spans do NOT ride the shared batch queue, for the reason the
+        transcript export's do not: that queue drops on saturation and
+        swallows a collector failure, so an export that never arrived
+        would be indistinguishable from one that did, and on this
+        surface there is nothing left on the host to go back and read.
+        They are built on the same private tracer, collected in memory,
+        and handed to the same dedicated exporter instance, reading the
+        same `OTEL_EXPORTER_OTLP_*` environment.
+
+        Timestamped at export time rather than at the instant each round
+        was assembled, which is the choice the transcript export makes
+        and for the same reason: the ordinal carries the order, and a
+        span claiming to have happened during a session that is already
+        over would be the one dishonest fact on the surface.
+
+        Answers `STOPPED` where nothing was attempted (this exporter has
+        stopped accepting, or the spans would not build), and otherwise
+        whether the far side took the batch. It never raises, because
+        its caller is a worker whose failures are events.
+
+        Safe to call from any thread, which is why it exists in this
+        shape: it runs on the LLM input exporter's own worker.
+        """
+        if not self._accepting:
+            return Delivery.STOPPED
+        try:
+            spans = self._llm_input_spans(session, context, rounds)
+        except Exception:  # noqa: BLE001 - a worker never dies of a job
+            # Deliberately unbound and deliberately silent, the rule
+            # this module applies to every containment, and the one
+            # place it matters most: what this call is holding is the
+            # whole of what a model was given.
+            return Delivery.STOPPED
+        if not spans:
+            return Delivery.DELIVERED
+        return self._deliver(spans)
+
+    def _llm_input_spans(
+        self, session: str, context: Any, rounds: "Sequence[LlmInputRound]"
+    ) -> list[Any]:
+        """This session's staged rounds as finished spans, held here
+        rather than queued anywhere.
+
+        The private provider's trick is the transcript export's, spelled
+        once for both in `_private_tracer` below: a provider with no
+        span processor at all still builds and ends real spans, and an
+        ended span is exactly what an exporter takes, so this page
+        exists as a list this function returns with no second queue
+        anywhere to drop it, flush it or export it behind its caller's
+        back.
+
+        Every attribute is named here, field by field, and the request
+        rides the one field a backend renders as input. Nothing is
+        folded through the catalog's gate, because this is not an event
+        and never was: what a span may carry on this surface is exactly
+        this function's decision.
+
+        Nothing at all for a context that was never pinned, which is a
+        caller error rather than a state: the exporter decides `no_trace`
+        at admission and never reaches this with nothing to write into.
+        """
+        if not isinstance(context, _Pinned):
+            return []
+        tracer = self._private_tracer()
+        spans = []
+        for staged in rounds:
+            span = tracer.start_span(
+                LLM_INPUT_SPAN,
+                context=self._continuing(context),
+                attributes={
+                    **dict.fromkeys(SESSION_ID_NAMES, session),
+                    **_named(context),
+                    LLM_ROUND_INDEX: staged.index,
+                    LLM_PURPOSE: staged.purpose,
+                    **({} if staged.agent is None else {TURN_AGENT: staged.agent}),
+                    OBSERVATION_INPUT: staged.request,
+                },
+            )
+            span.end()
+            spans.append(span)
+        return spans
+
+    def _private_tracer(self) -> Any:
+        """The tracer every post-close CONTENT span is built on, built
+        once and lazily on the thread that first needs one.
+
+        A provider with NO span processor attached, which is the whole
+        trick: the spans it builds are real and ended, and an ended span
+        is what an exporter takes, so the two content exporters hand
+        their own lists to their own bounded call and nothing of theirs
+        ever reaches the shared batch queue.
+
+        Bound to the same resource as the shared provider, spelled the
+        same way from the same two facts, because these are the same
+        service's spans and a second service name would put them in a
+        row of their own in every backend.
+
+        One home rather than two identical blocks, since the second
+        content class needed the same object for the same reason: a
+        provider built twice would be two resources to keep in step, and
+        the lock here is what keeps two workers from building either.
+        """
+        with self._private_lock:
+            if self._private is None:
+                self._private = self._sdk.provider(
+                    resource=self._sdk.resource(
+                        attributes={
+                            self._sdk.name_key: SERVICE,
+                            self._sdk.version_key: revision(),
+                        }
+                    )
+                )
+            return self._private.get_tracer(SERVICE)
 
     def _deliver(self, spans: list[Any]) -> Delivery:
         """The bounded call itself, and the one place this module asks a
@@ -2467,13 +2668,15 @@ class Telemetry:
                 self._finished.set()
 
     def _close_transcripts(self) -> None:
-        """Let the transcript export's own half go, if it was ever built.
+        """Let the post-close content exporters' own half go, if it was
+        ever built.
 
         Both halves under one guard, on a path that is already finishing
-        however it ended. Nothing waits on it: the transcript exporter's
-        own shutdown is pushed LAST onto the composition's exit stack
-        and therefore unwinds FIRST, so by the time this runs its worker
-        has finished or has been left behind with a lease of its own.
+        however it ended. Nothing waits on it: each content exporter's
+        own shutdown is pushed onto the composition's exit stack behind
+        everything it has to unwind in front of, so by the time this
+        runs their workers have finished or have been left behind with
+        leases of their own.
         """
         provider, self._private = self._private, None
         transports, self._transcripts = self._transcripts, None
