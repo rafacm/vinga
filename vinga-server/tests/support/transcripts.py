@@ -30,6 +30,25 @@ def pending() -> Acknowledgement:
     return Acknowledgement()
 
 
+class ObservedAcknowledgement(Acknowledgement):
+    """A pending answer that exposes when a consumer enters ``wait``."""
+
+    __slots__ = ("wait_entered",)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.wait_entered = threading.Event()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        self.wait_entered.set()
+        return super().wait(timeout)
+
+
+def observed_pending() -> ObservedAcknowledgement:
+    """An unanswered acknowledgement with a deterministic wait signal."""
+    return ObservedAcknowledgement()
+
+
 class Exported:
     """Record the two turn-root operations used by ``TranscriptExport``."""
 

@@ -519,3 +519,24 @@ integration attempt put the plan worktree's client-only executable first on
 tests refused their environment. After `uv sync --frozen`, the complete rerun
 used this M2 worktree's own server environment and the local libpq directory,
 and all 344 cases passed without a source change.
+
+### CI timing follow-up
+
+Unit CI run 34898537774, job 104158571120 exposed a test-only scheduler
+assumption in the one-slot transcript backlog case. The test slept for 100 ms
+and assumed the worker had dequeued the first job. Under CI load it had not, so
+the second job was refused instead of occupying the now-free pending slot. The
+same assumption in the decoded-wire handover test let its two-second
+acknowledgement deadline expire before the test settled the final row.
+
+Both tests now use an `Acknowledgement` test double whose public `wait()` method
+sets a `wait_entered` event. The backlog test fills the pending slot only after
+the worker has entered the first job's acknowledgement wait. The wire test
+settles the final handover row only after the worker has entered that row's
+wait. Production queueing and acknowledgement bounds are unchanged, and no
+test-only hook enters production code.
+
+The finalized backlog case passed 20 consecutive runs, its complete unit file
+passed 36 tests, and the four-worker transcript and lifecycle slice passed 56.
+The finalized decoded-wire case passed 10 consecutive runs, and its complete
+integration file passed 4 tests.
