@@ -539,7 +539,7 @@ async def test_a_failed_recap_keeps_one_safe_generation_identity(
     from tests.support.llm_input import exporting as exporting_llm_input
     from vinga_server.llm_input_export import LlmInputExport
 
-    telemetry, _ = exporting_llm_input({})
+    telemetry, exported = exporting_llm_input({})
     staging = LlmInputExport(telemetry=telemetry, backlog=4, shutdown_timeout_s=10.0)
     session.runtime._llm_input = staging
     session._llm_input = staging
@@ -556,13 +556,14 @@ async def test_a_failed_recap_keeps_one_safe_generation_identity(
         for one in tap.of("provider_failed")
         if one.payload.get("purpose") == "recap"
     ]
-    (staged,) = [
-        one.round
-        for one in staging._staged[session.session_id].rounds
-        if one.round.purpose == "recap"
-    ]
+    (invocation, staged) = [
+        one
+        for one in exported.snapshots
+        if pipeline_module.RECAP_INSTRUCTION in one[1]["gen_ai.system_instructions"]
+    ][0]
     assert failed["error"] == "RecapCredentialFailure"
-    assert failed["invocation"] == staged.invocation
+    assert failed["invocation"] == invocation
+    assert "gen_ai.input.messages" in staged
     assert "round" not in failed
     assert sum(record.rounds or 0 for record in kept.turns) == 2
     assert sentinel not in both_formats(caplog)
@@ -591,7 +592,7 @@ async def test_a_summarization_round_that_ran_long_falls_back(
     from tests.support.llm_input import exporting as exporting_llm_input
     from vinga_server.llm_input_export import LlmInputExport
 
-    telemetry, _ = exporting_llm_input({})
+    telemetry, exported = exporting_llm_input({})
     staging = LlmInputExport(telemetry=telemetry, backlog=4, shutdown_timeout_s=10.0)
     session.runtime._llm_input = staging
     session._llm_input = staging
@@ -609,13 +610,14 @@ async def test_a_summarization_round_that_ran_long_falls_back(
         for one in tap.of("provider_failed")
         if one.payload.get("purpose") == "recap"
     ]
-    (staged,) = [
-        one.round
-        for one in staging._staged[session.session_id].rounds
-        if one.round.purpose == "recap"
-    ]
+    (invocation, staged) = [
+        one
+        for one in exported.snapshots
+        if pipeline_module.RECAP_INSTRUCTION in one[1]["gen_ai.system_instructions"]
+    ][0]
     assert failed["error"] == "TimeoutError"
-    assert failed["invocation"] == staged.invocation
+    assert failed["invocation"] == invocation
+    assert "gen_ai.input.messages" in staged
     assert "round" not in failed
     assert sum(record.rounds or 0 for record in kept.turns) == 2
     await staging.shutdown()
@@ -703,7 +705,7 @@ async def test_the_summarization_round_is_staged_as_a_recap_round() -> None:
     from tests.support.llm_input import exporting as exporting_llm_input
     from vinga_server.llm_input_export import LlmInputExport
 
-    telemetry, _ = exporting_llm_input({})
+    telemetry, exported = exporting_llm_input({})
     staging = LlmInputExport(telemetry=telemetry, backlog=4, shutdown_timeout_s=10.0)
     voice = RecordingTts()
     kept = Kept().watching(voice)
@@ -715,17 +717,19 @@ async def test_the_summarization_round_is_staged_as_a_recap_round() -> None:
 
     await drive_reply(session, UTTERANCE)
 
-    stage = staging._staged[session.session_id]
-    purposes = [one.round.purpose for one in stage.rounds]
-    assert "recap" in purposes, "the summarization round was never staged"
-    assert purposes.count("recap") == 1
-    (staged,) = [one.round for one in stage.rounds if one.round.purpose == "recap"]
-    assert pipeline_module.RECAP_INSTRUCTION in staged.request
+    recap_snapshots = [
+        one
+        for one in exported.snapshots
+        if pipeline_module.RECAP_INSTRUCTION in one[1]["gen_ai.system_instructions"]
+    ]
+    assert len(recap_snapshots) == 1
+    invocation, staged = recap_snapshots[0]
+    assert "gen_ai.input.messages" in staged
     (recap,) = [
         one.payload for one in tap.of("llm_round") if one.payload["purpose"] == "recap"
     ]
     assert "round" not in recap
-    assert recap["invocation"] == staged.invocation
+    assert recap["invocation"] == invocation
     assert sum(record.rounds or 0 for record in kept.turns) == 2
     await staging.shutdown()
 

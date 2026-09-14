@@ -1,4 +1,4 @@
-"""What the model was given leaving the host, off the wire.
+"""What the model saw and generated on its actual generation spans.
 
 The unit lanes fake the one seam each and prove everything that is
 vinga's: the refusals, the stage, the bound, the drop accounting, the
@@ -51,6 +51,7 @@ HEARD = "tell me the secret 0LLMINPUT-WIRE-SENTINEL"
 # And what the agent's own prompt says, which is the other half of an
 # assembled request and the half no other surface here carries at all.
 PROMPT = "POET-0LLMINPUT-PROMPT-SENTINEL"
+MAX_OTLP_BODY_BYTES = 3 * 1024 * 1024
 
 
 def exporting_config() -> Config:
@@ -99,8 +100,8 @@ async def exported(caplog: pytest.LogCaptureFixture, timeout_s: float = 20.0) ->
     raise AssertionError("the export said nothing at all within the bound")
 
 
-def requests(spans: list[Any]) -> list[Any]:
-    return [span for span in spans if span.name == "llm_input"]
+def generations(spans: list[Any]) -> list[Any]:
+    return [span for span in spans if span.name == "llm"]
 
 
 async def test_a_conversations_assembled_requests_arrive_as_observations(
@@ -116,7 +117,7 @@ async def test_a_conversations_assembled_requests_arrive_as_observations(
     stopped handing the stage over fails here and nowhere else.
     """
     caplog.set_level(logging.INFO)
-    collector = Receiver()
+    collector = Receiver(MAX_OTLP_BODY_BYTES)
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.endpoint)
 
     try:
@@ -128,26 +129,25 @@ async def test_a_conversations_assembled_requests_arrive_as_observations(
         collector.close()
 
     assert spans, "nothing reached the collector at all"
-    written = requests(spans)
-    assert written, "the close never handed the staged rounds over"
+    written = generations(spans)
+    assert written, "the generation was not exported"
     said = attributes(written[0])
 
     # The request, in the field the backend renders as an observation's
     # input, carrying both halves of what was assembled: the agent's own
     # system prompt, and the history the model was given.
-    request = said["langfuse.observation.input"]
-    assert PROMPT in request
-    assert HEARD in request
+    assert PROMPT in said["gen_ai.system_instructions"]
+    assert HEARD in said["gen_ai.input.messages"]
+    assert HEARD in said["langfuse.observation.input"]
+    assert "POET" in said["gen_ai.output.messages"]
     # And the facts a reader puts the observations in order by.
     assert said["vinga.llm.round"] == 1
     assert said["vinga.llm.purpose"] == "reply"
     assert said["vinga.agent"] == "poet"
 
-    # On the session's own trace, beside the session span rather than in
-    # a trace of its own, which is where a reader arrives.
-    session_span = next(span for span in spans if span.name == "session")
-    assert written[0].trace_id == session_span.trace_id
-    assert written[0].parent_span_id == session_span.span_id
+    turn_span = next(span for span in spans if span.name == "turn")
+    assert written[0].trace_id == turn_span.trace_id
+    assert written[0].parent_span_id == turn_span.span_id
 
 
 async def test_nothing_of_the_request_is_anywhere_else_on_the_wire(
@@ -161,7 +161,7 @@ async def test_nothing_of_the_request_is_anywhere_else_on_the_wire(
     it, or a log line that rendered one, fails here.
     """
     caplog.set_level(logging.DEBUG)
-    collector = Receiver()
+    collector = Receiver(MAX_OTLP_BODY_BYTES)
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.endpoint)
 
     try:
@@ -178,7 +178,11 @@ async def test_nothing_of_the_request_is_anywhere_else_on_the_wire(
         for name, value in attributes(span).items()
         if isinstance(value, str) and PROMPT in value
     ]
-    assert carrying == [("llm_input", "langfuse.observation.input")], carrying
+    assert carrying == [
+        ("llm", "gen_ai.system_instructions"),
+        ("llm", "gen_ai.output.messages"),
+        ("llm", "langfuse.observation.output"),
+    ], carrying
     assert PROMPT not in both_formats(caplog)
 
 
@@ -189,7 +193,7 @@ async def test_the_flag_off_puts_no_such_span_on_the_wire(
     same traced server, with the flag off, sends the metadata it always
     did and not a word of what the model was given."""
     caplog.set_level(logging.INFO)
-    collector = Receiver()
+    collector = Receiver(MAX_OTLP_BODY_BYTES)
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.endpoint)
     config = exporting_config()
     config.server.telemetry = TelemetryConfig(enabled=True)
@@ -203,7 +207,7 @@ async def test_the_flag_off_puts_no_such_span_on_the_wire(
         collector.close()
 
     assert spans, "the traced server exported nothing at all"
-    assert requests(spans) == []
+    assert generations(spans), "ordinary generation metadata was not exported"
     assert not any(
         PROMPT in value
         for span in spans

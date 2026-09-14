@@ -1,50 +1,8 @@
-"""What was said leaving the host, off the wire and under the hostile
-shapes.
-
-The unit lane fakes both seams and proves everything that is vinga's:
-the refusals, the barrier, the bound, the worker, the paging, the
-reasons. Three claims it cannot make are here.
-
-**The wire claim.** A real server with recording, telemetry and the
-export on, a real device conversation with a handover, the real close
-ordering, and a real OTLP collector on a socket in this process. What
-that certifies is the protobuf a backend actually receives: one
-observation per turn, each in the trace of the turn it describes and
-under that turn's own span, the text in the two fields the backend
-renders as input and output, the legs as the exact canonical JSON
-string, and the transcript present in those attributes and nowhere else
-on the wire.
-
-The nesting is the claim this lane exists for rather than the unit
-lane's, because neither side of it is faked here: the utterance on the
-turn span is the one the pipeline minted, and the utterance on the
-observation is the one the store wrote. What this conversation produces
-is the MANY-TO-ONE, measured rather than assumed: it opens one turn and
-its handover writes two rows under that turn's one utterance, so both
-observations land under the one turn span. Two turns landing in two
-different traces is the exporter unit case next door, because this
-conversation cannot produce it.
-
-**The hostile backend.** One that accepts the connection and never
-answers, which is the failure the shared span queue has no answer for
-and the reason this surface delivers as a bounded call at all. Three
-latencies are asserted separately, because they are three different
-promises: the session's close is unaffected, the failure event fires
-inside the exporter's own deadline, and the shutdown finishes inside
-its own bound.
-
-**The wedged store.** A real conversation writer parked in front of its
-own transaction, so the close acknowledgement genuinely never settles.
-That is what `unrecorded` is for, and a fake handle cannot certify that
-a real writer's barrier behaves this way under a gate.
-"""
+"""Acknowledged transcript content on canonical turn roots over OTLP."""
 
 import asyncio
-import contextlib
 import json
 import logging
-import socket
-import threading
 import time
 from collections.abc import Iterator
 from typing import Any
@@ -59,10 +17,12 @@ from tests.support.telemetry import (
     Receiver,
     attributes,
     close_session,
+    finish_reply,
     open_session,
     session_events,
+    start_turn,
 )
-from tests.support.transcripts import a_row, reading, settled
+from tests.support.transcripts import pending, settled
 from vinga_server.config import Config
 from vinga_server.config.models import (
     ConversationsConfig,
@@ -70,17 +30,28 @@ from vinga_server.config.models import (
     ServerConfig,
     TelemetryConfig,
 )
+from vinga_server.conversations.records import TurnLeg, TurnRecord
 from vinga_server.conversations.store import ConversationStore
-from vinga_server.telemetry import Telemetry, build_telemetry
+from vinga_server.telemetry import (
+    OBSERVATION_INPUT,
+    OBSERVATION_OUTPUT,
+    TRANSCRIPT_LEGS,
+    TURN_INPUT,
+    TURN_LEGS,
+    TURN_OUTPUT,
+    Telemetry,
+    build_telemetry,
+)
 from vinga_server.transcript_export import TranscriptExport
 
 pytestmark = pytest.mark.asyncio
 
-SWITCHER_MAC = "aa:bb:cc:dd:ee:95"
+MAX_OTLP_BODY_BYTES = 3 * 1024 * 1024
 
-# The utterance every turn is transcribed to, and the sentinel this lane
-# hunts: it is content this surface IS authorized to send, so the claim
-# about it is where it may appear rather than that it may not.
+SWITCHER_MAC = "aa:bb:cc:dd:ee:95"
+SESSION = "0123456789abcdef0123456789abcdef"
+UTTERANCE = "0f1e2d3c4b5a69780f1e2d3c4b5a6978"
+CONVERSATION = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
 HEARD = "tell me the secret 0TRANSCRIPT-WIRE-SENTINEL"
 
 POET_TONE = 440
@@ -88,12 +59,7 @@ TUTOR_TONE = 660
 
 
 def exporting_config() -> Config:
-    """A device bound to two agents, the first scripted to hand the
-    conversation over, with recording and the transcript export on.
-
-    The handover is what makes the legs real: a reply split between two
-    agents is the one turn whose per-leg attribution exists at all.
-    """
+    """A real device reply split by a handover with transcript export on."""
     return Config(
         providers={
             "llm": {
@@ -128,13 +94,7 @@ def exporting_config() -> Config:
 
 
 async def exported(caplog: pytest.LogCaptureFixture, timeout_s: float = 20.0) -> None:
-    """Wait for the export to have said what became of it.
-
-    The wait is the lane's own half of the contract rather than
-    politeness: a shutdown INTERRUPTS this exporter, so a case that left
-    the server before the worker reached the job would be driving the
-    drop path whatever it meant to drive.
-    """
+    """Wait until the live worker reports attachment or omission."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout_s
     while loop.time() < deadline:
@@ -145,111 +105,52 @@ async def exported(caplog: pytest.LogCaptureFixture, timeout_s: float = 20.0) ->
         ):
             return
         await asyncio.sleep(0.05)
-    raise AssertionError("the export said nothing at all within the bound")
+    raise AssertionError("the transcript worker said nothing within the bound")
 
 
-def transcripts(spans: list[Any]) -> list[Any]:
-    return [span for span in spans if span.name == "transcript"]
+def one(spans: list[Any], name: str) -> Any:
+    matching = [span for span in spans if span.name == name]
+    assert len(matching) == 1, f"expected one {name}, got {len(matching)}"
+    return matching[0]
 
 
-# --- the wire ----------------------------------------------------------
+def a_turn(
+    *,
+    utterance: str = UTTERANCE,
+    heard: str | None = HEARD,
+    reply: str | None = "Done.",
+    agent: str = "poet",
+    legs: tuple[TurnLeg, ...] = (),
+) -> TurnRecord:
+    return TurnRecord(
+        at=101.0,
+        conversation=CONVERSATION,
+        agent=agent,
+        utterance=utterance,
+        heard=heard,
+        reply=reply,
+        legs=legs,
+    )
 
 
-async def test_a_conversations_turns_arrive_as_observations_under_their_turns(
+def held_turn(telemetry: Telemetry, session: str = SESSION) -> Any:
+    """Open and logically finish one root registered for settlement."""
+    telemetry.register_transcript_exporter()
+    clock = Clock()
+    emitted = session_events(clock, telemetry, session=session)
+    open_session(emitted)
+    start_turn(emitted, utterance=UTTERANCE)
+    clock.tick(1.0)
+    finish_reply(emitted)
+    return emitted
+
+
+async def test_live_handover_composes_onto_one_original_turn_root(
     serve, simulate, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The acceptance, decoded from the protobuf a collector received.
-
-    Nothing here reaches into the server: the configuration says record
-    and export, a device talks, a handover splits the reply, and what is
-    asserted is what arrived at an OTLP endpoint on a socket.
-    """
-    caplog.set_level(logging.INFO)
-    collector = Receiver()
-    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.endpoint)
-
-    try:
-        async with serve(exporting_config()) as port:
-            await simulate(port, SWITCHER_MAC)
-            await exported(caplog)
-        spans = collector.spans()
-    finally:
-        collector.close()
-
-    assert spans, "nothing reached the collector at all"
-    written = transcripts(spans)
-    # Two ROWS, because this is what a handover actually records: the
-    # store writes one row per turn and conversation, the switch moved
-    # the conversation, and both rows answer the one utterance the
-    # runtime minted. One observation each, in the store's own order.
-    assert len(written) == 2
-    first, second = (attributes(one) for one in written)
-
-    # The text, in the two fields the backend renders as an
-    # observation's own input and output. This is the claim the
-    # milestone's gate was run for, off the wire.
-    assert first["langfuse.observation.input"] == HEARD
-    assert second["langfuse.observation.output"] == "TUTOR here, hello."
-    # The ordinal, session-local and one-based, with the store's own row
-    # id beside it as a separate fact.
-    assert [first["vinga.turn.index"], second["vinga.turn.index"]] == [1, 2]
-    assert first["vinga.turn.id"] > 0
-    assert second["vinga.turn.id"] > first["vinga.turn.id"]
-    assert first["vinga.turn.t_ms"] >= 0
-    # The agent each turn opened with, which is how a reader follows a
-    # handover: the conversation moved between these two rows.
-    assert first["vinga.agent"] == "poet"
-    assert second["vinga.agent"] == "tutor"
-    # The legs, as ONE canonical JSON string on the wire rather than as
-    # a structure: span attributes take primitives and never mappings.
-    # Allowlisted to the two fields, which this pipeline proves rather
-    # than states, because the stored column also holds the per-leg
-    # token counts and none of them is here.
-    legs = first["langfuse.observation.metadata.legs"]
-    assert legs == '[{"agent":"poet"}]'
-    assert json.loads(legs) == [{"agent": "poet"}]
-    assert "tokens" not in legs
-    # Each observation under the turn it describes, in that turn's own
-    # trace. Matched by the utterance rather than by span name, which is
-    # what makes this the join and not an arrangement: the id on the
-    # turn span is the one the pipeline minted and the id on the
-    # observation is the one the store wrote.
-    turn_spans = {
-        attributes(span)["vinga.utterance.id"]: span
-        for span in spans
-        if span.name == "turn"
-    }
-    for observation in written:
-        turn = turn_spans[attributes(observation)["vinga.utterance.id"]]
-        assert observation.trace_id == turn.trace_id
-        assert observation.parent_span_id == turn.span_id
-    # Both under the ONE turn span, which is the many-to-one the key
-    # exists for, with neither side of it faked: the conversation opened
-    # one turn and the handover split its reply across two rows.
-    (only,) = turn_spans.values()
-    assert {span.trace_id for span in written} == {only.trace_id}
-    assert {span.parent_span_id for span in written} == {only.span_id}
-    # The session is no longer the parent, and still rides every
-    # observation under both spellings, which is what keeps a backend's
-    # session view grouping the words with the turns they now sit in.
-    session_span = next(span for span in spans if span.name == "session")
-    assert session_span.trace_id not in {span.trace_id for span in written}
-    assert first["session.id"] == attributes(session_span)["session.id"]
-    assert first["vinga.session.id"] == attributes(session_span)["vinga.session.id"]
-
-
-async def test_the_transcript_is_on_the_transcript_spans_and_nowhere_else(
-    serve, simulate, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The sentinel claim, made on the wire rather than in this process.
-
-    What was said is authorized onto the transcript observation and
-    nowhere else: every other span of every trace is derived from the
-    structured events, which carry no text by construction, and this is
-    that construction checked against the bytes a backend receives.
-    """
+    """The complete runtime, store and OTLP wire agree on one turn."""
     caplog.set_level(logging.DEBUG)
-    collector = Receiver()
+    collector = Receiver(MAX_OTLP_BODY_BYTES)
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.endpoint)
 
     try:
@@ -261,26 +162,40 @@ async def test_the_transcript_is_on_the_transcript_spans_and_nowhere_else(
     finally:
         collector.close()
 
+    assert spans, "nothing reached the collector"
+    assert not any(span.name == "transcript" for span in spans)
+    turn = one(spans, "turn")
+    turn_attributes = attributes(turn)
+    assert turn_attributes[TURN_INPUT] == HEARD
+    assert turn_attributes[TURN_OUTPUT] == "TUTOR here, hello."
+    assert turn_attributes[OBSERVATION_INPUT] == turn_attributes[TURN_INPUT]
+    assert turn_attributes[OBSERVATION_OUTPUT] == turn_attributes[TURN_OUTPUT]
+    legs = json.loads(turn_attributes[TURN_LEGS])
+    assert legs == [{"agent": "poet"}]
+    assert turn_attributes[TRANSCRIPT_LEGS] == turn_attributes[TURN_LEGS]
+
+    session = one(spans, "session")
+    assert turn.trace_id != session.trace_id
+    assert turn.parent_span_id == b""
+    assert any(
+        link.trace_id == session.trace_id and link.span_id == session.span_id
+        for link in turn.links
+    )
+    assert turn_attributes["session.id"] == attributes(session)["session.id"]
+    assert turn_attributes["vinga.session.id"] == attributes(session)[
+        "vinga.session.id"
+    ]
+
     carrying = [span for span in spans if HEARD in repr(attributes(span))]
-    assert [span.name for span in carrying] == ["transcript"]
-    # And it is on the wire exactly once, which is what says no second
-    # copy rode some span's events or a resource attribute.
-    assert sum(body.count(HEARD.encode()) for body in bodies) == 1
-    # Never in this server's own records, which is the surface the
-    # events keep metadata-only. This server's channels alone: the
-    # device protocol carries the transcript back to the board that
-    # spoke it, and what the test's own websocket client writes down
-    # about that is not something this server chose to write.
+    assert carrying == [turn]
+    assert sum(body.count(HEARD.encode()) for body in bodies) == 2
     assert HEARD not in both_formats(caplog)
 
 
-async def test_a_deployment_with_the_flag_off_exports_no_transcript(
+async def test_flag_off_keeps_the_turn_root_content_free(
     serve, simulate, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The default, from the wire's end: the same conversation, the same
-    collector, the same recording, and not one observation carrying a
-    word of it."""
-    collector = Receiver()
+    collector = Receiver(MAX_OTLP_BODY_BYTES)
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.endpoint)
     config = exporting_config()
     config.server.telemetry = TelemetryConfig(enabled=True)
@@ -288,87 +203,119 @@ async def test_a_deployment_with_the_flag_off_exports_no_transcript(
     try:
         async with serve(config) as port:
             await simulate(port, SWITCHER_MAC)
-            await asyncio.sleep(0.5)
         spans = collector.spans()
         bodies = list(collector.bodies)
     finally:
         collector.close()
 
-    assert spans, "nothing reached the collector at all"
-    assert transcripts(spans) == []
+    turn_attributes = attributes(one(spans, "turn"))
+    for key in (
+        TURN_INPUT,
+        TURN_OUTPUT,
+        TURN_LEGS,
+        OBSERVATION_INPUT,
+        OBSERVATION_OUTPUT,
+        TRANSCRIPT_LEGS,
+    ):
+        assert key not in turn_attributes
+    assert not any(span.name == "transcript" for span in spans)
     assert not any(HEARD.encode() in body for body in bodies)
 
 
-# --- the hostile backend ----------------------------------------------
+async def test_all_handover_acknowledgements_precede_one_wire_root(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two live rows become one ordered root with complete leg attribution."""
+    caplog.set_level(logging.INFO)
+    collector = Receiver(MAX_OTLP_BODY_BYTES)
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.endpoint)
+    telemetry = build_telemetry(TelemetryConfig(enabled=True))
+    assert telemetry is not None
+    emitted = held_turn(telemetry)
+    exporter = TranscriptExport(
+        telemetry=telemetry,
+        backlog=4,
+        acknowledgement_timeout_s=2.0,
+        shutdown_timeout_s=2.0,
+    )
+    first = settled()
+    second = pending()
+
+    try:
+        exporter.turn_recorded(
+            SESSION,
+            a_turn(
+                reply="Let me ask.",
+                legs=(
+                    TurnLeg(
+                        agent="poet",
+                        text="Let me ask.",
+                        input_tokens=11,
+                        output_tokens=5,
+                    ),
+                ),
+            ),
+            first,
+            final=False,
+        )
+        exporter.turn_recorded(
+            SESSION,
+            a_turn(
+                heard=None,
+                reply="Tutor here.",
+                agent="tutor",
+                legs=(
+                    TurnLeg(
+                        agent="tutor",
+                        text="Tutor here.",
+                        input_tokens=7,
+                        output_tokens=3,
+                    ),
+                ),
+            ),
+            second,
+            final=True,
+        )
+        await asyncio.sleep(0.1)
+        assert not any(
+            getattr(record, "event", None) == "transcripts_exported"
+            for record in caplog.records
+        )
+
+        second.settle(True)
+        await exported(caplog)
+        close_session(emitted)
+        await exporter.shutdown()
+        telemetry.release()
+        spans = collector.spans()
+    finally:
+        await exporter.shutdown()
+        telemetry.release()
+        collector.close()
+
+    turn = one(spans, "turn")
+    projected = attributes(turn)
+    assert projected[TURN_INPUT] == HEARD
+    assert projected[TURN_OUTPUT] == "Let me ask. Tutor here."
+    assert json.loads(projected[TURN_LEGS]) == [
+        {
+            "agent": "poet",
+            "input_tokens": 11,
+            "output_tokens": 5,
+            "text": "Let me ask.",
+        },
+        {
+            "agent": "tutor",
+            "input_tokens": 7,
+            "output_tokens": 3,
+            "text": "Tutor here.",
+        },
+    ]
+    assert projected[TRANSCRIPT_LEGS] == projected[TURN_LEGS]
+    assert not any(span.name == "transcript" for span in spans)
 
 
-class Withholding:
-    """A real listening endpoint that accepts the connection, reads the
-    request and then says nothing at all until it is released.
-
-    The `test_telemetry_hardening.py` shape, and here for the reason it
-    is there: an address that REFUSES costs an exporter nothing whatever
-    it does, and an unroutable one is only slow if the network treats it
-    as one.
-    """
-
-    def __init__(self) -> None:
-        self.entered = threading.Event()
-        self.release = threading.Event()
-        self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._socket.bind(("127.0.0.1", 0))
-        self._socket.listen(8)
-        self._held: list[socket.socket] = []
-        self._thread = threading.Thread(target=self._serve, daemon=True)
-        self._thread.start()
-
-    @property
-    def url(self) -> str:
-        host, port = self._socket.getsockname()[:2]
-        return f"http://{host}:{port}"
-
-    def _serve(self) -> None:
-        while not self.release.is_set():
-            try:
-                connection, _ = self._socket.accept()
-            except OSError:
-                return
-            self._held.append(connection)
-            threading.Thread(target=self._hold, args=(connection,), daemon=True).start()
-
-    def _hold(self, connection: socket.socket) -> None:
-        try:
-            connection.settimeout(5.0)
-            connection.recv(65536)
-        except OSError:
-            return
-        self.entered.set()
-        self.release.wait(120.0)
-        with contextlib.suppress(OSError):
-            connection.close()
-
-    def close(self) -> None:
-        self.release.set()
-        with contextlib.suppress(OSError):
-            self._socket.close()
-        for connection in self._held:
-            with contextlib.suppress(OSError):
-                connection.close()
-        self._thread.join(timeout=5.0)
-
-
-def a_retained_session(telemetry: Telemetry, session: str) -> None:
-    """One whole session through the real exporter, which is what puts a
-    trace in the retention for a job to be admitted on."""
-    clock = Clock()
-    events = session_events(clock, telemetry, session=session)
-    open_session(events)
-    clock.tick(1.0)
-    close_session(events)
-
-
-def outcomes(caplog: pytest.LogCaptureFixture) -> list[str]:
+def failure_reasons(caplog: pytest.LogCaptureFixture) -> list[str]:
     return [
         str(getattr(record, "reason", ""))
         for record in caplog.records
@@ -376,119 +323,44 @@ def outcomes(caplog: pytest.LogCaptureFixture) -> list[str]:
     ]
 
 
-async def test_a_backend_that_never_answers_costs_three_bounded_things(
+async def test_a_real_wedged_writer_releases_the_root_metadata_only(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The hostile shape, with the real OTLP exporter and the real HTTP
-    stack.
-
-    Three promises, asserted separately because they are three:
-
-    - the session's close is unaffected, which is what "off the audio
-      path" means and is measured as the time `session_closed` takes;
-    - the failure event fires inside the exporter's own deadline, which
-      is the whole reason delivery is a bounded call: riding the shared
-      queue, an unreachable backend would produce no event at all;
-    - and the shutdown finishes inside its own bound, because a backend
-      that has stopped answering must not hold a redeploy open.
-    """
+    """A real unanswered row acknowledgement never leaks partial content."""
     caplog.set_level(logging.DEBUG)
-    backend = Withholding()
-    session = "1111111111111111aaaaaaaaaaaaaaaa"
-    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", backend.url)
-    # The call's bound is the exporter's OWN deadline, read from the
-    # environment the SDK already reads, which is what this shortens:
-    # the ceiling is the operator's to set and this module never touches
-    # it.
-    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TIMEOUT", "2")
-    telemetry = build_telemetry(TelemetryConfig(enabled=True))
-    assert telemetry is not None
-    a_retained_session(telemetry, session)
-    door, _ = reading({session: [a_row(1)]})
-    exporter = TranscriptExport(
-        telemetry=telemetry,
-        reads=door,
-        backlog=4,
-        acknowledgement_timeout_s=2.0,
-        shutdown_timeout_s=1.0,
-    )
-
-    try:
-        began = time.monotonic()
-        exporter.session_closed(session, settled())
-        closing = time.monotonic() - began
-
-        # The close read a map and put a job on a queue: no request, no
-        # wait, no lock the export holds.
-        assert closing < 0.5, f"the close took {closing:.2f} s with a wedged backend"
-        assert backend.entered.wait(20.0), "the export never reached the backend"
-
-        deadline = time.monotonic() + 20.0
-        while time.monotonic() < deadline and not outcomes(caplog):
-            await asyncio.sleep(0.05)
-        assert outcomes(caplog) == ["undelivered"], (
-            "no failure event fired, so the delivery had no ceiling"
-        )
-
-        began = time.monotonic()
-        await exporter.shutdown()
-        assert time.monotonic() - began < 5.0, "the shutdown was not bounded"
-    finally:
-        backend.close()
-        await exporter.shutdown()
-        telemetry.release()
-
-
-# --- the wedged store --------------------------------------------------
-
-
-async def test_a_wedged_store_costs_a_close_nothing_and_says_unrecorded(
-    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A real conversation writer parked in front of its own
-    transaction, which is what makes this an integration claim: the
-    barrier the export waits on is a real handle from a real writer, and
-    what a gate proves is that a store which never commits produces
-    `unrecorded` rather than a worker that waits forever.
-    """
-    caplog.set_level(logging.DEBUG)
-    collector = Receiver()
+    collector = Receiver(MAX_OTLP_BODY_BYTES)
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.endpoint)
-    session = "2222222222222222bbbbbbbbbbbbbbbb"
     gate = Gate()
     store = ConversationStore(DatabaseConfig(), gate=gate)
     telemetry = build_telemetry(TelemetryConfig(enabled=True))
     assert telemetry is not None
-    a_retained_session(telemetry, session)
-    door, read = reading({session: [a_row(1)]})
+    emitted = held_turn(telemetry)
     exporter = TranscriptExport(
         telemetry=telemetry,
-        reads=door,
         backlog=4,
-        acknowledgement_timeout_s=1.0,
-        shutdown_timeout_s=5.0,
+        acknowledgement_timeout_s=0.25,
+        shutdown_timeout_s=2.0,
     )
+    record = a_turn()
 
     try:
         store.start()
-        store.open_session(session, 100.0, dict(CONVERSATIONS_MANIFEST))
-        # The writer is now parked in front of the open's own
-        # transaction, so everything behind it, the close included, is
-        # a record nothing will settle.
+        store.open_session(SESSION, 100.0, dict(CONVERSATIONS_MANIFEST))
         gate.wait()
+        acknowledgement = store.record_turn(SESSION, record)
 
         began = time.monotonic()
-        recorded = store.close_session(session, duration_s=1.0, reason="idle")
-        closing = time.monotonic() - began
-        exporter.session_closed(session, recorded)
+        exporter.turn_recorded(
+            SESSION, record, acknowledgement, final=True
+        )
+        assert time.monotonic() - began < 0.5
+        await exported(caplog)
+        assert failure_reasons(caplog) == ["unrecorded"]
 
-        assert closing < 0.5, f"the close took {closing:.2f} s against a wedged store"
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline and not outcomes(caplog):
-            await asyncio.sleep(0.05)
-
-        assert outcomes(caplog) == ["unrecorded"]
-        assert read.calls == [], "the store was read past its own barrier"
+        close_session(emitted)
+        await exporter.shutdown()
+        telemetry.release()
+        spans = collector.spans()
     finally:
         gate.open_forever()
         await exporter.shutdown()
@@ -496,11 +368,14 @@ async def test_a_wedged_store_costs_a_close_nothing_and_says_unrecorded(
         telemetry.release()
         collector.close()
 
+    turn_attributes = attributes(one(spans, "turn"))
+    for key in (TURN_INPUT, TURN_OUTPUT, TURN_LEGS):
+        assert key not in turn_attributes
+    assert not any(span.name == "transcript" for span in spans)
+    assert HEARD not in both_formats(caplog)
+
 
 @pytest.fixture(autouse=True)
 def _no_lease_outlives_its_case() -> Iterator[None]:
-    """These cases wedge exporters on purpose, so a lease that did not go
-    back would leave the rest of this lane running against a silenced
-    OpenTelemetry."""
     yield
     assert logging.getLogger("opentelemetry").propagate is not False
