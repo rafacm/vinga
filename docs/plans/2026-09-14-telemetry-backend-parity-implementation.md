@@ -228,3 +228,97 @@ outer-timeout and no-leak mechanics while requiring the following corrections.
     *Resolution* (`a28c6bbb`): the fragment has a `Removed` entry naming both
     former turn events and directing readers to failed `asr`, `llm`,
     `tts_stream` and `tool` spans.
+## M2: content on the operations it describes
+
+M2 moves opt-in content from private post-close observation spans onto the
+canonical operations it describes. It changes no deployment recipe and leaves
+both content flags off by default.
+
+### What landed
+
+**Synchronous generation pairing.** `llm_input_export.py` now renders one
+allowlisted input snapshot per server-minted invocation, observes raw semantic
+output before speech filtering, and completes the pair immediately before the
+matching `llm_round` or LLM `provider_failed` emission. Telemetry consumes that
+pair while creating the actual `llm` span. Reply and recap generations use the
+same path, watchdog retries keep one logical pair, and generated text withheld
+from speech remains in the authorized raw output. Tool schemas, choice, calls,
+arguments and results use structured GenAI message shapes. A complete operation
+is limited to 256 KiB and is dropped whole rather than truncated.
+
+**Acknowledged turn-root settlement.** Each live `TurnRecord` and its store
+acknowledgement now reach `transcript_export.py`, including every row produced
+by a handover. The final reply boundary closes the utterance group. The worker
+waits for all acknowledgements, composes the heard text, complete reply and
+ordered per-agent legs, then asks Telemetry to enrich and end the original
+`turn` root at the reply-finished timestamp. A false or missing acknowledgement,
+timeout, conflicting rows, admission refusal or shutdown releases the same root
+metadata-only. Earlier turns therefore leave while a long session remains open.
+
+Telemetry owns the terminal transition under `_held_turns_lock`: settlement,
+overflow and shutdown contenders pop under the lock, and only the winner
+mutates and ends the span outside it. The process-wide ledger holds at most
+4,096 logically finished roots. The next root releases the oldest metadata-only
+and reports the omission.
+
+**One ordinary OTLP path.** The private processorless content exporter and its
+`Delivery` answer are gone. The ordinary `BatchSpanProcessor` retains its
+2,048-span queue, five-second schedule, finite timeout and bounded shutdown,
+with a content-safe batch size of eight. A serializer test fills eight maximal
+content spans and keeps the real protobuf request below 3 MiB; content wire
+receivers reject a request at or above that limit. Existing outcome names remain,
+but now mean content was attached and enqueued, or omitted before enqueue. They
+do not claim that a backend acknowledged delivery.
+
+**Canonical content and compatibility.** Turn roots carry
+`vinga.turn.input`, `vinga.turn.output` and canonical JSON
+`vinga.turn.legs`. Generation spans carry `gen_ai.system_instructions`,
+`gen_ai.input.messages`, `gen_ai.output.messages`, `vinga.llm.tools` and
+`vinga.llm.tool_choice`. The direct Langfuse input, output and legs attributes
+are derived aliases from those canonical values. The separate `transcript` and
+`llm_input` spans, transcript row index, database id and relative timestamp,
+session-parent fallback, private exact-delivery answer and `undelivered` reason
+were removed.
+
+### Deviations and decisions
+
+There are no deviations from the reviewed M2 plan.
+
+The existing content modules remain because their responsibilities are deep:
+LLM input and raw-output rendering plus operation bounds belong together, while
+transcript acknowledgement truth, handover composition and worker admission
+belong together. Telemetry alone owns span lifecycle and SDK mechanics.
+
+The content outcome variants retain their existing field schema for consumer
+compatibility. Successful events are emitted per settled operation with a count
+of one and zero legacy drop counters; omissions use the remaining closed reason
+set. Their source notes and generated reference now define attachment and
+enqueue semantics exactly.
+
+The content-and-telemetry ADR replaces its former separate-span invariant. The
+event fold still never reads content, but a built and explicitly flagged content
+collaborator may enrich a fold-made span through a server-minted correlation key
+and an allowlisted projection.
+
+### Verification
+
+Run from `vinga-server/` unless noted otherwise:
+
+- `uv run ruff check .`: clean through the synced local environment.
+- `uv run mypy`: clean, 5 source files checked.
+- Focused generation, turn-root, recap and exporter tests: 45 passed.
+- Transcript exporter unit tests: 33 passed.
+- Transcript decoded-wire integration tests: 4 passed.
+- App composition and event-driver tests: 33 passed.
+- Generated server reference, event reference and configuration-example drift
+  tests: 212 passed.
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 7,426 passed, 2 skipped.
+- `uv run pytest tests/integration -q`: 343 passed with the synced server
+  environment first on `PATH`.
+
+The first integration invocation inherited a globally installed client-only
+`vinga-server` executable in smoke subprocesses. The application and telemetry
+tests in the same lane were green. The final complete invocation kept the
+synced server environment first while retaining the local `uv` and `psql`
+directories, exercised all 343 integration cases, and passed without a source
+change.
