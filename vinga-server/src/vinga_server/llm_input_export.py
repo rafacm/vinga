@@ -321,7 +321,11 @@ def _call(call: ToolCall) -> dict[str, Any]:
         "type": "tool_call",
         "id": call.id,
         "name": call.name,
-        "arguments": call.arguments,
+        "arguments": (
+            call.malformed_arguments
+            if call.malformed_arguments is not None
+            else call.arguments
+        ),
     }
 
 
