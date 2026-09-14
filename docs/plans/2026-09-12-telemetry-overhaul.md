@@ -1072,7 +1072,7 @@ the manifest with its own generator when stale.
   Design footprint: one field and an argument at three existing call
   sites, no new rule.
 - [x] **[M5: `export_llm_input`](2026-09-12-telemetry-overhaul-implementation.md#m5-export_llm_input)**
-  (PR TBD). The third class: the flag with its
+  (PR [#522](https://github.com/rafacm/vinga/pull/522)). The third class: the flag with its
   prose and refusal order, `llm_input_export.py` staging the assembled
   request per round under a stated bound, `Telemetry.export_llm_input`
   and `LlmInputRound` on the #495 bounded seam, delivery post-close as
