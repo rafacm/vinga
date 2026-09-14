@@ -17,8 +17,9 @@ from vinga_server.config.models import (
     PromptFragmentConfig,
     ProviderConfig,
     ProvidersConfig,
+    ResolvedValues,
     ServerConfig,
-    resolve_env_references,
+    resolve_env_values,
 )
 
 __all__ = [
@@ -32,8 +33,9 @@ __all__ = [
     "PromptFragmentConfig",
     "ProviderConfig",
     "ProvidersConfig",
+    "ResolvedValues",
     "ServerConfig",
     "compose_config",
     "load_file_config",
-    "resolve_env_references",
+    "resolve_env_values",
 ]

@@ -252,7 +252,10 @@ def test_mcp_values_resolve_literals_and_references(
         "weather", "env", {"REGION": "eu", "API_TOKEN": "$WEATHER_TOKEN"}, None
     )
 
-    assert resolved == {"REGION": "eu", "API_TOKEN": SECRET}
+    assert resolved.values == {"REGION": "eu", "API_TOKEN": SECRET}
+    # And the secrets that went in, which is what a consumer redacting a
+    # far side's text needs and cannot recover from the values alone.
+    assert resolved.secrets == frozenset({SECRET})
 
 
 def test_a_stored_mcp_secret_shadows_the_reference_written_for_it(
@@ -268,7 +271,10 @@ def test_a_stored_mcp_secret_shadows_the_reference_written_for_it(
         "weather", "env", {"REGION": "eu", "API_TOKEN": "$WEATHER_TOKEN"}, store
     )
 
-    assert resolved == {"REGION": "eu", "API_TOKEN": SECRET}
+    assert resolved.values == {"REGION": "eu", "API_TOKEN": SECRET}
+    # A stored secret replaces the whole slot, so it is its own atom and
+    # it joins the set the same way a substituted one does.
+    assert resolved.secrets == frozenset({SECRET})
 
 
 def test_a_stored_mcp_secret_needs_no_key_in_the_entity() -> None:
@@ -276,9 +282,11 @@ def test_a_stored_mcp_secret_needs_no_key_in_the_entity() -> None:
     placeholder for it either."""
     store, _ = _store(SecretLocation.mcp_server("weather", "headers.Authorization"))
 
-    assert resolve_mcp_values("weather", "headers", {}, store) == {"Authorization": SECRET}
+    assert resolve_mcp_values("weather", "headers", {}, store).values == {
+        "Authorization": SECRET
+    }
     # The groups do not bleed into each other.
-    assert resolve_mcp_values("weather", "env", {}, store) == {}
+    assert resolve_mcp_values("weather", "env", {}, store).values == {}
 
 
 def test_an_unusable_key_names_its_position_and_not_its_material() -> None:

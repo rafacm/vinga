@@ -54,7 +54,13 @@ from vinga_server.config.entities import (
     provider_identity,
 )
 from vinga_server.config.loader import ConfigError
-from vinga_server.config.models import MASK, resolve_env_references, spoken_identity
+from vinga_server.config.models import (
+    MASK,
+    ResolvedValues,
+    references_environment,
+    resolve_env_values,
+    spoken_identity,
+)
 
 # `MASK` and `provider_identity` are re-exported rather than defined
 # here. Both are facts about how an entity is named and displayed rather
@@ -188,25 +194,35 @@ def is_envelope(value: object) -> bool:
     )
 
 
-# The two environment-reference spellings, and nothing else, may be
-# displayed. The $NAME form mirrors the models' _ENV_REFERENCE_RE; the
-# bare form is the uppercase name an *_env field holds. Anything that
-# matches neither may be a plaintext secret that ended up in a secret
-# slot, so the display path fails closed rather than passing it on.
-_DOLLAR_REFERENCE_RE = re.compile(r"^\$[A-Za-z_][A-Za-z0-9_]*$")
+# The bare uppercase name an *_env field holds. The other spelling, a
+# $NAME anywhere inside the value, is not written again here: it is
+# `references_environment`, the models' own predicate, so what may be
+# stored is what may be displayed and the two cannot drift. Anything
+# that matches neither may be a plaintext secret that ended up in a
+# secret slot, so the display path fails closed rather than passing it
+# on.
 _BARE_REFERENCE_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
 def mask(value: object) -> object:
-    """A stored secret-slot value as it may be displayed. Only a
-    syntactically valid environment reference passes through, because a
-    reference names a variable and that is not a secret. Everything
-    else becomes the mask: valid ciphertext, malformed envelopes, and
-    stray strings alike, since a malformed value in a secret slot may
-    be a plaintext secret and showing it would make the display path
-    the leak."""
+    """A stored secret-slot value as it may be displayed. A value that
+    references an environment variable passes through, because what it
+    holds is the name of a variable rather than what the variable holds.
+    Everything else becomes the mask: valid ciphertext, malformed
+    envelopes, and stray strings alike, since a malformed value in a
+    secret slot may be a plaintext secret and showing it would make the
+    display path the leak.
+
+    One rule with the write path rather than a narrower one of its own.
+    A composed value (`Bearer $TOKEN`) is a reference the write path
+    admits, and masking it would mean it exports as eight asterisks and
+    cannot be imported into an empty database, where nothing is stored
+    for a mask to mean keep. That is the recovery an operator is told to
+    perform, so the display rule follows the write rule and there is one
+    predicate for both (#504).
+    """
     if isinstance(value, str) and (
-        _DOLLAR_REFERENCE_RE.match(value) or _BARE_REFERENCE_RE.match(value)
+        references_environment(value) or _BARE_REFERENCE_RE.match(value)
     ):
         return value
     return MASK
@@ -534,9 +550,9 @@ def stored_provider_secret(slot: str) -> str | None:
 
 def resolve_mcp_values(
     server: str, group: str, values: Mapping[str, str], store: SecretStore | None
-) -> dict[str, str]:
+) -> ResolvedValues:
     """One MCP server's `env` or `headers`, as the spawned process or the
-    request should see it.
+    request should see it, and the secrets that went into it.
 
     Literal values pass through and a `$VAR` is read from the server's
     own environment, exactly as before. A slot with a stored secret
@@ -562,9 +578,14 @@ def resolve_mcp_values(
                 stored[key] = secret
     references = {key: value for key, value in values.items() if key not in stored}
     written_at = entity_location(descriptor("mcp-server"), server)
-    resolved = resolve_env_references(f"{written_at}.{group}", references)
-    resolved.update(stored)
-    return resolved
+    resolved = resolve_env_values(f"{written_at}.{group}", references)
+    resolved.values.update(stored)
+    # A stored secret replaces the whole slot, so it is its own atom,
+    # and it joins the ones the resolver substituted inside composed
+    # values. What the set is for is a consumer that has to take this
+    # deployment's credentials back out of a far side's text, and there
+    # a credential is a credential whichever door it came through.
+    return ResolvedValues(resolved.values, resolved.secrets | frozenset(stored.values()))
 
 
 __all__ = [

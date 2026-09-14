@@ -7,13 +7,18 @@ PUT again unchanged, and the second read is the first one byte for byte.
 
 The hard case is the mask. A read masks whatever sits under a
 secret-shaped key, and not every masked value is ciphertext: a lowercase
-environment name in an `*_env` option and a whitespace-padded `$VAR` in
-an MCP server's env are both values a write accepts and the display
-rule refuses to show, so a read of such an entity carries `********`
-where a value it holds is stored. The unchanged-value marker is what
-makes that read writable: resubmitting the mask means keep what is
-stored there, and a mask with nothing stored behind it is refused
+environment name in an `*_env` option is a value a write accepts and the
+display rule refuses to show, so a read of such an entity carries
+`********` where a value it holds is stored. The unchanged-value marker
+is what makes that read writable: resubmitting the mask means keep what
+is stored there, and a mask with nothing stored behind it is refused
 naming as much of the path as this repository may name.
+
+The other side of that rule is the value that displays. A value naming
+an environment variable is not a secret, whether it names one as the
+whole value or inside a larger one, so it travels as itself and an
+export carrying it can be imported into an empty database, where a mask
+would have nothing to mean (#504).
 
 So the masked cases here start from writes the API itself accepted,
 which is what an engine-planted row cannot stand in for, and the
@@ -46,6 +51,7 @@ from vinga_server.config.secrets import (
     MASTER_KEY_ENV,
     generate_key,
     load_keys,
+    mask,
 )
 from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database, schema
@@ -61,9 +67,15 @@ EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
 # shaped so a substring check for it cannot match by accident.
 PASTED = "sk_test_4f8b2c9e_never_a_real_credential"
 
-# The other value a write accepts and a read masks: a reference the MCP
-# rule strips before it checks it, where the display rule does not.
+# A reference the MCP rule strips before it checks it. It used to be
+# masked, because the display rule was anchored where the secret rule
+# stripped; both now ask one question, so it displays as written and the
+# store keeps the padding it was given.
 PADDED = "  $HOME_ASSISTANT_TOKEN  "
+
+# And the shape #504 added: a reference composed into the header a
+# vendor asks for. One value, with a credential inside it.
+COMPOSED = "Bearer $HOME_ASSISTANT_TOKEN"
 
 
 @pytest.fixture
@@ -196,22 +208,42 @@ def test_a_masked_nested_reference_resubmits_as_the_stored_value(
     assert stored.model_extra["connection"] == {"api_key_env": PASTED, "host": "example"}
 
 
-def test_a_masked_padded_env_reference_resubmits_as_the_stored_value(
-    client: TestClient, store: ConfigStore
+@pytest.mark.parametrize("written_value", [PADDED, COMPOSED], ids=["padded", "composed"])
+def test_an_env_reference_displays_and_resubmits_as_itself(
+    written_value: str, client: TestClient, store: ConfigStore
 ) -> None:
-    """The MCP half of the same fact, and a different reason for it: the
-    secret rule strips a reference before it checks it, the display rule
-    does not, so a padded `$VAR` is accepted and read back masked."""
-    written = {"transport": "stdio", "command": "uvx", "env": {"API_ACCESS_TOKEN": PADDED}}
+    """The MCP half, under one rule rather than two.
+
+    A padded `$VAR` and a composed `Bearer $VAR` are both values the
+    secret rule accepts, and both name a variable rather than hold a
+    credential, so both are read back as written and resubmit as
+    themselves. The mask is not in it at all, which is what lets an
+    export of either be imported into a database with nothing stored
+    (#504).
+    """
+    written = {
+        "transport": "stdio",
+        "command": "uvx",
+        "env": {"API_ACCESS_TOKEN": written_value},
+    }
     assert client.put("/mcp-servers/home", json=written).status_code == 200
     envelope = client.get("/mcp-servers/home").json()
-    assert envelope["entity"]["env"] == {"API_ACCESS_TOKEN": MASK}
+    assert envelope["entity"]["env"] == {"API_ACCESS_TOKEN": written_value}
+    assert MASK not in str(envelope)
 
     again = client.put("/mcp-servers/home", json=envelope["entity"])
 
     assert again.status_code == 200
     assert client.get("/mcp-servers/home").json() == envelope
-    assert store.read_mcp_server("home").entry.env == {"API_ACCESS_TOKEN": PADDED}
+    assert store.read_mcp_server("home").entry.env == {"API_ACCESS_TOKEN": written_value}
+
+
+def test_a_value_naming_no_variable_under_a_secret_slot_still_masks() -> None:
+    """What the mask still catches, which is what it was written for:
+    ciphertext, a malformed envelope, and a bare paste with no reference
+    in it. The widened rule is about references, not about secrecy."""
+    assert mask(PASTED) == MASK
+    assert mask(COMPOSED) == COMPOSED
 
 
 def test_a_mask_under_a_key_that_is_not_secret_shaped_is_a_value(

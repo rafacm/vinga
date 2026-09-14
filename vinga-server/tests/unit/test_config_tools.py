@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from tests.support.configs import config_with
-from vinga_server.config import Config, McpServerConfig, resolve_env_references
+from vinga_server.config import Config, McpServerConfig, resolve_env_values
 from vinga_server.config.models import AgentConfig, mcp_entry_fragment
 from vinga_server.tools import names
 
@@ -149,9 +149,43 @@ def test_a_reserved_or_unusable_entry_name_fails_the_boot(name: str) -> None:
         HTTP | {"headers": {"Authorization": "Bearer sk-literal"}},
     ],
 )
-def test_an_inline_secret_is_refused(entry: dict) -> None:
-    with pytest.raises(ValidationError, match="inline secret"):
+def test_a_secret_bearing_value_referencing_nothing_is_refused(entry: dict) -> None:
+    """The rule is that a secret-bearing key references a variable
+    somewhere in its value, so a value that references none is refused
+    and the sentence says what is now allowed."""
+    with pytest.raises(ValidationError) as caught:
         config_with(mcp_servers={"x": entry})
+
+    problem = str(caught.value)
+    assert "references no environment variable" in problem
+    assert "Bearer $MY_SERVER_SECRET" in problem
+    # What the refusal itself says about the value is asserted where an
+    # operator meets it, which is the CLI and the API rather than
+    # pydantic's own wrapper: the wrapper echoes the input it was handed
+    # whatever the message says. `test_mcp_composed_reference.py` holds
+    # that half.
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        STDIO | {"env": {"API_ACCESS_TOKEN": "$HOME_ASSISTANT_TOKEN"}},
+        STDIO | {"env": {"API_ACCESS_TOKEN": "--token=$HOME_ASSISTANT_TOKEN"}},
+        HTTP | {"headers": {"Authorization": "$WEATHER_TOKEN"}},
+        HTTP | {"headers": {"Authorization": "Bearer $WEATHER_TOKEN"}},
+    ],
+)
+def test_a_secret_bearing_value_may_compose_a_reference(entry: dict) -> None:
+    """Whole or composed, and in both groups by one rule.
+
+    The header a vendor asks for is a word and a credential, and a rule
+    that took only the whole value would put the word inside the secret,
+    where a token that already carries the prefix sends
+    `Bearer Bearer ...` and reads back as a bad key. An `env` value has
+    the same problem the moment a server wants `--token=$TOKEN`, which
+    is why one rule serves both (#504).
+    """
+    config_with(mcp_servers={"x": entry})
 
 
 def test_a_non_secret_key_may_hold_a_literal() -> None:
@@ -163,11 +197,11 @@ def test_env_references_resolve_from_the_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("VINGA_TEST_HA_TOKEN", "secret-value")
-    resolved = resolve_env_references(
+    resolved = resolve_env_values(
         "mcp_servers.ha.env",
         {"API_ACCESS_TOKEN": "$VINGA_TEST_HA_TOKEN", "TZ": "Europe/Stockholm"},
     )
-    assert resolved == {"API_ACCESS_TOKEN": "secret-value", "TZ": "Europe/Stockholm"}
+    assert resolved.values == {"API_ACCESS_TOKEN": "secret-value", "TZ": "Europe/Stockholm"}
 
 
 def test_an_unset_env_reference_names_where_it_was_written(
@@ -175,7 +209,72 @@ def test_an_unset_env_reference_names_where_it_was_written(
 ) -> None:
     monkeypatch.delenv("VINGA_TEST_MISSING", raising=False)
     with pytest.raises(ValueError, match=r"mcp_servers\.ha\.env\.TOKEN.*VINGA_TEST_MISSING"):
-        resolve_env_references("mcp_servers.ha.env", {"TOKEN": "$VINGA_TEST_MISSING"})
+        resolve_env_values("mcp_servers.ha.env", {"TOKEN": "$VINGA_TEST_MISSING"})
+
+
+def test_a_reference_resolves_where_it_stands_inside_a_larger_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The substitution, and the atoms beside it.
+
+    The resolved value is what the request carries and the secret is
+    what a far side can hand back on its own, so both cross the seam:
+    recovering the second from the first anywhere else would mean
+    reading the environment twice or diffing strings.
+    """
+    monkeypatch.setenv("VINGA_TEST_HA_TOKEN", "secret-value")
+
+    resolved = resolve_env_values(
+        "mcp_servers.ha.headers", {"Authorization": "Bearer $VINGA_TEST_HA_TOKEN"}
+    )
+
+    assert resolved.values == {"Authorization": "Bearer secret-value"}
+    assert resolved.secrets == frozenset({"secret-value"})
+
+
+def test_every_reference_in_one_value_resolves(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VINGA_TEST_ONE", "first-value")
+    monkeypatch.setenv("VINGA_TEST_TWO", "second-value")
+
+    resolved = resolve_env_values(
+        "mcp_servers.ha.env", {"API_TOKEN": "$VINGA_TEST_ONE:$VINGA_TEST_TWO@$VINGA_TEST_ONE"}
+    )
+
+    assert resolved.values == {"API_TOKEN": "first-value:second-value@first-value"}
+    assert resolved.secrets == frozenset({"first-value", "second-value"})
+
+
+def test_a_value_with_no_reference_passes_through_byte_for_byte() -> None:
+    """Including its own whitespace: only a value that is nothing but a
+    reference is trimmed, and that trimming is about the reference
+    rather than about the value."""
+    written = {"TZ": "  Europe/Stockholm  ", "GREETING": "hello\nworld"}
+
+    resolved = resolve_env_values("mcp_servers.ha.env", dict(written))
+
+    assert resolved.values == written
+    assert resolved.secrets == frozenset()
+
+
+@pytest.mark.parametrize(
+    "written", ["$VINGA_TEST_HA_TOKEN", "  $VINGA_TEST_HA_TOKEN  ", "$VINGA_TEST_HA_TOKEN\n"]
+)
+def test_a_whole_reference_keeps_its_trimming(
+    written: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The compatibility story of #504, stated as behavior.
+
+    A value that is nothing but a reference, whatever whitespace is
+    around it, resolves to the bare secret exactly as it did before the
+    scanner existed. Only a value that is NOT a whole reference is
+    substituted as written, so a padded reference cannot quietly become
+    a composed value with whitespace in it.
+    """
+    monkeypatch.setenv("VINGA_TEST_HA_TOKEN", "secret-value")
+
+    resolved = resolve_env_values("mcp_servers.ha.env", {"TOKEN": written})
+
+    assert resolved.values == {"TOKEN": "secret-value"}
 
 
 def granted(config: Config, agent: str) -> list[tuple[str, list[str] | None]]:
