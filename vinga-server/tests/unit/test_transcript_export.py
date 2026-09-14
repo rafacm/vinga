@@ -10,7 +10,13 @@ from typing import Any
 import pytest
 
 from tests.support.events import both_formats, fields_of
-from tests.support.transcripts import Exported, exporting, pending, settled
+from tests.support.transcripts import (
+    Exported,
+    exporting,
+    observed_pending,
+    pending,
+    settled,
+)
 from vinga_server.boundary import Reach
 from vinga_server.config import ConfigError
 from vinga_server.config.models import ServerConfig
@@ -581,12 +587,14 @@ async def test_full_backlog_drops_newest_completed_group(
     exporter, telemetry = an_exporter(
         backlog=1, acknowledgement_timeout_s=30.0
     )
-    first = pending()
+    first = observed_pending()
     second = pending()
     exporter.turn_recorded(
         SESSION, a_turn(utterance="1" * 32), first, final=True
     )
-    await asyncio.sleep(0.1)
+    assert await asyncio.to_thread(first.wait_entered.wait, 5.0), (
+        "the transcript worker did not enter the first acknowledgement wait"
+    )
     exporter.turn_recorded(
         SESSION, a_turn(utterance="2" * 32), second, final=True
     )

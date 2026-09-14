@@ -22,7 +22,7 @@ from tests.support.telemetry import (
     session_events,
     start_turn,
 )
-from tests.support.transcripts import pending, settled
+from tests.support.transcripts import observed_pending, settled
 from vinga_server.config import Config
 from vinga_server.config.models import (
     ConversationsConfig,
@@ -242,7 +242,7 @@ async def test_all_handover_acknowledgements_precede_one_wire_root(
         shutdown_timeout_s=2.0,
     )
     first = settled()
-    second = pending()
+    second = observed_pending()
 
     try:
         exporter.turn_recorded(
@@ -279,7 +279,9 @@ async def test_all_handover_acknowledgements_precede_one_wire_root(
             second,
             final=True,
         )
-        await asyncio.sleep(0.1)
+        assert await asyncio.to_thread(second.wait_entered.wait, 5.0), (
+            "the transcript worker did not enter the final acknowledgement wait"
+        )
         assert not any(
             getattr(record, "event", None) == "transcripts_exported"
             for record in caplog.records
