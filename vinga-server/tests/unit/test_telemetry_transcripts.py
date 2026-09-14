@@ -148,15 +148,23 @@ def test_worker_and_provider_release_contenders_end_once() -> None:
         barrier = threading.Barrier(3)
         answer: list[TurnSettlement] = []
 
-        def settle() -> None:
-            barrier.wait()
-            answer.append(
-                telemetry.settle_turn(SESSION, utterance, {"input": "heard"})
+        def settle(
+            gate: threading.Barrier = barrier,
+            results: list[TurnSettlement] = answer,
+            exporter: Telemetry = telemetry,
+            identity: str = utterance,
+        ) -> None:
+            gate.wait()
+            results.append(
+                exporter.settle_turn(SESSION, identity, {"input": "heard"})
             )
 
-        def release_provider() -> None:
-            barrier.wait()
-            telemetry.release()
+        def release_provider(
+            gate: threading.Barrier = barrier,
+            exporter: Telemetry = telemetry,
+        ) -> None:
+            gate.wait()
+            exporter.release()
 
         worker = threading.Thread(target=settle)
         shutdown = threading.Thread(target=release_provider)
