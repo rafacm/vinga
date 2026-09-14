@@ -16,14 +16,24 @@
   was before: the key widens what a boundary allows, and never narrows
   it.
 - **One assertion covers every destination the section sends to, and it
-  means the outermost of them.** The traces and the exported
-  transcripts ride `OTEL_EXPORTER_OTLP_*` and the recording upload
-  rides `LANGFUSE_HOST`, so a collector on your own network beside a
-  media host at a vendor is `internet`, and all three features are
-  refused rather than the one that would have been caught. It is an
-  assertion and not a proof: nothing here reads either endpoint, so a
-  deployment that declares `network` and points the endpoint at a
-  vendor has contradicted its own configuration and this server cannot
-  tell. The refusal names the key the reach came from, beside the
-  switch, the reach and the boundary, and still carries no endpoint, no
-  host and no credential.
+  means the outermost of them.** There are three: the traces and the
+  exported transcripts ride `OTEL_EXPORTER_OTLP_*`; the recording
+  upload's REST calls go to `LANGFUSE_HOST`; and the recording's bytes
+  go to the presigned upload URL that host answers with, which is
+  whatever object storage your backend is configured with. Any one of
+  the three outside your network makes the honest answer `internet`,
+  and all three features are then refused rather than the one that
+  would have been caught. **So a LAN collector and a LAN Langfuse are
+  not enough to declare `network`**, unless that Langfuse's object
+  storage stays on your network too; if you cannot say where your
+  backend stores media, you have not got a `network` deployment to
+  declare.
+- **It is an assertion and not a proof**, and the third destination is
+  why that is not a formality: nothing here reads the OTLP endpoint or
+  the Langfuse host, and the upload target does not exist until the
+  backend names it, one request before the bytes go. A deployment that
+  declares `network` and then points the endpoint at a vendor, or runs
+  a LAN Langfuse backed by cloud object storage, has contradicted its
+  own configuration and this server cannot tell. The refusal names the
+  key the reach came from, beside the switch, the reach and the
+  boundary, and still carries no endpoint, no host and no credential.

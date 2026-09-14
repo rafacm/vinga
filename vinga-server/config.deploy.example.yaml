@@ -163,10 +163,14 @@ server:
   # telemetry:
   #   enabled: true
   #   # Where this section's destinations are, asserted by you, covering
-  #   # both transports at once and meaning the outermost of them:
-  #   # `host`, `network` or `internet`. Left out it is `internet`,
-  #   # which is what a deployment got before the key existed. It is an
-  #   # assertion and not a proof: nothing here reads either endpoint.
+  #   # all three at once and meaning the outermost of them: `host`,
+  #   # `network` or `internet`. The three are the OTLP endpoint, the
+  #   # Langfuse host, and the object storage that host hands out
+  #   # presigned upload URLs for, which is where a recording's bytes
+  #   # actually land. Left out it is `internet`, which is what a
+  #   # deployment got before the key existed. It is an assertion and
+  #   # not a proof: nothing here reads any of the three, and the last
+  #   # does not exist until the backend names it.
   #   reach: internet
   #   # Attaching a closed session's recording to its trace, which SENDS
   #   # ROOM AUDIO OFF THIS HOST and is its own decision: capture on and
@@ -176,7 +180,9 @@ server:
   #   # LANGFUSE_SECRET_KEY, which must name the same deployment and the
   #   # same project as the OTEL_EXPORTER_OTLP_* variables above;
   #   # pointed elsewhere both halves succeed and the recording is where
-  #   # nobody looks. Needs `server.capture` on to do anything.
+  #   # nobody looks. The bytes themselves go to the presigned URL that
+  #   # host answers with, so they land in its object storage rather
+  #   # than at the host. Needs `server.capture` on to do anything.
   #   export_audio: false
   #   # Exporting what was said, one observation per turn on the
   #   # session's trace, which SENDS CONVERSATION TEXT OFF THIS HOST and
