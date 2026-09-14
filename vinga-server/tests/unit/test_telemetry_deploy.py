@@ -98,15 +98,20 @@ def test_the_common_pipeline_owns_policy_before_both_forwards() -> None:
 def test_the_common_mask_names_every_content_field_and_alias() -> None:
     mask = _collector()["processors"]["transform/content-mask"]
     statements = mask["trace_statements"][0]["statements"]
+    content_statements = [
+        statement for statement in statements if 'attributes["' in statement
+    ]
     named = {
         match.group(1)
-        for statement in statements
+        for statement in content_statements
         if (match := re.search(r'attributes\["([^"]+)"\]', statement))
     }
 
     assert named == CONTENT_ATTRIBUTES
-    assert all("replace_pattern" in statement for statement in statements)
-    assert all('"[email]"' in statement for statement in statements)
+    assert all("replace_pattern" in statement for statement in content_statements)
+    assert all('"[email]"' in statement for statement in content_statements)
+    assert any("replace_all_patterns(attributes" in statement for statement in statements)
+    assert any("replace_pattern(status.message" in statement for statement in statements)
 
 
 def test_backend_adaptation_is_confined_to_the_sinks() -> None:
@@ -169,4 +174,4 @@ def test_vinga_is_always_on_in_both_runnable_paths() -> None:
     assert fanout["VINGA_SERVER__TELEMETRY__REACH"] == "internet"
     assert _services(FANOUT_PATH)["otel-collector"]["environment"][
         "TELEMETRY_SAMPLE_PERCENTAGE"
-    ] == "100"
+    ] == "${TELEMETRY_SAMPLE_PERCENTAGE:-100}"
