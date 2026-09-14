@@ -406,10 +406,11 @@ the existing Langfuse REST and object-storage destinations in that assertion.
   keeps the existing Langfuse aliases, including `usage_details`, as derived
   export-boundary compatibility attributes for direct-to-Langfuse deployments
   and delegates held-span lifecycle.
-- New `vinga_server/telemetry_deferred.py` owns the lifecycle decision for
-  logically finished live spans: the enrichable interval, explicit end time,
-  bounded retention, class settlement and exactly-once end across both content
-  exporters and shutdown. It imports no OpenTelemetry name at module scope.
+- `vinga_server/telemetry.py` also owns the bounded held-turn map beside its
+  existing pending and retained trace maps. Its public methods are the only
+  interface the transcript worker uses to register, enrich or release a turn;
+  no new pass-through module is added and optional SDK imports stay behind the
+  existing lazy boundary.
 - `transcript_export.py` keeps store acknowledgement, paging, admission and
   outcome reporting, but enriches turn roots rather than creating observations.
 - `llm_input_export.py` keeps neutral-seam rendering and byte budgets, adds
@@ -472,7 +473,7 @@ fixtures are extended rather than replaced.
   safe `error.type` is absent. Credential-shaped exception messages are absent
   from the span, event, log record message, typed arguments and exception
   chains in both log formats.
-- Deferred-ledger unit tests pin original span identity, explicit end time,
+- Held-turn unit tests pin original span identity, explicit end time,
   sampled and unsampled decisions, exact-once end, metadata-only release after every
   drop reason, the 4,097th-record oldest-finished overflow and shutdown races. The concurrency test
   is run at least 100 times because one passing interleaving proves nothing.
@@ -543,7 +544,7 @@ fixtures are extended rather than replaced.
   target backends join by identifiers. The direct and dual-receiver smokes
   deliberately observe children before release, then assert the final topology.
 - **Content buffering can grow with a long session.** Existing request/session
-  budgets remain, the deferred ledger has a flat 4,096-span process cap, and
+  budgets remain, telemetry's held-turn map has a flat 4,096-span process cap, and
   overflow ends the oldest logically finished span metadata-only rather than
   losing operation metadata or selecting by session state.
 - **A sampling decision can fork.** Original trace flags and state are retained
@@ -583,13 +584,13 @@ fixtures are extended rather than replaced.
   the existing runtime/event seams; no new module. Documentation footprint:
   update the exporter contract in `vinga-server/README.md` and the exported
   traces entry in the observability map; no deployment procedure changes yet.
-- [ ] **M2, content on the operations it describes.** Add the bounded deferred
-  span owner, enrich acknowledged turn roots and paired generation spans,
+- [ ] **M2, content on the operations it describes.** Add the bounded held-turn
+  lifecycle beside telemetry's existing retention maps, enrich acknowledged
+  turn roots and paired generation spans,
   remove the `transcript` and `llm_input` observation topology, and prove flags
   off, flags on, bounds, tools, handover, recap, failures and teardown on the
-  decoded OTLP wire. Design footprint: add `telemetry_deferred.py`, whose
-  callers stop knowing delayed SDK record identity and release, and deepen the
-  two existing content exporters and pipeline content seams. Documentation
+  decoded OTLP wire. Design footprint: deepen `telemetry.py`, the two existing
+  content exporters and pipeline content seams; no new module. Documentation
   footprint: widen the flag's source description in `config/models.py` to name
   generated and withheld model output, update the server exporter contract and
   LLM-input row of the observability map, and regenerate both configuration
@@ -832,6 +833,11 @@ read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 9m08s.
 8. **P2: `telemetry_deferred.py` still fails the deletion test.** Its exporters
    call only through `Telemetry`, and telemetry already owns the same bounded
    map shape. Fold it in unless a real second responsibility exists.
+
+   *Resolution:* The new module is removed from the plan. `Telemetry` owns the
+   held-turn map beside its three existing retention structures, and its public
+   methods remain the sole worker interface. This supersedes the first review's
+   module-resolution note while retaining the no-extra regression gates.
 9. **P2: M2 misses the transcript field prose, `TelemetryConfig` docstring and
    exported-transcripts observability section that its mechanism falsifies.**
 10. **P2: the changelog omits removed transcript attributes, per-agent leg
