@@ -827,3 +827,93 @@ share one id, and the exporter retains a turn under a given id. Joining
 them at the wire belongs with #506, which is the first consumer that
 actually performs the join, and proving it there rather than here keeps
 this milestone's diff to the mechanism.
+
+## M4b: the operator's collector reach
+
+The plan answered this milestone's three open questions in a section of
+its own, so there was nothing left to decide here and the work is the
+shape that section describes: one field, one argument at three existing
+call sites, and one more fact in a sentence that already existed.
+
+### What landed
+
+| Piece | Where |
+| --- | --- |
+| `server.telemetry.reach`, in the `Reach` vocabulary, defaulting to `internet` | `config/models.py` `TelemetryConfig` |
+| The declaration the refusal names, one spelling beside the rule | `boundary.py` `FEATURE_REACH_KEY` |
+| The refusal sentence, gaining the declaration and losing nothing | `boundary.py` `check_feature` |
+| The section's reach passed instead of a fixed `Reach.INTERNET` | `telemetry.py`, `transcript_export.py`, `capture_upload.py`, each `_boundary_refusal` and its one caller |
+| The suite that owns the joining up | `tests/unit/test_telemetry_reach.py` |
+
+### Deviations from the plan
+
+- **The default is the field's own, not a translation at the call
+  sites.** The plan says "absent by default" and "absent means
+  `internet`". Those are one fact, and it has one home: the field is
+  `Reach` rather than `Reach | None`, with `Reach.INTERNET` as its
+  pydantic default. A nullable field plus three `or Reach.INTERNET`
+  spellings would have been the same decision written four times, which
+  is the rule about two structures that must agree. The key is still
+  absent from a configuration by default, which is what an operator
+  sees; what changes is that nothing downstream has to know what its
+  absence means. The generated reference now states the default
+  outright, which is the upgrade note rendering itself.
+- **The declaration's spelling is a module constant rather than a
+  fourth argument.** `check_feature` names `server.telemetry.reach` in
+  its sentence, and the string lives in `boundary.py` beside the rule,
+  the way each caller's switch key lives beside its own builder. Every
+  feature of this shape is on one section, so an argument would be a
+  parameter with one possible value at three call sites. The comment
+  says what turns it into an argument: a second section growing a
+  feature of this shape, arriving with the caller that needs it.
+- **The changed sentences in the observability map are the Status
+  paragraphs, not only the Retention and access ones.** The plan's
+  documentation footprint named the latter. The falsified sentence,
+  "refused under any `server.data_boundary` narrower than `internet`",
+  is in all three Status paragraphs, so those are where the fact
+  actually lived and where it moved. The Retention and access
+  paragraphs gained the assertion itself, written out once in the
+  exported-traces section that owns the transport and cited from the
+  other two.
+
+### Verification
+
+**The absent-key case was falsified against a mutation of the
+default**, which is the one upgrade-breaking mistake available here. It
+is pinned twice and each pin catches a different way of making it: a
+table asserting admitted-or-refused at all four boundary states and at
+all three sites, and a differential case holding the refusal sentence
+equal to the one `check_feature(key, Reach.INTERNET, boundary)`
+composes. With the field's default changed to `Reach.NETWORK` the table
+fails at the `network` row (the boot is admitted where it was refused)
+and the sentence case fails everywhere; with `Reach.HOST` the table
+fails at two rows. Neither survives.
+
+The other cases were watched failing before the implementation existed:
+the declared-reach admissions and the wider-reach refusals against a
+section with no such key (`extra="forbid"` refuses the file), and the
+sentence cases against the pre-M4b wording, which names the switch, the
+reach and the boundary and not the declaration.
+
+Every case runs against all three features rather than against the one
+it was written for, which is the plan's "one assertion covers every
+destination" turned into a run: a per-site suite would pass equally
+against three keys.
+
+The no-leak case drives each refusal with the five variables either
+transport reads set to credential-shaped values, and hunts the sentinel
+in the sentence, in both log formats with the typed `record.args`
+behind them, and in every emission an attached server tap was offered.
+
+### Left alone deliberately
+
+- **`check_feature`'s shape.** It took the reach as an argument from
+  the day it was written, with a docstring saying that is what makes
+  this follow-up a change of argument. It was, and the function's
+  signature is unchanged.
+- **The live gate.** The plan asks for a server bounded at `network`
+  with an asserted LAN reach booting and exporting against a local
+  collector. It is not run here and the PR box stays unchecked with
+  that reason: what the gate would show is a boot that the unit lane
+  drives at every one of its decision points, and the collector this
+  gate wants is the one piece of the rig that is not in the worktree.
