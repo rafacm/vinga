@@ -1054,12 +1054,17 @@ which mutation each new case is held against.
   the ADR is exactly the four provider arguments, and a class whose
   value is that it is what was sent must not quietly grow a field the
   model never saw.
-- **A rendering that fails is a third absence, and it is not counted.**
-  `_stage` contains every exception, because it runs inside a reply.
-  The two counts are the bound's own vocabulary and mean something
-  exact to a reader; a request that could not be rendered at all is a
-  defect in this server rather than a conversation that outgrew its
-  budget, so it is one value-free warning line and no count.
+- **A rendering that fails is a third absence with a count of its
+  own.** `_stage` contains every exception, because it runs inside a
+  reply. The plan enumerates the two reasons the BOUND has, and this is
+  not one of them: folding it into either would report a ceiling that
+  was never reached and send an operator to tune a number that had
+  nothing to do with it. It shipped uncounted, which the PR review
+  round below found and rejected for the right reason, and it is
+  `unrenderable` on the export's own event now. The plan's own
+  principle is what settles it: a reader learns from the trace that an
+  export is partial, and with no local store behind this class a round
+  that vanished from the event vanished from everywhere.
 - **M4b's `reach` prose gained a word.** Its field description said
   "all three features are refused"; there are four exports behind that
   one assertion now. The count is corrected in the model, in
@@ -1135,3 +1140,121 @@ spellings census was run after every documentation edit.
   content surface built out of an SDK's call arguments would put the
   no-leak contract behind a per-adapter exclusion list maintained
   forever.
+
+### PR review round, PR #522
+
+External review: codex CLI 0.154.0, model gpt-5.6-sol, read-only
+sandbox, 2026-09-14, runtime 15m35s, reviewing main...e213a3df. Verdict
+as received: **not mergeable**. Three findings, two of them P1, all
+three confirmed in the tree before they were accepted and each fixed in
+a commit of its own.
+
+1. **P1: the idle worker retains the last exported prompt
+   indefinitely.** Every serialized request goes into `_Job.rounds`,
+   and `_run` leaves `job` bound when it returns to polling, so the
+   worker frame holds the most recent job until another arrives or the
+   process shuts down. That contradicts the promised "delivered or
+   dropped, and nowhere after that" retention boundary. Fix: clear
+   `job` in a `finally` immediately after `_attempt`, or move each
+   iteration into a helper whose frame ends, with a weak-reference
+   regression proving the completed job is collectible while the worker
+   remains idle.
+
+   *Resolution.* Adopted, and it is a broken promise rather than an
+   untidy loop: that sentence is the strictest retention answer in this
+   repository and the reason this class was allowed to exist with no
+   store behind it. A `get` that times out rebinds nothing, so the
+   frame that polls is the frame that holds, and an idle household is
+   exactly the case that produces it. The binding goes in a `finally`,
+   and the loop's docstring says why, including why the sibling worker
+   needs no such line: a transcript job holds a session id, a pinned
+   context and an acknowledgement, and its turns are read from the
+   store and let go inside its own attempt. The regression asks the
+   only question askable from outside, through a seam that keeps a weak
+   reference and no strong one, because the recorder every other case
+   uses would itself have held the job alive.
+
+2. **P1: request rendering can fail a conversation and can evade
+   structured drop accounting.** The UTF-8 encode sat outside the guard
+   that catches a failed rendering, and `ensure_ascii=False` keeps a
+   lone surrogate as itself, so a surrogate accepted by Python's JSON
+   decoder from an MCP tool result raises `UnicodeEncodeError` on the
+   reply path before the provider call. Conversely a rendering caught
+   inside the guard incremented the ordinal and neither drop count, and
+   `_Stage.anything()` could then make the close emit no outcome event
+   at all. Fix: make rendering and byte measurement one total,
+   UTF-8-safe operation with JSON escaping for problematic code points,
+   remove the unaccounted third absence, and test that hostile Unicode
+   neither fails the reply nor disappears from the ledger.
+
+   *Resolution.* Adopted in both halves. The serious one is the
+   standing posture of this whole ladder rather than a bug in one
+   module: no content export may fail a conversation, and staging runs
+   on the reply path ahead of the provider call, so an escape loses the
+   answer the user is waiting for and not merely an observation.
+   `_rendered` returns the string and its size as one operation inside
+   one guard, and a round that will not encode is rendered again with
+   every non-ASCII code point escaped, which is always encodable and is
+   what the far side itself sent; the round is exported exactly rather
+   than dropped for being awkward, and an ordinary conversation keeps
+   the compact spelling and its smaller bytes.
+
+   The accounting half takes the first of the two options the finding
+   offers, a third count with a name of its own, `unrenderable`. Not
+   folded into either bound's count, which the finding forbids and
+   which would be wrong anyway: those two are the BOUND's vocabulary
+   and reporting a ceiling that was never reached would send an
+   operator to tune a number that had nothing to do with it. Not left
+   uncounted either, which is what it was, and with no local store
+   behind this class a round that vanished from the event vanished from
+   everywhere. `anything()` answers for all three absences now, so a
+   session whose every round failed to render reports that instead of
+   saying nothing. It is a deviation from the plan's two-reason
+   accounting and is recorded above as one: the plan enumerates the
+   reasons the BOUND has, and its own principle, that a reader learns
+   from the trace that an export is partial, is what requires the third
+   to be countable too.
+
+3. **P2: transcript and LLM-input workers race one unsynchronized OTLP
+   exporter.** Both independent workers reach `Telemetry._deliver`,
+   which lazily reads, assigns and invokes `self._transcripts` with no
+   lock, and `_close_transcripts` is unsynchronized with both paths.
+   Concurrent first calls can construct two exporters and overwrite
+   one; later calls concurrently use one mutable HTTP exporter.
+   Existing tests exercise each exporter separately and cannot expose
+   it. Fix: a single serialized owner covering construction, export and
+   shutdown, or one exporter per worker, plus a barrier-based test that
+   overlaps teardown.
+
+   *Resolution.* Adopted, as one serialized owner rather than one
+   exporter each: what the two genuinely share is a transport
+   vocabulary, a credential family and a resource, and a second
+   connection pool to the same endpoint would be a second thing to shut
+   down for a saving neither worker needs. **The repository fact is
+   worth more than the fix, and is recorded here for the module that
+   comes next: a lazily constructed shared object is safe exactly as
+   long as one thread reaches it, and this one was, until a second
+   content exporter began delivering through the same path on a worker
+   of its own.** Nothing about `_deliver` changed when that happened,
+   which is why nothing looked wrong.
+
+   Construction, export and shutdown are under one lock, and the
+   invariant is stated where the lock is declared. The teardown takes
+   it, and the private provider's own lock, under a short bounded wait,
+   and an expired wait leaves that half to close itself: a skipped
+   shutdown costs a socket the interpreter closes moments later, where
+   a teardown blocked behind a collector that stopped answering costs a
+   redeploy. A closed transport stays closed, so a worker arriving
+   after the teardown gets the shutdown answer rather than a fresh
+   socket nobody owns. What the serialization costs is one delivery
+   waiting out another for that call's own bounded deadline, which two
+   post-close workers off the audio path are the right place to spend.
+
+   The barrier case runs both deliveries and the teardown together,
+   fifty times. It found its own first draft worthless: the teardown
+   runs behind the batch provider's own shutdown, so every delivery had
+   finished before the close arrived and the case passed with the
+   teardown unlocked. It now waits for a delivery to be genuinely
+   inside the transport before tearing anything down, and the
+   closed-transport guard has a case of its own, since that one is not
+   a race at all.
