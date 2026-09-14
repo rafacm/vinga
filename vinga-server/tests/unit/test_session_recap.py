@@ -609,6 +609,41 @@ async def test_a_recap_of_a_recap_records_the_one_it_consumed() -> None:
     assert any("we had talked about galaxies" in turn.content for turn in summarizing)
 
 
+# What the summarization round is, to the LLM input export
+
+
+async def test_the_summarization_round_is_staged_as_a_recap_round() -> None:
+    """The second LLM call shape (#502, M5). A recap is a request a
+    model was given, so a reader asking what it saw gets it as well as
+    the reply, and can tell the two apart: the summarization is not an
+    answer to anybody, and labelling it as one would be the export
+    claiming a conversation that never happened.
+
+    Staged before the call rather than after it, which is why the case
+    is here rather than beside the export's own bound: a recap that
+    failed or timed out is still something the model was handed.
+    """
+    from tests.support.llm_input import exporting as exporting_llm_input
+    from vinga_server.llm_input_export import LlmInputExport
+
+    telemetry, _ = exporting_llm_input({})
+    staging = LlmInputExport(telemetry=telemetry, backlog=4, shutdown_timeout_s=10.0)
+    voice = RecordingTts()
+    session, _ = consenting(voice, a_long_thread(), Kept().watching(voice))
+    session.runtime._llm_input = staging
+    session._llm_input = staging
+
+    await drive_reply(session, UTTERANCE)
+
+    stage = staging._staged[session.session_id]
+    purposes = [one.round.purpose for one in stage.rounds]
+    assert "recap" in purposes, "the summarization round was never staged"
+    assert purposes.count("recap") == 1
+    (staged,) = [one.round for one in stage.rounds if one.round.purpose == "recap"]
+    assert pipeline_module.RECAP_INSTRUCTION in staged.request
+    await staging.shutdown()
+
+
 # The no-leak sentinel
 
 

@@ -29,6 +29,7 @@ from vinga_server.device.bindings import DeviceBindings
 from vinga_server.device.boundary import RuntimeFactory
 from vinga_server.events.live import LiveEvents
 from vinga_server.generation import Generations
+from vinga_server.llm_input_export import LlmInputExport
 from vinga_server.memory.store import MemoryStore
 from vinga_server.onboarding import PendingDevices
 from vinga_server.registry import SessionRegistry
@@ -106,4 +107,10 @@ class Composition:
     # that too (#495). Here for the same reason: the device edge hands
     # it a closed session and the lifespan shuts it down.
     transcripts: TranscriptExport | None
+    # And the LLM input exporter beside that, when a deployment asked
+    # for the widest of the three content classes (#502). Here for the
+    # same two reaches, and it has a third the other two do not: the
+    # runtime factory closes over it as well, because what it exports is
+    # staged while a conversation runs rather than read after it.
+    llm_input: LlmInputExport | None
     api: ApiRuntime

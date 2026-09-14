@@ -126,6 +126,7 @@ def device_session(
     fallbacks: dict[str, Any] | None = None,
     devices: Any = None,
     device_access: Any = None,
+    llm_input: Any = None,
 ) -> session_module.DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one: the agents resolved from the binding, then the
@@ -173,6 +174,13 @@ def device_session(
     running conversation hands in a view with an engine behind it,
     which is the other shape `app.py` builds.
 
+    `llm_input` is the post-close surface each assembled request is
+    staged into (#502), and it goes to BOTH halves the way `app.py`
+    passes it: the factory closes over it because the rounds are staged
+    while the conversation runs, and the session holds it because the
+    close is where the stage is let go. None is a deployment that did
+    not ask for the export, which is every suite but the one about it.
+
     `device_access` is the other direction through those rows, what the
     location tool writes through, and None is what `app.py` composes for
     a server whose world came from a configuration it was handed rather
@@ -195,8 +203,11 @@ def device_session(
         threads,
         view,
         device_access,
+        llm_input,
     )
-    session = session_module.DeviceSession(cast(Any, websocket), generations, factory)
+    session = session_module.DeviceSession(
+        cast(Any, websocket), generations, factory, llm_input=llm_input
+    )
     # White-box, deliberately, and the only four sites in this file that
     # are. These lines are `run`'s own, transcribed: it reads the device
     # off the handshake before anything else can happen, resolves the
@@ -248,6 +259,7 @@ def session_for(
     fallbacks: dict[str, Any] | None = None,
     devices: Any = None,
     device_access: Any = None,
+    llm_input: Any = None,
 ) -> DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one, with the named agents' LLMs replaced by
@@ -267,6 +279,7 @@ def session_for(
         fallbacks,
         devices,
         device_access,
+        llm_input,
     )
 
 
