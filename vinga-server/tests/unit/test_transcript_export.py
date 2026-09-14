@@ -264,7 +264,7 @@ async def test_settlement_waits_for_the_store_acknowledgement() -> None:
 
 @pytest.mark.asyncio
 async def test_handover_rows_wait_independently_and_compose_once() -> None:
-    exporter, telemetry = an_exporter()
+    exporter, telemetry = an_exporter(acknowledgement_timeout_s=30.0)
     first = settled()
     second = observed_pending()
     exporter.turn_recorded(

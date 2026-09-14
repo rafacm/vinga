@@ -551,10 +551,11 @@ correctly reported `unrecorded` and the test later found no attached input.
 *Resolution* (`87dd1592`): the final row now uses the existing observed
 acknowledgement and the test waits for its public `wait_entered` signal before
 asserting that nothing settled early and supplying the answer. No production
-code, sleep or acknowledgement bound changed. The exact test passed 25
-consecutive runs, the transcript unit file passed 36 tests, the four-worker
-transcript and lifecycle slice passed 56, and the complete four-worker unit
-lane passed 7,431 tests with 19 skips.
+code changed. The test's 30-second acknowledgement bound is no longer
+load-bearing because `wait_entered` supplies the ordering. The exact test
+passed 25 consecutive runs, the transcript unit file passed 36 tests, the
+four-worker transcript and lifecycle slice passed 56, and the complete
+four-worker unit lane passed 7,431 tests with 19 skips.
 
 ## M3: direct Jaeger and one processed fanout
 
