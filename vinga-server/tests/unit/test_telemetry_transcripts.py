@@ -2,7 +2,7 @@
 
 The exporter's two new methods and nothing else: the narrow retained
 context a job is admitted on, and the bounded write that puts one page
-of turns onto the trace that session was exported under. The worker that
+of turns onto the trace of the turn each one describes. The worker that
 reads the store, bounds the queue and emits the outcome events is next
 door in `test_transcript_export.py`; what is here is the half that knows
 what a span may say.
@@ -126,7 +126,8 @@ def test_a_context_captured_at_admission_survives_its_own_eviction() -> None:
     the session had no trace.
 
     Captured at admission, later eviction cannot change the answer, and
-    the spans still land in the trace that session was exported under.
+    the spans still land against the session that was exported, which is
+    where a turn nothing pinned belongs.
     """
     deliveries = Deliveries()
     telemetry, memory = exporting(transcripts=deliveries)

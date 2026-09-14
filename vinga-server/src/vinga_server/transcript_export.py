@@ -1,5 +1,5 @@
 """A closed session's turns, read back out of the store and put onto the
-trace that session was exported under (#495).
+trace of the turn each one describes (#495, #506).
 
 Its callers stop having to know that a session's record has to be waited
 for before it can be read, that a store read is paged, that a span
@@ -161,8 +161,8 @@ def build_transcript_export(
        altogether, answers None with nothing said. That is the default,
        and the default costs a server nothing: no object, no thread, no
        callback, no read.
-    3. **Telemetry.** A transcript is written onto the trace its session
-       was exported under, so the flag on with `enabled` off is refused.
+    3. **Telemetry.** A transcript is written onto a trace this server
+       exported, so the flag on with `enabled` off is refused.
        Here rather than as a model validator, and for the reason
        `models.py` records for its sibling: a validator raises while the
        file is being PARSED, which is in front of everything a
@@ -228,9 +228,9 @@ def build_transcript_export(
 
 
 # What an export with no trace to write onto is refused with. A
-# transcript is an observation on the trace its session was exported
-# under; with no exporter there is no trace, and turns written nowhere
-# would be the gap this surface exists to close wearing a success.
+# transcript is an observation on a trace this server exported; with no
+# exporter there is no trace, and turns written nowhere would be the gap
+# this surface exists to close wearing a success.
 #
 # It reads like a cross-field configuration rule and it is one, and it
 # is nonetheless here rather than on a model, for the reason the
@@ -239,8 +239,8 @@ def build_transcript_export(
 # the cross-field section.
 TRANSCRIPTS_NEED_TELEMETRY = (
     "telemetry.export_transcripts is on with telemetry.enabled off; a transcript "
-    "is written onto the trace its session was exported under, and there is no "
-    "trace to write onto, so switch telemetry.enabled on or "
+    "is written onto a trace this server exported, and there is no trace to "
+    "write onto, so switch telemetry.enabled on or "
     "telemetry.export_transcripts off"
 )
 

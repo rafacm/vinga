@@ -2571,11 +2571,11 @@ session %s: capture staged for upload was left by a previous run and has been re
 
 ### `transcripts_exported`
 
-A closed session's turns are on its trace in the telemetry backend, one
-observation each, carrying what was heard and what was replied. How many and
-how long it took, and deliberately nothing the far side minted: what a reader
-needs is that it happened and how much went, and the trace it is on is the one
-already named by the session.
+A closed session's turns are in the telemetry backend, one observation each
+under the turn it describes, carrying what was heard and what was replied. How
+many and how long it took, and deliberately nothing the far side minted: what
+a reader needs is that it happened and how much went, and the traces they are
+on are the ones this session already named.
 
 #### Variant 1: `vinga_server.transcript_export` at INFO
 
@@ -2598,13 +2598,13 @@ session %s: %d turn transcripts exported to its trace in %d ms
 
 ### `transcript_export_failed`
 
-A closed session's turns are not on its trace, and why, from a closed set of
-five reasons. The other half of the ledger: an export that silently failed
-would leave a reader with a trace, the stage timings, none of the words, and
-no way to learn that any were meant to be there. It carries no count of what
-did get through, because an export truncated part way is visible where the
-reader already is, as the highest exported turn index beside this event on the
-same trace.
+A closed session's turns are not in the telemetry backend, and why, from a
+closed set of five reasons. The other half of the ledger: an export that
+silently failed would leave a reader with a trace, the stage timings, none of
+the words, and no way to learn that any were meant to be there. It carries no
+count of what did get through, because an export truncated part way is visible
+in the session's own turns, as the highest exported turn index any of them
+carries.
 
 #### Variant 1: `vinga_server.transcript_export` at WARNING
 
