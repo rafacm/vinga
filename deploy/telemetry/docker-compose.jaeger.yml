@@ -1,0 +1,30 @@
+# Optional direct Jaeger telemetry for the root trial stack.
+#
+# Run from the repository root with:
+#
+#   docker compose -f docker-compose.yml \
+#     -f deploy/telemetry/docker-compose.jaeger.yml \
+#     --profile server up -d --wait
+#
+# Jaeger 2.20.0 is the latest published v2 release as of 2026-09-14.
+# The digest is the release tag's multi-platform OCI index.
+services:
+  jaeger:
+    profiles: [server]
+    image: jaegertracing/jaeger:2.20.0@sha256:46a886260e04002d8f45e213fc39063fa11a50446048fdaa64786fc0840cb9f8
+    ports:
+      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:16686:16686"
+
+  vinga:
+    depends_on:
+      jaeger:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_TRACES_SAMPLER: always_on
+      VINGA_SERVER__TELEMETRY__ENABLED: "true"
+      VINGA_SERVER__TELEMETRY__REACH: network

@@ -1,0 +1,50 @@
+# Optional processed fanout for the root trial stack.
+#
+# Copy deploy/telemetry/.env.example to deploy/telemetry/.env, fill its
+# Langfuse values, then run this file with docker-compose.yml from the
+# repository root. That explicit env file is attached only to the
+# Collector. In particular, never copy its LANGFUSE_* names to the root
+# .env, because the root file is mounted into vinga.
+services:
+  jaeger:
+    profiles: [server]
+    image: jaegertracing/jaeger:2.20.0@sha256:46a886260e04002d8f45e213fc39063fa11a50446048fdaa64786fc0840cb9f8
+    ports:
+      - "127.0.0.1:16686:16686"
+
+  otel-collector:
+    profiles: [server]
+    image: otel/opentelemetry-collector-contrib:0.160.0@sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./deploy/telemetry/collector.yml:/etc/otelcol-contrib/config.yaml:ro
+    env_file:
+      - path: ./deploy/telemetry/.env
+        required: true
+    environment:
+      JAEGER_OTLP_ENDPOINT: http://jaeger:4318
+      # One hundred keeps the worked walkthrough complete. Sampling is
+      # per trace id, so a lower value samples turns, not sessions.
+      TELEMETRY_SAMPLE_PERCENTAGE: "100"
+    depends_on:
+      jaeger:
+        condition: service_started
+    ports:
+      # A source-tree server can use http://127.0.0.1:14318 while the
+      # containerized trial reaches the same receiver by service name.
+      - "127.0.0.1:14318:4318"
+
+  vinga:
+    depends_on:
+      otel-collector:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      # The Collector owns the only population decision before split.
+      OTEL_TRACES_SAMPLER: always_on
+      VINGA_SERVER__TELEMETRY__ENABLED: "true"
+      # Reach names the farthest destination, not the first hop.
+      VINGA_SERVER__TELEMETRY__REACH: internet
