@@ -830,7 +830,8 @@ class TelemetryConfig(BaseModel):
     per content class, and each means the same thing in its own class:
     if this content exists locally, it leaves. `export_audio` sends a
     recording of a room, `export_transcripts` sends what was said, and
-    `export_llm_input` sends the request the model was given. Each is
+    `export_llm_input` sends the request the model was given and the raw
+    output it generated, including text withheld from speech. Each is
     its own decision, each defaults off, and none is implied by anything
     above it or beside it.
 
@@ -970,11 +971,10 @@ class TelemetryConfig(BaseModel):
     export_transcripts: bool = Field(
         default=False,
         description=(
-            "Whether a closed session's turns are exported to the telemetry "
-            "backend, one observation per turn carrying what was heard and what "
-            "was replied, written under the turn it describes and inside that "
-            "turn's own trace; a turn the exporter can no longer address keeps "
-            "the session's trace instead. Off by default, and it is its own decision: **telemetry "
+            "Whether acknowledged conversation records enrich each reply's "
+            "original `turn` span with what was heard, what was replied, and "
+            "per-agent attribution when a handover split the reply. Off by "
+            "default, and it is its own decision: **telemetry "
             "being on and conversation text being stored do not imply that the "
             "text leaves.** What goes is conversation-level text only, the user's "
             "transcript and the reply, with per-agent attribution where a handover "
@@ -996,22 +996,25 @@ class TelemetryConfig(BaseModel):
             "and the server says so once at startup. Capture is irrelevant to it "
             "either way. Under a `data_boundary` narrower than this section's "
             "`reach` it is refused. "
-            "It needs no extra and no second credential: the turns travel as OTLP "
-            "spans over the same `OTEL_EXPORTER_OTLP_*` transport the traces "
-            "already use. The export runs on a worker of its own after the "
-            "session closed, never on the audio path, and every failure is a "
-            "warning event (`transcript_export_failed`) rather than a failed "
-            "session."
+            "It needs no extra and no second credential: enriched turn roots "
+            "travel through the ordinary bounded OTLP processor. A finished turn "
+            "root waits for every live conversation-store acknowledgement for "
+            "that utterance, then ends at its original reply-finished timestamp. "
+            "A missing, failed, timed-out, over-limit, or shutdown settlement "
+            "ends the root metadata-only and reports `transcript_export_failed`; "
+            "the conversation and reply path never wait for telemetry. "
+            "`transcripts_exported` means content was attached and enqueued for "
+            "ordinary OTLP processing, not that a backend acknowledged it."
         ),
     )
 
     export_llm_input: bool = Field(
         default=False,
         description=(
-            "Whether the request this server assembled for each of a closed "
-            "session's LLM rounds is exported to the telemetry backend, one "
-            "observation each on the trace that session was exported under, "
-            "carrying the request rendered as the observation's input. Off by "
+            "Whether each actual `llm` span carries the request this server "
+            "assembled and the raw semantic output the model generated. Output "
+            "is captured before speech filtering, so it includes tool calls and "
+            "text withheld from the user. Off by "
             "default, and it is its own decision: **neither `enabled` nor either "
             "export beside it implies that the model's input leaves.** "
             "**This is the widest of the three content classes, and it contains "
@@ -1019,7 +1022,8 @@ class TelemetryConfig(BaseModel):
             "dialogue as the model saw it, so switching this on sends the "
             "conversation text off this host whether or not `export_transcripts` "
             "is on; the two switches stay independent and neither turns the other "
-            "on. What goes is the request as vinga assembled it: the system "
+            "on. What goes is the request as vinga assembled it and the raw "
+            "output the model generated before any speech was withheld: the system "
             "prompt with its memory and know-how blocks, the message history as "
             "the model was given it, the tool schemas offered, the tool arguments "
             "the model asked for and the results it was handed back, and the tool "
@@ -1029,28 +1033,25 @@ class TelemetryConfig(BaseModel):
             "translation short of the bytes on the wire and is the one place a "
             "request exists once rather than once per vendor. "
             "**There is no local store behind it**, which makes its retention "
-            "answer the strictest here and its loss the quietest: a session "
-            "assembles a request because it is about to make it, so what is "
-            "exported exists for the session, then in a bounded delivery job "
-            "until it is delivered or dropped, and nowhere after that. A process "
-            "that dies with exports queued loses them with no ledger to recover "
-            "from, unlike a recording's files and a conversation's rows. What "
+            "answer the strictest here and its loss the quietest: content exists "
+            "only while its invocation runs and while the ordinary OTLP batch "
+            "processor holds the finished span. A process that dies with spans "
+            "queued loses them with no ledger to recover from, unlike a "
+            "recording's files and a conversation's rows. What "
             "that costs is bounded: a lost export is a missing observation and "
             "never a lost conversation, since what was said is in the store when "
             "`server.conversations` is recording it. "
-            "**What one session may stage is bounded in bytes**, per request and "
-            "for the session as a whole, because a request carries the history, "
+            "**What one operation may attach is bounded to 256 KiB**, with a "
+            "bounded pending-invocation budget for the session, because a request "
+            "carries the history, "
             "the tool schemas, the arguments and the results and nothing here "
             "chose their size. A request over the per-request ceiling is dropped "
             "whole rather than truncated, since a shortened request is not the "
             "request the model was given; over the session's budget, whole "
-            "requests go oldest first. Both absences are counted and both reasons "
-            "are reported on the export's own event (`llm_input_exported`), so a "
-            "partial export says so. That event carries a third count beside "
-            "them, `unrenderable`, which is a round this server could not render "
-            "at all: it is separate from the two because it reports a defect here "
-            "rather than a bound anybody reached, and a nonzero one is worth a bug "
-            "report rather than a larger budget. "
+            "requests go oldest first. An omitted pair is reported by "
+            "`llm_input_export_failed`. `llm_input_exported` means one complete "
+            "pair was attached to its generation span and enqueued for ordinary "
+            "OTLP processing, not that a backend acknowledged it. "
             "It needs `enabled` above, since an observation is written onto a "
             "trace this server exported, and it is refused at boot without it. "
             "Under a `data_boundary` narrower than this section's `reach` it is "
@@ -1063,12 +1064,12 @@ class TelemetryConfig(BaseModel):
             "that already left, and retention is then the backend's policy, "
             "configured there, with a backend that has none retaining "
             "indefinitely. "
-            "It needs no extra and no second credential: the requests travel as "
-            "OTLP spans over the same `OTEL_EXPORTER_OTLP_*` transport the traces "
-            "already use. The export runs on a worker of its own after the "
-            "session closed, never on the audio path, and every failure is a "
-            "warning event (`llm_input_export_failed`) rather than a failed "
-            "session."
+            "It needs no extra and no second credential: the content travels on "
+            "the actual generation span through the same bounded "
+            "`OTEL_EXPORTER_OTLP_*` transport the traces already use. Rendering "
+            "and attachment are synchronous at the round boundary; backend "
+            "delivery remains the ordinary batch processor's responsibility, and "
+            "every content omission is a warning rather than a failed session."
         ),
     )
 
