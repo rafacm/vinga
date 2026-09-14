@@ -423,6 +423,9 @@ the existing Langfuse REST and object-storage destinations in that assertion.
   The `export_transcripts` field says that a turn root is released after that
   turn's rows are acknowledged, so an ungraceful process death can lose roots
   still waiting on storage while already-acknowledged earlier turns have left.
+  It also replaces the old one-observation-per-row and session-parent fallback
+  mechanism. The enclosing `TelemetryConfig` disclosure-ladder docstring moves
+  with both field descriptions.
 - `runtime/pipeline.py`, `runtime/turns.py` and the event catalog/assembly/value
   modules expose the safe round output and failure type at the decision sites.
 - `device/session.py`, `composition.py` and `app.py` retain the shutdown and
@@ -593,10 +596,12 @@ fixtures are extended rather than replaced.
   content exporters and pipeline content seams; no new module. Documentation
   footprint: widen the flag's source description in `config/models.py` to name
   generated and withheld model output, update the server exporter contract and
-  LLM-input row of the observability map, and regenerate both configuration
-  references plus examples whose current post-close observation descriptions
-  become false. The changelog announces the existing flag's wider disclosure
-  under `### Changed`.
+  LLM-input row of the observability map; replace the `export_transcripts`
+  field description, `TelemetryConfig` docstring and exported-transcripts
+  observability section that describe per-row child spans and a session-parent
+  fallback; and regenerate both configuration references plus examples whose
+  current post-close observation descriptions become false. The changelog
+  announces the existing flag's wider disclosure under `### Changed`.
 - [ ] **M3, direct Jaeger and one processed fanout.** Add the pinned direct
   Jaeger and Collector examples, common masking and sampling, boundary-only
   Langfuse adaptation, Basic Auth and v4 ingestion header, static validation,
@@ -840,6 +845,11 @@ read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 9m08s.
    module-resolution note while retaining the no-extra regression gates.
 9. **P2: M2 misses the transcript field prose, `TelemetryConfig` docstring and
    exported-transcripts observability section that its mechanism falsifies.**
+
+   *Resolution:* M2's footprint now names all three maintained sources and the
+   generated references they feed. The transcript field and class docstring
+   lose the child-span and fallback claims, and the observability section is
+   rewritten around acknowledged per-turn root enrichment.
 10. **P2: the changelog omits removed transcript attributes, per-agent leg
     attribution and the removed session-parent fallback.** The plan must keep
     or explicitly remove each capability.
