@@ -20,6 +20,10 @@ models/
 # the secrets and nothing else needs to know about them.
 .env
 .env.local
+# The optional telemetry fanout has credentials of its own. The root
+# `.env` is mounted into vinga, while this one is mounted only into the
+# Collector by deploy/telemetry/docker-compose.fanout.yml.
+deploy/telemetry/.env
 
 # Correspondence with the infrastructure side, which is a private
 # repository. These carry hostnames, device identifiers and deployment

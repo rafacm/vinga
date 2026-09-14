@@ -1,0 +1,79 @@
+# One policy pipeline, then two backend adapters. The forward connectors
+# are the split: masking, sampling and batching happen once before them.
+extensions:
+  basicauth/langfuse:
+    client_auth:
+      username: ${env:LANGFUSE_PUBLIC_KEY}
+      password: ${env:LANGFUSE_SECRET_KEY}
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  transform/content-mask:
+    error_mode: propagate
+    trace_statements:
+      - context: span
+        statements:
+          # The explicit list is the reviewable content boundary. It
+          # includes every canonical content field and every alias vinga
+          # derives for direct Langfuse compatibility.
+          - replace_pattern(attributes["vinga.turn.input"], "(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", "[email]") where attributes["vinga.turn.input"] != nil
+          - replace_pattern(attributes["vinga.turn.output"], "(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", "[email]") where attributes["vinga.turn.output"] != nil
+          - replace_pattern(attributes["vinga.turn.legs"], "(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", "[email]") where attributes["vinga.turn.legs"] != nil
+          - replace_pattern(attributes["gen_ai.system_instructions"], "(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", "[email]") where attributes["gen_ai.system_instructions"] != nil
+          - replace_pattern(attributes["gen_ai.input.messages"], "(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", "[email]") where attributes["gen_ai.input.messages"] != nil
+          - replace_pattern(attributes["gen_ai.output.messages"], "(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", "[email]") where attributes["gen_ai.output.messages"] != nil
+          - replace_pattern(attributes["vinga.llm.tools"], "(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", "[email]") where attributes["vinga.llm.tools"] != nil
+          - replace_pattern(attributes["vinga.llm.tool_choice"], "(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", "[email]") where attributes["vinga.llm.tool_choice"] != nil
+          - replace_pattern(attributes["langfuse.observation.input"], "(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", "[email]") where attributes["langfuse.observation.input"] != nil
+          - replace_pattern(attributes["langfuse.observation.output"], "(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", "[email]") where attributes["langfuse.observation.output"] != nil
+          - replace_pattern(attributes["langfuse.observation.metadata.legs"], "(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", "[email]") where attributes["langfuse.observation.metadata.legs"] != nil
+  probabilistic_sampler:
+    sampling_percentage: ${env:TELEMETRY_SAMPLE_PERCENTAGE}
+    mode: proportional
+  batch:
+  filter/jaeger:
+    error_mode: propagate
+    traces:
+      span:
+        - name == "capture"
+  transform/jaeger:
+    error_mode: propagate
+    trace_statements:
+      - context: span
+        statements:
+          - delete_matching_keys(attributes, "^langfuse\\.")
+
+connectors:
+  forward/jaeger:
+  forward/langfuse:
+
+exporters:
+  otlphttp/jaeger:
+    endpoint: ${env:JAEGER_OTLP_ENDPOINT}
+  otlphttp/langfuse:
+    endpoint: ${env:LANGFUSE_OTLP_ENDPOINT}
+    auth:
+      authenticator: basicauth/langfuse
+    headers:
+      x-langfuse-ingestion-version: "4"
+
+service:
+  extensions: [basicauth/langfuse]
+  pipelines:
+    traces/common:
+      receivers: [otlp]
+      processors: [transform/content-mask, probabilistic_sampler, batch]
+      exporters: [forward/jaeger, forward/langfuse]
+    traces/jaeger:
+      receivers: [forward/jaeger]
+      processors: [filter/jaeger, transform/jaeger]
+      exporters: [otlphttp/jaeger]
+    traces/langfuse:
+      receivers: [forward/langfuse]
+      processors: []
+      exporters: [otlphttp/langfuse]
