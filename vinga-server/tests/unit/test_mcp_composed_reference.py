@@ -185,7 +185,7 @@ async def fingerprint(config: Config, name: str = "authorization") -> str:
 
 
 async def test_a_composed_header_reaches_the_server_with_the_secret_in_it(
-    monkeypatch: pytest.MonkeyPatch,
+    tap: Tap, watched: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The header the vendor asks for, sent as one value.
 
@@ -193,10 +193,21 @@ async def test_a_composed_header_reaches_the_server_with_the_secret_in_it(
     because the model would look right whatever the resolver did with
     it. The word `Bearer` is in the configuration, where an operator can
     read it, instead of inside the secret.
+
+    This is the connecting path of the no-leak claim: a credential is
+    materialized, sent and answered, and the tap and the log are read
+    afterwards. An absence here is an absence from a run that did the
+    whole thing rather than from one that refused early.
     """
     monkeypatch.setenv(SECRET_ENV, SENTINEL)
     async with serving(recording_server()) as url:
         assert await fingerprint(config_with(http_entry(url, COMPOSED))) == digest(EXPECTED)
+
+    # The connect line is there, so the absences below are absences from
+    # a log something was written to.
+    assert [record for record in watched.records if record.name.startswith("vinga_server")]
+    for surface in (every_format(watched), tap.rendered()):
+        assert SENTINEL not in surface
 
 
 async def test_a_value_with_no_reference_reaches_the_server_byte_for_byte(
@@ -378,6 +389,10 @@ async def test_a_composed_header_survives_an_export_into_an_empty_database(
         # The document carries the reference as written: a reference is a
         # body value, and this one is composed.
         assert f"Authorization: {COMPOSED}" in exported
+        # And carries no credential: what travels is the name of the
+        # variable, which is the whole reason a reference is a body
+        # value rather than a command in the footer.
+        assert SENTINEL not in exported
 
         sent = await fingerprint(load_boot_config().config)
 
