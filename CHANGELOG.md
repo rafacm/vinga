@@ -75,6 +75,8 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 - **What one session may stage is bounded in bytes**, per request and for the session as a whole, because a request carries the history, the tool schemas, the arguments and the results and nothing here chose their size. A request over the per-request ceiling is dropped whole rather than truncated, since a shortened request is not the request the model was given; over the session's budget, whole requests go oldest first. Both absences are counted and both reasons are reported on `llm_input_exported`, so a partial export says so rather than reading as a short conversation.
 - It needs `server.telemetry.enabled`, is refused at boot without it and under a `server.data_boundary` narrower than this section's `reach`, and answers to no second switch: unlike the two exports beside it there is no local surface that could be off, so `server.conversations` and `server.capture` are irrelevant to it. It needs no extra and no second credential, rides the same `OTEL_EXPORTER_OTLP_*` transport the traces already use, runs on a worker of its own after a session closed, never on the audio path, and reports every failure as a warning event (`llm_input_export_failed`) rather than as a failed session.
 
+- Trace successful and failed recap model calls as `llm` operations without changing reply-round accounting.
+
 ### Changed
 
 - **An MCP server's `env` or `headers` value may now reference an
@@ -137,6 +139,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   the old spelling for either needs the new one. `StorageError` still
   appears on both, for a database that cannot be reached, and nothing
   else in this server records the class of these failures.
+
+- Give every logical generation a server-owned correlation id, preserve retained OpenTelemetry sampling state, and represent failed ASR, LLM, TTS and tool work as real error spans with safe `error.type` metadata.
+
+### Removed
+
+- Remove duplicate `provider_failed` and failed `tool_call` span events from turn spans; use the failed `asr`, `llm`, `tts_stream` and `tool` spans instead.
 
 ### Fixed
 
