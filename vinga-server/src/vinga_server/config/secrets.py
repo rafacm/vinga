@@ -555,7 +555,8 @@ def resolve_mcp_values(
     request should see it, and the secrets that went into it.
 
     Literal values pass through and a `$VAR` is read from the server's
-    own environment, exactly as before. A slot with a stored secret
+    own environment, whether it is the whole value or sits inside a
+    larger one. A slot with a stored secret
     takes precedence over the reference written for the same key,
     because a secret write is the later and more deliberate act, and a slot
     with no key in the entity at all is added: a fragment cannot carry
