@@ -580,13 +580,14 @@ def resolve_mcp_values(
     references = {key: value for key, value in values.items() if key not in stored}
     written_at = entity_location(descriptor("mcp-server"), server)
     resolved = resolve_env_values(f"{written_at}.{group}", references)
-    resolved.values.update(stored)
     # A stored secret replaces the whole slot, so it is its own atom,
     # and it joins the ones the resolver substituted inside composed
     # values. What the set is for is a consumer that has to take this
     # deployment's credentials back out of a far side's text, and there
     # a credential is a credential whichever door it came through.
-    return ResolvedValues(resolved.values, resolved.secrets | frozenset(stored.values()))
+    return ResolvedValues(
+        {**resolved.values, **stored}, resolved.secrets | frozenset(stored.values())
+    )
 
 
 __all__ = [
