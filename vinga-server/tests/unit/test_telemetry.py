@@ -922,14 +922,20 @@ def test_a_failed_upload_says_why_on_the_trace() -> None:
     assert "reason" not in held
 
 
-def test_a_content_attachment_outcome_does_not_make_a_transport_span() -> None:
+def test_a_content_attachment_outcome_remains_on_the_session_trace() -> None:
     telemetry, memory = exporting()
     a_session(telemetry, SESSION)
 
     with watching_the_server(telemetry):
         transcripts_exported(transcript_emitter())
 
-    assert [span.name for span in finished(telemetry, memory)] == ["session"]
+    held = dict(
+        named(finished(telemetry, memory), "transcripts_exported").attributes or {}
+    )
+    assert held["vinga.export.turns"] == 7
+    assert held["vinga.export.elapsed_ms"] == 96
+    assert held["vinga.session.id"] == SESSION
+    assert [key for key in held if not key.count(".")] == []
 
 
 def test_an_outcome_for_a_session_this_exporter_never_saw_writes_nothing() -> None:
