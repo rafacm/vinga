@@ -655,7 +655,22 @@ async def test_the_request_carries_the_four_arguments_the_provider_was_given() -
     assert request["tools"][0]["name"] == "remember"
     assert request["tools"][0]["input_schema"]["type"] == "object"
     assert request["tool_choice"] == "auto"
-    assert request["purpose"] == "reply"
+
+
+@pytest.mark.asyncio
+async def test_the_request_carries_nothing_the_model_was_not_handed() -> None:
+    """Four keys and not five. Which call shape assembled a round is
+    vinga's own label, so it rides the span as an attribute and stays
+    out of the request: a class whose value is that it is exactly what
+    was sent must not quietly grow a field the model never saw."""
+    exporter, telemetry = an_exporter()
+    stage(exporter, recap=True)
+
+    request = await rendered(exporter, telemetry)
+
+    assert sorted(request) == ["messages", "system", "tool_choice", "tools"]
+    (one,) = telemetry.rounds
+    assert one.purpose == "recap", "the label is gone rather than moved"
 
 
 @pytest.mark.asyncio

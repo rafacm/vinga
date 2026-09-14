@@ -1047,6 +1047,13 @@ which mutation each new case is held against.
   than it may, and the two reasons stay the two the plan named: one
   request was too large to carry, or the conversation outgrew what may
   be held for it.
+- **The rendered request carries four keys and not five.** The purpose
+  is vinga's own label for which call shape assembled a round rather
+  than something the model was handed, so it rides the span as an
+  attribute and stays out of the request. The class's enumeration in
+  the ADR is exactly the four provider arguments, and a class whose
+  value is that it is what was sent must not quietly grow a field the
+  model never saw.
 - **A rendering that fails is a third absence, and it is not counted.**
   `_stage` contains every exception, because it runs inside a reply.
   The two counts are the bound's own vocabulary and mean something
