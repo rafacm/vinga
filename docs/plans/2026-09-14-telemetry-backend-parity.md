@@ -321,7 +321,13 @@ backend accepted an exact page. Their generated schema and documentation say
 which turn or generation content was attached to the canonical span or omitted
 before queueing, while ordinary telemetry exporter health owns downstream
 delivery. The old `undelivered` content reason and private `Delivery` API are
-removed, and that reporting change is a `### Changed` migration item.
+removed, and that reporting change is a `### Changed` migration item. The
+existing event names remain for compatibility, but their definitions become
+exact: `transcripts_exported` and `llm_input_exported` mean authorized content
+was attached and enqueued through the normal exporter, not that a backend
+acknowledged it; `transcript_export_failed` and `llm_input_export_failed` mean
+content was omitted before enqueueing for one of their remaining closed
+reasons.
 
 The shared processor's `max_export_batch_size` moves from 512 to
 `CONTENT_SAFE_BATCH_SIZE = 8`. Together with the 256 KiB per-operation content
