@@ -101,7 +101,7 @@ def test_blocking_release_ends_a_held_root_metadata_only() -> None:
     assert TURN_OUTPUT not in turn.attributes
 
 
-def test_worker_and_shutdown_contenders_end_once() -> None:
+def test_worker_and_metadata_release_contenders_end_once() -> None:
     session = SESSION
     for index in range(100):
         utterance = f"{index:032x}"
@@ -139,6 +139,36 @@ def test_worker_and_shutdown_contenders_end_once() -> None:
         assert answers.count(TurnSettlement.MISSING) == 1
         assert len([span for span in finished(telemetry, memory) if span.name == "turn"]) == 1
         telemetry.release()
+
+
+def test_worker_and_provider_release_contenders_end_once() -> None:
+    for index in range(100):
+        utterance = f"{index:032x}"
+        telemetry, memory = _held(utterance)
+        barrier = threading.Barrier(3)
+        answer: list[TurnSettlement] = []
+
+        def settle() -> None:
+            barrier.wait()
+            answer.append(
+                telemetry.settle_turn(SESSION, utterance, {"input": "heard"})
+            )
+
+        def release_provider() -> None:
+            barrier.wait()
+            telemetry.release()
+
+        worker = threading.Thread(target=settle)
+        shutdown = threading.Thread(target=release_provider)
+        worker.start()
+        shutdown.start()
+        barrier.wait()
+        worker.join()
+        shutdown.join()
+
+        assert answer[0] in {TurnSettlement.SETTLED, TurnSettlement.MISSING}
+        turns = [span for span in memory.get_finished_spans() if span.name == "turn"]
+        assert len(turns) == 1
 
 
 def test_the_4097th_policy_evicts_the_oldest_finished_root(

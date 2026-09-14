@@ -1925,6 +1925,8 @@ class Telemetry:
         self._held_turns: dict[tuple[str, str], _HeldTurn] = {}
         self._omitted_turns: dict[tuple[str, str], None] = {}
         self._held_turns_lock = threading.Lock()
+        self._held_turns_done = threading.Condition(self._held_turns_lock)
+        self._settling_turns = 0
         self._transcript_registered = False
         self._transcript_omitted: Callable[[str, str], None] | None = None
         # How many of them, which is the configured session capacity
@@ -2144,11 +2146,16 @@ class Telemetry:
             held = self._held_turns.pop(key, None)
             was_omitted = key in self._omitted_turns
             self._omitted_turns.pop(key, None)
+            if held is not None:
+                self._settling_turns += 1
         if held is None:
             return TurnSettlement.OMITTED if was_omitted else TurnSettlement.MISSING
-        if attributes:
-            held.span.set_attributes(_turn_content_attributes(attributes))
-        held.span.end(end_time=held.end_time)
+        try:
+            if attributes:
+                held.span.set_attributes(_turn_content_attributes(attributes))
+            held.span.end(end_time=held.end_time)
+        finally:
+            self._turn_settled()
         return TurnSettlement.SETTLED
 
     def release_turn(self, session: str, utterance: str) -> TurnSettlement:
@@ -2170,6 +2177,16 @@ class Telemetry:
             held, self._held_turns = list(self._held_turns.values()), {}
         for turn in held:
             turn.span.end(end_time=turn.end_time)
+        with self._held_turns_done:
+            while self._settling_turns:
+                self._held_turns_done.wait()
+
+    def _turn_settled(self) -> None:
+        """Let provider shutdown proceed after an owned root has ended."""
+        with self._held_turns_done:
+            self._settling_turns -= 1
+            if not self._settling_turns:
+                self._held_turns_done.notify_all()
 
     def _continuing(self, pinned: _Pinned) -> Any:
         """The context a span written after a session closed belongs in.
@@ -2728,12 +2745,16 @@ class Telemetry:
                 evicted_key = next(iter(self._held_turns))
                 evicted = self._held_turns.pop(evicted_key)
                 self._omitted_turns[evicted_key] = None
+                self._settling_turns += 1
                 while len(self._omitted_turns) > DEFERRED_TURNS:
                     self._omitted_turns.pop(next(iter(self._omitted_turns)))
         if evicted is not None:
-            evicted.span.end(end_time=evicted.end_time)
-            if self._transcript_omitted is not None and evicted_key is not None:
-                self._transcript_omitted(*evicted_key)
+            try:
+                evicted.span.end(end_time=evicted.end_time)
+                if self._transcript_omitted is not None and evicted_key is not None:
+                    self._transcript_omitted(*evicted_key)
+            finally:
+                self._turn_settled()
 
     # --- the stage spans ----------------------------------------------
     #
