@@ -40,6 +40,8 @@ is the project README's [Getting Started](../README.md#getting-started).
   costs to do without one.
 - [Choosing a tag](#choosing-a-tag): which tags are immutable and which
   ones move.
+- [Telemetry backends](#telemetry-backends): direct Jaeger and one
+  mask-and-sample fanout to Jaeger and Langfuse.
 - [Verifying a deployment](#verifying-a-deployment): the probes, the
   doctor, and a board.
 - [Keeping this page honest](#keeping-this-page-honest): what fails when
@@ -523,6 +525,102 @@ reschedules, is a deployment that upgrades itself at the worst possible
 moment. The compose file refuses to start without a tag for exactly
 this reason; the Deployment ships with `latest` as a placeholder that
 is the one value in it that should not stay as committed.
+
+## Telemetry backends
+
+The optional files under
+[`deploy/telemetry/`](../deploy/telemetry/README.md) compose with the root trial
+stack. They are add-ons, not a change to the production Docker or Kubernetes
+topology. Both examples keep vinga's canonical OTLP model and set its sampler
+to `always_on` explicitly.
+
+### Direct Jaeger
+
+The direct path runs the pinned Jaeger v2 image, sends OTLP/HTTP protobuf to
+port 4318 and exposes its UI only on loopback at
+<http://127.0.0.1:16686>:
+
+```bash
+docker compose \
+  -f docker-compose.yml \
+  -f deploy/telemetry/docker-compose.jaeger.yml \
+  --profile server up -d --wait
+```
+
+Hold one conversation, then search the `vinga-server` service in Jaeger. The
+session is the root of its own trace. The turn is a separate root trace linked
+to that session and grouped by `session.id`; `asr`, `llm`, `tool` when used,
+`tts_stream` and playback sit under the turn. Stop the add-on with the same
+file pair and `down -v`.
+
+Audio export is not a Jaeger feature. With `export_audio` on, the upload still
+uses the Langfuse REST API and the object-storage URL it supplies. No recording
+bytes travel over OTLP, and the Collector path below removes the Langfuse-only
+`capture` reference span from Jaeger.
+
+### One processed fanout
+
+Create the Collector-only credential file without putting any `LANGFUSE_*`
+name in the repository root `.env`, which is mounted into vinga:
+
+```bash
+umask 077
+cp deploy/telemetry/.env.example deploy/telemetry/.env
+${EDITOR:?set EDITOR} deploy/telemetry/.env
+```
+
+Then start the root stack with the fanout overlay:
+
+```bash
+docker compose \
+  -f docker-compose.yml \
+  -f deploy/telemetry/docker-compose.fanout.yml \
+  --profile server up -d --wait
+```
+
+The Collector receives OTLP on loopback port 14318 as well as on its Compose
+network. Its one common traces pipeline masks the canonical content fields and
+their direct-Langfuse aliases, samples by trace ID, and batches before two
+named forward connectors. The Jaeger sink removes all `langfuse.*` attributes
+and the entire `capture` span. The Langfuse sink preserves the masked aliases,
+uses Basic Auth from its private env file and sends the literal
+`x-langfuse-ingestion-version: 4` header. Credentials never enter vinga's
+configuration or environment.
+
+The default sample percentage is 100, which makes a live comparison complete.
+To choose a partial population for a capacity test, set the value only on the
+Compose invocation:
+
+```bash
+TELEMETRY_SAMPLE_PERCENTAGE=25 docker compose \
+  -f docker-compose.yml \
+  -f deploy/telemetry/docker-compose.fanout.yml \
+  --profile server up -d --wait
+```
+
+Sampling is per trace ID. A session and every turn have different trace IDs,
+so 25 percent samples turns, not conversations: a retained turn may link to a
+dropped session trace, or the retained session may have missing turns.
+`session.id` groups what survived but cannot restore what sampling dropped.
+
+Masking is a defensive control inside the deployment's trust boundary. It is
+not permission to turn a content flag on: `export_transcripts` and
+`export_llm_input` remain off by default and remain the decision that content
+may leave. The sample email rule replaces email-shaped text with `[email]` in
+every canonical and aliased content field before either connector.
+
+To compare the destinations, search each backend for the same time window and
+`service.name=vinga-server`, export the trace IDs, and compare the sets. At 100
+percent the complete conversation topology should be present in both. At a
+partial percentage the attempted trace-ID populations must still match. This
+is not transactional delivery: the two exporters and backends fail
+independently, so an outage after the split can make their stored sets differ.
+Collector health and exporter failures decide whether such a difference is a
+delivery incident rather than a policy difference.
+
+The direct Langfuse path remains supported independently of the Collector.
+Its exact v4 endpoint, URL-encoded Basic Authorization value and ingestion
+header are in [Exporting traces](../vinga-server/README.md#exporting-traces).
 
 ## Verifying a deployment
 

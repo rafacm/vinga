@@ -2808,7 +2808,39 @@ projection is limited to 256 KiB, keeping a maximal request below 3 MiB.
 not backend acknowledgement; ordinary exporter health owns downstream
 delivery. Standard `OTEL_EXPORTER_OTLP_*` variables own the
 destination, protocol and credentials; none becomes span content. This
-milestone changes no deployment recipe.
+repository supports three current trace paths:
+
+- direct Jaeger v2 over OTLP/HTTP protobuf;
+- direct Langfuse v4 over OTLP/HTTP with Basic Auth and its ingestion-version
+  header;
+- one Collector Contrib pipeline that masks, samples and batches before it
+  forwards the same attempted population to Jaeger and Langfuse.
+
+The runnable Jaeger and fanout Compose add-ons are under
+[`deploy/telemetry/`](../deploy/telemetry/README.md), with their worked
+procedure in [the deployment guide](../docs/deployment.md#telemetry-backends).
+The fanout source sampler is explicitly `always_on`; its Collector owns the
+one trace-id sampling decision before split. Since a session and each turn
+have independent trace IDs, partial sampling keeps or drops turns rather than
+whole conversations. The walkthrough defaults to 100 percent so its topology
+is complete.
+
+For direct Langfuse, supply the v4 OTLP endpoint and both required headers to
+the SDK-owned transport. The Authorization value is the word `Basic`, one
+URL-encoded space, then base64 of `public-key:secret-key`:
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.langfuse.com/api/public/otel
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic%20<base64-public-key-colon-secret-key>,x-langfuse-ingestion-version=4"
+```
+
+Fanout applies one policy decision and gives both exporters the same records.
+It is not a transaction across two backends. A backend outage can still make
+their stored populations differ, so compare trace IDs when diagnosing parity.
+The Langfuse-only `capture` reference span is removed on the Jaeger branch.
+Recording WAV and manifest bytes never enter OTLP: they remain on the separate
+Langfuse REST and object-storage upload path governed by `export_audio`.
 
 ## Capturing a session
 

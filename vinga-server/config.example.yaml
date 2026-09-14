@@ -377,6 +377,9 @@ server:
   # anything else is refused at startup rather than half-honored. The
   # service name is fixed to `vinga-server` and the build revision rides
   # along as its version; neither is taken from the environment.
+  # Runnable direct Jaeger and processed Jaeger plus Langfuse examples
+  # live under ../deploy/telemetry/. They keep backend topology and
+  # credentials outside this server configuration.
   #
   # Turning it on needs the OpenTelemetry packages, which both published
   # images carry and a checkout gets from `uv sync`. A server told to

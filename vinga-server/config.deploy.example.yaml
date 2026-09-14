@@ -159,7 +159,9 @@ server:
   # credentials and timeouts are that variable's relatives rather than
   # keys here. What a span carries is metadata (timings, closed reasons,
   # token counts), never what was said. The reasoning behind the switch
-  # is in config.example.yaml.
+  # is in config.example.yaml. Runnable direct Jaeger and processed
+  # Jaeger plus Langfuse examples live under ../deploy/telemetry/; that
+  # directory owns backend topology and Collector-only credentials.
   # telemetry:
   #   enabled: true
   #   # Where this section's destinations are, asserted by you, covering
