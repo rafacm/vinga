@@ -439,6 +439,17 @@ LEG_FIELDS = ("agent", "text")
 # value.
 DEVICE_NAME = "vinga.device.name"
 
+# The name a turn is addressed by after it is over, and the one fact the
+# turn span, the retention and a stored row all agree on.
+#
+# A constant rather than a spelling in the turn's table, because two
+# readers write it now: the live turn span folds it through that table,
+# and a transcript exported long afterwards carries it so a reader
+# holding the row and a reader holding the observation name one turn
+# (#506). Two spellings of one identifier is the drift `trace_of` exists
+# to avoid one level up.
+UTTERANCE_ID = "vinga.utterance.id"
+
 SESSION_ATTRIBUTES = {
     SESSION_FIELD: SESSION_ID_NAMES,
     DEVICE_FIELD: "vinga.device.id",
@@ -464,7 +475,7 @@ TURN_ATTRIBUTES = {
     # in this process's memory is one a reader of the trace cannot use:
     # a backend holding a stored row and this trace can find one from
     # the other only if both of them say it.
-    "utterance": "vinga.utterance.id",
+    "utterance": UTTERANCE_ID,
     "speech_ms": "vinga.turn.speech_ms",
     "barge_in": "vinga.turn.barge_in",
 }
@@ -2120,12 +2131,20 @@ class Telemetry:
     def export_transcript(
         self, session: str, context: Any, turns: "Sequence[TranscriptTurn]"
     ) -> Delivery:
-        """One page of a closed session's turns, as spans in the trace
-        that session was exported under, delivered and answered for
-        (#495).
+        """One page of a closed session's turns, as spans under the
+        turns they describe, delivered and answered for (#495, #506).
 
-        One span per turn, named `transcript`, a child of the session
-        span by the passed context. It carries the session under both
+        One span per turn, named `transcript`, a child of that turn's
+        own `turn` span and inside that turn's trace wherever the turn
+        can be addressed: the passed context is a session's pin, the
+        turn's utterance names one of the turns pinned under it, and
+        that pin is what the span continues. Where the turn cannot be
+        addressed (a row carrying no utterance, an utterance this
+        exporter never opened a turn for, a turn evicted past the
+        retention) it stays a child of the session span, which is where
+        every transcript used to go: a reader who cannot be told which
+        turn is better served by the words under the session than by no
+        words at all. It carries the session under both
         spellings so the query a reader already makes returns it beside
         the turns, the turn's ordinal and the store's own row id, the
         turn's offset and the agent it opened with, and the text in the
@@ -2193,6 +2212,14 @@ class Telemetry:
         same way from the same two facts, because a transcript is the
         same service's span and a second service name would put it in a
         row of its own in every backend.
+
+        Each span's parent is resolved HERE rather than handed in, and
+        that is the depth claim of #506: the exporter holds an opaque
+        handle and knows nothing of pins or of a retention, so the turn
+        it names is looked up by the one fact it did carry across the
+        seam. The session's context is the fallback and never a
+        contrivance: it is the parent this surface shipped with, and a
+        turn that cannot be addressed keeps it.
         """
         with self._transcript_lock:
             if self._private is None:
@@ -2207,11 +2234,17 @@ class Telemetry:
             tracer = self._private.get_tracer(SERVICE)
         spans = []
         for turn in turns:
+            pinned = self.turn_context(context, turn.utterance) or context
             span = tracer.start_span(
                 TRANSCRIPT_SPAN,
-                context=self._continuing(context),
+                context=self._continuing(pinned),
                 attributes={
-                    **_named(context),
+                    # Off the pin actually used, which for a turn's pin
+                    # is the session's own name copied onto it at the
+                    # open: a transcript names the board whichever
+                    # parent it found, and an unnamed board still
+                    # contributes no attribute.
+                    **_named(pinned),
                     **_transcript_attributes(session, turn),
                 },
             )
@@ -3134,7 +3167,7 @@ def _transcript_attributes(session: str, turn: TranscriptTurn) -> dict[str, Any]
     catalog's own value gate, and a transcript is not an event. What it
     is, is a projection of the conversation store read post hoc, so what
     a span may carry is decided here, field by field, from a type whose
-    seven members are the whole of what crossed the seam.
+    eight members are the whole of what crossed the seam.
 
     An absent half contributes no attribute rather than a null: a turn
     recorded before the text switch went on has nothing to say, and an
@@ -3148,6 +3181,11 @@ def _transcript_attributes(session: str, turn: TranscriptTurn) -> dict[str, Any]
     }
     if turn.agent is not None:
         attributes[TURN_AGENT] = turn.agent
+    if turn.utterance is not None:
+        # The same name the turn's own span carries, which is what makes
+        # the nesting readable as data rather than only as a parent
+        # pointer, and what a reader of a stored row searches by (#506).
+        attributes[UTTERANCE_ID] = turn.utterance
     if turn.heard is not None:
         attributes[OBSERVATION_INPUT] = turn.heard
     if turn.reply is not None:

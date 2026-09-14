@@ -9,10 +9,21 @@ reasons. Three claims it cannot make are here.
 export on, a real device conversation with a handover, the real close
 ordering, and a real OTLP collector on a socket in this process. What
 that certifies is the protobuf a backend actually receives: one
-observation per turn in the session's own trace, the text in the two
-fields the backend renders as input and output, the legs as the exact
-canonical JSON string, and the transcript present in those attributes
-and nowhere else on the wire.
+observation per turn, each in the trace of the turn it describes and
+under that turn's own span, the text in the two fields the backend
+renders as input and output, the legs as the exact canonical JSON
+string, and the transcript present in those attributes and nowhere else
+on the wire.
+
+The nesting is the claim this lane exists for rather than the unit
+lane's, because neither side of it is faked here: the utterance on the
+turn span is the one the pipeline minted, and the utterance on the
+observation is the one the store wrote. What this conversation produces
+is the MANY-TO-ONE, measured rather than assumed: it opens one turn and
+its handover writes two rows under that turn's one utterance, so both
+observations land under the one turn span. Two turns landing in two
+different traces is the exporter unit case next door, because this
+conversation cannot produce it.
 
 **The hostile backend.** One that accepts the connection and never
 answers, which is the failure the shared span queue has no answer for
@@ -144,7 +155,7 @@ def transcripts(spans: list[Any]) -> list[Any]:
 # --- the wire ----------------------------------------------------------
 
 
-async def test_a_conversations_turns_arrive_as_observations_on_its_trace(
+async def test_a_conversations_turns_arrive_as_observations_under_their_turns(
     serve, simulate, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The acceptance, decoded from the protobuf a collector received.
@@ -167,10 +178,10 @@ async def test_a_conversations_turns_arrive_as_observations_on_its_trace(
 
     assert spans, "nothing reached the collector at all"
     written = transcripts(spans)
-    # Two turns, because this is what a mock-driven handover actually
-    # records: the first agent's reply was the switch itself and spoke
-    # nothing, and the second agent answered in a turn of its own. One
-    # observation each, in the store's own order.
+    # Two ROWS, because this is what a handover actually records: the
+    # store writes one row per turn and conversation, the switch moved
+    # the conversation, and both rows answer the one utterance the
+    # runtime minted. One observation each, in the store's own order.
     assert len(written) == 2
     first, second = (attributes(one) for one in written)
 
@@ -198,12 +209,31 @@ async def test_a_conversations_turns_arrive_as_observations_on_its_trace(
     assert legs == '[{"agent":"poet"}]'
     assert json.loads(legs) == [{"agent": "poet"}]
     assert "tokens" not in legs
-    # In the session's own trace and under the session span, which is
-    # what makes a reader who opened the session find the words rather
-    # than having to know they exist.
+    # Each observation under the turn it describes, in that turn's own
+    # trace. Matched by the utterance rather than by span name, which is
+    # what makes this the join and not an arrangement: the id on the
+    # turn span is the one the pipeline minted and the id on the
+    # observation is the one the store wrote.
+    turn_spans = {
+        attributes(span)["vinga.utterance.id"]: span
+        for span in spans
+        if span.name == "turn"
+    }
+    for observation in written:
+        turn = turn_spans[attributes(observation)["vinga.utterance.id"]]
+        assert observation.trace_id == turn.trace_id
+        assert observation.parent_span_id == turn.span_id
+    # Both under the ONE turn span, which is the many-to-one the key
+    # exists for, with neither side of it faked: the conversation opened
+    # one turn and the handover split its reply across two rows.
+    (only,) = turn_spans.values()
+    assert {span.trace_id for span in written} == {only.trace_id}
+    assert {span.parent_span_id for span in written} == {only.span_id}
+    # The session is no longer the parent, and still rides every
+    # observation under both spellings, which is what keeps a backend's
+    # session view grouping the words with the turns they now sit in.
     session_span = next(span for span in spans if span.name == "session")
-    assert {span.trace_id for span in written} == {session_span.trace_id}
-    assert {span.parent_span_id for span in written} == {session_span.span_id}
+    assert session_span.trace_id not in {span.trace_id for span in written}
     assert first["session.id"] == attributes(session_span)["session.id"]
     assert first["vinga.session.id"] == attributes(session_span)["vinga.session.id"]
 
