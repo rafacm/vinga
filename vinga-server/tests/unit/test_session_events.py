@@ -368,6 +368,8 @@ async def test_an_llm_round_is_logged_with_what_it_cost(
     round_one = only(caplog, "llm_round")
     assert round_one.agent == "poet"
     assert round_one.round == 1
+    assert len(round_one.invocation) == 32
+    assert round_one.purpose == "reply"
     assert round_one.stage == "llm"
     assert round_one.provider == "mock"
     assert round_one.type == "mock"
@@ -424,6 +426,7 @@ async def test_every_round_of_a_reply_is_its_own_event(
 
     first, second = events(caplog, "llm_round")
     assert (first.round, second.round) == (1, 2)
+    assert first.invocation != second.invocation
     # The second round saw the first round's call and its result, so
     # the payload grew, which is what `turns` is there to show.
     assert second.turns > first.turns
@@ -568,6 +571,7 @@ async def test_a_tool_call_is_logged_with_its_duration(
     assert logged.duration_ms >= 0
     # An unknown tool is an error result, and the record says so.
     assert logged.is_error is True
+    assert logged.error == "tool_error"
 
 
 def test_the_fields_survive_the_json_formatter(caplog: pytest.LogCaptureFixture) -> None:

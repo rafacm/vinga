@@ -666,11 +666,16 @@ async def drive_llm_round(_: Path) -> None:
     script.identity = replace(script.identity, model=MODEL)  # type: ignore[attr-defined]
     await drive_reply(session, UTTERANCE)
     await drive_reply(unregistered(ScriptedLlm(["Two words."])), UTTERANCE)
+    # The shared success path's second declared shape: a recap is a real
+    # generation, but carries no reply-local round and changes no turn
+    # accounting. The end-to-end resumption fixture reaches that path.
+    await run_reply(recapping(), "yes, recap it first")
 
 
 async def drive_provider_failed(_: Path) -> None:
     await failing_reply("asr", Unreachable("asr", ConnectionRefusedError("no route")))
     await failing_reply("asr", Failing(ConnectionRefusedError("no route")))
+    await failing_reply("llm", Unreachable("llm", ConnectionRefusedError("no route")))
 
 
 def drive_prompt_assembled(_: Path) -> None:
@@ -1672,6 +1677,7 @@ def llm_inputs(contexts: dict[str, Any]) -> tuple[LlmInputExport, Any]:
 def a_staged_round(exporter: LlmInputExport, session: str) -> None:
     exporter.stage_reply(
         session,
+        invocation="0123456789abcdef0123456789abcdef",
         agent="alpha",
         system="You are a household assistant.",
         turns=[an_assembled_turn()],

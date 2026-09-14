@@ -47,6 +47,7 @@ from vinga_server.events.catalog import (
     BuiltinSentenceWithheld,
     BuiltinToolCall,
     Heard,
+    LlmRecap,
     LlmRetry,
     LlmRound,
     McpSentenceWithheld,
@@ -68,7 +69,9 @@ from vinga_server.events.values import (
     Fragment,
     FromEntry,
     Identifier,
+    InvocationId,
     LanguageTag,
+    LlmPurpose,
     Nothing,
     ProviderOutcome,
     QuotedProvider,
@@ -205,7 +208,12 @@ def tool_fragment(tool: str | None, entry: str | None) -> Fragment:
 
 
 def builtin_tool_called(
-    agent: str, conversation: str, tool: str, duration_s: float, is_error: bool
+    agent: str,
+    conversation: str,
+    tool: str,
+    duration_s: float,
+    is_error: bool,
+    error_type: str | None = None,
 ) -> Variant:
     """The `tool_call` shape for a builtin: the one branch that names
     its tool, because a builtin's name is this server's own word."""
@@ -218,11 +226,17 @@ def builtin_tool_called(
         named=QuotedToolName.of(tool),
         duration_s=Real(duration_s),
         outcome=_tool_outcome(is_error),
+        error=_tool_error(is_error, error_type),
     )
 
 
 def mcp_tool_called(
-    agent: str, conversation: str, entry: str, duration_s: float, is_error: bool
+    agent: str,
+    conversation: str,
+    entry: str,
+    duration_s: float,
+    is_error: bool,
+    error_type: str | None = None,
 ) -> Variant:
     """The `tool_call` shape for a server tool, which names the entry an
     operator wrote in their YAML and never the far side's own name."""
@@ -235,11 +249,17 @@ def mcp_tool_called(
         named=FromEntry.of(entry),
         duration_s=Real(duration_s),
         outcome=_tool_outcome(is_error),
+        error=_tool_error(is_error, error_type),
     )
 
 
 def unnamed_tool_called(
-    agent: str, conversation: str, source: str, duration_s: float, is_error: bool
+    agent: str,
+    conversation: str,
+    source: str,
+    duration_s: float,
+    is_error: bool,
+    error_type: str | None = None,
 ) -> Variant:
     """The `tool_call` shape that names nothing.
 
@@ -262,6 +282,7 @@ def unnamed_tool_called(
         named=Nothing(""),
         duration_s=Real(duration_s),
         outcome=_tool_outcome(is_error),
+        error=_tool_error(is_error, error_type),
     )
 
 
@@ -345,6 +366,13 @@ def _tool_outcome(is_error: bool) -> ToolOutcome:
     return ToolOutcome.FAILED if is_error else ToolOutcome.ANSWERED
 
 
+def _tool_error(is_error: bool, error_type: str | None) -> ClassName | Absent:
+    """The safe failure category, absent for a successful tool result."""
+    if not is_error:
+        return ABSENT
+    return ClassName(error_type or "tool_error")
+
+
 def _namespace(source: str) -> UnnamedToolSource:
     """The namespace word a call that names nothing carries.
 
@@ -388,12 +416,14 @@ def llm_rounded(
     conversation: str,
     stage: str,
     provider: object,
-    round_: int,
+    round_: int | None,
     turns: int,
     elapsed: float,
     input_tokens: int | None,
     output_tokens: int | None,
     first_token_ms: int | None,
+    invocation: str,
+    purpose: str = "reply",
 ) -> Variant:
     """The `llm_round` event for this generation.
 
@@ -403,9 +433,37 @@ def llm_rounded(
     a round that only asked for a tool timed no spoken token.
     """
     entry, type_, host, model = _entry_fields(provider)
+    declared_input = Count(input_tokens) if input_tokens is not None else ABSENT
+    declared_output = Count(output_tokens) if output_tokens is not None else ABSENT
+    declared_first_token = (
+        Whole(first_token_ms) if first_token_ms is not None else ABSENT
+    )
+    declared = LlmPurpose(purpose)
+    if declared is LlmPurpose.RECAP:
+        if round_ is not None:
+            raise ValueError("a recap generation has no reply-local round")
+        return LlmRecap(
+            agent=Identifier(agent),
+            conversation=ConversationId(conversation),
+            invocation=InvocationId(invocation),
+            turns=Count(turns),
+            duration_ms=Whole(round(elapsed * 1000)),
+            stage=Identifier(stage),
+            duration_s=Real(elapsed),
+            provider=entry,
+            type=type_,
+            host=host,
+            model=model,
+            input_tokens=declared_input,
+            output_tokens=declared_output,
+            first_token_ms=declared_first_token,
+        )
+    if round_ is None:
+        raise ValueError("a reply generation has a reply-local round")
     return LlmRound(
         agent=Identifier(agent),
         conversation=ConversationId(conversation),
+        invocation=InvocationId(invocation),
         round=Whole(round_),
         turns=Count(turns),
         duration_ms=Whole(round(elapsed * 1000)),
@@ -415,9 +473,9 @@ def llm_rounded(
         type=type_,
         host=host,
         model=model,
-        input_tokens=Count(input_tokens) if input_tokens is not None else ABSENT,
-        output_tokens=Count(output_tokens) if output_tokens is not None else ABSENT,
-        first_token_ms=Whole(first_token_ms) if first_token_ms is not None else ABSENT,
+        input_tokens=declared_input,
+        output_tokens=declared_output,
+        first_token_ms=declared_first_token,
     )
 
 
@@ -514,6 +572,9 @@ def provider_failure(
     provider: object,
     failure: BaseException,
     elapsed: float,
+    *,
+    invocation: str | None = None,
+    purpose: str | None = None,
 ) -> Variant:
     """The `provider_failed` event for this failure.
 
@@ -553,4 +614,6 @@ def provider_failure(
         type=type_,
         host=host,
         model=model,
+        invocation=ABSENT if invocation is None else InvocationId(invocation),
+        purpose=ABSENT if purpose is None else LlmPurpose(purpose),
     )

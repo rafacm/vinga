@@ -968,6 +968,7 @@ def _as_attribute(held: Any, rule: _Rule) -> Any | None:
 # those and is exported as a zero.
 ASR_USAGE = "gen_ai.usage.input_milliseconds"
 TTS_USAGE = "gen_ai.usage.input_characters"
+ERROR_TYPE = "error.type"
 
 # The ASR span, whose four ends carry four overlapping field sets. One
 # table for all of them, because a field a given outcome does not carry
@@ -994,7 +995,7 @@ ASR_ATTRIBUTES = {
     "submitted_ms": ASR_USAGE,
     "language": "vinga.asr.language",
     "language_confidence": "vinga.asr.language_confidence",
-    "error": "vinga.asr.error",
+    "error": ("vinga.asr.error", ERROR_TYPE),
     "type": "gen_ai.provider.name",
     "model": "gen_ai.request.model",
     "host": "server.address",
@@ -1051,6 +1052,19 @@ LLM_ATTRIBUTES = {
     "conversation": "vinga.conversation.id",
     "round": "vinga.llm.round",
     "turns": "vinga.llm.turns",
+    "invocation": "vinga.llm.invocation.id",
+    "purpose": "vinga.llm.purpose",
+}
+
+FAILED_PROVIDER_ATTRIBUTES = {
+    "type": "gen_ai.provider.name",
+    "model": "gen_ai.request.model",
+    "host": "server.address",
+    "agent": "vinga.agent",
+    "conversation": "vinga.conversation.id",
+    "error": ERROR_TYPE,
+    "invocation": "vinga.llm.invocation.id",
+    "purpose": "vinga.llm.purpose",
 }
 
 # The tool span, which is what a `tool_call` becomes instead of the
@@ -1085,6 +1099,7 @@ TOOL_ATTRIBUTES = {
     "is_error": "vinga.tool.is_error",
     "tool": "gen_ai.tool.name",
     "entry": "vinga.tool.entry",
+    "error": ERROR_TYPE,
 }
 
 # The per-sentence TTS span. The stream's lifetime is the span's own
@@ -1756,7 +1771,7 @@ class LlmInputRound:
     The seam between the LLM input exporter and this module, stated as a
     type rather than implied by a mapping both sides index, and for the
     same reason `TranscriptTurn` is one: what crosses is exactly these
-    four facts, so a stage that grew a field cannot reach a span by
+    five facts, so a stage that grew a field cannot reach a span by
     accident and this module never learns what a provider seam looks
     like.
 
@@ -1770,11 +1785,13 @@ class LlmInputRound:
     about. What reaches the wire is therefore exactly the string that
     was weighed.
 
-    `index` is the session-local ordinal of the round, `purpose` is
+    `invocation` is the server-minted correlation identity. `index` is
+    the session-local ordinal of the round, `purpose` is
     which call shape assembled it, and `agent` is who was speaking, or
     nothing for a runtime that was talking as nobody.
     """
 
+    invocation: str
     index: int
     purpose: str
     agent: str | None
@@ -1835,6 +1852,9 @@ class _Pinned:
     trace: str
     trace_id: int
     span_id: int
+    trace_flags: Any
+    trace_state: Any
+    is_remote: bool
     # The session these spans belong to. Here so that a holder of one of
     # these needs nothing else to write a span that says where it
     # belongs: the whole point of addressing by a pinned context is that
@@ -1898,7 +1918,6 @@ class Telemetry:
             SpanContext,
             Status,
             StatusCode,
-            TraceFlags,
             format_trace_id,
             set_span_in_context,
         )
@@ -1926,7 +1945,6 @@ class Telemetry:
         # them.
         self._orphan = NonRecordingSpan
         self._identity = SpanContext
-        self._sampled = TraceFlags(TraceFlags.SAMPLED)
         # The one status a span here ever sets, and it sets no
         # description with it: a description is prose, and the only
         # prose a failure has is the far side's message.
@@ -2561,8 +2579,9 @@ class Telemetry:
                 self._identity(
                     trace_id=pinned.trace_id,
                     span_id=pinned.span_id,
-                    is_remote=True,
-                    trace_flags=self._sampled,
+                    trace_flags=pinned.trace_flags,
+                    trace_state=pinned.trace_state,
+                    is_remote=pinned.is_remote,
                 )
             )
         )
@@ -3005,6 +3024,9 @@ class Telemetry:
                 trace=self._spelled(context.trace_id),
                 trace_id=context.trace_id,
                 span_id=context.span_id,
+                trace_flags=context.trace_flags,
+                trace_state=context.trace_state,
+                is_remote=context.is_remote,
                 session=session,
                 name=name if isinstance(name, str) else None,
             )
@@ -3112,6 +3134,9 @@ class Telemetry:
                 trace=self._spelled(context.trace_id),
                 trace_id=context.trace_id,
                 span_id=context.span_id,
+                trace_flags=context.trace_flags,
+                trace_state=context.trace_state,
+                is_remote=context.is_remote,
                 session=session,
                 name=exported.name,
             )
@@ -3202,16 +3227,15 @@ class Telemetry:
         which is the whole of the issue's motivating gap.
         """
         trace = self._sessions.get(session)
-        if trace is None or trace.turn is None or trace.transcribed:
-            # A turn has ONE ASR stage, and the second event that could
-            # end one is not a second transcription of it. The shape
-            # this refuses is the gate's: a barge-in candidate whose
-            # confirmation fails emits `provider_failed` at the ASR
-            # stage while the turn being spoken over is still open, and
-            # the plan is explicit that a rejected candidate's failure
-            # stays gate vocabulary on the turn it interrupted. So the
-            # first ASR outcome builds the stage span and every later
-            # one folds as the span event it is.
+        failed = emission.payload.get(EVENT_FIELD) == PROVIDER_FAILED
+        if trace is None:
+            return
+        if not failed and (trace.turn is None or trace.transcribed):
+            # A turn has one accepted ASR outcome, and a second success
+            # does not become a second transcription. A provider
+            # failure is different: even a rejected barge-in
+            # confirmation was a real semantic operation and receives
+            # its own failed span below.
             self._span_event(session, emission)
             return
         payload = emission.payload
@@ -3236,32 +3260,46 @@ class Telemetry:
         attributes[ASR_OUTCOME] = outcome
         span = self._tracer.start_span(
             ASR_SPAN,
-            context=self._within(trace.turn),
+            context=self._within(trace.turn if trace.turn is not None else trace.span),
             attributes=attributes,
             start_time=_before(end, payload.get(ASR_LENGTH.get(str(outcome), ""))),
         )
-        if outcome == PROVIDER_FAILED:
+        if failed:
             # The only stage span that is ever marked failed, and the
             # only one of the four ASR outcomes that IS a failure:
             # nothing failed when a transcript came back empty, and
             # nothing failed when the answer stopped being wanted.
             span.set_status(self._failed)
         span.end(end_time=end)
-        trace.transcribed = True
+        if trace.turn is not None and not trace.transcribed:
+            trace.transcribed = True
 
     def _provider_failed(self, session: str, emission: Emission) -> None:
-        """A provider failure, which is an ASR outcome or a span event.
-
-        The stage is what decides. An ASR failure ends the turn's ASR
-        stage and is one of its four ends; an LLM or TTS failure ends no
-        interval this exporter draws, because the LLM and TTS spans are
-        built from the rounds and the streams that finished, so it folds
-        onto the turn with the fields the catalog gave it.
-        """
-        if emission.payload.get("stage") == ASR_STAGE:
+        """A provider failure as the failed semantic operation itself."""
+        stage = emission.payload.get("stage")
+        if stage == ASR_STAGE:
             self._asr_span(session, emission)
             return
-        self._span_event(session, emission)
+        if stage not in {LLM_STAGE, TTS_STAGE}:
+            return
+        trace = self._sessions.get(session)
+        if trace is None:
+            return
+        payload = emission.payload
+        end = self._at(emission)
+        attributes = {
+            **self._context(trace, payload, states=stage),
+            **_attributes(payload, FAILED_PROVIDER_ATTRIBUTES),
+            **_attributes(payload, {"provider": _entry_name(stage)}),
+        }
+        span = self._tracer.start_span(
+            LLM_SPAN if stage == LLM_STAGE else TTS_SPAN,
+            context=self._within(trace.turn if trace.turn is not None else trace.span),
+            attributes=attributes,
+            start_time=_before(end, payload.get("duration_ms")),
+        )
+        span.set_status(self._failed)
+        span.end(end_time=end)
 
     def _llm_span(self, session: str, emission: Emission) -> None:
         """One generation, with the settled GenAI vocabulary on it.
@@ -3345,6 +3383,8 @@ class Telemetry:
             },
             start_time=_before(end, payload.get("duration_ms")),
         )
+        if payload.get("is_error") is True:
+            span.set_status(self._failed)
         span.end(end_time=end)
 
     def _tts_span(self, session: str, emission: Emission) -> None:

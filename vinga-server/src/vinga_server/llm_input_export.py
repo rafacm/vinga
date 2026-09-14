@@ -416,6 +416,7 @@ class LlmInputExport:
         self,
         session: str,
         *,
+        invocation: str,
         agent: str | None,
         system: str,
         turns: "list[Turn]",
@@ -429,12 +430,13 @@ class LlmInputExport:
         watchdog's retry one observation rather than two: the retry
         re-sends content fixed before the first attempt.
         """
-        self._stage(session, REPLY, agent, system, turns, tools, choice)
+        self._stage(session, invocation, REPLY, agent, system, turns, tools, choice)
 
     def stage_recap(
         self,
         session: str,
         *,
+        invocation: str,
         agent: str | None,
         system: str,
         turns: "list[Turn]",
@@ -448,11 +450,12 @@ class LlmInputExport:
         staged because both are things a model was given, and a reader
         asking what it saw wants the recap as much as the reply.
         """
-        self._stage(session, RECAP, agent, system, turns, tools, choice)
+        self._stage(session, invocation, RECAP, agent, system, turns, tools, choice)
 
     def _stage(
         self,
         session: str,
+        invocation: str,
         purpose: str,
         agent: str | None,
         system: str,
@@ -524,7 +527,11 @@ class LlmInputExport:
         stage.rounds.append(
             _Staged(
                 round=LlmInputRound(
-                    index=stage.index, purpose=purpose, agent=agent, request=request
+                    invocation=invocation,
+                    index=stage.index,
+                    purpose=purpose,
+                    agent=agent,
+                    request=request,
                 ),
                 size=size,
             )

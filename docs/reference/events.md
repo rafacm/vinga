@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 79 events in 108 variants. What
+This document is that surface written down: 79 events in 109 variants. What
 was said in a conversation is in the conversation store instead, keyed by the
 same `session` ([its reference](conversations-schema.md)).
 
@@ -153,6 +153,7 @@ a bare code span would hide it.
 | `reported_mac` | `'[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}'` | 17 | The Device-Id header as the firmware sent it, which the OTA sentence renders beside the normalized form the field carries. Only a header `normalize_mac` accepted ever reaches that sentence, so the looser separator and case are the whole of the difference. |
 | `session_id` | `'[0-9A-Za-z_-]{1,64}'` | 64 | A token this server minted. Production ids are `uuid4().hex`; the syntax is the bounded machine form rather than that one spelling, because the capture and store suites drive sessions of their own naming and a session id is never far-side bytes whoever chose it. |
 | `conversation_id` | `'[0-9A-Za-z_-]{1,64}'` | 64 | A token this server minted for one conversation thread. Production ids are `uuid4().hex`, the same shape and the same bounded machine form a session id takes, and for the same reason: the store suites drive threads of their own naming, and a thread id is never far-side bytes whoever chose it. |
+| `invocation_id` | `'[0-9A-Za-z_-]{1,64}'` | 64 | A token this server minted for one logical model invocation. Production ids are `uuid4().hex`; a first-token retry keeps the same id because it is still the same logical generation. |
 | `activation_code` | `'[0-9]{6}'` | 6 | A claim ticket read off a screen, not a credential. |
 | `event_name` | `'[a-z][a-z0-9_]{0,63}'` | 64 | The registry's own key, carried in the payload as `event`. |
 | `language` | `'[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{1,8})*'` | 16 | A language code as an ASR engine reports it: the bare ISO 639 code or a tagged form such as `en-US`. |
@@ -232,7 +233,7 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `milestone_recorded` | `vinga_server.session` | INFO | 1 |
 | `prompt_assembled` | `vinga_server.session` | INFO | 1 |
 | `llm_retry` | `vinga_server.session` | WARNING | 1 |
-| `llm_round` | `vinga_server.session` | INFO | 1 |
+| `llm_round` | `vinga_server.session` | INFO | 2 |
 | `provider_failed` | `vinga_server.session` | WARNING | 1 |
 | `tool_call` | `vinga_server.session` | INFO | 3 |
 | `tool_arguments_coerced` | `vinga_server.session` | INFO | 1 |
@@ -1063,6 +1064,7 @@ session %s: %s round %d took %.2f s over %d turns
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `agent` | `IDENTIFIER` | yes | no |  |  |
 | `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
+| `invocation` | `ID` | yes | no | the `invocation_id` syntax | The server-minted identity of this logical generation. A first-token retry keeps it, and no provider value enters it. |
 | `round` | `INT` | yes | no |  | Counts the whole reply rather than one agent's leg, so the generation after a handover is a round of its own. |
 | `turns` | `COUNT` | yes | no |  | The cheap proxy for payload size. |
 | `duration_ms` | `INT` | yes | no |  |  |
@@ -1074,6 +1076,43 @@ session %s: %s round %d took %.2f s over %d turns
 | `input_tokens` | `COUNT` | no | no |  | Present where the provider reported usage; their absence is a fact about the endpoint. |
 | `output_tokens` | `COUNT` | no | no |  |  |
 | `first_token_ms` | `INT` | no | no |  | Times the first spoken token, so a round that only asked for a tool carries none. |
+| `purpose` | `TOKEN` | yes | no | one of: `reply` |  |
+
+#### Variant 2: `vinga_server.session` at INFO
+
+The recap is a semantic generation but not a reply round. Its `round` field is
+absent, and it changes no stored turn total.
+
+```text
+session %s: %s recap took %.2f s over %d turns
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `agent` (`IDENTIFIER`) | no |  |  |
+| 3 | `duration_s` (`FLOAT`) | no |  |  |
+| 4 | `turns` (`COUNT`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax |  |
+| `invocation` | `ID` | yes | no | the `invocation_id` syntax |  |
+| `turns` | `COUNT` | yes | no |  | The cheap proxy for payload size. |
+| `duration_ms` | `INT` | yes | no |  |  |
+| `stage` | `IDENTIFIER` | yes | no |  |  |
+| `provider` | `IDENTIFIER` | no | no |  |  |
+| `type` | `IDENTIFIER` | no | no |  |  |
+| `host` | `IDENTIFIER` | no | no |  |  |
+| `model` | `IDENTIFIER` | no | no |  |  |
+| `input_tokens` | `COUNT` | no | no |  |  |
+| `output_tokens` | `COUNT` | no | no |  |  |
+| `first_token_ms` | `INT` | no | no |  |  |
+| `purpose` | `TOKEN` | yes | no | one of: `recap` |  |
 
 ### `provider_failed`
 
@@ -1116,6 +1155,8 @@ session %s: %s provider%s %s after %.2f s%s: %s
 | `type` | `IDENTIFIER` | no | no |  |  |
 | `host` | `IDENTIFIER` | no | no |  |  |
 | `model` | `IDENTIFIER` | no | no |  |  |
+| `invocation` | `ID` | no | no | the `invocation_id` syntax |  |
+| `purpose` | `TOKEN` | no | no | one of: `recap`, `reply` |  |
 
 ### `tool_call`
 
@@ -1147,6 +1188,7 @@ session %s: %s tool%s took %.2f s%s
 | `tool` | `IDENTIFIER` | yes | no |  | The only tool names this server authors. |
 | `duration_ms` | `INT` | yes | no |  |  |
 | `is_error` | `BOOL` | yes | no |  |  |
+| `error` | `CLASS_NAME` | no | no |  |  |
 
 #### Variant 2: `vinga_server.session` at INFO
 
@@ -1173,6 +1215,7 @@ session %s: %s tool%s took %.2f s%s
 | `entry` | `IDENTIFIER` | yes | no |  | The configured entry, never the far side's tool name. |
 | `duration_ms` | `INT` | yes | no |  |  |
 | `is_error` | `BOOL` | yes | no |  |  |
+| `error` | `CLASS_NAME` | no | no |  |  |
 
 #### Variant 3: `vinga_server.session` at INFO
 
@@ -1201,6 +1244,7 @@ session %s: %s tool%s took %.2f s%s
 | `source` | `TOKEN` | yes | no | one of: `device`, `unknown` |  |
 | `duration_ms` | `INT` | yes | no |  |  |
 | `is_error` | `BOOL` | yes | no |  |  |
+| `error` | `CLASS_NAME` | no | no |  |  |
 
 ### `tool_arguments_coerced`
 

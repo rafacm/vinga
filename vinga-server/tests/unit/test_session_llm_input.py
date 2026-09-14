@@ -31,7 +31,7 @@ from typing import Any, cast
 import pytest
 
 from tests.support.configs import POET_MAC, TIMEOUT_S, base_config, watchdog_config
-from tests.support.events import both_formats
+from tests.support.events import both_formats, only
 from tests.support.llm_input import A_CONTEXT, exporting
 from tests.support.providers import ScriptedLlm, StallingLlm
 from tests.support.sessions import (
@@ -223,10 +223,13 @@ async def test_a_watchdog_retry_is_one_observation_and_not_two(
     ]
     assert len(retried) == 1
     assert retried[0].duration_ms >= TIMEOUT_S * 1000
-    assert len(held(exporter, session.session_id)) == 1
+    (staged,) = held(exporter, session.session_id)
+    assert staged.invocation == only(caplog, "llm_round").invocation
 
 
-async def test_a_round_whose_provider_failed_is_still_staged() -> None:
+async def test_a_round_whose_provider_failed_is_still_staged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """The model was given it whatever came back. Both attempts stall,
     the round is given up as the provider's failure, and the request is
     on the stage: an operator diagnosing a failed round is exactly the
@@ -240,11 +243,15 @@ async def test_a_round_whose_provider_failed_is_still_staged() -> None:
         )
     )
 
-    start_reply(session, UTTERANCE)
-    await wait_for_reply(session)
+    with caplog.at_level(logging.INFO):
+        start_reply(session, UTTERANCE)
+        await wait_for_reply(session)
 
     assert llm.calls == 2
-    assert len(held(exporter, session.session_id)) == 1
+    (staged,) = held(exporter, session.session_id)
+    failed = only(caplog, "provider_failed")
+    assert failed.invocation == staged.invocation
+    assert failed.purpose == "reply"
 
 
 async def test_a_barge_in_cancelling_a_reply_leaves_its_round_staged() -> None:

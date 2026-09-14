@@ -38,17 +38,22 @@ from typing import Any, cast
 
 import pytest
 
-from tests.support.configs import config_with_agent
-from tests.support.providers import ScriptedEndpointer
+from tests.support.configs import POET_MAC, base_config, config_with_agent
+from tests.support.events import both_formats
+from tests.support.providers import BrokenStreamingTts, ScriptedEndpointer, ScriptedLlm
 from tests.support.sessions import (
+    drive_reply,
     end_utterance,
     events_of,
     plant_utterance,
     realtime_session,
+    session_for,
     start_reply,
     turn_taking,
     wait_for_reply,
+    with_device,
 )
+from tests.support.sockets import RecordingSocket
 from tests.support.telemetry import (
     AGENT,
     CONVERSATION,
@@ -256,6 +261,7 @@ def test_a_failed_transcription_is_the_one_asr_span_marked_failed() -> None:
     asr = named(finished(telemetry, memory), ASR_SPAN)
     assert asr.attributes["vinga.asr.outcome"] == "provider_failed"
     assert asr.attributes["vinga.asr.error"] == "TimeoutError"
+    assert asr.attributes["error.type"] == "TimeoutError"
     assert asr.status.status_code.name == "ERROR"
     # No description: the only prose a failure has is the far side's
     # message, and the class name is the whole of what may travel.
@@ -366,11 +372,8 @@ def test_an_asr_outcome_that_measured_nothing_is_a_span_with_no_extent() -> None
     assert "vinga.asr.language" not in asr.attributes
 
 
-def test_a_failure_at_another_stage_stays_a_span_event() -> None:
-    """`provider_failed` is an ASR outcome only where it names the ASR
-    stage. An LLM or TTS failure ends no interval this exporter draws,
-    so it folds onto the turn with its fields, which is where a reader
-    looking at a failed reply finds it."""
+def test_a_tts_failure_is_one_real_failed_span() -> None:
+    """A failed synthesis is the operation itself, never a turn event."""
     clock = Clock()
     telemetry, memory = exporting()
     events = a_turn(clock, telemetry)
@@ -381,10 +384,95 @@ def test_a_failure_at_another_stage_stays_a_span_event() -> None:
     close_session(events)
 
     spans = finished(telemetry, memory)
-    turn = named(spans, TURN_SPAN)
     assert spans_of(ASR_SPAN, spans) == []
-    assert [event.name for event in turn.events] == ["provider_failed"]
-    assert turn.events[0].attributes["stage"] == "tts"
+    tts = named(spans, TTS_SPAN)
+    assert tts.status.status_code.name == "ERROR"
+    assert tts.status.description is None
+    assert tts.attributes["error.type"] == "TimeoutError"
+    assert named(spans, TURN_SPAN).events == ()
+
+
+async def test_a_real_tts_failure_has_no_success_twin() -> None:
+    """The runtime emits one failure end, not failure plus success."""
+    telemetry, memory = exporting()
+    session = session_for(
+        base_config(),
+        POET_MAC,
+        {"poet": ScriptedLlm(["The answer."])},
+        stages={"tts": cast(Any, BrokenStreamingTts())},
+    )
+    with_device(session, POET_MAC)
+    session.websocket = cast(Any, RecordingSocket())
+    events = events_of(session)
+    events.attach(telemetry.session_tap())
+    open_session(events, providers={}, keep_identities=True)
+    start_turn(events)
+
+    await drive_reply(session, speech_pcm(600))
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    (tts,) = spans_of(TTS_SPAN, spans)
+    assert tts.status.status_code.name == "ERROR"
+    assert tts.attributes["error.type"] == "RuntimeError"
+    assert named(spans, TURN_SPAN).events == ()
+
+
+def test_every_semantic_failure_is_one_safe_failed_span(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """All four operation kinds carry only their safe failure category."""
+
+    class CredentialFailure(RuntimeError):
+        pass
+
+    sentinel = "sk-live-0SEMANTIC-FAILURE-SENTINEL"
+    cause = ValueError(sentinel)
+    failure = CredentialFailure(sentinel)
+    failure.__cause__ = cause
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    with caplog.at_level("DEBUG"):
+        provider_failed(events, stage="asr", failure=failure)
+        provider_failed(events, stage="llm", failure=failure)
+        provider_failed(events, stage="tts", failure=failure)
+        call_tool(events, is_error=True, error_type="CredentialFailure")
+        finish_reply(events, outcome=ReplyOutcome.FAILED, sentences=0)
+        close_session(events)
+
+    spans = finished(telemetry, memory)
+    operations = [
+        *spans_of(ASR_SPAN, spans),
+        *spans_of(LLM_SPAN, spans),
+        *spans_of(TTS_SPAN, spans),
+        *spans_of(TOOL_SPAN, spans),
+    ]
+    assert len(operations) == 4
+    assert {one.attributes["error.type"] for one in operations} == {
+        "CredentialFailure"
+    }
+    assert all(one.status.status_code.name == "ERROR" for one in operations)
+    assert all(one.status.description is None for one in operations)
+    turn = named(spans, TURN_SPAN)
+    assert not {event.name for event in turn.events} & {"provider_failed", "tool_call"}
+    assert sentinel not in both_formats(caplog)
+    assert all(sentinel not in repr(record.__dict__) for record in caplog.records)
+    assert all(record.exc_info is None for record in caplog.records)
+
+
+def test_a_returned_tool_error_uses_the_closed_category() -> None:
+    telemetry, memory = exporting()
+    events = a_turn(Clock(), telemetry)
+
+    call_tool(events, is_error=True)
+    finish_reply(events)
+    close_session(events)
+
+    tool = named(finished(telemetry, memory), TOOL_SPAN)
+    assert tool.attributes["error.type"] == "tool_error"
+    assert tool.status.status_code.name == "ERROR"
 
 
 # --- the LLM round, and the settled vocabulary -------------------------
@@ -430,6 +518,10 @@ def test_one_round_is_one_span_with_the_settled_gen_ai_keys() -> None:
     # this says what the round that answered actually ran on.
     assert llm.attributes["vinga.provider.llm.name"] == "openai-main"
     assert llm.attributes["vinga.llm.round"] == 1
+    assert llm.attributes["vinga.llm.invocation.id"] == (
+        "11111111111111111111111111111111"
+    )
+    assert llm.attributes["vinga.llm.purpose"] == "reply"
     assert llm.attributes["vinga.agent"] == AGENT
     # And nothing else wearing a foreign prefix: a key a backend reads
     # by name is a key this repository has to have chosen deliberately.
@@ -445,6 +537,53 @@ def test_one_round_is_one_span_with_the_settled_gen_ai_keys() -> None:
     }
     assert llm.end_time - llm.start_time == 800 * MS
     assert llm.end_time == int((ended + telemetry._offset) * 1e9)
+
+
+def test_a_failed_generation_is_one_real_span_with_its_join_key() -> None:
+    telemetry, memory = exporting()
+    events = a_turn(Clock(), telemetry)
+    invocation = "fedcba9876543210fedcba9876543210"
+
+    provider_failed(
+        events,
+        stage="llm",
+        failure=ConnectionRefusedError("credential shaped words"),
+        invocation=invocation,
+    )
+    finish_reply(events, outcome=ReplyOutcome.FAILED, sentences=0)
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    llm = named(spans, LLM_SPAN)
+    assert llm.attributes["vinga.llm.invocation.id"] == invocation
+    assert llm.attributes["vinga.llm.purpose"] == "reply"
+    assert llm.attributes["error.type"] == "ConnectionRefusedError"
+    assert llm.status.status_code.name == "ERROR"
+    assert llm.status.description is None
+    assert named(spans, TURN_SPAN).events == ()
+
+
+def test_a_successful_recap_is_a_generation_without_a_reply_ordinal() -> None:
+    telemetry, memory = exporting()
+    events = a_turn(Clock(), telemetry)
+    invocation = "abcdefabcdefabcdefabcdefabcdefab"
+
+    round_done(
+        events,
+        round_=None,
+        invocation=invocation,
+        purpose="recap",
+        turns=7,
+    )
+    finish_reply(events)
+    close_session(events)
+
+    llm = named(finished(telemetry, memory), LLM_SPAN)
+    assert llm.attributes["vinga.llm.invocation.id"] == invocation
+    assert llm.attributes["vinga.llm.purpose"] == "recap"
+    assert llm.attributes["vinga.llm.turns"] == 7
+    assert "vinga.llm.round" not in llm.attributes
+    assert llm.status.status_code.name != "ERROR"
 
 
 def test_the_first_token_is_a_mark_inside_the_round() -> None:
@@ -1570,19 +1709,17 @@ class FailingConfirmation:
 CUT_IN = config_with_agent(llm_reply="Answering {text}.")
 
 
-async def test_a_rejected_confirmation_leaves_the_turn_with_one_asr_span() -> None:
+async def test_a_rejected_confirmation_is_a_second_real_asr_operation() -> None:
     """End to end, through the runtime that emits it.
 
     A barge-in whose confirmation fails never reaches `start_reply`, so
     it opens no turn: the reply being spoken over goes on being the
     turn. But the gate says `provider_failed` at the ASR stage while
-    that turn is open, and a fold that built a stage span from every
-    ASR-ending event gave that turn TWO transcriptions, the second one
-    belonging to an utterance this turn never answered.
+    that turn is open. That call is a second semantic operation even
+    though it never becomes the turn's accepted transcription.
 
-    So the turn keeps the one ASR span its own transcription made, and
-    the rejection lands on it as the span event the gate's vocabulary
-    is.
+    The attempted confirmation is still semantic provider work. It is a
+    second failed ASR span rather than a duplicate event on the turn.
     """
     telemetry, memory = exporting()
     ears = FailingConfirmation()
@@ -1609,8 +1746,12 @@ async def test_a_rejected_confirmation_leaves_the_turn_with_one_asr_span() -> No
 
     spans = finished(telemetry, memory)
     turn = named(spans, TURN_SPAN)
-    assert len(spans_of(ASR_SPAN, spans)) == 1
-    assert named(spans, ASR_SPAN).attributes["vinga.asr.outcome"] == "heard"
+    asr = spans_of(ASR_SPAN, spans)
+    assert len(asr) == 2
+    assert sum(one.status.status_code.name == "ERROR" for one in asr) == 1
+    assert {one.attributes.get("error.type") for one in asr} == {
+        None,
+        "ConnectionRefusedError",
+    }
     said = [event.name for event in turn.events]
-    assert "provider_failed" in said
-    assert said.count("provider_failed") == 1
+    assert "provider_failed" not in said

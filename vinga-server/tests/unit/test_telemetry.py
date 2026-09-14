@@ -33,6 +33,7 @@ import sys
 import threading
 import time
 from collections.abc import Iterator
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -969,6 +970,35 @@ def test_an_outcome_for_a_session_this_exporter_never_saw_writes_nothing() -> No
 
 
 A_REFERENCE = "@@@langfuseMedia:type=audio/wav|id=probe-media-1|source=bytes@@@"
+
+
+def test_a_continued_trace_preserves_flags_state_and_remoteness() -> None:
+    """A later writer continues the original decision without inventing one."""
+    from opentelemetry.trace import TraceFlags, TraceState
+
+    telemetry, memory = exporting()
+    a_session(telemetry, SESSION)
+    original = telemetry.retained_context(SESSION)
+    state = TraceState((('vendor', 'opaque'),))
+    unsampled = replace(
+        original,
+        trace_flags=TraceFlags(TraceFlags.DEFAULT),
+        trace_state=state,
+        is_remote=False,
+    )
+
+    assert telemetry.reference_media(unsampled, {"capture_audio": A_REFERENCE})
+    assert not any(
+        span.name == "capture" for span in finished(telemetry, memory)
+    ), "an unsampled trace was resurrected"
+
+    sampled = replace(original, trace_state=state, is_remote=False)
+    assert telemetry.reference_media(sampled, {"capture_audio": A_REFERENCE})
+
+    written = next(span for span in finished(telemetry, memory) if span.name == "capture")
+    assert written.parent.trace_flags == original.trace_flags
+    assert written.parent.trace_state == state
+    assert written.parent.is_remote is False
 
 
 def test_a_reference_lands_in_the_trace_the_session_was_exported_under() -> None:

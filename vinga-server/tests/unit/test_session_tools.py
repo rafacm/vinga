@@ -30,7 +30,7 @@ from tests.support.configs import (
     registry_config,
 )
 from tests.support.device_tools import VOLUME, FakeDevice
-from tests.support.events import events, fields_of, only
+from tests.support.events import both_formats, events, fields_of, only
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.support.providers import ScriptedLlm
 from tests.support.records import only_record, recording_session
@@ -121,18 +121,20 @@ async def test_an_unknown_tool_comes_back_as_an_error_result() -> None:
 
 
 async def test_a_tool_that_never_answers_becomes_a_timeout_result(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     monkeypatch.setattr(pipeline_module, "DEFAULT_TOOL_TIMEOUT_S", 0.05)
     script = ScriptedLlm([[call("remember", text="a fact")], "Sorry, that took too long."])
     session = session_for(base_config(), POET_MAC, {"poet": script}, memory=_HangingStore())
-    assert await run_reply(session, "remember this") == ["Sorry, that took too long."]
+    with caplog.at_level("INFO"):
+        assert await run_reply(session, "remember this") == ["Sorry, that took too long."]
 
     (result,) = [
         result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
     ]
     assert result.is_error
     assert "did not answer in time" in result.content
+    assert only(caplog, "tool_call").error == "TimeoutError"
 
 
 class _HangingStore(MemoryStore):
@@ -150,6 +152,41 @@ class _HangingStore(MemoryStore):
     ) -> int:
         await asyncio.sleep(30)
         raise AssertionError("unreachable")
+
+
+async def test_a_tool_exception_exports_only_its_class(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    sentinel = "sk-live-0TOOL-FAILURE-SENTINEL"
+
+    class CredentialFailure(RuntimeError):
+        pass
+
+    class FailingStore(MemoryStore):
+        def __init__(self) -> None:
+            super().__init__(cast(Any, None), cast(Any, None))
+
+        async def add(
+            self, scope: MemoryScope, owner: str, fact: str, *, agent: str
+        ) -> int:
+            try:
+                raise ValueError(sentinel)
+            except ValueError as cause:
+                raise CredentialFailure(sentinel) from cause
+
+    script = ScriptedLlm([[call("remember", text="a fact")], "It failed safely."])
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=FailingStore())
+    with caplog.at_level("INFO"):
+        await run_reply(session, "remember this")
+
+    logged = only(caplog, "tool_call")
+    assert logged.error == "CredentialFailure"
+    assert logged.exc_info is None
+    assert sentinel not in logged.getMessage()
+    assert sentinel not in repr(logged.args)
+    assert sentinel not in repr(fields_of(logged))
+    assert sentinel not in repr(logged.__dict__)
+    assert sentinel not in both_formats(caplog)
 
 
 async def test_the_round_cap_ends_the_reply_in_speech() -> None:
