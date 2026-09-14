@@ -754,3 +754,47 @@ content alias, while requiring the following corrections.
    sleeps, and both early-exit and deadline diagnostics join stdout and stderr.
    The direct Jaeger and exact-config fanout acceptances passed together after
    the change.
+
+## PR review round, M2 CI fix (PR #527)
+
+Automated external review of the PR diff `origin/main...474f8db6`: claude CLI
+2.1.271, read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 3m03s,
+[posted on the PR](https://github.com/rafacm/vinga/pull/527#issuecomment-5672262211).
+Verdict: mergeable after the listed fixes. The reviewer found two P2 and one
+P3 test-contract issues.
+
+1. **P2: the implementation record called the repaired handover test the
+   remaining timing assumption while an identical sibling still slept for
+   100 ms under a 250 ms acknowledgement bound.**
+
+   *Resolution* (`26ee23dd`): the settlement-wait test now uses the observed
+   acknowledgement, waits for its public `wait_entered` signal and keeps a
+   30-second bound that does not carry the ordering claim. The earlier record
+   now says the post-merge workflow found another instance, not the last one.
+
+2. **P2: the repaired handover test still had only 250 ms between the worker's
+   signal and its answer.** An event-loop scheduling hop could therefore
+   reproduce the `unrecorded` outcome even though the fixed sleep was gone.
+
+   *Resolution* (`f981ea74`): the handover test uses the established 30-second
+   acknowledgement bound. Its `wait_entered` signal remains the ordering proof,
+   so the larger bound changes no behavior under test.
+
+3. **P3: the handover checkpoint asserted that no root settled but not that no
+   root was released.** A premature omission would surface five seconds later
+   as a generic worker timeout rather than at its cause.
+
+   *Resolution* (`7d7d99c1`): the checkpoint now asserts both the settlement
+   and release lists are empty before answering the final acknowledgement.
+
+### Verification
+
+- The two exact acknowledgement cases passed together in 25 consecutive
+  invocations, for 50 focused passes.
+- The complete transcript exporter unit file passed 36 tests.
+- The four-worker transcript, telemetry and turn-lifecycle slice passed 56
+  tests with file-level distribution.
+- The complete four-worker unit lane passed 7,431 tests with 19 skips.
+- `uv run ruff check .`: clean.
+- Command-spellings census: 52 passed.
+- Documentation links and anchors: 247 files checked, 0 failures.
