@@ -117,12 +117,14 @@ def stage(
     turns: Any = None,
     tools: Any = None,
     choice: str = "auto",
+    invocation: str = "0123456789abcdef0123456789abcdef",
 ) -> None:
     """One round staged through whichever of the two verbs a case is
     about."""
     verb = exporter.stage_recap if recap else exporter.stage_reply
     verb(
         session,
+        invocation=invocation,
         agent=agent,
         system=system,
         turns=[a_turn()] if turns is None else turns,

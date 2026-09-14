@@ -56,6 +56,8 @@ from vinga_server.events.values import (
     Flag,
     FromEntry,
     Identifier,
+    InvocationId,
+    LlmPurpose,
     Nothing,
     ProviderOutcome,
     QuotedProvider,
@@ -167,6 +169,7 @@ QUARTET = ("provider", "type", "host", "model")
 # The thread every builder here is told about. A uuid hex, the shape the
 # runtime mints, so a builder is exercised with what a session hands it.
 THREAD = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
+INVOCATION = "0123456789abcdef0123456789abcdef"
 
 
 @pytest.mark.parametrize("provider", [CLOUD, IN_PROCESS, UNREGISTERED])
@@ -181,8 +184,19 @@ def test_no_builder_names_an_entry_without_naming_its_type(provider: Stamped) ->
     """
     built = [
         assembly.llm_retried("poet", THREAD, "llm", provider, 2, 0.5),
-        assembly.llm_rounded("poet", THREAD, "llm", provider, 2, 3, 0.5, 140, 12, 220),
-        assembly.provider_failure("poet", THREAD, "llm", provider, ConnectionRefusedError(), 0.5),
+        assembly.llm_rounded(
+            "poet", THREAD, "llm", provider, 2, 3, 0.5, 140, 12, 220, INVOCATION
+        ),
+        assembly.provider_failure(
+            "poet",
+            THREAD,
+            "llm",
+            provider,
+            ConnectionRefusedError(),
+            0.5,
+            invocation=INVOCATION,
+            purpose="reply",
+        ),
         assembly.heard("poet", THREAD, provider, 1.5, 40, None, None),
         assembly.sentence_synthesized("poet", THREAD, provider, 0, 17, 90, 400),
     ]
@@ -236,10 +250,12 @@ def test_a_retry_on_a_provider_with_no_identity_says_less() -> None:
 
 
 def test_a_round_carries_the_numbers_the_provider_reported() -> None:
-    assert assembly.llm_rounded("poet", THREAD, "llm", CLOUD, 2, 3, 0.5, 140, 12, 220
+    assert assembly.llm_rounded(
+        "poet", THREAD, "llm", CLOUD, 2, 3, 0.5, 140, 12, 220, INVOCATION
     ) == LlmRound(
         agent=Identifier("poet"),
         conversation=ConversationId(THREAD),
+        invocation=InvocationId(INVOCATION),
         round=Whole(2),
         turns=Count(3),
         duration_ms=Whole(500),
@@ -260,7 +276,19 @@ def test_a_round_that_reported_nothing_carries_no_zeroes() -> None:
     token are absences rather than zeroes, which is a different fact and
     has to stay a different record."""
     payload = carried(
-        assembly.llm_rounded("poet", THREAD, "llm", UNREGISTERED, 1, 1, 0.5, None, None, None)
+        assembly.llm_rounded(
+            "poet",
+            THREAD,
+            "llm",
+            UNREGISTERED,
+            1,
+            1,
+            0.5,
+            None,
+            None,
+            None,
+            INVOCATION,
+        )
     )
 
     assert "input_tokens" not in payload
@@ -270,7 +298,14 @@ def test_a_round_that_reported_nothing_carries_no_zeroes() -> None:
 
 def test_a_failure_names_the_entry_and_the_host_it_reached() -> None:
     assert assembly.provider_failure(
-        "poet", THREAD, "llm", CLOUD, ConnectionRefusedError("no route"), 0.5
+        "poet",
+        THREAD,
+        "llm",
+        CLOUD,
+        ConnectionRefusedError("no route"),
+        0.5,
+        invocation=INVOCATION,
+        purpose="reply",
     ) == ProviderFailed(
         agent=Identifier("poet"),
         conversation=ConversationId(THREAD),
@@ -285,6 +320,8 @@ def test_a_failure_names_the_entry_and_the_host_it_reached() -> None:
         type=Identifier("openai"),
         host=Identifier("api.example.com"),
         model=Identifier("gpt-4o-mini"),
+        invocation=InvocationId(INVOCATION),
+        purpose=LlmPurpose.REPLY,
     )
 
 
@@ -342,6 +379,7 @@ def test_a_server_call_names_the_entry_an_operator_wrote() -> None:
         named=FromEntry(' from entry "tools"'),
         duration_s=Real(0.25),
         outcome=ToolOutcome.FAILED,
+        error=ClassName("tool_error"),
     )
 
 

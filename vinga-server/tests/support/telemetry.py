@@ -478,10 +478,12 @@ def round_done(
     first_token_ms: int | None = 250,
     input_tokens: int | None = 420,
     output_tokens: int | None = 37,
-    round_: int = 1,
+    round_: int | None = 1,
     turns: int = 4,
     unbuilt: bool = False,
     agent: str = AGENT,
+    invocation: str = "11111111111111111111111111111111",
+    purpose: str = "reply",
 ) -> float:
     """One `llm_round`, built through the events' own assembly so the
     quartet's absence rules are the real ones.
@@ -503,6 +505,8 @@ def round_done(
             input_tokens,
             output_tokens,
             first_token_ms,
+            invocation,
+            purpose,
         )
     )
 
@@ -523,6 +527,8 @@ def provider_failed(
     duration_ms: int = 1500,
     failure: BaseException | None = None,
     identity: Identity | None = None,
+    invocation: str | None = None,
+    purpose: str | None = None,
 ) -> float:
     """A provider call that failed, at whichever stage, naming whichever
     entry it ran on."""
@@ -530,7 +536,18 @@ def provider_failed(
     raised = TimeoutError() if failure is None else failure
     return events.emit(
         lambda: assembly.provider_failure(
-            AGENT, CONVERSATION, stage, provider, raised, duration_ms / 1000
+            AGENT,
+            CONVERSATION,
+            stage,
+            provider,
+            raised,
+            duration_ms / 1000,
+            invocation=(
+                "22222222222222222222222222222222"
+                if stage == "llm" and invocation is None
+                else invocation
+            ),
+            purpose="reply" if stage == "llm" and purpose is None else purpose,
         )
     )
 
@@ -568,6 +585,7 @@ def call_tool(
     name: str = "remember",
     duration_s: float = 0.25,
     is_error: bool = False,
+    error_type: str | None = None,
 ) -> float:
     """One `tool_call` in whichever of its three shapes, built through
     the events' own assembly.
@@ -579,13 +597,13 @@ def call_tool(
     """
     built = {
         "builtin": lambda: assembly.builtin_tool_called(
-            AGENT, CONVERSATION, name, duration_s, is_error
+            AGENT, CONVERSATION, name, duration_s, is_error, error_type
         ),
         "mcp": lambda: assembly.mcp_tool_called(
-            AGENT, CONVERSATION, name, duration_s, is_error
+            AGENT, CONVERSATION, name, duration_s, is_error, error_type
         ),
         "unnamed": lambda: assembly.unnamed_tool_called(
-            AGENT, CONVERSATION, "device", duration_s, is_error
+            AGENT, CONVERSATION, "device", duration_s, is_error, error_type
         ),
     }[which]
     return events.emit(built)

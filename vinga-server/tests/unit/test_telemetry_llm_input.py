@@ -83,6 +83,7 @@ def a_session(telemetry: Telemetry, session: str = SESSION) -> None:
 
 def a_round(index: int = 1, **overrides: Any) -> LlmInputRound:
     fields: dict[str, Any] = {
+        "invocation": f"{index:032x}",
         "index": index,
         "purpose": "reply",
         "agent": "alpha",

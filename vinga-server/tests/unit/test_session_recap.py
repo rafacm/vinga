@@ -521,6 +521,59 @@ async def test_a_summarizer_that_failed_falls_back_and_stores_nothing() -> None:
     assert turns[-1].content.endswith(pipeline_module.RECAP_UNAVAILABLE)
 
 
+async def test_a_failed_recap_keeps_one_safe_generation_identity(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    sentinel = "sk-live-0RECAP-FAILURE-SENTINEL"
+    voice = RecordingTts()
+    kept = Kept().watching(voice)
+    poet = _FailingSummarizer(
+        [
+            [call("resume_conversation", conversation=GALAXY, start_from="recap")],
+            RECAP,
+            "Carrying on.",
+        ],
+        sentinel,
+    )
+    session = speaking_session(cast(Any, poet), voice, a_long_thread(), kept)
+    from tests.support.llm_input import exporting as exporting_llm_input
+    from vinga_server.llm_input_export import LlmInputExport
+
+    telemetry, _ = exporting_llm_input({})
+    staging = LlmInputExport(telemetry=telemetry, backlog=4, shutdown_timeout_s=10.0)
+    session.runtime._llm_input = staging
+    session._llm_input = staging
+    tap = Tap()
+    events_of(session).attach(tap)
+    _offer(session, "poet", GALAXY)
+    _asked(session, "poet", GALAXY)
+
+    with caplog.at_level(logging.INFO):
+        await drive_reply(session, UTTERANCE)
+
+    (failed,) = [
+        one.payload
+        for one in tap.of("provider_failed")
+        if one.payload.get("purpose") == "recap"
+    ]
+    (staged,) = [
+        one.round
+        for one in staging._staged[session.session_id].rounds
+        if one.round.purpose == "recap"
+    ]
+    assert failed["error"] == "RecapCredentialFailure"
+    assert failed["invocation"] == staged.invocation
+    assert "round" not in failed
+    assert sum(record.rounds or 0 for record in kept.turns) == 2
+    assert sentinel not in both_formats(caplog)
+    assert all(sentinel not in record.getMessage() for record in caplog.records)
+    assert all(sentinel not in repr(record.args) for record in caplog.records)
+    assert all(sentinel not in repr(fields_of(record)) for record in caplog.records)
+    assert all(sentinel not in repr(record.__dict__) for record in caplog.records)
+    assert all(record.exc_info is None for record in caplog.records)
+    await staging.shutdown()
+
+
 async def test_a_summarization_round_that_ran_long_falls_back(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -535,6 +588,15 @@ async def test_a_summarization_round_that_ran_long_falls_back(
         ]
     )
     session = speaking_session(cast(Any, poet), voice, a_long_thread(), kept)
+    from tests.support.llm_input import exporting as exporting_llm_input
+    from vinga_server.llm_input_export import LlmInputExport
+
+    telemetry, _ = exporting_llm_input({})
+    staging = LlmInputExport(telemetry=telemetry, backlog=4, shutdown_timeout_s=10.0)
+    session.runtime._llm_input = staging
+    session._llm_input = staging
+    tap = Tap()
+    events_of(session).attach(tap)
     _offer(session, "poet", GALAXY)
     _asked(session, "poet", GALAXY)
 
@@ -542,6 +604,21 @@ async def test_a_summarization_round_that_ran_long_falls_back(
 
     assert kept.milestones == []
     assert talking_thread(session) == GALAXY
+    (failed,) = [
+        one.payload
+        for one in tap.of("provider_failed")
+        if one.payload.get("purpose") == "recap"
+    ]
+    (staged,) = [
+        one.round
+        for one in staging._staged[session.session_id].rounds
+        if one.round.purpose == "recap"
+    ]
+    assert failed["error"] == "TimeoutError"
+    assert failed["invocation"] == staged.invocation
+    assert "round" not in failed
+    assert sum(record.rounds or 0 for record in kept.turns) == 2
+    await staging.shutdown()
 
 
 # What a recap is allowed to claim
@@ -629,7 +706,10 @@ async def test_the_summarization_round_is_staged_as_a_recap_round() -> None:
     telemetry, _ = exporting_llm_input({})
     staging = LlmInputExport(telemetry=telemetry, backlog=4, shutdown_timeout_s=10.0)
     voice = RecordingTts()
-    session, _ = consenting(voice, a_long_thread(), Kept().watching(voice))
+    kept = Kept().watching(voice)
+    session, _ = consenting(voice, a_long_thread(), kept)
+    tap = Tap()
+    events_of(session).attach(tap)
     session.runtime._llm_input = staging
     session._llm_input = staging
 
@@ -641,6 +721,12 @@ async def test_the_summarization_round_is_staged_as_a_recap_round() -> None:
     assert purposes.count("recap") == 1
     (staged,) = [one.round for one in stage.rounds if one.round.purpose == "recap"]
     assert pipeline_module.RECAP_INSTRUCTION in staged.request
+    (recap,) = [
+        one.payload for one in tap.of("llm_round") if one.payload["purpose"] == "recap"
+    ]
+    assert "round" not in recap
+    assert recap["invocation"] == staged.invocation
+    assert sum(record.rounds or 0 for record in kept.turns) == 2
     await staging.shutdown()
 
 
@@ -679,9 +765,32 @@ class _SlowSummarizer(ScriptedLlm):
     """A model whose second round, which is the summarization one, takes
     longer than the bound allows."""
 
-    async def stream(self, system: str, turns: Any, tools: Any = (), tool_choice: Any = "auto"):
+    async def stream(
+        self, system: str, turns: Any, tools: Any = (), tool_choice: Any = "auto"
+    ):
         if system == pipeline_module.RECAP_INSTRUCTION:
             await asyncio.sleep(5.0)
+        async for event in super().stream(system, turns, tools, tool_choice):
+            yield event
+
+
+class RecapCredentialFailure(RuntimeError):
+    pass
+
+
+class _FailingSummarizer(ScriptedLlm):
+    """A model whose recap failure carries a nested credential sentinel."""
+
+    def __init__(self, rounds: Any, sentinel: str) -> None:
+        super().__init__(rounds)
+        self._sentinel = sentinel
+
+    async def stream(self, system: str, turns: Any, tools: Any = (), tool_choice: Any = "auto"):
+        if system == pipeline_module.RECAP_INSTRUCTION:
+            try:
+                raise ValueError(self._sentinel)
+            except ValueError as cause:
+                raise RecapCredentialFailure(self._sentinel) from cause
         async for event in super().stream(system, turns, tools, tool_choice):
             yield event
 

@@ -388,6 +388,7 @@ def _tool_called(
     conversation: str,
     duration_s: float,
     is_error: bool,
+    error_type: str | None,
 ) -> Variant:
     """Which of the three `tool_call` shapes describes this call.
 
@@ -401,14 +402,14 @@ def _tool_called(
     """
     if classified.source == BUILTIN:
         return assembly.builtin_tool_called(
-            agent, conversation, classified.name, duration_s, is_error
+            agent, conversation, classified.name, duration_s, is_error, error_type
         )
     if classified.source == MCP and classified.entry is not None:
         return assembly.mcp_tool_called(
-            agent, conversation, classified.entry, duration_s, is_error
+            agent, conversation, classified.entry, duration_s, is_error, error_type
         )
     return assembly.unnamed_tool_called(
-        agent, conversation, classified.source, duration_s, is_error
+        agent, conversation, classified.source, duration_s, is_error, error_type
     )
 
 
@@ -1159,7 +1160,12 @@ class PipelineRuntime:
             raise
 
     async def _watched_stream(
-        self, provider: object, events: AsyncIterator[Any]
+        self,
+        provider: object,
+        events: AsyncIterator[Any],
+        *,
+        invocation: str,
+        purpose: str,
     ) -> AsyncIterator[Any]:
         """An LLM stream, with a failure raised by the stream itself
         reported as that provider's.
@@ -1178,13 +1184,22 @@ class PipelineRuntime:
                 return
             except Exception as exc:
                 self._provider_failed(
-                    "llm", provider, exc, asyncio.get_running_loop().time() - started
+                    "llm",
+                    provider,
+                    exc,
+                    asyncio.get_running_loop().time() - started,
+                    invocation=invocation,
+                    purpose=purpose,
                 )
                 raise
             yield event
 
     async def _watchdog_stream(
-        self, provider: object, make_stream: Callable[[], AsyncIterator[LlmEvent]]
+        self,
+        provider: object,
+        make_stream: Callable[[], AsyncIterator[LlmEvent]],
+        *,
+        invocation: str,
     ) -> AsyncIterator[LlmEvent]:
         """An LLM stream whose wait for the first event is bounded.
 
@@ -1224,7 +1239,9 @@ class PipelineRuntime:
         timeout_s = self._server.llm_first_token_timeout_s
         loop = asyncio.get_running_loop()
         for attempt in ("first", "retry"):
-            events = self._watched_stream(provider, make_stream())
+            events = self._watched_stream(
+                provider, make_stream(), invocation=invocation, purpose="reply"
+            )
             started = loop.time()
             try:
                 async with asyncio.timeout(timeout_s) as watchdog:
@@ -1239,7 +1256,14 @@ class PipelineRuntime:
                     failure = FirstTokenTimeout(
                         f"no first token within {timeout_s:.0f} s, twice"
                     )
-                    self._provider_failed("llm", provider, failure, elapsed)
+                    self._provider_failed(
+                        "llm",
+                        provider,
+                        failure,
+                        elapsed,
+                        invocation=invocation,
+                        purpose="reply",
+                    )
                     raise failure from exc
                 # The loop variable is read by a thunk the emitter calls
                 # before this iteration ends, so there is no late binding
@@ -1268,6 +1292,10 @@ class PipelineRuntime:
         began: float,
         first_token_at: float | None,
         usage: Usage | None,
+        *,
+        invocation: str,
+        purpose: str = "reply",
+        round_: int | None = None,
     ) -> None:
         """One `llm_round` event, which is where a slow reply becomes
         attributable.
@@ -1301,28 +1329,39 @@ class PipelineRuntime:
             None if first_token_at is None else round((first_token_at - began) * 1000)
         )
         inputs, outputs = _reported(usage)
+        reply_round = self._llm_round if round_ is None and purpose == "reply" else round_
         self._events.emit(
             lambda: assembly.llm_rounded(
                 self._agent,
                 self._conversation,
                 "llm",
                 provider,
-                self._llm_round,
+                reply_round,
                 len(working),
                 elapsed,
                 inputs,
                 outputs,
                 first_token_ms,
+                invocation,
+                purpose,
             )
         )
         # Counted here rather than where the round starts, so that the
         # turn's rounds, its summed duration and its token totals all
         # describe one set of rounds: the ones that finished, which is
         # the set an `llm_round` row exists for.
-        self._turn.round_done(round(elapsed * 1000), first_token_ms, inputs, outputs)
+        if purpose == "reply":
+            self._turn.round_done(round(elapsed * 1000), first_token_ms, inputs, outputs)
 
     def _provider_failed(
-        self, stage: str, provider: object, exc: BaseException, elapsed: float
+        self,
+        stage: str,
+        provider: object,
+        exc: BaseException,
+        elapsed: float,
+        *,
+        invocation: str | None = None,
+        purpose: str | None = None,
     ) -> None:
         """One `provider_failed` event, and the sentence that goes with
         it. A timeout is worded as one, because where traffic is
@@ -1352,7 +1391,14 @@ class PipelineRuntime:
         """
         self._events.emit(
             lambda: assembly.provider_failure(
-                self._agent, self._conversation, stage, provider, exc, elapsed
+                self._agent,
+                self._conversation,
+                stage,
+                provider,
+                exc,
+                elapsed,
+                invocation=invocation,
+                purpose=purpose,
             )
         )
 
@@ -2081,6 +2127,7 @@ class PipelineRuntime:
             first_token_at: float | None = None
             usage: Usage | None = None
             self._llm_round += 1
+            invocation = uuid.uuid4().hex
             # Resolved before the request is built, and per round rather
             # than per reply, because that is the memory block's clock.
             system = await self._system_prompt()
@@ -2095,6 +2142,7 @@ class PipelineRuntime:
                 # about a retry is already on the trace as `llm_retry`.
                 self._llm_input.stage_reply(
                     self.session_id,
+                    invocation=invocation,
                     agent=self._agent,
                     system=system,
                     turns=working,
@@ -2105,6 +2153,7 @@ class PipelineRuntime:
                 async for event in self._watchdog_stream(
                     providers.llm,
                     functools.partial(providers.llm.stream, system, working, tools, choice),
+                    invocation=invocation,
                 ):
                     match event:
                         case TextDelta(text=text):
@@ -2135,7 +2184,14 @@ class PipelineRuntime:
                 # mid-execution), and a call the model issued belongs on
                 # the record whether or not it ever ran.
                 slots = self._reserve_tools(calls)
-                self._llm_round_done(providers.llm, working, began, first_token_at, usage)
+                self._llm_round_done(
+                    providers.llm,
+                    working,
+                    began,
+                    first_token_at,
+                    usage,
+                    invocation=invocation,
+                )
                 tail = splitter.flush()
                 if tail is not None and not self._withheld(tail, tools, origins):
                     speaking = await self._speak_after(
@@ -2516,6 +2572,11 @@ class PipelineRuntime:
         providers = self._providers
         said: list[str] = []
         turns = [*made.input, Turn("user", RECAP_REQUEST)]
+        invocation = uuid.uuid4().hex
+        loop = asyncio.get_running_loop()
+        began = loop.time()
+        first_token_at: float | None = None
+        usage: Usage | None = None
         if self._llm_input is not None:
             # The second call shape, staged for the same reason the
             # reply's rounds are: this is a thing a model was given, and
@@ -2525,6 +2586,7 @@ class PipelineRuntime:
             # as something the model was handed.
             self._llm_input.stage_recap(
                 self.session_id,
+                invocation=invocation,
                 agent=self._agent,
                 system=RECAP_INSTRUCTION,
                 turns=turns,
@@ -2532,13 +2594,35 @@ class PipelineRuntime:
                 choice="none",
             )
         try:
-            async with asyncio.timeout(RECAP_ROUND_TIMEOUT_S):
+            async with asyncio.timeout(RECAP_ROUND_TIMEOUT_S) as deadline:
                 async for event in self._watched_stream(
                     providers.llm,
                     providers.llm.stream(RECAP_INSTRUCTION, turns, (), "none"),
+                    invocation=invocation,
+                    purpose="recap",
                 ):
                     if isinstance(event, TextDelta):
+                        if first_token_at is None and event.text.strip():
+                            first_token_at = loop.time()
                         said.append(event.text)
+                    elif isinstance(event, Usage):
+                        usage = event
+        except TimeoutError as exc:
+            if deadline.expired():
+                self._provider_failed(
+                    "llm",
+                    providers.llm,
+                    exc,
+                    loop.time() - began,
+                    invocation=invocation,
+                    purpose="recap",
+                )
+            logger.warning(
+                "session %s: the recap could not be made: %s",
+                self.session_id,
+                type(exc).__name__,
+            )
+            return None
         except Exception as exc:  # noqa: BLE001 - a failed recap is a fallback
             # The class name and nothing else, the rule the reply path
             # applies to every provider failure: a message from the wire
@@ -2549,6 +2633,15 @@ class PipelineRuntime:
                 type(exc).__name__,
             )
             return None
+        self._llm_round_done(
+            providers.llm,
+            turns,
+            began,
+            first_token_at,
+            usage,
+            invocation=invocation,
+            purpose="recap",
+        )
         text = "".join(said).strip()
         return text or None
 
@@ -2761,16 +2854,24 @@ class PipelineRuntime:
         try:
             async with asyncio.timeout(self._timeout_for(classified)):
                 content, is_error = await self._dispatch(call, dispatched)
+            error_type = "tool_error" if is_error else None
         except TimeoutError:
             content, is_error = f'the tool "{call.name}" did not answer in time', True
+            error_type = "TimeoutError"
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             content, is_error = f'the tool "{call.name}" failed: {exc}', True
+            error_type = type(exc).__name__
         elapsed = loop.time() - started
         self._events.emit(
             lambda: _tool_called(
-                classified, self._agent, self._conversation, elapsed, is_error
+                classified,
+                self._agent,
+                self._conversation,
+                elapsed,
+                is_error,
+                error_type,
             )
         )
         self._turn.executed(slot, content, is_error, round(elapsed * 1000))

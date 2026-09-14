@@ -243,6 +243,15 @@ UTTERANCE_ID = Syntax(
     "that they answer the same utterance.",
 )
 
+INVOCATION_ID = Syntax(
+    "invocation_id",
+    r"[0-9A-Za-z_-]{1,64}",
+    64,
+    "A token this server minted for one logical model invocation. "
+    "Production ids are `uuid4().hex`; a first-token retry keeps the "
+    "same id because it is still the same logical generation.",
+)
+
 EVENT_NAME = Syntax(
     "event_name",
     r"[a-z][a-z0-9_]{0,63}",
@@ -265,6 +274,7 @@ SYNTAXES: dict[str, Syntax] = {
         REPORTED_MAC,
         SESSION_ID,
         CONVERSATION_ID,
+        INVOCATION_ID,
         ACTIVATION_CODE,
         EVENT_NAME,
         LANGUAGE,
@@ -677,6 +687,17 @@ class UtteranceId(MachineId):
     """
 
     SYNTAX: ClassVar[Syntax | None] = UTTERANCE_ID
+
+
+@dataclass(frozen=True)
+class InvocationId(MachineId):
+    """One logical model invocation, minted before its request is assembled.
+
+    It correlates the content collaborator with the semantic operation and
+    contains no provider value. A transport retry therefore keeps one id.
+    """
+
+    SYNTAX: ClassVar[Syntax | None] = INVOCATION_ID
 
 
 @dataclass(frozen=True)
@@ -1292,6 +1313,13 @@ class ReplyOutcome(StrEnum):
     DEVICE_GONE = "device_gone"
 
 
+class LlmPurpose(StrEnum):
+    """Which server-owned generation path made one model call."""
+
+    REPLY = "reply"
+    RECAP = "recap"
+
+
 class DropReason(StrEnum):
     """Why a mic frame was discarded before it could be decoded.
 
@@ -1903,8 +1931,10 @@ __all__ = [
     "Fragment",
     "FromEntry",
     "Identifier",
+    "InvocationId",
     "LanguageTag",
     "LlmInputExportFailure",
+    "LlmPurpose",
     "LoopbackHost",
     "MachineId",
     "McpConnectFailure",

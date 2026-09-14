@@ -92,9 +92,11 @@ from vinga_server.events.values import (
     FromEntry,
     Grammar,
     Identifier,
+    InvocationId,
     Kind,
     LanguageTag,
     LlmInputExportFailure,
+    LlmPurpose,
     LoopbackHost,
     McpConnectFailure,
     McpDown,
@@ -1828,6 +1830,12 @@ class LlmRound(Variant):
             "store's."
         )
     )
+    invocation: InvocationId = value(
+        note=(
+            "The server-minted identity of this logical generation. A "
+            "first-token retry keeps it, and no provider value enters it."
+        )
+    )
     round: Whole = value(
         note=(
             "Counts the whole reply rather than one agent's leg, so the "
@@ -1863,6 +1871,37 @@ class LlmRound(Variant):
             "for a tool carries none."
         ),
     )
+    purpose: LlmPurpose = value(fixed=LlmPurpose.REPLY)
+
+
+@dataclass(frozen=True)
+class LlmRecap(Variant):
+    """A recap generation finishes without entering reply accounting."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: %s recap took %.2f s over %d turns"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "agent", "duration_s", "turns")
+    NOTE: ClassVar[str] = (
+        "The recap is a semantic generation but not a reply round. Its "
+        "`round` field is absent, and it changes no stored turn total."
+    )
+
+    agent: Identifier = value()
+    conversation: ConversationId = value()
+    invocation: InvocationId = value()
+    turns: Count = value(note="The cheap proxy for payload size.")
+    duration_ms: Whole = value()
+    stage: Identifier = value()
+    duration_s: Real = value(carried=False)
+    provider: Identifier | Absent = value(default=ABSENT)
+    type: Identifier | Absent = value(default=ABSENT)
+    host: Identifier | Absent = value(default=ABSENT)
+    model: Identifier | Absent = value(default=ABSENT)
+    input_tokens: Count | Absent = value(default=ABSENT)
+    output_tokens: Count | Absent = value(default=ABSENT)
+    first_token_ms: Whole | Absent = value(default=ABSENT)
+    purpose: LlmPurpose = value(fixed=LlmPurpose.RECAP)
 
 
 @dataclass(frozen=True)
@@ -1911,6 +1950,8 @@ class ProviderFailed(Variant):
     type: Identifier | Absent = value(default=ABSENT)
     host: Identifier | Absent = value(default=ABSENT)
     model: Identifier | Absent = value(default=ABSENT)
+    invocation: InvocationId | Absent = value(default=ABSENT)
+    purpose: LlmPurpose | Absent = value(default=ABSENT)
 
 
 @dataclass(frozen=True)
@@ -1945,6 +1986,7 @@ class BuiltinToolCall(Variant):
     named: QuotedToolName = value(carried=False)
     duration_s: Real = value(carried=False)
     outcome: ToolOutcome = value(carried=False)
+    error: ClassName | Absent = value(default=ABSENT)
 
 
 @dataclass(frozen=True)
@@ -1980,6 +2022,7 @@ class McpToolCall(Variant):
     named: FromEntry = value(carried=False)
     duration_s: Real = value(carried=False)
     outcome: ToolOutcome = value(carried=False)
+    error: ClassName | Absent = value(default=ABSENT)
 
 
 @dataclass(frozen=True)
@@ -2016,6 +2059,7 @@ class UnnamedToolCall(Variant):
     named: Nothing = value(carried=False)
     duration_s: Real = value(carried=False)
     outcome: ToolOutcome = value(carried=False)
+    error: ClassName | Absent = value(default=ABSENT)
 
 
 @dataclass(frozen=True)
@@ -2565,7 +2609,9 @@ LLM_RETRY = declare(
     variants=(LlmRetry,),
 )
 
-LLM_ROUND = declare("llm_round", note="A generation call finishes.", variants=(LlmRound,))
+LLM_ROUND = declare(
+    "llm_round", note="A generation call finishes.", variants=(LlmRound, LlmRecap)
+)
 
 PROVIDER_FAILED = declare(
     "provider_failed",
@@ -4580,6 +4626,7 @@ __all__ = [
     "LlmInputExportFailed",
     "LlmInputExported",
     "LlmRetry",
+    "LlmRecap",
     "LlmRound",
     "Logged",
     "MCP_CALL_DROPPED",
