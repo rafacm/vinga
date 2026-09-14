@@ -681,15 +681,34 @@ def test_the_transcript_projection_is_exactly_the_authorized_columns(stores) -> 
     store = stores()
     store.start()
     store.open_session("alpha", 100.0, MANIFEST)
-    store.record_turn("alpha", a_spoken_turn(thread("projection"), "lights on"))
+    store.record_turn(
+        "alpha",
+        a_spoken_turn(
+            thread("projection"), "lights on", utterance="0f1e2d3c4b5a6978"
+        ),
+    )
     store.stop()
 
     (row,) = read_transcript("alpha")
 
-    assert sorted(row) == ["agent", "heard", "id", "legs", "reply", "t_ms"]
+    assert sorted(row) == [
+        "agent",
+        "heard",
+        "id",
+        "legs",
+        "reply",
+        "t_ms",
+        "utterance",
+    ]
     assert row["heard"] == "lights on"
     assert row["reply"] == "Done."
     assert row["agent"] == "sam"
+    # The name the trace knows this turn by, which is what files an
+    # exported transcript under that turn's own span (#506). Read back
+    # from a turn the store actually wrote rather than named in the
+    # projection alone, so a column that reached the tuple and a value
+    # that never reached the row cannot both pass.
+    assert row["utterance"] == "0f1e2d3c4b5a6978"
 
 
 def test_the_transcript_projection_reads_only_the_named_session(stores) -> None:
