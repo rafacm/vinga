@@ -644,7 +644,8 @@ fixtures are extended rather than replaced.
 
 ## Milestones
 
-- [ ] **M1, canonical metadata and real failed operations.** Preserve original
+- [x] **[M1, canonical metadata and real failed operations.](2026-09-14-telemetry-backend-parity-implementation.md#m1-canonical-metadata-and-real-failed-operations)**
+  (PR TBD) Preserve original
   trace flags and state, freeze the canonical topology and attribute contract,
   add the server-minted generation invocation id at reply and recap assembly,
   make successful and failed recap calls symmetric real `llm` spans, add
