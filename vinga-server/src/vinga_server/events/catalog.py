@@ -94,6 +94,7 @@ from vinga_server.events.values import (
     Identifier,
     Kind,
     LanguageTag,
+    LlmInputExportFailure,
     LoopbackHost,
     McpConnectFailure,
     McpDown,
@@ -152,6 +153,7 @@ CONFIG_API_CHANNEL = "vinga_server.config.api"
 CONVERSATIONS_CHANNEL = "vinga_server.conversations.store"
 BINDINGS_CHANNEL = "vinga_server.device.bindings"
 FILLER_CHANNEL = "vinga_server.filler"
+LLM_INPUT_EXPORT_CHANNEL = "vinga_server.llm_input_export"
 MEMORY_CHANNEL = "vinga_server.memory.store"
 ONBOARDING_CHANNEL = "vinga_server.onboarding"
 OTA_CHANNEL = "vinga_server.ota"
@@ -170,6 +172,7 @@ SERVER_CHANNELS: tuple[str, ...] = (
     CONVERSATIONS_CHANNEL,
     BINDINGS_CHANNEL,
     FILLER_CHANNEL,
+    LLM_INPUT_EXPORT_CHANNEL,
     MEMORY_CHANNEL,
     ONBOARDING_CHANNEL,
     OTA_CHANNEL,
@@ -3802,6 +3805,118 @@ class TranscriptExportFailed(Variant):
     )
 
 
+# --- llm_input_export.py: what the model was given, onto the trace -----
+#
+# The vocabulary of the fourth rung of the disclosure ladder (#502, M5):
+# the request a session assembled for each of its LLM rounds, staged
+# while the session ran and written onto its trace after it closed,
+# behind a flag of its own. Two events and the whole ledger between
+# them, for the reason the two pairs above each have one, and here it is
+# the strongest of the three: this class has no local store behind it,
+# so an export that failed silently leaves nothing anybody could go back
+# and read.
+#
+# The exported event carries three counts rather than one, and that is
+# the bound made legible. What a session stages is capped in bytes, per
+# request and per session, so a long conversation with a talkative tool
+# loop genuinely can arrive incomplete; a reader who has only the
+# observations cannot tell a short session from a truncated one. So the
+# event says how many rounds went, how many were too large to carry at
+# all, and how many the session's own budget pushed out, because those
+# two absences mean different things to whoever is looking: one request
+# was outsized, or the conversation outgrew what may be held for it.
+#
+# What neither of these may carry is what the other two pairs may not,
+# and one thing more. No URL and no far-side identifier. No exception
+# message: the reason is chosen where the failure is decided, from the
+# closed set. And not one byte of the request itself, which is the whole
+# point of this surface being a span rather than a log line: the content
+# goes to the one place the flag authorizes, and the events say only
+# that it went.
+
+
+@dataclass(frozen=True)
+class LlmInputExported(Variant):
+    """A closed session's assembled requests are in the telemetry
+    backend."""
+
+    CHANNEL: ClassVar[str] = LLM_INPUT_EXPORT_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "session %s: %d assembled LLM requests exported to telemetry in %d ms "
+        "(%d too large, %d over the session budget)"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = (
+        "session",
+        "rounds",
+        "elapsed_ms",
+        "oversized",
+        "over_budget",
+    )
+
+    session: SessionId = value()
+    rounds: Count = value(
+        note=(
+            "How many rounds went, which is one observation each. A "
+            "logical round rather than a provider attempt: the "
+            "first-token watchdog re-sends content fixed before the "
+            "first try, so a retried round is one request that was made "
+            "twice and not two requests."
+        )
+    )
+    elapsed_ms: Whole = value(
+        note=(
+            "How long the whole export took, measured off the audio "
+            "path: this happens on a worker of its own after the "
+            "session closed, so it is a fact about the backend and the "
+            "link to it rather than about any reply's latency."
+        )
+    )
+    oversized: Count = value(
+        note=(
+            "How many rounds were dropped whole for exceeding the "
+            "per-request ceiling. Dropped rather than truncated, "
+            "because a shortened request is not the request the model "
+            "was given and this class is the one whose whole value is "
+            "that it is exact."
+        )
+    )
+    over_budget: Count = value(
+        note=(
+            "And how many were dropped, oldest first, because the "
+            "session held more than its byte budget or more rounds than "
+            "the entry cap behind it. A reader with a partial export "
+            "learns from these two counts that it is partial, and which "
+            "of the two bounds it met."
+        )
+    )
+
+
+@dataclass(frozen=True)
+class LlmInputExportFailed(Variant):
+    """A closed session's assembled requests did not reach the telemetry
+    backend."""
+
+    CHANNEL: ClassVar[str] = LLM_INPUT_EXPORT_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "session %s: assembled LLM requests not exported to telemetry (%s)"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "reason")
+
+    session: SessionId = value()
+    reason: LlmInputExportFailure = value(
+        note=(
+            "Which of the three ways this ends badly it was. Never the "
+            "far side's words and never a count of what did get "
+            "through: what an operator acts on is the class of the "
+            "failure, and what this class loses to a failure is gone "
+            "either way, since nothing on this host holds an assembled "
+            "request once its session has ended."
+        )
+    )
+
+
 # --- app.py: what the composition root says about capture -------------
 
 
@@ -4264,6 +4379,32 @@ TRANSCRIPT_EXPORT_FAILED = declare(
     variants=(TranscriptExportFailed,),
 )
 
+LLM_INPUT_EXPORTED = declare(
+    "llm_input_exported",
+    note=(
+        "A closed session's assembled requests are in the telemetry "
+        "backend, one observation each carrying the request as vinga "
+        "built it. How many went and how many the two bounds dropped, "
+        "and deliberately nothing of the requests themselves: the "
+        "content rides the span the flag authorizes, and this says only "
+        "that it went."
+    ),
+    variants=(LlmInputExported,),
+)
+
+LLM_INPUT_EXPORT_FAILED = declare(
+    "llm_input_export_failed",
+    note=(
+        "A closed session's assembled requests are not in the telemetry "
+        "backend, and why, from a closed set of three reasons. The other "
+        "half of the ledger, and the half that matters most on this "
+        "surface: the requests were held in the session's own memory and "
+        "are gone with it, so an export that failed silently would leave "
+        "nothing anywhere to go back to."
+    ),
+    variants=(LlmInputExportFailed,),
+)
+
 CAPTURE_ENABLED = declare(
     "capture_enabled",
     note=(
@@ -4415,8 +4556,13 @@ __all__ = [
     "HEARD",
     "Handover",
     "Heard",
+    "LLM_INPUT_EXPORTED",
+    "LLM_INPUT_EXPORT_CHANNEL",
+    "LLM_INPUT_EXPORT_FAILED",
     "LLM_RETRY",
     "LLM_ROUND",
+    "LlmInputExportFailed",
+    "LlmInputExported",
     "LlmRetry",
     "LlmRound",
     "Logged",

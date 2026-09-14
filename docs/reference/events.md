@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 77 events in 106 variants. What
+This document is that surface written down: 79 events in 108 variants. What
 was said in a conversation is in the conversation store instead, keyed by the
 same `session` ([its reference](conversations-schema.md)).
 
@@ -67,7 +67,7 @@ keeps validation a cost paid per decision rather than per frame.
 ## The channels
 
 The channel is the scope. One session channel, `vinga_server.session`, carries
-everything a conversation says about itself; the 16 server channels are each a
+everything a conversation says about itself; the 17 server channels are each a
 subsystem's own module name. An event declared on one channel and emitted from
 another is a violation even when its fields are lawful.
 
@@ -79,6 +79,7 @@ another is a violation even when its fields are lawful.
 - `vinga_server.conversations.store`
 - `vinga_server.device.bindings`
 - `vinga_server.filler`
+- `vinga_server.llm_input_export`
 - `vinga_server.memory.store`
 - `vinga_server.onboarding`
 - `vinga_server.ota`
@@ -275,6 +276,8 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `capture_upload_failed` | `vinga_server.capture`, `vinga_server.capture_upload` | WARNING | 2 |
 | `transcripts_exported` | `vinga_server.transcript_export` | INFO | 1 |
 | `transcript_export_failed` | `vinga_server.transcript_export` | WARNING | 1 |
+| `llm_input_exported` | `vinga_server.llm_input_export` | INFO | 1 |
+| `llm_input_export_failed` | `vinga_server.llm_input_export` | WARNING | 1 |
 | `capture_enabled` | `vinga_server.app` | WARNING | 1 |
 | `capture_disabled` | `vinga_server.app` | INFO | 1 |
 | `drain_started` | `vinga_server.registry` | INFO | 1 |
@@ -2622,6 +2625,62 @@ session %s: transcripts not exported to telemetry (%s)
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
 | `reason` | `TOKEN` | yes | no | one of: `dropped`, `no_trace`, `undelivered`, `unreadable`, `unrecorded` | Which of the five ways this ends badly it was. Never the far side's words and never a count of what did get through: what an operator acts on is the class of the failure, and what a reader needs about a truncated export is already on the turns that did go out, as the highest index any of them carries. |
+
+### `llm_input_exported`
+
+A closed session's assembled requests are in the telemetry backend, one
+observation each carrying the request as vinga built it. How many went and how
+many the two bounds dropped, and deliberately nothing of the requests
+themselves: the content rides the span the flag authorizes, and this says only
+that it went.
+
+#### Variant 1: `vinga_server.llm_input_export` at INFO
+
+```text
+session %s: %d assembled LLM requests exported to telemetry in %d ms (%d too large, %d over the session budget)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `rounds` (`COUNT`) | no |  |  |
+| 3 | `elapsed_ms` (`INT`) | no |  |  |
+| 4 | `oversized` (`COUNT`) | no |  |  |
+| 5 | `over_budget` (`COUNT`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `rounds` | `COUNT` | yes | no |  | How many rounds went, which is one observation each. A logical round rather than a provider attempt: the first-token watchdog re-sends content fixed before the first try, so a retried round is one request that was made twice and not two requests. |
+| `elapsed_ms` | `INT` | yes | no |  | How long the whole export took, measured off the audio path: this happens on a worker of its own after the session closed, so it is a fact about the backend and the link to it rather than about any reply's latency. |
+| `oversized` | `COUNT` | yes | no |  | How many rounds were dropped whole for exceeding the per-request ceiling. Dropped rather than truncated, because a shortened request is not the request the model was given and this class is the one whose whole value is that it is exact. |
+| `over_budget` | `COUNT` | yes | no |  | And how many were dropped, oldest first, because the session held more than its byte budget or more rounds than the entry cap behind it. A reader with a partial export learns from these two counts that it is partial, and which of the two bounds it met. |
+
+### `llm_input_export_failed`
+
+A closed session's assembled requests are not in the telemetry backend, and
+why, from a closed set of three reasons. The other half of the ledger, and the
+half that matters most on this surface: the requests were held in the
+session's own memory and are gone with it, so an export that failed silently
+would leave nothing anywhere to go back to.
+
+#### Variant 1: `vinga_server.llm_input_export` at WARNING
+
+```text
+session %s: assembled LLM requests not exported to telemetry (%s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `reason` (`TOKEN`) | no | one of: `dropped`, `no_trace`, `undelivered` |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `dropped`, `no_trace`, `undelivered` | Which of the three ways this ends badly it was. Never the far side's words and never a count of what did get through: what an operator acts on is the class of the failure, and what this class loses to a failure is gone either way, since nothing on this host holds an assembled request once its session has ended. |
 
 ### `capture_enabled`
 
