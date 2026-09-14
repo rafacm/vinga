@@ -41,7 +41,7 @@ from tests.support.uploads import exporting as upload_telemetry
 from vinga_server.boundary import FEATURE_REACH_KEY, BoundaryRefusal, Reach, check_feature
 from vinga_server.capture_upload import ATTACH_KEY, build_capture_upload
 from vinga_server.config import ConfigError
-from vinga_server.config.models import DatabaseConfig, ServerConfig
+from vinga_server.config.models import ServerConfig
 from vinga_server.events import Emission, attach_server_tap, detach_server_tap
 from vinga_server.telemetry import TELEMETRY_KEY, build_telemetry
 from vinga_server.transcript_export import TRANSCRIPTS_KEY, build_transcript_export
@@ -109,9 +109,7 @@ def a_traced_exporter(config: ServerConfig, boundary: Reach | None) -> object | 
 
 def a_transcript_export(config: ServerConfig, boundary: Reach | None) -> object | None:
     held, _ = transcript_telemetry()
-    return build_transcript_export(
-        config, telemetry=held, database=DatabaseConfig(), boundary=boundary
-    )
+    return build_transcript_export(config, telemetry=held, boundary=boundary)
 
 
 def a_capture_upload(config: ServerConfig, boundary: Reach | None) -> object | None:
