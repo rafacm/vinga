@@ -89,6 +89,7 @@ class _Round:
     invocation: str
     attributes: dict[str, str]
     size: int
+    output_size: int = 0
     text: list[str] = field(default_factory=list)
     calls: list[ToolCall] = field(default_factory=list)
 
@@ -186,20 +187,27 @@ class LlmInputExport:
         staged = self._rounds.get(invocation)
         if staged is None:
             return
-        if isinstance(event, TextDelta):
-            staged.text.append(event.text)
-        elif isinstance(event, ToolCall):
-            staged.calls.append(event)
-        else:
-            return
         try:
-            output = _output(staged.text, staged.calls)
-            total = staged.size + len(output.encode("utf-8"))
+            if isinstance(event, TextDelta):
+                added = _utf8_size(event.text)
+            elif isinstance(event, ToolCall):
+                added = _utf8_size(_json(_call(event)))
+            else:
+                return
         except Exception:  # noqa: BLE001 - content export never breaks a reply
             self._drop(invocation)
             return
-        if total > self._max_content_bytes:
+        # Both the canonical output and its direct-Langfuse alias carry the
+        # same bytes. Count each delta once here so a long stream stays O(n),
+        # then let finish render and weigh the one authoritative JSON value.
+        if staged.size + 2 * (staged.output_size + added) > self._max_content_bytes:
             self._drop(invocation)
+            return
+        staged.output_size += added
+        if isinstance(event, TextDelta):
+            staged.text.append(event.text)
+        else:
+            staged.calls.append(event)
 
     def finish(self, invocation: str) -> None:
         """Stage the complete pair before the matching event is emitted."""
@@ -283,7 +291,11 @@ def _json(value: Any) -> str:
 
 
 def _size(attributes: dict[str, str]) -> int:
-    return sum(len(value.encode("utf-8")) for value in attributes.values())
+    return sum(_utf8_size(value) for value in attributes.values())
+
+
+def _utf8_size(value: str) -> int:
+    return len(value.encode("utf-8"))
 
 
 def _message(turn: Turn) -> dict[str, Any]:
