@@ -232,11 +232,11 @@ NOTHING_HEARD = "nothing_heard"
 PROVIDER_FAILED = "provider_failed"
 TRANSCRIPTION_ABANDONED = "transcription_abandoned"
 
-# The stage a `provider_failed` has to name to be an ASR outcome. Every
-# other stage's failure folds as an ordinary span event onto the turn,
-# which is where a failed generation or a failed voice belongs: the LLM
-# and TTS spans are built from the events that SUCCEEDED, and a span
-# built from a failure would claim an interval nobody measured.
+# The three provider stages a `provider_failed` may end. For each one,
+# the failure event becomes the failed semantic stage span itself and
+# is consumed by that fold, so the turn never receives a duplicate
+# `provider_failed` span event. An undeclared future stage keeps the
+# default span-event fallback instead of disappearing.
 ASR_STAGE = "asr"
 
 # And the three stages a stage span can answer for ITSELF, which is why
