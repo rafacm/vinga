@@ -16,6 +16,7 @@ from vinga_server.config import ConfigError
 from vinga_server.config.models import DatabaseConfig, ServerConfig
 from vinga_server.conversations.records import ToolInvocation, TurnLeg, TurnRecord
 from vinga_server.events.values import TranscriptExportFailure
+from vinga_server.telemetry import TurnSettlement
 from vinga_server.transcript_export import (
     RECORDING_KEY,
     TEXT_KEY,
@@ -312,6 +313,38 @@ async def test_handover_rows_wait_independently_and_compose_once() -> None:
                         "output_tokens": 3,
                     },
                 ],
+            },
+        )
+    ]
+    assert telemetry.released == []
+
+
+@pytest.mark.asyncio
+async def test_a_final_boundary_without_a_new_row_finishes_the_handover_group() -> None:
+    exporter, telemetry = an_exporter()
+    exporter.turn_recorded(
+        SESSION,
+        a_turn(
+            heard="help me",
+            reply="I will ask beta.",
+            legs=(TurnLeg(agent="alpha", text="I will ask beta."),),
+        ),
+        settled(),
+        final=False,
+    )
+
+    exporter.turn_missing(SESSION, UTTERANCE)
+    await wait_for(lambda: bool(telemetry.settled))
+    await exporter.shutdown()
+
+    assert telemetry.settled == [
+        (
+            SESSION,
+            UTTERANCE,
+            {
+                "input": "help me",
+                "output": "I will ask beta.",
+                "legs": [{"agent": "alpha", "text": "I will ask beta."}],
             },
         )
     ]
@@ -680,8 +713,43 @@ def test_telemetry_ledger_omission_is_reported_without_span_ownership(
     caplog.set_level(logging.WARNING)
     exporter, telemetry = an_exporter()
 
-    exporter.omitted(SESSION)
+    exporter.omitted(SESSION, UTTERANCE)
 
     assert telemetry.settled == []
     assert telemetry.released == []
+    assert reasons(caplog) == [TranscriptExportFailure.DROPPED]
+
+
+@pytest.mark.asyncio
+async def test_overflow_callback_before_worker_reports_one_outcome(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING)
+    telemetry = Exported(answer=False)
+    exporter, _ = an_exporter(telemetry=telemetry)
+
+    exporter.omitted(SESSION, UTTERANCE)
+    exporter.turn_recorded(SESSION, a_turn(), settled(), final=True)
+    await wait_for(lambda: bool(telemetry.settled))
+    await exporter.shutdown()
+
+    assert reasons(caplog) == [TranscriptExportFailure.DROPPED]
+
+
+@pytest.mark.asyncio
+async def test_overflow_worker_before_callback_reports_one_outcome(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING)
+    telemetry = Exported(
+        settlement=TurnSettlement.OMITTED,
+        acknowledges_omission=False,
+    )
+    exporter, _ = an_exporter(telemetry=telemetry)
+
+    exporter.turn_recorded(SESSION, a_turn(), settled(), final=True)
+    await wait_for(lambda: bool(telemetry.settled))
+    exporter.omitted(SESSION, UTTERANCE)
+    await exporter.shutdown()
+
     assert reasons(caplog) == [TranscriptExportFailure.DROPPED]

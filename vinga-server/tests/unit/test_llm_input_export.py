@@ -121,6 +121,35 @@ def test_a_pair_over_the_operation_ceiling_is_dropped_whole(
     assert failures[0].reason == LlmInputExportFailure.DROPPED.value
 
 
+def test_a_live_trace_refusal_drops_the_pair_truthfully(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    telemetry, recorded = exporting(accepts=False)
+    staged = LlmInputExport(telemetry=telemetry, backlog=4)
+    staged.stage_reply(
+        "missing-session",
+        invocation="not-staged",
+        agent=None,
+        system="be concise",
+        turns=[],
+        tools=[],
+        choice="none",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        staged.finish("not-staged")
+
+    assert recorded.snapshots == []
+    failures = [
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "llm_input_export_failed"
+    ]
+    assert [failure.reason for failure in failures] == [
+        LlmInputExportFailure.DROPPED.value
+    ]
+
+
 def test_output_growth_can_drop_the_whole_pair() -> None:
     staged, recorded = exporter(max_request_bytes=512)
     staged.stage_reply(

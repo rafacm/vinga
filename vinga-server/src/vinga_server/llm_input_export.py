@@ -220,7 +220,9 @@ class LlmInputExport:
         except Exception:  # noqa: BLE001 - content export never breaks a reply
             self._failed(staged.session, LlmInputExportFailure.DROPPED)
             return
-        if not self._telemetry.stage_llm_content(invocation, attributes):
+        if not self._telemetry.stage_llm_content(
+            staged.session, invocation, attributes
+        ):
             self._failed(staged.session, LlmInputExportFailure.DROPPED)
             return
         events.emit(
