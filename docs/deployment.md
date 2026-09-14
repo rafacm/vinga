@@ -550,8 +550,11 @@ docker compose \
 Hold one conversation, then search the `vinga-server` service in Jaeger. The
 session is the root of its own trace. The turn is a separate root trace linked
 to that session and grouped by `session.id`; `asr`, `llm`, `tool` when used,
-`tts_stream` and playback sit under the turn. Stop the add-on with the same
-file pair and `down -v`.
+`tts_stream` and playback sit under the turn. Stop the composed stack with the
+same file pair and `down`. This removes its containers and network while
+preserving the `vinga-postgres` and `vinga-data` volumes. Use `down -v` only
+for an intentional full reset that erases the trial's configuration,
+conversations, downloaded models and voices.
 
 Audio export is not a Jaeger feature. With `export_audio` on, the upload still
 uses the Langfuse REST API and the object-storage URL it supplies. No recording
@@ -577,6 +580,10 @@ docker compose \
   -f deploy/telemetry/docker-compose.fanout.yml \
   --profile server up -d --wait
 ```
+
+Stop the composed stack with the same file pair and `down`. Its named database
+and data volumes remain available for the next start. `down -v` is the
+separate full-reset operation and erases both volumes.
 
 The Collector receives OTLP on loopback port 14318 as well as on its Compose
 network. Its one common traces pipeline masks the canonical content fields and
