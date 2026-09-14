@@ -281,11 +281,6 @@ async def test_handover_rows_wait_independently_and_compose_once() -> None:
             heard=None,
             reply="Beta here.",
             agent="beta",
-            legs=(
-                TurnLeg(
-                    agent="beta", text="Beta here.", input_tokens=7, output_tokens=3
-                ),
-            ),
         ),
         second,
         final=True,
@@ -306,12 +301,7 @@ async def test_handover_rows_wait_independently_and_compose_once() -> None:
                 "output": "I will ask beta. Beta here.",
                 "legs": [
                     {"agent": "alpha", "text": "I will ask beta."},
-                    {
-                        "agent": "beta",
-                        "text": "Beta here.",
-                        "input_tokens": 7,
-                        "output_tokens": 3,
-                    },
+                    {"agent": "beta", "text": "Beta here."},
                 ],
             },
         )

@@ -171,7 +171,10 @@ async def test_live_handover_composes_onto_one_original_turn_root(
     assert turn_attributes[OBSERVATION_INPUT] == turn_attributes[TURN_INPUT]
     assert turn_attributes[OBSERVATION_OUTPUT] == turn_attributes[TURN_OUTPUT]
     legs = json.loads(turn_attributes[TURN_LEGS])
-    assert legs == [{"agent": "poet"}]
+    assert legs == [
+        {"agent": "poet"},
+        {"agent": "tutor", "text": "TUTOR here, hello."},
+    ]
     assert turn_attributes[TRANSCRIPT_LEGS] == turn_attributes[TURN_LEGS]
 
     session = one(spans, "session")
