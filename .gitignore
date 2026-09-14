@@ -53,3 +53,6 @@ managed_components/
 *.log
 nohup.out
 .DS_Store
+
+# Personal working notes for this checkout, not the project's process.
+CLAUDE.local.md
