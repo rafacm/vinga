@@ -440,6 +440,12 @@ separately exported child or renders it beneath the turn. The plan
 should make the live check a completion gate, or narrow the goal
 explicitly to the topology vinga emits.
 
+*Resolution* (f507c7ce): taken. The live check is a completion
+gate on the issue rather than an optional extra: the lane gates the
+merge, the live run gates the close, and where it cannot run the
+closing note narrows the claim to the emitted topology and leaves the
+rendering half open rather than implying it.
+
 ### 2 (P2): the wire test does not cover both rows of the handover join
 
 The plan compares one transcript span with one turn span, while the
@@ -448,7 +454,7 @@ M4a's key exists to make a handover's rows resolve to one turn. Both
 should be asserted, and the turn should be selected by utterance id
 rather than by span name.
 
-*Resolution* (commit below): taken, with its premise corrected. Both
+*Resolution* (d879bf43): taken, with its premise corrected. Both
 observations are asserted and the turn is selected by utterance id.
 But the two observations that case produces are two TURNS rather than
 a handover's two rows, which the case's own comment states: the
@@ -464,7 +470,7 @@ plan then leaves null, unknown and evicted turns on the session span.
 The promise should be nesting for every ADDRESSABLE transcript, with
 the fallback stated in the goal and in the milestone's acceptance.
 
-*Resolution* (commit below): taken. The goal now promises the nesting
+*Resolution* (8e6d6750): taken. The goal now promises the nesting
 for every addressable transcript and states the session-span fallback
 beside it, and the milestone's title and acceptance say both halves
 rather than carrying the fallback as a caveat.
@@ -480,7 +486,7 @@ the integration suite's module docstring and its parenting assertions,
 and both `transcripts_exported` and `transcript_export_failed` rows in
 the server README.
 
-*Resolution* (commit below): taken in full. All eight are enumerated in
+*Resolution* (de2314d6): taken in full. All eight are enumerated in
 the documentation footprint, with the note that the refusal sentence is
 operator-facing and carries pins and a generated reference with it.
 
@@ -493,7 +499,7 @@ constructed directly in more than one suite. The plan should require a
 real-store projection case with a non-null utterance, name the fixture
 updates, and say whether the new member defaults.
 
-*Resolution* (commit below): taken. The real-store projection case, the
+*Resolution* (d0b3fdb0): taken. The real-store projection case, the
 `a_row` and `a_turn` fixture defaults and the exact-attribute pin are
 named, and the seam member defaults to `None` in last position so the
 direct constructions elsewhere stand. The default in the FIXTURES is a
@@ -508,15 +514,9 @@ trace to find, and an evicted turn is reachable only if the backend can
 filter on that attribute. It should be called a shared correlation key,
 with the reachable cases named.
 
-*Resolution* (commit below): taken. The plan no longer calls the
+*Resolution* (d78fdeb9): taken. The plan no longer calls the
 attribute option 1. It is a shared correlation key, and the three
 unaddressable cases are separated: an evicted turn is reachable only
 through a backend attribute filter this change does not verify, a turn
 no span was opened for has nothing to reach, and a null row carries no
 attribute at all.
-
-*Resolution* (commit below): taken. The live check is a completion
-gate on the issue rather than an optional extra: the lane gates the
-merge, the live run gates the close, and where it cannot run the
-closing note narrows the claim to the emitted topology and leaves the
-rendering half open rather than implying it.
