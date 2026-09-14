@@ -345,6 +345,15 @@ common pipeline is the only population decision. Neither sink pipeline may
 contain a sampler or content mask, and both receive the exact same processed
 records from the common pipeline before their documented backend adaptation.
 
+Sampling is per trace id, and vinga deliberately gives the session and every
+turn independent trace ids. A partial ratio therefore samples turns, not whole
+conversations: a kept turn may link to a dropped session trace, and a kept
+session trace may have dropped turn traces. `session.id` still groups what
+survives but cannot reconstruct what was sampled away. The runnable live
+comparison defaults to 100 percent so its topology is complete; the automated
+two-receiver smoke alone uses a deterministic partial ratio to prove matching
+populations. The deployment guide states this tradeoff beside the sampler.
+
 The sample mask covers every canonical content-bearing attribute introduced
 here before the split. It includes a documented email-shaped rule so an
 automated sentinel can prove the raw value appears in neither receiver and the
@@ -503,6 +512,8 @@ fixtures are extended rather than replaced.
 - **A sampling decision can fork.** Original trace flags and state are retained
   exactly. The fanout example fixes the source to `always_on` and makes one
   trace-id-based Collector sampler the only population decision before split.
+  The guide states that this samples independent turn traces rather than whole
+  sessions and defaults the walkthrough to 100 percent.
 - **Masking can protect one alias but miss its source.** The common processor
   masks the canonical names before aliases exist. The sentinel test scans both
   complete protobuf payloads, not selected attributes.
@@ -696,6 +707,11 @@ model `claude-opus-5`, 2026-09-14, runtime 5m18s.
 16. **P3: trace-id sampling samples turns, not sessions.** Session and turn
     traces have independent ids, so partial sampling can leave either side of
     their link absent. The deployment guide must say so.
+
+    *Resolution:* The contract now states that ratio sampling preserves or
+    drops independent turn traces, that links can have a missing peer, and that
+    `session.id` cannot recover dropped data. Live walkthroughs default to 100
+    percent; deterministic partial sampling remains an automated parity test.
 17. **P3: the ledger bound is not actually derived.** The existing unlimited
     `max_sessions`, per-session turn count and byte-based LLM bounds do not
     yield a global span count. The plan must state the formula or flat cap and
