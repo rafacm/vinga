@@ -1030,7 +1030,7 @@ the manifest with its own generator when stale.
   one declared event field and one stored column that give the two
   sides a name for the same utterance.
 - [x] **[M4b: the operator's collector reach](2026-09-12-telemetry-overhaul-implementation.md#m4b-the-operators-collector-reach)**
-  (PR TBD). The reach assertion
+  (PR [#521](https://github.com/rafacm/vinga/pull/521)). The reach assertion
   #493's implementation doc named, in the shape settled under "M4b is
   one key on the telemetry section": `server.telemetry.reach` in the
   `Reach` vocabulary, absent meaning `internet` so an upgrade changes
