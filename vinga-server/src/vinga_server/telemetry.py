@@ -2734,12 +2734,12 @@ class Telemetry:
         """Let the post-close content exporters' own half go, if it was
         ever built.
 
-        Both halves on a path that is already finishing however it
-        ended, and each under the owner that built it, which is the
-        third thing the transport's lock covers: a shutdown landing
-        inside an export in flight is the same race as two exports, and
-        a worker left behind by its own bounded join is exactly the
-        thread that can still be in one.
+        Two halves on a path that is already finishing however it
+        ended, each under the owner that built it, which is the third
+        thing the transport's lock covers: a shutdown landing inside an
+        export in flight is the same race as two exports, and a worker
+        left behind by its own bounded join is exactly the thread that
+        can still be in one.
 
         **Each wait is bounded and an expired one skips that half**,
         which is the honest answer rather than a teardown that hangs:
@@ -2751,28 +2751,52 @@ class Telemetry:
         in front of, so by the time this runs their workers have
         finished or have been left behind with leases of their own.
         """
-        for lock, taken in (
-            (self._private_lock, "provider"),
-            (self._transport_lock, "transport"),
-        ):
-            if not lock.acquire(timeout=CLOSE_WAIT_S):
-                # Left to the interpreter rather than shut down from
-                # under whoever is still inside it. Value-free and
-                # unbound, like every other line this teardown writes.
-                logger.debug("the %s was still in use and was left to close itself", taken)
-                continue
-            try:
-                closing = self._private if taken == "provider" else self._transcripts
-                if taken == "provider":
-                    self._private = None
-                else:
-                    self._transcripts = None
-                    self._transport_closed = True
-                if closing is not None:
-                    with contextlib.suppress(Exception):
-                        closing.shutdown()
-            finally:
-                lock.release()
+        self._close_private()
+        self._close_transport()
+
+    def _close_private(self) -> None:
+        """The processor-less provider both content exporters build
+        their spans on, under the lock that builds it.
+
+        The shutdown happens INSIDE the lock rather than after it, so
+        the provider cannot be rebuilt by a `_private_tracer` that
+        arrived while this one was closing: what that would leave is an
+        object nobody owns and nobody will close again.
+        """
+        if not self._private_lock.acquire(timeout=CLOSE_WAIT_S):
+            logger.debug("the span provider was in use and was left to close itself")
+            return
+        try:
+            provider, self._private = self._private, None
+            if provider is not None:
+                with contextlib.suppress(Exception):
+                    provider.shutdown()
+        finally:
+            self._private_lock.release()
+
+    def _close_transport(self) -> None:
+        """And the one OTLP exporter both of them deliver through, under
+        the lock that owns every touch of it.
+
+        The flag is what makes the close final: a delivery that had been
+        waiting on this lock would otherwise find the field back at
+        `None` and build a fresh HTTP exporter after the shutdown, which
+        is a socket nobody owns. An expired wait sets no flag and nulls
+        nothing, which is the honest half of the same rule: somebody is
+        inside the transport right now, so it is left as it is rather
+        than shut down from under them.
+        """
+        if not self._transport_lock.acquire(timeout=CLOSE_WAIT_S):
+            logger.debug("the span transport was in use and was left to close itself")
+            return
+        try:
+            transport, self._transcripts = self._transcripts, None
+            self._transport_closed = True
+            if transport is not None:
+                with contextlib.suppress(Exception):
+                    transport.shutdown()
+        finally:
+            self._transport_lock.release()
 
     # --- the fold -----------------------------------------------------
 
