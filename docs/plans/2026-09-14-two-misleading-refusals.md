@@ -265,13 +265,27 @@ That also settles where the sentence must NOT go: not into `_body`, not
 into `_read_domain`, and not into the API's 500, each of which serves
 readers for whom it is false.
 
-### #507: what the second line says
+### #507: what the second line says, and both recoveries
 
-Three facts and no parsing: that the row is in the domain database and
-the location above addresses it, that the configuration API cannot
-reach it until the server boots, and the procedure this project already
-records (boot a server on an empty domain database, import a kept
-`export`, re-enter the secrets an export deliberately omits, apply).
+Facts, no parsing, and both ways out.
+
+- The row is in the domain database and the location printed above
+  addresses it.
+- The configuration API cannot reach it until the server boots, which
+  is why the obvious command does not work.
+- With an export taken while the deployment was healthy: boot on an
+  empty domain database, import it, re-enter the credentials an export
+  deliberately omits, apply.
+- Without one: correct or delete the addressed row with SQL as the
+  server's own role. The CLI reference already names surgical access to
+  the rows as the alternative outside this grammar, so this points at a
+  door the project has, rather than inventing one.
+
+Both, because the issue's own path is a restored or hand-edited
+database, which is exactly the deployment least likely to be holding an
+export of the state it is in. Telling that operator only to reapply an
+export they do not have would be the same defect this issue reports,
+one sentence further on.
 
 It does not try to name the table by taking the location apart. The
 location is printed directly above it, and a sentence that re-derives
@@ -559,3 +573,9 @@ should cover both: the rebuild where an export exists, and otherwise
 correcting or deleting the addressed row through SQL as the server
 role, which the CLI reference already names as the surgical
 alternative.
+
+*Resolution* (commit below): taken. The second line now names both
+recoveries, the rebuild where an export exists and the SQL correction
+where none does, with the reason the second cannot be left out: the
+issue's own path is a restored or hand-edited database, which is the
+one least likely to hold an export of the state it is in.
