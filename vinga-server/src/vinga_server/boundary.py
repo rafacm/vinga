@@ -223,7 +223,9 @@ def check_feature(label: str, reach: Reach, boundary: Reach | None) -> None:
     exporter has neither, because how far it reaches is a property of
     where its transport POINTS, which nothing in this repository can
     read: vinga never parses `OTEL_EXPORTER_OTLP_ENDPOINT` or
-    `LANGFUSE_HOST`, and could not vouch for either if it did. All three
+    `LANGFUSE_HOST`, could not vouch for either if it did, and for the
+    capture upload's bytes cannot even see the address, which the
+    backend names in a presigned URL one request before they go. All three
     callers passed a fixed `Reach.INTERNET` until #502, which was honest
     and cost the deployment the key exists for: a `network`-bounded
     server refused telemetry even toward a collector on its own network.

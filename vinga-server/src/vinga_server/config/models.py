@@ -834,12 +834,12 @@ class TelemetryConfig(BaseModel):
 
     `reach` is not a rung of that ladder and sits above all three: it
     says where this section's destinations ARE, which is one fact about
-    two transports rather than one per switch, and splitting it per
-    class would let a deployment assert something about audio that is
-    untrue of the transcripts riding the same endpoint (#502). What it
-    governs is the data boundary's verdict on all three, and absent it
-    is `internet`, which is what the three builders passed before the
-    key existed.
+    every place this section's bytes end up rather than one per switch,
+    and splitting it per class would let a deployment assert something
+    about audio that is untrue of the transcripts riding the same
+    endpoint (#502). What it governs is the data boundary's verdict on
+    all three, and absent it is `internet`, which is what the three
+    builders passed before the key existed.
 
     The rules that refuse them with `enabled` off are deliberately NOT
     validators, here or on `ServerConfig`, and the reason is boot
@@ -880,16 +880,27 @@ class TelemetryConfig(BaseModel):
             "`data_boundary` allows and never narrows it. "
             "One assertion covers EVERY destination this section sends to, and it "
             "means the outermost of them, which is the shape `data_boundary` "
-            "itself has. There are two: the traces and the exported transcripts "
-            "ride `OTEL_EXPORTER_OTLP_*`, and the recording upload rides "
-            "`LANGFUSE_HOST`. A collector on your network beside a media host at a "
-            "vendor is therefore `internet`, and all three features are refused "
-            "rather than the one that would have been caught. "
-            "**It is an assertion, not a proof.** Nothing here reads either "
-            "endpoint, so a deployment that declares `network` and then points "
-            "`OTEL_EXPORTER_OTLP_ENDPOINT` at a vendor has contradicted its own "
-            "configuration and this server cannot tell: the mechanism admits "
-            "declarations, not behaviour, and is not a network sandbox. "
+            "itself has. There are three. The traces and the exported transcripts "
+            "ride `OTEL_EXPORTER_OTLP_*`. The recording upload's REST calls go to "
+            "`LANGFUSE_HOST`. And the recording's BYTES go somewhere neither of "
+            "those names: the media API answers with a presigned upload URL and "
+            "the WAV and the manifest are PUT to that, so they land in whatever "
+            "object storage your backend is configured to use, which a backend on "
+            "your own network may perfectly well answer with a URL at a cloud "
+            "vendor. The value is the outermost of all three, so a LAN collector "
+            "and a LAN Langfuse are not enough to declare `network`: the object "
+            "storage behind that Langfuse has to stay on your network too, and if "
+            "you cannot say where your backend stores media then you have not got "
+            "a `network` deployment to declare. "
+            "**It is an assertion, not a proof**, and the third destination is why "
+            "that is not a formality. Nothing here reads the OTLP endpoint or the "
+            "Langfuse host, and the upload target does not exist until the backend "
+            "names it, one request before the bytes go. So a deployment that "
+            "declares `network` and then points `OTEL_EXPORTER_OTLP_ENDPOINT` at a "
+            "vendor, or runs a LAN Langfuse backed by cloud object storage, has "
+            "contradicted its own configuration and this server cannot tell: the "
+            "mechanism admits declarations, not behaviour, and is not a network "
+            "sandbox. "
             "A reach exceeding `server.data_boundary` refuses the boot before "
             "anything is imported or constructed, and the refusal names this key "
             "as where the reach came from."
@@ -916,13 +927,22 @@ class TelemetryConfig(BaseModel):
             "The two transports are configured independently and must point at the "
             "same deployment and the same project: the traces go over "
             "`OTEL_EXPORTER_OTLP_*`, which the OpenTelemetry SDK reads for itself, "
-            "and the upload over `LANGFUSE_HOST`, `LANGFUSE_PUBLIC_KEY` and "
-            "`LANGFUSE_SECRET_KEY`, which the uploader reads from the environment "
-            "and hands to the Langfuse REST client. Both families stay transport "
-            "credentials: they are never vinga configuration, never stored, and "
-            "never rendered back by anything this server prints. Pointed at "
+            "and the upload's REST calls over `LANGFUSE_HOST`, "
+            "`LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`, which the uploader "
+            "reads from the environment and hands to the Langfuse REST client. "
+            "Both families stay transport credentials: they are never vinga "
+            "configuration, never stored, and never rendered back by anything this "
+            "server prints. Pointed at "
             "different projects both halves succeed and the recording lands where "
             "the trace's reader will never look. "
+            "**The bytes themselves go to a third address, which neither variable "
+            "names.** The media API answers a request for an upload URL with a "
+            "presigned one, and the WAV and the manifest are PUT to that, so they "
+            "land in whatever object storage the backend is configured with. A "
+            "Langfuse on your own network can answer with a URL at a cloud vendor, "
+            "and this server hands the bytes over without reading it, which is why "
+            "`reach` above has to be the outermost of all three and why it is an "
+            "assertion rather than a proof. "
             "Turning it on needs the `langfuse` extra, which both published images "
             "carry, and the boot is refused if it is missing. "
             "Under a `data_boundary` narrower than this section's `reach` it is "
