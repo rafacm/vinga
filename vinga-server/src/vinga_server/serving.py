@@ -37,6 +37,7 @@ from vinga_server.app import StartupFailed, create_app, startup_failure, stop_ad
 from vinga_server.composition import Composition
 from vinga_server.config import Config, ConfigError
 from vinga_server.config.boot import load_boot_config
+from vinga_server.config.loader import StoredConfigUnreadableError
 from vinga_server.providers import ProviderError
 from vinga_server.registry import CLOSE_MARGIN_S
 
@@ -61,6 +62,41 @@ UVICORN_ERROR_LOGGER = "uvicorn.error"
 # had the conversations. Short, because by then there is nothing left to
 # wait for but sockets that would not go.
 UVICORN_GRACEFUL_SHUTDOWN_S = 5
+
+
+# What a boot says after a refusal about a row it could not read, and
+# the whole of what #507 adds to this module.
+#
+# The refusal above it names the entry and quotes nothing of it; this
+# names the doors, in fixed text with no value of its own. It is printed
+# for one class and not for its parent: a database this server cannot
+# reach is a healthy configuration behind a network problem, and
+# answering that with "rebuild from an export" would be telling an
+# operator to destroy what is fine.
+#
+# Both ways out, because the row that gets here arrives from a restore
+# or a hand edit, which is the deployment least likely to be holding an
+# export of the state it is in. Telling that operator only to reapply a
+# document they do not have would be this issue's own defect one
+# sentence further on.
+#
+# It does not name the table by taking the location apart. The location
+# is printed directly above it, and a sentence that re-derives half of
+# one is a second spelling of an identity.
+STORED_CONFIG_RECOVERY = (
+    "The row is in the domain half of this deployment's database, and the location "
+    "named above addresses it. `vinga mcp-server delete` and `vinga provider delete` "
+    "remove such a row by identity without having to understand it, but every command "
+    "is a request to the configuration API, and that API is behind this boot: there is "
+    "nobody to answer one until the server starts. So there are two ways back. With a "
+    "`vinga-server config export` taken while this deployment was healthy: start a "
+    "server on an empty domain schema, import that document, run the secret set "
+    "commands it lists to enter each stored credential again, since an export "
+    "deliberately carries none of them, and apply it. Without one: correct or delete "
+    "the addressed row with SQL as the role this server connects as, which is the "
+    "surgical door this project keeps outside the command grammar. Both procedures "
+    "are written out in docs/reference/cli.md."
+)
 
 
 class DrainingServer(uvicorn.Server):
@@ -409,6 +445,14 @@ def run(config_path: str | None) -> int:
             # this server's device bindings the database's live answer.
             from_store=True,
         )
+    except StoredConfigUnreadableError as exc:
+        # Ahead of the arm below because it is one of its refusals, and
+        # the only one with a second thing to say. What is stored cannot
+        # be corrected through the API this boot never publishes, so the
+        # operator is told where the row is and both ways to reach it.
+        print(exc, file=sys.stderr)
+        print(STORED_CONFIG_RECOVERY, file=sys.stderr)
+        return 1
     except (ConfigError, ProviderError) as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -431,6 +475,7 @@ def run(config_path: str | None) -> int:
 __all__ = [
     "PING_INTERVAL_S",
     "PING_TIMEOUT_S",
+    "STORED_CONFIG_RECOVERY",
     "UVICORN_ERROR_LOGGER",
     "UVICORN_GRACEFUL_SHUTDOWN_S",
     "DrainingServer",
