@@ -36,6 +36,7 @@ from fastapi.testclient import TestClient
 from mcp.server.fastmcp import FastMCP
 
 from tests.support.configs import world
+from tests.support.events import every_format
 from tests.support.mcp_reflecting_server import REFLECTED_ENV, REFLECTED_PREFIX
 from tests.support.stores import memory as lane_memory
 from tests.support.tools_mcp import serving
@@ -44,6 +45,7 @@ from vinga_server.app import _prompt_preview
 from vinga_server.config import Config, cli
 from vinga_server.config.api import build_api, mount_api
 from vinga_server.config.models import API_MOUNT_PATH, DatabaseConfig
+from vinga_server.events import Emission, attach_server_tap, detach_server_tap
 from vinga_server.tools.mcp import CONNECTED, REDACTED, McpServers, transport
 
 # Not a real credential, and shaped so a substring check for it cannot
@@ -202,6 +204,37 @@ def rendered(caplog: pytest.LogCaptureFixture) -> str:
     return caplog.text + "".join(
         logs.JsonFormatter().format(record) for record in caplog.records
     )
+
+
+class Tap:
+    """A server-scope consumer that keeps what it was handed.
+
+    A log record is not the whole surface: `Emission.args` reaches every
+    tap as the objects themselves, so a claim that a value reaches
+    nobody is asserted here as well as at the log.
+    """
+
+    def __init__(self) -> None:
+        self.seen: list[Emission] = []
+
+    def emit(self, emission: Emission) -> None:
+        self.seen.append(emission)
+
+    def rendered(self) -> str:
+        return "\n".join(
+            "\n".join([str(one.payload), str(one.message), repr(one.args)])
+            for one in self.seen
+        )
+
+
+@pytest.fixture
+def tap() -> Iterator[Tap]:
+    consumer = Tap()
+    attach_server_tap(consumer)
+    try:
+        yield consumer
+    finally:
+        detach_server_tap(consumer)
 
 
 @pytest.fixture
@@ -390,6 +423,7 @@ async def test_what_a_server_ships_reaches_no_operator_surface(
 
 async def test_a_server_reflecting_the_token_out_of_a_composed_value_reaches_nothing(
     tmp_path: Path,
+    tap: Tap,
     watched: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -448,6 +482,19 @@ async def test_a_server_reflecting_the_token_out_of_a_composed_value_reaches_not
     for surface in (json.dumps(status), printed, json.dumps(answered), shown):
         assert SENTINEL not in surface
     assert SENTINEL not in rendered(watched)
+    # And the surfaces `rendered` cannot see, which the case beside this
+    # one also holds: every record whoever wrote it, read through the
+    # all-record helper so a foreign logger is not silently excluded and
+    # a typed argument no placeholder consumed is read too; every
+    # emission an attached tap was handed, which is its own retained
+    # transport; and the exception chain a traceback would be built
+    # from, of which there is none.
+    assert SENTINEL not in every_format(watched)
+    # The tap was handed something, so this is an absence from a
+    # transport that ran rather than from one nothing reached.
+    assert tap.seen
+    assert SENTINEL not in tap.rendered()
+    assert all(record.exc_info is None for record in watched.records)
 
 
 async def test_an_http_server_cannot_reflect_its_credential_onto_the_surfaces(
