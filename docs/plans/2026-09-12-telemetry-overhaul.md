@@ -590,11 +590,14 @@ by default.
 
 **One assertion covers every destination the section sends to**, and
 the semantics are the outermost of them, which is the same shape
-`server.data_boundary` itself has. Two transports exist: the OTLP
-endpoint that traces and transcripts ride, and the Langfuse REST host
-the capture upload uses. An operator whose collector is on the LAN and
-whose media host is a vendor has asserted `internet`, because that is
-the outermost reach of what this section sends, and the refusal then
+`server.data_boundary` itself has. Three destinations exist (corrected
+from two on 2026-09-14, see the amendment below): the OTLP endpoint
+that traces and transcripts ride, the Langfuse REST host the capture
+upload's requests go to, and the object storage that host hands out
+presigned upload URLs for, which is where the recording's bytes
+actually land. An operator whose collector is on the LAN and whose
+media storage is a vendor has asserted `internet`, because that is the
+outermost reach of what this section sends, and the refusal then
 applies to all three features rather than to the one that would have
 been caught. That is the honest direction to round in: an assertion
 that admitted the LAN case while audio left for a vendor would be the
@@ -605,6 +608,13 @@ words beside the key, the way the promises page already says of the
 whole mechanism (it "admits declarations, not behavior"). An operator
 who points `OTEL_EXPORTER_OTLP_ENDPOINT` at a vendor after declaring
 `network` has lied to their own configuration, and vinga cannot tell.
+The third destination is what makes this concrete rather than
+theoretical: the other two are addresses this server declines to read,
+while that one does not exist until the backend names it, one request
+before the bytes go. So the prose has to tell an operator what they are
+being asked to vouch for, in those words: if you cannot say where your
+backend stores media, you have not got a `network` deployment to
+declare.
 
 **Refusal ordering is unchanged and the sentence gains one fact.**
 Each builder still calls `check_feature` before it constructs anything,
@@ -616,6 +626,27 @@ carries no endpoint; it keeps all of that and names
 operator reading a refusal can see which of their own statements
 produced it. No endpoint, no host and no credential is rendered, which
 is the rule this sentence already keeps.
+
+**Amendment, 2026-09-14: there are three destinations, not two.** This
+section was written against two, and PR #521's external review found
+the third against the merged code. `capture_upload.py`'s `_attach` asks
+the media API for an upload URL and PUTs the WAV and the manifest to
+the PRESIGNED URL that comes back, so the bytes land in whatever object
+storage the backend is configured with rather than at `LANGFUSE_HOST`.
+A Langfuse on the operator's own network can answer with a URL at a
+cloud vendor, so an operator who read the two-destination prose,
+checked their collector and their Langfuse and declared `network` could
+have had room audio leave under a declaration that admitted it.
+
+Nothing about the milestone's shape moves: one key, absent meaning
+`internet`, the outermost of what the section sends, the refusal
+ordering and the sentence. What moves is the count, the direction the
+rounding has to survive (a LAN collector and a LAN Langfuse are not
+enough on their own), and how much weight "assertion, not a proof"
+carries. The presigned leg was recorded in `capture_upload.py`'s module
+docstring and in the events catalog's reason for quieting the HTTP
+stack, and in no document an operator reads; the amendment's own
+correction puts it on the pages that describe where content goes.
 
 ### The staged LLM input is bounded per session, oldest dropped first
 
