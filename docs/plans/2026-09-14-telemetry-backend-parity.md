@@ -411,8 +411,13 @@ the existing Langfuse REST and object-storage destinations in that assertion.
   first two change with the widened `export_llm_input` description even though
   no field is added; the events reference changes with the safe correlation and
   failure metadata.
-- `changelog.d/523-telemetry-backend-parity.md` records the completed operator
-  feature under `### Added`; `CHANGELOG.md` is not edited.
+- `changelog.d/523-telemetry-backend-parity.md` records the supported Jaeger
+  and Collector paths under `### Added`, the wider LLM-output disclosure and
+  new canonical content locations under `### Changed`, and removal of the
+  `transcript` and `llm_input` span names under `### Removed`. The Changed entry
+  tells direct-to-Langfuse operators that their path remains supported and
+  tells saved-view owners to select `turn` and `llm` instead. `CHANGELOG.md` is
+  not edited.
 
 ## Tests and verification
 
@@ -658,6 +663,10 @@ model `claude-opus-5`, 2026-09-14, runtime 5m18s.
 13. **P2: an Added-only changelog is incomplete.** Removing the `transcript`
     and `llm_input` span names and moving their content needs Removed and
     Changed entries with an upgrade note.
+
+    *Resolution:* The fragment now has Added, Changed and Removed footprints.
+    It names the disclosure widening, replacement span names and saved-view
+    upgrade action while affirming direct-to-Langfuse compatibility.
 14. **P2: the content-and-telemetry ADR must be amended.** Its current
     metadata-only fold and separate content-span rule becomes false. It needs a
     replacement invariant that content reaches a fold-made span only through a
