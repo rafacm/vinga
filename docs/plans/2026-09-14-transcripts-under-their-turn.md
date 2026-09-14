@@ -19,10 +19,14 @@ one trace, the dialogue on another, and no field on either naming the
 other. That is the defect, confirmed from the outside by M3's live gate
 run and recorded in the #502 implementation doc.
 
-After this, each transcript is a child of the `turn` span of the turn it
-describes, inside that turn's own trace, and it carries the utterance
-id both sides already agree on, so the correlation is readable as data
-and not only as a nesting.
+After this, every transcript whose turn can be addressed is a child of
+the `turn` span of the turn it describes, inside that turn's own trace,
+and carries the utterance id both sides already agree on, so the
+correlation is readable as data and not only as a nesting. A turn that
+cannot be addressed, which is a row with no utterance and a turn
+evicted past the retention, keeps the parent it has today, the session
+span. Both halves are the promise: the nesting where the addressing
+exists, the session span and no invented parent where it does not.
 
 This is M4a's first consumer and the end-to-end proof that the join
 M4a built actually joins: M4a proved each side separately (the store's
@@ -307,10 +311,11 @@ move.
 
 ## Milestones
 
-- [ ] **M1: a transcript is a child of its turn**. The utterance joins
-  the projection, the seam type and the span's attributes; the span is
-  parented on the turn's pinned context where there is one and on the
-  session's where there is not; the unit cases above, the wire case in
+- [ ] **M1: an addressable transcript is a child of its turn**. The
+  utterance joins the projection, the seam type and the span's
+  attributes; the span is parented on the turn's pinned context where
+  there is one and on the session's where there is not, which is the
+  milestone's acceptance in both directions and not a caveat on it; the unit cases above, the wire case in
   the integration lane, the three documentation edits and a
   `changelog.d/506-transcripts-under-their-turn.md` fragment under
   `### Fixed`. Design footprint: one member on an existing seam type,
@@ -394,6 +399,11 @@ The goal promises "each transcript" is a child of its turn, and the
 plan then leaves null, unknown and evicted turns on the session span.
 The promise should be nesting for every ADDRESSABLE transcript, with
 the fallback stated in the goal and in the milestone's acceptance.
+
+*Resolution* (commit below): taken. The goal now promises the nesting
+for every addressable transcript and states the session-span fallback
+beside it, and the milestone's title and acceptance say both halves
+rather than carrying the fallback as a caveat.
 
 ### 4 (P2): the impact inventory leaves false contracts behind
 
