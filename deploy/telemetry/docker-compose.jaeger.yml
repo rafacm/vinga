@@ -27,4 +27,4 @@ services:
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
       OTEL_TRACES_SAMPLER: always_on
       VINGA_SERVER__TELEMETRY__ENABLED: "true"
-      VINGA_SERVER__TELEMETRY__REACH: network
+      VINGA_SERVER__TELEMETRY__REACH: host
