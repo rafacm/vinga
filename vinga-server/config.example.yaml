@@ -461,11 +461,11 @@ server:
   #   # where the capture budget cannot see it; the queue depth bounds
   #   # it and the next startup sweeps what was left behind.
   #   export_audio: false
-  #   # EXPORTS WHAT WAS SAID to the telemetry backend, one observation
-  #   # per turn under the turn it describes, in that turn's own trace,
-  #   # carrying what was heard and what was replied. A turn the
-  #   # exporter can no longer address keeps the session's trace
-  #   # instead. Off by default and its own decision: telemetry being on
+  #   # ATTACHES WHAT WAS SAID to each reply's original turn root after
+  #   # every conversation-store acknowledgement for its utterance has
+  #   # settled. It carries what was heard, the complete reply and
+  #   # per-agent legs when a handover split it. Off by default and its
+  #   # own decision: telemetry being on
   #   # and `conversations.text` being on do not imply that the text
   #   # leaves.
   #   #
@@ -488,16 +488,17 @@ server:
   #   # a trace this server exported, and under a `data_boundary`
   #   # narrower than this section's `reach` it is refused too.
   #   #
-  #   # It needs no extra and no second credential: the turns travel as
-  #   # OTLP spans over the same OTEL_EXPORTER_OTLP_* transport the
-  #   # traces already use. The export runs on a worker of its own after
-  #   # the session closed, never on the audio path, and a failure is a
-  #   # warning rather than a failed session.
+  #   # It needs no extra and no second credential. A worker waits for
+  #   # acknowledgements off the reply path, then enriches and releases
+  #   # the original root at its reply-finished timestamp. Failure,
+  #   # timeout, overflow and shutdown release it metadata-only. The
+  #   # outcome event reports attachment and enqueue, not backend
+  #   # acknowledgement.
   #   export_transcripts: false
-  #   # EXPORTS THE REQUEST THE MODEL WAS GIVEN to the telemetry
-  #   # backend, one observation per LLM round on the trace that
-  #   # session was exported under, rendered as the observation's
-  #   # input. Off by default and its own decision: neither `enabled`
+  #   # ATTACHES THE REQUEST AND RAW OUTPUT to each actual LLM span.
+  #   # Output is captured before speech filtering, including tool calls
+  #   # and text withheld from the user. Off by default and its own
+  #   # decision: neither `enabled`
   #   # nor either switch above it implies that the model's input
   #   # leaves.
   #   #
@@ -507,7 +508,8 @@ server:
   #   # text off this host whether or not the switch above is on. The
   #   # two stay independent; neither turns the other on.
   #   #
-  #   # What goes is the request as this server assembled it: the
+  #   # What goes is the request as this server assembled it and the raw
+  #   # semantic output the model generated: the
   #   # system prompt with its memory and know-how blocks, the message
   #   # history as the model was given it, the tool schemas offered,
   #   # the tool arguments the model asked for and the results it was
@@ -516,18 +518,17 @@ server:
   #   # and any credential.
   #   #
   #   # There is no local store behind it: a session assembles a
-  #   # request because it is about to make it, so what is exported
-  #   # exists for the session, then in a bounded delivery job until it
-  #   # is delivered or dropped, and nowhere after that. A process that
-  #   # dies with exports queued loses them, and nothing can recover
+  #   # request because it is about to make it. Content exists through
+  #   # that invocation and then in the ordinary bounded OTLP span queue.
+  #   # A process that dies with spans queued loses them, and nothing can recover
   #   # them; what was said is still in the conversation store when
   #   # that is recording.
   #   #
-  #   # What one session may stage is bounded in bytes, per request and
-  #   # for the session as a whole. A request over the ceiling is
+  #   # What one operation may attach is bounded to 256 KiB, with a
+  #   # bounded pending budget for the session. A pair over the ceiling is
   #   # dropped whole rather than truncated; over the budget, whole
-  #   # requests go oldest first. Both are counted and both reasons are
-  #   # reported on `llm_input_exported`, so a partial export says so.
+  #   # unfinished requests go oldest first. The outcome event reports
+  #   # attachment and enqueue, not backend acknowledgement.
   #   #
   #   # EXPORTED REQUESTS OUTLIVE ERASURE HERE, the way exported text
   #   # does, and retention is then the backend's.
@@ -537,9 +538,10 @@ server:
   #   # refused too. Nothing else can make it a no-op: there is no
   #   # local surface behind it to switch off, so `conversations` and
   #   # `capture` are irrelevant to it. It needs no extra and no second
-  #   # credential, rides the same OTEL_EXPORTER_OTLP_* transport, runs
-  #   # on a worker of its own after the session closed, and a failure
-  #   # is a warning rather than a failed session.
+  #   # credential and rides the same OTEL_EXPORTER_OTLP_* transport on
+  #   # the actual generation span. Pairing finishes synchronously at
+  #   # each round boundary; a content omission is a warning rather than
+  #   # a failed session.
   #   export_llm_input: false
 
   # Whether speech that arrives while a reply is playing interrupts it.

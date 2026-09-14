@@ -2627,7 +2627,7 @@ on are the ones this session already named.
 #### Variant 1: `vinga_server.transcript_export` at INFO
 
 ```text
-session %s: %d turn transcripts exported to telemetry in %d ms
+session %s: %d turn transcripts attached to telemetry in %d ms
 ```
 
 | # | Argument | Nullable | Constraint | Note |
@@ -2640,8 +2640,8 @@ session %s: %d turn transcripts exported to telemetry in %d ms
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `turns` | `COUNT` | yes | no |  | How many turns went, which is what a reader compares against what the session's own record holds. Turns rather than spans because they are the same number: one turn is one observation. |
-| `elapsed_ms` | `INT` | yes | no |  | How long the whole export took, measured off the audio path: this happens on a worker of its own after the session closed, so it is a fact about the store, the backend and the link to it rather than about any reply's latency. |
+| `turns` | `COUNT` | yes | no |  | How many original turn roots received their complete acknowledged content projection. Emitted once per settled utterance, so this is currently one. |
+| `elapsed_ms` | `INT` | yes | no |  | How long acknowledgement and content assembly took off the audio path. It excludes delivery by the ordinary OTLP processor and is not a backend acknowledgement. |
 
 ### `transcript_export_failed`
 
@@ -2656,19 +2656,19 @@ carries.
 #### Variant 1: `vinga_server.transcript_export` at WARNING
 
 ```text
-session %s: transcripts not exported to telemetry (%s)
+session %s: turn transcript not attached to telemetry (%s)
 ```
 
 | # | Argument | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- |
 | 1 | `session` (`ID`) | no | the `session_id` syntax |  |
-| 2 | `reason` (`TOKEN`) | no | one of: `dropped`, `no_trace`, `undelivered`, `unreadable`, `unrecorded` |  |
+| 2 | `reason` (`TOKEN`) | no | one of: `dropped`, `no_trace`, `unreadable`, `unrecorded` |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `reason` | `TOKEN` | yes | no | one of: `dropped`, `no_trace`, `undelivered`, `unreadable`, `unrecorded` | Which of the five ways this ends badly it was. Never the far side's words and never a count of what did get through: what an operator acts on is the class of the failure, and what a reader needs about a truncated export is already on the turns that did go out, as the highest index any of them carries. |
+| `reason` | `TOKEN` | yes | no | one of: `dropped`, `no_trace`, `unreadable`, `unrecorded` | Which of the four omission classes applied. Never the content itself and never a backend-delivery verdict, which belongs to ordinary telemetry exporter health. |
 
 ### `llm_input_exported`
 
@@ -2681,7 +2681,7 @@ and this says only that it went.
 #### Variant 1: `vinga_server.llm_input_export` at INFO
 
 ```text
-session %s: %d assembled LLM requests exported to telemetry in %d ms (%d too large, %d over the session budget, %d unrenderable)
+session %s: %d LLM content pairs attached to telemetry in %d ms (%d too large, %d over the session budget, %d unrenderable)
 ```
 
 | # | Argument | Nullable | Constraint | Note |
@@ -2697,8 +2697,8 @@ session %s: %d assembled LLM requests exported to telemetry in %d ms (%d too lar
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `rounds` | `COUNT` | yes | no |  | How many rounds went, which is one observation each. A logical round rather than a provider attempt: the first-token watchdog re-sends content fixed before the first try, so a retried round is one request that was made twice and not two requests. |
-| `elapsed_ms` | `INT` | yes | no |  | How long the whole export took, measured off the audio path: this happens on a worker of its own after the session closed, so it is a fact about the backend and the link to it rather than about any reply's latency. |
+| `rounds` | `COUNT` | yes | no |  | How many actual generation spans received a complete pair. A logical round rather than a provider attempt: the first-token watchdog re-sends content fixed before the first try, so a retried round is one request that was made twice and not two requests. |
+| `elapsed_ms` | `INT` | yes | no |  | How long synchronous pairing and attachment took. It excludes delivery by the ordinary OTLP processor and is not a backend acknowledgement. |
 | `oversized` | `COUNT` | yes | no |  | How many rounds were dropped whole for exceeding the per-request ceiling. Dropped rather than truncated, because a shortened request is not the request the model was given and this class is the one whose whole value is that it is exact. |
 | `over_budget` | `COUNT` | yes | no |  | And how many were dropped, oldest first, because the session held more than its byte budget or more rounds than the entry cap behind it. A reader with a partial export learns from these counts that it is partial, and which of the bounds it met. |
 | `unrenderable` | `COUNT` | yes | no |  | And how many this server could not render at all, which is a defect here rather than a conversation that outgrew what may be held for it. A count of its own rather than a fold into either of the two above, because those are the BOUND's vocabulary: reporting a ceiling that was never reached would send an operator to tune a number that had nothing to do with it. Nonzero is a bug report, and it is here rather than nowhere because nothing on this host keeps an assembled request, so a round that vanished from this event vanished from everywhere. |
@@ -2714,19 +2714,19 @@ would leave nothing anywhere to go back to.
 #### Variant 1: `vinga_server.llm_input_export` at WARNING
 
 ```text
-session %s: assembled LLM requests not exported to telemetry (%s)
+session %s: LLM content pair not attached to telemetry (%s)
 ```
 
 | # | Argument | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- |
 | 1 | `session` (`ID`) | no | the `session_id` syntax |  |
-| 2 | `reason` (`TOKEN`) | no | one of: `dropped`, `no_trace`, `undelivered` |  |
+| 2 | `reason` (`TOKEN`) | no | one of: `dropped` |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `reason` | `TOKEN` | yes | no | one of: `dropped`, `no_trace`, `undelivered` | Which of the three ways this ends badly it was. Never the far side's words and never a count of what did get through: what an operator acts on is the class of the failure, and what this class loses to a failure is gone either way, since nothing on this host holds an assembled request once its session has ended. |
+| `reason` | `TOKEN` | yes | no | one of: `dropped` | Why this server omitted the pair before the matching span ended. Never the content itself and never a backend delivery verdict, which belongs to ordinary telemetry exporter health. |
 
 ### `capture_enabled`
 
