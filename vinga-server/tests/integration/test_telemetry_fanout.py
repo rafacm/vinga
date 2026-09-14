@@ -36,6 +36,7 @@ IMAGE = (
 
 RAW_EMAIL = "trace.person@example.test"
 MASKED_EMAIL = "[email]"
+MASKED_CREDENTIAL = "[credential]"
 PUBLIC_KEY = "pk-lf-fanout-smoke-not-real"
 SECRET_KEY = "sk-lf-fanout-smoke-not-real"
 TRACE_COUNT = 64
@@ -153,12 +154,20 @@ def _request() -> bytes:
             span.name = name
             span.start_time_unix_nano = 1_800_000_000_000_000_000 + index * 1_000
             span.end_time_unix_nano = span.start_time_unix_nano + 500
-            span.status.code = Status.STATUS_CODE_OK
+            span.status.code = Status.STATUS_CODE_ERROR
+            # Deliberately violates vinga's safe-error rule so the
+            # Collector's defensive credential mask is tested too.
+            span.status.message = f"failed with {SECRET_KEY}"
             span.attributes.extend(
                 [
                     _attribute("session.id", "fanout-session"),
-                    _attribute("vinga.turn.input", f"mail {RAW_EMAIL}"),
-                    _attribute("langfuse.observation.input", f"mail {RAW_EMAIL}"),
+                    _attribute(
+                        "vinga.turn.input", f"mail {RAW_EMAIL} token {SECRET_KEY}"
+                    ),
+                    _attribute(
+                        "langfuse.observation.input",
+                        f"mail {RAW_EMAIL} token {SECRET_KEY}",
+                    ),
                     _attribute("vinga.safe.error.type", "ProviderError"),
                 ]
             )
@@ -228,13 +237,17 @@ def test_committed_collector_fans_out_one_masked_sampled_population() -> None:
             for span in jaeger.spans()
         )
         assert all(
-            attributes(span)["vinga.turn.input"] == f"mail {MASKED_EMAIL}"
+            attributes(span)["vinga.turn.input"]
+            == f"mail {MASKED_EMAIL} token {MASKED_CREDENTIAL}"
             for span in jaeger.spans()
         )
+        assert all(MASKED_CREDENTIAL in span.status.message for span in jaeger.spans())
         for span in langfuse.spans():
             carried = attributes(span)
-            assert carried["vinga.turn.input"] == f"mail {MASKED_EMAIL}"
-            assert carried["langfuse.observation.input"] == f"mail {MASKED_EMAIL}"
+            expected = f"mail {MASKED_EMAIL} token {MASKED_CREDENTIAL}"
+            assert carried["vinga.turn.input"] == expected
+            assert carried["langfuse.observation.input"] == expected
+            assert MASKED_CREDENTIAL in span.status.message
 
         raw = b"".join(jaeger.bodies + langfuse.bodies)
         for sentinel in (RAW_EMAIL, PUBLIC_KEY, SECRET_KEY):

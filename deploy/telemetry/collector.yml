@@ -18,6 +18,11 @@ processors:
     trace_statements:
       - context: span
         statements:
+          # Credentials are never valid trace content. This catches a
+          # credential-shaped value even if a future metadata or error
+          # mapping violates the server's allowlist before this layer.
+          - replace_all_patterns(attributes, "value", "(?i)(?:pk|sk)-lf-[a-z0-9_-]+", "[credential]")
+          - replace_pattern(status.message, "(?i)(?:pk|sk)-lf-[a-z0-9_-]+", "[credential]") where status.message != ""
           # The explicit list is the reviewable content boundary. It
           # includes every canonical content field and every alias vinga
           # derives for direct Langfuse compatibility.

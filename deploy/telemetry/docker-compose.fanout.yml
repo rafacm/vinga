@@ -25,7 +25,7 @@ services:
       JAEGER_OTLP_ENDPOINT: http://jaeger:4318
       # One hundred keeps the worked walkthrough complete. Sampling is
       # per trace id, so a lower value samples turns, not sessions.
-      TELEMETRY_SAMPLE_PERCENTAGE: "100"
+      TELEMETRY_SAMPLE_PERCENTAGE: "${TELEMETRY_SAMPLE_PERCENTAGE:-100}"
     depends_on:
       jaeger:
         condition: service_started
