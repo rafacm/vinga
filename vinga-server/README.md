@@ -648,7 +648,7 @@ vinga-server config mcp-server set weather -f - <<'YAML'
 transport: streamable_http
 url: http://localhost:8000/mcp
 headers:
-  Authorization: $WEATHER_TOKEN
+  Authorization: Bearer $WEATHER_TOKEN
 tool_timeout_s: 15
 YAML
 ```
@@ -709,9 +709,12 @@ against what published rather than against what the server listed: a
 tool dropped for a name collision or for being too long once prefixed is
 exactly as unreachable as one that was never offered.
 
-Secrets follow the same rule as everywhere else: a value of `$NAME` is
-read from that environment variable at startup, and any secret-looking
-key (`token`, `api_key`, `authorization`, ...) must use that form. An
+Secrets follow the same rule as everywhere else: `$NAME` is read from
+that environment variable at startup, and any secret-looking key
+(`token`, `api_key`, `authorization`, ...) must reference a variable
+somewhere in its value. The reference may be the whole value or sit
+inside a larger one, so `Authorization: Bearer $WEATHER_TOKEN` keeps the
+word `Bearer` in the configuration instead of inside the secret. An
 unset variable fails the boot, as does an unknown reference or a
 reserved entry name. A server that is merely unreachable does not: it
 logs a warning, contributes no tools, and reconnects in the background
@@ -1983,7 +1986,7 @@ forms are supported:
 - **An environment reference**, which is the only form a fragment may
   carry: a provider names the variable holding its key (`api_key_env:
   ANTHROPIC_API_KEY`), an MCP server writes `$NAME` where the secret
-  goes. The server reads the variable at startup and fails the boot when
+  goes, on its own or inside a larger value. The server reads the variable at startup and fails the boot when
   it is unset, rather than failing every conversation later.
 - **A value encrypted in the database**, written with a noun's own
   `secret set`, which reads it from stdin (not echoed at a terminal) or

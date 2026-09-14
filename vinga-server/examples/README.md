@@ -67,9 +67,9 @@ name is left alone, and the same document twice changes nothing.
 
 A fragment never holds a credential. A secret-bearing key names the
 environment variable holding the value (`api_key_env: ANTHROPIC_API_KEY`
-on a provider, `$NAME` in an MCP server's `env` or `headers`), and the
-models refuse anything else, exactly as they do for the configuration
-file.
+on a provider, `$NAME` in an MCP server's `env` or `headers`, which may
+sit inside a larger value as in `Bearer $NAME`), and the models refuse
+anything else, exactly as they do for the configuration file.
 
 The other way to hold a credential is encrypted in the database, which
 never passes through a file at all:

@@ -22,11 +22,13 @@ command: mcp-proxy
 args:
   - http://homeassistant.local:8123/mcp_server/sse
 
-# Secrets are never written here: a value of $NAME is read from that
-# environment variable at startup, and any key that looks secret-bearing
-# (token, api_key, authorization, ...) must use that form. The other way
-# is to store the value encrypted in the database, under the slot the
-# key names:
+# Secrets are never written here: $NAME is read from that environment
+# variable at startup, either as the whole value or inside a larger one
+# (`--token=$NAME`), and any key that looks secret-bearing (token,
+# api_key, authorization, ...) must reference a variable somewhere in
+# its value. The other way is to store the value encrypted in the
+# database, under the slot the key names, where what you enter is the
+# finished value rather than a piece of it:
 #
 #   vinga mcp-server secret set home env.API_ACCESS_TOKEN
 #
