@@ -163,6 +163,19 @@ ordered legs of a handover exactly once, not the response of any one LLM
 round. Empty input or output remains absent rather than becoming an empty
 string.
 
+A handover writes one row per conversation under the same utterance, so the
+transcript exporter composes by utterance before it releases a root. Rows stay
+in store-id order. The first non-null heard value becomes the one input; the
+non-empty reply values are concatenated in row order for the one output. A
+conflicting second heard value makes that utterance unreadable rather than
+choosing one. Keyset paging carries the final utterance group into the next
+page and releases it only after a different utterance or end of input proves
+the group complete. If a later page cannot be read or flushed, the partial
+group is released metadata-only and reported, never exported as half a reply.
+Rows without an utterance cannot address a canonical turn root and remain an
+explicit unaddressable omission rather than creating a session-level content
+span.
+
 The OTLP export mapping copies these values to
 `langfuse.observation.input` and `langfuse.observation.output` so an existing
 direct-to-Langfuse deployment still renders the turn root as an observation.
@@ -394,7 +407,10 @@ fixtures are extended rather than replaced.
   is run at least 100 times because one passing interleaving proves nothing.
 - Transcript tests assert the actual `turn` root, not a child, carries the
   acknowledged heard/reply pair; ordinary, empty, cancelled and handover turns
-  are covered. There is no span named `transcript`.
+  are covered. A handover whose two rows straddle the 256-row page boundary
+  proves carryover and ordered, exactly-once composition; a failed following
+  page proves the partial group releases metadata-only. There is no span named
+  `transcript`.
 - LLM tests assert every successful, tool-only, tool-result, handover, recap
   and failed round has one actual `llm` span with its own matched standard
   input/output JSON. All three content attributes and both vinga extensions
@@ -552,6 +568,12 @@ model `claude-opus-5`, 2026-09-14, runtime 5m18s.
 6. **P1: a handover turn is two store rows that can straddle pages.** The plan
    does not say how those rows become one ordered root output before exactly-once
    release. Grouping and page-boundary carryover must be specified.
+
+   *Resolution:* Transcript projection now groups consecutive rows by
+   utterance, carries the last group across keyset pages, and releases only
+   when the next utterance or EOF proves completeness. It chooses the first
+   heard value, concatenates replies in row order, rejects conflicting input,
+   and releases an incomplete group metadata-only on later-page failure.
 7. **P2: registering a router beside the batch processor exports held spans
    twice.** OpenTelemetry calls every registered processor. The router must own
    the ordinary batch processor and be the only provider registration.
