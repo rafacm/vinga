@@ -362,6 +362,14 @@ Jaeger query API under a fixed deadline and asserts the session, turn and
 semantic children. An optional built-image repetition belongs only to the
 existing non-PR image job and is not claimed as the PR gate.
 
+The maintained direct-to-Langfuse recipe remains part of the server exporter
+contract. It supplies both requirements in the SDK-owned transport variable as
+one comma-separated value:
+`OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic%20<base64-public-key-colon-secret-key>,x-langfuse-ingestion-version=4"`.
+Neither value becomes vinga configuration. The live v4 gate exercises this
+direct recipe as well as the Collector path and records the accepted generation
+and turn-root rendering before the old recipe is called supported.
+
 The fanout example sends vinga to a pinned Collector Contrib image. Its graph
 has one common traces pipeline with, in order, content masking, one
 trace-id-based probabilistic sampler and batching. Its exporters are two named
@@ -552,6 +560,10 @@ fixtures are extended rather than replaced.
   identifiers and canonical projections, and records the UI/API observations
   and commands in the implementation doc. CI uses local protocol receivers
   because repository secrets must not be required on pull requests.
+- A direct Langfuse v4 live gate sends Basic Auth and the ingestion-version
+  header through `OTEL_EXPORTER_OTLP_HEADERS`, then verifies turn and generation
+  rendering. It is checked only when actually run with a real project's
+  credentials.
 - Run `uv run ruff check .`, the distributed unit lane, integration tests,
   command-spelling census, generated-document drift checks, both compose
   resolutions and the new telemetry smoke. Any image or real-Langfuse gate
@@ -895,6 +907,11 @@ read-only tool set, model `claude-opus-5`, 2026-09-14, runtime 9m08s.
 12. **P2: direct-to-Langfuse remains supported but never receives the v4
     ingestion header in the plan.** Its README recipe and live gate must cover
     both Basic Auth and the version header.
+
+    *Resolution:* The server README now owns the exact combined
+    `OTEL_EXPORTER_OTLP_HEADERS` template with Basic Auth and ingestion version
+    4. The live v4 walkthrough exercises the direct path separately from the
+    Collector path before compatibility is claimed.
 13. **P3: slim-image boot is not a pull-request gate.** Only the no-extra unit
     refusal runs on PRs; image verification is workflow-dispatch or post-merge.
 14. **P3: the cross-thread deferred map has no stated concurrency boundary.**
