@@ -674,7 +674,7 @@ fixtures are extended rather than replaced.
   current post-close observation descriptions become false. The changelog
   announces the existing flag's wider disclosure and topology migration in an
   M2 fragment.
-- [ ] **M3, direct Jaeger and one processed fanout.** Add the pinned direct
+- [x] **[M3, direct Jaeger and one processed fanout.](2026-09-14-telemetry-backend-parity-implementation.md#m3-direct-jaeger-and-one-processed-fanout)** (PR TBD) Add the pinned direct
   Jaeger and Collector examples, common masking and sampling, boundary-only
   Langfuse adaptation, Basic Auth and v4 ingestion header, static validation,
   direct Jaeger smoke, dual-receiver parity smoke, live Jaeger/Langfuse

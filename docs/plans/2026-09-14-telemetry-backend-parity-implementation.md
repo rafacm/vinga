@@ -540,3 +540,116 @@ The finalized backlog case passed 20 consecutive runs, its complete unit file
 passed 36 tests, and the four-worker transcript and lifecycle slice passed 56.
 The finalized decoded-wire case passed 10 consecutive runs, and its complete
 integration file passed 4 tests.
+
+## M3: direct Jaeger and one processed fanout
+
+M3 makes Jaeger a supported direct OTLP/HTTP destination and adds one optional
+Collector path that applies policy before it splits canonical traces between
+Jaeger and Langfuse. No server module or production deployment topology
+changed.
+
+### What landed
+
+**Pinned runnable paths.** `deploy/telemetry/docker-compose.jaeger.yml` adds
+Jaeger v2 to the root trial stack and points vinga directly at its OTLP/HTTP
+protobuf receiver. `docker-compose.fanout.yml` adds the same Jaeger plus
+Collector Contrib and points vinga at the Collector with `always_on` source
+sampling. Both images use immutable multi-platform digests. The adjacent
+README records that the pins were verified on 2026-09-14 against the upstream
+release APIs and OCI indexes: Jaeger 2.20.0 and Collector Contrib 0.160.0.
+
+**One policy decision before split.** The committed Collector graph has one
+common trace pipeline in the fixed order content mask, trace-id probabilistic
+sampler, batch. Two named forward connectors hand those same processed records
+to backend sink pipelines. The Jaeger sink drops the entire Langfuse-only
+`capture` span and every `langfuse.*` attribute. The Langfuse sink preserves
+the already-masked compatibility aliases and adds Basic Auth plus the literal
+ingestion-version 4 header at its OTLP/HTTP exporter.
+
+The mask names every canonical turn and generation content field and every
+derived content alias explicitly. Its email-shaped sample rule applies to all
+of them. A defense-in-depth credential rule covers all span attributes and the
+status message before fanout. The behavioral test injects raw email and
+credential sentinels into content and a deliberately invalid status message,
+then scans both complete protobuf streams and the Collector log for the raw
+values.
+
+**Credential isolation and sampling truth.** The ignored
+`deploy/telemetry/.env` is attached only to the Collector and has a committed
+dummy `.env.example`. The root `.env` remains vinga's file and receives no
+Langfuse name. The default Collector sample percentage is 100 for complete
+walkthroughs and may be overridden for capacity tests. Documentation states
+that sampling is per trace id, so it samples independent turns rather than
+whole sessions and can leave one side of a session link absent. It also states
+that common preprocessing gives both exporters identical attempted records,
+not transactional delivery to two independent backends.
+
+**Maintained acceptance.** The pull-request integration lane now runs a
+source-tree server through a simulated conversation against the pinned Jaeger
+container and queries Jaeger's API for the session, turn and semantic children.
+A second Docker-backed test sends 64 deterministic trace IDs through the exact
+committed Collector config to two recording OTLP receivers at a 25 percent
+ratio. It asserts a nonempty proper subset, identical trace-ID populations and
+canonical projections, common masked values, branch-only headers and aliases,
+and complete capture removal from Jaeger. The non-PR image job repeats the
+direct Jaeger path against both built image variants.
+
+The server README carries the exact direct Langfuse v4 header recipe:
+`Authorization=Basic%20<base64-public-key-colon-secret-key>,x-langfuse-ingestion-version=4`.
+The deployment guide carries the direct Jaeger and processed fanout commands,
+the 100 percent live default, partial-sampling consequence, privacy boundary,
+trace-ID comparison and independent-outage limit. The observability map makes
+the Langfuse-only media exception explicit: the `capture` reference span is
+removed from Jaeger, while WAV and manifest bytes stay on the separate
+Langfuse REST and object-storage path.
+
+### Deviations and decisions
+
+There are no deviations from the reviewed M3 contract.
+
+Jaeger's published latest release on the implementation date was 2.20.0 even
+though its upstream release schedule named later tentative versions. The pin
+follows the release API and published OCI index, not the schedule. Collector
+Contrib 0.160.0 was likewise the latest published release on that date.
+
+The common mask also replaces Langfuse-shaped credential tokens in all span
+attributes and status messages. Vinga's own allowlists and safe error types
+remain the primary privacy boundary; this is a defensive Collector rule and
+does not authorize content capture when either content flag is off.
+
+### Verification
+
+Run from `vinga-server/` unless noted otherwise:
+
+- The pinned Collector binary accepted the exact committed configuration.
+- Both telemetry compose overlays resolved with separate dummy root and
+  Collector env files; the fully resolved graph put all three Langfuse names
+  on the Collector and none on vinga.
+- `uv run ruff check .`: clean.
+- `uv run mypy`: clean, 5 source files checked.
+- `uv run pytest tests/unit/test_telemetry_deploy.py -q`: 6 passed. The
+  strengthened structural and fanout selection later ran together as 7
+  passing cases.
+- `uv run pytest tests/integration/test_telemetry_fanout.py -q`: 1 passed. It
+  exercised the exact pinned Collector and two real recording receivers.
+- The source-tree direct Jaeger acceptance: 1 passed against the pinned image
+  and live Jaeger query API.
+- The existing decoded-wire topology case plus the fanout acceptance: 2
+  passed, proving the shared source-server fixture still exports normally.
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 7,426 passed, 19
+  skipped.
+- `uv run pytest tests/integration -q`: 346 passed, including both new Docker
+  acceptances.
+- Configuration examples and command-spelling census: 67 passed.
+- Generated-document drift checks ran inside the full unit and integration
+  lanes and stayed byte-identical.
+- `python3 scripts/check_doc_links.py .` from the repository root: 247 files,
+  0 failures.
+- `python3 scripts/fold_changelog.py check .`: 2 fragments, 0 failures.
+- Credential checks scanned both received protobuf streams, Collector output,
+  the resolved service environments and the committed secret locations. Raw
+  sentinels were absent and no Langfuse name reached vinga.
+- The real Langfuse v4 direct and fanout gates were not run because no project
+  credentials are available in this environment.
+- The built-image Jaeger repetition was not run locally because it belongs to
+  the non-PR image job after an image build.
