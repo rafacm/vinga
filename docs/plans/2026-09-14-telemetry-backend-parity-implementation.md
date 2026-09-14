@@ -300,6 +300,28 @@ event fold still never reads content, but a built and explicitly flagged content
 collaborator may enrich a fold-made span through a server-minted correlation key
 and an allowlisted projection.
 
+The acceptance review found three terminal edges where the first implementation
+did not yet make that ownership complete. A final reply boundary that produced
+no new row now closes and settles any earlier handover rows for the utterance,
+instead of releasing their root and leaving the group until session close.
+Telemetry records a bounded, key-only tombstone when ledger overflow ends a
+root and returns an explicit `OMITTED` settlement result, so a queued worker does
+not report the same operation again as `no_trace`. The tombstone uses the same
+lock and bound as held-root ownership. The overflow callback transfers the
+cancellation to the transcript collaborator, so a delayed job consumes it even
+after the telemetry tombstone is acknowledged. Emitted events still carry no
+utterance or other content identifier.
+
+Generation staging remains keyed only by the server-minted invocation. Its
+interface now also receives the session as a live-trace admission guard:
+missing or closed sessions refuse the snapshot and produce the existing
+`dropped` omission outcome. In the runtime, `finish()` and the matching event
+emit are consecutive synchronous calls, and event taps fold inline, so session
+close cannot interleave after admission. Both LLM event folds still
+defensively consume a staged snapshot if an out-of-order interface caller has
+lost its session trace, so that misuse cannot retain content until process
+shutdown.
+
 ### Verification
 
 Run from `vinga-server/` unless noted otherwise:
@@ -310,6 +332,10 @@ Run from `vinga-server/` unless noted otherwise:
 - Transcript exporter unit tests: 33 passed.
 - Transcript decoded-wire integration tests: 4 passed.
 - App composition and event-driver tests: 33 passed.
+- Acceptance follow-up telemetry and exporter tests: 140 passed.
+- Acceptance follow-up runtime recording, handover, recap and generation tests:
+  112 passed.
+- Acceptance follow-up decoded-wire and content integration tests: 12 passed.
 - Generated server reference, event reference and configuration-example drift
   tests: 212 passed.
 - `uv run pytest tests/unit -q -n 4 --dist loadfile`: 7,426 passed, 2 skipped.
