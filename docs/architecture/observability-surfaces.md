@@ -320,9 +320,11 @@ both spellings either way, so the backend's session view groups the
 words with the turns whichever parent they found.
 Conversation-level text exactly, read post hoc from the conversation
 store's own rows. The assembled model request, the tool arguments and
-results, and the per-request audio are not in it: the first is a content
-class of its own on the ladder below (`export_llm_input`, unlanded) and
-the last is an `export_audio` artifact when something needs it. What it
+results, and the per-request audio are not in it: the first is a
+[content class of its own](#exported-llm-input) behind
+`export_llm_input`, which a deployment switches on separately and which
+contains what this surface contains, and the last is an `export_audio`
+artifact when something needs it. What it
 carries is therefore the conversation-store surface above, narrowed to
 its text, sent to where the exported-traces surface already sends
 metadata.
