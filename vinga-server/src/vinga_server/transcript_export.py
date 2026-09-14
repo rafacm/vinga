@@ -6,7 +6,7 @@ import logging
 import queue
 import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any
 
 from vinga_server.boundary import BoundaryRefusal, Reach, check_feature
@@ -316,14 +316,22 @@ def _content(rows: tuple[_Row, ...]) -> dict[str, Any]:
     replies = [row.record.reply for row in rows if row.record.reply]
     legs: list[dict[str, Any]] = []
     for row in rows:
-        for leg in row.record.legs:
-            legs.append(
-                {
-                    key: value
-                    for key, value in asdict(leg).items()
-                    if value is not None
-                }
-            )
+        if row.record.legs:
+            for leg in row.record.legs:
+                legs.append(
+                    {
+                        key: value
+                        for key, value in {
+                            "agent": leg.agent,
+                            "text": leg.text,
+                            "input_tokens": leg.input_tokens,
+                            "output_tokens": leg.output_tokens,
+                        }.items()
+                        if value is not None
+                    }
+                )
+        elif row.record.reply:
+            legs.append({"agent": row.record.agent, "text": row.record.reply})
     content: dict[str, Any] = {}
     if heard:
         content["input"] = heard[0]
