@@ -772,3 +772,63 @@ minority of each turn and the rest is unattributed, and only then
 reduced on whichever of per-reply speech or `TURNS` the measurement
 names. `REPLY_BOUND_S` moves with the healthy number rather than
 staying generous over a shorter reply.
+
+## Plan review round 2
+
+The first round's finding 1 said that if the attribution revealed a new
+shared fixture or seam, the plan should be amended and reviewed before
+that code was written. It did, so this round reviews that seam.
+
+Backend codex, `codex-cli 0.154.0`, model `gpt-5.6-terra`, sandbox
+read-only, 2026-09-15, against commit `48d03b51`. Reviewer runtime
+6m41s. Verdict: ready after the P1/P2 amendments. Two P1s, both
+confirmed against the tree before amendment.
+
+### 6 (P1): the proposed provider block cannot reach the target TTS configurations
+
+The plan describes a shared full `MOCK_PROVIDERS` block, but the actual
+prompt-echo targets construct TTS inline: `test_agent_guidance.py:168`,
+`test_tools.py:47`, `test_conversations.py:51`. Named voices also need
+to retain `tone_hz`, for example `test_two_personas.py:41-44`. The plan
+should name the full TTS-entry inventory now rather than defer it to a
+milestone grep, and specify an integration-only, fresh-value builder in
+`tests/integration/conftest.py` that applies the lane's `ms_per_char`
+while preserving per-test options such as `tone_hz`. That passes the
+deletion test; a shared mutable full dictionary does not.
+`tests/support/configs.py` should stay outside this seam because unit
+tests use it too, with intentional long-reply behavior.
+
+### 7 (P1): the plan incorrectly says no integration test asserts reply timing
+
+`test_device_simulator.py:32-34` derives `EXPECTED_REPLY_S` from 40 ms
+per character and asserts an audio-duration window at `153-157`. With
+`ms_per_char` of 4, "You said hello." reaches the 240 ms floor, below
+the current 300 ms lower bound. The plan should explicitly preserve
+that contract, either by retaining a 40 ms override for this
+configuration or by deriving the expected duration from the lane
+setting while keeping an audio-duration assertion. It should also
+disposition the timing-sensitive drain setup, which relies on a short
+sleep after starting a deliberately multi-sentence reply
+(`test_drain.py:88-107`).
+
+### 8 (P2): the A/B proves an effect, not that 56% is exclusively paced duration
+
+Varying `ms_per_char` also changes generated PCM, synthesis iterations,
+encoding, packet count and delivery calls in `MockTts.synthesize`.
+`ReplyPacer` does support the pacing explanation by sleeping once per
+packet (`pacing.py:186`), but the A/B alone does not partition the
+delta exactly. The plan should say the A/B attributes 56% to the
+mock-TTS duration setting, with paced playback as the principal
+demonstrated mechanism, and measure emitted audio duration or pacer
+wait time if it wants the stronger claim.
+
+### 9 (P2): the wedged-collector amendment conflates two distinct test shapes
+
+Only the real-transport case performs one preliminary reply plus twelve
+more (`test_telemetry_hardening.py:445-456`); the replacement-exporter
+case wedges during its first of twelve turns (`142-178`). The plan also
+lacks a stated observable proving a reduced `TURNS` still saturates the
+queue. It should split timing and disposition by test, require proof of
+each one's distinct precondition, and if `TURNS` changes, specify the
+observable that demonstrates saturation and set `REPLY_BOUND_S` from
+the newly measured healthy reply time.
