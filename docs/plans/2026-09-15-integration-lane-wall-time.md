@@ -706,7 +706,7 @@ existing test is restated.
   seam already there. Measured: the file 83.37s to 68.33s, the lane
   167.19s to 130.22s at four workers, width four confirmed against
   widths 1, 2 and 8 on the lane rather than on the file.
-- [x] **[M3: the rest of the worklist, attributed and dispositioned](2026-09-15-integration-lane-wall-time-implementation.md#m3-the-rest-of-the-worklist-attributed-and-dispositioned)** (PR TBD).
+- [x] **[M3: the rest of the worklist, attributed and dispositioned](2026-09-15-integration-lane-wall-time-implementation.md#m3-the-rest-of-the-worklist-attributed-and-dispositioned)** (PR #535).
   The three conversation cases are already attributed (56% of those
   three files is real-time playback of a prompt-echo reply), so the
   work is the disposition: the lane's mock provider block gets one home
