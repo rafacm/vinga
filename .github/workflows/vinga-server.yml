@@ -95,12 +95,25 @@ env:
 
 jobs:
   # The suite runs as two lanes that start at the same time rather than
-  # one that runs everything in a row: the unit tests are by far the
+  # one that runs everything in a row, so the critical path is the
+  # longer lane instead of the sum of both. Which lane that is has
+  # moved twice and is a property neither of them owns, which is how
+  # the sentence that used to stand here (the unit tests are by far the
   # longest single item, and the integration tests fit entirely inside
-  # them, so the critical path becomes the longer lane instead of the sum
-  # of both. Nothing moved between lanes for any reason but duration, and
-  # nothing was dropped: every step that ran in the old `test` job runs in
-  # one of these two.
+  # them) came to be false for weeks before anybody read it again. It
+  # was true when the lanes were split. #254 then distributed the unit
+  # tests and handed the critical path to the integration lane, and
+  # three weeks later, measured from the GitHub API at `c999d0dc`, job
+  # start to job completion, the last three runs before this comment
+  # changed were 8m43s, 8m58s and 8m57s of unit against 10m57s, 10m56s
+  # and 10m36s of integration. The repair was to stop running the two
+  # lanes differently rather than to move work between them: both
+  # pytest steps below now carry the same ` -n auto --dist loadfile`
+  # (#491), which is what makes their durations comparable at all, and
+  # the lane expected to finish last is the unit lane again. Nothing
+  # moved between lanes for any reason but duration, and nothing was
+  # dropped: every step that ran in the old `test` job runs in one of
+  # these two.
   #
   # The first three steps (checkout, setup-uv, `uv sync --frozen`) are
   # duplicated by design. A job is its own runner with its own empty
@@ -467,9 +480,18 @@ jobs:
       - name: Unit tests
         run: uv run pytest tests/unit -v --durations=25 -n auto --dist loadfile
 
-  # The shorter lane: the integration tests, the generated-document drift
-  # checks, and the wheel migration. The checks ride here because they
-  # cost seconds and this lane finishes well before the other one.
+  # The other lane: the integration tests, the generated-document drift
+  # checks, and the wheel migration. This used to open with "the
+  # shorter lane", and being the shorter lane was the stated reason the
+  # checks ride here. It stopped being true, which is what #491 was
+  # about, so the reason is restated on a basis that does not depend on
+  # which lane wins: the checks are far too cheap to decide either
+  # lane's finish. On run 34966200567, measured at `c999d0dc`, the
+  # integration tests step was 10m17s of the job's 10m57s, so every
+  # drift check, the wheel migration, the checkout and the install
+  # together were the remaining 40 seconds. What keeps them on one lane
+  # is that a document which drifted is then reported from one place,
+  # and this is the place it has always been reported from.
   #
   # The count used to be written into this sentence and was already one
   # document behind when the metrics views page was added, which is why
@@ -547,8 +569,30 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      # Distributed over worker processes, with the unit step's exact
+      # two tokens and for the same reasons: two lanes of the same tool
+      # run differently is an asymmetry nobody remembers deciding, and
+      # this one cost the repository the critical path for three weeks.
+      #
+      # `--dist loadfile` is what this lane needs most. Its expensive
+      # fixtures are module-scoped: `test_tier_closure.py` builds six
+      # throwaway installs in one set, and `test_cli_wheel.py` builds a
+      # wheel, installs it, prepares a directory outside the checkout
+      # and boots a server in another four. Scattering a file's tests
+      # would rebuild those once per worker that drew one, and the lane
+      # would get slower rather than faster. Intra-file order is
+      # unchanged by construction, which is what makes the change
+      # reviewable.
+      #
+      # Measured at `c999d0dc` on a 14-core development machine, the
+      # same 346 tests either way: 495.34s serial, 130.66s at four
+      # workers, 92.36s at fourteen. A single case that only fails here
+      # is a finding about that case rather than about these two
+      # tokens; if the whole lane turns intermittently red instead, the
+      # grading ladder in the unit step's comment above applies
+      # unchanged, thread-pool caps first and the tokens last.
       - name: Integration tests
-        run: uv run pytest tests/integration -v --durations=25
+        run: uv run pytest tests/integration -v --durations=25 -n auto --dist loadfile
 
       # The reference is generated from the models, so the committed
       # copy is a cache: it exists to be read on GitHub and in an
