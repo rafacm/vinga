@@ -373,13 +373,34 @@ what is measured and what is pinned, not as new cases.
   under the new invocation, locally at two widths (done, in the table
   above) and on the pull request's own CI run, which is the measurement
   that counts and is taken after the change rather than before it.
-- **M2's pooled loops are falsified before they are believed.** The
-  pooled test is watched failing against a deliberately broken command
-  (a module-scope import of the server half added to one ungated
-  command's arm, reverted after), and the failure must name that
-  command. A pooled loop that swallows which row failed is the exact
-  regression this change could introduce, and a green run does not
-  distinguish it from a working one.
+- **M2's pooled loops are falsified before they are believed**, by a
+  fault that can only affect one row. The regression this change could
+  introduce is a pool that swallows which row failed, and a green run
+  does not distinguish that from a working one, so the drill has to
+  produce a row-specific failure and check the row's name comes back.
+
+  **Not by breaking a command's imports**, which was this plan's first
+  proposal and cannot work. `command()` in `config/cli.py` builds the
+  whole grammar per call and runs every row's `declare`, so a
+  module-scope or declaration-time import that reaches the server half
+  breaks *every* `--help` invocation rather than one; and an import
+  inside a single handler is never executed by `--help` at all, since
+  those are deferred until the action runs (`_ota_url` is the worked
+  example). Neither end of that isolates a row.
+
+  **The fault goes at the pooling boundary instead**: `_ran` is wrapped
+  for the duration of the drill so that one chosen `argv` comes back
+  with a non-zero return code and a recognizable stderr, every other
+  row running normally. The pooled test must then fail naming that row
+  and carrying that stderr, which is precisely the property the serial
+  loop's `assert ..., (row.words, finished.stderr)` gives today and the
+  only thing the pool could lose.
+
+  The drill temporarily edits a tracked file, so it follows AGENTS.md's
+  restore rule rather than `git checkout`: copy the original bytes
+  aside, copy them back, and `touch` the restored file, because a
+  restored mtime can land on the second a `.pyc` was compiled on and
+  the interpreter will keep running the pre-restore version.
 - **M2 pins the inventory, not a count.** The pooled test still walks
   `cli.COMMANDS` and still skips exactly `GATED`; the assertion that
   both halves together cover the whole table is what stops a pool from
@@ -578,3 +599,15 @@ measuring widths 2, 4 and 8 **against the whole lane at `-n 4`**, since
 a file that is faster alone and slower in the lane has bought nothing.
 The risk bullet's "four workers each running a pool" is corrected:
 `loadfile` puts the file on one worker, so there is exactly one pool.
+
+*Resolution*: amended. The drill no longer breaks a command's imports,
+and the plan now says why that could not have worked: `command()`
+builds the whole grammar per call and runs every row's `declare`, so a
+declaration-time import breaks every `--help` invocation, while a
+handler-level import is never reached by `--help` at all. The fault is
+injected at the pooling boundary instead, by wrapping `_ran` so one
+chosen `argv` returns non-zero with a recognizable stderr while every
+other row runs normally; the pooled test must fail naming that row and
+carrying that stderr, which is exactly what the serial loop's
+`assert ..., (row.words, finished.stderr)` gives today. AGENTS.md's
+restore rule is named with it, including the `touch`.
