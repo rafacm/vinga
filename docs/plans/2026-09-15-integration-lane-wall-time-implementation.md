@@ -322,6 +322,47 @@ the lane, unchanged across four pool widths and two lane passes.
   `tests/unit/test_command_spellings.py` was run because this milestone
   edits documents, and is reported with the documentation commit.
 
+### What the review round changed
+
+One P2, from codex/terra on PR #534, and it found a real hazard the
+milestone's own falsification could not have: the drill proves a
+failure names its row, and says nothing about how long the failure
+takes to arrive.
+
+The first shape was `pool.map` inside a `with ThreadPoolExecutor(...)`.
+Three facts combine badly there. `ran` gives every command
+`COMMAND_SECONDS`, which is 120, and raises when it expires; the map
+submits the whole inventory at once rather than lazily; and leaving the
+`with` block shuts the pool down without cancelling, so it waits for
+rows that never started. A systemic hang therefore cost a deadline per
+row per worker, which for sixty-two rows over four workers is roughly
+half an hour, on a lane whose whole budget is now minutes. One red
+command would have read as a wedged runner.
+
+The rows are now submitted explicitly, collected in order through
+`future.result()`, and the pool shut down with `cancel_futures=True` in
+a `finally`. Ordered collection is kept deliberately, because it is what
+lets a failure name its row.
+
+The worst case is stated as two deadlines rather than one, and the two
+is measured rather than reasoned to. On a stand-in with the deadline's
+shape (raise on the first row, sleep on the rest, sixty-two rows, four
+workers), cancelling started 8 rows in 1.01s and not cancelling started
+all 62 in 8.05s. Eight is two waves, because the workers pick up a fresh
+row between the deadlines expiring together and the shutdown reaching
+them, and the docstring says so rather than claiming the tidier number.
+
+The falsification drill was re-run once against the rewritten
+collection, same boundary injection and same restore discipline: a
+failing `("device", "relocate")` produced
+`AssertionError: (('device', 'relocate'), 'DRILL-6f3a: this one row was
+made to fail')`, so attribution survives. `uv run ruff check .` passed
+and `uv run pytest tests/integration/test_tier_closure.py -q` gave **43
+passed in 67.66s**, against 68.02s before the change, so the
+cancellation costs nothing on a green run. The widths were not
+re-measured: what changed is the failure path, and the numbers above
+were all taken on runs where nothing failed.
+
 ### The changelog fragment, and why there is none
 
 M2 writes no fragment, which is what the plan's documentation footprint
