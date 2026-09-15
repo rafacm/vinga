@@ -564,6 +564,7 @@ def test_one_round_is_one_span_with_the_settled_gen_ai_keys() -> None:
     assert {
         key for key in llm.attributes if not key.startswith("vinga.")
     } == {
+        "gen_ai.operation.name",
         "gen_ai.provider.name",
         "gen_ai.request.model",
         "server.address",
@@ -660,7 +661,12 @@ def test_a_provider_with_no_identity_carries_no_gen_ai_keys() -> None:
     """The quartet is atomic in the catalog, and the span inherits that:
     a provider the registry never built names no entry, no type, no host
     and no model, and a span with a null model would be a claim the
-    event refused to make."""
+    event refused to make.
+
+    What the span does still say is which operation it is, because that
+    is a fact about this span rather than about the provider behind it.
+    It is the only `gen_ai` key here for the same reason: a round with
+    no identity is exactly the round a reader cannot otherwise type."""
     clock = Clock()
     telemetry, memory = exporting()
     events = a_turn(clock, telemetry)
@@ -680,8 +686,9 @@ def test_a_provider_with_no_identity_carries_no_gen_ai_keys() -> None:
     llm = named(finished(telemetry, memory), LLM_SPAN)
     assert {
         key for key in llm.attributes if not key.startswith("vinga.")
-    } == GROUPING
+    } == {"gen_ai.operation.name", *GROUPING}
     assert "vinga.provider.llm.name" not in llm.attributes
+    assert "gen_ai.request.model" not in llm.attributes
 
 
 def test_two_rounds_are_two_spans_in_the_same_turn() -> None:
@@ -781,6 +788,48 @@ def test_a_tool_call_says_it_is_a_tool_call_in_the_conventions_words() -> None:
     assert {
         key for key in tool.attributes if not key.startswith("vinga.")
     } == {"gen_ai.operation.name", "gen_ai.tool.name", *GROUPING}
+
+
+def test_a_round_says_it_is_a_chat_in_the_conventions_words() -> None:
+    """The key the tool span already carried, on the span beside it.
+
+    The conventions make `gen_ai.operation.name` required on a
+    generation, and a round is one. It is also what a backend types the
+    observation from when the provider reported no model, which a live
+    Langfuse gate measured: untyped, the round's usage is never priced.
+    `chat` is the conventions' value for a streamed chat completion, so
+    a recap is one too and `vinga.llm.purpose` is what separates them.
+    """
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.4)
+    round_done(events, duration_ms=400)
+    finish_reply(events)
+    close_session(events)
+
+    llm = named(finished(telemetry, memory), LLM_SPAN)
+    assert llm.attributes["gen_ai.operation.name"] == "chat"
+
+
+def test_a_failed_round_still_says_which_operation_failed() -> None:
+    """A failure is not a reason to stop naming the operation: this is
+    the round least likely to carry a model name, so it is the one a
+    reader most needs the operation from."""
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.4)
+    provider_failed(events, stage="llm", duration_ms=400, unbuilt=True)
+    finish_reply(events, outcome=ReplyOutcome.FAILED, sentences=0)
+    close_session(events)
+
+    llm = named(finished(telemetry, memory), LLM_SPAN)
+    assert llm.attributes["gen_ai.operation.name"] == "chat"
+    assert llm.status.status_code.name == "ERROR"
+    assert "gen_ai.request.model" not in llm.attributes
 
 
 def test_a_builtin_names_its_tool_and_an_mcp_call_names_its_entry() -> None:

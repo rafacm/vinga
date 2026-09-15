@@ -1085,6 +1085,24 @@ FAILED_PROVIDER_ATTRIBUTES = {
 GEN_AI_OPERATION = "gen_ai.operation.name"
 EXECUTE_TOOL = "execute_tool"
 
+# The same key names what a round span IS, and the conventions make it
+# required on a generation rather than optional. It was missing here
+# while the tool span beside it carried it, so a round was the one
+# semantic operation in the trace that did not say what operation it
+# was. `chat` is the conventions' value for a streamed chat completion,
+# which is what every round is, a recap included: `purpose` is what
+# separates those and the operation is the same one.
+#
+# A backend reads it as well as a person. A live gate against Langfuse
+# measured which attributes decide an observation's type there: a round
+# carrying `gen_ai.request.model` is already typed as a generation, and
+# so is one carrying a `gen_ai.operation.name` the backend knows, while
+# a round carrying neither is typed as a plain span and its usage is
+# never priced. Providers that report no model name are what made that
+# reachable. Stating the operation is the canonical fix for it, and it
+# needs no backend-specific alias to work.
+CHAT = "chat"
+
 TOOL_ATTRIBUTES = {
     "agent": "vinga.agent",
     "conversation": "vinga.conversation.id",
@@ -2891,6 +2909,11 @@ class Telemetry:
             **spoken,
         }
         if stage == LLM_STAGE:
+            # A round that failed is still a round, and a failed
+            # generation a reader cannot type is the case the operation
+            # name matters most for: there is no model name on some of
+            # these at all.
+            attributes[GEN_AI_OPERATION] = CHAT
             attributes.update(self._take_llm_content(payload.get("invocation")))
         span = self._tracer.start_span(
             LLM_SPAN if stage == LLM_STAGE else TTS_SPAN,
@@ -2932,6 +2955,7 @@ class Telemetry:
             context=self._within(trace.turn if trace.turn is not None else trace.span),
             attributes={
                 **self._context(trace, payload, states=LLM_STAGE),
+                GEN_AI_OPERATION: CHAT,
                 **_attributes(payload, LLM_ATTRIBUTES),
                 **self._take_llm_content(payload.get("invocation")),
             },
