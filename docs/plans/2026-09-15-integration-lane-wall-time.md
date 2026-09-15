@@ -102,6 +102,16 @@ This is also precisely what makes #489 worth doing after this and not
 before: #489 shortens the unit lane, and until the integration lane
 falls below it, a shorter unit lane buys no wall time at all.
 
+**Outcome, added after the runs:** the prediction above was optimistic
+by about a quarter and the claim it supports held. The step came in at
+3m20s and 3m31s over two green runs rather than near 2m45s, the job at
+4m04s and 4m08s rather than near 3m20s, and the integration lane
+stopped being the critical path exactly as claimed. The numbers, the
+run identifiers and why the scaling factor was wrong are in
+[the implementation doc](2026-09-15-integration-lane-wall-time-implementation.md#the-ci-runs-which-are-m1s-real-verification);
+this paragraph stays as written, because a prediction that is quietly
+edited after the fact is not one.
+
 Two comments in the workflow still describe the 2026-08-23 world and
 are now false. `L97-L100` says "the unit tests are by far the longest
 single item, and the integration tests fit entirely inside them".

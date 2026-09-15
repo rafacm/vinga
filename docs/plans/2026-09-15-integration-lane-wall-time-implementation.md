@@ -93,16 +93,56 @@ The test count is the thing to read rather than the seconds: 346 serial
 and 346 at both widths, so nothing was skipped, deselected or silently
 lost by the distribution.
 
+### The CI runs, which are M1's real verification
+
+Two runs, both green in both lanes, recorded with the commit each ran
+on because a rerun after a change is a new measurement.
+
+| | before (`c999d0dc`) | [35013431041](https://github.com/rafacm/vinga/actions/runs/35013431041) `pull_request`, `65197b12` | [35013309547](https://github.com/rafacm/vinga/actions/runs/35013309547) `workflow_dispatch`, `37684920` |
+| --- | ---: | ---: | ---: |
+| `Integration tests` step | 10m17s | **3m20s** | **3m31s** |
+| `integration` job | 10m57s | **4m04s** | **4m08s** |
+| `Unit tests` step | 8m04s | 7m41s | 8m12s |
+| `unit` job | 8m43s | 8m16s | 8m51s |
+
+A third data point exists and is reported for completeness rather than
+relied on: run
+[35012831765](https://github.com/rafacm/vinga/actions/runs/35012831765)
+was cancelled when the census fix superseded it, but its `integration`
+job had already finished `success` at 3m57s with a 3m24s step. The
+cancellation reached the `unit` job, which was still running at 5m16s.
+
+**The claim M1 rests on holds.** The integration lane is no longer the
+critical path: it finishes around 4m against the unit lane's 8m16s to
+8m51s, so CI wall time, which is the longer of the two, is now set by
+the unit job. The saving in wall time is the roughly two minutes the
+plan claimed, and is 2m41s on the pull-request run measured against the
+10m57s the integration job took before.
+
+**The plan's prediction was optimistic by about a quarter, and the
+reason is worth keeping.** It predicted a step near 2m45s and a job
+near 3m20s; the step came in at 3m20s and 3m31s, the job at 4m04s and
+4m08s. The prediction scaled the local four-worker result by 1.25x,
+which was measured from the SERIAL comparison (CI 10m17s against local
+8m15s). The parallel factor is 1.56x (CI 3m20s against local 2m11s),
+because the local four-worker run had four workers on a fourteen-core
+machine, where each had a real core and headroom, while CI runs four
+workers on four cores against everything else on the runner. A scaling
+factor measured serially does not transfer to a parallel run, which is
+the calibration to carry into #489 and #490, both of which will want to
+predict CI numbers from local ones.
+
 ### What is not verified, and is not claimed
 
-- **The CI run.** M1's real verification is the pull request's own
-  workflow run, and the plan asks for a second, dispatched run so the
-  claim rests on two rather than one. Neither has happened at the time
-  this section is written. The plan's prediction, stated so CI can
-  falsify it, is an integration step near 2m45s and a job near 3m20s,
-  with the unit job's 8m43s becoming the critical path; none of that is
-  a result yet.
-- **Stability.** Two green CI runs would not prove a parallel lane
-  stable either, and this section will say so when it records them.
+- **Stability.** Two green runs do not prove a parallel lane stable.
+  What they establish is that the lane passes distributed in CI twice,
+  on two different commits and two different event types, with all 346
+  tests accounted for each time. A case that fails intermittently under
+  parallelism would not necessarily have shown itself yet, and the
+  workflow's grading ladder (thread-pool caps, then `-n 3`, then `-n 2`,
+  then the tokens) is what it is for.
+- **The `image` job.** It does not run on a pull request, and in the
+  dispatched run it was still going when this section was written. It
+  is untouched by this milestone.
 - **The `image` job.** Untouched by this milestone and not run locally.
 - **The serial unit lane.** Not run to completion, for the reason above.
