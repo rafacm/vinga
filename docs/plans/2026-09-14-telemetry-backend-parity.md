@@ -678,7 +678,10 @@ fixtures are extended rather than replaced.
   Jaeger and Collector examples, common masking and sampling, boundary-only
   Langfuse adaptation, Basic Auth and v4 ingestion header, static validation,
   direct Jaeger smoke, dual-receiver parity smoke, live Jaeger walkthrough,
-  explicit unchecked Langfuse gates, deployment and index documentation,
+  the two Langfuse gates (deviated at the merge for want of credentials and
+  since [run against a live
+  project](2026-09-14-telemetry-backend-parity-implementation.md#the-live-langfuse-walkthroughs)),
+  deployment and index documentation,
   configuration-example pointers, changelog fragment and final implementation
   record. Design
   footprint: no server module; `deploy/telemetry/` owns the optional deployment

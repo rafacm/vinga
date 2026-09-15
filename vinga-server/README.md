@@ -2788,7 +2788,14 @@ the failed operation.
 OpenTelemetry names are the canonical attributes. The existing
 `langfuse.observation.usage_details` fields for ASR and TTS remain derived
 copies of the canonical whole-number usage values so direct-to-Langfuse
-deployments keep their pricing behavior. With `export_transcripts`, acknowledged
+deployments keep their pricing behavior. A live gate measured the condition
+that alias is read under: Langfuse prices an observation only where it stored
+one as a generation, which it decides from `gen_ai.request.model` or from a
+`gen_ai.operation.name` it knows. Every stage span carries the model a real
+provider reported, and the `llm` round names its operation, so both paths to
+that are canonical attributes rather than a backend hint. A stage whose
+provider reports no model at all, which in practice means the mock providers
+the test lanes run on, is stored as a plain span and is not priced. With `export_transcripts`, acknowledged
 text and ordered handover legs enrich the original turn root as
 `vinga.turn.input`, `vinga.turn.output` and `vinga.turn.legs`. With
 `export_llm_input`, the actual generation span receives
@@ -2809,9 +2816,8 @@ not backend acknowledgement; ordinary exporter health owns downstream
 delivery. Standard `OTEL_EXPORTER_OTLP_*` variables own the
 destination, protocol and credentials; none becomes span content. This
 repository provides three current trace paths. The Jaeger and Collector paths
-are exercised in automated tests. The direct Langfuse v4 recipe is maintained,
-but its rendering under the M2 turn-root and generation-content model has not
-yet been re-verified against a live project:
+are exercised in automated tests, and all three have been walked against a live
+Langfuse v4 project under the M2 turn-root and generation-content model:
 
 - direct Jaeger v2 over OTLP/HTTP protobuf;
 - direct Langfuse v4 over OTLP/HTTP with Basic Auth and its ingestion-version
