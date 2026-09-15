@@ -392,7 +392,7 @@ configures a mock voice, exactly as it did.
 | --- | --- |
 | The seam | `tests/integration/conftest.py`: `mock_voice(**options)`, returning a fresh entry carrying `LANE_MS_PER_CHAR` with the caller's own options on top |
 | The rate, with the measurement that chose it | the same file: `LANE_MS_PER_CHAR = 4.0`, and beside it the playback figures at 40, 8, 4, 2 and the floor's asymptote |
-| The voice's floor, once | the same file: `VOICE_MIN_MS = 240.0`, which two cases now derive a duration from instead of spelling it twice |
+| The voice's floor, once and operative | the same file: `VOICE_MIN_MS = 240.0`, set on every entry the builder returns, which two cases then derive a duration from. It is `once` only after the review round below; as first written it was a second copy of the shipped default rather than the floor the voice used |
 | The inventory, routed | twenty files, twenty-nine entries, each keeping its own name and its own `tone_hz` (below) |
 | The duration window | `tests/integration/test_device_simulator.py`: `EXPECTED_REPLY_S` is `max(VOICE_MIN_MS, LANE_MS_PER_CHAR * len(reply))`, not `40 * len(reply)` |
 | The drain's own proof | `tests/integration/test_drain.py`: the sleep is replaced by waiting for the first sentence, and two assertions a late drain cannot satisfy |
@@ -725,6 +725,65 @@ above:
   module the unit lane imports: `tests/support/configs.py` is
   deliberately outside the seam and `providers/mock.py` is unchanged.
 - **The `image` job.** Untouched and not run.
+
+### What the review round changed
+
+One P2, from codex/sol on PR #535, and it is the same rule this
+milestone's own design notes lean on: two structures that must agree
+are one structure with a bug pending.
+
+`mock_voice` set the rate and not the floor, so `VOICE_MIN_MS` in the
+lane's conftest was a copy of `providers/mock.py`'s default rather than
+the value the voice actually spoke at. The comment beside it claimed a
+stale copy "would fail those two cases loudly rather than quietly",
+because each compares the number against audio the voice really
+produced. That claim was wrong, and the reviewer said why: at the
+lane's rate `test_device_simulator.py`'s reply is floor-bound, so its
+window is the floor halved to the floor tripled, and a shipped floor
+that moved to 200 ms would put the real audio at 0.20s, inside a 0.12s
+to 0.72s window, with nothing said.
+
+**Reproduced rather than accepted**, by moving `providers/mock.py`'s
+`min_ms` default to 200.0 and running the lane against it. A probe
+built the provider from what `mock_voice()` returns and measured the
+audio it emitted, which is the operative floor rather than the declared
+one:
+
+| | the entry the lane builds | declared | operative | `test_device_simulator.py` and `test_drain.py` |
+| --- | --- | ---: | ---: | --- |
+| before the fix, default moved to 200 | `{'type': 'mock', 'ms_per_char': 4.0}` | 240.0 ms | **200.0 ms** | **4 passed** |
+| after the fix, default still 200 | `{'type': 'mock', 'ms_per_char': 4.0, 'min_ms': 240.0}` | 240.0 ms | **240.0 ms** | 4 passed |
+
+The first row is the finding: the lane declared one floor, spoke at
+another, and every case went green. The second is the fix working, and
+the thing to read in it is that the lane is UNAFFECTED by a shipped
+default it no longer inherits.
+
+So the builder now pins both of the voice's timing parameters, the rate
+and the floor, with `options` still winning so a case that wants a
+different floor says so. The two comments that made the old claim are
+corrected rather than softened: `VOICE_MIN_MS` now says the lane pins
+this, and the builder's docstring says why both parameters are set,
+which is that a parameter the lane names without setting is one the
+voice may not have used.
+
+The drill edits a tracked file, so it was undone by AGENTS.md's restore
+rule and not by `git checkout`: the original bytes were copied aside
+before the edit, copied back afterwards, the file `touch`ed so a
+restored mtime could not land on the second a `.pyc` was compiled on,
+and the tree's `__pycache__` directories removed. The restored file
+hashes to the backup (`7e4a16ef`) with its default back at 240.0, and
+`git status` shows the conftest and nothing else.
+
+Re-run after the restore, on the same machine and database as the rest
+of this section: `uv run ruff check .` gives `All checks passed!`,
+`test_device_simulator.py` and `test_drain.py` together give **4 passed
+in 5.19s**, the lane at `-n 4 --dist loadfile` gives **346 passed in
+85.79s** against 88.53s before the fix, and
+`tests/unit/test_command_spellings.py` gives **52 passed** with the
+manifest unmoved. Pinning the floor changes no timing, because the
+value pinned is the one the voice was already using; what it changes is
+that the lane now says so.
 
 ### The changelog fragment, and why there is none
 

@@ -84,29 +84,47 @@ FRAME_BYTES = SAMPLE_RATE * FRAME_MS // 1000 * 2
 # said.
 LANE_MS_PER_CHAR = 4.0
 
-# The mock voice's own floor, which no entry in this lane overrides. It
-# is the shipped default, named here because two cases derive a duration
-# from it: at the rate above, a sentence under sixty characters costs
-# this rather than its text. A copy that went stale would fail those two
-# loudly rather than quietly, since each compares it against audio the
-# voice really produced.
+# The floor the lane's mock voice speaks at, under which no sentence's
+# audio can fall however short its text. Pinned below rather than
+# inherited, which is the difference between this being the lane's floor
+# and being a guess about somebody else's: two cases derive a duration
+# from this number and compare it against audio the voice produced, so
+# the value they read has to be the value the voice used.
+#
+# It happens to be the shipped default today, and that is not what makes
+# it right. Left un-pinned, a shipped default that moved to 200 ms would
+# leave this line declaring 240 while the voice spoke 200, and both
+# cases would go on passing: their windows are wide enough to swallow
+# the difference (#491, found in review and reproduced by moving the
+# default).
 VOICE_MIN_MS = 240.0
 
 
 def mock_voice(**options: Any) -> dict[str, Any]:
-    """One mock TTS entry for this lane, carrying its speaking rate.
+    """One mock TTS entry for this lane, carrying its voice timing.
 
     A fresh mapping every call, never one dictionary shared between
     tests: an entry reaches a config that a test may edit, and a shared
     one would carry an edit into the next case.
 
+    Both of the voice's timing parameters are pinned, the rate and the
+    floor, because both are read back: two cases derive an expected
+    duration from them and check it against audio this entry produced,
+    and a parameter the lane names without setting is one the voice may
+    not have used.
+
     `options` are the caller's own and win, so a named voice keeps its
-    `tone_hz` and a case that genuinely needs the shipped 40 ms says so
-    by passing it. There is no shared providers block here on purpose:
-    the entries this lane writes are named voices as often as not, and a
-    block would flatten the names the tests assert on.
+    `tone_hz`, and a case that genuinely wants the shipped rate or a
+    floor of its own says so by passing it. There is no shared providers
+    block here on purpose: the entries this lane writes are named voices
+    as often as not, and a block would flatten the names the tests
+    assert on.
     """
-    return {"type": "mock", "ms_per_char": LANE_MS_PER_CHAR} | options
+    return {
+        "type": "mock",
+        "ms_per_char": LANE_MS_PER_CHAR,
+        "min_ms": VOICE_MIN_MS,
+    } | options
 
 
 def booted(config: Config):
