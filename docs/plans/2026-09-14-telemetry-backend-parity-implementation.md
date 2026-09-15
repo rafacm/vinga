@@ -801,59 +801,119 @@ P3 test-contract issues.
 
 ## The live Langfuse walkthroughs
 
-Run on 2026-09-15 against a live Langfuse v4 cloud project, which is what
-M3 could not reach. Both gates used the source-tree server driven through
-one simulated conversation by the xiaozhi-sdk device simulator, with
-`export_transcripts` and `export_llm_input` both on, against the pinned
-Jaeger 2.20.0 image and the exact committed `deploy/telemetry/collector.yml`
-on the pinned Collector Contrib 0.160.0. No credential appears in this
-record; the endpoint, the Basic Auth value and the project are supplied from
+Run on 2026-09-15 against a live Langfuse v4 cloud project, which is what M3
+could not reach, and rerun in full at this branch's HEAD after the round span
+gained `gen_ai.operation.name`. The first pass ran before that fix and is not
+what is recorded here: it observed the round stored as a plain span, which is
+the defect the fix answers, so recording it as accepted generation rendering
+would have described a model the repository no longer produces.
+
+Both gates drive one **multi-round** conversation: the first round asks for
+`switch_agent`, the handover moves the turn to a second agent, and the second
+round speaks the reply. That is the shape a single-round conversation cannot
+prove, since it is what puts two generation spans in one turn, each with its
+own matched request and output, and the final reply on the turn root coming
+from an agent other than the one the turn opened against.
+
+No credential appears in this record, and none is quoted back by the commands
+below. The Langfuse endpoint, its Basic Auth value and the project come from
 the environment exactly as the README recipe and `deploy/telemetry/.env`
 describe.
 
-**Direct Langfuse v4.** The maintained recipe was accepted: the v4 OTLP
-endpoint with `Authorization=Basic%20<base64>` and
-`x-langfuse-ingestion-version=4` on `OTEL_EXPORTER_OTLP_HEADERS`, ingest
-answering 200. The M2 content model rendered as the plan intended. The turn
-root carried the heard transcript as its observation input and the final
-reply as its output, and the trace carried the same pair, so a reader meets
-the turn without opening a child. `vinga.turn.legs` arrived parsed back into
-a structured `metadata.legs` rather than a quoted blob. The actual `llm`
-span carried that round's assembled request and its generated output as
-matched GenAI message structures. Both turn traces were grouped under the
-session id. Nothing else of the conversation appeared anywhere.
+### The commands
 
-**Collector fanout.** One conversation through the committed graph at the
-100 percent default, to Jaeger and the same live project. The two backends
-were compared span by span rather than by eye:
+The two backends are the pinned images the committed overlays name, run the
+way [the deployment guide](../deployment.md#telemetry-backends) runs them. The
+gate drives the source-tree server rather than the container, so the Compose
+walkthrough's server is replaced by the same server with the same exporter
+environment:
+
+```bash
+# The backends, pinned exactly as deploy/telemetry/ pins them.
+docker run --detach --name gate-jaeger \
+  --publish 127.0.0.1::4318 --publish 127.0.0.1::16686 \
+  jaegertracing/jaeger:2.20.0@sha256:46a886260e04002d8f45e213fc39063fa11a50446048fdaa64786fc0840cb9f8
+
+docker run --detach --name gate-collector \
+  --add-host host.docker.internal:host-gateway \
+  --publish 127.0.0.1::4318 \
+  --env JAEGER_OTLP_ENDPOINT=http://host.docker.internal:<jaeger-4318> \
+  --env LANGFUSE_OTLP_ENDPOINT="$LANGFUSE_BASE_URL/api/public/otel" \
+  --env LANGFUSE_PUBLIC_KEY --env LANGFUSE_SECRET_KEY \
+  --env TELEMETRY_SAMPLE_PERCENTAGE=100 \
+  --volume "$PWD/deploy/telemetry/collector.yml:/etc/otelcol-contrib/config.yaml:ro" \
+  otel/opentelemetry-collector-contrib:0.160.0@sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6 \
+  --config=/etc/otelcol-contrib/config.yaml
+
+# Direct Langfuse: the README recipe, unchanged.
+export OTEL_EXPORTER_OTLP_ENDPOINT="$LANGFUSE_BASE_URL/api/public/otel"
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_TRACES_SAMPLER=always_on
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic%20$(printf %s "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY" | base64),x-langfuse-ingestion-version=4"
+
+# Fanout: the same server, pointed at the Collector instead.
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:<collector-4318>
+unset OTEL_EXPORTER_OTLP_HEADERS
+```
+
+The server runs with `server.telemetry.enabled`, `export_transcripts` and
+`export_llm_input` on, and `server.conversations` recording text, which is what
+makes the turn root's transcript available to the post-close exporter. The
+conversation is driven through the xiaozhi-sdk device simulator, the same one
+`tests/integration/` uses. Traces are then read back from Jaeger's
+`/api/traces?service=vinga-server` and from Langfuse's
+`/api/public/traces/<trace id>`, the trace id being the OTel trace id
+unchanged.
+
+### Direct Langfuse v4
+
+The maintained recipe was accepted, ingest answering 200, and the M2 content
+model rendered as the plan intended.
+
+The turn root carried the heard transcript as its observation input and the
+final reply as its output, and the trace carried the same pair, so a reader
+meets the turn without opening a child. Both rounds arrived as Langfuse
+**generations** carrying `gen_ai.operation.name=chat`, each with its own
+matched assembled request and generated output, and the second answering for
+the agent the handover moved the turn to rather than the one it opened
+against. Two `tts_stream` spans followed it, one per spoken sentence. Nothing
+else of the conversation appeared anywhere.
+
+### Collector fanout, compared with Jaeger
+
+The same conversation through the committed graph at the 100 percent default,
+to Jaeger and the live project, compared on identifiers rather than by eye:
 
 - The trace-ID sets were identical, both holding the session trace and the
   turn trace.
 - Every `(trace id, span id)` pair present in one was present in the other,
   with no span on either side alone. A Langfuse observation id is the OTel
   span id, so this is an identifier comparison and not a name match.
-- Span names and parentage agreed, including the turn root's empty parent
-  and each stage's parent inside the turn.
+- Span names and parentage agreed, including the turn root's empty parent and
+  each stage's parent inside the turn, across both rounds and both sentences.
 - Start times agreed within a millisecond, which is the precision Langfuse
   stores, and durations agreed.
-- Every canonical attribute agreed value for value: nine on the turn root,
-  eleven on the `llm` span, seven on `asr`, six on `tts_stream` and five on
-  `playback`.
-- The only difference was the intended one. `langfuse.observation.*`
-  survived on the Langfuse branch and was absent from Jaeger, which is
+- The compared canonical attributes agreed value for value on every span. The
+  comparison covers the identity, provider, turn-content and round attributes
+  this contract names; it is not a proof that the two backends hold identical
+  attribute SETS, which is a different claim and one no run here made.
+- `gen_ai.operation.name` was compared across the backends by span id
+  specifically, because it is what this branch adds and the branch a backend
+  adapter could have dropped it on. Both rounds carried `chat` in both.
+- The only difference was the intended one: `langfuse.observation.*` survived
+  on the Langfuse branch and was absent from Jaeger, which is
   `transform/jaeger` doing what it is there for.
 
-**Failed operations, across the same fanout.** A second run drove a provider
-failure and an errored tool through the Collector. Both backends stored the
-same two span ids with `ERROR` status and the safe error types `TimeoutError`
-and `tool_error`, and neither carried a message, an argument or a result.
+A second run drove a provider failure and an errored tool through the same
+fanout. Both backends stored the same two span ids with `ERROR` status and the
+safe error types `TimeoutError` and `tool_error`, and neither carried a
+message, an argument or a result.
 
 ### What the gate found
 
-Langfuse stores an OTLP span as a generation, and prices its usage, only
-when it can type it as one. Four attribute combinations were measured
-directly against the project to establish the rule, each as a span of its
-own in one trace:
+Langfuse stores an OTLP span as a generation, and prices its usage, only where
+it can type it as one. Four attribute combinations were measured directly
+against the project, each as a span of its own in one trace:
 
 | What the span carried | Stored as | `usageDetails` |
 | --- | --- | --- |
@@ -863,32 +923,40 @@ own in one trace:
 | none of the three | span | empty |
 
 `langfuse.observation.usage_details` is read only on a generation, so on a
-plain span it is stored and ignored. Every stage span already carries the
-model a real provider reports, so a real deployment reaches the first row.
-What the gate reached was the last row, because the mock providers the test
-lanes run on report no model at all, and that exposed a genuine gap beside
-it: the `llm` round span named no operation, though the `tool` span next to
-it did and the GenAI conventions make the key required on a generation. The
-round now carries `gen_ai.operation.name=chat`, on ordinary rounds, recaps
-and failed rounds alike. That is a canonical attribute and not a backend
-hint, so it costs Jaeger nothing and needed no new alias.
+plain span it is stored and ignored. Every stage span carries the model a real
+provider reports, so a real deployment reaches the first row and its pricing
+was never broken. What the gate reached was the last row, because the mock
+providers the test lanes run on report no model at all, and that exposed a
+genuine gap beside it: the `llm` round span named no operation, though the
+`tool` span next to it did and the GenAI conventions make the key required on
+a generation. The round now carries `gen_ai.operation.name=chat`, on ordinary
+rounds, recaps and failed rounds alike. That is a canonical attribute and not
+a backend hint, so it costs Jaeger nothing and needed no new alias.
 
-The evidence boundary is worth stating. The rule above was measured on spans
-constructed to carry one attribute set each, and the conversation gates ran
-on mock providers. No cloud ASR, LLM or TTS provider was exercised, so the
+`asr` and `tts_stream` are deliberately not given one. The conventions this
+build ships have no operation name for speech-to-text or text-to-speech, and
+the backend types a generation only from names it knows, so inventing a value
+for them would be a backend hint wearing a canonical spelling. They reach
+generation typing by the model a real provider reports, and against a
+model-less provider they remain plain spans.
+
+The evidence boundary is worth stating. The typing rule above was measured on
+spans constructed to carry one attribute set each, and both conversation gates
+ran on mock providers. No cloud ASR, LLM or TTS provider was exercised, so the
 priced rows are verified at the attribute level rather than through a real
 provider's traffic.
 
 ### Verification
 
-- Direct Langfuse v4, one simulated conversation: accepted, turn-root and
-  generation content rendered as recorded above.
-- Collector fanout to Jaeger and the live project: trace-ID sets, span ids,
-  parentage, names, timestamps, status and canonical attributes all matched.
+- Direct Langfuse v4, one multi-round conversation at this HEAD: accepted,
+  both rounds stored as generations carrying `chat`, turn-root and generation
+  content rendered as recorded above.
+- Collector fanout to Jaeger and the live project, same conversation: trace-ID
+  sets, span ids, parentage, names, timestamps, status and the compared
+  canonical attributes all matched, `gen_ai.operation.name` included.
 - Failed provider and errored tool across the fanout: same span ids, `ERROR`
   status and safe error types in both backends.
-- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 7,450 passed, 2
-  skipped.
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 7,450 passed, 2 skipped.
 - `uv run pytest tests/integration -q`: 346 passed.
 
   This lane first reported `test_the_attachment_refuses_from_an_install_without_its_extra`
@@ -906,3 +974,71 @@ provider's traffic.
   whole fix, and nothing in the repository was wrong.
 - `uv run ruff check .`: clean.
 - `uv run mypy`: clean, 5 source files checked.
+
+## PR review round, live gates and operation name (PR #528)
+
+Automated external review of the PR diff `origin/main...d5e2202b`: codex CLI
+0.154.0, read-only sandbox, model `gpt-5.6-sol`, 2026-09-15, runtime 7m17s,
+[posted on the PR](https://github.com/rafacm/vinga/pull/528#issuecomment-5675963270).
+Verdict: mergeable after the listed fixes. The reviewer found one P1, two P2
+and two P3 issues, every one of them accepted.
+
+1. **P1: the live gates were checked off against the pre-fix trace model.**
+   The record claimed accepted generation rendering while also stating that
+   the conversation reached the "neither model nor operation" case and was
+   stored as a plain span. Both cannot be true of one run, and the second is
+   what actually happened: the gates ran before the fix, so the attribute
+   under review was absent from them. The plan also asks the Collector gate
+   for a multi-round conversation and for recorded commands, and the record
+   described one single-round conversation and carried no commands.
+
+   *Resolution* (`83f994d6`): both gates were rerun at this branch's HEAD on
+   a multi-round tool-and-handover conversation, and the section is rewritten
+   around those runs. It now records two rounds arriving as Langfuse
+   generations carrying `gen_ai.operation.name=chat`, that attribute compared
+   across the backends by span id, the sanitized runnable commands, and an
+   explicit note that the first pass is deliberately not what is recorded.
+
+2. **P2: the README said every model-less stage becomes a plain span.** That
+   stopped being true for the round this branch changes, which is a
+   generation through its operation name whether or not a model was reported.
+
+   *Resolution* (`036536d1`): the paragraph now separates the two stage
+   kinds. An `llm` round always names its operation; `asr` and `tts_stream`
+   have no operation name the backend recognizes and reach generation typing
+   only by a real provider's model.
+
+3. **P2: the recap clause was not pinned by the tests.** The new operation
+   test claimed recap coverage while driving an ordinary reply round, so a
+   regression keyed on purpose would have passed every changed test.
+
+   *Resolution* (`036536d1`): the assertion moves to
+   `test_a_successful_recap_is_a_generation_without_a_reply_ordinal`, which
+   drives a real recap, and the reply test points at it rather than claiming
+   it.
+
+4. **P3: a renamed contract left an inverted test name behind.**
+   `test_a_provider_with_no_identity_carries_no_gen_ai_keys` now expects
+   exactly one `gen_ai` key.
+
+   *Resolution* (`036536d1`): renamed to
+   `test_a_provider_with_no_identity_carries_only_the_operation_key`.
+
+5. **P3: the path summary said direct Jaeger was walked against Langfuse.**
+   All three paths were described as walked against a live Langfuse project,
+   with direct Jaeger listed among them.
+
+   *Resolution* (`036536d1`): direct Jaeger is now stated as walked against
+   Jaeger, and the two Langfuse destinations, the direct one and the
+   Collector's Langfuse branch, against Langfuse.
+
+One defect the review did not raise was found while answering a question
+about how the second half of the issue's test criterion could be tested, and
+is fixed in the same rewrite. The section quoted per-span counts of agreeing
+canonical attributes ("nine on the turn root, eleven on the `llm` span"). Those
+counted the name list of the scratch comparison script, not the spans, which
+carry about nineteen; the number was reproducible only from a file that is not
+in the repository, and it did not move when this branch added an attribute to
+the `llm` span. The claim is now the one the run supports: the compared
+canonical attributes agreed value for value, and the comparison is not a proof
+that both backends hold identical attribute sets.
