@@ -341,10 +341,24 @@ cleared:
 | a device note reaches every agent on that device | 10.97s | 3.85s |
 | a fact remembered in one conversation reaches the next | 10.42s | 3.87s |
 
-**91.6 seconds of 164, 56% of those three files, is the duration of
-synthesized reply audio.** The run's CPU share says what kind of cost
-it is: 25.30s user against 163.98s wall, 17%. The lane is not computing,
+**91.6 seconds of 164, 56% of those three files, is attributable to the
+mock voice's duration setting**, with paced playback as the principal
+demonstrated mechanism. The run's CPU share says what kind of cost it
+is: 25.30s user against 163.98s wall, 17%. The lane is not computing,
 it is waiting.
+
+**What this A/B does and does not partition.** It varies one setting
+and measures the effect of that setting, which is what M3 needs in
+order to act. It does not prove the delta is *exclusively* playback
+time, because `ms_per_char` also changes the generated PCM, the number
+of synthesis iterations, the encoding, the packet count and the
+per-packet delivery calls. What makes paced playback the principal
+mechanism rather than a guess is `ReplyPacer`, which sleeps once per
+packet against a wall clock (`device/pacing.py`), plus the 17% CPU
+share, which rules out the generation and encoding work being where the
+time goes. If M3 wants the stronger claim it measures emitted audio
+duration or accumulated pacer wait directly; nothing in the milestone
+depends on having it.
 
 **Why it waits is product behavior, not a test artifact.**
 `device/pacing.py` exists to send a reply's audio "at the rate it will
@@ -468,26 +482,50 @@ was right about one and unproven about the other.
 exercises `SHUTDOWN_TIMEOUT_S` and its own docstring says it is
 "measured rather than asserted about the constant". It is kept.
 
-`test_a_collector_that_never_answers_costs_no_reply_anything` and its
-sibling (30.02s) are **not** a single real-time wait. They perform one
-reply plus `TURNS = 12` more against `QUEUE = 4`, each asserted under
-`REPLY_BOUND_S = 3.0`, and each reply carries synthesized speech from
-`ScriptedLlm(["Two words. And two more."])`. That reply is short (two
-sentences, about 24 characters, roughly 1 s of audio at the shipped
-default), so unlike the three cases above the speech is a minority of
-each turn's ~2.3 s, and the rest is not yet attributed.
+The remaining wedged-collector time is **two cases, not one**, and they
+are different shapes with different preconditions. Treating them as one
+was an error in this plan's first draft.
 
-So M3 times this case by component before touching it: fixture setup,
-the turn that wedges the exporter, each subsequent reply, and the
-teardown that releases and joins. Then, and only then, it reduces
-whatever dominates. Two levers are available and both preserve the
-claim if the measurement supports them: the per-reply speech duration,
-and `TURNS`, whose stated job is to fill a queue of 4 "several times
-over" and which does not obviously need twelve to do that. The reply
-bound moves with the healthy number if the healthy number moves, since
-its comment says it is deliberately "generous by an order of magnitude"
-against it; a bound left at 3.0 s over a 0.3 s reply would be a weaker
-test, not a faster one.
+- **`test_a_collector_that_never_answers_costs_no_reply_anything`**
+  replaces the exporter object, so what it certifies is the queue
+  between the reply and the transport. It wedges during the first of
+  its `TURNS = 12` turns. Its preconditions are that the exporter
+  actually blocked (`collector.entered.wait(1.0)`, asserted every turn)
+  and that saturation dropped rather than grew without bound
+  (`collector.batches <= QUEUE + 1`).
+- **`test_a_collector_that_answers_nothing_costs_no_reply_anything`**
+  leaves the real OTLP exporter in place against an endpoint that
+  accepts and never answers, so what it certifies is the whole path a
+  deployment runs. It performs one preliminary turn (a span reaches the
+  transport only when it ends) plus `TURNS` more. Its preconditions are
+  that the request was entered (`collector.entered.wait(15.0)`) and was
+  **still outstanding** when the replies finished
+  (`collector.outstanding >= 1`).
+
+Both assert every reply under `REPLY_BOUND_S = 3.0`, and both carry
+speech from `ScriptedLlm(["Two words. And two more."])`. That reply is
+short (two sentences, about 24 characters, roughly 1 s of audio at the
+shipped default), so unlike the three cases above the speech is a
+minority of each turn's ~2.3 s and the rest is not yet attributed.
+
+So M3 times **each case separately** by component before touching
+either: fixture setup, the turn that establishes the precondition, each
+subsequent reply, and the teardown that releases and joins. Then, and
+only then, it reduces whatever dominates, per case.
+
+Two levers are available. Per-reply speech duration is one. `TURNS` is
+the other, and it may not be cut on the "several times over" comment
+alone: **if `TURNS` changes, the milestone states the observable that
+demonstrates the precondition still holds at the new value**, which is
+the batch count against `QUEUE + 1` for the first case and
+`collector.outstanding >= 1` for the second. A turn count reduced until
+the case still passes is not evidence; the case passing is compatible
+with never having saturated anything.
+
+`REPLY_BOUND_S` is then set from the newly measured healthy reply time,
+since its comment says it is deliberately "generous by an order of
+magnitude" against it. A bound left at 3.0 s over a 0.3 s reply would
+be a weaker test, not a faster one.
 
 Only the remainder that survives that closes as measured-and-kept.
 
@@ -660,21 +698,27 @@ existing test is restated.
   The three conversation cases are already attributed (56% of those
   three files is real-time playback of a prompt-echo reply), so the
   work is the disposition: the lane's mock provider block gets one home
-  in the integration `conftest.py` carrying the lane's `ms_per_char`,
-  the duplicated `MOCK_PROVIDERS` literals read it from there, the
-  value is the smallest that keeps `dominant_hz` inside 20 Hz and
-  `audio.size > 0`, and the three files are measured again at it. The
-  bounded-shutdown case is kept. The wedged-collector case is timed by
-  component (setup, the wedging turn, each reply, teardown) before
-  anything is changed, then reduced on whichever of per-reply speech or
-  `TURNS` the measurement names, with `REPLY_BOUND_S` moving with the
-  healthy number rather than staying generous over a shorter one.
+  in the integration `conftest.py` as a builder carrying the lane's
+  `ms_per_char`, every TTS entry in the inventory rewritten through it
+  keeping its own name and options, the value chosen as the smallest
+  that keeps `dominant_hz` inside 20 Hz, `audio.size > 0`,
+  `test_device_simulator.py`'s duration window (derived from the lane
+  setting, not a hardcoded 40) and `test_drain.py`'s drain landing
+  mid-reply, and the three files measured again at it. The
+  bounded-shutdown case is kept. The two wedged-collector cases are
+  timed separately by component before anything is changed, then
+  reduced on whichever of per-reply speech or `TURNS` the measurement
+  names, with any `TURNS` change stating the observable that shows its
+  precondition still holds, and `REPLY_BOUND_S` set from the newly
+  measured healthy reply.
   Anything that survives closes measured-and-kept. **Design footprint:**
-  one seam, the lane's provider block in the integration `conftest.py`,
-  which is where this lane already puts what two or more modules need.
-  It passes the deletion test in the direction that matters: its body
-  inlined into its callers is the dozen duplicated literals the lane
-  has today, which is why the value has nowhere to live.
+  one seam, a mock-voice entry builder in the integration
+  `conftest.py`, returning a fresh entry that carries the lane's
+  `ms_per_char` and preserves the caller's own options such as
+  `tone_hz`. Not a shared dictionary, which cannot reach the three
+  worklist files and would flatten the named voices.
+  `tests/support/configs.py` stays out of it, since 79 unit files
+  import it.
 
 M2 and M3 stack on M1 and on each other, and each subagent starts when
 its predecessor's PR opens rather than when it merges.
@@ -902,3 +946,25 @@ finishes inside its 0.05 s window the drain no longer lands mid-speech.
 The surviving half of the original claim, about
 `test_the_utterance_is_paced_rather_than_burst`, is kept and labelled
 as the part that was right.
+
+*Resolution for 8 (P2)*: amended. The claim is now that the A/B
+attributes 56% to the mock voice's duration setting, with paced
+playback as the principal demonstrated mechanism, and the plan says
+outright what the A/B does not partition: `ms_per_char` also moves the
+generated PCM, the synthesis iterations, the encoding, the packet count
+and the per-packet delivery calls. What makes pacing principal rather
+than assumed is `ReplyPacer` sleeping once per packet against a wall
+clock plus the 17% CPU share. Measuring emitted audio duration or pacer
+wait directly is named as what the stronger claim would need, and
+nothing in M3 depends on having it.
+
+*Resolution for 9 (P2)*: amended. The two cases are separated with
+their distinct shapes and preconditions written out: the
+replacement-exporter case certifies the queue and wedges during its
+first turn, asserting `entered` every turn and `batches <= QUEUE + 1`;
+the real-transport case certifies the whole path, takes one preliminary
+turn because a span reaches the transport only when it ends, and
+asserts `entered` plus `outstanding >= 1`. Each is timed separately.
+The plan now refuses a `TURNS` reduction justified by the case still
+passing, and requires the observable that shows the precondition still
+holds at the new value, naming which observable belongs to which case.
