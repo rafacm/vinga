@@ -992,7 +992,7 @@ and two P3 issues, every one of them accepted.
    for a multi-round conversation and for recorded commands, and the record
    described one single-round conversation and carried no commands.
 
-   *Resolution* (`83f994d6`): both gates were rerun at this branch's HEAD on
+   *Resolution* (`e2a00704`): both gates were rerun at this branch's HEAD on
    a multi-round tool-and-handover conversation, and the section is rewritten
    around those runs. It now records two rounds arriving as Langfuse
    generations carrying `gen_ai.operation.name=chat`, that attribute compared
