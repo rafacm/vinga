@@ -367,45 +367,92 @@ something "by actually sleeping through N") in a shape the review did
 not anticipate: the tests are not sleeping through a timeout, they are
 listening to a long reply.
 
-### The disposition: the lane's voice timing gets one home
+### The disposition: a builder, not a shared block
 
 The change is to the **lane's** mock voice, never to the shipped
 default. `build_tts`'s 40 ms per character stays exactly as it is,
 because it is the default a person gets when they configure a mock
-voice and nothing here is about them.
+voice and nothing here is about them. The precedent for overriding it
+per configuration is already in the tree: `tests/support/configs.py`
+sets `"ms_per_char": 1` on one entry today.
 
-Today `{"type": "mock"}` is written out as a literal in the integration
-configs, most often inside a repeated
-`MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in (...)}`
-that appears verbatim in file after file. That duplication is why there
-is no one place to set this. M3 gives the lane's provider block one
-home in the integration `conftest.py`, carrying the lane's
-`ms_per_char`, and the files read it from there. Two structures that
-must agree are one structure with a bug pending, and this is a dozen.
+**Not a shared `MOCK_PROVIDERS` dictionary**, which was this plan's
+first proposal and does not work. The grep, run rather than remembered:
 
-That is the seam the earlier draft said might be needed; it is now
-named, and it passes the deletion test the other way round: inlining it
-back into a dozen callers is exactly the state the lane is in, and it
-is the reason the value has nowhere to live.
+- Ten integration files define their own
+  `MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in (...)}`:
+  `test_access_logs.py`, `test_activation.py`, `test_capture_upload.py`,
+  `test_device_simulator.py`, `test_device_bindings.py`,
+  `test_drain.py`, `test_telemetry_export.py`, `test_ota_endpoint.py`,
+  `test_ws_auth.py`, `test_wire_latency_capture.py`.
+- **None of the three worklist files is among them.**
+  `test_agent_guidance.py`, `test_tools.py` and `test_conversations.py`
+  each write `"tts": {"mock": {"type": "mock"}}` inline inside a config
+  they build for the case. So a shared block would not have reached the
+  files the attribution is about.
+- Several files name their voices and carry options that must survive:
+  `test_two_personas.py` and `test_tools.py` use
+  `{"tenor": {"type": "mock", "tone_hz": POET_TONE}, "alto": {...}}`,
+  `test_llm_input_export.py` uses `{"tenor": {"type": "mock",
+  "tone_hz": 440}}`, and `test_cli_wheel.py` and `test_cli_live.py` use
+  a voice named `voice`. A shared dictionary would flatten all of that.
 
-**The claims that must survive, each checked rather than assumed:**
+So the seam is a **builder**, in `tests/integration/conftest.py`: it
+returns a fresh mock TTS entry carrying the lane's `ms_per_char`, and
+it takes and preserves whatever per-entry options the caller already
+passes, `tone_hz` above all. Fresh value per call, never one mutable
+dictionary shared between tests. Each of the entries in the inventory
+above is rewritten to go through it, keeping its own name and its own
+options.
 
+**`tests/support/configs.py` stays outside this seam.** It is imported
+by 79 unit test files, some of which depend on the long-reply behavior
+deliberately, so the lane's value must not be set there. This is an
+integration-lane seam and nothing else.
+
+### The claims that must survive, each checked rather than assumed
+
+The first version of this section claimed that no integration test
+asserts reply timing. That was wrong, and the correction is the reason
+this round exists.
+
+- **`test_device_simulator.py` asserts an audio-duration window, and it
+  is derived from the constant this change moves.** It sets
+  `EXPECTED_REPLY_S = 40 * len(EXPECTED_REPLY) / 1000` with a comment
+  saying "The mock TTS speaks 40 ms per character with a 240 ms floor",
+  and asserts `EXPECTED_REPLY_S / 2 <= duration_s <= EXPECTED_REPLY_S * 3`.
+  For "You said hello." that window is 0.3 s to 1.8 s. At 4 ms per
+  character the reply floors to 0.24 s and the case fails. M3 keeps
+  this contract by deriving `EXPECTED_REPLY_S` from the lane's setting
+  rather than from a hardcoded 40, keeping the duration assertion and
+  the floor in the arithmetic, and updating the comment that states the
+  constants. Retaining a 40 ms override for this one configuration is
+  the acceptable alternative if the derivation cannot keep a meaningful
+  window.
+- **`test_drain.py` is timing-sensitive in a way that shortening a
+  reply can silently defeat.** Its case starts a five-sentence reply,
+  sleeps 0.05 s, then drains, and asserts the whole reply was spoken
+  rather than the part that fitted before the drain. If the reply
+  becomes short enough to finish inside that window, the case still
+  passes while no longer testing a drain during speech. M3 either keeps
+  this configuration's speech long enough that the drain lands
+  mid-reply, or replaces the sleep with synchronization on the first
+  spoken sentence. It does not simply let the number move.
 - `spoken(events)` reads the `tts sentence_start` **text**, which is
-  what all three cases assert on. Text is unchanged by how long its
-  audio is.
+  what the three worklist cases assert on. Text is unchanged by how
+  long its audio is.
 - `test_tools.py` asserts `audio.size > 0` and
-  `abs(dominant_hz(audio) - TONE) < 20`. Shortening the audio shortens
-  the FFT window, so M3 confirms the remaining audio still resolves the
-  tone inside 20 Hz. The floor helps: `min_ms` is 240 ms, which at the
-  16 kHz analysis rate is 3,840 samples against the ~800 a 20 Hz
-  resolution needs. Confirmed by running those cases, not by this
-  arithmetic.
-- No integration test asserts that the reply arrives paced.
-  `test_the_utterance_is_paced_rather_than_burst` is about the
+  `abs(dominant_hz(audio) - TONE) < 20`, and `test_two_personas.py`
+  reads `dominant_hz` too. Shortening the audio shortens the FFT
+  window, so M3 confirms the remaining audio still resolves the tone
+  inside 20 Hz. The 240 ms floor helps, giving 3,840 samples at the
+  16 kHz analysis rate against the ~800 a 20 Hz resolution needs.
+  Confirmed by running those cases, not by this arithmetic.
+- `test_the_utterance_is_paced_rather_than_burst` is about the
   simulator's **outgoing** utterance and asserts on recorded sleep
-  calls rather than on elapsed time, so it is untouched.
-- `test_two_personas.py` also reads `dominant_hz`, so it is in the same
-  check.
+  calls rather than elapsed time, so it is untouched. That part of the
+  original claim stands; what was wrong was treating it as the whole
+  search.
 
 **What M3 does not claim.** `ms_per_char` of 4 was the A/B's probe, not
 a proposed constant. M3 picks the lane's value as the smallest that
@@ -832,3 +879,26 @@ queue. It should split timing and disposition by test, require proof of
 each one's distinct precondition, and if `TURNS` changes, specify the
 observable that demonstrates saturation and set `REPLY_BOUND_S` from
 the newly measured healthy reply time.
+
+*Resolution for 6 (P1)*: amended. The disposition is no longer a shared
+`MOCK_PROVIDERS` dictionary, and the plan now carries the grep rather
+than promising one: ten files define their own `MOCK_PROVIDERS` and
+**none of the three worklist files is among them**, because those three
+write their TTS entry inline. Several files name their voices and carry
+`tone_hz`, which a shared dictionary would flatten. The seam is now a
+builder in `tests/integration/conftest.py` returning a fresh entry that
+carries the lane's `ms_per_char` and preserves the caller's own
+options. `tests/support/configs.py` is named as out of scope, with the
+reason: 79 unit files import it.
+
+*Resolution for 7 (P1)*: amended, and the false claim is corrected in
+place rather than quietly dropped. `test_device_simulator.py` derives
+`EXPECTED_REPLY_S` from a hardcoded 40 ms per character and asserts a
+0.3 s to 1.8 s window that a 4 ms setting would fail, so M3 now derives
+that expectation from the lane's setting and keeps the assertion.
+`test_drain.py` is dispositioned too, with the sharper point that it
+would keep PASSING while stopping to test anything: if the reply
+finishes inside its 0.05 s window the drain no longer lands mid-speech.
+The surviving half of the original claim, about
+`test_the_utterance_is_paced_rather_than_burst`, is kept and labelled
+as the part that was right.
