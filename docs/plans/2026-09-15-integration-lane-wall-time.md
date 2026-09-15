@@ -229,17 +229,47 @@ than its longest file however wide the runner is. That floor is
 workers against a 492s total (the summed durations of the serial run) is a bin-packing result a few seconds off
 its own optimum.
 
-This is why M2 exists and why its claim is modest. Removing the
-help-page case's 25.31s takes the floor to roughly 58s and lets a
-four-worker pack approach ~118s. That is ten to twelve seconds of CI
-wall time, which would not be worth a milestone on its own. What makes
-it worth one is that it is the floor: it is what the next runner width
-buys nothing against, and it is 25 seconds of a developer's local loop
-whether or not they pass `-n`.
+This is why M2 exists and why its claim is modest, and the arithmetic
+has to be done with the pool's width in it rather than against zero.
+The pooled loop does not vanish; it divides. With width `w` the
+optimistic floor is
 
-M2's claim is therefore stated as "the floor moves from 83s to ~58s",
-never as a CI wall-time figure, and M2's verification measures the file
-rather than the job.
+```
+83.37 - 25.31 + 25.31/w   (+ pool overhead, + whatever the gated loop returns)
+```
+
+which is **64.4s at width four**, not 58s. Subtracting the case whole
+was the error: 58s is the `w` = infinity answer, and the plan
+explicitly refuses 65-way concurrency, so it was never available.
+
+**The width is 4, chosen as a starting point and required to be
+confirmed by measurement, with the lane as the thing optimized.** The
+reasoning: `loadfile` puts this file on exactly one worker, so there is
+one pool in the run, competing with the other three xdist workers for a
+four-core runner. Each pooled subprocess is a fresh interpreter whose
+life is mostly importing the CLI, which is CPU, so a wide pool on a
+saturated runner trades the file's wall time against every other
+worker's. Four is the runner's core count and the point past which the
+pool is bidding against its own lane.
+
+That number is a hypothesis, not a result. M2 measures widths 2, 4 and
+8, **both for the file alone and for the whole lane at `-n 4`**, and
+takes the width that minimizes the LANE. A width that makes the file
+faster and the lane slower has bought nothing, which is the trap a
+file-only measurement cannot see.
+
+The risk section previously said "four workers each running a pool".
+That cannot happen under `loadfile` and the sentence is corrected: one
+worker holds `test_tier_closure.py` and runs the only pool.
+
+M2's claim is therefore stated as "the file's serial total moves from
+83.37s toward roughly 64s at width four, confirmed or corrected by
+measurement", never as a CI wall-time figure. Against a 492s lane total
+that lets a four-worker pack approach ~123s rather than ~118s. Ten
+seconds of CI wall time would not be worth a milestone on its own; what
+makes it worth one is that it is the floor, which is what the next
+runner width buys nothing against, and that it is 25 seconds of a
+developer's local loop whether or not they pass `-n`.
 
 ### The help-page case gets a pool, not a consolidation
 
@@ -406,11 +436,13 @@ existing test is restated.
   either and the doc says so rather than implying it.
 - **The pool hides which command failed.** Named above, and falsified
   rather than reasoned about.
-- **The pool starves a small runner.** Bounded width, stated as a
-  number, chosen so four workers each running a pool do not
-  collectively exceed the runner. M2 measures the file at four workers,
-  not only alone, because a file that is faster in isolation and slower
-  in the lane has bought nothing.
+- **The pool starves the rest of the lane.** Under `loadfile` there is
+  exactly one pool, on the one worker holding `test_tier_closure.py`,
+  and it competes with the other three workers for a four-core runner.
+  Bounded width, stated as a number (4 to start), and chosen by
+  measuring widths 2, 4 and 8 against the whole lane at `-n 4` rather
+  than against the file alone: a file that is faster in isolation and
+  slower in the lane has bought nothing.
 - **M3 finds nothing worth changing.** This is an outcome, not a risk,
   and the issue says so. The milestone is written to close that way
   without embarrassment, and its cost is capped at the attribution.
@@ -431,11 +463,13 @@ existing test is restated.
 - [ ] **M2: the tier-closure floor.** The two serial subprocess loops
   in `test_tier_closure.py` run through a bounded pool, one fresh
   interpreter per command preserved exactly, failures still naming
-  their row, falsified against a deliberately broken command. Claim:
-  the file's serial total moves from 83.37s toward ~58s, which is the
-  lane's `loadfile` floor. **Design footprint:** a file-local helper,
-  deliberately not a module; `_ran` is unchanged, which is the seam
-  already there.
+  their row, falsified by a row-specific fault injected at the pooling
+  boundary. Width starts at 4 and is settled by measuring 2, 4 and 8
+  against the whole lane at `-n 4`, not against the file alone. Claim:
+  the file's serial total moves from 83.37s toward roughly 64s, which
+  is the lane's `loadfile` floor. **Design footprint:** a file-local
+  helper, deliberately not a module; `_ran` is unchanged, which is the
+  seam already there.
 - [ ] **M3: the rest of the worklist, attributed and dispositioned.**
   Where the seconds go in the three conversation cases, which is not
   yet known and is the milestone's first deliverable; the
@@ -533,3 +567,14 @@ and `test_cli_wheel.py`'s four (`wheel`, `installed`, `elsewhere`,
 `live`), which are the genuinely expensive ones. The two telemetry
 files are named explicitly as NOT an example, with their actual scopes,
 and are left where they belong, in the shared-resource audit.
+
+*Resolution*: amended. The floor is now computed as
+`83.37 - 25.31 + 25.31/w` with the pool's width in it, giving roughly
+64s at width four rather than 58s, and the plan says plainly that 58s
+was the `w` = infinity answer it had already refused. The width is
+stated as 4, justified against one pool competing with three other
+xdist workers on a four-core runner, and required to be settled by
+measuring widths 2, 4 and 8 **against the whole lane at `-n 4`**, since
+a file that is faster alone and slower in the lane has bought nothing.
+The risk bullet's "four workers each running a pool" is corrected:
+`loadfile` puts the file on one worker, so there is exactly one pool.
