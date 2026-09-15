@@ -621,18 +621,18 @@ Langfuse REST and object-storage path.
 
 ### Deviations and decisions
 
-Two reviewed live acceptance gates remain deviations because no Langfuse
-project credentials are available in this environment:
+Two reviewed live acceptance gates were deviations at the time of the merge
+because no Langfuse project credentials were available in that environment.
+Both have since been run against a live project; the walkthrough and what it
+found are recorded in [the live Langfuse
+walkthroughs](#the-live-langfuse-walkthroughs) below.
 
-- [ ] Direct Langfuse v4: send the M2 turn-root and generation-content model
+- [x] Direct Langfuse v4: send the M2 turn-root and generation-content model
   with the maintained Basic Auth and ingestion-version header recipe, then
   record its accepted generation and turn rendering.
-- [ ] Collector fanout to Langfuse v4: send the same model through the
+- [x] Collector fanout to Langfuse v4: send the same model through the
   committed common policy pipeline, then compare its real Langfuse rendering
   and trace-ID population with Jaeger.
-
-Until those gates run, the direct Langfuse recipe is maintained but its
-rendering under the M2 content model is not claimed as live-verified.
 
 Jaeger's published latest release on the implementation date was 2.20.0 even
 though its upstream release schedule named later tentative versions. The pin
@@ -798,3 +798,101 @@ P3 test-contract issues.
 - `uv run ruff check .`: clean.
 - Command-spellings census: 52 passed.
 - Documentation links and anchors: 247 files checked, 0 failures.
+
+## The live Langfuse walkthroughs
+
+Run on 2026-09-15 against a live Langfuse v4 cloud project, which is what
+M3 could not reach. Both gates used the source-tree server driven through
+one simulated conversation by the xiaozhi-sdk device simulator, with
+`export_transcripts` and `export_llm_input` both on, against the pinned
+Jaeger 2.20.0 image and the exact committed `deploy/telemetry/collector.yml`
+on the pinned Collector Contrib 0.160.0. No credential appears in this
+record; the endpoint, the Basic Auth value and the project are supplied from
+the environment exactly as the README recipe and `deploy/telemetry/.env`
+describe.
+
+**Direct Langfuse v4.** The maintained recipe was accepted: the v4 OTLP
+endpoint with `Authorization=Basic%20<base64>` and
+`x-langfuse-ingestion-version=4` on `OTEL_EXPORTER_OTLP_HEADERS`, ingest
+answering 200. The M2 content model rendered as the plan intended. The turn
+root carried the heard transcript as its observation input and the final
+reply as its output, and the trace carried the same pair, so a reader meets
+the turn without opening a child. `vinga.turn.legs` arrived parsed back into
+a structured `metadata.legs` rather than a quoted blob. The actual `llm`
+span carried that round's assembled request and its generated output as
+matched GenAI message structures. Both turn traces were grouped under the
+session id. Nothing else of the conversation appeared anywhere.
+
+**Collector fanout.** One conversation through the committed graph at the
+100 percent default, to Jaeger and the same live project. The two backends
+were compared span by span rather than by eye:
+
+- The trace-ID sets were identical, both holding the session trace and the
+  turn trace.
+- Every `(trace id, span id)` pair present in one was present in the other,
+  with no span on either side alone. A Langfuse observation id is the OTel
+  span id, so this is an identifier comparison and not a name match.
+- Span names and parentage agreed, including the turn root's empty parent
+  and each stage's parent inside the turn.
+- Start times agreed within a millisecond, which is the precision Langfuse
+  stores, and durations agreed.
+- Every canonical attribute agreed value for value: nine on the turn root,
+  eleven on the `llm` span, seven on `asr`, six on `tts_stream` and five on
+  `playback`.
+- The only difference was the intended one. `langfuse.observation.*`
+  survived on the Langfuse branch and was absent from Jaeger, which is
+  `transform/jaeger` doing what it is there for.
+
+**Failed operations, across the same fanout.** A second run drove a provider
+failure and an errored tool through the Collector. Both backends stored the
+same two span ids with `ERROR` status and the safe error types `TimeoutError`
+and `tool_error`, and neither carried a message, an argument or a result.
+
+### What the gate found
+
+Langfuse stores an OTLP span as a generation, and prices its usage, only
+when it can type it as one. Four attribute combinations were measured
+directly against the project to establish the rule, each as a span of its
+own in one trace:
+
+| What the span carried | Stored as | `usageDetails` |
+| --- | --- | --- |
+| `gen_ai.request.model` | generation | priced |
+| `gen_ai.operation.name=chat` | generation | priced |
+| `langfuse.observation.type=generation` | generation | priced |
+| none of the three | span | empty |
+
+`langfuse.observation.usage_details` is read only on a generation, so on a
+plain span it is stored and ignored. Every stage span already carries the
+model a real provider reports, so a real deployment reaches the first row.
+What the gate reached was the last row, because the mock providers the test
+lanes run on report no model at all, and that exposed a genuine gap beside
+it: the `llm` round span named no operation, though the `tool` span next to
+it did and the GenAI conventions make the key required on a generation. The
+round now carries `gen_ai.operation.name=chat`, on ordinary rounds, recaps
+and failed rounds alike. That is a canonical attribute and not a backend
+hint, so it costs Jaeger nothing and needed no new alias.
+
+The evidence boundary is worth stating. The rule above was measured on spans
+constructed to carry one attribute set each, and the conversation gates ran
+on mock providers. No cloud ASR, LLM or TTS provider was exercised, so the
+priced rows are verified at the attribute level rather than through a real
+provider's traffic.
+
+### Verification
+
+- Direct Langfuse v4, one simulated conversation: accepted, turn-root and
+  generation content rendered as recorded above.
+- Collector fanout to Jaeger and the live project: trace-ID sets, span ids,
+  parentage, names, timestamps, status and canonical attributes all matched.
+- Failed provider and errored tool across the fanout: same span ids, `ERROR`
+  status and safe error types in both backends.
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 7,450 passed, 2
+  skipped.
+- `uv run pytest tests/integration -q`: 345 passed, 1 failed. The failure is
+  `test_the_attachment_refuses_from_an_install_without_its_extra`, which
+  reproduces identically on an unmodified `main`: its subprocess cannot open
+  the development database in this environment and refuses on that instead
+  of on the missing extra. It is unrelated to this change.
+- `uv run ruff check .`: clean.
+- `uv run mypy`: clean, 5 source files checked.
