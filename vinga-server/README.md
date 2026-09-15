@@ -2791,11 +2791,14 @@ copies of the canonical whole-number usage values so direct-to-Langfuse
 deployments keep their pricing behavior. A live gate measured the condition
 that alias is read under: Langfuse prices an observation only where it stored
 one as a generation, which it decides from `gen_ai.request.model` or from a
-`gen_ai.operation.name` it knows. Every stage span carries the model a real
-provider reported, and the `llm` round names its operation, so both paths to
-that are canonical attributes rather than a backend hint. A stage whose
-provider reports no model at all, which in practice means the mock providers
-the test lanes run on, is stored as a plain span and is not priced. With `export_transcripts`, acknowledged
+`gen_ai.operation.name` it knows. Both paths to it are canonical attributes
+rather than a backend hint, and the two stage kinds reach it differently. An
+`llm` round always names its operation, so it is a generation whether or not
+its provider reported a model. `asr` and `tts_stream` have no operation name
+the backend recognizes, so they reach it only by the model a real provider
+reports; against a provider that reports none, which in practice means the
+mock providers the test lanes run on, they are stored as plain spans and are
+not priced. With `export_transcripts`, acknowledged
 text and ordered handover legs enrich the original turn root as
 `vinga.turn.input`, `vinga.turn.output` and `vinga.turn.legs`. With
 `export_llm_input`, the actual generation span receives
@@ -2816,8 +2819,10 @@ not backend acknowledgement; ordinary exporter health owns downstream
 delivery. Standard `OTEL_EXPORTER_OTLP_*` variables own the
 destination, protocol and credentials; none becomes span content. This
 repository provides three current trace paths. The Jaeger and Collector paths
-are exercised in automated tests, and all three have been walked against a live
-Langfuse v4 project under the M2 turn-root and generation-content model:
+are exercised in automated tests, and all three have been walked live under the
+M2 turn-root and generation-content model: direct Jaeger against a Jaeger
+instance, and both Langfuse destinations, the direct one and the Collector's
+Langfuse branch, against a live Langfuse v4 project:
 
 - direct Jaeger v2 over OTLP/HTTP protobuf;
 - direct Langfuse v4 over OTLP/HTTP with Basic Auth and its ingestion-version
