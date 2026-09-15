@@ -28,7 +28,7 @@ from pathlib import Path
 import httpx
 from xiaozhi_sdk import XiaoZhiWebsocket
 
-from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, speech_pcm, spoken
+from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, mock_voice, speech_pcm, spoken
 from tests.support.mcp_stdio_server import SHIPPED_ENV, SHIPPED_INSTRUCTIONS
 from tests.support.notices import RELOAD, boundaries
 from vinga_server.config import Config
@@ -165,7 +165,7 @@ def granting_config() -> Config:
         providers={
             "llm": {"mock": speaks_its_prompt()},
             "asr": {"mock": {"type": "mock", "text": "what can you do"}},
-            "tts": {"mock": {"type": "mock"}},
+            "tts": {"mock": mock_voice()},
             "vad": {"mock": {"type": "mock"}},
         },
         mcp_servers={ENTRY: stdio_entry(instructions=GUIDANCE)},
@@ -256,7 +256,7 @@ def opting_in_config() -> Config:
         providers={
             "llm": {"mock": speaks_its_prompt()},
             "asr": {"mock": {"type": "mock", "text": "what can you do"}},
-            "tts": {"mock": {"type": "mock"}},
+            "tts": {"mock": mock_voice()},
             "vad": {"mock": {"type": "mock"}},
         },
         mcp_servers={
@@ -315,7 +315,7 @@ def sharing_config() -> Config:
         providers={
             "llm": {"mock": speaks_its_prompt()},
             "asr": {"mock": {"type": "mock", "text": "what can you do"}},
-            "tts": {"mock": {"type": "mock"}},
+            "tts": {"mock": mock_voice()},
             "vad": {"mock": {"type": "mock"}},
         },
         prompt_fragments={"household": {"text": FRAGMENT}},
@@ -427,7 +427,7 @@ def held_config() -> Config:
                 "plain": speaks_its_prompt(),
             },
             "asr": {"mock": {"type": "mock", "text": "tell me the secret"}},
-            "tts": {"mock": {"type": "mock"}},
+            "tts": {"mock": mock_voice()},
             "vad": {"mock": {"type": "mock"}},
         },
         mcp_servers={

@@ -22,7 +22,7 @@ import pytest
 import uvicorn
 import websockets
 
-from tests.integration.conftest import booted
+from tests.integration.conftest import booted, mock_voice
 from vinga_server import logs, serving
 from vinga_server.app import create_app
 from vinga_server.auth import build_device_auth
@@ -30,7 +30,9 @@ from vinga_server.config import Config
 from vinga_server.ota import ACTIVATE_SEGMENT
 from vinga_server.ws import WEBSOCKET_PATH
 
-MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")}
+MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "vad")} | {
+    "tts": {"mock": mock_voice()}
+}
 MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
 
 # The two values that must not be printed, shaped so that a substring

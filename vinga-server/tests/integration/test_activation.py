@@ -21,13 +21,15 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.integration.conftest import booted
+from tests.integration.conftest import booted, mock_voice
 from tests.support.notices import CHECK_IN, boundaries
 from vinga_server.config import Config
 from vinga_server.onboarding import onboarding_key, onboarding_path
 from vinga_server.ota import ACTIVATE_SEGMENT
 
-MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")}
+MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "vad")} | {
+    "tts": {"mock": mock_voice()}
+}
 MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
 
 DEVICE_MAC = "aa:bb:cc:dd:ee:ff"

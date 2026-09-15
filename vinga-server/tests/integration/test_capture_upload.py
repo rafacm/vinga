@@ -44,6 +44,7 @@ from typing import Any
 
 import pytest
 
+from tests.integration.conftest import mock_voice
 from tests.support.events import every_format
 from tests.support.telemetry import Receiver, attributes, named
 from tests.support.uploads import exporting
@@ -62,7 +63,9 @@ from vinga_server.config.models import CaptureConfig, ServerConfig, TelemetryCon
 
 pytestmark = pytest.mark.asyncio
 
-MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")}
+MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "vad")} | {
+    "tts": {"mock": mock_voice()}
+}
 MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
 
 DEVICE_MAC = "aa:bb:cc:dd:ee:67"

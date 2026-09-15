@@ -17,7 +17,7 @@ import asyncio
 import pytest
 import websockets
 
-from tests.integration.conftest import converse, dominant_hz, running, spoken
+from tests.integration.conftest import converse, dominant_hz, mock_voice, running, spoken
 from vinga_server.auth import build_device_auth
 from vinga_server.config import Config
 from vinga_server.ws import WEBSOCKET_PATH
@@ -39,8 +39,8 @@ def two_persona_config() -> Config:
             },
             "asr": {"mock": {"type": "mock", "text": "rain"}},
             "tts": {
-                "tenor": {"type": "mock", "tone_hz": POET_TONE},
-                "alto": {"type": "mock", "tone_hz": TUTOR_TONE},
+                "tenor": mock_voice(tone_hz=POET_TONE),
+                "alto": mock_voice(tone_hz=TUTOR_TONE),
             },
             "vad": {"mock": {"type": "mock"}},
         },

@@ -35,7 +35,7 @@ import uvicorn
 from opentelemetry.proto.trace.v1.trace_pb2 import Status
 from xiaozhi_sdk import XiaoZhiWebsocket
 
-from tests.integration.conftest import booted
+from tests.integration.conftest import booted, mock_voice
 from tests.support.telemetry import (
     Clock,
     Receiver,
@@ -56,7 +56,9 @@ from vinga_server.telemetry import build_telemetry
 
 pytestmark = pytest.mark.asyncio
 
-MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")}
+MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "vad")} | {
+    "tts": {"mock": mock_voice()}
+}
 MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
 
 DEVICE_MAC = "aa:bb:cc:dd:ee:66"

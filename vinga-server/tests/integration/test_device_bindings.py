@@ -15,13 +15,15 @@ import os
 import httpx
 import pytest
 
-from tests.integration.conftest import spoken
+from tests.integration.conftest import mock_voice, spoken
 from tests.support.notices import CHECK_IN, boundaries
 from tests.support.stores import the_lock_held
 from vinga_server.config import Config
 from vinga_server.ota import OTA_PATH
 
-MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")}
+MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "vad")} | {
+    "tts": {"mock": mock_voice()}
+}
 MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
 
 DEVICE_MAC = "aa:bb:cc:dd:ee:ff"

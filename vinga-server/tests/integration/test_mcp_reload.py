@@ -22,7 +22,7 @@ from pathlib import Path
 import httpx
 from xiaozhi_sdk import XiaoZhiWebsocket
 
-from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, speech_pcm, spoken
+from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, mock_voice, speech_pcm, spoken
 from tests.support.notices import RELOAD, boundaries
 from tests.support.problems import refused as refusal_body
 from vinga_server.config import Config
@@ -63,7 +63,7 @@ def one_agent(**extra: object) -> Config:
                         }
                     },
                     "asr": {"mock": {"type": "mock", "text": "tell me the secret"}},
-                    "tts": {"mock": {"type": "mock"}},
+                    "tts": {"mock": mock_voice()},
                     "vad": {"mock": {"type": "mock"}},
                 },
                 "agent_defaults": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),

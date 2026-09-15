@@ -32,6 +32,7 @@ from typing import Any
 
 import pytest
 
+from tests.integration.conftest import mock_voice
 from tests.support.events import both_formats
 from tests.support.telemetry import Receiver, attributes
 from vinga_server.config import Config
@@ -66,7 +67,7 @@ def exporting_config() -> Config:
         providers={
             "llm": {"plain": {"type": "mock", "reply": "{system} here, hello."}},
             "asr": {"mock": {"type": "mock", "text": HEARD}},
-            "tts": {"tenor": {"type": "mock", "tone_hz": 440}},
+            "tts": {"tenor": mock_voice(tone_hz=440)},
             "vad": {"mock": {"type": "mock"}},
         },
         agent_defaults={"asr": "mock", "vad": "mock"},
