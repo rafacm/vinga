@@ -8,11 +8,12 @@ is speaking reaches its end, and only then does the socket close.
 
 import asyncio
 import json
+import time
 
 import pytest
 import websockets
 
-from tests.integration.conftest import running_app, speech_pcm
+from tests.integration.conftest import VOICE_MIN_MS, mock_voice, running_app, speech_pcm
 from vinga_server.audio.opus import OpusEncoder
 from vinga_server.auth import build_device_auth
 from vinga_server.config import Config
@@ -23,10 +24,17 @@ from vinga_server.ws import WEBSOCKET_PATH
 MOCK_PROVIDERS = {
     "llm": {"mock": {"type": "mock", "reply": "One. Two. Three. Four. Five."}},
     "asr": {"mock": {"type": "mock", "text": "count"}},
-    "tts": {"mock": {"type": "mock"}},
+    "tts": {"mock": mock_voice()},
     "vad": {"mock": {"type": "mock"}},
 }
 MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
+
+# What the mock voice takes to say one of the five sentences below. All
+# five are short enough to cost its floor rather than their own text, at
+# the lane's rate and at the shipped one alike, so this is the floor and
+# not a rate times a length, and it is read from the lane rather than
+# spelled again here.
+SENTENCE_S = VOICE_MIN_MS / 1000
 
 DEVICE_MAC = "aa:bb:cc:dd:ee:ff"
 DEVICE_UUID = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
@@ -71,6 +79,30 @@ async def connect(port: int, config: Config):
     return socket
 
 
+def sentences(texts: list[dict]) -> list[str]:
+    return [m["text"] for m in texts if m.get("type") == "tts" and m["state"] == "sentence_start"]
+
+
+async def until_the_first_sentence(socket) -> list[dict]:
+    """Everything the server says up to and including the moment it
+    starts speaking the first sentence.
+
+    What the drain below is timed against, and the reason it is an
+    observable rather than a sleep: a sleep is calibrated against how
+    long the mock voice takes to say a reply, and a voice that speaks
+    faster would leave the same sleep landing after the reply had ended.
+    The case would go on passing and would have stopped draining
+    mid-speech, which is the one thing it exists to see.
+    """
+    texts: list[dict] = []
+    while True:
+        received = await asyncio.wait_for(socket.recv(), timeout=15)
+        if isinstance(received, str):
+            texts.append(json.loads(received))
+            if sentences(texts[-1:]):
+                return texts
+
+
 async def messages_until_close(socket) -> tuple[list[dict], int]:
     """Everything the server says from here until it closes, and the
     close code it used."""
@@ -94,18 +126,27 @@ async def test_a_drain_lets_the_reply_finish_then_closes_going_away() -> None:
         for packet in OpusEncoder().encode(speech_pcm(300)):
             await socket.send(framing.wrap(1, packet))
         await socket.send(json.dumps({"type": "listen", "state": "stop"}))
-        await asyncio.sleep(0.05)
+        begun = await until_the_first_sentence(socket)
 
+        started = time.monotonic()
         await app.state.composition.sessions.drain(timeout_s=20)
+        drained_in = time.monotonic() - started
         texts, code = await messages_until_close(socket)
 
-    spoken = [
-        m["text"] for m in texts if m.get("type") == "tts" and m["state"] == "sentence_start"
-    ]
     # The whole reply was said, not the part that fitted before the drain.
-    assert spoken == ["One.", "Two.", "Three.", "Four.", "Five."]
+    assert sentences(begun + texts) == ["One.", "Two.", "Three.", "Four.", "Five."]
     assert any(m.get("type") == "tts" and m["state"] == "stop" for m in texts)
     assert code == GOING_AWAY
+
+    # And the drain really did land mid-speech, which is what makes the
+    # line above a claim about draining rather than about a reply. Two
+    # observables, because either alone could be had by accident: the
+    # other four sentences were still unspoken when the drain was
+    # called, and the drain itself waited out more speech than one
+    # sentence takes. A drain that arrived after the reply had ended
+    # would return at once and would have nothing left to report.
+    assert sentences(texts) == ["Two.", "Three.", "Four.", "Five."]
+    assert drained_in > SENTENCE_S, f"the drain returned in {drained_in:.2f} s"
 
 
 async def test_a_draining_server_refuses_a_new_conversation() -> None:
