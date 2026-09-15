@@ -18,10 +18,12 @@ import pytest
 import uvicorn
 from xiaozhi_sdk import XiaoZhiWebsocket
 
-from tests.integration.conftest import booted
+from tests.integration.conftest import LANE_MS_PER_CHAR, VOICE_MIN_MS, booted, mock_voice
 from vinga_server.config import Config
 
-MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")}
+MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "vad")} | {
+    "tts": {"mock": mock_voice()}
+}
 MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
 
 DEVICE_MAC = "aa:bb:cc:dd:ee:01"
@@ -29,9 +31,15 @@ SAMPLE_RATE = 16000
 FRAME_MS = 60
 FRAME_BYTES = SAMPLE_RATE * FRAME_MS // 1000 * 2
 
-# The mock TTS speaks 40 ms per character with a 240 ms floor, at 24 kHz.
+# What the mock voice takes to say the reply below, at 24 kHz: the
+# lane's rate per character against the voice's own floor, whichever is
+# longer. Both halves are here because either can be the one that
+# decides, and both are READ from the lane rather than restated: they
+# are `conftest`'s numbers, the entry above carries the rate, and a
+# window derived from a second copy of either goes wrong silently on the
+# day the copies disagree.
 EXPECTED_REPLY = "You said hello."
-EXPECTED_REPLY_S = 40 * len(EXPECTED_REPLY) / 1000
+EXPECTED_REPLY_S = max(VOICE_MIN_MS, LANE_MS_PER_CHAR * len(EXPECTED_REPLY)) / 1000
 
 
 @pytest.fixture
