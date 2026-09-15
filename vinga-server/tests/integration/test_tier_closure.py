@@ -426,9 +426,26 @@ def _ran_concurrently(
     failure name the row that asked for it. Returning them as they
     finished would have thrown that away, and naming the row is the
     whole of what the serial loops this replaced gave a reader.
+
+    The queue is cancelled on the way out, and that is the load-bearing
+    part rather than tidiness. `ran` gives every command a deadline of
+    `COMMAND_SECONDS` and raises when it expires, so a command that
+    hangs costs two minutes; but the whole inventory is submitted at
+    once, and a pool shut down without `cancel_futures` waits for rows
+    that have not started. A systemic hang would then cost two minutes
+    per row per worker, which for this file's sixty-two rows is half an
+    hour of a lane whose entire budget is minutes. Cancelling drops
+    everything still queued, and what survives it is what is already
+    running plus the one wave the workers pick up between expiring
+    together and this shutdown reaching them, so the worst case is two
+    deadlines rather than sixteen.
     """
-    with ThreadPoolExecutor(max_workers=POOL_WIDTH) as pool:
-        return list(pool.map(lambda argv: _ran(python, *argv), argvs))
+    pool = ThreadPoolExecutor(max_workers=POOL_WIDTH)
+    try:
+        running = [pool.submit(_ran, python, *argv) for argv in argvs]
+        return [started.result() for started in running]
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
 
 
 # The client tier
