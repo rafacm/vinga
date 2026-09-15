@@ -81,10 +81,19 @@ QUEUE = 4
 
 # What one scripted reply may take, in seconds, against providers whose
 # timings are this lane's own: a mock ear, a two-sentence scripted model
-# and a mock voice into a recording socket. Generous by an order of
-# magnitude against the healthy number, because what would fail this is
-# a reply that WAITED on an export, and an export here waits forever.
-REPLY_BOUND_S = 3.0
+# and a mock voice into a recording socket. What would fail it is a
+# reply that WAITED on an export, and an export here waits forever.
+#
+# The healthy number is under a millisecond, measured rather than
+# guessed at: the slowest of twelve replies was 0.7 ms in the case below
+# and 0.4 ms in the one at the foot of this file, over eight runs of
+# each on a development machine (#491). This bound is three orders of
+# magnitude above that, which is not generosity for its own sake. It is
+# what leaves a four-core runner carrying four test workers room to be
+# slow without being wrong, while staying far below anything a waiting
+# reply could cost: the shortest wait on this path is the bounded
+# shutdown's five seconds.
+REPLY_BOUND_S = 0.5
 
 
 class Blocking:
@@ -345,12 +354,29 @@ class Withholding:
 
     It counts what it is holding, so the case can assert the request was
     entered AND still outstanding rather than merely slow.
+
+    There are two ways for the holding to end, and which one the
+    teardown picks is worth thirty seconds. See `answer` below.
     """
+
+    # The smallest thing an OTLP exporter reads as a success: a 200 whose
+    # body is an empty `ExportTraceServiceResponse`, which is zero bytes.
+    ANSWER = (
+        b"HTTP/1.1 200 OK\r\n"
+        b"Content-Type: application/x-protobuf\r\n"
+        b"Content-Length: 0\r\n"
+        b"\r\n"
+    )
 
     def __init__(self) -> None:
         self.entered = threading.Event()
         self.release = threading.Event()
         self.outstanding = 0
+        # Whether a released hold hangs up or answers. False for as long
+        # as the case is making its assertions, which is what makes this
+        # a collector that answers nothing.
+        self._answering = False
+        self._closed = threading.Event()
         self._lock = threading.Lock()
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -366,7 +392,10 @@ class Withholding:
         return f"http://{host}:{port}"
 
     def _serve(self) -> None:
-        while not self.release.is_set():
+        # Until this is CLOSED rather than until it is released, so that
+        # an exporter which sends a second request after `answer` meets
+        # the same answer rather than a backlog nobody accepts.
+        while not self._closed.is_set():
             try:
                 connection, _ = self._socket.accept()
             except OSError:
@@ -390,10 +419,32 @@ class Withholding:
         with self._lock:
             self.outstanding -= 1
         with contextlib.suppress(OSError):
+            if self._answering:
+                connection.sendall(self.ANSWER)
             connection.close()
+
+    def answer(self) -> None:
+        """End the holding with a success rather than a hangup.
+
+        Called only once the case's assertions have been made, so what
+        the exporter met for the whole of the part being measured is
+        still a collector that answers nothing. What this changes is
+        only the teardown, and it changes it by thirty seconds.
+
+        A hangup is a release too, and it was the only one this class
+        used to offer. It is the expensive one: an exporter whose
+        outstanding request dies under it reads that as a retryable
+        failure and backs off, so the teardown then waits out a bounded
+        shutdown (5 s) and, after it, the abandoned export's own retry
+        budget (25 s), for work nothing was ever going to read. That was
+        30 of this case's 30.5 seconds, measured by component (#491).
+        """
+        self._answering = True
+        self.release.set()
 
     def close(self) -> None:
         self.release.set()
+        self._closed.set()
         with contextlib.suppress(OSError):
             self._socket.close()
         for connection in self._held:
@@ -462,10 +513,13 @@ async def test_a_collector_that_answers_nothing_costs_no_reply_anything(
             f"a reply took {slowest:.2f} s with an export outstanding"
         )
     finally:
-        # Released first, so the exporter's own thread can finish rather
-        # than being joined against a request nothing will answer, and
-        # then waited out: the SDK's silence is a process-wide lease and
-        # this lane asserts the count is zero at the end of every case.
-        collector.close()
+        # Answered first, so the exporter's own thread finishes the
+        # request it is inside rather than being left to back off
+        # against one that died under it, and then waited out: the SDK's
+        # silence is a process-wide lease and this lane asserts the
+        # count is zero at the end of every case. The endpoint is shut
+        # last, once nothing is trying to reach it any more.
+        collector.answer()
         await telemetry.shutdown()
         await asyncio.to_thread(telemetry.release)
+        collector.close()
