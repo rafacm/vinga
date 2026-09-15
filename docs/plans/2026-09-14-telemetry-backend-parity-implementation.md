@@ -889,10 +889,20 @@ provider's traffic.
   status and safe error types in both backends.
 - `uv run pytest tests/unit -q -n 4 --dist loadfile`: 7,450 passed, 2
   skipped.
-- `uv run pytest tests/integration -q`: 345 passed, 1 failed. The failure is
-  `test_the_attachment_refuses_from_an_install_without_its_extra`, which
-  reproduces identically on an unmodified `main`: its subprocess cannot open
-  the development database in this environment and refuses on that instead
-  of on the missing extra. It is unrelated to this change.
+- `uv run pytest tests/integration -q`: 346 passed.
+
+  This lane first reported `test_the_attachment_refuses_from_an_install_without_its_extra`
+  failing, on an unmodified `main` too, and the cause is worth recording
+  because the sentence it fails with names the wrong thing. The tier-closure
+  fixtures build their installs with `uv sync --frozen --no-editable`, and
+  `uv` reused a cached build of the project from before the newest
+  conversations migration existed. The lane's own database is migrated by the
+  source tree, so the install then met a database stamped at a revision its
+  packaged scripts did not contain. Alembic raised `Can't locate revision
+  identified by ...`, which is not one of the two causes `migration_failure`
+  recognizes, so it fell through to the general sentence: `cannot open the
+  vinga database`, naming host, port, credentials and a database that was in
+  fact open and reachable. `uv cache clean vinga-server` and a rerun are the
+  whole fix, and nothing in the repository was wrong.
 - `uv run ruff check .`: clean.
 - `uv run mypy`: clean, 5 source files checked.
