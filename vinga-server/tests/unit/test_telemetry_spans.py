@@ -621,6 +621,12 @@ def test_a_successful_recap_is_a_generation_without_a_reply_ordinal() -> None:
     assert llm.attributes["vinga.llm.turns"] == 7
     assert "vinga.llm.round" not in llm.attributes
     assert llm.status.status_code.name != "ERROR"
+    # A recap is the same OPERATION as a reply and differs only in its
+    # purpose, which is the whole of why the operation name is a
+    # constant rather than a field read. Asserted here and not only on
+    # the reply case, because a regression that keyed the attribute on
+    # purpose would leave every changed test in this file passing.
+    assert llm.attributes["gen_ai.operation.name"] == "chat"
 
 
 def test_the_first_token_is_a_mark_inside_the_round() -> None:
@@ -657,7 +663,7 @@ def test_a_round_that_spoke_no_token_gets_no_mark() -> None:
     assert llm.events == ()
 
 
-def test_a_provider_with_no_identity_carries_no_gen_ai_keys() -> None:
+def test_a_provider_with_no_identity_carries_only_the_operation_key() -> None:
     """The quartet is atomic in the catalog, and the span inherits that:
     a provider the registry never built names no entry, no type, no host
     and no model, and a span with a null model would be a claim the
@@ -797,8 +803,12 @@ def test_a_round_says_it_is_a_chat_in_the_conventions_words() -> None:
     generation, and a round is one. It is also what a backend types the
     observation from when the provider reported no model, which a live
     Langfuse gate measured: untyped, the round's usage is never priced.
-    `chat` is the conventions' value for a streamed chat completion, so
-    a recap is one too and `vinga.llm.purpose` is what separates them.
+
+    `chat` is the conventions' value for a streamed chat completion. A
+    recap is one too, and that clause is pinned where a recap is
+    actually driven, in
+    `test_a_successful_recap_is_a_generation_without_a_reply_ordinal`,
+    rather than claimed here over an ordinary reply round.
     """
     clock = Clock()
     telemetry, memory = exporting()
