@@ -161,12 +161,23 @@ reasons.
 
 `loadfile` keeps a file's tests on one worker, which is what this
 lane's expensive fixtures assume. `test_tier_closure.py` builds six
-throwaway installs in module-scoped fixtures; `test_telemetry_export.py`
-and `test_telemetry_fanout.py` boot containers in theirs. Under
-`--dist load` those fixtures would be rebuilt on every worker that
-received one of their tests, and the lane would get slower rather than
-faster. Intra-file order also stays exactly what it is, which is the
-property that makes this change reviewable at all.
+throwaway installs in module-scoped fixtures (`client_env`, `serve_env`,
+`sim_env`, `otel_env`, `langfuse_env`, `serve_otel_env`), and
+`test_cli_wheel.py` builds a wheel, installs it, prepares a directory
+outside the checkout and boots a server, all four module-scoped
+(`wheel`, `installed`, `elsewhere`, `live`). Under `--dist load` those
+fixtures would be rebuilt on every worker that received one of their
+tests, and the lane would get slower rather than faster. Intra-file
+order also stays exactly what it is, which is the property that makes
+this change reviewable at all.
+
+The two Docker-backed telemetry files are **not** an example of this.
+`jaeger` in `test_telemetry_export.py` is a default function-scoped
+fixture and `_collector` in `test_telemetry_fanout.py` is a context
+manager used by its single test, so neither would be duplicated by a
+different distributor. They matter to the shared-resource audit below,
+which is a separate question, and citing them here would have been a
+reason that does not hold.
 
 `auto` rather than `4` so a runner resize is picked up without a second
 edit, which is the reasoning `9a4b1359` recorded for the unit lane.
