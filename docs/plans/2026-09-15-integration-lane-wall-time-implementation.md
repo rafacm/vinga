@@ -82,7 +82,12 @@ development instance, on the tree committed as `778fd9ba`:
   spellings census below. The serial unit lane is therefore recorded as
   not run.
 - `uv run pytest tests/unit/test_command_spellings.py` after the
-  documentation edits: CENSUS_RESULT
+  documentation edits: **52 passed in 6.33s**, and again after the
+  implementation doc and the plan tick were committed, which is the run
+  that counts because the census sweeps every tracked file. The
+  manifest did not move, so nothing was regenerated and none of this
+  milestone's documentation changed the distinct set of classified
+  command spellings.
 
 The test count is the thing to read rather than the seconds: 346 serial
 and 346 at both widths, so nothing was skipped, deselected or silently
