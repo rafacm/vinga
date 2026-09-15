@@ -706,7 +706,7 @@ existing test is restated.
   seam already there. Measured: the file 83.37s to 68.33s, the lane
   167.19s to 130.22s at four workers, width four confirmed against
   widths 1, 2 and 8 on the lane rather than on the file.
-- [ ] **M3: the rest of the worklist, attributed and dispositioned.**
+- [x] **[M3: the rest of the worklist, attributed and dispositioned](2026-09-15-integration-lane-wall-time-implementation.md#m3-the-rest-of-the-worklist-attributed-and-dispositioned)** (PR TBD).
   The three conversation cases are already attributed (56% of those
   three files is real-time playback of a prompt-echo reply), so the
   work is the disposition: the lane's mock provider block gets one home
@@ -731,6 +731,15 @@ existing test is restated.
   worklist files and would flatten the named voices.
   `tests/support/configs.py` stays out of it, since 79 unit files
   import it.
+  Measured: the three files 163.95s to 68.18s, the rate settled at
+  4.0 on the emitted audio rather than on wall time (227.20s of
+  playback at 40 against 34.50s at 4 and a 30.72s floor), the two
+  wedged-collector cases timed by component before either was touched.
+  The replacement-exporter case is 0.07s and closes measured-and-kept
+  with `TURNS` and `QUEUE` untouched; the real-transport case was
+  30.46s of which 30.01s was its teardown, which is neither lever the
+  plan named, and it is now 0.10s. The bounded-shutdown case is kept at
+  5.00s.
 
 M2 and M3 stack on M1 and on each other, and each subagent starts when
 its predecessor's PR opens rather than when it merges.

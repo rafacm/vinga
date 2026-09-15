@@ -374,3 +374,366 @@ records notable changes for the person running vinga, and a reader of
 it would learn nothing true about their deployment from this one. The
 lane's own speed is already the subject of M1's `### Changed` entry,
 which is where a reader looking for it will be.
+
+## M3: the rest of the worklist, attributed and dispositioned
+
+The lane's mock voice now speaks at a rate of its own, set in one place
+and reaching every TTS entry the lane writes; the two cases whose
+claims were derived from the old rate say what they used to assume; and
+the two wedged-collector cases were timed by component before either
+was touched, which found the thirty seconds somewhere neither of the
+plan's two levers could have reached. No production module changed:
+`providers/mock.py` speaks at 40 ms per character for anyone who
+configures a mock voice, exactly as it did.
+
+### What landed
+
+| Piece | Where |
+| --- | --- |
+| The seam | `tests/integration/conftest.py`: `mock_voice(**options)`, returning a fresh entry carrying `LANE_MS_PER_CHAR` with the caller's own options on top |
+| The rate, with the measurement that chose it | the same file: `LANE_MS_PER_CHAR = 4.0`, and beside it the playback figures at 40, 8, 4, 2 and the floor's asymptote |
+| The voice's floor, once | the same file: `VOICE_MIN_MS = 240.0`, which two cases now derive a duration from instead of spelling it twice |
+| The inventory, routed | twenty files, twenty-nine entries, each keeping its own name and its own `tone_hz` (below) |
+| The duration window | `tests/integration/test_device_simulator.py`: `EXPECTED_REPLY_S` is `max(VOICE_MIN_MS, LANE_MS_PER_CHAR * len(reply))`, not `40 * len(reply)` |
+| The drain's own proof | `tests/integration/test_drain.py`: the sleep is replaced by waiting for the first sentence, and two assertions a late drain cannot satisfy |
+| The held export, answered | `tests/integration/test_telemetry_hardening.py`: `Withholding.answer()`, used by the teardown after every assertion has been made |
+| The reply bound, from the measured reply | the same file: `REPLY_BOUND_S` 3.0 to 0.5, with the 0.4 ms it stands over written down |
+
+Design footprint: one seam, a builder in the lane's own conftest, which
+is where this lane already puts what two or more modules need. It
+passes the deletion test in the direction that matters: inlined, its
+twenty-nine callers would each carry the rate, and the rate would stop
+being one fact.
+
+### The inventory, by grep rather than from memory
+
+Twenty-nine TTS entries in twenty files, all of them now built by
+`mock_voice`:
+
+| Shape | Files | Entries |
+| --- | --- | ---: |
+| A four-stage `MOCK_PROVIDERS` comprehension, with `tts` split out of it | `test_access_logs.py`, `test_activation.py`, `test_capture_upload.py`, `test_device_bindings.py`, `test_device_simulator.py`, `test_ota_endpoint.py`, `test_telemetry_export.py`, `test_wire_latency_capture.py`, `test_ws_auth.py` | 9 |
+| An entry written inline in a config the file builds | `test_agent_guidance.py` (4), `test_tools.py` (3), `test_conversations.py`, `test_drain.py`, `test_mcp_reload.py`, `test_cli_simulator.py` | 11 |
+| A named voice carrying a `tone_hz` or a name a case asserts on | `test_tools.py` (`tenor`, `alto`), `test_transcript_export.py` (`tenor`, `alto`), `test_two_personas.py` (`tenor`, `alto`), `test_llm_input_export.py` (`tenor`), `test_cli_live.py` (`voice`), `test_cli_wheel.py` (`voice`) | 9 |
+
+This is why the plan's second review round was right to refuse a shared
+`MOCK_PROVIDERS` block. Nine of the twenty-nine entries are named
+voices, seven of them carry a `tone_hz`, and four of those are read
+back out of the received audio by `dominant_hz`; eleven more are
+written inline in a config the file builds rather than in any shared
+block, and three of the files that do that are the ones the whole
+attribution is about.
+
+Three TTS entries in the lane are deliberately NOT routed, and the
+reason is the same in each: nothing speaks.
+
+- `test_config_api.py:30`, the `tts` row of `PIPELINE`. A request body
+  in the write order a first deployment sends over the configuration
+  API. No conversation is held and no audio is synthesized.
+- `test_startup_failure.py:112`, a loop over every stage seeding a
+  domain for a boot that is expected to refuse.
+- `test_reach_upgrade.py:339`, a provider write the case expects to be
+  refused.
+
+`tests/support/configs.py` is untouched, per the plan: 79 unit files
+import it, and some of them want the long reply on purpose
+(`LONG_REPLY` is named for the eight seconds it takes).
+
+### The rate, and why four
+
+The A/B in the plan varied `ms_per_char` and measured the effect. What
+settled the value is a second measurement, which the plan named as what
+the stronger claim would need and said nothing depended on: the length
+of every sentence the three files actually have spoken, recorded once,
+then costed at each candidate rate. The voice's duration is
+`max(min_ms, ms_per_char * len(text))`, so one run's sentence lengths
+give the exact playback total for any rate, with no run-to-run noise in
+it at all.
+
+Those three files speak **128 sentences, 5,655 characters**, the
+longest 273 and the median 33.
+
+| `ms_per_char` | Audio emitted | Sentences at the 240 ms floor |
+| ---: | ---: | ---: |
+| 40 (shipped) | 227.20s | 17 / 128 |
+| 16 | 94.26s | 35 / 128 |
+| 8 | 52.67s | 58 / 128 |
+| **4** | **34.50s** | **81 / 128** |
+| 2 | 31.14s | 126 / 128 |
+| 1 | 30.75s | 127 / 128 |
+| the asymptote | 30.72s | 128 / 128 |
+
+**Four, for two reasons the table makes visible.** The floor is
+30.72s, which is those 128 sentences at 240 ms each, and no rate can go
+below it: four is within 3.78s of it, so every smaller rate together is
+worth the last 1.7% of what 40 cost. And four is the last rate at which
+the voice still does what its docstring says it does, since 47 of the
+128 sentences are still longer than the floor there, against 2 at a
+rate of 2 and 1 at a rate of 1.
+
+The wall-clock sweep agrees and cannot separate the small values, which
+is the other half of the argument. Six files (the three worklist ones
+plus the three that carry claims at risk), same machine, same database,
+one pass each:
+
+| `ms_per_char` | The six files |
+| ---: | ---: |
+| 8 | 84.06s |
+| **4** | **76.87s** |
+| 2 | 77.51s |
+| 1 | 74.44s |
+
+Two and four are within a second of each other in the wrong direction,
+and one is 2.4s under four, against a 3.78s playback difference that is
+the most any of them could have been worth. Every one of these values
+passes every check; the choice is therefore made on the playback table,
+where the numbers are exact, and not on this one.
+
+**What the audio measurement adds to the plan's A/B.** The plan was
+careful to say the A/B attributes 56% of those files to the mock
+voice's duration setting with paced playback as the principal
+demonstrated mechanism, and that it does not partition the delta. The
+emitted audio is now measured directly: 227.20s at 40 against 34.50s at
+4, a difference of 192.70s. The three files' wall time fell by 95.77s
+over the same change, which is half of that, and the gap is not a
+contradiction: several of these cases hold two conversations at once
+(two personas, three agents on one entry), so audio the voice emits is
+not audio the lane waits through one second at a time. The honest
+statement is that the emitted audio fell by 193s and the wall time by
+95s, and that the first is the mechanism of the second rather than its
+measure.
+
+### The three files, before and after
+
+Same instrument as the plan's tables, `uv run pytest ... -q
+--durations=0` run serially, on the 14-core darwin development machine,
+against a Postgres of this worktree's own (`docker compose -p wt491m3`,
+host port 55493).
+
+| File | before, at `705d9af1` | after, at `6e6976a2` |
+| --- | ---: | ---: |
+| `test_agent_guidance.py` | 58.29s | **25.10s** |
+| `test_tools.py` | 63.18s | **24.68s** |
+| `test_conversations.py` | 40.33s | **18.14s** |
+| the three together, pytest's own wall time | **163.95s** | **68.18s** |
+
+The plan measured 163.98s for the same three files at `c999d0dc`, so
+the before number reproduces to three hundredths of a second three
+commits later.
+
+### The claims that had to survive, each checked
+
+- **`test_device_simulator.py`'s duration window.** It asserted
+  `EXPECTED_REPLY_S / 2 <= duration_s <= EXPECTED_REPLY_S * 3` with
+  `EXPECTED_REPLY_S` derived from a hardcoded 40, which at the lane's
+  rate would have put the window's floor above the reply. Derived
+  rather than overridden, which is the option the plan preferred: the
+  expectation is now `max(VOICE_MIN_MS, LANE_MS_PER_CHAR * len(reply))`,
+  both numbers read from the lane's own conftest. For "You said hello."
+  at four that is the floor, 0.24s, and the window is 0.12s to 0.72s,
+  which the decoded audio lands inside: the case is green and the
+  assertion still bounds the reply on both sides. A 40 ms override was not kept, because the
+  derivation holds the window and an override would have left this one
+  file disagreeing with the lane about what its voice does.
+- **`test_drain.py` landing mid-reply.** This is the one the plan
+  called out as able to keep passing while testing nothing, and the
+  measurement says the danger was not where it looked: every one of
+  this reply's five sentences is under sixty characters, so all five
+  cost the 240 ms floor at the lane's rate and at the shipped one
+  alike, and the reply is 1.2s either way. The sleep was replaced
+  anyway, because it was a hope rather than a claim. See below.
+- **`dominant_hz` inside 20 Hz.** Confirmed by running
+  `test_tools.py` and `test_two_personas.py` rather than by arithmetic,
+  and the arithmetic says why it was never close: the floor makes every
+  sentence at least 240 ms, which is 3,840 samples at the 16 kHz
+  analysis rate and a resolution of 4.2 Hz, against the roughly 800
+  samples 20 Hz needs. `audio.size > 0` likewise.
+- **`spoken(events)`** reads `tts sentence_start` text, which no rate
+  changes.
+- **`test_the_utterance_is_paced_rather_than_burst`** asserts on
+  recorded sleep calls for the simulator's OUTGOING utterance
+  (`said = utterance.packaged()`), so it is untouched, as the plan said.
+
+### The drain, falsified rather than argued
+
+The case now waits for the server to start speaking the first sentence
+instead of sleeping 0.05s, and then asserts two things a drain arriving
+after the reply cannot satisfy: that the other four sentences arrived
+after the drain was called, and that the drain itself took longer than
+one sentence of speech.
+
+The drill ran both shapes against the same server, in a scratch file
+that was deleted afterwards:
+
+| | sentences before the drain | sentences after it | the drain took |
+| --- | --- | --- | ---: |
+| the shape that ships | `['One.']` | `['Two.', 'Three.', 'Four.', 'Five.']` | 1.144s |
+| a drain deliberately arriving late | all five | none | 0.001s |
+
+The assertion the case had before this milestone, that the whole reply
+was spoken, passes in BOTH rows. That is the point: it is satisfied by
+a reply nobody interrupted. The two new ones fail in the second row,
+which is what makes them a claim about draining.
+
+### The two wedged-collector cases, timed separately
+
+Timed by component before either was touched, with `time.monotonic()`
+marks around each piece, in a scratch file that copied the case bodies
+verbatim and was deleted afterwards. The plan's first draft treated
+these as one case at 30.02s; they are two, and the 30 seconds belongs
+entirely to one of them.
+
+**`test_a_collector_that_never_answers_costs_no_reply_anything`**, the
+one that replaces the exporter object: **0.07s, all of it.**
+
+| Component | |
+| --- | ---: |
+| `build_telemetry` | 0.002s |
+| the session, tapped | 0.006s |
+| each of the twelve turns | 0.001s |
+| teardown | 0.001s |
+
+Nothing to reduce and nothing reduced. It closes **measured-and-kept**,
+and the two things the plan would have wanted proved before touching
+`TURNS` are recorded instead as the reasons for leaving it alone: the
+exporter took exactly `QUEUE + 1` = 5 batches, which is the saturation
+the case asserts, and `collector.entered` was set on every turn. Both
+held identically on each of eight runs.
+
+**`test_a_collector_that_answers_nothing_costs_no_reply_anything`**,
+the one that keeps the real OTLP transport: **30.46s, of which 30.01s
+was the teardown.**
+
+| Component | before | after |
+| --- | ---: | ---: |
+| `Withholding()` | 0.000s | 0.000s |
+| `build_telemetry` | 0.001s | |
+| the session, tapped | 0.006s | |
+| the preliminary turn | 0.002s | |
+| `collector.entered.wait(15.0)` | 0.002s | |
+| each of the twelve measured turns | 0.001s | |
+| teardown: `collector.close()` | 0.000s | |
+| teardown: `telemetry.shutdown()` | 5.006s | |
+| teardown: `telemetry.release` | 25.002s | |
+| **the whole case** | **30.46s** | **0.10s** |
+
+**Both of the plan's levers are dead here, and the measurement is what
+says so.** Per-reply speech is worth nothing: this case drives its
+session below the wire onto a `RecordingSocket`, so there is no pacer
+and a whole reply takes under a millisecond. `TURNS` is worth nothing
+for the same reason: twelve turns are 0.012s of a 30.46s case.
+
+What the teardown was actually waiting for is the collector's own
+choice of how to stop. Hanging up on an outstanding OTLP request is a
+retryable failure, so the exporter backed off against work nothing was
+ever going to read: `shutdown()` spent its whole `SHUTDOWN_TIMEOUT_S`
+of 5s, and the unbounded `release` that follows it spent the abandoned
+export's own 25s afterwards. The collector now **answers** that request,
+with the smallest response an OTLP exporter reads as a success, and
+goes on answering until the endpoint is shut last.
+
+Every assertion in the case is made before the teardown runs, so what
+the exporter met for the whole of the measured part is still a
+collector that answers nothing. The preconditions were checked at the
+new shape rather than assumed: `collector.outstanding` was 1 on every
+one of the twelve turns, on each of eight runs.
+
+`TURNS` and `QUEUE` are therefore unchanged in both cases, and the
+milestone owes no observable for a reduction it did not make.
+
+`REPLY_BOUND_S` moves, 3.0 to 0.5. Its comment said it was generous by
+an order of magnitude against the healthy reply; the healthy reply is
+0.7 ms in the first case and 0.4 ms in the second, worst of twelve over
+eight runs each, so it was generous by three orders. Half a second is
+still roughly seven hundred times the measured reply, which leaves a
+four-core runner carrying four test workers room to be slow without
+being wrong, and is far below the five seconds the shortest wait on
+this path would cost.
+
+`test_the_shutdown_of_a_wedged_exporter_is_bounded` is untouched at
+5.00s. It spends `SHUTDOWN_TIMEOUT_S` on purpose and measures it rather
+than asserting about the constant, which is its whole claim. **Kept, on
+its own evidence.**
+
+The file: **35.44s to 5.76s.**
+
+### Deviations from the plan
+
+Two, both forced by measurements the plan asked for and could not have
+had.
+
+- **The wedged-collector reduction came from neither of the plan's two
+  levers.** The plan named per-reply speech and `TURNS`, on the
+  reasoning that the case's scripted reply is "about 1 s of audio at
+  the shipped default" and that the rest was unattributed. The
+  component timing says all twelve replies together are 0.012s and the
+  teardown is 30.01s, so both named levers are worth nothing here. The
+  plan's instruction that governs is the one above them, to time each
+  case by component and then reduce whatever dominates; what dominates
+  is how the collector stops, and that is what was changed. The plan's
+  own levers were left exactly where they were, which is why this
+  milestone states no observable for a `TURNS` reduction: there is none.
+- **`test_drain.py`'s speech was never at risk.** The plan's second
+  review round found that a shorter reply could leave the drain landing
+  after it, and that the case would keep passing. Measured, every one
+  of that reply's five sentences is already under the voice's floor at
+  the shipped rate, so the reply is 1.2s at 40 ms per character and 1.2s
+  at 4. The sleep was replaced anyway, because "it happens to be long
+  enough today" is what the finding was really about.
+
+One addition rather than a departure: the **emitted audio duration was
+measured directly**, which the plan named as what a stronger claim
+would need and said nothing depended on. It is what chose the rate, so
+in the end something did.
+
+### What the verification proved
+
+All local, at `6e6976a2`, on the machine and against the database named
+above:
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/integration -q -n 4 --dist loadfile`, CI's
+  runner width: **346 passed in 88.53s**, against M2's 130.22s at the
+  same width on this machine. The count is the thing to read: the same
+  346 as M1, M2 and the plan's table, so nothing was skipped or lost.
+- The three worklist files, serial: **23 passed in 68.18s**, against
+  163.95s before, the same 23 tests.
+- `test_device_simulator.py`, `test_drain.py`, `test_tools.py`,
+  `test_two_personas.py`, the four carrying the claims at risk: **19
+  passed in 33.32s**, run together and serially.
+- `tests/integration/test_telemetry_hardening.py`: **4 passed in
+  5.76s**, against 35.75s of summed durations before.
+- `uv run pytest tests/unit/test_command_spellings.py`, run after this
+  section and the plan's tick were written, which is the run that
+  counts because the census sweeps every tracked file: **52 passed in
+  6.18s**. The manifest did not move, so nothing was regenerated and
+  none of this milestone's documentation changed the distinct set of
+  classified command spellings.
+- `scripts/check_doc_links.py .`: **checked 249 files, 0 failures**.
+
+### What is not verified, and is not claimed
+
+- **CI.** Every number here is from a 14-core darwin machine with
+  sibling worktrees on it. This milestone's CI evidence is the pull
+  request's own run, which has not happened as this section is written.
+- **Stability.** One pass of the lane at four workers is not a
+  stability proof, and `REPLY_BOUND_S` at 0.5s has not met a loaded
+  four-core runner. What justifies it is the margin rather than a run:
+  seven hundred times the measured reply, against a failure mode that
+  costs seconds.
+- **The unit lane.** Untouched by this milestone, which changes no
+  module the unit lane imports: `tests/support/configs.py` is
+  deliberately outside the seam and `providers/mock.py` is unchanged.
+- **The `image` job.** Untouched and not run.
+
+### The changelog fragment, and why there is none
+
+M3 writes no fragment, which is what the plan's documentation footprint
+allows for it: one only if a case's shape actually changes in a way
+somebody outside the repository could see. Nothing observable did. No
+command moved, no configuration key moved, no product behavior moved,
+and the mock voice a person gets when they configure one still speaks
+at 40 ms per character. What changed is how fast this repository's own
+test lane talks to itself. The lane's speed is already the subject of
+M1's `### Changed` entry, which is where a reader looking for it will
+be.
