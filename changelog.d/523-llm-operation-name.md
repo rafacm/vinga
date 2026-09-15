@@ -1,3 +1,0 @@
-### Fixed
-
-- The `llm` round span now carries `gen_ai.operation.name`, the GenAI conventions' required name for the operation a generation span stands for, with the value `chat` on ordinary rounds, recaps and failed rounds alike. The `tool` span beside it already named its operation, so a round was the one semantic operation in a trace that did not say what it was. A backend also reads the key: a live Langfuse gate measured that an observation is typed as a generation from `gen_ai.request.model` or from an operation name the backend knows, and that a round carrying neither is stored as a plain span whose usage is never priced. Providers that report no model name are what made that reachable.
