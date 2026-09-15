@@ -34,7 +34,7 @@ from dataclasses import replace
 
 import pytest
 
-from tests.integration.conftest import booted
+from tests.integration.conftest import booted, mock_voice
 from tests.support.config_cli import API_SECRET_ENV
 from tests.support.deployment import Live, served
 from vinga_server.config import Config, cli
@@ -77,7 +77,7 @@ def deployment(**overrides: object) -> Config:
                 "providers": {
                     "llm": {"mock": {"type": "mock", "reply": "You said {text}."}},
                     "asr": {"mock": {"type": "mock", "text": HEARD}},
-                    "tts": {"mock": {"type": "mock"}},
+                    "tts": {"mock": mock_voice()},
                     "vad": {"mock": {"type": "mock"}},
                 },
                 "agent_defaults": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),

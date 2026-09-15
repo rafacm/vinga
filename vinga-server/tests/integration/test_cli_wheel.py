@@ -103,6 +103,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.integration.conftest import mock_voice
 from tests.support.commands import BUILD_SECONDS, ran
 from tests.support.config_cli import registered
 from tests.support.deployment import Live, check_in, serving
@@ -190,7 +191,7 @@ DEPLOYMENT: dict[str, object] = {
     "providers": {
         "llm": {"brain": {"type": "mock", "reply": "You said {text}."}},
         "asr": {"ears": {"type": "mock", "text": "hello"}},
-        "tts": {"voice": {"type": "mock"}},
+        "tts": {"voice": mock_voice()},
         "vad": {"gate": {"type": "mock"}},
     },
     "mcp_servers": {"house": {"transport": "stdio", "command": "/bin/echo", "args": ["house"]}},

@@ -24,12 +24,15 @@ from pathlib import Path
 
 import pytest
 
+from tests.integration.conftest import mock_voice
 from vinga_server.config import Config
 from vinga_server.config.models import CaptureConfig, ServerConfig
 
 SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "wire_latency.py"
 
-MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")}
+MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "vad")} | {
+    "tts": {"mock": mock_voice()}
+}
 MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
 
 DEVICE_MAC = "aa:bb:cc:dd:ee:44"

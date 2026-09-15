@@ -58,6 +58,57 @@ FRAME_MS = 60
 FRAME_BYTES = SAMPLE_RATE * FRAME_MS // 1000 * 2
 
 
+# What this lane's mock voice takes to say one character, against the
+# 40 ms a configured mock voice gets by default (`providers/mock.py`).
+#
+# The default is a person's and stays exactly where it is. It is the
+# rate a reply is HEARD at, and the server sends a reply's audio out at
+# that rate on purpose rather than as fast as it encodes, because the
+# board plays what arrives as it arrives (`device/pacing.py`). So a test
+# that provokes a long reply waits through it, and the three files that
+# drive a model answering with its whole system prompt waited through
+# most of their own duration (#491).
+#
+# Four, because the voice's 240 ms floor is where this stops paying.
+# Measured on those three files, by recording the length of every
+# sentence they have spoken and costing it at each rate: 227.20 s of
+# audio at 40, 52.67 s at 8, 34.50 s at 4, 31.14 s at 2, and an
+# asymptote of 30.72 s, which is their 128 sentences at the floor. Four
+# is within 3.78 s of that asymptote, so no smaller number can buy more
+# than the last 1.7% of what 40 cost; and it is the last rate at which
+# the voice still does what its docstring says it does, since 47 of the
+# 128 sentences are still longer than the floor there against 2 of them
+# at a rate of 2. That a reply's duration follows its text is the mock
+# voice's own claim, and a lane which flattened every sentence onto the
+# floor would be reading a number that had stopped depending on what was
+# said.
+LANE_MS_PER_CHAR = 4.0
+
+# The mock voice's own floor, which no entry in this lane overrides. It
+# is the shipped default, named here because two cases derive a duration
+# from it: at the rate above, a sentence under sixty characters costs
+# this rather than its text. A copy that went stale would fail those two
+# loudly rather than quietly, since each compares it against audio the
+# voice really produced.
+VOICE_MIN_MS = 240.0
+
+
+def mock_voice(**options: Any) -> dict[str, Any]:
+    """One mock TTS entry for this lane, carrying its speaking rate.
+
+    A fresh mapping every call, never one dictionary shared between
+    tests: an entry reaches a config that a test may edit, and a shared
+    one would carry an edit into the next case.
+
+    `options` are the caller's own and win, so a named voice keeps its
+    `tone_hz` and a case that genuinely needs the shipped 40 ms says so
+    by passing it. There is no shared providers block here on purpose:
+    the entries this lane writes are named voices as often as not, and a
+    block would flatten the names the tests assert on.
+    """
+    return {"type": "mock", "ms_per_char": LANE_MS_PER_CHAR} | options
+
+
 def booted(config: Config):
     """The app the server would serve, from the same configuration after
     a round trip through the database this run provisioned.

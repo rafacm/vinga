@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.integration.conftest import dominant_hz, spoken
+from tests.integration.conftest import dominant_hz, mock_voice, spoken
 from vinga_server.config import Config
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.memory.store import open_memory
@@ -44,7 +44,7 @@ def one_agent(llm: dict[str, object], **extra: object) -> Config:
                 "providers": {
                     "llm": {"mock": llm},
                     "asr": {"mock": {"type": "mock", "text": "tell me the secret"}},
-                    "tts": {"mock": {"type": "mock"}},
+                    "tts": {"mock": mock_voice()},
                     "vad": {"mock": {"type": "mock"}},
                 },
                 "agent_defaults": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
@@ -129,8 +129,8 @@ def switching_config(target: str) -> Config:
             },
             "asr": {"mock": {"type": "mock", "text": "tell me the secret"}},
             "tts": {
-                "tenor": {"type": "mock", "tone_hz": POET_TONE},
-                "alto": {"type": "mock", "tone_hz": TUTOR_TONE},
+                "tenor": mock_voice(tone_hz=POET_TONE),
+                "alto": mock_voice(tone_hz=TUTOR_TONE),
             },
             "vad": {"mock": {"type": "mock"}},
         },
@@ -223,7 +223,7 @@ def household_config(opening: str) -> Config:
                 "reader": {"type": "mock", "reply": "Prompt: {system}"},
             },
             "asr": {"mock": {"type": "mock", "text": "tell me the secret"}},
-            "tts": {"mock": {"type": "mock"}},
+            "tts": {"mock": mock_voice()},
             "vad": {"mock": {"type": "mock"}},
         },
         agent_defaults=dict.fromkeys(("asr", "tts", "vad"), "mock"),
@@ -341,7 +341,7 @@ def granting_config(kids_grant: object) -> Config:
         providers={
             "llm": {"mock": {"type": "mock", "reply": "I have {tools}."}},
             "asr": {"mock": {"type": "mock", "text": "what can you do"}},
-            "tts": {"mock": {"type": "mock"}},
+            "tts": {"mock": mock_voice()},
             "vad": {"mock": {"type": "mock"}},
         },
         mcp_servers={"tools": stdio_server()},

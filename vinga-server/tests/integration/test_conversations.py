@@ -18,7 +18,7 @@ from typing import Any
 from sqlalchemy import text
 from xiaozhi_sdk import XiaoZhiWebsocket
 
-from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, speech_pcm
+from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, mock_voice, speech_pcm
 from vinga_server.config import Config
 from vinga_server.config.models import DatabaseConfig, ProviderConfig
 from vinga_server.db import read_engine
@@ -48,7 +48,7 @@ def recording_config() -> Config:
                 }
             },
             "asr": {"mock": {"type": "mock", "text": "how is the battery"}},
-            "tts": {"mock": {"type": "mock"}},
+            "tts": {"mock": mock_voice()},
             "vad": {"mock": {"type": "mock"}},
         },
         agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),

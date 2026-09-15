@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from tests.integration.conftest import mock_voice
 from tests.support.events import both_formats
 from tests.support.sessions import Gate
 from tests.support.stores import CONVERSATIONS_MANIFEST
@@ -74,8 +75,8 @@ def exporting_config() -> Config:
             },
             "asr": {"mock": {"type": "mock", "text": HEARD}},
             "tts": {
-                "tenor": {"type": "mock", "tone_hz": POET_TONE},
-                "alto": {"type": "mock", "tone_hz": TUTOR_TONE},
+                "tenor": mock_voice(tone_hz=POET_TONE),
+                "alto": mock_voice(tone_hz=TUTOR_TONE),
             },
             "vad": {"mock": {"type": "mock"}},
         },

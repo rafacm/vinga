@@ -18,12 +18,14 @@ from collections.abc import Iterator
 import pytest
 import uvicorn
 
-from tests.integration.conftest import booted
+from tests.integration.conftest import booted, mock_voice
 from vinga_server.auth import build_device_auth
 from vinga_server.config import Config
 from vinga_server.ota import OTA_PATH
 
-MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")}
+MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "vad")} | {
+    "tts": {"mock": mock_voice()}
+}
 MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
 
 DEVICE_MAC = "aa:bb:cc:dd:ee:ff"

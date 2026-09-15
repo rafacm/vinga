@@ -76,6 +76,7 @@ import pytest
 import yaml
 
 from tests.conftest import reset_database
+from tests.integration.conftest import mock_voice
 from tests.support.config_cli import document, registered
 from tests.support.deployment import (
     BOARD,
@@ -501,7 +502,7 @@ DEPLOYMENT: dict[str, object] = {
             "spare": {"type": "anthropic", "model": "m", "api_key_env": "ANTHROPIC_API_KEY"},
         },
         "asr": {"ears": {"type": "mock", "text": "hello"}},
-        "tts": {"voice": {"type": "mock"}},
+        "tts": {"voice": mock_voice()},
         "vad": {"gate": {"type": "mock"}},
     },
     "mcp_servers": {
