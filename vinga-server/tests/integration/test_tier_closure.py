@@ -51,7 +51,9 @@ install proves nothing about a command whose heavy import sits inside
 its own arm, which is exactly what `openapi`, `ota-url` and `check`
 are. So the grammar's own inventory is split in two here, the gated
 commands against everything else, and both sides are invoked as
-subprocesses of the installed binary. The `vinga-server` entry point's own gated
+subprocesses of the installed binary, a bounded few at a time rather
+than one after another: the fresh interpreter per command is the claim,
+and its turn in a queue never was. The `vinga-server` entry point's own gated
 sibling, the conversations group, is driven here too: it is outside the
 grammar's tree, so nothing about `cli.COMMANDS` would ever reach it.
 M3 widens that to the full registered inventory
@@ -81,6 +83,7 @@ import subprocess
 import sys
 import tomllib
 from collections.abc import Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -114,6 +117,13 @@ PROJECT = Path(__file__).resolve().parents[2]
 # because the assertion below is two-way: a fourth gated command fails
 # this lane from the side it joined.
 GATED = frozenset({("openapi",), ("ota-url",), ("check",)})
+
+# The other half of that inventory, derived from it rather than
+# listed: every row a client install must answer. One home for the
+# split, so the two halves cannot come to disagree about which rows
+# either of them covers, and so the coverage assertion beside GATED's
+# own has one thing to hold the pools to.
+UNGATED = tuple(row.words for row in cli.COMMANDS if row.words not in GATED)
 
 # A port nothing listens on, which is how the serve door below is asked
 # to refuse rather than to serve. The lane's own instance is reachable
@@ -386,6 +396,41 @@ def _ran(
     )
 
 
+# How many of those commands are in flight at once, for the two
+# inventory-wide cases below. Bounded, and a number rather than
+# `len(COMMANDS)`: under `--dist loadfile` this file sits on exactly one
+# xdist worker, so there is one pool in the whole run and it competes
+# with the lane's other workers for the runner's cores. Each pooled
+# process is a fresh interpreter whose life is mostly importing the CLI,
+# which is CPU, so a wide pool bids against its own lane.
+#
+# Settled by measuring widths 2, 4 and 8 against the whole integration
+# lane at four workers rather than against this file alone, since a file
+# that is faster in isolation and slower in the lane has bought nothing.
+# The numbers are in the plan's implementation doc, under M2.
+POOL_WIDTH = 4
+
+
+def _ran_concurrently(
+    python: Path, argvs: Sequence[Sequence[str]]
+) -> list[subprocess.CompletedProcess[str]]:
+    """The commands `_ran` runs, `POOL_WIDTH` of them at a time.
+
+    One fresh interpreter per command is this file's claim and it is
+    untouched here: what changes is that the processes wait for each
+    other's exits rather than for each other's turns. `_ran` blocks in
+    `subprocess.run`, so the waiting is what threads are for and `_ran`
+    itself needs nothing.
+
+    Results come back in the caller's own order, which is what lets a
+    failure name the row that asked for it. Returning them as they
+    finished would have thrown that away, and naming the row is the
+    whole of what the serial loops this replaced gave a reader.
+    """
+    with ThreadPoolExecutor(max_workers=POOL_WIDTH) as pool:
+        return list(pool.map(lambda argv: _ran(python, *argv), argvs))
+
+
 # The client tier
 
 
@@ -579,25 +624,32 @@ def test_every_ungated_command_has_a_help_page_from_the_client_install(
     milestone's moves could have caused: a command whose declaration or
     whose module-scope import reaches the server half fails before it
     prints anything, and importing `cli` would not have found it.
+
+    The rows run concurrently rather than one after another, which
+    changes nothing about that claim: each is still its own process of
+    its own interpreter. `strict=True` is what holds the pool to the
+    inventory, since a result quietly missing is the one failure a green
+    run would not show.
     """
-    for row in cli.COMMANDS:
-        if row.words in GATED:
-            continue
-        finished = _ran(client_env, "vinga", *row.words, "--help")
-        assert finished.returncode == 0, (row.words, finished.stderr)
-        assert finished.stdout.strip(), row.words
+    pages = _ran_concurrently(client_env, [("vinga", *words, "--help") for words in UNGATED])
+
+    for words, page in zip(UNGATED, pages, strict=True):
+        assert page.returncode == 0, (words, page.stderr)
+        assert page.stdout.strip(), words
 
 
 def test_the_gated_commands_refuse_from_the_client_install(client_env: Path) -> None:
     """The other side of the same inventory. They are in the grammar, so
     they parse; they need the server half, so they refuse; and they
     refuse with the sentence rather than with an ImportError."""
-    for words in sorted(GATED):
-        finished = _ran(client_env, "vinga", *words)
-        assert finished.returncode == 1, (words, finished.stdout, finished.stderr)
-        assert finished.stderr.strip() == cli.NEEDS_THE_SERVER_HALF, words
-        assert finished.stdout == "", words
-        assert "Traceback" not in finished.stderr, words
+    gated = sorted(GATED)
+    refusals = _ran_concurrently(client_env, [("vinga", *words) for words in gated])
+
+    for words, refusal in zip(gated, refusals, strict=True):
+        assert refusal.returncode == 1, (words, refusal.stdout, refusal.stderr)
+        assert refusal.stderr.strip() == cli.NEEDS_THE_SERVER_HALF, words
+        assert refusal.stdout == "", words
+        assert "Traceback" not in refusal.stderr, words
 
 
 def test_the_conversations_group_refuses_from_the_client_install(client_env: Path) -> None:
@@ -680,10 +732,22 @@ def test_the_doctor_with_no_url_derives_one_from_the_serve_install(serve_env: Pa
 
 def test_the_gated_set_is_what_the_table_says_it_is() -> None:
     """The inventory held closed against the registration table, so a
-    command that left the gated set fails from the side it left."""
-    assert GATED <= {row.words for row in cli.COMMANDS}
+    command that left the gated set fails from the side it left, and
+    the two pooled cases above held to covering all of it.
+
+    The second half is what a pool makes worth writing down. A pool
+    ranging over fewer rows than the loop it replaced still passes, and
+    a count would not catch a row that moved between the halves, so the
+    pin is the two sets against the table rather than a number.
+    """
+    table = [row.words for row in cli.COMMANDS]
+
+    assert GATED <= set(table)
     for words in GATED:
         assert registered(list(words)) == words
+
+    assert set(UNGATED) | GATED == set(table), "the two halves no longer cover the table"
+    assert len(UNGATED) + len(GATED) == len(table), "a row is covered by both halves or twice"
 
 
 # The serve tier
