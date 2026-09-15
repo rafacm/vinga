@@ -694,7 +694,7 @@ existing test is restated.
   recorded with their numbers. **Design footprint:** none; no module,
   no seam. This milestone removes an asymmetry between two invocations
   of the same tool.
-- [ ] **M2: the tier-closure floor.** The two serial subprocess loops
+- [x] **[M2: the tier-closure floor](2026-09-15-integration-lane-wall-time-implementation.md#m2-the-tier-closure-floor)** (PR TBD). The two serial subprocess loops
   in `test_tier_closure.py` run through a bounded pool, one fresh
   interpreter per command preserved exactly, failures still naming
   their row, falsified by a row-specific fault injected at the pooling
@@ -703,7 +703,9 @@ existing test is restated.
   the file's serial total moves from 83.37s toward roughly 64s, which
   is the lane's `loadfile` floor. **Design footprint:** a file-local
   helper, deliberately not a module; `_ran` is unchanged, which is the
-  seam already there.
+  seam already there. Measured: the file 83.37s to 68.33s, the lane
+  167.19s to 130.22s at four workers, width four confirmed against
+  widths 1, 2 and 8 on the lane rather than on the file.
 - [ ] **M3: the rest of the worklist, attributed and dispositioned.**
   The three conversation cases are already attributed (56% of those
   three files is real-time playback of a prompt-echo reply), so the
