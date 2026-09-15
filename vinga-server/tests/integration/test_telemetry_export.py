@@ -397,10 +397,18 @@ async def test_the_gen_ai_keys_arrive_spelled_as_the_conventions_spell_them(
     # name, because it is the one foreign-prefixed attribute every span
     # carries whatever its stage did (#67 M1); the case below is what
     # holds it to its value.
+    #
+    # The operation name is in the set for the opposite reason to the
+    # rest: it is not something a provider reports, it is what this span
+    # IS, so it is present exactly when the mocks report nothing. That
+    # is also the case a backend needs it in, since with no model name
+    # it is the only thing left to type the observation from.
     assert {key for key in carried if not key.startswith("vinga.")} == {
+        "gen_ai.operation.name",
         "gen_ai.provider.name",
         "session.id",
     }
+    assert carried["gen_ai.operation.name"] == "chat"
     assert [event.name for event in llm.events] == ["first_token"]
 
 
