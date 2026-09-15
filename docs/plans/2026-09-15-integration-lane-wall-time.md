@@ -676,7 +676,7 @@ existing test is restated.
 
 ## Milestones
 
-- [x] **[M1: the integration lane distributes](2026-09-15-integration-lane-wall-time-implementation.md#m1-the-integration-lane-distributes)** (PR TBD). `-n auto --dist
+- [x] **[M1: the integration lane distributes](2026-09-15-integration-lane-wall-time-implementation.md#m1-the-integration-lane-distributes)** (PR #532). `-n auto --dist
   loadfile` on the workflow's integration step, the two stale comments
   in that file corrected, `AGENTS.md`'s Commands block made true of
   both lanes, and a `### Changed` changelog fragment. No test changes.
