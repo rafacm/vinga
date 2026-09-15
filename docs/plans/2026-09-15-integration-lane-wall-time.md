@@ -437,3 +437,81 @@ existing test is restated.
 
 M2 and M3 stack on M1 and on each other, and each subagent starts when
 its predecessor's PR opens rather than when it merges.
+
+## Plan review round
+
+Backend codex, `codex-cli 0.154.0`, model `gpt-5.6-sol`, sandbox
+read-only, 2026-09-15, against commit `42b45310`. Reviewer runtime
+7m21s. Verdict: ready after the P1/P2 amendments. Findings recorded as
+received, condensed but faithful.
+
+### 1 (P1): M3 leaves the issue's required attribution and design unresolved
+
+The issue requires attribution before change, but the plan says the
+three conversation cases are "not yet known", permits "whatever
+cheapest change" is later discovered, and leaves both files and fixture
+design unspecified. That prevents review of behavioral preservation,
+shared-state safety and the deletion test before implementation. The
+plan should attribute every worklist case now, state its exact
+disposition, identify the files and configuration changes, and describe
+the preserved assertions. If attribution reveals a new shared fixture
+or seam, the plan should be amended and reviewed before that code is
+written.
+
+### 2 (P2): the 30-second telemetry case is classified as irreducible without measuring its components
+
+The plan concludes both telemetry cases are inherently real-time and
+should be kept. The 5-second shutdown case does deliberately exercise
+`SHUTDOWN_TIMEOUT_S`. The 30-second case instead performs an initial
+reply plus `TURNS = 12` more, and those replies use configurable mock
+speech whose duration is `max(min_ms, ms_per_char * len(text))` with
+defaults of 240 ms and 40 ms per character. A real monotonic latency
+assertion does not require twelve long synthesized replies. The plan
+should separately time setup, queue saturation, each reply and
+teardown, reduce speech duration and turn count to the minimum that
+demonstrably fills the queue and proves replies remain independent, and
+close only an irreducible remainder as measured-and-kept.
+
+### 3 (P2): M2's claimed 58-second floor is incompatible with a bounded pool
+
+The plan subtracts the entire 25.31s help case and predicts a floor of
+roughly 58s while explicitly retaining one fresh subprocess per command
+and refusing 65-way concurrency. With pool width `w` the optimistic
+floor is `83.37 - 25.31 + 25.31/w` plus pool overhead, about 64.4s at
+width four, and the plan never chooses `w`. Its risk analysis also
+discusses "four workers each running a pool"; `loadfile` places this
+file on one worker, so there is one nested pool competing with the
+other xdist workers. The plan should choose the exact width, justify it
+against one pooled worker plus the remaining CI workers, give a
+realistic target using the residual subprocess time, and measure both
+the file alone and the complete four-worker lane.
+
+### 4 (P2): the proposed M2 falsification cannot produce the targeted failure it claims
+
+The drill proposes adding a module-scope import to one ungated
+command's arm and expects the failure to name that command. The test
+invokes only `vinga <words> --help`, and the CLI constructs the entire
+command tree and executes every row's declaration for every invocation,
+while server-only imports inside handlers are deferred until the action
+runs. A true module-scope or declaration-time import therefore breaks
+every help invocation; an import inside one handler is not executed by
+`--help`. Neither isolates the named row. The plan should specify a
+deterministic row-specific fault at the pooling boundary, such as
+making `_ran` return a failing result for one chosen argv, and verify
+the main test thread surfaces that row and its stderr. Because the
+drill temporarily edits a tracked file, it should follow AGENTS.md's
+restore rule: preserve the prior bytes, restore without `git checkout`,
+and `touch` the restored file.
+
+### 5 (P3): the `loadfile` rationale cites telemetry fixtures that are not module-scoped
+
+The plan says `test_telemetry_export.py` and `test_telemetry_fanout.py`
+boot containers in module-scoped fixtures that `--dist load` would
+duplicate. In `test_telemetry_export.py`, `jaeger` is a default
+function-scoped fixture; in `test_telemetry_fanout.py`, `_collector` is
+a context manager used by its single test. The genuine expensive
+module-scoped examples are the tier environments and the wheel build,
+installed environment, server and runner in `test_cli_wheel.py`. The
+plan should cite the actual module-scoped fixtures as the amortization
+reason; the telemetry containers remain relevant to the cross-file
+shared-resource audit but not to fixture duplication.
