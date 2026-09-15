@@ -526,3 +526,10 @@ installed environment, server and runner in `test_cli_wheel.py`. The
 plan should cite the actual module-scoped fixtures as the amortization
 reason; the telemetry containers remain relevant to the cross-file
 shared-resource audit but not to fixture duplication.
+
+*Resolution*: amended in `5f0ee8a2`. The `loadfile` rationale now cites
+`test_tier_closure.py`'s six module-scoped environment fixtures by name
+and `test_cli_wheel.py`'s four (`wheel`, `installed`, `elsewhere`,
+`live`), which are the genuinely expensive ones. The two telemetry
+files are named explicitly as NOT an example, with their actual scopes,
+and are left where they belong, in the shared-resource audit.
