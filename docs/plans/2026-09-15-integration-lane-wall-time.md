@@ -322,25 +322,134 @@ thread. So M3's expected outcome for these is the issue's
 measured-and-kept, and its deliverable is that the disposition is
 written down with its numbers rather than left as an impression.
 
-What M3 must not do is assume the same of the other three worklist
-cases. `test_one_session_across_a_reload_a_switch_and_a_memory_write`
-(23.01s), `test_a_restricted_agent_is_offered_exactly_its_subset`
-(20.37s) and `test_a_conversations_notes_come_back_when_the_thread_does`
-(16.06s) are conversation tests whose cost is not attributed yet, and
-the arithmetic says it is not simply the number of conversations they
-hold: a single-conversation case in the same lane
-(`test_a_conversation_triggers_an_mcp_tool_and_the_reply_reflects_it`)
-costs 2.65s, and the restricted-agent case holds two and costs 20.37s.
-Something other than the conversations dominates those three, and M3's
-first deliverable is what.
+### The three conversation cases are attributed: they are listening to speech in real time
+
+This is done rather than deferred, and the answer is a single
+mechanism shared by all three.
+
+**The measurement.** Same three files, same machine, same commit, the
+only variable the mock voice's `ms_per_char` (shipped default 40.0,
+`providers/mock.py:345`), each run twice-clean with the bytecode caches
+cleared:
+
+| | `ms_per_char` 40 | `ms_per_char` 4 |
+| --- | ---: | ---: |
+| the three files together | **163.98s** | **72.36s** |
+| one session across a reload, a switch, a memory write | 23.31s | 6.44s |
+| a restricted agent is offered exactly its subset | 20.53s | 4.24s |
+| a conversation's notes come back when the thread does | 16.68s | 5.69s |
+| a device note reaches every agent on that device | 10.97s | 3.85s |
+| a fact remembered in one conversation reaches the next | 10.42s | 3.87s |
+
+**91.6 seconds of 164, 56% of those three files, is the duration of
+synthesized reply audio.** The run's CPU share says what kind of cost
+it is: 25.30s user against 163.98s wall, 17%. The lane is not computing,
+it is waiting.
+
+**Why it waits is product behavior, not a test artifact.**
+`device/pacing.py` exists to send a reply's audio "at the rate it will
+be heard at", because "the board plays what arrives as it arrives, so a
+long answer sent as fast as it encodes floods its playback queue". So
+the server deliberately paces outgoing audio in real time, and a test
+that provokes a long reply waits through it.
+
+**Why the replies are long.** These files use a mock model that answers
+with the prompt it was handed (`speaks_its_prompt`, `{"reply":
+"{system}"}`), which is the only way to see a session's assembled
+prompt from the far end and is the whole point of those cases. A system
+prompt is hundreds of characters, and the mock voice renders
+`max(min_ms, ms_per_char * len(text))`, so a several-hundred-character
+prompt echo becomes ten or twenty seconds of tone that the pacer then
+plays out at real time.
+
+This is the issue's second named mechanism (a test that proves
+something "by actually sleeping through N") in a shape the review did
+not anticipate: the tests are not sleeping through a timeout, they are
+listening to a long reply.
+
+### The disposition: the lane's voice timing gets one home
+
+The change is to the **lane's** mock voice, never to the shipped
+default. `build_tts`'s 40 ms per character stays exactly as it is,
+because it is the default a person gets when they configure a mock
+voice and nothing here is about them.
+
+Today `{"type": "mock"}` is written out as a literal in the integration
+configs, most often inside a repeated
+`MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in (...)}`
+that appears verbatim in file after file. That duplication is why there
+is no one place to set this. M3 gives the lane's provider block one
+home in the integration `conftest.py`, carrying the lane's
+`ms_per_char`, and the files read it from there. Two structures that
+must agree are one structure with a bug pending, and this is a dozen.
+
+That is the seam the earlier draft said might be needed; it is now
+named, and it passes the deletion test the other way round: inlining it
+back into a dozen callers is exactly the state the lane is in, and it
+is the reason the value has nowhere to live.
+
+**The claims that must survive, each checked rather than assumed:**
+
+- `spoken(events)` reads the `tts sentence_start` **text**, which is
+  what all three cases assert on. Text is unchanged by how long its
+  audio is.
+- `test_tools.py` asserts `audio.size > 0` and
+  `abs(dominant_hz(audio) - TONE) < 20`. Shortening the audio shortens
+  the FFT window, so M3 confirms the remaining audio still resolves the
+  tone inside 20 Hz. The floor helps: `min_ms` is 240 ms, which at the
+  16 kHz analysis rate is 3,840 samples against the ~800 a 20 Hz
+  resolution needs. Confirmed by running those cases, not by this
+  arithmetic.
+- No integration test asserts that the reply arrives paced.
+  `test_the_utterance_is_paced_rather_than_burst` is about the
+  simulator's **outgoing** utterance and asserts on recorded sleep
+  calls rather than on elapsed time, so it is untouched.
+- `test_two_personas.py` also reads `dominant_hz`, so it is in the same
+  check.
+
+**What M3 does not claim.** `ms_per_char` of 4 was the A/B's probe, not
+a proposed constant. M3 picks the lane's value as the smallest that
+keeps every check above passing, states it with its reason, and
+measures the three files again at that value.
+
+### The wedged-collector case is timed by component before it is kept
+
+The plan's earlier draft called both telemetry cases irreducible. That
+was right about one and unproven about the other.
+
+`test_the_shutdown_of_a_wedged_exporter_is_bounded` (5.00s) genuinely
+exercises `SHUTDOWN_TIMEOUT_S` and its own docstring says it is
+"measured rather than asserted about the constant". It is kept.
+
+`test_a_collector_that_never_answers_costs_no_reply_anything` and its
+sibling (30.02s) are **not** a single real-time wait. They perform one
+reply plus `TURNS = 12` more against `QUEUE = 4`, each asserted under
+`REPLY_BOUND_S = 3.0`, and each reply carries synthesized speech from
+`ScriptedLlm(["Two words. And two more."])`. That reply is short (two
+sentences, about 24 characters, roughly 1 s of audio at the shipped
+default), so unlike the three cases above the speech is a minority of
+each turn's ~2.3 s, and the rest is not yet attributed.
+
+So M3 times this case by component before touching it: fixture setup,
+the turn that wedges the exporter, each subsequent reply, and the
+teardown that releases and joins. Then, and only then, it reduces
+whatever dominates. Two levers are available and both preserve the
+claim if the measurement supports them: the per-reply speech duration,
+and `TURNS`, whose stated job is to fill a queue of 4 "several times
+over" and which does not obviously need twelve to do that. The reply
+bound moves with the healthy number if the healthy number moves, since
+its comment says it is deliberately "generous by an order of magnitude"
+against it; a bound left at 3.0 s over a 0.3 s reply would be a weaker
+test, not a faster one.
+
+Only the remainder that survives that closes as measured-and-kept.
 
 ### What M3 may and may not conclude
 
-M3 is allowed to close every case measured-and-kept. It is not allowed
-to close any case without the measurement, and it is not allowed to
-report a reduction it did not measure at the file level. If the
-attribution finds a shared fixture cost rather than five separate ones,
-M3 says so and fixes the one thing.
+M3 is allowed to close a case measured-and-kept. It is not allowed to
+close any case without the measurement, and it is not allowed to report
+a reduction it did not measure at the file level, under the instrument
+this plan's tables use, at the commit it ran on.
 
 ## Module layout
 
@@ -353,16 +462,25 @@ Small, and no production module is touched.
   of only the unit lane (M1).
 - `vinga-server/tests/integration/test_tier_closure.py`: two serial
   loops become pooled, and the pool helper is local to the file (M2).
-- `vinga-server/tests/integration/test_telemetry_hardening.py` and
-  whichever files M3's attribution names (M3).
+- `vinga-server/tests/integration/conftest.py`: the lane's mock
+  provider block gains one home, carrying the lane's `ms_per_char`
+  (M3).
+- The integration files that today repeat
+  `MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in (...)}`
+  read it from there instead (M3). The exact list is the grep, run in
+  the milestone and recorded in the implementation doc rather than
+  copied into this plan, since an inventory written from memory is the
+  thing the review lenses forbid.
+- `vinga-server/tests/integration/test_telemetry_hardening.py`: the
+  wedged-collector case, after its component timing (M3).
 
 **No new module.** The pool helper in M2 is a handful of lines used by
 two tests in one file, and a module beside it would fail the deletion
 test: inlined into its only caller, the caller does not get harder to
-read. If M3's attribution finds a cost shared by several files, the
-seam it needs is a fixture in the integration `conftest.py`, which is
-where this lane already puts what two or more modules need, and the
-milestone names it then rather than now.
+read. M3's one seam is a fixture in the integration `conftest.py`,
+which is where this lane already puts what two or more modules need,
+and no production module is touched by either: `providers/mock.py`'s
+shipped defaults do not change.
 
 ## Tests
 
@@ -492,14 +610,24 @@ existing test is restated.
   helper, deliberately not a module; `_ran` is unchanged, which is the
   seam already there.
 - [ ] **M3: the rest of the worklist, attributed and dispositioned.**
-  Where the seconds go in the three conversation cases, which is not
-  yet known and is the milestone's first deliverable; the
-  wedged-collector cases named as real-time and kept, with their
-  numbers written down; and whatever cheapest change the attribution
-  justifies, or none. Allowed to close measured-and-kept in whole or in
-  part. **Design footprint:** none unless the attribution finds a
-  shared cost, in which case a fixture in the integration
-  `conftest.py`, named in the implementation doc when it is known.
+  The three conversation cases are already attributed (56% of those
+  three files is real-time playback of a prompt-echo reply), so the
+  work is the disposition: the lane's mock provider block gets one home
+  in the integration `conftest.py` carrying the lane's `ms_per_char`,
+  the duplicated `MOCK_PROVIDERS` literals read it from there, the
+  value is the smallest that keeps `dominant_hz` inside 20 Hz and
+  `audio.size > 0`, and the three files are measured again at it. The
+  bounded-shutdown case is kept. The wedged-collector case is timed by
+  component (setup, the wedging turn, each reply, teardown) before
+  anything is changed, then reduced on whichever of per-reply speech or
+  `TURNS` the measurement names, with `REPLY_BOUND_S` moving with the
+  healthy number rather than staying generous over a shorter one.
+  Anything that survives closes measured-and-kept. **Design footprint:**
+  one seam, the lane's provider block in the integration `conftest.py`,
+  which is where this lane already puts what two or more modules need.
+  It passes the deletion test in the direction that matters: its body
+  inlined into its callers is the dozen duplicated literals the lane
+  has today, which is why the value has nowhere to live.
 
 M2 and M3 stack on M1 and on each other, and each subagent starts when
 its predecessor's PR opens rather than when it merges.
@@ -611,3 +739,36 @@ other row runs normally; the pooled test must fail naming that row and
 carrying that stderr, which is exactly what the serial loop's
 `assert ..., (row.words, finished.stderr)` gives today. AGENTS.md's
 restore rule is named with it, including the `touch`.
+
+*Resolution for 1 (P1) and 2 (P2)*: both amended, by doing the
+attribution rather than rewording the deferral.
+
+The three conversation cases share one mechanism, now measured: an A/B
+on the mock voice's `ms_per_char` alone (40 shipped against 4, same
+files, same machine, commit `c999d0dc`) takes those three files from
+163.98s to 72.36s, so **56% of them is the duration of synthesized
+reply audio**. The run is 17% CPU, so it is waiting rather than
+computing, and what it waits on is `device/pacing.py` deliberately
+sending a reply at the rate it will be heard at. The replies are long
+because those files use a model that answers with its whole system
+prompt, which the mock voice renders at 40 ms per character.
+
+The disposition is now stated with its files and its preserved
+assertions: the lane's provider block gets one home in the integration
+`conftest.py` carrying the lane's `ms_per_char`, the shipped default in
+`providers/mock.py` is untouched, and the checks are `spoken()` reading
+text rather than audio, `dominant_hz` still resolving inside 20 Hz
+against the 240 ms floor, `audio.size > 0`, and the absence of any test
+asserting the reply arrives paced (`test_the_utterance_is_paced_rather_than_burst`
+is about the simulator's outgoing utterance and asserts on recorded
+sleep calls). The probe value of 4 is explicitly not proposed as the
+constant.
+
+For finding 2, the 30-second case is no longer called irreducible. The
+bounded-shutdown case is kept on its own evidence; the wedged-collector
+case is timed by component first (setup, the wedging turn, each reply,
+teardown), because its scripted reply is short enough that speech is a
+minority of each turn and the rest is unattributed, and only then
+reduced on whichever of per-reply speech or `TURNS` the measurement
+names. `REPLY_BOUND_S` moves with the healthy number rather than
+staying generous over a shorter reply.
