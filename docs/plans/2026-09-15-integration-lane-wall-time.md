@@ -694,7 +694,7 @@ existing test is restated.
   recorded with their numbers. **Design footprint:** none; no module,
   no seam. This milestone removes an asymmetry between two invocations
   of the same tool.
-- [x] **[M2: the tier-closure floor](2026-09-15-integration-lane-wall-time-implementation.md#m2-the-tier-closure-floor)** (PR TBD). The two serial subprocess loops
+- [x] **[M2: the tier-closure floor](2026-09-15-integration-lane-wall-time-implementation.md#m2-the-tier-closure-floor)** (PR #534). The two serial subprocess loops
   in `test_tier_closure.py` run through a bounded pool, one fresh
   interpreter per command preserved exactly, failures still naming
   their row, falsified by a row-specific fault injected at the pooling
