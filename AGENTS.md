@@ -178,6 +178,46 @@ what should have changed. A resolution that left a marker behind, or
 that dropped a hunk, is invisible in a diff nobody reads line by
 line.
 
+### Whether a branch has landed, in a repository that rebase-merges
+
+This repository allows rebase merges only, so a merge rewrites every
+commit hash. That breaks both of the obvious ways to ask whether a
+branch's work is on `main`, and they fail in opposite directions, so
+believing either one costs something.
+
+- **`git merge-base --is-ancestor <branch> origin/main` answers no for
+  everything.** During one cleanup it called all 29 worktree branches
+  unmerged, two dozen of which had pull requests merged weeks earlier.
+  Taken at face value it means nothing is ever safe to delete.
+- **`git cherry main <branch>` is closer and still not decisive.** It
+  compares patch ids, and a patch id is computed from the diff
+  including its context lines. Rebasing a stacked branch onto a new
+  base shifts that context, so the id moves even when the content is
+  identical. Two milestone branches came back with five and six
+  commits apparently not on `main`, which reads exactly like work about
+  to be destroyed. All eleven were on `main`.
+
+What settles it, in order: ask GitHub, since a merged pull request is
+the fact (`gh pr list --repo rafacm/vinga --head <branch> --state all
+--json number,state`); then, for whatever `git cherry` still flags,
+compare each commit's subject against `main`, because a commit that
+landed in rebased form keeps its subject. A branch with no pull request
+at all is the genuinely ambiguous case, and the question to ask there
+is whether its issue is still open: one such branch held six unique
+commits against an open issue and was live work rather than litter.
+
+Two smaller traps in the same territory. **`git branch -d` refuses
+every landed branch here**, for the same reason `--is-ancestor` does,
+so cleanup needs `-D`, which does not second-guess the caller; that is
+what makes the checks above load-bearing rather than ceremonial. And
+**removing a worktree keeps its branch**, so worktree cleanup is safe
+whatever the merge status, while branch deletion is the step that needs
+the care.
+
+One reading that looks alarming and is not: `git stash list` is
+repository-wide rather than per worktree, so the same two stashes
+appear against every worktree and are two stashes, not two per tree.
+
 
 ## Workflow
 
