@@ -7,6 +7,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-09-20
 
+### Changed
+
+- The test lanes' per-test cleanup now holds one database connection per worker process instead of opening and closing one for every test. Measured on a fourteen-core development machine: the full unit suite drops from a 122.1 s median to about 114 s, and the run opens 5,552 connections where it used to open 13,067, which is 0.75 per test rather than 1.76. What the cleanup does is unchanged: it still runs for every test in a lane that provisions storage, so nothing can write without being cleared afterwards.
+
+- The command-spellings census runs in a lane of its own, `tests/census`, which declares no storage. It reads no database row and never did, but it lived under the unit tests and inherited their declaration, so the documentation workflow carried a Postgres service container for it. That container is gone. The census still runs in both workflows, so every change is still covered by it.
+
 ### Fixed
 
 - `-n auto` now resolves to at most eight worker processes in the test lanes, which makes the documented test commands work where they previously did not. Above roughly eight processes connecting at once, connections from the host to the compose instance through its published port begin failing, and they fail by reporting that the database is unreachable while it is open and serving every other worker. The threshold was measured on one macOS machine against the compose file's Postgres, and is not claimed to be the right one under a different host or container runtime; the reasoning is recorded beside the setting so it can be re-measured. An explicit `--maxprocesses` still overrides the cap, and continuous integration is unaffected: it resolves four workers and reaches its database with no published port in between.
