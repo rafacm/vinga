@@ -34,6 +34,7 @@ import argparse
 import io
 import json
 import re
+import subprocess
 import sys
 import token
 import tokenize
@@ -90,12 +91,53 @@ def sites(source: str, path: str) -> tuple[list[Site], list[Site]]:
     return reached, own
 
 
+def tracked(root: Path) -> list[Path]:
+    """Every Python file git tracks under `root`, in path order.
+
+    The enumeration is git's rather than the filesystem's, for the
+    reason the spellings census gives for its own: an untracked scratch
+    file cannot change the answer. That matters more once a committed
+    manifest is diffed against this walk, because a stray
+    `tests/scratch.py` would otherwise be a red run that blames the
+    manifest for a file nobody committed.
+
+    `git -C <root> ls-files -z -- .` lists tracked paths relative to
+    `<root>` whatever directory the caller invoked the tool from, which
+    is the part an ambient `git ls-files` gets wrong: the same tool run
+    from `vinga-server/` and from the repository root would otherwise
+    render different paths. The `*.py` filter is applied afterwards,
+    since `ls-files` lists everything and this census is a Python
+    tokenizer.
+
+    A root git cannot list is refused by name rather than falling back
+    to a filesystem walk. Two enumerations would be two structures that
+    must agree, and the failure a silent fallback produces is an empty
+    census, which reads exactly like a clean tree.
+    """
+    listed = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "--", "."],
+        capture_output=True,
+        text=True,
+    )
+    if listed.returncode != 0:
+        raise ValueError(f"not a directory of the checkout: {root}")
+    return sorted(root / name for name in listed.stdout.split("\0") if name.endswith(".py"))
+
+
 def walk(root: Path) -> tuple[list[Site], list[Site]]:
-    """Every site under `root`, in path order."""
+    """Every site under `root`, in path order.
+
+    A tracked path that is not on disk is skipped: `ls-files` lists a
+    file deleted but not yet staged, and a missing file is a fact about
+    the working tree rather than about the census.
+    """
     reached: list[Site] = []
     own: list[Site] = []
-    for path in sorted(root.rglob("*.py")):
-        text = path.read_text(encoding="utf-8")
+    for path in tracked(root):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
         found, mine = sites(text, str(path.relative_to(root.parent)))
         reached.extend(found)
         own.extend(mine)
