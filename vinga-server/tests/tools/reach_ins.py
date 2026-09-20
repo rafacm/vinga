@@ -76,6 +76,23 @@ MANIFEST_HEADER = (
 )
 
 
+class Unwalkable(ValueError):
+    """A root `git ls-files` cannot list.
+
+    Named so the command boundary can catch this one refusal and answer
+    it with a sentence, rather than catching every `ValueError` the
+    tokenizer or the standard library might raise on the way. A
+    `ValueError` subclass because that is what it is to a caller who
+    does not know this module's own names: a bad argument.
+
+    The root stays in the message. It is the value the developer just
+    typed as `--root` on their own command line, in an instrument under
+    `tests/` that reaches no log, event, API body or record, so echoing
+    it back discloses nothing the reader does not already have, and
+    naming it is what keeps the refusal from reading as a clean tree.
+    """
+
+
 @dataclass(frozen=True)
 class Site:
     """One `receiver._name` in one place."""
@@ -136,10 +153,11 @@ def tracked(root: Path) -> list[Path]:
     since `ls-files` lists everything and this census is a Python
     tokenizer.
 
-    A root git cannot list is refused by name rather than falling back
-    to a filesystem walk. Two enumerations would be two structures that
-    must agree, and the failure a silent fallback produces is an empty
-    census, which reads exactly like a clean tree.
+    A root git cannot list raises `Unwalkable`, naming the root, rather
+    than falling back to a filesystem walk. Two enumerations would be
+    two structures that must agree, and the failure a silent fallback
+    produces is an empty census, which reads exactly like a clean tree.
+    `main` turns it into one line on stderr and a nonzero exit.
     """
     listed = subprocess.run(
         ["git", "-C", str(root), "ls-files", "-z", "--", "."],
@@ -147,7 +165,7 @@ def tracked(root: Path) -> list[Path]:
         text=True,
     )
     if listed.returncode != 0:
-        raise ValueError(f"not a directory of the checkout: {root}")
+        raise Unwalkable(f"not a directory of the checkout: {root}")
     return sorted(root / name for name in listed.stdout.split("\0") if name.endswith(".py"))
 
 
@@ -235,7 +253,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    reached, own = walk(Path(args.root))
+    # The refusal answered as a sentence. A hand-run instrument that
+    # rejects its own argument owes the reader the reason, not a stack
+    # of frames from the subprocess call that found out; 2 is
+    # argparse's own code for an argument it will not accept, so the
+    # exit status reads the same whichever half of the boundary refused.
+    try:
+        reached, own = walk(Path(args.root))
+    except Unwalkable as refusal:
+        sys.stderr.write(f"{refusal}\n")
+        return 2
     census = _census(reached, own)
 
     if args.json:
