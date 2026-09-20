@@ -62,12 +62,16 @@ the workflow file itself; a
 touched. Every other change (documentation, the skills, this file) runs
 `.github/workflows/docs.yml` instead, whose `paths-ignore` mirrors the
 server workflow's paths: it checks internal links and anchors
-(`scripts/check_doc_links.py`) and runs the command-spellings census,
-which sweeps every tracked file, so a documentation change can stale
-it: a spelling a document starts or stops quoting, or a move that gives
-one another class. On a pull request it also refuses an edit to
+(`scripts/check_doc_links.py`) and runs the census lane,
+`vinga-server/tests/census`, which holds two censuses against two
+committed manifests. The command-spellings census sweeps every tracked
+file, so a documentation change can stale it: a spelling a document
+starts or stops quoting, or a move that gives one another class. The
+reach-in census counts where the tests reach past an interface, and
+reads only the tracked Python under `tests/`, so a documentation change
+leaves it alone. On a pull request the workflow also refuses an edit to
 `CHANGELOG.md` and holds every `changelog.d/` fragment to its shape.
-Between the two workflows every change runs the census somewhere. A
+Between the two workflows every change runs the lane somewhere. A
 third workflow, `.github/workflows/changelog-fold.yml`, runs only on a
 push to `main` that touches `changelog.d/`: it folds the fragments into
 the dated changelog section and pushes the result, which is the one bot
@@ -146,7 +150,8 @@ something, run because the tedious alternative invited automating it.
   which is what actually caught the nineteen lost commits.
 
 Two files used to conflict on almost every rebase here. One of those
-conflict classes is gone and the other has a known resolution.
+conflict classes is gone and the other has a known resolution, which
+now covers two files rather than one.
 
 The dated `CHANGELOG.md` section can no longer conflict, because a
 branch never edits that file. It writes one
@@ -159,20 +164,25 @@ is no recipe here any more: `changelog.d/README.md` states the
 contract, and a rebase that still reports a `CHANGELOG.md` conflict
 means a branch edited the file and should not have.
 
-`vinga-server/tests/census/command-spellings.txt` is the one that
-remains. It is generated, by
+The generated manifests in `vinga-server/tests/census/` are what
+remain, and there are two of them:
+`command-spellings.txt`, regenerated with
 `uv run python -m tests.census.test_command_spellings` from
-`vinga-server/`, and must be **regenerated on the rebased tree**
-rather than merged, since a textual merge of it is a state no
-generator produced. The manifest records no positions, so a change
-that only shifts a line leaves it alone: it moves when the distinct
-set of classified spellings moves, one line per spelling added,
-removed or reclassified, which git merges cleanly. Regenerating on the
-rebased tree stays the rule for the times it does conflict, and
-`test_the_manifest_is_the_census` is what enforces it, in both
-workflows: the manifest is rendered again and diffed, so a spliced
-resolution is a red run rather than a committed state no generator
-produced.
+`vinga-server/`, and `reach-ins.txt`, regenerated with
+`uv run python -m tests.census.test_reach_ins` from the same place.
+Both must be **regenerated on the rebased tree** rather than merged,
+since a textual merge of either is a state no generator produced.
+Neither records positions, so a change that only shifts a line leaves
+them alone: the spellings manifest moves when the distinct set of
+classified spellings moves, one line per spelling added, removed or
+reclassified, and the reach-in manifest moves when a `path  name` pair
+is added or removed or its site count changes, one line either way.
+Both shapes git merges cleanly. Regenerating on the rebased tree stays
+the rule for the times they do conflict, and
+`test_the_manifest_is_the_census`, one of them in each module, is what
+enforces it, in both workflows: each manifest is rendered again and
+diffed, so a spliced resolution is a red run rather than a committed
+state no generator produced.
 
 And the habit both classes taught, which outlives them: after any
 rebase, grep the tree for conflict markers before pushing, and count

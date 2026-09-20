@@ -4,9 +4,9 @@ on:
   push:
     branches: [main]
     # This paths list is mirrored, inverted, by docs.yml's paths-ignore:
-    # that workflow runs the command-spellings census on everything this
-    # one ignores, so the two lists must move together or a class of
-    # change stops being census-covered anywhere.
+    # that workflow runs the census lane on everything this one ignores,
+    # so the two lists must move together or a class of change stops
+    # being census-covered anywhere.
     paths:
       - "vinga-server/**"
       # The generated domain-configuration reference is committed there
@@ -480,16 +480,18 @@ jobs:
       - name: Unit tests
         run: uv run pytest tests/unit -v --durations=25 -n auto --dist loadfile
 
-      # The census, which this step used to get for free by collecting
-      # `tests/unit`. It moved to a lane of its own so that the
-      # documentation workflow could stop carrying a Postgres service
-      # for a test that reads no row (#489), and that move takes it out
-      # of the command above. Named here explicitly, because the
-      # promise in AGENTS.md is that every change runs the census
+      # The census lane, which this step used to get for free by
+      # collecting `tests/unit`. It moved to a lane of its own so that
+      # the documentation workflow could stop carrying a Postgres
+      # service for tests that read no row (#489), and that move takes
+      # it out of the command above. Named here explicitly, because the
+      # promise in AGENTS.md is that every change runs the lane
       # somewhere: the documentation workflow covers the changes this
-      # one ignores, and this one has to keep covering its own. It
-      # needs no database and is a few seconds.
-      - name: Command-spellings census
+      # one ignores, and this one has to keep covering its own. Two
+      # censuses live here, command spellings and reach-ins, each
+      # against its own committed manifest. Neither needs a database and
+      # both are a few seconds.
+      - name: Census lane
         run: uv run pytest tests/census -q
 
   # The other lane: the integration tests, the generated-document drift
