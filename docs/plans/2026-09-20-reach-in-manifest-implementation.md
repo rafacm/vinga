@@ -149,3 +149,112 @@ manifest was generated on darwin, and the first CI run on Linux against
 it is the real test of cross-platform agreement; the sort is on `str`,
 which is codepoint order and locale-independent, so the expectation is
 that it agrees, but the expectation is not the evidence.
+
+## PR review round
+
+External adversarial review of PR #540's diff (`main...89f6347a`),
+backend codex CLI 0.155.0, model `gpt-5.6-sol`, read-only sandbox,
+2026-09-20, runtime 8m18s, posted as
+[a comment on the PR](https://github.com/rafacm/vinga/pull/540#issuecomment-5752531430).
+Five findings: one P1, three P2, one P3. Verdict: mergeable after the
+listed fixes. Four accepted whole, one accepted in half with the other
+half rejected and its reasons recorded here.
+
+**1 (P1): the refusal answered with a traceback.** *Accepted in half.*
+The facts are right: `tracked` embedded the root in a bare `ValueError`,
+`main` left it uncaught, and the census-level test pinned the message
+through `match=str(outside)` without ever exercising the command
+boundary. So a hand-run `--root /somewhere-else` answered with the frames
+of the subprocess call that found out, where the reader wanted the
+reason.
+
+*Resolution* (`20947fd6`): the refusal is `Unwalkable`, a `ValueError`
+subclass, so `main` can catch this one thing rather than every
+`ValueError` the tokenizer might raise on the way; `main` writes the
+sentence to stderr and returns 2, argparse's own code for an argument it
+will not accept. `test_the_command_refuses_an_unwalkable_root_with_one_sentence`
+drives `main` and asserts the nonzero return, the single stderr line,
+the empty stdout and the absence of `Traceback`. Watched failing twice:
+leaving the refusal uncaught turns it red, and building the refusal
+without the root turns it and the census-level test red.
+
+*The sanitization half is rejected, with reasons.* The finding asks for
+the path to be removed from the message. This repository's no-leak
+contract governs secrets, far-side output and untrusted bytes reaching a
+retained surface. The value here is none of those: it is the argument
+the developer typed as `--root` on their own command line, in an
+instrument under `tests/` that never runs in the server's request path
+and reaches no log, no event, no API body and no record, so echoing it
+back discloses nothing the reader does not already hold. Naming the root
+is also a settled decision of the plan, taken so the refusal cannot read
+as a clean tree, and the review offers no security gain to trade against
+it. The class docstring states the reasoning where the decision lives.
+
+**2 (P2): every filesystem error was treated as a deleted file.**
+*Accepted.* `except OSError` is wider than the settled behavior, which
+permits skipping only a tracked path git lists and the working tree does
+not have. A permission error or an I/O fault silently removed that
+file's reach-ins, which falsifies the manifest header's claim to count
+every one of them while rendering a green run, and the deletion test
+could not tell the two apart.
+
+*Resolution* (`7081fcfd`): `FileNotFoundError` and nothing wider; every
+other read failure propagates. An absent file is the one case where the
+census has nothing to count, and the rest are cases where it could not
+look. `test_a_tracked_file_that_cannot_be_read_does_not_vanish`
+monkeypatches `read_text` rather than arranging a mode of 000, because a
+process running as root ignores the mode and the test would pass for the
+wrong reason in a container lane; the docstring says so. Watched
+failing: restoring the broad catch turns the new test red while the
+tracked-but-deleted case stays green, which is exactly the distinction
+the finding said was missing.
+
+**3 (P2): the nested-root test passed against the fault it was written
+to catch.** *Accepted, and this is the finding worth keeping.* The test
+asserted substring membership on the whole render, and every nested
+spelling is a substring of the spelling the root above it renders, so
+`unit/test_config_cli_rendering.py` sits inside the default root's own
+line `tests/unit/test_config_cli_rendering.py  _x  1`. Reproduced
+before fixing rather than taken on trust: a `walk` that ignores its root
+argument and always reads the whole suite went **2 passed** against both
+parametrizations.
+
+*Resolution* (`a077e65a`): `rendered_paths` parses the render's path
+column, the expected spelling is compared exactly, and every row of a
+root's render must sit inside that root's own subtree, which also rules
+out a render that carries the right row among rows from elsewhere.
+Watched failing in both directions: hard-coding the full suite turns the
+nested-root case red, hard-coding `tests/unit` turns the default-root
+case red, and each parametrization now fails for its own fault and no
+other.
+
+**4 (P2): the recorded sweep total was already false.** *Accepted, as a
+shape change rather than a new number.* The section recorded 46 hits at
+a tree that held 49, because writing the sentence added three matches to
+what it was counting. Re-running and recording 49 would have been false
+again the moment this section quoted the phrase, which it now does
+several times.
+
+*Resolution* (`0d6b0edc`): the live-page classification is stated first
+as the checked claim, with each of the three hits named, the two live
+pages that now carry none named beside them, and the way to falsify it
+written down; the dated-record total is quoted as a reading of one named
+commit with the reason it cannot be a state. The reviewer's own remedy,
+re-running after the final documentation edits, cannot terminate in a
+document that is itself part of the corpus being counted, which is why
+the disposition diverges from the fix as written while accepting the
+finding behind it.
+
+**5 (P3): the lane's own conftest still described one census.**
+*Accepted.* `tests/census/conftest.py` said the lane "reads every
+tracked file and compares the command spellings" and called that census
+"a job whose only test", both false since the reach-in manifest landed
+beside it, and this file is where a reader arriving at a lane failure
+looks first.
+
+*Resolution* (`c2e291af`): it names both censuses with their manifests,
+states the one property they share (neither opens a store) against the
+reach that differs (every tracked file for spellings, the tracked Python
+under `tests/` for reach-ins), and keeps the #489 history and the reason
+the lane exists, with one sentence on why the second census was placed
+here and needed no workflow edit.
