@@ -52,12 +52,17 @@ left open at session end, taken away with the database they belong to.
 No worker ever terminates another's. During the window where the 667
 failures happen there is no server-side error of any kind.
 
-The decisive measurement is simpler still. In run 3, with
-`log_connections` on, Postgres logged `connection received` **11,576**
-times and `connection authorized` **11,576** times, exactly. Every
-connection Postgres saw, it accepted. The 602 failed connections in
-that run **never reached Postgres at all**, so nothing Postgres or the
-fixtures did could have caused them.
+The decisive measurement is an accounting one, and it is worth stating
+as the argument it is rather than as a coincidence of two counters. In
+run 3, with `log_connections` on, Postgres logged `connection
+received` **11,576** times and `connection authorized` **11,576**
+times. Every receipt reached authorization, so the server refused
+nothing; the 11,576 authorizations are therefore the client's
+successful connections. The same run's clients reported **602**
+connect failures. That puts the client at 12,178 attempts against the
+server's 11,576 receipts, and the 602 unaccounted attempts are exactly
+the failures. They **never reached Postgres**, so nothing Postgres or
+the fixtures did could have caused them.
 
 ### What the constraint actually is
 
@@ -121,10 +126,18 @@ change.
 
 ## What this plan does, and what it deliberately does not
 
-The fault is in a third-party desktop tool's port forwarder, on
-developer machines only. The proportionate repair is to stop the
-documented command asking for more concurrency than that path sustains,
-so that the command in `AGENTS.md` is correct everywhere as written.
+The fault is in the host-to-container published-port path, on
+developer machines only. What this plan claims about that path is
+only what was measured: connections opened from the host through a
+published port fail above a certain number of concurrently connecting
+processes, while the same connections opened inside the container do
+not. Which component along that path imposes the limit was not
+isolated, and the plan deliberately does not name one.
+
+The proportionate repair is to stop the documented command asking for
+more concurrency than that path sustains, so that the command in
+`AGENTS.md` is correct as written on the machines this was measured
+on.
 
 `pytest-xdist` already has the knob. `--maxprocesses` is applied at
 `xdist/plugin.py:322` as `numprocesses = min(numprocesses,
@@ -236,8 +249,9 @@ than checking a box it cannot honestly check.
 
 ## Risks
 
-- **The constant ages.** Docker Desktop's limit is not a documented
-  contract, and a future version may raise or lower it. Mitigated by
+- **The constant ages.** The published-port path's limit is not a
+  documented contract of anything, and a future version of the
+  container runtime may raise or lower it. Mitigated by
   the comment carrying the measurement rather than only the number, so
   the next person can re-run the sweep instead of re-deriving the
   question. A lower limit on some other machine surfaces as the same
