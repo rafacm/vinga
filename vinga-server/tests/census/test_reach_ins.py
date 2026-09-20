@@ -230,6 +230,43 @@ def test_a_tracked_path_that_is_not_on_disk_is_skipped(tmp_path: Path) -> None:
     assert entries(manifest_of(walk(root)[0])) == ["tests/test_a.py  _foo  1"]
 
 
+def test_a_tracked_file_that_cannot_be_read_does_not_vanish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The skip is for an absent file and nothing wider.
+
+    The manifest header claims to count every reach-in the suite makes,
+    so a file dropped because the census could not read it would
+    falsify that claim while rendering a green run. An absent file is
+    the one case where there is nothing to count; a permission error is
+    a case where the census could not look, and it has to say so.
+
+    The failure is monkeypatched rather than arranged with a mode of
+    000, because a process running as root ignores the mode and the
+    test would then pass for the wrong reason, which is a plausible
+    lane in a container.
+    """
+    root = checkout(
+        tmp_path / "repo",
+        {
+            "tests/test_a.py": REACHES.format(name="_foo"),
+            "tests/test_locked.py": REACHES.format(name="_bar"),
+        },
+    )
+    locked = root / "test_locked.py"
+    readable = Path.read_text
+
+    def refuse(self: Path, *args: object, **kwargs: object) -> str:
+        if self == locked:
+            raise PermissionError(13, "Permission denied", str(self))
+        return readable(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", refuse)
+
+    with pytest.raises(PermissionError):
+        walk(root)
+
+
 def test_a_root_outside_the_checkout_is_refused_by_its_name(tmp_path: Path) -> None:
     """Refused rather than walked another way. Two enumerations would be
     two structures that must agree, and the failure a silent fallback

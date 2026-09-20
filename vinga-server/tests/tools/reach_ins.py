@@ -175,13 +175,20 @@ def walk(root: Path) -> tuple[list[Site], list[Site]]:
     A tracked path that is not on disk is skipped: `ls-files` lists a
     file deleted but not yet staged, and a missing file is a fact about
     the working tree rather than about the census.
+
+    `FileNotFoundError` and nothing wider. Every other read failure
+    propagates, because the manifest header claims to count every
+    reach-in in the suite and a file quietly dropped for a permission
+    error or a bad device would falsify that claim while rendering a
+    green run. An absent file is the one case where the census has
+    nothing to count; the rest are cases where it could not look.
     """
     reached: list[Site] = []
     own: list[Site] = []
     for path in tracked(root):
         try:
             text = path.read_text(encoding="utf-8")
-        except OSError:
+        except FileNotFoundError:
             continue
         found, mine = sites(text, str(path.relative_to(root.parent)))
         reached.extend(found)
