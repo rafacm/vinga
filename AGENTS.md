@@ -160,8 +160,10 @@ contract, and a rebase that still reports a `CHANGELOG.md` conflict
 means a branch edited the file and should not have.
 
 `vinga-server/tests/census/command-spellings.txt` is the one that
-remains. It is generated and must be **regenerated on the rebased
-tree** rather than merged, since a textual merge of it is a state no
+remains. It is generated, by
+`uv run python -m tests.census.test_command_spellings` from
+`vinga-server/`, and must be **regenerated on the rebased tree**
+rather than merged, since a textual merge of it is a state no
 generator produced. The manifest records no positions, so a change
 that only shifts a line leaves it alone: it moves when the distinct
 set of classified spellings moves, one line per spelling added,

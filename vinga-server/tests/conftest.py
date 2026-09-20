@@ -615,19 +615,27 @@ def _open_truncation_connection() -> Any:
     """
     import psycopg
 
-    return psycopg.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        dbname=LANE_DATABASE,
-        autocommit=True,
-        application_name=TRUNCATION_APPLICATION,
-        # A test that left a writer holding a lock is a defect, and a
-        # teardown that waits ten seconds for it hides which test did
-        # it behind a slow suite.
-        options="-c lock_timeout=5000",
-    )
+    # Built in the handler and raised outside it, so the driver's
+    # exception, which quotes the DSN it tried with the password in it,
+    # is not reachable from what travels.
+    problem: str | None = None
+    try:
+        return psycopg.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            dbname=LANE_DATABASE,
+            autocommit=True,
+            application_name=TRUNCATION_APPLICATION,
+            # A test that left a writer holding a lock is a defect, and
+            # a teardown that waits ten seconds for it hides which test
+            # did it behind a slow suite.
+            options="-c lock_timeout=5000",
+        )
+    except Exception:
+        problem = UNREACHABLE
+    raise RuntimeError(problem)
 
 
 def _truncate(connection: Any) -> None:
@@ -648,6 +656,65 @@ def _truncate(connection: Any) -> None:
     )
 
 
+# The three sentences a failed truncation is reported with. Fixed
+# text, built in the handler and raised outside it, for the reason
+# every other refusal in this file is: a driver exception from this
+# path can carry the connection it was opening, password included, and
+# the ones from the statement carry whatever a test left in the
+# database. None of them may reach a terminal or a CI log.
+LOCK_HELD = (
+    "the test left a connection holding a lock on the store, so the lane "
+    "could not clear it for the next test"
+)
+
+TRUNCATION_REFUSED = (
+    "the lane could not clear the store between tests, and the driver's own "
+    "message is not repeated here: a failure while opening this connection "
+    "quotes the DSN it tried, password included, and a failure while "
+    "truncating quotes whatever the test left behind. Check that the "
+    "development instance is still running"
+)
+
+RECONNECT_REFUSED = (
+    "the lane lost its truncation connection, opened another, and could not "
+    "clear the store with that one either, so this is a second failure "
+    "rather than a dropped connection. Nothing of the driver's message is "
+    "repeated here, for the same reason as above"
+)
+
+
+# What `_attempt` answers when the connection itself has gone, which is
+# the one answer that is not a refusal: it is the signal to reconnect.
+# A sentinel rather than a boolean out-parameter, so the function has
+# one return type and one meaning per value.
+BROKEN = "\x00broken"
+
+
+def _attempt(connection: Any) -> str | None:
+    """One guard-and-truncate. `None` when it worked, a sentence when
+    it did not, and never an exception of the driver's own.
+
+    Both attempts in `clear_store` go through here, which is what keeps
+    a lock held by a test mapping to the same sentence whether it is
+    met on the held connection or on its replacement.
+    """
+    import psycopg
+
+    try:
+        _truncate(connection)
+        return None
+    except psycopg.errors.LockNotAvailable:  # pragma: no cover - a defect
+        # Named before the general arm, because this is an
+        # `OperationalError` too, and it must never be retried: a retry
+        # would sit through a wait this lane deliberately refuses to
+        # make, and would hide the defect the sentence names.
+        return LOCK_HELD
+    except psycopg.Error:
+        if connection.closed or connection.broken:
+            return BROKEN
+        return TRUNCATION_REFUSED
+
+
 def clear_store() -> None:
     """Everything the stores hold, gone, with the identity counters
     back at one and the migration stamps untouched.
@@ -663,31 +730,28 @@ def clear_store() -> None:
     transaction is not broken at all: it stays open with a failed
     status. So nothing can be learned by inspecting the connection
     before using it, and the only honest test is the attempt itself.
-    One retry, never a loop: a second failure is a real one.
+
+    One retry, never a loop. The second attempt gets the same error
+    mapping as the first and no reconnection of its own, so a lock held
+    by a test reads the same whichever connection meets it, and a
+    second failure escapes instead of starting a third attempt.
     """
     global _TRUNCATION
-    import psycopg
 
     if _TRUNCATION is None or _TRUNCATION.closed:
         _TRUNCATION = _open_truncation_connection()
-    try:
-        _truncate(_TRUNCATION)
+    problem = _attempt(_TRUNCATION)
+    if problem is None:
         return
-    except psycopg.errors.LockNotAvailable as exc:  # pragma: no cover - a defect
-        # Before the broken-connection arm below, because this is an
-        # `OperationalError` too and must never be retried: the retry
-        # would sit through a wait this lane deliberately refuses to
-        # make, and would hide the defect the sentence names.
-        raise AssertionError(
-            "the test left a connection holding a lock on the store, so the "
-            "lane could not clear it for the next test"
-        ) from exc
-    except psycopg.Error:
-        if not (_TRUNCATION.closed or _TRUNCATION.broken):
-            raise
+    if problem is not BROKEN:
+        raise AssertionError(problem)
+
     close_truncation_connection()
     _TRUNCATION = _open_truncation_connection()
-    _truncate(_TRUNCATION)
+    problem = _attempt(_TRUNCATION)
+    if problem is None:
+        return
+    raise AssertionError(RECONNECT_REFUSED if problem is BROKEN else problem)
 
 
 def close_truncation_connection() -> None:
