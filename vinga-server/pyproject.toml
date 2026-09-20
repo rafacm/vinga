@@ -298,7 +298,44 @@ testpaths = ["tests"]
 # importlib mode imports each file by its full path instead, so the
 # names can stay descriptive and CI does not have to keep the suites in
 # separate commands to avoid it.
-addopts = ["--import-mode=importlib"]
+#
+# And the ceiling on how many worker processes `-n auto` may resolve
+# to. It is not about this machine's cores: connections opened from
+# the host to the compose instance through its published port start
+# failing above roughly eight processes connecting at once, and the
+# failure is loud, misdirecting and nothing to do with this
+# repository. A connect returns "server closed the connection
+# unexpectedly", so hundreds of tests report that the database is
+# unreachable while it is open, healthy and serving every other
+# worker.
+#
+# Measured for #537 on a 14-core darwin machine against
+# `postgres:17-alpine`, with a connect loop that runs no tests at all:
+# six and eight processes clean, ten, twelve and fourteen broken, and
+# the throughput flat at about 1000 connections a second at every one
+# of those points. So the variable is how many processes are
+# connecting, not how fast. The same loop run INSIDE the container
+# does 2764 a second at fourteen clients with no failures, which is
+# what puts the limit in the host-to-container published-port path
+# rather than in Postgres. Re-run that sweep before changing this
+# number; the reasoning, not the eight, is what carries over to
+# another machine.
+#
+# Repository-wide rather than per lane, deliberately. It reaches
+# `tests/smoke`, which opens no database and therefore cannot meet
+# this limit, and that is the cheaper mistake: three lane-specific
+# spellings are three things that can drift apart, while a ceiling
+# costs a lane nothing unless `auto` would have resolved above it, and
+# no lane here is large enough for eight workers to constrain it. CI
+# is untouched for the same reason, resolving four on a four-core
+# runner, and never meets the fault anyway because it reaches Postgres
+# as a service container with no published port in between.
+#
+# A later `--maxprocesses` on the command line still wins, which is
+# what leaves someone investigating this able to ask for fourteen.
+# `tests/unit/test_worker_ceiling.py` holds all three of those
+# properties, on a machine of any size.
+addopts = ["--import-mode=importlib", "--maxprocesses=8"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
