@@ -406,9 +406,10 @@ edits, since a documentation change can stale it.
   `tests/census/test_reach_ins.py` holds the drift test, the
   aggregation pins and the regeneration entry;
   `tests/census/reach-ins.txt` is committed at whatever the census
-  reports. AGENTS.md's rebase section and both workflow step names
-  stop naming one census where there are two, and the design guide
-  points at the enforcement. Freezes 355 sites over 118 names across
+  reports. AGENTS.md's rebase section, both workflow step names and
+  the comments around them, and both places in the `implement-issue`
+  skill stop naming one census where there are two, and the design
+  guide points at the enforcement. Freezes 355 sites over 118 names across
   75 files; reduces nothing.
 
 M2 and M3 of #531 are out of this plan's scope, so #531 stays open
@@ -445,6 +446,17 @@ alternative that does catch all 28. The manifest can still win, on
 unnamed headroom, on naming the pair, and on net-zero detection, but
 implementation should not begin while the central comparison is false.
 
+*Resolution* (`4c23602c`): accepted, and the reviewer's figures were
+reproduced independently before the amendment rather than taken on
+trust: a persistent ceiling starting at 295 catches 22 of 28, the
+window's maximum is 361, the exact pin catches 28 of 28 and the
+count-free manifest 17 of 28. The "Cheapest alternative" line now
+prices an exact-count pin, the table carries four shapes with the
+ceiling kept in it as the shape that looks equivalent and is not, and
+the ceiling's six-site final headroom is stated. The plan's conclusion
+survives: pin and manifest are at parity on catching, and the manifest
+is justified by naming.
+
 ### Finding 2 (P2): the sample supports a 14-day adjacent-commit claim, not "three months" or PR-level behavior
 
 The 400 commits run from `3410ec0e` (2026-09-06) to `aa8ed3ba`
@@ -459,6 +471,18 @@ reviewed PR is net-zero: PR-level swaps are unmeasured. The 7% figure
 is commit-level artifact churn and is not a measurement of
 rebase-conflict probability.
 
+*Resolution* (`a84cc7b0`): accepted in full. The window is now stated
+as fourteen days, `3410ec0e` to `aa8ed3ba`, before any number that
+rests on it, together with the two consequences the reviewer named:
+that it opens after #210's reduction, so the ceiling's 22 of 28
+flatters the ceiling, and that adjacent comparisons on a rebase-merging
+repository cannot see PR-level swaps, which are now declared
+unmeasured. "Zero swaps" is narrowed to zero manifest-visible
+constant-total adjacent commits. The 7% is labelled commit-level
+artifact churn, and the rebase-conflict risk it was offered as
+mitigation for is returned to the risks section as an accepted,
+unpriced cost.
+
 ### Finding 3 (P2): the 48% statistic is mislabeled and does not explain the 11-of-28 result
 
 The arithmetic reproduces, but **245 sites (69%) share a pair with
@@ -468,6 +492,13 @@ site", which is the wrong statistic for that sentence. Separately, the
 current-tree concentration and the 11 historical count-only transitions
 are two different measurements and the plan uses them as if one
 explained the other.
+
+*Resolution* (`69482363`): accepted, both halves. The census section
+now reads 245 sites (69%) sitting in a shared pair and 172 (48%) as
+occurrences beyond the first of their pair, and the two measurements
+are separated: the current-tree concentration is labelled structural
+context that establishes nothing on its own, and the 11 of 28 is
+labelled the whole of the evidence for the count column.
 
 ### Finding 4 (P2): the tracked-file change leaves `walk(root)` and `--root` undefined
 
@@ -482,6 +513,16 @@ and rendered paths retained, out-of-repository roots decided
 explicitly, and tests that invoke the default root and a nested root
 **from a different working directory**.
 
+*Resolution* (`2c2f1caa`): accepted. The enumeration swap is now
+specified part by part: `git -C <root> ls-files -z -- .` so the listing
+does not depend on the caller's working directory, the `*.py` filter
+and the `relative_to(root.parent)` rendering both unchanged, a
+tracked-but-absent path skipped rather than raising, and a root outside
+the checkout refused by name rather than silently falling back to
+`rglob`, since the fallback's failure mode is an empty census that
+reads like a clean tree. The single untracked-file test becomes four,
+two of them run from a different working directory.
+
 ### Finding 5 (P2): the documentation footprint misses live workflow guidance
 
 Beyond the pages the plan names, `.claude/skills/implement-issue/SKILL.md`
@@ -491,3 +532,14 @@ describe the whole lane as that single census in the comments
 immediately above the command that collects the directory. Renaming
 only the step names leaves live operational guidance incomplete, and
 the edits need a complete search for singular references afterwards.
+
+*Resolution* (`21d847ec`): accepted. The footprint now covers both
+workflow file headers and the comment block above each step, not only
+the two step names, and both places in
+`.claude/skills/implement-issue/SKILL.md` that tell a milestone
+subagent the lane is one census with one regeneration command. It also
+requires a complete, untruncated `git grep` for the singular after the
+edits, with the hits split into live pages that are corrected and
+dated execution records that the authority taxonomy forbids
+correcting, and it records the one live page that keeps the singular on
+purpose.
