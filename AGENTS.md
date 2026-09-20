@@ -258,6 +258,18 @@ know. The method and its worked examples from merged vinga code are in
 - **The deletion test**: if a module did not exist and its body were inlined
   into its only caller, would the caller get harder to read? If not, it is a
   pass-through and should not exist.
+- **The proportion test**: a structure earns itself against the cheapest
+  thing that would also solve the problem, not against doing nothing. Before
+  adding a boundary, a lane, a layer, a retry or any other mechanism, price
+  the one-function change that would buy the same outcome, and measure the
+  difference where the claim is a number. Two measured cases, both from
+  2026-09-20: #537's lane failure looked like it wanted a bounded-retry seam
+  around every connect, and the cap that replaced it bought seconds no green
+  run had ever demonstrated the retry would beat; #489 proposed an enforced
+  pure/storage boundary across 219 test files, and it measured 7.3s against
+  7.4s for one reused connection in one function. Where the deletion test
+  asks whether a module should exist at all, this one asks whether a
+  justified structure is the cheapest shape of its own justification.
 - **The interface is the test surface**: a test reaches the names a caller
   reaches. An underscore reach-in in a new test is a review flag: either the
   module lacks an interface callers need, or the test pins a detail.
@@ -300,6 +312,15 @@ verb or a flag.
   same change). The rule is the enumerated-baseline record in
   `docs/adr/`; the line makes the membership decision explicit where
   it applies and costs one line where it does not.
+- Every plan carries one "Cheapest alternative" line, which is the
+  proportion test written down: the smallest change that would also solve
+  the stated problem, and what this plan's proposal buys over it. Where that
+  gain is a number, it is measured before the plan is committed rather than
+  estimated, because an estimate is exactly what a proposal's author is
+  worst placed to make. "None, this is the smallest change that works" is
+  the honest answer most of the time and costs one line; a plan that cannot
+  name any cheaper alternative has usually not looked for one. The two cases
+  this rule came from are in the design conventions above.
 - Active plans keep a milestone checklist that doubles as the milestone
   descriptions (one annotated checkbox item per milestone, no separate
   status list). Tick the milestone (with its PR number) in the same change

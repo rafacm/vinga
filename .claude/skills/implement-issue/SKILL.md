@@ -119,6 +119,15 @@ subagent brief:
   lists, and "nothing else touches X" claims are backed by grep or
   an AST check named in the plan's verification; after any rebase,
   recorded hashes and counts are refreshed.
+- **Proportion before structure.** A plan that proposes a boundary, a
+  lane, a layer or a retry names the cheapest change that would solve
+  the same problem and says what the proposal buys over it, measured
+  where the gain is a number. This is the "Cheapest alternative" line
+  AGENTS.md requires in every plan, and it is a review lens because
+  the author is the worst placed person to estimate it: twice on
+  2026-09-20 a filed issue's own proposed remedy measured no better
+  than a one-function change, and both times what caught it was
+  somebody asking rather than the plan noticing.
 - **Falsify before claiming.** A new test is written to break its
   claim and watched failing before the claim is made; a test
   written to agree with an implementation proves the
