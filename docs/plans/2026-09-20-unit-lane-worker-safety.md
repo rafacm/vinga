@@ -139,6 +139,14 @@ more concurrency than that path sustains, so that the command in
 `AGENTS.md` is correct as written on the machines this was measured
 on.
 
+The scope of that claim is exactly one environment: a 14-core darwin
+machine running the compose file's `postgres:17-alpine` through a
+published port. It is the environment the issue reports from and the
+one this fix is for. Whether eight is also the right ceiling under
+another desktop container runtime is not known here and is not
+claimed; a machine with a lower limit meets the same failure, and the
+comment beside the option names the sweep to re-run.
+
 `pytest-xdist` already has the knob. `--maxprocesses` is applied at
 `xdist/plugin.py:322` as `numprocesses = min(numprocesses,
 config.option.maxprocesses)`, after `auto` has been resolved, so it
@@ -207,10 +215,38 @@ rather than asserted.
 ### The value is 8, as a commented constant
 
 Eight is the last measured-clean point in the sweep above, at zero
-failures with the throughput of every broken point, and it is
-independently the width at which the full lane runs green. Six would
-add margin nobody has shown is needed and would cost real parallelism;
+failures with the throughput of every broken point. Six would add
+margin nobody has shown is needed and would cost real parallelism;
 ten is measured broken.
+
+**What "clean" is allowed to mean here, stated before the runs rather
+than after.** This fault has a signature nothing else in this lane
+produces: hundreds of failures *and* hundreds of teardown errors
+together, every failure a connect-time `connection failed: server
+closed the connection unexpectedly`. The three unclamped runs above
+gave 225/719, 256/854 and 196/660. So the acceptance threshold is
+**zero runs showing that signature**, not zero runs with any failure
+at all. The lane has ordinary timing flakes independent of this issue
+(the issue's own table records one at `-n 4`, and #432 closed on a
+frame-cadence pin that fails on a loaded machine), and a threshold
+that could not tell the two apart would be unfalsifiable in the
+direction that matters.
+
+**Eight full unit-lane runs at eight workers**, on the machine and
+against the instance described above: **seven green** (7433 passed, 19
+skipped, 121.61s to 125.99s) and **one with two failures and zero
+errors**, in the single run that was also the slow one at 153.29s.
+
+That eighth run is classified, not observed: its output was captured
+to its summary line only, so which two tests failed is not
+recoverable. The classification rests on the signature and on the
+shape. Two failures with no errors is not this fault, which has never
+produced fewer than 196 failures and 660 errors in any run of it; and
+a run 25% slower than every other is the loaded-machine condition this
+lane's timing pins are known to fail under. It is recorded as an
+unclassified failure rather than folded into the seven, because a
+repeat campaign that quietly rounds away its own exception is the
+thing the reviewer was right to ask for.
 
 It is a ceiling, not a floor, so it changes nothing where `auto`
 already resolves lower: CI's four-core runner resolves 4, and
@@ -281,9 +317,11 @@ Then the invocations themselves, which are what the fix is finally
 about:
 
 - The full unit lane at `-n auto --dist loadfile` on a 14-core machine,
-  green, which is the exact command and the exact machine class that
-  fails today. Falsification is already in hand and recorded above:
-  the same command without the clamp fails on three runs out of three.
+  which is the exact command and the exact machine class that fails
+  today, repeated to the threshold stated above. Falsification is
+  already in hand and recorded there: the same command without the
+  clamp fails on three runs out of three, and with it the signature
+  appears in none of eight.
 - The full integration lane at `-n auto --dist loadfile`, which since
   #491 runs distributed too and reaches the same fixtures through the
   same path, so it carries the same hazard and the same clamp.
