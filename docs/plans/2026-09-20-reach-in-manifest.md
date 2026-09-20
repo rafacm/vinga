@@ -357,8 +357,22 @@ bought and a test that passes either way would not hold it.
 - **`.github/workflows/docs.yml` and `.github/workflows/vinga-server.yml`**:
   the step is named "Command-spellings census" in both and runs the
   whole `tests/census` lane. The step name is corrected to name the
-  lane rather than one of its two censuses. No `paths` or `run` line
-  changes, which is the point of the placement decision.
+  lane rather than one of its two censuses, **and so are the comments
+  around it**: each file's header (`docs.yml:7`,
+  `vinga-server.yml:7`) explains the two-workflow split in terms of
+  "the command-spellings census", and the comment block immediately
+  above the step describes the lane's whole job as that one census. A
+  step renamed over a comment that still says "the census" is worse
+  than leaving both. No `paths` or `run` line changes, which is the
+  point of the placement decision.
+- **`.claude/skills/implement-issue/SKILL.md`**, the live procedure a
+  milestone subagent is briefed from. Two places: the subagent brief
+  tells it a documentation change can stale "the command-spellings
+  census" and gives only that census's regeneration command, and the
+  CI-shapes paragraph describes the docs workflow as "link check plus
+  the command-spellings census". A subagent that edits documentation
+  and regenerates one of two manifests leaves the other stale, which
+  is a red run in a workflow the brief told it it had satisfied.
 - **`docs/architecture/design-guide.md`**, guidelines class, "The
   interface is the test surface". It states the rule the census
   measures and does not currently say that the rule is enforced. One
@@ -369,6 +383,18 @@ bought and a test that passes either way would not hold it.
   event.
 - **A `changelog.d/531-reach-in-manifest.md` fragment** under
   `### Added`.
+
+**A complete search for singular references after the edits**, not a
+sampled one: `git grep -n "command-spellings census"` over the whole
+tree, read in full rather than through `head`, with each hit placed in
+one of two sets. The live pages above are corrected. The dated
+execution records (the plans, their implementation companions,
+`docs/features/`, `CHANGELOG.md`) are **not**: they report what was
+true when they were written and the taxonomy forbids editing them into
+agreement with the code. One live page keeps the singular deliberately:
+`docs/architecture/cli-guide.md` says a word is "inside the
+command-spellings census's reach", which is a claim about that census
+in particular and stays true.
 
 The command-spellings census itself is run after the documentation
 edits, since a documentation change can stale it.
