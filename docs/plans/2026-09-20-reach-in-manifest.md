@@ -58,9 +58,17 @@ PR-level swaps are unmeasured, and no claim below rests on them.**
 
 **Today's census.** 355 reach-in sites over 118 names across 75 files,
 with 425 `self`/`cls` accesses excluded. Those 355 sites occupy **183
-distinct `(path, name)` pairs**; 73 pairs carry more than one site and
-cover 245 of them. So **172 of the 355 sites, 48%, share a pair with
-another site.**
+distinct `(path, name)` pairs**; 73 pairs carry more than one site.
+**245 sites, 69%, sit in a pair that some other site shares**, and
+**172, 48%, are occurrences beyond the first of their pair**, which is
+the number a count-free manifest would render invisible. The two are
+different statistics and the plan review caught this one stated as the
+other.
+
+This is structural context about the tree as it stands today. It is
+**not** the evidence for recording counts, and does not predict the
+historical figure below; it says only that the concentration a count
+column would capture is large rather than marginal.
 
 **Four candidate shapes, over 400 revisions that touch `tests/`**
 (399 adjacent comparisons; the census went 295 sites to 355 across
@@ -90,12 +98,13 @@ the issue as filed.
 own precedent.** `command-spellings.txt` deliberately records the
 distinct set of `class  invocation` pairs and nothing else, and
 `test_a_site_leaving_a_pair_another_site_keeps_moves_nothing` pins
-that blind spot as accepted. Copying it here would miss 11 of the 28
-observed changes, because a second reach-in for a name a file already
-reaches for is the common case rather than the rare one: 48% of
-current sites are exactly that. The divergence is one column, it costs
-no positions, and without it M1 would be the weakest of the three
-shapes while looking like the safest.
+that blind spot as accepted. Copying it here would miss **11 of the 28
+observed changes**, in each of which a count moved while the pair set
+did not. That figure, measured over the window, is the whole of the
+evidence for the count column; the current-tree concentration above is
+context beside it and not a second proof of it. The divergence is one
+column, it costs no positions, and without it M1 would be the weakest
+of the four shapes while looking like the safest.
 
 **The exact pin has no blind spot to point at.** The obvious argument
 for a manifest over a single number is the one-in-one-out swap, where a
