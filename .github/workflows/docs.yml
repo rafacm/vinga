@@ -4,22 +4,26 @@ name: docs
 # runs when a change touches the server, the generated references, the
 # database plumbing or itself; this one runs when a change touches
 # anything else. Between the two, every change to the repository runs
-# the command-spellings census in at least one workflow, which is the
-# hole this file exists to close: the census sweeps every tracked file
-# (`git ls-files` in tests/census/test_command_spellings.py), so a
-# documentation-only merge is census surface even though the server
-# workflow ignores it. One such merge staled the committed manifest and
-# left main's unit lane red with no run having gone red first; the
-# record is the M4 section of
+# the census lane in at least one workflow, which is the hole this file
+# exists to close: the lane's command-spellings census sweeps every
+# tracked file (`git ls-files` in
+# tests/census/test_command_spellings.py), so a documentation-only merge
+# is census surface even though the server workflow ignores it. The
+# lane's other census, the reach-in one, reads only the tracked Python
+# under tests/ and no documentation change can stale it; it runs here
+# because the lane is collected whole. One such merge staled the
+# committed spellings manifest and left main's unit lane red with no run
+# having gone red first; the record is the M4 section of
 # docs/plans/2026-08-26-docs-authority-reorg-implementation.md, and the
 # decision is issue #329.
 #
-# paths-ignore rather than paths, deliberately: the census scans
-# everything, so any enumeration of "documentation paths" here would be
-# a standing lie of omission. The ignore list below is a mirror of the
-# other workflow's paths list, and the two must move together; each
-# file says so beside its own list. A change that touches both surfaces
-# runs both workflows and the census twice, which is harmless.
+# paths-ignore rather than paths, deliberately: the spellings census
+# scans everything, so any enumeration of "documentation paths" here
+# would be a standing lie of omission. The ignore list below is a
+# mirror of the other workflow's paths list, and the two must move
+# together; each file says so beside its own list. A change that touches
+# both surfaces runs both workflows and the lane twice, which is
+# harmless.
 on:
   push:
     branches: [main]
@@ -143,11 +147,17 @@ jobs:
       - name: Upstream watch manifest agrees with the notes
         run: uv run --project vinga-server python scripts/upstream_watch.py check
 
-      # The census: every command spelling in the tree, found once and
-      # classified once, against the committed manifest. This is the
-      # test a documentation move stales; regeneration is
+      # The census lane, both of its censuses, each against its own
+      # committed manifest. Command spellings: every one in the tree,
+      # found once and classified once, and this is the test a
+      # documentation move stales; regeneration is
       # `uv run python -m tests.census.test_command_spellings` from
-      # vinga-server/, never a hand edit.
-      - name: Command-spellings census
+      # vinga-server/, never a hand edit. Reach-ins: every place the
+      # tests reach past an interface, counted per `path  name` pair,
+      # regenerated with `uv run python -m tests.census.test_reach_ins`
+      # from the same place. A documentation change cannot stale that
+      # one, which is why the step is named for the lane rather than for
+      # either census.
+      - name: Census lane
         working-directory: vinga-server
         run: uv run pytest tests/census -q

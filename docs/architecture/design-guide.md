@@ -134,6 +134,13 @@ that is free to change. In review, an underscore reach-in in a new
 test is a flag, and the answer is one of those two, decided
 explicitly.
 
+The flag is enforced rather than remembered:
+`vinga-server/tests/census/reach-ins.txt` records one line per
+`path  name` pair the suite reaches for, with its site count, and the
+census lane fails when a fresh walk disagrees with it. So a new
+reach-in arrives as a diff line with a name on it, which is where the
+question above gets asked.
+
 **Example.** `FillerCache` in `runtime/filler_runner.py` is declared
 as a protocol of three reads and no writes, and its own docstring
 says why: a test that hands the runner two clips should not have to

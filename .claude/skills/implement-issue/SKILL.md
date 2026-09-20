@@ -214,20 +214,24 @@ The subagent's brief states, verbatim where possible:
 - `PYTHONDONTWRITEBYTECODE=1` outside pytest (the stale-bytecode
   trap in AGENTS.md).
 - No pushes and no GitHub commands from subagents.
-- A documentation change can stale the command-spellings census,
-  which scans every tracked file: a spelling a document starts or
+- The `tests/census` lane holds two censuses against two committed
+  manifests, and a change can stale either. The command-spellings
+  census scans every tracked file: a spelling a document starts or
   stops quoting, or a move that gives one another class. A move
-  that changes neither leaves the manifest alone, since it records
+  that changes neither leaves its manifest alone, since it records
   the distinct set of `class  invocation` pairs and no positions.
-  The `docs` workflow runs the census on the changes the server
-  workflow ignores (the hole that once turned `main`'s unit lane
-  red with no run going red, 2026-08-27), but a PR should arrive
-  synchronized rather than lean on CI to say so: after editing,
-  moving or renaming documentation, run
-  `tests/census`; when stale, regenerate
-  the manifest with
-  `uv run python -m tests.census.test_command_spellings`, never by
-  hand.
+  The reach-in census reads the tracked Python under `tests/` and
+  records one line per `path  name` pair with its site count, so a
+  test that reaches past an interface stales it while a
+  documentation change cannot. The `docs` workflow runs the lane on
+  the changes the server workflow ignores (the hole that once
+  turned `main`'s unit lane red with no run going red, 2026-08-27),
+  but a PR should arrive synchronized rather than lean on CI to say
+  so: after editing, moving or renaming documentation, and after
+  any change under `tests/`, run `tests/census`; when stale,
+  regenerate the manifest the failure names, with
+  `uv run python -m tests.census.test_command_spellings` or
+  `uv run python -m tests.census.test_reach_ins`, never by hand.
 
 If a subagent dies mid-run (machine sleep), resume it with a status
 recap verified from `git log`, not from memory; its commits
@@ -254,7 +258,8 @@ findings in the same fix round.
 
 Two CI shapes to know:
 a docs-only diff outside `docs/reference/` runs the `docs` workflow
-(link check plus the command-spellings census), not the server
+(link check plus the `tests/census` lane, which is both the
+command-spellings and the reach-in census), not the server
 lanes, and its green is the check the PR waits for; and a
 `pull_request` event that never registers a run is
 a GitHub failure mode this repository has seen a whole day of
