@@ -186,3 +186,110 @@ workflows' mirrored `paths-ignore` arrange.
 - **The census moving could leave it running nowhere.** Mitigated by
   checking both workflows explicitly, and the plan states the
   invariant: every change runs the census somewhere.
+
+## Plan review round
+
+External adversarial review of this plan at `5d437ae3`, run read-only
+in the worktree. Backend codex, `codex-cli 0.155.0`, model
+`gpt-5.6-sol`, 2026-09-20. Eight findings: one P1, six P2, one P3.
+Verdict: ready after the P1/P2 amendments.
+
+### 1 (P1): the accessor cannot detect every unusable connection it promises to recover
+
+A remotely terminated socket may not become `closed` or `broken` until
+a statement executes on it, which is after the accessor has returned,
+and an aborted transaction is not a broken connection at all: it stays
+open with a failed transaction status. So "return the held connection
+when it is usable" cannot be implemented by inspecting the connection.
+`clear_store()` should own a single retry of the whole
+guard-and-truncate instead, and ordinary SQL errors, `LockNotAvailable`
+above all, must keep their present behavior rather than driving a
+reconnect.
+
+*Resolution*: accepted in full, and it corrects the design rather than
+the wording. The plan's open question is rewritten: the retry lives in
+`clear_store()`, covers the guard and the truncate together, runs at
+most once, and is entered only when the driver marks the connection
+broken. `LockNotAvailable` keeps its `AssertionError` exactly as
+today, which the milestone now pins.
+
+### 2 (P2): the held connection's transaction and shutdown lifecycle is unspecified
+
+`autocommit=True` and the unconditional `close()` are load-bearing and
+the plan named neither. Without autocommit a reused connection can
+carry an uncommitted truncation and its locks into the next test, and
+without a shutdown rule the held connection survives until process
+exit.
+
+*Resolution*: accepted, and the shutdown half is sharper than the
+finding states. `_drop_this_process_databases` force-drops this
+worker's database at session finish, so a held connection that is
+still open is terminated by its own worker's drop. That is exactly the
+17 self-inflicted `terminating connection due to administrator
+command` lines #537 measured, and this change would have added to
+them. The plan now requires `autocommit=True` and every existing
+connection parameter to be preserved verbatim, and the held connection
+to be closed at session finish before the drop.
+
+### 3 (P2): the verification does not prove that connections are reused
+
+A wall-clock comparison is nondeterministic, and the termination test
+passes even against an implementation that reconnects on every call.
+
+*Resolution*: accepted. The milestone now requires a deterministic
+test: two consecutive `clear_store()` calls observed to use one
+backend, a terminated backend causing exactly one replacement, and
+seeded rows actually gone afterwards, so the retry is proved to have
+completed the work rather than merely to have returned.
+
+### 4 (P2): the reconnect test reaches through the fixture's interface
+
+The plan made the accessor an implementation detail and then had the
+test take the held connection from it, which is the underscore
+reach-in `AGENTS.md` calls a review flag.
+
+*Resolution*: accepted. The test goes through `clear_store()` and
+identifies the backend from outside, through `pg_backend_pid()` on the
+lane database, so nothing test-only is exported and no private name is
+reached.
+
+### 5 (P2): M2 does not name the required server-workflow edit
+
+Once the census leaves `tests/unit`, `vinga-server.yml`'s unit step
+stops collecting it, so naming only the `docs.yml` change would leave
+the census running in one workflow rather than two and break the
+invariant the plan itself states.
+
+*Resolution*: accepted, and it is the finding most likely to have
+produced a silently weakened check. M2 now names the
+`vinga-server.yml` invocation as well as the `docs.yml` one, and the
+verification checks both workflows explicitly.
+
+### 6 (P2): the move lacks a reliable check for stale path references
+
+`AGENTS.md` carries the literal manifest path
+`vinga-server/tests/unit/command-spellings.txt`, and the census
+recognizes command invocations rather than plain paths, so it cannot
+be relied on to catch that one.
+
+*Resolution*: accepted. M2 names both the command and the manifest
+path in `AGENTS.md`, and the verification includes a repository-wide
+search for the old module and manifest paths.
+
+### 7 (P2): the required changelog fragment is absent
+
+*Resolution*: accepted, a plain omission. Each milestone now carries
+its `changelog.d/489-*.md` fragment.
+
+### 8 (P3): passing without truncation does not establish that the 92 files perform no writes
+
+Non-conflicting writes, unique rows, or code tolerating an unavailable
+database can pass both described runs while still touching storage.
+
+*Resolution*: accepted, and this is the fourth claim in this session's
+work to be narrowed to its evidence, after three in #537. The plan now
+says what was measured: those 92 files pass in both configurations,
+and disabling the truncation for them saved about 7.3 seconds. The
+inference "neither need storage nor write to it" is removed. The
+conclusion the measurement supports is unchanged, because the argument
+never rested on zero writes: it rests on the 7.3 seconds against 7.4.
