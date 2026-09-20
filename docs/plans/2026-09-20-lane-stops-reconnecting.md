@@ -1,0 +1,188 @@
+# The unit lane stops reconnecting, and the census stops asking for a database
+
+Plan for [#489](https://github.com/rafacm/vinga/issues/489). Its
+companion is
+`docs/plans/2026-09-20-lane-stops-reconnecting-implementation.md`, one
+section per milestone, appended in the same change that ticks the
+milestone.
+
+**Local baseline:** not applicable. Nothing here changes a
+conversational capability. The whole change is how a test fixture
+reaches the database and where one test file lives; a deployment
+reaches none of it.
+
+## The measurement this plan starts from, and the milestone it closed
+
+The issue as filed proposes splitting the unit suite into a pure lane
+and a storage lane, with the classification enforced. It was measured
+before it was planned, on `10dfb58f`, on a 14-core darwin machine
+against the compose file's Postgres, `-n auto --dist loadfile`, which
+is eight workers since #537.
+
+**The split buys what one reused connection buys.** `clear_store`
+opens a fresh `psycopg` connection for every test and closes it again:
+16.91 ms per teardown against 15 tables, of which 4.26 ms is the
+connect alone.
+
+| Variant | Time | Saving |
+| --- | ---: | ---: |
+| Full lane today | 122.05 s (median of 5) | |
+| Full lane, one truncation connection held per worker | **114.6 s** (median of 4, band 114.5-115.6) | **7.4 s** |
+| The 92 genuinely pure files, with truncation | 40.08 / 41.10 s | |
+| The same 92, truncation off, which is a pure lane's upper bound | 33.05 / 33.17 s | **7.3 s** |
+
+Seven seconds either way. One is ten lines in one function that moves
+no test and classifies nothing; the other is a boundary across 219
+files that 127 of them may never cross.
+
+**The suite is also harder to classify than the issue assumes.** Of
+219 unit files, **127 need a database** and **92 are genuinely pure**.
+The 92 are validated two independent ways: they pass with no database
+reachable at all, and they pass with a database present and the
+truncation disabled, so they neither need storage nor write to it.
+They hold 2,432 of 7,437 tests, **33%**, so an enforced boundary would
+police two thirds of the suite to protect a third.
+
+The route to those numbers is part of the evidence and is recorded
+because it is the strongest argument here. Two attempts to classify
+the suite were both wrong. The first summarized its run with `-rf`,
+which lists failures and not errors, and 1,047 tests **errored**,
+which is precisely how a storage test fails when provisioning is
+disabled; it undercounted the storage files by fifteen. The second
+defined pure as "passes with no database", which let through 159 tests
+that write to a real store and depend on the truncation to clean up
+after them. If classifying this suite defeats two attempts made with
+the tests in hand and no other purpose, then an enforced classifier is
+a rule this repository will keep tripping over.
+
+So the split is closed with the numbers and no further change, which
+the issue's own M2 names as a valid outcome, and the issue has been
+re-scoped to say so. This plan implements what is left, which is where
+the measured wins actually are.
+
+## What is settled and not re-litigated
+
+From the issue, and from the re-scoping recorded on it:
+
+- **The truncation's condition stays the LANE and never the test.**
+  This is the property the original design protects, for the stated
+  reason that a per-test "did this one touch anything" is the same
+  fixture with a hole in it, since what leaks is exactly the write
+  nobody noticed. Nothing here touches it: every test in a
+  provisioning lane still truncates.
+- **Refuse, don't skip.** A lane that needs storage and cannot reach
+  it still fails hard rather than skipping. Nothing here weakens that.
+- **Storage tests keep testing storage.** No mocking pass, no doubles.
+- **A contributor still needs the development instance running**, even
+  for a test that touches no storage, because the lane still
+  provisions once per worker. That is the split's third motivation and
+  it is given up deliberately: it costs one `docker compose up -d
+  --wait` that the setup documentation already prescribes.
+
+## Open questions, resolved
+
+### What happens to the held connection when a test breaks it
+
+A connection opened per test is disposable by construction, and one
+held for a session is not, so the failure this introduces is a
+connection that a test leaves unusable: a server-side termination, an
+aborted transaction, a socket closed under it.
+
+The answer is to reopen rather than to protect: the accessor returns
+the held connection when it is usable and opens a new one when it is
+not, so a broken connection costs one reconnect rather than a cascade
+of teardown failures across the rest of that worker's files. That is
+strictly better than today only if "usable" is judged honestly, so the
+check is `closed` plus the driver's own broken-connection error on
+use, not a liveness ping, which would put back the round trip the
+change exists to remove.
+
+The `lock_timeout=5000` option and the `current_database()` assertion
+both stay exactly as they are. They are per-statement and
+per-connection properties respectively, and neither depends on the
+connection being new.
+
+### Why not a pool
+
+A pool is the same thing with a name and a size to tune. One
+connection per worker process is what the lane needs, since a worker
+runs one test at a time, and the deletion test applies: a pool of one,
+inlined, is a variable.
+
+### Where the census goes
+
+`tests/unit/test_command_spellings.py` reads no rows. It provisions a
+database only because it lives under `tests/unit`, whose conftest
+declares that lane's storage at import. Moving the file is what frees
+`docs.yml`.
+
+It moves to `tests/census/`, a directory of its own with no conftest
+declaring storage, rather than into `tests/smoke` (which is about
+driving a container over HTTP and would become two unrelated things)
+or `tests/tools` (which is the helpers' package, not a lane). The
+manifest, `command-spellings.txt`, moves with it: the generator and
+its output are one unit, and the regeneration command in `AGENTS.md`
+changes with the module path.
+
+The workflows change with it. `docs.yml` drops its `postgres`
+service block and the comment justifying it, and the path it runs
+becomes the new one; `vinga-server.yml`'s unit step still collects
+`tests/unit` and therefore no longer collects the census, so the
+census runs in both workflows through its own path. The one thing that
+must stay true is that **every change still runs the census
+somewhere**, which is what `AGENTS.md` promises and what the two
+workflows' mirrored `paths-ignore` arrange.
+
+## Milestones
+
+- [ ] **M1: the lane stops reconnecting**. `clear_store` takes its
+  connection from a per-worker accessor that opens once and reopens
+  only when the held one is unusable, instead of connecting and
+  closing per test. The autouse fixture, its lane condition and the
+  `current_database()` guard are untouched. Verified by the full lane
+  green and by the wall-clock band above. **Design footprint:** one
+  new module-level accessor beside `clear_store` in
+  `tests/conftest.py`, which is where every other fact about this
+  lane's database already lives; no new module, because a file whose
+  only content is "hold a connection" would be a pass-through by the
+  deletion test. **Documentation footprint:** none; no page describes
+  how the truncation reaches the database.
+- [ ] **M2: the census stops asking for a database**.
+  `test_command_spellings.py` and `command-spellings.txt` move to
+  `tests/census/`, `docs.yml` drops its Postgres service and the
+  comment justifying it, and the regeneration command in `AGENTS.md`
+  and anywhere else it is quoted moves with the module path.
+  **Design footprint:** none; a file moves to a directory that
+  declares nothing. **Documentation footprint:** `AGENTS.md`'s
+  regeneration spelling, and any other page quoting the census path or
+  command; the command-spellings census itself will flag the ones that
+  quote a command, which is the mechanism doing its own job.
+
+## Tests and verification
+
+- The full unit lane, `-n auto --dist loadfile`, green, and its
+  wall-clock compared against the 122.05 s median recorded above. The
+  claim is a saving, so the number is the test.
+- The integration lane, green, since it shares `tests/conftest.py` and
+  therefore shares the changed accessor.
+- **The reconnect path is falsified rather than assumed**: a test that
+  takes the held connection and terminates it server-side, after which
+  the next truncation must still succeed. Without that, the reopen
+  branch is code no run has ever entered, and "it reconnects" is a
+  claim about a path nothing exercised.
+- The census runs from its new home in both workflows, and
+  `tests/unit` no longer collects it.
+- `uv run ruff check .`, the doc link check, and the census itself.
+
+## Risks
+
+- **A held connection changes what a leaked lock does.** Today a test
+  that leaves a writer holding a lock meets `lock_timeout` on a fresh
+  connection; tomorrow it meets it on the held one. The timeout and
+  the assertion that follows are unchanged, so the failure is the same
+  failure with the same sentence; what differs is that the connection
+  survives into the next test, which is why the reopen branch judges
+  usability rather than assuming it.
+- **The census moving could leave it running nowhere.** Mitigated by
+  checking both workflows explicitly, and the plan states the
+  invariant: every change runs the census somewhere.
