@@ -299,3 +299,81 @@ edits, since a documentation change can stale it.
 
 M2 and M3 of #531 are out of this plan's scope, so #531 stays open
 when this merges.
+
+## Plan review round
+
+Reviewed by codex `gpt-5.6-sol` (codex-cli 0.155.0, `--sandbox
+read-only`) on 2026-09-20 against commit `3cae5dff`, the plan as first
+committed. Runtime 15m45s, 175,742 tokens. The prompt reproduced the
+measurement script in full and asked the reviewer to audit the method
+rather than accept the numbers, and to argue for the ceiling as a P1 if
+it disagreed with the choice the maintainer had already made.
+
+Verdict as received: **ready after the P1/P2 amendments**. The
+deletion-test lens found no pass-through module in the proposed layout;
+the blockers were the measurement, the breadth of the evidence claims,
+and omitted interface and documentation work.
+
+### Finding 1 (P1): the load-bearing experiment does not model the proposed ceiling
+
+The plan offers `assert sites() <= 355` as the cheapest alternative and
+claims it catches 28 of 28, but the script defines `ceiling_sees = t1
+!= t0`, which models an **exact-count pin against the immediately
+preceding revision**, not a persistent `<=` ceiling. A real `<=`
+ceiling accumulates headroom whenever the count falls, so it catches
+fewer. The reviewer reproduced the raw counts (28 manifest changes, 25
+rises, 3 falls, 11 count-only, 17 pair-set) and reported that a real
+ceiling starting at 295 and raised only when it fails catches **22 of
+28**, with an observed maximum of 361. Its recommendation: compare
+against either the real ceiling, reporting its weaker coverage, or an
+exact-count pin `assert sites() == 355`, which is the honest ten-line
+alternative that does catch all 28. The manifest can still win, on
+unnamed headroom, on naming the pair, and on net-zero detection, but
+implementation should not begin while the central comparison is false.
+
+### Finding 2 (P2): the sample supports a 14-day adjacent-commit claim, not "three months" or PR-level behavior
+
+The 400 commits run from `3410ec0e` (2026-09-06) to `aa8ed3ba`
+(2026-09-20), fourteen days rather than the three months the plan
+claims, and the window begins **after** #210's reduction from 440 to
+162, which is exactly where a ceiling would accumulate headroom. The
+constant-total predicate itself is correct for adjacent commits. But
+this repository rebase-merges and every milestone's intermediate
+commits survive, while CI and review judge branch tips, so a separate
+add commit and remove commit appear as a rise and a fall even when the
+reviewed PR is net-zero: PR-level swaps are unmeasured. The 7% figure
+is commit-level artifact churn and is not a measurement of
+rebase-conflict probability.
+
+### Finding 3 (P2): the 48% statistic is mislabeled and does not explain the 11-of-28 result
+
+The arithmetic reproduces, but **245 sites (69%) share a pair with
+another site**, while 172 (48%) is the count of occurrences *beyond the
+first* of each pair. The plan says 48% "share a pair with another
+site", which is the wrong statistic for that sentence. Separately, the
+current-tree concentration and the 11 historical count-only transitions
+are two different measurements and the plan uses them as if one
+explained the other.
+
+### Finding 4 (P2): the tracked-file change leaves `walk(root)` and `--root` undefined
+
+`walk(root)` renders paths relative to `root.parent` and the CLI
+publicly accepts an arbitrary `--root`. Replacing the enumeration with
+`git ls-files -z -- <root>` specifies neither a stable git working
+directory, nor `*.py` filtering, nor path normalization, nor the
+behavior for a root outside the checkout. The single untracked-file
+test would not preserve the existing interface. Wanted: the
+repository-relative path calculation defined, the `*.py` restriction
+and rendered paths retained, out-of-repository roots decided
+explicitly, and tests that invoke the default root and a nested root
+**from a different working directory**.
+
+### Finding 5 (P2): the documentation footprint misses live workflow guidance
+
+Beyond the pages the plan names, `.claude/skills/implement-issue/SKILL.md`
+still tells a subagent that `tests/census` is the command-spellings
+census and gives only its regeneration command, and both workflow files
+describe the whole lane as that single census in the comments
+immediately above the command that collects the directory. Renaming
+only the step names leaves live operational guidance incomplete, and
+the edits need a complete search for singular references afterwards.
