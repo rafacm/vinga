@@ -198,16 +198,44 @@ inherit determinism from `rglob`, from `git ls-files` ordering, or
 from `Counter.most_common`'s tie-breaking. Sorting is on `str`, which
 is codepoint order and locale-independent.
 
-### The file set: a latent trap fixed in passing
+### The file set: a latent trap fixed in passing, without moving the interface
 
 `walk()` enumerates with `Path.rglob`, where the spellings census uses
 `git ls-files` precisely so "an untracked scratch file cannot change
 the answer". The two sets are identical today, 302 files each, so this
 is latent rather than live; but a drift test on an `rglob` walk turns
 any untracked `tests/scratch.py` into a red run that blames the
-manifest. The walk moves to `git ls-files -z -- <root>`, which from
-`vinga-server/` renders paths exactly as the walk does today
-(`tests/census/conftest.py`), verified against the current output.
+manifest.
+
+Only the **enumeration** changes. The plan review was right that the
+first draft left the rest of `walk(root)` undefined, so each part is
+settled here:
+
+- **The source.** `git -C <root> ls-files -z -- .`, which lists tracked
+  paths relative to `<root>` whatever the caller's working directory
+  is. Not `git ls-files` from an ambient cwd, which would render
+  different paths depending on where the tool was invoked from.
+- **The filter stays `*.py`**, applied after the listing, since the
+  census is a Python tokenizer and `ls-files` lists everything.
+- **The rendering does not move.** Each listed path is resolved against
+  `<root>` and rendered `relative_to(root.parent)`, byte for byte what
+  `walk()` does today: `tests/unit/test_doctor.py` for the default
+  root, and `unit/test_doctor.py` for `--root tests/unit`, which is the
+  existing behavior and stays it.
+- **A tracked path that is not on disk is skipped**, because
+  `ls-files` lists a file deleted but not yet staged, and a missing
+  file is a fact about the working tree rather than about the census.
+  This mirrors `_text()` in the spellings census, which returns `None`
+  rather than raising.
+- **A root outside the checkout is refused**, naming the root, rather
+  than falling back to `rglob`. Two enumeration paths would be two
+  structures that must agree; and the failure a silent fallback
+  produces is an empty census, which reads exactly like a clean tree.
+  Nothing in the repository passes such a root.
+
+The `--root` flag therefore keeps its meaning, its rendering and its
+`*.py` restriction, and loses only the ability to walk untracked files
+and non-repository trees.
 
 ### Whether the tool moves into the census lane
 
@@ -269,9 +297,16 @@ repository already has one of.
 - **The excluded receivers stay excluded**: `self._x` and `cls._x` do
   not reach the manifest, which the tool already tests at the census
   level and the manifest must not undo.
-- **The tracked-file switch**: an untracked file under `tests/` does
-  not change the render. Written to fail first against the `rglob`
-  walk, which is what makes it a claim rather than a restatement.
+- **The tracked-file switch**, four cases, because the enumeration is
+  the one part of the tool's interface this milestone touches: an
+  untracked file under `tests/` does not change the render (written to
+  fail first against the `rglob` walk, which is what makes it a claim
+  rather than a restatement); the default root renders the paths it
+  renders today; a nested root such as `tests/unit` renders relative to
+  its own parent as it does today; and both of those are invoked **from
+  a different working directory** than `vinga-server/`, which is the
+  case a `git ls-files` run from an ambient cwd would silently get
+  wrong. A tracked-but-deleted path is skipped rather than raising.
 - **Determinism**: the render sorts, pinned by feeding shuffled input
   and comparing renders.
 
