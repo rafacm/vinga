@@ -401,7 +401,8 @@ edits, since a documentation change can stale it.
 
 ## Milestones
 
-- [ ] **M1: the reach-in census becomes a manifest.** `reach_ins.py`
+- [x] **[M1: the reach-in census becomes a manifest](2026-09-20-reach-in-manifest-implementation.md#m1-the-reach-in-census-becomes-a-manifest)**
+  (PR TBD). `reach_ins.py`
   gains `manifest_of` and walks the tracked file set;
   `tests/census/test_reach_ins.py` holds the drift test, the
   aggregation pins and the regeneration entry;
