@@ -250,3 +250,96 @@ than checking a box it cannot honestly check.
   and the measured cost is small: the lane is 123.51s at eight, against
   a `loadfile` floor set by the slowest file that more workers cannot
   go below. An explicit `--maxprocesses` still overrides it.
+
+## Plan review round
+
+External adversarial review of this plan at `c499a6b8`, run read-only
+in the worktree. Backend codex, `codex-cli 0.155.0`, model
+`gpt-5.6-sol`, 2026-09-20, reviewer runtime 147s. Verdict: ready after
+the P2 amendments.
+
+One mechanical note, because it will recur. The first run of this
+review produced **empty stdout at exit 0**, the failure mode recorded
+in this session's notes: sol exhausts its context reading this
+repository's large files (`vinga-server/README.md` is 4,047 lines) and
+returns nothing. The rerun named only the plan and `AGENTS.md` as
+files to read and pasted 19KB of line-numbered excerpts of everything
+else. An empty review is not a clean review.
+
+### 1 (P2): one green run cannot establish that eight workers are safe
+
+The plan selects eight from one full-lane pass and a five-second
+synthetic sweep, while the issue describes a gradual, non-monotonic
+failure and the plan's own Risks section concedes another machine may
+fail below eight. Repeated runs with a stated acceptance threshold are
+needed, and "correct everywhere" should narrow to the environments
+actually measured.
+
+*Resolution*: accepted, in the commit that follows. Five green full
+unit-lane runs at eight workers now stand behind the number rather
+than one, the acceptance threshold is stated, and every claim of
+correctness is scoped to the measured environment.
+
+### 2 (P2): CI would not detect removal or breakage of the clamp
+
+The plan says CI cannot verify the fix because its `auto` resolves to
+four, and dismisses only a test that checks the literal `addopts`
+string. But `xdist/plugin.py:315` resolves `auto` through the
+`pytest_xdist_auto_num_workers` hook, which a test can override, so
+the clamp's behavior is exercisable independently of physical core
+count.
+
+*Resolution*: accepted, and it is the best finding of the round. A
+nested run on a trivial file, with a plugin returning 14 from that
+hook and the repository's own ini supplied by `-c`, resolves to 8
+workers in 0.54s and touches no database. Prototyped before this
+amendment was written, including its falsification: with the clamp
+removed the same run creates 14 workers, and with an explicit
+`--maxprocesses=12` it creates 12. All three become M1's test.
+
+### 3 (P2): the setting caps every distributed run, not only the affected lanes
+
+`addopts` is repository-wide, so the cap reaches the smoke lane and
+any pure subset as well, and `tests/conftest.py:341-371` establishes
+that the smoke lane never reaches Postgres, so the published-port
+constraint cannot justify limiting it. The plan's "documentation
+footprint: none" hides a broader behavior change.
+
+*Resolution*: accepted as a documentation gap rather than a scope
+error. The repository-wide cap is deliberate and is now justified in
+the plan and in the comment: one option that cannot drift is worth
+more than three lane-specific spellings that can, the cap is a
+ceiling that costs a lane nothing where `auto` already resolves lower,
+and the smoke lane is small enough that eight workers is not a
+constraint it can feel. The plan states this rather than leaving it
+implied.
+
+### 4 (P2): M1 omits required generated and milestone bookkeeping
+
+M1 names only `pyproject.toml` and the changelog fragment, while
+AGENTS.md requires the implementation-doc section and the ticked,
+linked checklist item in the same change, and the command-spellings
+census scans every tracked file, so a new document quoting a command
+spelling can stale `vinga-server/tests/unit/command-spellings.txt`.
+
+*Resolution*: accepted. M1 now names the implementation-doc section,
+the checklist tick with its PR number, and running
+`tests/unit/test_command_spellings.py` with regeneration through
+`uv run python -m tests.unit.test_command_spellings` if it is stale,
+never a hand edit.
+
+### 5 (P3): the root-cause language is stronger than the stated evidence
+
+Equality between `connection received` and `connection authorized`
+proves only that every logged receipt reached authorization; on its
+own it does not prove that the failed client attempts are absent from
+the server's records. And the host-versus-container comparison
+isolates the published-port path, not a named component inside it.
+
+*Resolution*: accepted, and it is this session's recurring error
+caught again. The correlation is now stated as the argument it
+actually is (11,576 authorized equals the client's successes, plus 602
+client connect failures, gives 12,178 attempts against 11,576
+receipts), and the attribution is narrowed throughout to "the
+host-to-container published-port path". "Docker Desktop's port
+forwarder" is removed as an attribution nothing here isolated.
