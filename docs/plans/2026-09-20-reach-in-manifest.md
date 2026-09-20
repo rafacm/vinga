@@ -17,15 +17,21 @@ conversational capability. The whole change is a generated artifact
 under `tests/` and the test that diffs it; a deployment reaches none
 of it.
 
-**Cheapest alternative:** a single-number ceiling assertion,
-`assert sites() <= 355`, about ten lines and no committed artifact. It
+**Cheapest alternative:** a single-number **exact-count pin**,
+`assert sites() == 355`, about ten lines and no committed artifact. It
 was measured against the manifest over 400 revisions of `tests/` and
 **catches every change the manifest catches**, so this plan does not
 claim the manifest catches more. What the manifest buys is that the
-change arrives under a name: a ceiling's diff reads `355 -> 356` and
-the reviewer has to run the tool to find out what landed, which is the
-review moment #531 exists to create. The measurement, including the
-blind spot the ceiling turned out not to have, is the section below.
+change arrives under a name: a pin's diff reads `355 -> 356` and the
+reviewer has to run the tool to find out what landed, which is the
+review moment #531 exists to create. The measurement is the section
+below.
+
+A `<=` ceiling, which is the shape this line proposed before the plan
+review corrected it, is **not** the cheapest alternative: it is
+strictly worse than the pin at the same price, because every reduction
+hands it headroom nobody records. Measured over the same window it
+catches 22 of 28 and finishes 6 sites above the truth.
 
 ## The measurement this plan starts from
 
@@ -40,16 +46,26 @@ distinct `(path, name)` pairs**; 73 pairs carry more than one site and
 cover 245 of them. So **172 of the 355 sites, 48%, share a pair with
 another site.**
 
-**Three candidate shapes, over 400 revisions that touch `tests/`**
-(399 consecutive comparisons; the census went 295 sites to 355 across
-them, and 371 comparisons show no census change at all, so 28 are
-changes at all):
+**Four candidate shapes, over 400 revisions that touch `tests/`**
+(399 adjacent comparisons; the census went 295 sites to 355 across
+them, with a maximum of 361, and 371 comparisons show no census change
+at all, so 28 are changes at all):
 
 | Shape | Catches | Cost |
 | --- | ---: | --- |
-| Single-number ceiling | **28 / 28** | ten lines, one number |
-| Manifest of `path  name  count` | **28 / 28** | render, drift test, 183-line artifact, regeneration discipline |
-| Manifest of `path  name`, the `command-spellings.txt` shape | **17 / 28** | the same as above |
+| Persistent `<=` ceiling, raised when it fails | **22 / 28** | ten lines, one number |
+| Exact-count pin, `== N` | **28 / 28** | ten lines, one number |
+| Manifest of `path  name`, the `command-spellings.txt` shape | **17 / 28** | render, drift test, 183-line artifact, regeneration discipline |
+| Manifest of `path  name  count` | **28 / 28** | the same as above |
+
+The ceiling and the pin cost the same and differ by six changes, which
+is the first thing the plan review corrected here and is worth stating
+plainly: a ceiling is red only when the count **exceeds** the recorded
+number, so each of the three reductions in this window widened the gap
+between what is recorded and what is true. The ceiling ends the window
+at 361 against an actual 355, so six reach-ins could arrive green. The
+pin has no such gap by construction, which is why it rather than the
+ceiling is the honest cheapest alternative.
 
 Three things follow, and the first two are the reason this plan is not
 the issue as filed.
@@ -65,12 +81,15 @@ current sites are exactly that. The divergence is one column, it costs
 no positions, and without it M1 would be the weakest of the three
 shapes while looking like the safest.
 
-**The ceiling has no blind spot to point at.** The obvious argument for
-a manifest is the one-in-one-out swap, where a site is added and
-another removed and the total does not move. There were **zero** such
-revisions in 400. The argument is sound in principle and was worth
-nothing in three months of practice, and this plan says so rather than
-quoting it as a benefit.
+**The exact pin has no blind spot to point at.** The obvious argument
+for a manifest over a single number is the one-in-one-out swap, where a
+site is added and another removed and the total does not move. There
+were **zero** manifest-visible constant-total adjacent commits in the
+window. The argument is sound in principle and was worth nothing across
+these fourteen days, so this plan discards it rather than quoting it as
+a benefit. What it does not establish is the PR-level version of the
+same question, which is measured in the section below and is not
+measured here.
 
 **So the manifest is justified by naming, not by catching.** #531's
 own sentence is that the next reach-in should arrive "as a diff line
