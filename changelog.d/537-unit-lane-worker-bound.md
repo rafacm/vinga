@@ -1,0 +1,3 @@
+### Fixed
+
+- The documented test commands now work on a developer machine with more than about eight usable cores. `-n auto` resolves to at most eight worker processes, because connections from the host to the compose instance through its published port start failing above roughly that many processes connecting at once, and they fail by reporting that the database is unreachable while it is open and serving every other worker. An explicit `--maxprocesses` still overrides the cap, and continuous integration is unaffected: it resolves four workers and reaches its database with no published port in between.
