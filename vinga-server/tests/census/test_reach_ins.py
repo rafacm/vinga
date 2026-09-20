@@ -97,6 +97,18 @@ def entries(rendered: str) -> list[str]:
     return rendered.removeprefix(MANIFEST_HEADER).splitlines()
 
 
+def rendered_paths(rendered: str) -> list[str]:
+    """The path column of every row, parsed rather than searched for.
+
+    A substring test on the whole render is not a test of a path: every
+    nested spelling is a suffix of the spelling the root above it
+    renders, so `unit/test_x.py` is inside `tests/unit/test_x.py` and a
+    walk that ignored its root entirely would satisfy both. Parsing the
+    column is what makes the comparison exact.
+    """
+    return [line.split("  ")[0] for line in entries(rendered)]
+
+
 def test_two_sites_at_one_pair_are_one_line_carrying_two() -> None:
     """The aggregation itself: the pair is the line, the count is what
     the line says, and the order the sites were walked in is not in the
@@ -303,15 +315,19 @@ def test_the_command_refuses_an_unwalkable_root_with_one_sentence(
 
 
 @pytest.mark.parametrize(
-    ("root", "quoted"),
+    ("root", "spelled", "subtree"),
     [
-        (TESTS_ROOT, "tests/unit/test_config_cli_rendering.py"),
-        (TESTS_ROOT / "unit", "unit/test_config_cli_rendering.py"),
+        (TESTS_ROOT, "tests/unit/test_config_cli_rendering.py", "tests/"),
+        (TESTS_ROOT / "unit", "unit/test_config_cli_rendering.py", "unit/"),
     ],
     ids=["the default root", "a nested root"],
 )
 def test_a_root_renders_the_paths_it_always_has_from_anywhere(
-    root: Path, quoted: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    root: Path,
+    spelled: str,
+    subtree: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The rendering the tracked-file switch had to leave alone.
 
@@ -321,12 +337,23 @@ def test_a_root_renders_the_paths_it_always_has_from_anywhere(
     silently get wrong: the listing would be relative to wherever the
     caller happened to stand, and every path in the manifest would move
     with it.
+
+    The assertions are an exact membership and a whole-subtree bound,
+    and both are needed. This test asserted substring membership first,
+    and a walk that ignored its root argument and always read the whole
+    suite passed both parametrizations, because `unit/test_x.py` is a
+    substring of the line `tests/unit/test_x.py  _y  1` that the root
+    above it renders. An exact path rules that out for the nested root,
+    and the subtree bound rules out a render that carries the right row
+    among rows from somewhere else.
     """
     from_the_lane = manifest_of(walk(root)[0])
     monkeypatch.chdir(tmp_path)
 
+    columns = rendered_paths(from_the_lane)
     assert manifest_of(walk(root)[0]) == from_the_lane
-    assert f"{quoted}  " in from_the_lane
+    assert spelled in columns
+    assert [path for path in columns if not path.startswith(subtree)] == []
 
 
 def test_the_receivers_the_census_excludes_stay_out_of_the_manifest(tmp_path: Path) -> None:
