@@ -219,6 +219,36 @@ repository-wide rather than per worktree, so the same two stashes
 appear against every worktree and are two stashes, not two per tree.
 
 
+### A completeness check piped through `head`
+
+The fourth trap of the family above, and the one that lies by
+agreeing with you. A search whose *completeness* is the claim
+(`grep -rn <old path>` before declaring a rename finished, `git
+ls-files | grep` before saying nothing else references something)
+answers the question only if you see all of it. Piped through `head`,
+`tail`, `-m 1` or a truncating pager, it returns a prefix that looks
+exactly like the whole answer and contains no sign that anything was
+cut.
+
+It cost this repository twice in one session, 2026-09-20, both times
+on #489. Once a file classification came back wrong because the run
+that produced it was summarized with `-rf`, which lists failures and
+hides errors, and errors are how a storage test fails when
+provisioning is off; the count was out by fifteen files and the wrong
+number reached a committed document. Once a stale path survived a
+rename sweep because it sat below a `head -20`, and the
+implementation doc then claimed in writing that only historical
+references remained. An external review caught the second; the first
+was caught only because a later measurement contradicted it.
+
+So: **truncate what you scan, never what you act on.** When the answer
+is "how many" or "is that all", pipe to `wc -l`, to `sort -u`, or to
+a file you then read in full, and let the count be the thing you
+quote. Reserve `head` for looking, and never use it in the command
+whose output becomes a claim. The same applies to a test run standing
+in for an inventory: `-ra` reports errors as well as failures, and
+`-rf` silently does not.
+
 ## Workflow
 
 - Implementing an issue end to end follows the pipeline encoded in

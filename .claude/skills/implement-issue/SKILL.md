@@ -118,7 +118,11 @@ subagent brief:
 - **Inventories by tooling, not memory.** Site counts, migration
   lists, and "nothing else touches X" claims are backed by grep or
   an AST check named in the plan's verification; after any rebase,
-  recorded hashes and counts are refreshed.
+  recorded hashes and counts are refreshed. The command that backs
+  such a claim is never truncated: no `head`, no `tail`, no `-m 1`,
+  and `-ra` rather than `-rf` when a test run is the inventory, since
+  a prefix of the answer is indistinguishable from all of it.
+  AGENTS.md records the two times this cost the repository.
 - **Proportion before structure.** A plan that proposes a boundary, a
   lane, a layer or a retry names the cheapest change that would solve
   the same problem and says what the proposal buys over it, measured
