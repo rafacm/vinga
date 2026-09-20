@@ -92,27 +92,42 @@ the plan.
 
 ### The documentation sweep, read in full
 
-`git grep -n "command-spellings census"` after the edits: 46 hits, read
-in full rather than through `head`, and split as the plan's finding 5
-requires.
+`git grep -n "command-spellings census"` over the whole tree, read in
+full rather than through `head`, and split as the plan's finding 5
+requires. **The load-bearing claim is the live-page half**, and it is
+stated first because it is the half that can be checked and stays
+checked. The total is not, and the reason is worth stating rather than
+rounding away.
 
-Three are on live pages and all three are correct. Two were written in
-this milestone and name the specific census inside the now-named lane,
-in `AGENTS.md` and in `.github/workflows/docs.yml`. The third,
-`docs/architecture/cli-guide.md:690`, says a word is "inside the
-command-spellings census's reach", which is a claim about that census in
-particular and stays singular on purpose.
+**Live pages: three hits, each named, all three correct.** Two were
+written in this milestone and name the specific census inside the
+now-named lane: `AGENTS.md:67` and `.github/workflows/docs.yml:8`. The
+third, `docs/architecture/cli-guide.md:690`, says a word is "inside the
+command-spellings census's reach", a claim about that census in
+particular, and it stays singular on purpose. That enumeration is the
+complete live set: after the edits, `.claude/skills/implement-issue/SKILL.md`
+and `.github/workflows/vinga-server.yml` carry no hit at all, so no
+live page still calls the lane one census. This is the claim the sweep
+exists to make, and it is falsifiable by re-running the grep and
+checking that nothing outside `docs/plans/`, `docs/features/` and
+`CHANGELOG.md` appears that is not one of those three.
 
-The other 43 are dated execution records: the plans, their
-implementation companions, `docs/features/` and `CHANGELOG.md`. The
-authority taxonomy says they report what was true when they were
-written, so none of them was touched. Nine of the 43 are in this
-milestone's own plan, which describes the state the edits changed and is
-a record of it.
+**Dated execution records: 46 hits as of `c2e291af`**, in the plans,
+their implementation companions, `docs/features/` and `CHANGELOG.md`.
+The authority taxonomy says they report what was true when they were
+written, so not one of them was touched. Six are in this milestone's own
+plan and three in this document.
 
-No live page still calls the lane one census: after the edits,
-`.claude/skills/implement-issue/SKILL.md` and
-`.github/workflows/vinga-server.yml` carry no hit at all.
+That total is quoted as a reading of one commit rather than as a state,
+because **it moves whenever any record mentions the census, this
+document included**. The first version of this section said 46 total
+and 43 dated, which was true when it was written and false by the time
+it was committed: writing the sentence added three matches to the tree
+it was counting. Recording a new total here would falsify itself the
+same way the moment the review-round section below quotes the phrase
+again. A number that cannot be stated stably is stated with its
+instability, and the claim that is actually load-bearing, the live-page
+classification above, does not depend on it.
 
 ### Verification
 
