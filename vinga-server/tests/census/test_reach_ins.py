@@ -42,7 +42,15 @@ from pathlib import Path
 
 import pytest
 
-from tests.tools.reach_ins import MANIFEST_HEADER, Site, manifest_of, tracked, walk
+from tests.tools.reach_ins import (
+    MANIFEST_HEADER,
+    Site,
+    Unwalkable,
+    main,
+    manifest_of,
+    tracked,
+    walk,
+)
 
 # The tests directory, found from this file rather than from the
 # working directory, for the same reason the tool passes `git -C`: the
@@ -230,8 +238,31 @@ def test_a_root_outside_the_checkout_is_refused_by_its_name(tmp_path: Path) -> N
     outside = tmp_path / "not-a-checkout"
     outside.mkdir()
 
-    with pytest.raises(ValueError, match=str(outside)):
+    with pytest.raises(Unwalkable, match=str(outside)):
         walk(outside)
+
+
+def test_the_command_refuses_an_unwalkable_root_with_one_sentence(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other side of the same refusal, which the census-level test
+    above cannot see.
+
+    `reach_ins` is run by hand, so the boundary owes its reader the
+    reason rather than a stack of frames from the subprocess call that
+    found out. One line on stderr, nothing on stdout, a nonzero exit,
+    and the root still named in it: it is the argument the reader just
+    typed, and a refusal that withheld it would read like a clean tree.
+    """
+    outside = tmp_path / "not-a-checkout"
+    outside.mkdir()
+
+    assert main(["--root", str(outside)]) != 0
+
+    written = capsys.readouterr()
+    assert written.err.splitlines() == [f"not a directory of the checkout: {outside}"]
+    assert "Traceback" not in written.err
+    assert written.out == ""
 
 
 @pytest.mark.parametrize(
