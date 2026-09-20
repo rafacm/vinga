@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-09-20
+
+### Fixed
+
+- `-n auto` now resolves to at most eight worker processes in the test lanes, which makes the documented test commands work where they previously did not. Above roughly eight processes connecting at once, connections from the host to the compose instance through its published port begin failing, and they fail by reporting that the database is unreachable while it is open and serving every other worker. The threshold was measured on one macOS machine against the compose file's Postgres, and is not claimed to be the right one under a different host or container runtime; the reasoning is recorded beside the setting so it can be re-measured. An explicit `--maxprocesses` still overrides the cap, and continuous integration is unaffected: it resolves four workers and reaches its database with no published port in between.
+
 ## 2026-09-15
 
 ### Added
