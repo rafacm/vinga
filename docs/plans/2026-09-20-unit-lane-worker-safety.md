@@ -184,6 +184,18 @@ the same value through a mechanism of its own, which is a pass-through
 by the deletion test: it would hide nothing that the option does not
 already express.
 
+It is also repository-wide, which is a deliberate choice and not an
+oversight. The cap reaches every lane, `tests/smoke` and any pure
+subset included, and the smoke lane never opens a database at all
+(`tests/conftest.py:341-371`), so the constraint that motivates the
+cap does not apply to it. Three lane-specific spellings would be
+three things that can drift apart, which is the failure this
+repository has a rule about; one ceiling that cannot drift is worth
+more than a tighter fit. And the fit costs nothing to pay: a ceiling
+changes a lane only where `auto` would resolve above it, and no lane
+here is large enough for eight workers to be a constraint it can
+feel. The smoke lane is a handful of cases against a container.
+
 The cost is that `addopts` names an option only `pytest-xdist`
 registers, so an environment running pytest without the dev group would
 fail on an unrecognized argument. No environment in this repository
@@ -218,11 +230,15 @@ deliberately.
   fragment at `changelog.d/537-unit-lane-worker-bound.md`.
   **Design footprint:** none. No module, no seam, no new name. This
   milestone sets one existing option of an existing plugin.
-  **Documentation footprint:** none, and that is the point of clamping
-  rather than documenting. The command blocks in `AGENTS.md` (L47-L48)
-  and `vinga-server/README.md` (L1397-L1398) stay true exactly as
-  written, which they are not today on any machine with more than eight
-  usable cores.
+  **Documentation footprint:** no page's description of behavior is
+  falsified, which is the point of clamping rather than documenting:
+  the command blocks in `AGENTS.md` (L47-L48) and
+  `vinga-server/README.md` (L1397-L1398) stay true exactly as written,
+  which they are not today on any machine with more than eight usable
+  cores. What the milestone does owe, because the cap is
+  repository-wide and reaches lanes the constraint does not apply to,
+  is that the comment beside the option says so rather than leaving a
+  reader of `tests/smoke` to wonder why it is bounded.
 
 ## Tests and verification
 
