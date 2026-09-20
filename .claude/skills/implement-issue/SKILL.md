@@ -224,9 +224,9 @@ The subagent's brief states, verbatim where possible:
   red with no run going red, 2026-08-27), but a PR should arrive
   synchronized rather than lean on CI to say so: after editing,
   moving or renaming documentation, run
-  `tests/unit/test_command_spellings.py`; when stale, regenerate
+  `tests/census`; when stale, regenerate
   the manifest with
-  `uv run python -m tests.unit.test_command_spellings`, never by
+  `uv run python -m tests.census.test_command_spellings`, never by
   hand.
 
 If a subagent dies mid-run (machine sleep), resume it with a status

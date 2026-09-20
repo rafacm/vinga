@@ -480,6 +480,18 @@ jobs:
       - name: Unit tests
         run: uv run pytest tests/unit -v --durations=25 -n auto --dist loadfile
 
+      # The census, which this step used to get for free by collecting
+      # `tests/unit`. It moved to a lane of its own so that the
+      # documentation workflow could stop carrying a Postgres service
+      # for a test that reads no row (#489), and that move takes it out
+      # of the command above. Named here explicitly, because the
+      # promise in AGENTS.md is that every change runs the census
+      # somewhere: the documentation workflow covers the changes this
+      # one ignores, and this one has to keep covering its own. It
+      # needs no database and is a few seconds.
+      - name: Command-spellings census
+        run: uv run pytest tests/census -q
+
   # The other lane: the integration tests, the generated-document drift
   # checks, and the wheel migration. This used to open with "the
   # shorter lane", and being the shorter lane was the stated reason the

@@ -159,7 +159,7 @@ is no recipe here any more: `changelog.d/README.md` states the
 contract, and a rebase that still reports a `CHANGELOG.md` conflict
 means a branch edited the file and should not have.
 
-`vinga-server/tests/unit/command-spellings.txt` is the one that
+`vinga-server/tests/census/command-spellings.txt` is the one that
 remains. It is generated and must be **regenerated on the rebased
 tree** rather than merged, since a textual merge of it is a state no
 generator produced. The manifest records no positions, so a change
