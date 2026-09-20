@@ -11,6 +11,14 @@ conversational capability. The whole change is how a test fixture
 reaches the database and where one test file lives; a deployment
 reaches none of it.
 
+**Cheapest alternative:** none for M1, which is itself the cheapest
+alternative to the boundary this issue originally proposed, and the
+measurement that establishes it is the whole of the section below. For
+M2, the cheaper option is to leave the census where it is and give
+`docs.yml` a Postgres it does not use, which is the status quo this
+issue exists to end; the move costs one file and buys a container per
+documentation run.
+
 ## The measurement this plan starts from, and the milestone it closed
 
 The issue as filed proposes splitting the unit suite into a pure lane
@@ -37,11 +45,15 @@ files that 127 of them may never cross.
 
 **The suite is also harder to classify than the issue assumes.** Of
 219 unit files, **127 need a database** and **92 are genuinely pure**.
-The 92 are validated two independent ways: they pass with no database
-reachable at all, and they pass with a database present and the
-truncation disabled, so they neither need storage nor write to it.
-They hold 2,432 of 7,437 tests, **33%**, so an enforced boundary would
-police two thirds of the suite to protect a third.
+The 92 were measured two ways: they pass with no database reachable at
+all, and they pass with a database present and the truncation
+disabled. That is what was observed, and it is deliberately not
+stated as "they perform no writes", which neither run establishes: a
+non-conflicting write, a uniquely keyed row, or code that tolerates an
+unavailable database would survive both. The argument does not need
+the stronger claim, because it rests on the seconds rather than on
+purity. They hold 2,432 of 7,437 tests, **33%**, so an enforced
+boundary would police two thirds of the suite to protect a third.
 
 The route to those numbers is part of the evidence and is recorded
 because it is the strongest argument here. Two attempts to classify
@@ -171,18 +183,27 @@ workflows' mirrored `paths-ignore` arrange.
   `tests/conftest.py`, which is where every other fact about this
   lane's database already lives; no new module, because a file whose
   only content is "hold a connection" would be a pass-through by the
-  deletion test. **Documentation footprint:** none; no page describes
-  how the truncation reaches the database.
+  deletion test. A `### Changed` fragment at
+  `changelog.d/489-lane-stops-reconnecting.md`.
+  **Documentation footprint:** none; no page describes how the
+  truncation reaches the database.
 - [ ] **M2: the census stops asking for a database**.
   `test_command_spellings.py` and `command-spellings.txt` move to
-  `tests/census/`, `docs.yml` drops its Postgres service and the
-  comment justifying it, and the regeneration command in `AGENTS.md`
-  and anywhere else it is quoted moves with the module path.
+  `tests/census/`. **Both workflows change, not one**: `docs.yml`
+  drops its Postgres service and the comment justifying it and runs
+  the census at its new path, and `vinga-server.yml` gains an
+  invocation of it, because its unit step collects `tests/unit` and
+  would otherwise stop running the census altogether. That would
+  leave the census in one workflow instead of two and quietly break
+  the invariant this plan states. A `### Changed` fragment at
+  `changelog.d/489-census-needs-no-database.md`.
   **Design footprint:** none; a file moves to a directory that
-  declares nothing. **Documentation footprint:** `AGENTS.md`'s
-  regeneration spelling, and any other page quoting the census path or
-  command; the command-spellings census itself will flag the ones that
-  quote a command, which is the mechanism doing its own job.
+  declares nothing. **Documentation footprint:** `AGENTS.md` twice,
+  for the regeneration command **and** for the literal manifest path
+  `vinga-server/tests/unit/command-spellings.txt` it quotes, which the
+  census cannot catch because it recognizes command invocations and
+  not bare paths; plus any other page quoting either. Verified by a
+  repository-wide search for both old paths, not by the census alone.
 
 ## Tests and verification
 
@@ -211,8 +232,11 @@ the timing is reported as a consequence rather than offered as proof.
   wall-clock against the 122.05 s median recorded above, reported as a
   consequence of the above rather than as evidence for it.
 - The integration lane, green, since it shares `tests/conftest.py`.
-- The census runs from its new home in both workflows, and
-  `tests/unit` no longer collects it.
+- The census runs from its new home in **both** workflows, checked by
+  reading each workflow rather than inferred, and `tests/unit` no
+  longer collects it.
+- A repository-wide search for the old module path and the old
+  manifest path returns only deliberately historical mentions.
 - `uv run ruff check .`, the doc link check, and the census itself.
 
 ## Risks
