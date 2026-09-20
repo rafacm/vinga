@@ -35,10 +35,26 @@ catches 22 of 28 and finishes 6 sites above the truth.
 
 ## The measurement this plan starts from
 
-Taken 2026-09-20 on `a7a2d545`, with one instrument across all of
-history: today's `tests/tools/reach_ins.py` read every revision of
-`tests/*.py` straight out of the git objects, so no result depends on
-what the tool looked like at the time.
+Taken 2026-09-20 on `a7a2d545`, with one instrument across every
+revision it read: today's `tests/tools/reach_ins.py` read each one of
+them out of the git objects, so no result depends on what the tool
+looked like at the time.
+
+**What the window is, stated before the numbers that rest on it.** The
+400 commits are the most recent 400 touching `vinga-server/tests/`,
+`3410ec0e` (2026-09-06) to `aa8ed3ba` (2026-09-20): **fourteen days**,
+not the whole history and not a representative sample of it. They are
+compared **adjacently**, each commit against the one before it, and
+every milestone branch's intermediate commits are present, because this
+repository rebase-merges. Two consequences the plan does not paper
+over. The window opens *after* #210 M6's reduction from 440 sites to
+162, which is the largest reduction on record and exactly where a
+ceiling would have banked headroom, so the ceiling's 22 of 28 flatters
+it rather than the reverse. And an adjacent comparison is not a
+review-level one: a branch that adds a reach-in in one commit and
+removes another in the next shows up here as a rise and then a fall,
+while the pull request a reviewer actually reads is net zero. **So
+PR-level swaps are unmeasured, and no claim below rests on them.**
 
 **Today's census.** 355 reach-in sites over 118 names across 75 files,
 with 425 `self`/`cls` accesses excluded. Those 355 sites occupy **183
@@ -102,9 +118,13 @@ There is no cheaper shape that names what changed; that is the whole
 of what this milestone buys, and it is bought at one generated file.
 
 **Churn, since a committed artifact invites the question.** The
-manifest would have moved on 28 of 399 test-touching comparisons, 7%.
-It records no positions, so it is untouched by a line shift anywhere in
-the tree.
+manifest would have moved on 28 of 399 adjacent test-touching
+comparisons, 7%. That is how often the artifact changes at all, at
+commit granularity; it is **not** a measurement of how often two
+branches would conflict in it, which this window cannot answer and
+which the risks section treats as an open cost rather than a priced
+one. It records no positions, so it is untouched by a line shift
+anywhere in the tree.
 
 ## What is settled and not re-litigated
 
@@ -263,10 +283,15 @@ bought and a test that passes either way would not hold it.
   rebase rule for the spellings manifest and now for this one.
 - **A new conflict class on rebases.** The repository has one
   generated manifest today and its resolution rule is written down in
-  AGENTS.md; a second doubles the surface. Mitigated by the shape:
-  no positions, one line per pair, and a measured 7% of test-touching
-  commits move it at all. The AGENTS.md rebase section is updated in
-  this milestone to name both manifests rather than one.
+  AGENTS.md; a second doubles the surface. **This cost is accepted, not
+  priced**: the 7% churn figure above is how often the artifact moves
+  at commit granularity, which is not how often two branches collide in
+  it, and nothing measured here answers that. What reduces it is the
+  shape, no positions and one line per pair, so a conflict means two
+  branches touched the same pair; and what handles it is the rule that
+  already exists, regenerate on the rebased tree rather than splice.
+  The AGENTS.md rebase section is updated in this milestone to name
+  both manifests rather than one.
 - **The count column is read as a target.** The manifest freezes 355
   sites and claims no reduction, so a reader could take a green run as
   approval of the number. Mitigated in the manifest header and the
