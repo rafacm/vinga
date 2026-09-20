@@ -257,7 +257,7 @@ deliberately.
 
 ## Milestones
 
-- [ ] **M1: the resolved worker count is bounded**. `--maxprocesses=8`
+- [x] **[M1: the resolved worker count is bounded](2026-09-20-unit-lane-worker-safety-implementation.md#m1-the-resolved-worker-count-is-bounded)** (PR TBD). `--maxprocesses=8`
   joins `addopts` in `vinga-server/pyproject.toml`, under a comment
   carrying the measurement that justifies it: eight processes clean and
   ten broken at the same throughput, the limit in the published-port
