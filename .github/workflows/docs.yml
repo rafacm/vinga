@@ -6,7 +6,7 @@ name: docs
 # anything else. Between the two, every change to the repository runs
 # the command-spellings census in at least one workflow, which is the
 # hole this file exists to close: the census sweeps every tracked file
-# (`git ls-files` in tests/unit/test_command_spellings.py), so a
+# (`git ls-files` in tests/census/test_command_spellings.py), so a
 # documentation-only merge is census surface even though the server
 # workflow ignores it. One such merge staled the committed manifest and
 # left main's unit lane red with no run having gone red first; the

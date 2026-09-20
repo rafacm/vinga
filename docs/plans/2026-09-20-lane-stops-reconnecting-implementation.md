@@ -96,6 +96,14 @@ and breaks only the guarantee about which errors may be retried.
 | Full unit lane, `-n auto --dist loadfile` | green; 128.09 s, 114.09 s, 114.96 s over three runs |
 | Integration lane, same | green, 346 passed, 72.18 s |
 | `uv run ruff check .` | passed |
+| Connections the lane opens, `log_connections` on | **5,552** over 7,391 tests, **0.75 each** |
+
+The connection count is the measurement the plan promised and the
+changelog publishes, and it is recorded here because a published
+number that was never taken is the failure this project keeps
+catching. Before the change: 13,067 over 7,433 tests, 1.76 each. The
+drop is 7,515, slightly more than the one-per-test the change removes,
+because the census's own tests left `tests/unit` in M2 as well.
 
 Against the 122.05 s median the plan recorded for the unlanded tree,
 that is roughly **7.5 seconds**, which is what the plan predicted and
@@ -153,3 +161,98 @@ The census running with `VINGA_DB_PORT` pointed at a closed port is
 the direct evidence for this milestone's claim: it is not that the
 census happens to pass without a container, but that it cannot notice
 whether one exists.
+
+## PR review round
+
+External adversarial review of PR #539's diff, backend codex, model
+`gpt-5.6-sol`, 2026-09-20, posted as
+[a comment on the PR](https://github.com/rafacm/vinga/pull/539#issuecomment-5750979322).
+Six findings: one P1, four P2, one P3. Verdict: mergeable after the
+listed fixes. Five accepted, one rejected with its reasons.
+
+**1 (P1): driver failures leaked the driver's own words.** The retry
+introduced escape paths the disposable version did not have: a
+non-broken statement error re-raised raw, a failure while reconnecting,
+and a second-attempt failure. `_open_truncation_connection` is the
+sharp one, because a failure there raises a `psycopg` exception
+quoting the DSN it tried, **password included**, which is exactly why
+`_maintenance` has built its own sentence since it was written. The
+pre-existing `from exc` on the lock refusal had the same shape.
+
+*Resolution*: every failure on this path is now fixed text, built in
+the handler and raised outside it, with no `from`. Three sentences:
+`LOCK_HELD`, `TRUNCATION_REFUSED` and `RECONNECT_REFUSED`, the last
+distinguishing a second failure from a dropped connection.
+`test_no_failure_carries_the_driver_s_own_words` asserts that
+`__cause__` and `__context__` are both `None` and that neither the
+password nor the driver's name appears in the rendered message.
+Watched failing: raising the refusal inside the handler instead of
+after it turns that case red.
+
+**2 (P2): a lock met after a reconnect bypassed the mapping.** The
+retry was a bare `_truncate` outside the arm that names a held lock,
+so a terminated backend followed by a leaked writer lock would have
+raised a raw driver exception rather than the lane's sentence.
+
+*Resolution*: both attempts go through one `_attempt` helper that does
+the identical mapping, and only the first may answer "broken" in a way
+that reconnects. `test_a_lock_met_after_a_reconnect_still_reads_as_a_lock`
+is the case, and it is the one the review asked for.
+
+**3 (P2): the one-retry limit was not pinned, and the review was right
+in a way the first fix was not.** Every other case injects a single
+broken attempt, so an unbounded loop satisfies them all: the loop
+simply never goes round twice. **The first replacement test did not
+fix this.** Mutating the code to an unbounded retry loop left all six
+cases green, which is the finding reproducing itself against the fix
+for it.
+
+What pins it is making **both** attempts break, with a
+`BEFORE TRUNCATE` trigger that terminates whichever backend is running
+the truncation. A bounded implementation gives up and raises the
+second-failure sentence; an unbounded one reconnects forever. The call
+is driven on a thread with a thirty-second deadline, because an
+unbounded implementation would otherwise hang the suite rather than
+fail it, and a hang is a worse thing to hand a reader than an
+assertion. Re-run against the same mutation, the case now goes red.
+
+**4 (P2): `TRUNCATION_APPLICATION` is a test-facing export.**
+*Rejected, with reasons.* The plan's commitment was that the test
+"should not export the holder or create a test-only accessor", and
+this is neither: it is a value the connection is configured with, not
+a handle to it or a way in. `application_name` also earns its place
+independently of the test, because it is what makes these connections
+identifiable in `pg_stat_activity` to a human debugging a lane run;
+before this change they were anonymous. And the alternative the
+finding proposes, counting sessions on the lane database without
+naming them, is measurably more fragile: tests legitimately hold store
+connections open on that database, so a count would be pinning the
+behaviour of every other test in the file rather than this one.
+`tests/conftest.py` is test code, and a public name it offers to test
+code is not the reach-in the design guide is about.
+
+**5 (P2): the path sweep was incomplete, and the implementation doc
+said otherwise.** `.github/workflows/docs.yml:9` still named
+`tests/unit/test_command_spellings.py`, and `AGENTS.md` carried the
+manifest path without the regeneration command the plan required.
+
+*Resolution*: both fixed, and the cause is worth recording because it
+is a repeat. The sweep was run through `head`, so the workflow line
+sat below the cut on a search whose completeness was its entire point.
+Re-run without truncation, every remaining mention is a historical
+record: the changelog, earlier implementation and feature docs
+recording their own verification runs, and this plan's description of
+the pre-move state. The implementation doc's claim that only
+historical references remained was false when written and is corrected
+here rather than quietly edited.
+
+**6 (P3): a published number that was never measured.** The changelog
+claimed "roughly 7,400 fewer connections" while the verification table
+recorded only tests, timings and lint.
+
+*Resolution*: measured, with `log_connections` on. **5,552
+connections over 7,391 tests, 0.75 each**, against 13,067 over 7,433
+tests, 1.76 each, before. The drop is 7,515, slightly more than the
+one-per-test this change removes, because M2 also took the census's
+own tests out of the lane. The changelog now carries the measurement
+instead of the estimate.
