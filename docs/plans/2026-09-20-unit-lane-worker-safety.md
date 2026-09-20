@@ -227,7 +227,17 @@ deliberately.
   ten broken at the same throughput, the limit in the published-port
   path rather than in Postgres or the fixtures, and CI unaffected
   because its `auto` already resolves lower. A `### Fixed` changelog
-  fragment at `changelog.d/537-unit-lane-worker-bound.md`.
+  fragment at `changelog.d/537-unit-lane-worker-bound.md`. The clamp's
+  behavioral test, below. And the bookkeeping this repository requires
+  in the same change as the milestone: the companion
+  implementation-doc section, and this checklist item ticked with its
+  PR number and its name turned into a link to that section. The
+  command-spellings census scans every tracked file, and this
+  milestone adds documents that quote command spellings, so
+  `uv run pytest tests/unit/test_command_spellings.py` runs before the
+  PR, and a stale manifest is regenerated with
+  `uv run python -m tests.unit.test_command_spellings`, never edited
+  by hand.
   **Design footprint:** none. No module, no seam, no new name. This
   milestone sets one existing option of an existing plugin.
   **Documentation footprint:** no page's description of behavior is
@@ -242,9 +252,33 @@ deliberately.
 
 ## Tests and verification
 
-The claim is about an invocation, not about a unit of code, so the
-proof is the invocation. A unit test asserting that `addopts` contains
-a string would pin the spelling and prove nothing about the behavior.
+A unit test asserting that `addopts` contains a string would pin the
+spelling and prove nothing about the behavior. But the behavior itself
+is testable on any machine, a four-core runner included, because
+`xdist/plugin.py:315` resolves `auto` through the
+`pytest_xdist_auto_num_workers` hook, which a plugin may override.
+
+**The clamp's own test**, which is what lets CI catch this setting
+being removed or broken. A nested pytest run, on a trivial file in a
+temporary directory, with a plugin returning 14 from that hook and
+this repository's own ini supplied through `-c`, asserted to create
+eight workers. It costs 0.54s and touches no database: a file outside
+`tests/` pulls in no lane conftest, so nothing provisions. Prototyped
+before this plan promised it, with its falsification and its
+boundary:
+
+| Condition | Workers created |
+| --- | ---: |
+| clamp present, `auto` forced to 14 | **8** |
+| clamp removed, `auto` forced to 14 | 14 |
+| clamp present, explicit `--maxprocesses=12` | 12 |
+
+The second row is the falsification, and the third pins the
+documented escape hatch, so a change that silently disabled the
+override turns this red too.
+
+Then the invocations themselves, which are what the fix is finally
+about:
 
 - The full unit lane at `-n auto --dist loadfile` on a 14-core machine,
   green, which is the exact command and the exact machine class that
