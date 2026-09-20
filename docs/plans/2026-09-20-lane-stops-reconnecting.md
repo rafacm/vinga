@@ -173,7 +173,7 @@ workflows' mirrored `paths-ignore` arrange.
 
 ## Milestones
 
-- [x] **[M1: the lane stops reconnecting](2026-09-20-lane-stops-reconnecting-implementation.md#m1-the-lane-stops-reconnecting)** (PR TBD). `clear_store` takes its
+- [x] **[M1: the lane stops reconnecting](2026-09-20-lane-stops-reconnecting-implementation.md#m1-the-lane-stops-reconnecting)** (PR [#539](https://github.com/rafacm/vinga/pull/539)). `clear_store` takes its
   connection from a per-worker accessor that opens once and reopens
   only when the held one is unusable, instead of connecting and
   closing per test. The autouse fixture, its lane condition and the
@@ -187,7 +187,7 @@ workflows' mirrored `paths-ignore` arrange.
   `changelog.d/489-lane-stops-reconnecting.md`.
   **Documentation footprint:** none; no page describes how the
   truncation reaches the database.
-- [x] **[M2: the census stops asking for a database](2026-09-20-lane-stops-reconnecting-implementation.md#m2-the-census-stops-asking-for-a-database)** (PR TBD).
+- [x] **[M2: the census stops asking for a database](2026-09-20-lane-stops-reconnecting-implementation.md#m2-the-census-stops-asking-for-a-database)** (PR [#539](https://github.com/rafacm/vinga/pull/539)).
   `test_command_spellings.py` and `command-spellings.txt` move to
   `tests/census/`. **Both workflows change, not one**: `docs.yml`
   drops its Postgres service and the comment justifying it and runs
