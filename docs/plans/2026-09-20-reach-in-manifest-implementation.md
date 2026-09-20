@@ -132,17 +132,22 @@ classification above, does not depend on it.
 ### Verification
 
 - `uv run ruff check .`: all checks passed.
-- `uv run pytest tests/census -q`: 64 passed, which is the spellings
-  census's 52 and the reach-in census's 12.
-- `uv run pytest tests/unit -q`: 7,391 passed, 19 skipped, in 712 s.
-- `uv run pytest tests/integration -q`: 346 passed, in 332 s.
+- `uv run pytest tests/census -q`: 66 passed, which is the spellings
+  census's 52 and the reach-in census's 14. It was 64 and 12 before the
+  review round, which added the command-boundary refusal test and the
+  unreadable-file test.
+- `uv run pytest tests/unit -q -ra`: 7,391 passed, 19 skipped, in 718 s.
+  Both skips are `piper extra not installed`.
+- `uv run pytest tests/integration -q -ra`: 346 passed, in 326 s.
 - `uv run python scripts/check_doc_links.py .`: 255 files, 0 failures,
   which is 254 plus this document.
 - `uv run python scripts/fold_changelog.py check .`: 1 fragment, 0
   failures.
-- The command-spellings census was run after the documentation edits and
-  was already current: no spelling a document quotes moved, so its
-  manifest needed no regeneration.
+- Both manifests were checked after the documentation edits and both
+  were already current, so neither was regenerated: no spelling a
+  document quotes moved, and the census still reads 355 sites over 118
+  names across 75 files, because the review round's two new tests reach
+  past no interface.
 
 The one thing not verifiable here is the plan's fourth risk. The
 manifest was generated on darwin, and the first CI run on Linux against
