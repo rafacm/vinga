@@ -101,3 +101,60 @@ not this fault's cause and reducing it could not fix this fault, since
 the limit is on processes rather than on connections. It is a real
 efficiency question and it belongs to #489 M2, the milestone that
 re-measures fixture overhead.
+
+### PR review round
+
+External adversarial review of PR #538's diff, backend codex, model
+`gpt-5.6-sol`, 2026-09-20, posted as
+[a comment on the PR](https://github.com/rafacm/vinga/pull/538#issuecomment-5749513840).
+Four findings, one P1. Verdict: mergeable after the listed fixes. All
+four accepted; every one was about the test rather than the change it
+guards, which is the right proportion for a milestone whose behavior
+is one token.
+
+**1 (P1): the nested run could hide a failure, and could print raw
+child output.** The helper ignored `finished.returncode` and fed the
+concatenated stdout and stderr into rewritten assertions. Both halves
+are real. xdist prints `created: N/N workers` before the first test
+executes, so a child that announced eight workers and then failed was
+indistinguishable from one that passed; and a mismatch would have had
+pytest print a child pytest run's output, which carries this lane's
+environment through any traceback in it, where both the auth secret
+and the API token live.
+
+*Resolution* (`1215d2df`): the exit status is asserted before the
+output is read at all, the worker count is parsed to an integer with
+an anchored pattern so that "14 workers" cannot satisfy a test looking
+for four, and the refusal is a named sentence that repeats nothing of
+the child's output but its exit code.
+
+**2 (P2): the ceiling was not pinned to the measured value.** The
+helper read `--maxprocesses` out of the file under test and derived
+every expectation from it, so changing the cap to an unmeasured nine
+left all three cases green while contradicting the plan and the
+changelog.
+
+*Resolution* (`1215d2df`): `MEASURED_CEILING = 8` is a literal in the
+test now, with its own case asserting the configuration equals it, and
+the resolution cases assert against the literal. The two can fail for
+opposite reasons, which is why they are separate: xdist could clamp
+perfectly to a number nobody measured. Watched failing: 8 to 9 turns
+two cases red where it previously turned none.
+
+**3 (P2): the published claims outran the measurement.** The changelog
+fragment said the commands now work "on a developer machine" and
+stated the threshold generally, while the plan limits its evidence to
+one 14-core darwin machine reaching the compose instance one way.
+
+*Resolution* (`1215d2df`): the fragment now says where it was measured
+and states that the number is not claimed elsewhere, and the module
+docstring says the same. This is the third time in this issue that a
+claim had to be narrowed to its evidence.
+
+**4 (P3): the lower-auto case did not exercise a lower auto.** It
+forced the hook to 14 and then passed `-n2`, which replaces the
+resolution rather than testing it, so the docstring's claim was
+unproven.
+
+*Resolution* (`1215d2df`): the hook answers 2 and the run stays
+`-n auto`, so the pass-through is what is measured.
