@@ -88,19 +88,45 @@ held for a session is not, so the failure this introduces is a
 connection that a test leaves unusable: a server-side termination, an
 aborted transaction, a socket closed under it.
 
-The answer is to reopen rather than to protect: the accessor returns
-the held connection when it is usable and opens a new one when it is
-not, so a broken connection costs one reconnect rather than a cascade
-of teardown failures across the rest of that worker's files. That is
-strictly better than today only if "usable" is judged honestly, so the
-check is `closed` plus the driver's own broken-connection error on
-use, not a liveness ping, which would put back the round trip the
-change exists to remove.
+**The recovery cannot live in the accessor**, which is where this plan
+first put it. A connection whose peer has gone does not report
+`closed` or `broken` until a statement is executed on it, which is
+after any accessor has returned, and an aborted transaction is not a
+broken connection at all: it stays open with a failed transaction
+status. Inspecting the connection before handing it over therefore
+cannot answer the question the accessor would be asked.
 
-The `lock_timeout=5000` option and the `current_database()` assertion
-both stay exactly as they are. They are per-statement and
-per-connection properties respectively, and neither depends on the
-connection being new.
+So `clear_store()` owns the recovery, over the whole operation rather
+than over the connection:
+
+- The guard and the truncate run together as one attempt.
+- If that attempt fails with the driver marking the connection broken,
+  the held connection is discarded, a new one is opened, and the
+  attempt runs **once** more. Not a loop: a second failure is a real
+  failure and is raised.
+- **Every other SQL error keeps exactly the behavior it has today.**
+  `LockNotAvailable` above all: a test that left a writer holding a
+  lock still meets `lock_timeout` and still becomes the same
+  `AssertionError` with the same sentence. A reconnect on that error
+  would retry a wait the lane deliberately refuses to make, and would
+  hide the defect it exists to name.
+
+**The connection's parameters are preserved verbatim**, and two of
+them are load-bearing. `autocommit=True` is what keeps a truncation
+and its locks from surviving into the next test, which is precisely
+the risk a held connection introduces. `options="-c lock_timeout=5000"`
+is per-statement and unaffected by reuse. The `current_database()`
+assertion stays where it is, inside the attempt, so it is re-checked
+after a reconnect rather than trusted from before it.
+
+**And the held connection is closed at session finish**, before this
+worker drops its database. That is not tidiness. `_drop_this_process_databases`
+force-drops the lane database, and a `DROP DATABASE ... WITH (FORCE)`
+terminates every backend still on it: #537 measured exactly 17 such
+terminations in one run, every one a worker's own leftover backends
+taken by its own drop. A connection held for the whole session and
+never closed would add one per worker to that count, which is the
+opposite of what this milestone is for.
 
 ### Why not a pool
 
@@ -160,16 +186,31 @@ workflows' mirrored `paths-ignore` arrange.
 
 ## Tests and verification
 
-- The full unit lane, `-n auto --dist loadfile`, green, and its
-  wall-clock compared against the 122.05 s median recorded above. The
-  claim is a saving, so the number is the test.
-- The integration lane, green, since it shares `tests/conftest.py` and
-  therefore shares the changed accessor.
-- **The reconnect path is falsified rather than assumed**: a test that
-  takes the held connection and terminates it server-side, after which
-  the next truncation must still succeed. Without that, the reopen
-  branch is code no run has ever entered, and "it reconnects" is a
-  claim about a path nothing exercised.
+A wall-clock comparison is nondeterministic and cannot by itself show
+that anything was reused: an implementation that reconnected on every
+call would pass a timing check on a quiet machine and would pass a
+termination test too. So the reuse is pinned deterministically, and
+the timing is reported as a consequence rather than offered as proof.
+
+- **Reuse, deterministically**: two consecutive `clear_store()` calls
+  observed to run on **one** backend. The backend is identified from
+  outside, by asking the lane database for `pg_backend_pid()`, so the
+  test goes through `clear_store()` and reaches no private name. This
+  is the test that fails against today's code.
+- **Recovery, falsified rather than assumed**: that backend terminated
+  server-side, after which one further `clear_store()` succeeds, runs
+  on exactly one new backend, and **leaves seeded rows actually
+  gone**. The last clause is what distinguishes a retry that completed
+  the work from one that merely returned.
+- **`LockNotAvailable` still raises its `AssertionError`**, pinned, so
+  the retry cannot have swallowed the one error the lane wants loud.
+- **The per-test connection is gone**: the issue's own count
+  re-measured, from roughly 1.76 connections per test toward one per
+  worker plus what the tests themselves open.
+- The full unit lane, `-n auto --dist loadfile`, green, with its
+  wall-clock against the 122.05 s median recorded above, reported as a
+  consequence of the above rather than as evidence for it.
+- The integration lane, green, since it shares `tests/conftest.py`.
 - The census runs from its new home in both workflows, and
   `tests/unit` no longer collects it.
 - `uv run ruff check .`, the doc link check, and the census itself.
