@@ -578,6 +578,76 @@ def _database_default(name: str) -> None:
 _database_default(LANE_DATABASE)
 
 
+# What the truncation calls itself on the server, so that a test can
+# find the backend it is using without being handed the connection.
+# `tests/unit/test_truncation_connection.py` asks `pg_stat_activity`
+# for it, which is how the reuse below is pinned through `clear_store`
+# rather than through a private name. It is also what makes this
+# lane's own connections identifiable in `pg_stat_activity` while
+# debugging one.
+TRUNCATION_APPLICATION = "vinga-test-truncation"
+
+# This process's truncation connection, opened once instead of once per
+# test.
+#
+# It used to be opened and closed around every truncation, which is
+# 16.91 ms of which 4.26 ms was the connect, on every one of this
+# lane's tests. Measured for #489 on a 14-core darwin machine: holding
+# it takes the full unit lane from a 122.05 s median to 114.6 s, which
+# is as much as the pure/storage lane split that issue originally
+# proposed would have bought, for ten lines instead of a boundary
+# across 219 files.
+#
+# What does NOT change is the condition the truncation runs under. It
+# is still the lane and never the test, so there is no per-test "did
+# this one touch anything" and nothing to leak through.
+_TRUNCATION: Any | None = None
+
+
+def _open_truncation_connection() -> Any:
+    """One connection for this process's truncations.
+
+    Every parameter is the one the per-test connection used, and two of
+    them are load-bearing. `autocommit` is what stops a truncation and
+    its locks surviving into the next test, which is the risk a held
+    connection introduces and a disposable one could not have.
+    `lock_timeout` is per-statement and is unaffected by the reuse.
+    """
+    import psycopg
+
+    return psycopg.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        dbname=LANE_DATABASE,
+        autocommit=True,
+        application_name=TRUNCATION_APPLICATION,
+        # A test that left a writer holding a lock is a defect, and a
+        # teardown that waits ten seconds for it hides which test did
+        # it behind a slow suite.
+        options="-c lock_timeout=5000",
+    )
+
+
+def _truncate(connection: Any) -> None:
+    """The guard and the truncation, as one attempt.
+
+    The `current_database()` check is inside the attempt rather than
+    beside it, so a reconnect re-checks it instead of trusting an
+    answer from before the connection was replaced.
+    """
+    current = connection.execute("select current_database()").fetchone()[0]
+    assert current == LANE_DATABASE, (
+        f"refusing to truncate {current!r}, which is not this worker's "
+        f"test database"
+    )
+    connection.execute(
+        "truncate table " + ", ".join(_application_tables()) +
+        " restart identity cascade"
+    )
+
+
 def clear_store() -> None:
     """Everything the stores hold, gone, with the identity counters
     back at one and the migration stamps untouched.
@@ -585,38 +655,56 @@ def clear_store() -> None:
     Public because one caller is not a fixture: the event baseline
     drives every emit path in one test, and two of its drivers open a
     session of the same name, which one database cannot hold at once.
+
+    The recovery lives here rather than in whatever hands the
+    connection over, and that is not a matter of taste. A connection
+    whose backend has been terminated reports neither `closed` nor
+    `broken` until a statement is executed on it, and an aborted
+    transaction is not broken at all: it stays open with a failed
+    status. So nothing can be learned by inspecting the connection
+    before using it, and the only honest test is the attempt itself.
+    One retry, never a loop: a second failure is a real one.
     """
+    global _TRUNCATION
     import psycopg
 
-    connection = psycopg.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        dbname=LANE_DATABASE,
-        autocommit=True,
-        # A test that left a writer holding a lock is a defect, and a
-        # teardown that waits ten seconds for it hides which test did
-        # it behind a slow suite.
-        options="-c lock_timeout=5000",
-    )
+    if _TRUNCATION is None or _TRUNCATION.closed:
+        _TRUNCATION = _open_truncation_connection()
     try:
-        current = connection.execute("select current_database()").fetchone()[0]
-        assert current == LANE_DATABASE, (
-            f"refusing to truncate {current!r}, which is not this worker's "
-            f"test database"
-        )
-        connection.execute(
-            "truncate table " + ", ".join(_application_tables()) +
-            " restart identity cascade"
-        )
+        _truncate(_TRUNCATION)
+        return
     except psycopg.errors.LockNotAvailable as exc:  # pragma: no cover - a defect
+        # Before the broken-connection arm below, because this is an
+        # `OperationalError` too and must never be retried: the retry
+        # would sit through a wait this lane deliberately refuses to
+        # make, and would hide the defect the sentence names.
         raise AssertionError(
             "the test left a connection holding a lock on the store, so the "
             "lane could not clear it for the next test"
         ) from exc
-    finally:
-        connection.close()
+    except psycopg.Error:
+        if not (_TRUNCATION.closed or _TRUNCATION.broken):
+            raise
+    close_truncation_connection()
+    _TRUNCATION = _open_truncation_connection()
+    _truncate(_TRUNCATION)
+
+
+def close_truncation_connection() -> None:
+    """This process's truncation connection, closed.
+
+    Called at session finish before this process drops its database,
+    and that order is the whole point. `DROP DATABASE ... WITH (FORCE)`
+    terminates every backend still on the database, and #537 measured
+    seventeen such terminations in one run, each a worker's own
+    leftovers taken by its own drop. A connection held for a whole
+    session and never closed would add one more per worker.
+    """
+    global _TRUNCATION
+    if _TRUNCATION is not None:
+        with contextlib.suppress(Exception):
+            _TRUNCATION.close()
+        _TRUNCATION = None
 
 
 @pytest.fixture(autouse=True)
@@ -978,8 +1066,10 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
 
     All three also take their own test databases away with them, which
     is the first thing here because it has to happen whichever of the
-    three this process is.
+    three this process is. The truncation connection goes first of all,
+    because the drop that follows would otherwise terminate it.
     """
+    close_truncation_connection()
     _drop_this_process_databases()
     residual = _LEDGER.unaccounted()
     workeroutput = getattr(session.config, "workeroutput", None)
