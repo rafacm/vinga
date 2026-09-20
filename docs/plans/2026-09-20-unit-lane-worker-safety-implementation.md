@@ -94,13 +94,20 @@ last one's `TIME_WAIT`; and host ephemeral-port exhaustion, which is
 real for a sustained storm at the 16,384 ceiling but which the lane
 never approaches, peaking at 6,247 and failing anyway.
 
-**The fixtures open more connections than anyone would guess**, about
-1.6 per test and 13,067 across a run, because `clear_store` opens a
-fresh one per test on top of what each test's own store opens. It is
-not this fault's cause and reducing it could not fix this fault, since
-the limit is on processes rather than on connections. It is a real
-efficiency question and it belongs to #489 M2, the milestone that
-re-measures fixture overhead.
+**The fixtures open more connections than anyone would guess**:
+13,067 across a green run of 7,433 tests, 1.76 each, of which exactly
+7,433 are `clear_store`, one per test by construction because the
+autouse truncation's condition is deliberately the lane and never the
+test. It is not this fault's cause, and reducing it could not fix this
+fault, since the limit is on processes rather than on connections.
+
+It is ordinary fixture overhead, which is #489 M2's subject, and it
+has been **moved there rather than merely mentioned**: that
+milestone's text now carries this baseline and owes an attribution
+against it. The baseline had to be taken here because M1 removes the
+chance to take it, stopping the pure lane truncating at all across
+115 of 217 unit files, so a large share of those 7,433 disappears as
+a side effect of the split.
 
 ### PR review round
 
