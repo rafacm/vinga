@@ -319,6 +319,28 @@ Three details that are the whole of whether this works:
   `VINGA_REVISION`, means there is nothing to go backwards over: the
   run proceeds and says so.
 
+### The dated tag carries seconds, and reuse is refused
+
+`type=raw,value={{date 'YYYY-MM-DD-HHmm'}}` gives two commits
+publishing inside the same minute the same "immutable" tag, and the
+later registry write wins. Today serialization plus a six-minute
+publish makes that practically unreachable; M1 cuts the publish to
+seconds and M2 permits overlap, so it becomes reachable exactly when
+merges burst.
+
+The dated tag therefore becomes `YYYY-MM-DD-HHmmss`. That keeps what
+the tag means, the moment the build happened, and removes the
+collision class rather than shrinking it. It is a user-visible format
+change and lands in the documentation footprint.
+
+Seconds make a collision vanishingly unlikely; they do not make it
+impossible, and this repository prefers a guarantee enforced over one
+documented. So `image-publish` also refuses reuse: if the dated tag
+already resolves and names a digest other than the one being
+published, the job fails loudly rather than overwriting. Five lines,
+and it converts a silent registry overwrite into a red run.
+
+
 ### No new promise, no new record
 
 M2 preserves a property the workflow has today rather than creating
@@ -396,6 +418,14 @@ and are corrected when it moves.
   the same correction. It summarizes the server README and links it,
   so the correction goes to the README and this page keeps pointing
   at it.
+- **M1, the dated tag format, in both pages and the server README's
+  variant table.** `2026-08-03-1200` becomes `2026-08-03-120015` in
+  the table's example tags, in `docs/deployment.md`'s "Pin an
+  immutable tag" paragraph, and in the "finish minutes apart"
+  passages that quote a pair of them. The pages call these tags
+  immutable and never reused, which is the claim the seconds and the
+  reuse refusal make true rather than likely, so the correction is to
+  the examples and not to the promise.
 - **M2, both pages.** The moving-tag paragraphs gain one sentence for
   the guarantee the ordering check makes explicit: a moving tag never
   moves to an older commit's image. This strengthens rather than
@@ -497,8 +527,10 @@ that quotes commands.
   `--dry-run` on everything but a push to `main`, and asserts the
   assembled index carries an attestation manifest per platform. Cache
   scopes become `variant-arch`, exported exactly once each. `needs:
-  [unit, integration]` moves from the build to the publish. Documents
-  the two "finish minutes apart" passages.
+  [unit, integration]` moves from the build to the publish. The dated
+  tag gains seconds, `YYYY-MM-DD-HHmmss`, and the job refuses to reuse
+  one that already names different bytes. Documents the two "finish
+  minutes apart" passages and the new tag format.
 - [ ] **M2: validation overlaps across main pushes; the moving tag
   alone stays ordered.** The workflow-level concurrency group stops
   serializing `main` (each push gets its own group) and keeps
