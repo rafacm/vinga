@@ -254,8 +254,8 @@ be built.
 | With the resize made a no-op, as if the platform had refused | failed, and failed through the new message before `assert 0 == 141` |
 
 The mutation is the one that matters, because the fallback is the part
-of this change nothing else checks. Commenting the `fcntl.fcntl` call
-out puts the test back on the host's 262,144-byte default, which is
+of this change nothing else checks. Replacing the `fcntl.fcntl` call with
+`pass` puts the test back on the host's 262,144-byte default, which is
 exactly what an unsupported platform leaves it with, and the failure
 that comes back is the explanatory one rather than the bare compare.
 This host is therefore a machine where the silent fallback can be
@@ -279,7 +279,18 @@ a heading meant for behavior.
 
 - `uv run ruff check .`: all checks passed.
 - `uv run mypy`: success, no issues found in 5 source files.
-- `uv run pytest tests/unit -q -ra`: see below.
-- `uv run pytest tests/integration -q -ra`: see below.
-- `uv run pytest tests/census -q -ra`: see below.
-- `uv run python scripts/check_doc_links.py .`: see below.
+- `uv run pytest tests/unit -q -ra`: **7,395 passed, 19 skipped** in
+  1,705.62 s, no failures. M1 left this lane with one, the test this
+  milestone repairs, and the plan says the lane is green on a 16 KiB-page
+  host once M2 lands. It is. The 19 skips are the `faster-whisper` and
+  `piper` extras, unchanged.
+- `uv run pytest tests/integration -q -ra`: 346 passed in 541.00 s.
+- `uv run pytest tests/census -q`: 66 passed. Neither manifest moved, and
+  neither should have: this milestone quotes no command spelling that was
+  not already quoted, and the test reaches no private name.
+- `uv run python scripts/check_doc_links.py .`: 257 files, 0 failures.
+- `uv run python scripts/fold_changelog.py check .`: 1 fragment, 0
+  failures, which is M1's and still the only one.
+
+The repaired test was run five times on its own after the change, 5/5
+green, and the whole file 23/23 alongside it.
