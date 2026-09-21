@@ -318,6 +318,7 @@ respell  config export
 respell  config import
 respell  config list
 respell  config mcp-server status
+respell  config openapi
 respell  config ota-url
 respell  config provider secret set
 respell  config provider set
