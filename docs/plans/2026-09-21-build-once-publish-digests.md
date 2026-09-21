@@ -339,13 +339,8 @@ in two:
   group is exactly what could displace it.
 - **`image-promote`** moves the moving tag and nothing else, in a
   group of `publish-${{ matrix.variant }}` with
-  `cancel-in-progress: false`. It promotes **from the `sha-` tag
-  `image-publish` just pushed**, with one more
-  `docker buildx imagetools create`, which copies an index rather than
-  building anything. That source is unambiguous, it is per-commit so
-  no later run can move it underneath this one, and this run has
-  already proved it exists by pushing it. `image-promote` therefore
-  needs no digest artifacts of its own.
+  `cancel-in-progress: false`. It is a **reconciler, not a publisher
+  of its own commit**: see below.
 
 The split is what makes the design safe rather than the group being
 non-cancelling, and the reason is a semantic of GitHub Actions that is
@@ -366,9 +361,48 @@ on `main` has no image, and no run went red to say so. The workflow's
 own comment that "Merges to main run to completion, however many of
 them queue up" has been false since it was written.
 
-Displacing a pending `image-promote` is harmless by construction: the
-moving tag is meant to end up at the newest commit, and the newest run
-is the one that survives displacement.
+Displacing a pending `image-promote` would not be harmless if the job
+promoted its own commit, and the second review round is where that
+became clear. Replacement follows **eligibility**, not commit order.
+For commits A < B < C, A can be promoting while C finishes its gates
+and becomes pending, and a slower B can then become eligible and
+displace C. B is newer than A, so an ancestry check waves it through,
+and the moving tag settles on B while C, the newest gated commit,
+never gets it. The tag has not gone backwards; it has stopped
+following `main`, permanently, with no run red.
+
+### image-promote reconciles, it does not publish its own commit
+
+So `image-promote` does not ask "should I promote my commit". Holding
+its per-variant group, it fetches `origin/main`, walks it from the
+tip, and promotes the first commit whose `sha-` tag exists, whichever
+run produced it, giving up after a bounded number of commits.
+
+That works because of what publishing a `sha-` tag already means.
+`image-publish` runs only after the unit lane, the integration lane
+and every image job have passed, so "the newest commit on `main`
+carrying a `sha-` tag" is exactly "the newest gated image". The walk
+order supplies the ordering guarantee, so there is no separate
+ancestry check to get wrong and no read-then-write window to reason
+about.
+
+Three properties follow, and they are why this shape rather than a
+smarter group:
+
+- **Idempotent and invocation-independent.** Any surviving promote
+  computes the same answer, so displacement is harmless for a reason
+  instead of by assertion.
+- **Self-healing.** A moving tag left stale by an earlier
+  displacement is corrected by the next promote that runs. Both the
+  current design and this plan's first draft left it stale forever.
+- **It needs no digest artifacts**, because it addresses images by
+  name, across runs. That is also why the promotion source cannot be a
+  digest carried as a job output: by design this job publishes images
+  its own run did not build.
+
+The promotion itself is one more
+`docker buildx imagetools create`, copying an index rather than
+building anything.
 
 ### The moving tag will not go backwards, and the check says so
 
