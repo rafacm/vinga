@@ -303,7 +303,8 @@ worse than one that fails.
   exit status. The claims this milestone corrects are both docstrings,
   which ship with the code they describe. `docs/reference/events.md` is
   generated and its content is untouched.
-- [ ] **M2: the real-process test sets the capacity it needs**.
+- [x] **[M2: the real-process test sets the capacity it needs](2026-09-21-broken-pipe-at-shutdown-implementation.md#m2-the-real-process-test-sets-the-capacity-it-needs)**
+  ([PR TBD](https://github.com/rafacm/vinga/pull/TBD)).
   `test_event_docs.py::test_a_reader_who_stops_reading_gets_no_traceback`
   narrows its own pipe to one page and stops inheriting the platform's
   default, and its status assertion carries a message naming the cause

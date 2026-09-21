@@ -204,3 +204,82 @@ An empty round on the substance is worth recording as such rather than
 reading as a clean bill: the reviewer had the whole diff, including the
 four tests and the two docstring corrections, and returned nothing
 about them.
+## M2: the real-process test sets the capacity it needs
+
+### What landed
+
+| Piece | Where |
+| --- | --- |
+| The sized pipe | `vinga-server/tests/unit/test_event_docs.py`, `narrowed_pipe`, beside the test that uses it |
+| The test that stops inheriting a capacity | the same file, `test_a_reader_who_stops_reading_gets_no_traceback` |
+| The status assertion's message | the same test, naming the cause and refusing the two widenings |
+
+No production code moved and no other test did. This milestone is one
+test that stops reading a number off the machine and states it.
+
+### One deviation: `SET_PIPE_SIZE` moved up
+
+M1 put `SET_PIPE_SIZE = getattr(fcntl, "F_SETPIPE_SZ", None)` with the
+near-fit test, which was the only thing that wanted it. Two tests want
+it now, and the plan does not say where it should live when that
+happens. Defining it twice is the rule against two structures that must
+agree, so the constant moved up to the head of the real-process section
+and its comment now carries both readings of its absence: the test that
+narrows an inherited pipe still has a pipe without the command, so it
+runs, and the test that needs a pipe larger than the document has no
+construction without it, so it skips. That is the whole of the
+deviation, and neither of M1's four tests was otherwise touched.
+
+### Why the fallback is silent here and a skip there
+
+The two judgements look inconsistent read side by side, so the reason is
+written down where each one is made. What `F_SETPIPE_SZ` buys this test
+is a *narrower* pipe than the platform's, and the platform's is already
+narrow enough everywhere the command is missing: macOS defaults to
+65,536 bytes against a 133,861-byte document, which is the regime this
+test was written for and the one it has always run in. Losing the
+command costs it a regime chosen badly rather than no regime at all, so
+it runs. The near-fit test needs a pipe *wider* than the document, which
+no platform hands out by default and only that command can ask for, so
+without it there is nothing to exercise. The plan refuses a skip on
+capacity and this is not one: it is a skip on a construction that cannot
+be built.
+
+### The failure it fixes, watched in both directions
+
+| Run | Result |
+| --- | --- |
+| Before the change, on this host | `assert 0 == 141`, the bare failure the plan names |
+| After the change | passed, 5 runs out of 5 |
+| With the resize made a no-op, as if the platform had refused | failed, and failed through the new message before `assert 0 == 141` |
+
+The mutation is the one that matters, because the fallback is the part
+of this change nothing else checks. Commenting the `fcntl.fcntl` call
+out puts the test back on the host's 262,144-byte default, which is
+exactly what an unsupported platform leaves it with, and the failure
+that comes back is the explanatory one rather than the bare compare.
+This host is therefore a machine where the silent fallback can be
+observed failing, which macOS, where the fallback is real, is not: there
+the default is small enough that the test passes on it.
+
+The document on the day is M1's table above, unchanged: 133,861 bytes,
+against a pipe this test now sets to one page, 16,384 bytes on this
+host.
+
+### No changelog fragment
+
+Judged rather than skipped. M1's `### Fixed` fragment describes the
+user-visible change, which is the exit status and the stderr of two
+commands, and this milestone changes neither. What it changes is which
+machines a test is honest on, and a person running vinga meets nothing
+of it. A second fragment would say "a test now sizes its own pipe" under
+a heading meant for behavior.
+
+### Verification
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 5 source files.
+- `uv run pytest tests/unit -q -ra`: see below.
+- `uv run pytest tests/integration -q -ra`: see below.
+- `uv run pytest tests/census -q -ra`: see below.
+- `uv run python scripts/check_doc_links.py .`: see below.
