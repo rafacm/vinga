@@ -440,38 +440,38 @@ The promotion itself is one more
 `docker buildx imagetools create`, copying an index rather than
 building anything.
 
-### The moving tag will not go backwards, and the check says so
+### What the reconciler needs in order to be right
 
-Job-level ordering is necessary and not sufficient, because GitHub
-does not promise that two queued promotions run in commit order.
-Before moving a tag, `image-promote` reads the revision of what that
-tag currently points at:
+The ancestry check this section used to specify is gone with the
+design that needed it. A run no longer asks whether its own commit is
+newer than the published one, so `git merge-base --is-ancestor` is not
+used at all, and the AGENTS.md trap about ancestry across a rebase
+merge stops being something this workflow has to reason about. That is
+a real simplification and not just a move: one fewer wrong answer
+available.
 
-```
-docker buildx imagetools inspect "$IMAGE:$MOVING" --format '{{json .Image}}'
-```
+What the reconciler needs instead is four things.
 
-That returns the per-platform configs, including
-`VINGA_REVISION=<short sha>` from the image's own `ENV` (verified
-against `ghcr.io/rafacm/vinga-server:latest`, which reports
-`VINGA_REVISION=a81608d` for both platforms). If that revision is a
-descendant of this run's commit, this run is the older one and leaves
-the moving tag alone. Its immutable tags were pushed by
-`image-publish` already and are unaffected.
-
-Three details that are the whole of whether this works:
-
-- `image-promote` checks out with `fetch-depth: 0`. The default depth
-  of 1 has no history and every ancestry question would answer wrong.
-- `git merge-base --is-ancestor` is the right tool **here** and is the
-  wrong tool in the case AGENTS.md warns about. That warning is about
-  branches across a rebase merge, where hashes are rewritten. Both
-  commits here are commits on `main`, so ancestry is genuine. The
-  distinction goes in the step's comment, because the warning is more
-  memorable than its scope.
-- A moving tag that does not exist, or whose config carries no
-  `VINGA_REVISION`, means there is nothing to go backwards over: the
-  run proceeds and says so.
+- **History and a current tip.** `fetch-depth: 0` and a fetch of
+  `origin/main` before the walk. A shallow checkout has no history to
+  walk, and a stale tip would promote something that is no longer the
+  newest.
+- **A bound on the walk, and an honest failure at the end of it.** It
+  looks back a fixed number of commits for the first one carrying a
+  `sha-` tag. Finding none is not a silent no-op: the run fails,
+  because either the registry is unreachable or `main` has gone that
+  far without a single gated image, and both are things somebody
+  should hear about.
+- **An idempotent exit.** If the moving tag already resolves to the
+  same index as the chosen commit's `sha-` tag, the job does nothing
+  and says so. That is what makes a second promote against an
+  unchanged `main` a no-op, which is the property the whole design
+  leans on and is cheap to check on a dispatch.
+- **Nothing read from the moving tag except for that comparison.** The
+  moving tag is an output of this system, never an input to its
+  decision. The decision comes from `main` and from which `sha-` tags
+  exist, both of which are facts a displaced run and a surviving run
+  agree on.
 
 ### The dated tag carries seconds, and reuse is refused
 
