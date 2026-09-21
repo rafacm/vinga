@@ -457,3 +457,169 @@ that quotes commands.
   'pull_request'` and the comment explaining the exemption;
   `image-publish` keeps its main-only tag move and runs dry on the
   pull request. `workflow_dispatch` stays.
+
+## Plan review round
+
+Reviewed at `27d12b0f` on 2026-09-21. Backend codex, model
+`gpt-5.6-sol`, `--sandbox read-only`, runtime 184s. The prompt carried
+the plan, the reading list, the issue body, and the commands behind
+every measurement the plan rests on, so the method could be audited
+rather than only the conclusions. Verdict as received: **not ready**.
+
+Six findings, recorded as received.
+
+### 1 (P1): the proposed concurrency group can silently discard publish jobs
+
+GitHub Actions permits one running and one pending member per
+concurrency group. When a third publish becomes ready it replaces the
+pending one even with `cancel-in-progress: false`, so in the
+three-merge burst M2 exists to handle, the middle commit's publish is
+cancelled and it never receives its dated and `sha-` tags. The plan
+promised "publishing its immutable tags regardless" without
+establishing that the job runs at all. The plan must verify a
+three-run overlap, not a two-run one.
+
+*Resolution*: accepted, and verifying it found that this is a **live
+defect in the current design rather than a hazard M2 would
+introduce**. The workflow-level group has the same one-running,
+one-pending semantics today. In the 2026-09-11 burst the issue
+measures, `gh api` lists a fourth run the issue does not mention:
+`2026-09-11T18:19:29Z d6d76dd push completed cancelled`, queued behind
+the 18:05 run and replaced when the 18:33 one arrived. `d6d76dd1`
+("Regenerate the spellings census on the rebased tree") is an ancestor
+of `origin/main`, and `ghcr.io/rafacm/vinga-server:sha-d6d76dd` does
+not exist, while `sha-2f9675f`, `sha-f943bc6` and `sha-623f170` all
+do. A merged commit on `main` has no image, and no run went red to say
+so.
+
+The amendment is to split publication by what actually needs ordering.
+`image-publish` assembles the manifest and pushes the **immutable**
+dated and `sha-` tags, with no concurrency group at all, so it can
+never be displaced while pending. `image-promote` moves the **moving**
+tag alone, in an ordered non-cancelling group per variant. A displaced
+`image-promote` is then harmless by construction: the moving tag is
+supposed to end up at the newest commit, and the newest run is exactly
+the one that survives displacement. This is a sharper reading of the
+issue's own sentence than the plan had: the ordering guarantee is
+needed by the moving tag, not by the publish.
+
+The workflow comment at L52-54, "Merges to main run to completion,
+however many of them queue up", is false and has been. Correcting it
+joins M2's documentation footprint.
+
+### 2 (P1): concurrent publication makes the minute-resolution tag mutable
+
+`type=raw,value={{date 'YYYY-MM-DD-HHmm'}}` gives two commits
+publishing inside the same minute the same dated tag, and the later
+registry write wins. Today serialization plus a six-minute publish
+makes this practically impossible; M2 permits overlap and M1 cuts the
+publish to seconds, so the collision becomes reachable. Both
+maintained pages call dated tags immutable and never reused.
+
+*Resolution*: accepted. The dated tag gains seconds,
+`YYYY-MM-DD-HHmmss`, which keeps what the tag means (when the build
+happened) and removes the collision class rather than shrinking it.
+The publish additionally refuses to reuse a dated tag: if the tag
+already resolves and its digest differs from the one being published,
+the job fails loudly rather than overwriting. This repository's stated
+preference is that a guarantee is enforced rather than documented, and
+the check is five lines. The tag-format change is user-visible, so it
+joins M1's documentation footprint in both pages, alongside the
+example tags in the server README's variant table.
+
+### 3 (P1): M3 does not implement automatic PR coverage for forks
+
+M1 requires the image exporter to push to GHCR; M3 then removes the PR
+exclusion, and a fork PR has a read-only token, so it fails. The issue
+asks for image-affecting pull requests to build and smoke, not for
+same-repository ones, and explicitly offers "carried as a build
+artifact" as the route the plan rejected without pricing.
+
+*Resolution*: accepted, with a different remedy than the one proposed,
+and the plan is better for it. **Pull requests stop pushing by digest
+at all.** A pull request publishes nothing, so it needs no digest: the
+build loads locally and the smoke runs against that, exactly as today.
+Push-by-digest runs on `push` and `workflow_dispatch` only, which are
+the events that publish or dry-run the assembly.
+
+This resolves the finding completely (a fork PR builds and smokes with
+no token and no credentials reaching fork code), and it also retires
+two things the plan had accepted as costs: the accumulation of
+untagged GHCR versions from pull requests, and most of finding 5's
+exposure. The artifact route was priced before being set aside:
+`imagetools create` cannot read a local OCI archive, so it would need
+`skopeo` or `crane`, neither preinstalled, plus roughly 2 to 4 GB of
+artifact traffic per run to move images that no longer need moving.
+
+The cost is that a pull request no longer exercises manifest assembly.
+`workflow_dispatch` still does, and dispatch is already the plan's
+pre-merge gate.
+
+### 4 (P2): the cache-export conclusion is wider than the evidence
+
+The plan said the first two same-scope exports are overwritten and
+"nothing ever reads them". But the amd64 export completes before the
+arm64 build imports the same scope, and that export completes before
+the publish imports it, so a later step in the same job can consume an
+export before its index is overwritten. The timing method measured
+export duration and never inspected cache-hit provenance.
+
+*Resolution*: accepted without reservation. This is the recurring
+error this repository has a note about, prose claiming more than was
+measured, and the reviewer is right about the mechanism: a same-job
+reader exists and was never checked for. The claim narrows to what the
+timings support, that same-scope exports overwrite one another **for
+future runs**, and the words "provably overwritten" and "nothing ever
+reads them" come out. The `variant-arch` split becomes a stated
+hypothesis rather than a conclusion, and M1's verification gains a
+cache-hit measurement on a warm run: the arm64 build's duration and
+its imported-layer count before and after, so the split is judged on
+hit provenance rather than on export duration alone. If the arm64
+build gets slower, the scopes merge back and the milestone says so.
+
+### 5 (P2): moving builds ahead of tests changes the registry gate
+
+The plan said "nothing reaches the registry" unless both lanes pass
+and called the invariant unchanged, while each architecture job pushes
+an addressable digest before either lane has passed. Only tag
+assembly remains gated.
+
+*Resolution*: accepted; the sentence was wrong as written. Finding
+3's remedy removes the pull-request half of the exposure entirely, and
+what remains is stated precisely instead of being called unchanged:
+on a push to `main`, content-addressed manifests may reach GHCR before
+the test lanes finish, and **no tag of any kind, moving or immutable,
+is created until the unit lane, the integration lane and every image
+job have passed**. An untagged manifest is unreachable by name and is
+not what any deployment resolves. A `main` push whose tests then fail
+leaves an untagged manifest behind, which is the accepted cost, named
+here rather than in a risks list, since it is the invariant's actual
+shape.
+
+### 6 (P2): the attestation experiment does not validate the real assembly shape
+
+The experiment generalized from a one-layer Alpine build and assembled
+one source digest at a time. The real publication merges two
+single-platform indexes from a multi-stage Dockerfile, and counting
+"an attestation per platform" can miss a malformed or mis-associated
+one.
+
+*Resolution*: accepted, and the acceptance check the reviewer proposes
+is adopted verbatim in preference to the plan's weaker one. Part of
+the topology gap was closed after the plan was committed, by a second
+experiment: two single-platform builds pushed by digest separately,
+then merged with one `imagetools create`, produce an index with four
+entries, one `linux/amd64` manifest, one `linux/arm64` manifest and
+two `attestation-manifest` entries, which is the same shape
+`ghcr.io/rafacm/vinga-server:latest` carries today (verified by
+`imagetools inspect --raw` on the live tag). That closes "does merging
+two indexes preserve both platforms and both attestations" and leaves
+the reviewer's other three assertions open, so the check asserts all
+of them: one manifest per expected platform, each attestation's
+`vnd.docker.reference.digest` naming its own platform manifest, no
+nested or duplicate platform index, and both configs carrying the
+expected `VINGA_REVISION` and variant. It runs in both the real and
+the `--dry-run` publish, so a dispatch catches the failure before a
+merge does. The reviewer's framing is kept: the local experiments show
+the exporter choice matters, and the acceptance check is what
+validates the topology.
