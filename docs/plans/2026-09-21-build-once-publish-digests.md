@@ -51,11 +51,15 @@ cache**, three times, all into `scope=default`. The issue predicted
 3m22s of export inside the publish; it is now 4m27s there plus 2m22s
 before it.
 
-The three exports write the same scope key, so only the last one's
-index survives. The first two (142.3s every run) are therefore not
-merely redundant, they are overwritten: nothing ever reads them. That
-is what "one exporter per arch-variant scope" is worth, and it is
-worth more than the issue expected.
+The three exports write the same scope key, so for a **future** run
+only the last one's index survives. That is as far as these timings
+reach, and no further: within the same job, the amd64 export completes
+before the arm64 build imports that scope, and the arm64 export
+completes before the publish imports it, so a later step in the same
+run can consume an export before its index is overwritten. Export
+duration was measured; cache-hit provenance was not. Whether the
+earlier exports have a same-job reader is open, and M1 measures it
+rather than assuming either answer.
 
 The rest of the issue's account of the publish is exactly right. The
 log shows `#22 [linux/arm64 builder 5/10] RUN uv sync ... DONE 50.3s`
@@ -206,10 +210,20 @@ an accident.
 exactly one step, and the publish job configures no cache at all
 because it builds nothing.
 
-A run's amd64 job then imports an index written by the previous run's
-amd64 job, which is better targeted than today, where the amd64 build
-imports an index whose last writer was the two-platform publish
-build.
+The intended effect is that a run's amd64 job imports an index written
+by the previous run's amd64 job, rather than one whose last writer was
+a two-platform publish build. **That is a hypothesis, not a
+conclusion.** Splitting the scope also stops each architecture seeing
+the other's export, and the timings behind this plan say nothing about
+whether anything was gaining from that. The arm64 build is where it
+would show, since it imports last today.
+
+M1 therefore measures rather than asserts: the arm64 build's duration
+and its cached-versus-executed step counts on a **warm** run, before
+and after. If the arm64 build gets slower, the scopes merge back to
+one per variant and the milestone records the number that said so.
+Cold-start on the first run after the key changes is expected and is
+not the measurement.
 
 **Not taken, deliberately: moving the export to
 `type=registry`.** GHCR registry cache is usually faster to export
@@ -220,9 +234,11 @@ both at the same time means the first run after M1 cannot attribute
 its numbers to either. M1's verification reports the measured export
 time, and that number is what should decide it, as its own change.
 
-The report's caution applies and is honored: this milestone removes
-only exports that are provably overwritten within the same job, not
-exports that a later run might hit.
+The report's own caution is what this is: measure subsequent cache hit
+rates before deciding which exports to remove, since an export that
+looks redundant may be the one later runs hit. The plan's first draft
+quoted that caution while doing the opposite, and the review round
+caught it.
 
 ### Native arm64 runners: evaluated, not adopted
 
@@ -474,7 +490,9 @@ an event.
 This is a workflow-only change, so the honest statement of what can be
 verified where matters more than usual.
 
-- **Locally**: `actionlint` if available, and a YAML parse. The
+- **Locally**: `actionlint` (v1.7.7, verified clean against the four
+  workflows as they stand today, so a new finding is the change's) and
+  a YAML parse. The
   mechanism itself has already been verified locally against a
   throwaway registry, and the two experiments are reproducible:
   push-by-digest plus `imagetools create` assembling a tagged index,
@@ -487,7 +505,10 @@ verified where matters more than usual.
 - **On `main`, after merging**: the first push is the only thing that
   can exercise the real tag move. M1's implementation-doc section
   records the measured job durations and cache-export times of that
-  run against the table above, including if they are worse.
+  run against the table above, including if they are worse. It also
+  records the cache-hit comparison finding 4 asks for, from the
+  **second** push rather than the first, since the first runs against
+  a cold scope key by construction.
 - **Not verifiable before merging, and not claimed**: that a burst
   behaves. The round is explicit that two overlapping runs are not the
   case to check, because the displacement needs a third; the case is
