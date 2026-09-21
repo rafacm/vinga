@@ -205,9 +205,9 @@ requires all four:
 
 It runs identically in the real and the `--dry-run` publish, because
 `--dry-run` prints the index it would push, so a dispatch catches a
-regression here before a merge can. The local experiments are what
-they are: evidence that the exporter choice matters. This check is
-what validates the topology.
+regression here before a merge can. The local experiments are what they are:
+evidence that the exporter choice matters. This check is what
+validates the topology.
 
 ### One job, matrix over variant and architecture
 
@@ -447,16 +447,48 @@ seconds and M2 permits overlap, so it becomes reachable exactly when
 merges burst.
 
 The dated tag therefore becomes `YYYY-MM-DD-HHmmss`. That keeps what
-the tag means, the moment the build happened, and removes the
-collision class rather than shrinking it. It is a user-visible format
-change and lands in the documentation footprint.
+the tag means, the moment the build happened, and it is a
+user-visible format change that lands in the documentation footprint.
 
-Seconds make a collision vanishingly unlikely; they do not make it
-impossible, and this repository prefers a guarantee enforced over one
-documented. So `image-publish` also refuses reuse: if the dated tag
-already resolves and names a digest other than the one being
-published, the job fails loudly rather than overwriting. Five lines,
-and it converts a silent registry overwrite into a red run.
+And `image-publish` refuses reuse, on **both** immutable tags: if the
+dated tag or the `sha-` tag already resolves and names a digest other
+than the one being published, the job fails rather than overwriting.
+Five lines, and it converts a silent registry overwrite into a red
+run.
+
+**What that does and does not buy, stated precisely**, because the
+first draft of this section claimed more. The refusal is a read
+before a write and `image-publish` is deliberately ungrouped, so it
+narrows the window rather than closing it: two publishers choosing the
+same value in the same instant would both see the tag absent and both
+push. It does not make either tag immutable by enforcement. What it
+does is ensure that every reuse the check can see ends a run red
+instead of replacing an image somebody has deployed.
+
+Two residuals remain and they are not the same size, which is what
+decides the shape here:
+
+- **The dated tag** collides only if two commits complete the unit
+  lane, the integration lane, every image job and the assembly within
+  **the same second**.
+- **The `sha-` tag** collides if any two commits in the repository's
+  history share a seven-character prefix. At a thousand commits that
+  is on the order of 0.2 percent, and it grows with the square.
+
+The second is already the accepted cost of a seven-character tag, and
+it is the larger one by a wide margin. Embedding the revision in the
+dated tag, the obvious way to make it "intrinsically" unique, would
+therefore move the dated tag's residual **up** to meet the `sha-`
+tag's rather than down. So the revision stays out of it.
+
+The width stays at seven for a reason of its own: `VINGA_REVISION` in
+the image's `ENV`, the `sha-` tag, and the existing workflow step that
+asserts those two are equal are all built on it and agree by
+construction. Widening is coherent, larger, and the single lever that
+would close both residuals at once, so it is recorded as the named
+remedy with a trigger rather than taken speculatively. The trigger is
+an actual collision, which after this change announces itself as a red
+run instead of as an image that quietly changed.
 
 
 ### No new promise, no new record
