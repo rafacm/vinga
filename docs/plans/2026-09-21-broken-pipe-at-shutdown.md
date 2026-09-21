@@ -345,3 +345,75 @@ pins and the redirect pin run everywhere.
   factor of eighty to reach it. If it ever does, the test fails loudly
   with a traceback and exit 1, which is the 20,000-byte row above, not
   silently.
+
+## Plan review round
+
+External adversarial review of this plan at `f9b27251`, run read-only
+in the worktree. Backend codex, `codex-cli 0.155.1`, model
+`gpt-5.6-sol`, 2026-09-21, reviewer runtime 140s. Verdict: ready after
+the P1 and P2 amendments. Two findings, both accepted.
+
+The prompt named six small files to read in full and pasted the
+nineteen relevant lines of `config/cli.py` (9,667 lines) rather than
+naming it, together with an explicit instruction not to open it or
+`vinga-server/README.md`. That is the recorded remedy for sol
+returning empty stdout at exit 0 on this repository's large files, and
+this round came back with a body.
+
+### 1 (P1): M2 does not say how the pipe is sized, and the obvious way does not work
+
+Resizing through `child.stdout` after `Popen` creates the pipe leaves
+the child already writing before `F_SETPIPE_SZ` lands, which preserves
+the exact race M2 exists to remove, and on a 262,144-byte host the
+child can finish first. The pipe must be created with `os.pipe()` and
+sized before the child starts, with the already-sized write descriptor
+passed as `stdout`, the parent's copy closed, and the read descriptor
+used for reading. The unsupported-platform fallback has to be decided
+before the child starts too.
+
+*Resolution*: accepted as a specification gap, and M2 now states the
+mechanism. The finding is right that the plan did not say it, and the
+sequence it prescribes is the one that was already prototyped and
+verified 5/5 on two machines before this issue was filed; the plan
+described the outcome and left the order of operations implied, which
+is exactly the kind of thing a milestone brief then gets wrong.
+
+### 2 (P2): the committed tests never run the real command through the near-fit path
+
+The three proposed tests prove separately that `main` flushes and that
+`reader_stopped_reading` redirects a retained buffer, but none of them
+runs `events reference` through the near-fit shutdown path, so the
+plan's sentence claiming "the near-fit regime is reached by the tests'
+own construction" is false. A change in entrypoint dispatch, stream
+wrapping, encoding, buffering or process termination could restore
+exit 120 with all three green. Keep one deterministic real-process
+near-fit regression built on the plan's own pre-filled-pipe
+construction, with a bounded synchronization mechanism, assertions for
+exit 141 and empty stderr, and an explicit guard on the retained-tail
+precondition so the test fails rather than silently entering the
+mid-write regime.
+
+*Resolution*: accepted in full, and the rejection it overturns was the
+worse of this plan's two judgement calls. The issue's M1 asks for this
+test in as many words, which makes it a settled decision rather than
+something to price on proportion, and the sentence the finding quotes
+is this session's recurring error: it claimed for three tests a
+property only a fourth one has. The test is added to M1, the rejection
+bullet is gone, and the sentence is corrected.
+
+The guard the finding asks for is now a measured construction rather
+than an intention. Set the free capacity to
+`len(document) - len(document) % io.DEFAULT_BUFFER_SIZE`, which is the
+document's whole-chunk part, so the child writes exactly the chunks
+that fit exactly and retains the remainder. The pipe then ends
+**exactly full**, and that is the assertion that catches a settle-poll
+which fired early, because a child still writing leaves it short.
+Measured at `f9b27251`, five runs per variant: `events reference`
+(133,861 bytes, remainder 2,789) fills the pipe to exactly 262,144 in
+all fifteen runs, committed code exits 120, the flush fix exits 141
+with empty stderr, and the flush fix without the redirect exits 120
+again. The same construction against `config openapi` (455,602 bytes)
+comes up 8,192 short, because a larger document retains more than one
+buffer's worth, and that is the evidence that the fullness assertion
+is a real check rather than a tautology: it can fail, and when it
+fails it fails red.
