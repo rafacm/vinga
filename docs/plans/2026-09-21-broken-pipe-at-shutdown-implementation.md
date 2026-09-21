@@ -294,3 +294,36 @@ a heading meant for behavior.
 
 The repaired test was run five times on its own after the change, 5/5
 green, and the whole file 23/23 alongside it.
+
+### PR review round
+
+External adversarial review of PR [#543](https://github.com/rafacm/vinga/pull/543)'s
+diff against `origin/main`. Backend codex, `codex-cli 0.155.1`, model
+`gpt-5.6-sol`, 2026-09-21. Verdict: mergeable after the listed fixes.
+Two findings, both accepted.
+
+**1 (P2): the completed milestone still links to `PR TBD`.** The same
+finding this plan's M1 round produced, for the same reason: the tick is
+written in the change that completes the milestone, which is before the
+pull request exists.
+
+*Resolution*: accepted, substituted.
+
+**2 (P2): the neighbouring explanation still says the repaired test
+inherits its pipe capacity.** The comment heading the near-fit
+section opened with "The test above inherits whatever pipe the platform
+gives it", which this milestone made false, and it is the paragraph
+that explains why the two real-process tests differ.
+
+*Resolution*: accepted, and it is the round's real finding. This is the
+class a green run cannot catch by construction: a false sentence in
+prose, beside code that works. The paragraph now says the test above
+asks for the mid-write regime by narrowing its pipe to one page, which
+is what it does after this milestone, and keeps the reason the near-fit
+regime has to be built rather than chosen. The reader-mode measurement
+that establishes that reason is now quoted in it rather than left as an
+assertion.
+
+Worth recording for the next milestone that repairs a test: the
+staleness was one comment away from the diff's own hunks, which is
+exactly far enough for the author not to re-read it.

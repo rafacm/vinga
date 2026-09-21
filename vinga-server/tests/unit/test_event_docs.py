@@ -700,16 +700,22 @@ def test_a_reader_who_stops_reading_gets_no_traceback(tmp_path: Path) -> None:
 
 # --- the real command, through the regime that was reaching nobody ----
 #
-# The test above inherits whatever pipe the platform gives it, and what
-# that decides is which failure it reaches: a pipe much smaller than the
-# document cuts the writer off mid-write, which every version of this
-# code has answered, and a pipe that fits the document reaches no
-# failure at all. The one in between is the reported bug, and it is not
-# reachable by choosing a capacity, because how much a reader happens to
-# drain before closing decides how much the writer gets to absorb.
+# Which failure a reader who stops reading meets is decided by the
+# pipe's capacity against the document's size, and there are three
+# answers. A pipe much smaller than the document cuts the writer off
+# mid-write, which every version of this code has answered; that is the
+# regime the test above asks for by narrowing its pipe to one page. A
+# pipe that fits the document reaches no failure at all. The one in
+# between is the reported bug.
 #
-# So the regime is built rather than hoped for, and the construction is
-# the plan's, measured there:
+# That middle regime cannot be reached by choosing a capacity and
+# hoping, because how much a reader happens to drain before closing
+# decides how much the writer gets to absorb: the same capacity and the
+# same document answered 120 through a text reader and 0 through a
+# binary one, five runs each.
+#
+# So it is built rather than hoped for, and the construction is the
+# plan's, measured there:
 #
 #   1. A pipe whose capacity is the next power of two above the
 #      document, pre-filled so the free space is exactly the document's
