@@ -279,7 +279,7 @@ worse than one that fails.
 ## Milestones
 
 - [x] **[M1: the failure surfaces where it is already caught](2026-09-21-broken-pipe-at-shutdown-implementation.md#m1-the-failure-surfaces-where-it-is-already-caught)**
-  ([PR TBD](https://github.com/rafacm/vinga/pull/TBD)).
+  (PR [#542](https://github.com/rafacm/vinga/pull/542)).
   `sys.stdout.flush()` as the last statement inside the `try` in
   `src/vinga_server/events_cli.py` and in
   `src/vinga_server/config/cli.py`. Three tests: the two in-process

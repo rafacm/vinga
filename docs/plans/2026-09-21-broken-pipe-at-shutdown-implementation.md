@@ -181,3 +181,26 @@ resize the kernel refuses, with the errno in the message.
 - `uv run python scripts/check_doc_links.py .`: 257 files, 0 failures.
 - `uv run python scripts/fold_changelog.py check .`: 1 fragment, 0
   failures.
+
+### PR review round
+
+External adversarial review of PR [#542](https://github.com/rafacm/vinga/pull/542)'s
+diff against `origin/main`. Backend codex, `codex-cli 0.155.1`, model
+`gpt-5.6-sol`, 2026-09-21. Verdict: mergeable after the one listed fix.
+One finding.
+
+**1 (P2): the completed milestone still links to `PR TBD`.** The
+checklist item is ticked and its implementation-doc link resolves, but
+the pull request it names is a placeholder, which AGENTS.md requires to
+be the number.
+
+*Resolution*: accepted and fixed in the commit that carries this
+section. The placeholder is the pipeline's own ordering (the milestone
+is ticked in the change that completes it, which is necessarily before
+the pull request exists), so what the finding catches is the
+substitution not having happened yet rather than a decision.
+
+An empty round on the substance is worth recording as such rather than
+reading as a clean bill: the reviewer had the whole diff, including the
+four tests and the two docstring corrections, and returned nothing
+about them.
