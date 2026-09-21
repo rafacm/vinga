@@ -465,6 +465,51 @@ def test_a_reader_who_stops_reading_gets_the_shell_s_own_status(
     assert capsys.readouterr().err == ""
 
 
+class _EmptiedIntoAClosedPipe(io.StringIO):
+    """A stdout that takes what it is given and fails when it is
+    emptied, which is what the one above becomes a moment later.
+
+    A pipe whose reader has gone takes the bytes that fit and leaves the
+    rest in the writer's buffer, so the write that filled it succeeded
+    and nothing has yet tried to move the remainder.
+    """
+
+    def flush(self) -> None:
+        raise BrokenPipeError(32, "Broken pipe")
+
+
+def test_a_reader_who_stops_reading_between_chunks_gets_the_status(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other half of the pair above, and the half that was reaching
+    nobody. `_ClosedPipe` raises where the command is printing, which
+    this grammar has always answered; this one raises only when what was
+    already printed is pushed out, which is the ordinary case for a
+    document long enough to outrun a pipe buffer.
+
+    What it pins is the `sys.stdout.flush()` inside `main`'s `try`.
+    Without it the command returns 0 with its buffer still full, and the
+    interpreter's own flush on the way out raises where nothing is left
+    to catch it: `Exception ignored` on stderr and exit 120, which is
+    the traceback this surface exists to prevent wearing other words.
+
+    The command is `openapi` and not the tail above, though this is the
+    tail's file, because the tail is the one row of the grammar that
+    empties its own buffer: it flushes after every line, so that
+    `| head -n 1` answers before the next event rather than after the
+    next eight kilobytes, and the flush in `main` is therefore never
+    what its remainder meets. `openapi` prints one long document and
+    leaves the emptying to the boundary, which is every other row's
+    shape and the one this pin is about.
+    """
+    capsys.readouterr()
+    monkeypatch.setattr(sys, "stdout", _EmptiedIntoAClosedPipe())
+
+    assert run("openapi") == BROKEN_PIPE_STATUS
+
+    assert capsys.readouterr().err == ""
+
+
 # What it asks for
 
 
