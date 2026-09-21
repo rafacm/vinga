@@ -245,20 +245,53 @@ main would publish". Without it, M1's entire publishing half would
 first execute on `main`, which is the one place the workflow is not
 allowed to be wrong.
 
-### The ordering check reads the published image, not the branch
+### Publication splits by what needs ordering
 
-M2 narrows `concurrency` at the workflow level to a group that no
-longer serializes `main`
-(`${{ github.workflow }}-${{ github.ref }}` on a pull request; the run
-id appended on a push, so each push gets its own group), and gives
-`image-publish` a job-level group of its own,
-`publish-${{ matrix.variant }}` with `cancel-in-progress: false`.
+M2 narrows the workflow-level `concurrency` so it no longer serializes
+`main`: a pull request keeps
+`${{ github.workflow }}-${{ github.ref }}` with `cancel-in-progress`,
+and a push appends the run id so each one gets a group of its own.
 
-Job-level ordering is necessary but not sufficient, because GitHub
-does not promise that two queued publishes run in commit order. The
-sufficient part is an explicit check, which the issue anticipates.
-Before moving a tag, the job reads the revision of what the moving tag
-currently points at:
+The serialization that remains is placed by asking which tag actually
+needs it, and the answer is only the moving one. So publication splits
+in two:
+
+- **`image-publish`** assembles the manifest and pushes the immutable
+  dated and `sha-` tags. It takes **no concurrency group**, because a
+  group is exactly what could displace it.
+- **`image-promote`** moves the moving tag and nothing else, in a
+  group of `publish-${{ matrix.variant }}` with
+  `cancel-in-progress: false`.
+
+The split is what makes the design safe rather than the group being
+non-cancelling, and the reason is a semantic of GitHub Actions that is
+easy to read past: a group holds one running member and one pending
+member, and a third arrival **replaces the pending one** whether or not
+`cancel-in-progress` is set. Anything whose output is per-commit and
+irreplaceable must therefore not be in a group at all.
+
+**This is a live defect today, not a hazard the plan avoids
+introducing.** The current workflow-level group has the same
+semantics, and the 2026-09-11 burst contains a fourth run the issue
+does not mention: `2026-09-11T18:19:29Z d6d76dd push completed
+cancelled`, queued behind the 18:05 run and replaced when the 18:33
+one arrived. `d6d76dd1` is an ancestor of `origin/main` and
+`ghcr.io/rafacm/vinga-server:sha-d6d76dd` does not exist, while
+`sha-2f9675f`, `sha-f943bc6` and `sha-623f170` all do. A merged commit
+on `main` has no image, and no run went red to say so. The workflow's
+own comment that "Merges to main run to completion, however many of
+them queue up" has been false since it was written.
+
+Displacing a pending `image-promote` is harmless by construction: the
+moving tag is meant to end up at the newest commit, and the newest run
+is the one that survives displacement.
+
+### The moving tag will not go backwards, and the check says so
+
+Job-level ordering is necessary and not sufficient, because GitHub
+does not promise that two queued promotions run in commit order.
+Before moving a tag, `image-promote` reads the revision of what that
+tag currently points at:
 
 ```
 docker buildx imagetools inspect "$IMAGE:$MOVING" --format '{{json .Image}}'
@@ -268,20 +301,20 @@ That returns the per-platform configs, including
 `VINGA_REVISION=<short sha>` from the image's own `ENV` (verified
 against `ghcr.io/rafacm/vinga-server:latest`, which reports
 `VINGA_REVISION=a81608d` for both platforms). If that revision is a
-descendant of this run's commit, this run is the older one and skips
-the moving tag, publishing its immutable dated and `sha-` tags as
-normal.
+descendant of this run's commit, this run is the older one and leaves
+the moving tag alone. Its immutable tags were pushed by
+`image-publish` already and are unaffected.
 
 Three details that are the whole of whether this works:
 
-- The publish job checks out with `fetch-depth: 0`. The default depth
+- `image-promote` checks out with `fetch-depth: 0`. The default depth
   of 1 has no history and every ancestry question would answer wrong.
-- `git merge-base --is-ancestor` is the right tool **here** and is
-  the wrong tool in the case AGENTS.md warns about. That warning is
-  about branches across a rebase merge, where hashes are rewritten.
-  Both commits here are commits on `main`, so ancestry is genuine.
-  The distinction is written into the step's comment, because the
-  warning is more memorable than its scope.
+- `git merge-base --is-ancestor` is the right tool **here** and is the
+  wrong tool in the case AGENTS.md warns about. That warning is about
+  branches across a rebase merge, where hashes are rewritten. Both
+  commits here are commits on `main`, so ancestry is genuine. The
+  distinction goes in the step's comment, because the warning is more
+  memorable than its scope.
 - A moving tag that does not exist, or whose config carries no
   `VINGA_REVISION`, means there is nothing to go backwards over: the
   run proceeds and says so.
@@ -299,15 +332,17 @@ gain a sentence saying what the tag now guarantees.
 ```
 unit ─────────────┐
 integration ──────┤
-                  ├─> image-publish (matrix: variant)
-image (matrix: variant x arch) ─┘      needs all three
-  amd64: build, push by digest, pull back, smoke
-  arm64: build, push by digest, import check
+                  ├─> image-publish ──> image-promote
+image (matrix: variant x arch) ─┘       (matrix: variant, both)
+  amd64: build, smoke                   publish: immutable tags, no group
+  arm64: build, import check            promote: the moving tag, ordered group
 ```
 
 `image` runs on push, pull_request and workflow_dispatch after M3.
-`image-publish` runs on all three too, with `--dry-run` on everything
-but a push to `main`.
+`image-publish` runs on push and workflow_dispatch, with `--dry-run`
+on everything but a push to `main`. `image-promote` runs only on a
+push to `main`, since it exists to move a tag and there is no dry
+version of that worth running.
 
 ## Design footprint
 
@@ -326,10 +361,15 @@ digest, which is the point of the issue.
 - **M1 deepens `image`.** It stops being a job that builds, smokes and
   publishes, and becomes a job that proves one architecture of one
   variant. The publishing half leaves it entirely.
-- **M2 deepens `image-publish`** rather than adding a gate beside it.
-  The ordering check lives in the only job that moves a tag, which is
-  the same reason M2 exists at all: the guarantee is needed by the
-  publish and was being paid for by everything.
+- **M2 adds `image-promote` and shrinks what ordering costs.** The new
+  module's one responsibility is moving a tag, and what its callers
+  stop having to know is how ordering is achieved: everything upstream
+  of it runs unordered. It passes the deletion test because inlining
+  it back into `image-publish` is precisely the shape that loses a
+  merged commit's image, which is the defect the round found. This is
+  the issue's own sentence read one level sharper: the ordering
+  guarantee is needed by the moving tag, not by the publish, and
+  certainly not by everything.
 - **M3 adds nothing.** It is one `if:` deleted and a paths list; the
   whole of what makes it affordable was built by M1.
 
@@ -361,6 +401,16 @@ and are corrected when it moves.
   moves to an older commit's image. This strengthens rather than
   weakens the existing advice not to deploy from a moving tag, and
   must not be written in a way that reads as permission to.
+- **M2, `.github/workflows/vinga-server.yml` L52-54.** "Never on a
+  push to main ... Merges to main run to completion, however many of
+  them queue up" is false today, and `d6d76dd` is the counterexample.
+  The comment is rewritten to say what the split actually guarantees:
+  immutable tags for every merged commit, because nothing that
+  produces them sits in a group, and a moving tag that only ever moves
+  forward. A comment is not a maintained page, but it is the load
+  bearing explanation of the block it sits on, and leaving it would
+  leave the next reader with the belief that cost this repository an
+  image.
 - **M3: nothing.** The server README's smoke-lane section says "CI
   runs it against the image it just built", which stays true when
   pull requests run it too. No page claims the image job skips pull
@@ -389,10 +439,15 @@ verified where matters more than usual.
   can exercise the real tag move. M1's implementation-doc section
   records the measured job durations and cache-export times of that
   run against the table above, including if they are worse.
-- **Not verifiable before merging, and not claimed**: that the moving
-  tag ends up where it should after two merges land inside one run of
-  each other. M2's section records this as unchecked with the reason,
-  and the next real burst is what discharges it.
+- **Not verifiable before merging, and not claimed**: that a burst
+  behaves. The round is explicit that two overlapping runs are not the
+  case to check, because the displacement needs a third; the case is
+  **three merges inside one run's duration**, where the assertions are
+  that all three commits get their dated and `sha-` tags, and that the
+  moving tag ends at the newest of them. M2's section records this
+  unchecked with the reason. It can be provoked rather than waited
+  for, by merging M3 and a documentation commit in quick succession
+  once M2 is on `main`, and that is the intended discharge.
 
 The `tests/census` lane is run before each PR: the command-spellings
 census sweeps every tracked file, and this work edits documentation
@@ -444,14 +499,17 @@ that quotes commands.
   scopes become `variant-arch`, exported exactly once each. `needs:
   [unit, integration]` moves from the build to the publish. Documents
   the two "finish minutes apart" passages.
-- [ ] **M2: validation overlaps across main pushes; publication alone
-  stays ordered.** The workflow-level concurrency group stops
-  serializing `main` and keeps cancelling superseded pull-request
-  runs; `image-publish` takes an ordered, non-cancelling group of its
-  own per variant, checks out with `fetch-depth: 0`, and refuses to
-  move a moving tag whose current image is a descendant of this run's
-  commit, publishing its immutable tags regardless. Documents the
-  guarantee in the two moving-tag passages.
+- [ ] **M2: validation overlaps across main pushes; the moving tag
+  alone stays ordered.** The workflow-level concurrency group stops
+  serializing `main` (each push gets its own group) and keeps
+  cancelling superseded pull-request runs. Publication splits:
+  `image-publish` keeps the immutable tags and takes no group at all,
+  so it cannot be displaced while pending; a new `image-promote` moves
+  the moving tag in an ordered, non-cancelling group per variant,
+  checks out with `fetch-depth: 0`, and leaves the tag alone when its
+  current image is a descendant of this run's commit. Corrects the
+  workflow's false comment about merges running to completion, and
+  documents the guarantee in the two moving-tag passages.
 - [ ] **M3: image-affecting pull requests build and smoke
   automatically.** `image` loses `if: github.event_name !=
   'pull_request'` and the comment explaining the exemption;
