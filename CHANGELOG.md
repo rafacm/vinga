@@ -11,6 +11,10 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 - Every place the tests reach past an interface is now recorded in a committed manifest, `vinga-server/tests/census/reach-ins.txt`, and the census lane fails when a fresh walk disagrees with it. One line per distinct `path  name` pair with the number of sites at it, no positions, so a change that only shifts a line leaves the file alone. The census itself is not new; what is new is that a reach-in now arrives as a named diff line rather than as a number nobody compared, which is how it grew from 162 sites to 355 unremarked. The manifest freezes what is there and reduces nothing. Its enumeration also moved from a filesystem walk to the tracked file set, so an untracked scratch file under `tests/` can no longer change the answer.
 
+### Fixed
+
+- `vinga-server events reference | head` and the `vinga-server config` commands now answer the shell's own status for a reader who stopped reading in the one case where they did not: a pipe closed while the last partial chunk was still in the writer's buffer. The kernel hands a blocked write back the bytes it placed, the command returns believing it printed the document, and the failure then arrives at interpreter shutdown, where nothing is left to catch it, so the process printed `Exception ignored in: <_io.TextIOWrapper name='<stdout>'>` on stderr and exited 120 rather than 141. Both entry points now empty the buffer inside the boundary that answers for a closed pipe. Whether the old behavior was reachable depended on the pipe's capacity against the document's size, which is why it survived: a smaller pipe cuts the writer off mid-write, which was always answered correctly, and a larger one never fails at all.
+
 ## 2026-09-20
 
 ### Changed
