@@ -453,7 +453,7 @@ def test_a_reader_who_stops_reading_gets_the_shell_s_own_status(
     The other half of the pattern, redirecting the descriptor so the
     interpreter's own final flush cannot raise again where nothing can
     catch it, is pinned in a real process by
-    `test_event_docs.test_a_reader_who_stops_reading_gets_no_traceback`;
+    `test_broken_pipe.test_a_retained_buffer_cannot_raise_at_interpreter_shutdown`;
     what this pins is that the answer is reached at all.
     """
     answering(run, serving(event(event="ota_check", device=MAC)))

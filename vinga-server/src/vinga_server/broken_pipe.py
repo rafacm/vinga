@@ -6,7 +6,11 @@ events tail` prints until it is told to stop, so `| head -n 1` is the
 ordinary way to wait for one event. Neither may answer that with a
 traceback, and what keeps them from doing so is subtle enough that two
 copies of it would be one pending bug: the exit status is a convention,
-and the redirection below is a trap nobody guesses twice.
+and the redirection below is a trap nobody guesses twice. Both claims
+are held in a process of their own by `tests/unit/test_broken_pipe.py`,
+which is where they became falsifiable: while they were asserted only in
+the docstrings of tests belonging to other modules, the redirect could
+be deleted with every one of those tests still green.
 
 The module is stdlib only, deliberately. It is imported by the events
 group, which reaches no server, and by the configuration CLI, whose
@@ -33,12 +37,19 @@ def reader_stopped_reading() -> int:
     Two things have to happen for it to stay unreported. The status is
     the shell's own for a process cut off by SIGPIPE, so a pipeline reads
     the way a pipeline does. And the file descriptor behind `sys.stdout`
-    is replaced with the null device before returning, because the
-    interpreter flushes its streams on the way out and a flush to a pipe
-    nobody is reading raises a second time, after this function is out of
-    the way: Python would print `Exception ignored on flushing
-    sys.stdout` to stderr, which is the traceback this exists to prevent
-    wearing different words.
+    is replaced with the null device before returning, because the caller
+    arrives here holding a buffer it could not empty and every byte that
+    was in it: a flush that raises discards nothing, so the interpreter's
+    own flush on the way out meets the same bytes and the same closed
+    pipe, at the one point in a process where no `except` is left to
+    answer. Python would print `Exception ignored in: <_io.TextIOWrapper
+    name='<stdout>'>` to stderr and exit 120, which is the traceback this
+    exists to prevent wearing different words.
+
+    The retention is measured rather than assumed, and assuming the
+    opposite is how this line came to look like dead code:
+    `tests/unit/test_broken_pipe.py` holds the claim in a process of its
+    own, and replacing the `os.dup2` below with `pass` turns it red.
     """
     try:
         empty = os.open(os.devnull, os.O_WRONLY)
