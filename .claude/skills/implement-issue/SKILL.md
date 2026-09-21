@@ -145,7 +145,15 @@ subagent brief:
   claiming more is noise. A mutation that survives its test is a
   finding about the test, reported explicitly, never a relief:
   the surviving breakage is how a substring assertion is caught
-  posing as a pinned line.
+  posing as a pinned line, and how a test aimed at a subject that
+  cannot exhibit the behavior is caught looking correct. When a
+  mutation survives, ask whether the DRIVER reaches the condition
+  before asking whether the assertion is strong enough: #541's
+  flush pin had the right shape and the right assertion and still
+  passed with the fix removed, because it drove a command that
+  flushes per line and so never had a remainder to meet. The
+  driver came from the plan's own wording, so that run audited
+  the plan and not only the test.
 
 **One plan may cover a PAIR of issues** that share a module and a
 shape, with a milestone per issue and each issue closed by its own PR:
