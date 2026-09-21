@@ -257,11 +257,26 @@ a number rather than left implied.
 ### Builds stop waiting on the test lanes; the publish does not
 
 `image` drops `needs: [unit, integration]`. `image-publish` carries
-`needs: [unit, integration, image]`, so the invariant is unchanged:
-nothing is published unless both lanes passed. What changes is that a
-commit whose tests will fail also builds an image, which costs runner
-minutes on a public repository, where they are free, and buys the
-critical path 453s.
+`needs: [unit, integration, image]`, and `image-promote` follows it.
+
+The invariant this preserves has to be stated precisely, because the
+plan's first draft stated it wrongly ("nothing reaches the registry")
+and the review round was right to refuse that. On a push to `main`,
+**content-addressed manifests may reach GHCR before the test lanes
+finish**, and **no tag of any kind, moving or immutable, is created
+until the unit lane, the integration lane and every image job have
+passed**. Those are different sentences and only the second one is
+true.
+
+The gap between them is what an untagged manifest is: unreachable by
+name, resolved by no deployment, and not what any of the three
+documented pull commands names. A `main` push whose tests then fail
+leaves one behind, which is the accepted price of building before the
+gates rather than after them. Pull requests contribute none of this,
+since finding 3's remedy stops them pushing at all.
+
+What is bought is 453s of critical path, against runner minutes that
+are free on a public repository.
 
 ### The publish job runs on push and dispatch, dry on everything but main
 
