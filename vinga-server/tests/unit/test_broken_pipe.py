@@ -88,10 +88,16 @@ def test_a_retained_buffer_cannot_raise_at_interpreter_shutdown(
     # construction removes.
     read_fd, write_fd = os.pipe()
     os.close(read_fd)
+    environment = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+    # Block buffering is the precondition and not an incidental default:
+    # an unbuffered stream keeps nothing back, so there would be no
+    # retained buffer for the interpreter to meet and the test would
+    # pass without reaching what it is about.
+    environment.pop("PYTHONUNBUFFERED", None)
     child = subprocess.Popen(
         [sys.executable, "-c", WRITER],
         cwd=tmp_path,
-        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        env=environment,
         stdout=write_fd,
         stderr=subprocess.PIPE,
         text=True,
