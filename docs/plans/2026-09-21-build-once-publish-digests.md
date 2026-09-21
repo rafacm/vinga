@@ -203,9 +203,29 @@ requires all four:
 - both platform configs carrying the expected `VINGA_REVISION` and
   `VINGA_VARIANT`.
 
-It runs identically in the real and the `--dry-run` publish, because
-`--dry-run` prints the index it would push, so a dispatch catches a
-regression here before a merge can. The local experiments are what they are:
+**The order it runs in is the whole of whether it works**, which the
+first draft of this check left unsaid. A tagged `imagetools create`
+has to push before its tag can be read back, so a post-push assertion
+finds a malformed index only after the immutable tags exist; and
+`--dry-run` prints an index without creating a tag, so there is
+nothing for `.Image` to read the configs from. Neither half alone
+checks anything before publication.
+
+So validation is two phases, and the thing that makes it possible is
+that the per-platform manifests were pushed **by digest before any tag
+existed**, so every one of them is already addressable:
+
+1. `imagetools create --dry-run`, parse its raw index, and resolve
+   each entry by digest against the same repository
+   (`imagetools inspect "$IMAGE@<digest>"`, raw for the manifests and
+   `--format '{{json .Image}}'` for the configs). All four properties
+   above are checked here, before anything is tagged.
+2. Only then the tagged push, and afterwards one inspect of the tag,
+   required to resolve to the same index digest phase 1 validated.
+
+This costs one extra inspect and makes the dispatch gate genuinely
+equivalent to the push gate for this check, which the first draft
+intended and did not achieve. The local experiments are what they are:
 evidence that the exporter choice matters. This check is what
 validates the topology.
 
@@ -681,7 +701,10 @@ that quotes commands.
   scopes become `variant-arch`, exported exactly once each. `needs:
   [unit, integration]` moves from the build to the publish. The dated
   tag gains seconds, `YYYY-MM-DD-HHmmss`, and the job refuses to reuse
-  one that already names different bytes. Documents the two "finish
+  either immutable tag when it already names different bytes. The
+  index topology is validated in two phases, against the `--dry-run`
+  index resolved by digest before anything is tagged, then re-checked
+  against the tag afterwards. Documents the two "finish
   minutes apart" passages and the new tag format.
 - [ ] **M2: validation overlaps across main pushes; the moving tag
   alone stays ordered.** The workflow-level concurrency group stops
