@@ -782,6 +782,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             sys.argv[1:] if argv is None else argv,
             CONSOLE_SCRIPT if argv is None else DISPATCHED,
         )
+        # The buffer is emptied inside the boundary, for the reason
+        # `events_cli.main` states at the same line: a reader who closed
+        # the pipe while the last partial chunk was still buffered
+        # raises at interpreter shutdown otherwise, where no arm can
+        # catch it, and the process prints `Exception ignored` and exits
+        # 120 rather than answering the status below.
+        sys.stdout.flush()
     except BrokenPipeError:
         # A reader that stopped reading, which is not a failure and is
         # not this grammar's sentence either: `broken_pipe.py` says what
