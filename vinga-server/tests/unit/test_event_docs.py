@@ -22,12 +22,16 @@ declaration lives. There is no second description to compare against and
 none to fall out of step.
 """
 
+import array
+import fcntl
 import io
 import logging
 import os
 import re
 import subprocess
 import sys
+import termios
+import time
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -622,3 +626,187 @@ def test_a_reader_who_stops_reading_gets_no_traceback(tmp_path: Path) -> None:
     assert "Exception ignored" not in errors
     assert errors == ""
     assert status == BROKEN_PIPE_STATUS
+
+
+# --- the real command, through the regime that was reaching nobody ----
+#
+# The test above inherits whatever pipe the platform gives it, and what
+# that decides is which failure it reaches: a pipe much smaller than the
+# document cuts the writer off mid-write, which every version of this
+# code has answered, and a pipe that fits the document reaches no
+# failure at all. The one in between is the reported bug, and it is not
+# reachable by choosing a capacity, because how much a reader happens to
+# drain before closing decides how much the writer gets to absorb.
+#
+# So the regime is built rather than hoped for, and the construction is
+# the plan's, measured there:
+#
+#   1. A pipe whose capacity is the next power of two above the
+#      document, pre-filled so the free space is exactly the document's
+#      whole-chunk part.
+#   2. A child that writes the document into it, and a parent that reads
+#      nothing at all.
+#   3. The child fills the free space exactly and blocks. When the
+#      parent closes the read end, the kernel hands that blocked write
+#      back the bytes it did place, which is a short write rather than a
+#      failure, and the remainder is under one buffer, so the stream
+#      keeps it and the command returns believing it printed everything.
+#
+# That remainder is the whole bug. Without a flush inside the boundary
+# it is the interpreter's own flush that meets the closed pipe, and it
+# meets it where no `except` is left: `Exception ignored` on stderr and
+# exit 120.
+
+# Setting a pipe's capacity is a Linux command and not a portable one.
+# macOS has no equivalent, so the construction cannot be built there at
+# all and the test says so rather than pretending: this is a platform it
+# cannot run on, which is a different thing from a capacity it does not
+# like, and the plan refuses the second.
+SET_PIPE_SIZE = getattr(fcntl, "F_SETPIPE_SZ", None)
+
+# How long the parent will wait for the child to stop adding to the
+# pipe, and how still it has to be before the parent believes it. A
+# child that has filled the pipe is asleep in a write syscall, so the
+# count goes from the pre-fill to full and stays there; the deadline is
+# generous because what it guards against is a hang, not a slow start.
+SETTLE_POLL_S = 0.02
+SETTLE_STILL_SAMPLES = 10
+SETTLE_DEADLINE_S = 60.0
+
+
+def queued(read_fd: int) -> int:
+    """How many bytes are sitting in the pipe, unread."""
+    counted = array.array("i", [0])
+    fcntl.ioctl(read_fd, termios.FIONREAD, counted, True)
+    return counted[0]
+
+
+def settled(read_fd: int, filled: int, child: subprocess.Popen[str]) -> int:
+    """The pipe's byte count once the child has stopped adding to it.
+
+    Stillness alone would not do, because the child has an interpreter
+    to start before it writes its first byte and a parent that sampled
+    through that would conclude the child had finished before it began.
+    So the count has to move off the pre-fill first, and only then is
+    stillness read as the child having written everything it is going to
+    write. A child that exited without writing is not waited for either:
+    it has nothing more to add and its stderr is what the caller wants
+    to see.
+    """
+    deadline = time.monotonic() + SETTLE_DEADLINE_S
+    previous = filled
+    moved = False
+    still = 0
+    while time.monotonic() < deadline:
+        time.sleep(SETTLE_POLL_S)
+        now = queued(read_fd)
+        moved = moved or now != filled
+        still = still + 1 if now == previous else 0
+        previous = now
+        if child.poll() is not None:
+            return now
+        if moved and still >= SETTLE_STILL_SAMPLES:
+            return now
+    raise AssertionError(
+        f"the child never stopped writing: {previous} bytes in the pipe after "
+        f"{SETTLE_DEADLINE_S}s. Nothing reads this pipe, so a child still "
+        "moving is a child writing more than the construction left room for."
+    )
+
+
+def test_a_reader_who_stops_reading_mid_chunk_gets_no_traceback(tmp_path: Path) -> None:
+    """The real command, through the real failure, answering 141 with
+    nothing on stderr.
+
+    This is the only test here that runs `events reference` through the
+    near-fit regime, and it is here because the three narrow ones cannot
+    see it. They pin that `main` flushes and that the redirect holds a
+    retained buffer; a change in how the entry point dispatches, wraps,
+    encodes or buffers could put exit 120 back with all three still
+    green.
+
+    Two guards make it a regression test rather than a hopeful one. The
+    regime is chosen rather than inherited: the free capacity is the
+    document's whole-chunk part, derived from the document this test
+    just rendered, so it holds whatever the catalog has grown to. And
+    the poll's conclusion is checked: the pipe must end exactly full,
+    which is what the construction predicts and what a poll that fired
+    early cannot produce, since a child still writing leaves it short.
+    That assertion is known to be able to fail; the same construction
+    against the much larger `config openapi` document comes up one
+    buffer short, because a larger document retains more than one
+    buffer's worth.
+    """
+    if SET_PIPE_SIZE is None:
+        pytest.skip("setting a pipe's capacity is a Linux command")
+
+    document = events_docgen.reference().encode("utf-8")
+    retained = len(document) % io.DEFAULT_BUFFER_SIZE
+    assert retained, (
+        "the document is an exact multiple of the stream's buffer, so this "
+        "construction leaves nothing retained and reaches the wrong regime. "
+        "Make the free capacity one buffer smaller than the whole-chunk part "
+        "and assert the pipe ends one buffer short of full."
+    )
+    free = len(document) - retained
+
+    read_fd, write_fd = os.pipe()
+    child: subprocess.Popen[str] | None = None
+    try:
+        try:
+            capacity = fcntl.fcntl(write_fd, SET_PIPE_SIZE, 1 << len(document).bit_length())
+        except OSError as refused:
+            pytest.skip(f"this pipe's capacity could not be set: {refused}")
+        # Pre-filled, so what is left is exactly the whole-chunk part
+        # however big the document has become.
+        filled = capacity - free
+        while filled > queued(read_fd):
+            os.write(write_fd, b"\0" * (filled - queued(read_fd)))
+
+        environment = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        # Block buffering is the regime, not an incidental default: an
+        # unbuffered stream retains nothing and raises inside `write`,
+        # which is the failure the test above reaches.
+        environment.pop("PYTHONUNBUFFERED", None)
+        child = subprocess.Popen(
+            [sys.executable, "-m", "vinga_server.main", "events", "reference"],
+            cwd=tmp_path,
+            env=environment,
+            stdout=write_fd,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        os.close(write_fd)
+        write_fd = -1
+
+        # And the parent reads nothing, ever. What ends the child's
+        # write is the read end closing, not a byte leaving the pipe.
+        standing = settled(read_fd, filled, child)
+        os.close(read_fd)
+        read_fd = -1
+        errors = child.communicate()[1]
+        status = child.returncode
+    finally:
+        for descriptor in (read_fd, write_fd):
+            if descriptor != -1:
+                os.close(descriptor)
+        if child is not None and child.poll() is None:
+            child.kill()
+            child.wait()
+
+    assert standing == capacity, (
+        f"the pipe holds {standing} of {capacity} bytes, so the child had not "
+        "finished writing when the reader closed. That is the mid-write "
+        f"regime and not this test's: {errors!r}"
+    )
+    assert "Traceback" not in errors
+    assert "Exception ignored" not in errors, (
+        "the remainder the child kept reached the interpreter's own flush, "
+        "which is exactly the reported bug: suspect the sys.stdout.flush() "
+        "inside the try in events_cli.main"
+    )
+    assert errors == ""
+    assert status == BROKEN_PIPE_STATUS, (
+        f"a reader who stopped reading got {status} rather than "
+        f"{BROKEN_PIPE_STATUS}"
+    )
