@@ -373,13 +373,29 @@ irreplaceable must therefore not be in a group at all.
 introducing.** The current workflow-level group has the same
 semantics, and the 2026-09-11 burst contains a fourth run the issue
 does not mention: `2026-09-11T18:19:29Z d6d76dd push completed
-cancelled`, queued behind the 18:05 run and replaced when the 18:33
-one arrived. `d6d76dd1` is an ancestor of `origin/main` and
-`ghcr.io/rafacm/vinga-server:sha-d6d76dd` does not exist, while
-`sha-2f9675f`, `sha-f943bc6` and `sha-623f170` all do. A merged commit
-on `main` has no image, and no run went red to say so. The workflow's
-own comment that "Merges to main run to completion, however many of
-them queue up" has been false since it was written.
+cancelled`.
+
+The evidence that carries this is the run's own record, run
+`34632623405`, and not the missing tag, which on its own would also be
+consistent with a later deletion or with some other failure:
+
+- `GET /actions/runs/34632623405/jobs` returns an **empty job list**.
+  Not a failed job, not a cancelled job, none at all. Nothing ran, so
+  nothing failed, and the image job never started.
+- `created_at` and `run_started_at` are both `18:19:29Z`, and
+  `updated_at` is `18:33:59Z`, one second after `f943bc6`'s run was
+  created at `18:33:58Z`. It sat pending for fourteen minutes and was
+  terminated at the moment the next push entered its group.
+
+`d6d76dd1` is an ancestor of `origin/main`, and
+`ghcr.io/rafacm/vinga-server:sha-d6d76dd` does not exist while
+`sha-2f9675f`, `sha-f943bc6` and `sha-623f170` all do. With the empty
+job list, the tag's absence needs no deletion to explain it: the job
+that would have created it never started. A merged commit on `main`
+has no image, and no run went red to say so.
+
+The workflow's own comment that "Merges to main run to completion,
+however many of them queue up" has been false since it was written.
 
 Displacing a pending `image-promote` would not be harmless if the job
 promoted its own commit, and the second review round is where that
@@ -644,14 +660,22 @@ verified where matters more than usual.
   **second** push rather than the first, since the first runs against
   a cold scope key by construction.
 - **Not verifiable before merging, and not claimed**: that a burst
-  behaves. The round is explicit that two overlapping runs are not the
-  case to check, because the displacement needs a third; the case is
-  **three merges inside one run's duration**, where the assertions are
-  that all three commits get their dated and `sha-` tags, and that the
-  moving tag ends at the newest of them. M2's section records this
-  unchecked with the reason. It can be provoked rather than waited
-  for, by merging M3 and a documentation commit in quick succession
-  once M2 is on `main`, and that is the intended discharge.
+  behaves. Two overlapping runs cannot show it, because displacement
+  needs a third, and the second round sharpened the case further: what
+  has to happen is that a **newer commit becomes pending before an
+  older commit becomes eligible**, which is the order that defeated
+  the previous design. Three merges inside one run's duration is the
+  setup; the assertions are that all three commits get their dated and
+  `sha-` tags, and that the moving tag ends at the newest of them
+  whichever run moved it last. M2's section records this unchecked
+  with the reason. It can be provoked rather than waited for, by
+  merging M3 and a documentation commit in quick succession once M2 is
+  on `main`, and that is the intended discharge.
+- **Cheap to check and worth checking first**: the reconciler is
+  idempotent, so running `image-promote` twice against an unchanged
+  `main` must be a no-op the second time, and running it when the
+  moving tag is deliberately left stale must repair it. Both are
+  provable on a dispatch against a branch, without a burst.
 
 The `tests/census` lane is run before each PR: the command-spellings
 census sweeps every tracked file, and this work edits documentation
@@ -712,11 +736,14 @@ that quotes commands.
   cancelling superseded pull-request runs. Publication splits:
   `image-publish` keeps the immutable tags and takes no group at all,
   so it cannot be displaced while pending; a new `image-promote` moves
-  the moving tag in an ordered, non-cancelling group per variant,
-  checks out with `fetch-depth: 0`, and leaves the tag alone when its
-  current image is a descendant of this run's commit. Corrects the
-  workflow's false comment about merges running to completion, and
-  documents the guarantee in the two moving-tag passages.
+  the moving tag in an ordered, non-cancelling group per variant. It
+  reconciles rather than publishing its own commit: `fetch-depth: 0`,
+  fetch `origin/main`, walk from the tip and promote the first commit
+  carrying a `sha-` tag, bounded, whichever run produced it. That is
+  idempotent, self-healing and independent of which run survives
+  displacement. Corrects the workflow's false comment about merges
+  running to completion, and documents the guarantee in the two
+  moving-tag passages.
 - [ ] **M3: image-affecting pull requests build and smoke
   automatically.** `image` loses `if: github.event_name !=
   'pull_request'` and the comment explaining the exemption, and on a
