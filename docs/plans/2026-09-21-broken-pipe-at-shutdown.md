@@ -13,8 +13,8 @@ neither.
 
 **Cheapest alternative:** the two `sys.stdout.flush()` lines and
 nothing else. That is the whole behavior change, and the rest of this
-plan is three tests and two corrected docstrings, about sixty lines.
-What they buy is stated where it is decided, but the headline is that
+plan is four tests and two corrected docstrings.
+What they buy is stated where each is decided, but the headline is that
 one of them pins a line the issue proposed deleting, and the
 measurement below says deleting it would have reintroduced the very
 symptom this issue is about. An unpinned load-bearing line is how this
@@ -151,9 +151,13 @@ either module changes.
 
 ### What gets pinned, and by what
 
-Three claims, three tests, and they are deliberately three rather than
-one end-to-end test, because they fail for three different reasons and
-a single test that covers all three says only that something is wrong.
+Four claims, four tests. Three of them are narrow on purpose, because
+they fail for three different reasons and a single test covering all
+three would say only that something is wrong; the fourth is the
+end-to-end regression that holds the composition of them together,
+since a narrow test cannot see a change in dispatch, stream wrapping,
+encoding or buffering that reintroduces the symptom with all three
+still green.
 
 - **`events_cli.main` flushes inside the `try`.** In process, with a
   `sys.stdout` whose `write` succeeds and whose `flush` raises
@@ -175,7 +179,35 @@ a single test that covers all three says only that something is wrong.
   `os.dup2` line with `pass` and this test goes to 120 with the
   interpreter's complaint on stderr, 5/5.
 
-That third test gets a new home, `tests/unit/test_broken_pipe.py`.
+- **`events reference` answers 141 with empty stderr in the near-fit
+  regime.** The end-to-end regression the issue asks for, and the only
+  test here that runs the real command through the real failure. Its
+  construction is the deterministic one measured above, and its two
+  guards are what make it a regression test rather than a hopeful one:
+
+  - **The regime is chosen, not inherited.** The free capacity is set
+    to `len(document) - len(document) % io.DEFAULT_BUFFER_SIZE`, the
+    document's whole-chunk part, by creating a pipe of the next power
+    of two above the document and pre-filling it with the difference.
+    The child then writes exactly the chunks that fit exactly, and
+    retains the remainder, whatever the document's size has grown to.
+    A remainder of zero would leave nothing retained, so the test
+    asserts it is non-zero and says in its message what to do if the
+    catalog ever lands on a multiple.
+  - **The synchronization is bounded, and its conclusion is checked.**
+    The parent reads nothing and polls `FIONREAD` until the count
+    stops moving, with a deadline that fails the test rather than
+    hanging it. What makes that poll safe is the assertion after it:
+    the pipe must be **exactly full**, which is what the construction
+    predicts and what a poll that fired early cannot produce, since a
+    child still writing leaves it short. Measured full in all fifteen
+    runs for this document, and measured 8,192 short for a larger one,
+    so the assertion is known to be capable of failing.
+
+  Then exit 141 and empty stderr, each with a message naming the
+  mid-write regime as the thing to suspect.
+
+The redirect test gets a new home, `tests/unit/test_broken_pipe.py`.
 `broken_pipe.py` has no test file of its own today; its two claims are
 asserted in the docstrings of tests belonging to two other modules,
 and one of those claims is false. A module whose interface is two
@@ -225,21 +257,15 @@ worse than one that fails.
   M3's two outcomes. Measured load-bearing, twelve runs to one
   construction and five to another. This is the finding the issue
   asked for and it points the other way.
-- **A real-process, end-to-end, near-fit test of `events reference`
-  itself.** It is buildable: the deterministic construction above does
-  exactly this and is what produced the plan's numbers. It is rejected
-  on proportion. It costs the pre-fill arithmetic, a `FIONREAD` poll
-  loop and a settling heuristic, roughly forty lines of machinery, to
-  assert a composition of two things that are each pinned in eight
-  lines by the tests above. It also carries a silent failure mode the
-  cheap tests do not: when the document's length happens to be an
-  exact multiple of the stream's buffer size there is no retained tail,
-  the construction falls into the ordinary cut-off-mid-write regime,
-  and the test stays green while testing nothing. That is the
-  green-and-empty shape this issue exists to refuse, so the plan does
-  not introduce a new instance of it. The construction stays in this
-  document and in the verification below, where it is run by hand and
-  its regime is checked by a human reading the numbers.
+- **A second end-to-end near-fit test, for `config openapi`.** One is
+  committed, for `events reference`, and the config CLI's own flush is
+  pinned in process instead. The two `main` functions differ in what
+  they wrap, not in how they buffer, so a second real-process test
+  would re-prove the composition rather than a second behavior, and
+  `config openapi` is measured above to retain more than one buffer's
+  worth, which is what puts the fullness assertion out of reach for it.
+  What the config CLI gets is its in-process flush pin and the
+  by-hand measurement recorded in this plan.
 - **Flushing anywhere other than the last statement inside the `try`.**
   A `finally`, or a flush in `reader_stopped_reading`, would either run
   on paths that did not write or raise outside the arm that catches it.
@@ -259,7 +285,9 @@ worse than one that fails.
   flush pins, one beside the existing `_ClosedPipe` test in
   `tests/unit/test_config_cli_events.py` and one in
   `tests/unit/test_event_docs.py`, and the real-process redirect pin in
-  a new `tests/unit/test_broken_pipe.py`. The two docstring
+  a new `tests/unit/test_broken_pipe.py`. And the fourth, the
+  end-to-end near-fit regression on `events reference`, in
+  `tests/unit/test_event_docs.py` beside the test M2 then repairs. The two docstring
   corrections. A `### Fixed` changelog fragment at
   `changelog.d/541-broken-pipe-at-shutdown.md`. The
   implementation-doc section and this checklist item ticked with its PR
@@ -327,25 +355,34 @@ value:
 - Each in-process flush pin, with the new `sys.stdout.flush()` removed
   from the module it covers: must fail. One run each is enough; this is
   straight-line logic and a repeat would be noise.
+- The end-to-end near-fit test, with the new `sys.stdout.flush()`
+  removed from `events_cli.main`: must fail, and must fail by reporting
+  120 with `Exception ignored` rather than by its fullness assertion or
+  its deadline, since those two failing would mean the construction
+  missed the regime rather than the code being wrong. Already run at
+  plan time, 5/5 on each side of the mutation.
 - The issue's own reproduction script, by hand, against the merged
   fix: exit 141 with empty stderr at 16,384, 65,536 and 131,072, and
   exit 0 at 262,144. Recorded in the implementation doc with the
   numbers it printed.
 
-CI cannot reproduce the bug: on 4 KiB pages the default pipe is 65,536
-bytes against a 133,861-byte document, which is the cut-off-mid-write
-regime. What CI verifies is that the fix and the tests break nothing,
-and the near-fit regime is reached by the tests' own construction
-rather than by the runner's page size, which is why the two in-process
-pins and the redirect pin run everywhere.
+CI's default pipe would not reproduce the bug: on 4 KiB pages it is
+65,536 bytes against a 133,861-byte document, which is the
+cut-off-mid-write regime. That is why the near-fit test sizes and
+pre-fills its own pipe rather than using the default, and it is the
+one test here that reaches the near-fit regime; the two in-process
+pins reach a stdout that raises, and the redirect pin reaches a
+retained buffer, and neither of those is that regime. So CI does run
+the reported failure, on its own runner, through the construction
+rather than through the page size.
 
 ## Risks
 
 - **The document grows past the near-fit window.** The event catalog
   grows, and with it the capacity at which the bug is reachable. This
-  is a risk to the hand-run reproduction above, not to the committed
-  tests, which is the reason the committed tests do not use pipe
-  capacity as their variable. The implementation doc records the
+  is a risk to the hand-run reproduction above and not to the
+  near-fit test, which derives its capacity from the document it just
+  rendered rather than naming one. The implementation doc records the
   document's size on the day, so a later reader knows which capacities
   to re-derive rather than reusing these.
 - **`F_SETPIPE_SZ` is Linux-only.** M2 falls back silently, which is
