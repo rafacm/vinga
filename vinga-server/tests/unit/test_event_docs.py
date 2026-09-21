@@ -28,6 +28,7 @@ import io
 import logging
 import os
 import re
+import resource
 import subprocess
 import sys
 import termios
@@ -595,26 +596,88 @@ def test_a_reader_who_stops_reading_between_chunks_gets_the_status(
 # --- the command, in a process of its own ------------------------------
 
 
+# Setting a pipe's capacity is a Linux command and not a portable one:
+# macOS has no equivalent and `fcntl` does not export the name there,
+# which is why the absence is read from the module rather than from a
+# list of platforms somebody has to keep current.
+#
+# Both tests below want it, and neither is entitled to the other's
+# answer to its absence. The first narrows a pipe it would otherwise
+# inherit, and without the command it inherits it: a 64 KiB default the
+# document still overflows, which is a worse-chosen regime rather than
+# no regime, so it runs anyway. The second needs a pipe larger than the
+# document and there is no way to ask for one, so it has nothing to run
+# and says so. Each states which it is where it is.
+SET_PIPE_SIZE = getattr(fcntl, "F_SETPIPE_SZ", None)
+
+
+def narrowed_pipe() -> tuple[int, int]:
+    """A pipe the document below cannot fit into, whatever the host.
+
+    What decides whether the child is cut off is the pipe's capacity
+    and not the document's length, so a test that inherits the
+    platform's pipe is asserting something about the machine it runs
+    on. This one used to, and on a kernel with 16 KiB pages it is
+    false: a default pipe is sixteen pages, 262,144 bytes, against a
+    reference of 133,861, so the child writes the lot, exits 0, and the
+    only thing the failure says is `assert 0 == 141`. Measured on a
+    Raspberry Pi 5 (2026-09-21), the same document through the same
+    code: cut off at 16,384 and at 65,536, finished cleanly at 262,144.
+
+    So the capacity is stated here instead, one page, which is the
+    narrowest a kernel grants. Where it cannot be stated the platform's
+    default stands and this test still runs, because a default of
+    64 KiB is a pipe this document overflows too, and it is what every
+    machine this test has run green on already had. That is a different
+    judgement from the near-fit test further down, which skips on such
+    a platform: it needs a pipe *larger* than the document, and there
+    is no way to ask for one.
+
+    The order of operations is the whole of it. Handing `Popen` a
+    `subprocess.PIPE` would have it create the pipe, and by the time
+    the parent could reach `child.stdout` to resize it the child is
+    already writing into the capacity it was born with. So the pipe is
+    made, sized, and its fallback decided here, before there is a child
+    at all, and the sized write end is what the child is given.
+    """
+    read_fd, write_fd = os.pipe()
+    if SET_PIPE_SIZE is not None:
+        try:
+            fcntl.fcntl(write_fd, SET_PIPE_SIZE, resource.getpagesize())
+        except OSError:
+            # A kernel that refuses the size leaves its default in
+            # place, which is the same fallback as not having the
+            # command, and the assertion below is what checks it.
+            pass
+    return read_fd, write_fd
+
+
 def test_a_reader_who_stops_reading_gets_no_traceback(tmp_path: Path) -> None:
     """`vinga-server events reference | head` is an ordinary thing to
-    do with a document this long, and the document is far longer than a
-    pipe buffer, so the write really does fail rather than finishing
-    into the buffer unnoticed. What the reader must never see for it is
-    a traceback: a closed pipe is a reader who has read enough, and the
-    answer is the shell's own status for one."""
+    do with a document this long, and the pipe it goes through here is
+    narrower than the document, so the write really does fail rather
+    than finishing into the buffer unnoticed. What the reader must
+    never see for it is a traceback: a closed pipe is a reader who has
+    read enough, and the answer is the shell's own status for one."""
+    read_fd, write_fd = narrowed_pipe()
     child = subprocess.Popen(
         [sys.executable, "-m", "vinga_server.main", "events", "reference"],
         cwd=tmp_path,
         env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
-        stdout=subprocess.PIPE,
+        stdout=write_fd,
         stderr=subprocess.PIPE,
         text=True,
     )
-    assert child.stdout is not None and child.stderr is not None
-    first = child.stdout.readline()
+    # The child holds the only write end now, so the reader below sees
+    # the pipe close when the child goes rather than waiting on a copy
+    # this process forgot it had.
+    os.close(write_fd)
+    assert child.stderr is not None
+    reader = os.fdopen(read_fd, "r")
+    first = reader.readline()
     # What `head` does: stop reading and close, while the writer is
     # still going.
-    child.stdout.close()
+    reader.close()
     errors = child.stderr.read()
     status = child.wait()
     child.stderr.close()
@@ -625,7 +688,14 @@ def test_a_reader_who_stops_reading_gets_no_traceback(tmp_path: Path) -> None:
     # interpreter shutdown prints a complaint without a traceback.
     assert "Exception ignored" not in errors
     assert errors == ""
-    assert status == BROKEN_PIPE_STATUS
+    assert status == BROKEN_PIPE_STATUS, (
+        "the child was never cut off: it wrote the whole document into the "
+        "pipe and exited cleanly, so this run proved nothing about a reader "
+        "who stops reading. What moved is the buffer rather than the code, "
+        "so narrow the pipe further in narrowed_pipe. Widening this to "
+        "`status in (0, 141)`, or skipping on capacity, would leave the test "
+        "green and empty."
+    )
 
 
 # --- the real command, through the regime that was reaching nobody ----
@@ -656,13 +726,6 @@ def test_a_reader_who_stops_reading_gets_no_traceback(tmp_path: Path) -> None:
 # it is the interpreter's own flush that meets the closed pipe, and it
 # meets it where no `except` is left: `Exception ignored` on stderr and
 # exit 120.
-
-# Setting a pipe's capacity is a Linux command and not a portable one.
-# macOS has no equivalent, so the construction cannot be built there at
-# all and the test says so rather than pretending: this is a platform it
-# cannot run on, which is a different thing from a capacity it does not
-# like, and the plan refuses the second.
-SET_PIPE_SIZE = getattr(fcntl, "F_SETPIPE_SZ", None)
 
 # How long the parent will wait for the child to stop adding to the
 # pipe, and how still it has to be before the parent believes it. A
