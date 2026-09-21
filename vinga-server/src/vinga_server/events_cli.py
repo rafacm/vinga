@@ -41,6 +41,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         args = _parser().parse_args(argv)
         args.run(args)
+        # And the buffer is emptied here, inside the arm that answers
+        # for a reader who stopped reading. Left to the interpreter's
+        # own flush on the way out, a pipe closed while the last partial
+        # chunk was still buffered raises where no `except` can be: the
+        # process prints `Exception ignored` and exits 120, which is
+        # this command's traceback wearing different words. Flushing
+        # here moves that failure into the arm below, which is the only
+        # place that knows what to do with it.
+        sys.stdout.flush()
     except EventsCommandError as exc:
         print(exc, file=sys.stderr)
         return 1
