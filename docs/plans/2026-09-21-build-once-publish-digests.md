@@ -339,7 +339,13 @@ in two:
   group is exactly what could displace it.
 - **`image-promote`** moves the moving tag and nothing else, in a
   group of `publish-${{ matrix.variant }}` with
-  `cancel-in-progress: false`.
+  `cancel-in-progress: false`. It promotes **from the `sha-` tag
+  `image-publish` just pushed**, with one more
+  `docker buildx imagetools create`, which copies an index rather than
+  building anything. That source is unambiguous, it is per-commit so
+  no later run can move it underneath this one, and this run has
+  already proved it exists by pushing it. `image-promote` therefore
+  needs no digest artifacts of its own.
 
 The split is what makes the design safe rather than the group being
 non-cancelling, and the reason is a semantic of GitHub Actions that is
