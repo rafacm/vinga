@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-09-21
+
+### Added
+
+- Every place the tests reach past an interface is now recorded in a committed manifest, `vinga-server/tests/census/reach-ins.txt`, and the census lane fails when a fresh walk disagrees with it. One line per distinct `path  name` pair with the number of sites at it, no positions, so a change that only shifts a line leaves the file alone. The census itself is not new; what is new is that a reach-in now arrives as a named diff line rather than as a number nobody compared, which is how it grew from 162 sites to 355 unremarked. The manifest freezes what is there and reduces nothing. Its enumeration also moved from a filesystem walk to the tracked file set, so an untracked scratch file under `tests/` can no longer change the answer.
+
 ## 2026-09-20
 
 ### Changed
