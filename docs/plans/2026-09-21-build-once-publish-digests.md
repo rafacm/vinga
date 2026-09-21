@@ -801,3 +801,159 @@ the `--dry-run` publish, so a dispatch catches the failure before a
 merge does. The reviewer's framing is kept: the local experiments show
 the exporter choice matters, and the acceptance check is what
 validates the topology.
+
+## Plan review round 2
+
+Re-review at `57bf28f5` on 2026-09-21, same backend and model
+(codex, `gpt-5.6-sol`, read-only), runtime 187s. The prompt asked
+per-finding whether each amendment actually closed its finding or only
+read better, and asked specifically for defects the amendments
+themselves introduced.
+
+Round 1's findings **3, 4 and 5 came back closed**, and **1 closed for
+immutable publication**. Five findings, three of them P1, and two of
+the three are against the amendments rather than the original plan.
+
+### 1 (P1): the reuse refusal has a read-then-write race
+
+`image-publish` is ungrouped, so two runs can choose the same second,
+both observe the tag absent, and both push different indexes. Seconds
+reduce the probability; they do not "remove the collision class", and
+a read-before-write check does not enforce immutability under
+concurrent publishers.
+
+*Resolution*: the criticism of the claim is accepted in full and the
+claim is corrected; the remedy is not adopted, on a measurement the
+finding does not have. "Removes the collision class" was wrong and
+comes out. What the refusal does is turn a silent overwrite into a red
+run, which narrows rather than enforces, and the residual is two
+publishers choosing the same value in the same instant.
+
+The remedy proposed is to make the dated tag intrinsically unique by
+embedding the revision. That does not reach intrinsic uniqueness
+either, because the revision here is seven characters, which is
+finding 3 of this round: it would replace one residual with the same
+residual the `sha-` tag already carries. Ranking the two is what
+decides it. A dated-tag collision needs two commits to complete unit,
+integration, every image job and the assembly **within the same
+second**. A `sha-` collision needs two commits anywhere in the
+repository's history to share a seven-character prefix, which at a
+thousand commits is on the order of 0.2 percent and rises with the
+square. The second is already accepted as the cost of a
+seven-character tag; making the dated tag depend on it too would move
+the dated tag's residual **up**, not down.
+
+So: seconds stay, the refusal stays and is described as what it is,
+and the plan states the residual and this ranking rather than claiming
+enforcement. If the residual ever needs closing, both tags close
+together by widening the revision, which is the one lever under both.
+
+### 2 (P1): a displaced promote is not necessarily older than the run that displaces it
+
+Concurrency replacement follows eligibility, not commit order. For
+commits A < B < C: A can be promoting while C finishes its gates and
+becomes pending, and slower B can then become eligible and displace C.
+B passes the ancestry check against A and advances the tag to B,
+leaving C, the newest gated commit, unpublished under the moving tag.
+The defect is displacement order, not the check's read-then-write
+window, and "the survivor's gates later fail" is not the relevant
+counterexample, because a run whose promote entered the group has
+already passed its gates.
+
+*Resolution*: accepted, and the remedy is adopted. This breaks the
+"harmless by construction" claim exactly as the prompt invited it to,
+and the break is real: the moving tag would not go backwards, but it
+would stop following `main` and stay stale at B with no run red.
+
+`image-promote` becomes a **reconciler rather than a publisher of its
+own commit**. Holding its per-variant group, it fetches `origin/main`,
+walks it from the tip, and promotes the first commit whose `sha-` tag
+exists, whichever run produced it, stopping after a bounded number of
+commits. Because `image-publish` pushes the `sha-` tag only after the
+unit lane, the integration lane and every image job have passed, "the
+newest commit on `main` with a `sha-` tag" is precisely "the newest
+gated image", and no separate ancestry check is needed: the walk order
+supplies it.
+
+That makes the job idempotent and independent of which run invoked it,
+so any surviving promote converges on the same answer and displacement
+becomes harmless for a reason rather than by assertion. It also
+self-heals: a moving tag left stale by an earlier displacement is
+corrected by the next promote that runs, which the current design and
+the previous amendment both left permanently stale.
+
+The verification gains the case the finding names, which is not the
+one the previous round added: a newer commit must become pending
+**before** an older commit becomes eligible.
+
+### 3 (P1): seven-character `sha-` tags are neither collision-proof nor unambiguous promotion sources
+
+Two commits sharing the seven-character prefix get the same supposedly
+immutable tag; ungrouped publishers can overwrite it, and a promote
+can then copy bytes belonging to the other commit.
+
+*Resolution*: accepted as a defect, with the tag width kept and the
+consequence made loud instead. The reuse refusal added for the dated
+tag applies to **both** immutable tags, so a prefix collision fails
+the run rather than overwriting an existing image, which also removes
+the "promote copies the other commit's bytes" path: the colliding
+commit never publishes.
+
+The width stays seven because three things are already built on it and
+agree by construction: `VINGA_REVISION` in the image's own `ENV`, the
+`sha-` tag, and the existing workflow step that asserts the two match.
+Widening is a coherent change and a larger one, and it is the single
+lever that would also close finding 1's residual, so the plan records
+it as the named remedy with its trigger (an actual collision, which
+now announces itself as a red run) rather than taking it speculatively
+here. The alternative the finding offers, promoting from a digest
+carried as a job output, cannot work with finding 2's reconciler,
+which by design addresses images from runs other than its own and so
+must address them by name.
+
+### 4 (P2): the topology assertion's executable ordering is unspecified
+
+`imagetools create --tag` must push before the tag can be read back,
+so a post-push assertion detects a malformed index only after the
+immutable tags exist; and `--dry-run` prints an index but creates no
+tag from which `.Image` can read both platform configs. The amendment
+listed the right properties and no mechanism that checks them before
+publication in both modes.
+
+*Resolution*: accepted and adopted as specified. Validation is two
+phases. First `imagetools create --dry-run`, whose raw index is parsed
+and whose entries are then resolved **by digest** against the same
+repository, which works because the per-platform manifests were pushed
+by digest before any tag existed: `imagetools inspect "$IMAGE@<digest>"`
+reaches every platform manifest and every config without a tag. All
+four properties are checked there. Only then does the tagged push run,
+and afterwards the tag is inspected again and required to resolve to
+the same index digest the dry run validated.
+
+This is strictly better than what the amendment said and costs one
+extra inspect. It also makes the dispatch gate genuinely equivalent to
+the push gate for this check, which was the amendment's stated
+intention and not something it achieved.
+
+### 5 (P2): the live-defect claim has not excluded deletion or another cancellation cause
+
+A cancelled run plus an absent tag is consistent with displacement but
+does not establish that the image job never ran or that the tag was
+never created; later package cleanup would look the same.
+
+*Resolution*: accepted as stated, and closed by measurement rather
+than by softening the claim. The run is `34632623405`. Its
+`GET /actions/runs/34632623405/jobs` returns **an empty job list**: not
+a failed job, not a cancelled job, none at all. `created_at` and
+`run_started_at` are both `2026-09-11T18:19:29Z` and `updated_at` is
+`2026-09-11T18:33:59Z`, which is one second after `f943bc6`'s run was
+created at `18:33:58Z`.
+
+So the run sat pending for fourteen minutes without starting a single
+job and was terminated at the moment the next push entered its group.
+That excludes both alternatives the finding raises: nothing failed,
+because nothing ran; and the tag's absence needs no deletion to
+explain it, because the job that would have created it never started.
+The claim stands as written, and the plan now cites the empty job list
+and the timestamp coincidence rather than the tag's absence alone,
+which is the evidence that actually carries it.
