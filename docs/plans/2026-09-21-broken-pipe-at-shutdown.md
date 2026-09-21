@@ -276,10 +276,24 @@ worse than one that fails.
   generated and its content is untouched.
 - [ ] **M2: the real-process test sets the capacity it needs**.
   `test_event_docs.py::test_a_reader_who_stops_reading_gets_no_traceback`
-  narrows its own pipe with `F_SETPIPE_SZ` to one page, falls back
-  silently where unsupported, and its status assertion carries a
-  message naming the cause and forbidding the widening that would make
-  it green and empty. The implementation-doc section and the tick.
+  narrows its own pipe to one page and stops inheriting the platform's
+  default, and its status assertion carries a message naming the cause
+  and forbidding the widening that would make it green and empty. The
+  implementation-doc section and the tick.
+  **The order of operations is the whole of it**, because the obvious
+  spelling does not work: `Popen(stdout=subprocess.PIPE)` creates the
+  pipe itself and the child is already writing before the parent could
+  reach `child.stdout`, so a resize applied there changes nothing on
+  the host this is for. The pipe is therefore created with `os.pipe()`,
+  sized with `F_SETPIPE_SZ` to `resource.getpagesize()` and the
+  fallback decided, all **before** the child starts; the sized write
+  descriptor is passed as `stdout`, the parent closes its copy
+  immediately after the spawn, and the test reads through
+  `os.fdopen(read_fd)`. The fallback is silent, because where
+  `F_SETPIPE_SZ` is absent or refused (macOS has no such command and
+  raises `OSError`) the platform default of 64 KiB still overflows the
+  document, which is the state every machine this test has run green on
+  was already in.
   **Design footprint:** none. One test stops reading a value from the
   platform and states it instead.
   **Documentation footprint:** none.
