@@ -177,9 +177,37 @@ critical path; provenance is not for sale at that price.
 
 The corollary is a rule the implementation must not drift from:
 **publish from `containerimage.digest` as reported by a build whose
-only output is the image exporter.** Pinned by a check in the publish
-job that the assembled index contains an attestation manifest per
-platform, so the trap cannot return silently.
+only output is the image exporter.**
+
+A second experiment closed half of the topology question the first one
+left open. Two single-platform builds, pushed by digest separately and
+then merged by one `imagetools create`, produce an index with four
+entries: one `linux/amd64` manifest, one `linux/arm64` manifest, and
+two `attestation-manifest` entries. That is the same shape
+`ghcr.io/rafacm/vinga-server:latest` carries today, read back with
+`imagetools inspect --raw` on the live tag. So merging two indexes
+preserves both platforms and both attestations.
+
+It does not show that each attestation is associated with the right
+subject, that no nested or duplicate platform index crept in, or that
+the configs say what they should, and an alpine image cannot show
+those for this repository's Dockerfile anyway. Those are properties of
+the real artifact, so they are asserted on the real artifact rather
+than inferred. `image-publish` reads the assembled index back and
+requires all four:
+
+- exactly one manifest for each expected platform, and no others;
+- for each, an attestation manifest whose
+  `vnd.docker.reference.digest` names **that** platform manifest;
+- no nested index and no duplicate platform entry;
+- both platform configs carrying the expected `VINGA_REVISION` and
+  `VINGA_VARIANT`.
+
+It runs identically in the real and the `--dry-run` publish, because
+`--dry-run` prints the index it would push, so a dispatch catches a
+regression here before a merge can. The local experiments are what
+they are: evidence that the exporter choice matters. This check is
+what validates the topology.
 
 ### One job, matrix over variant and architecture
 
@@ -507,12 +535,11 @@ verified where matters more than usual.
 
 - **Locally**: `actionlint` (v1.7.7, verified clean against the four
   workflows as they stand today, so a new finding is the change's) and
-  a YAML parse. The
-  mechanism itself has already been verified locally against a
-  throwaway registry, and the two experiments are reproducible:
-  push-by-digest plus `imagetools create` assembling a tagged index,
-  and the attestation difference between the index digest and the
-  platform manifest digest.
+  a YAML parse. The mechanism itself has been verified against a
+  throwaway registry and all three experiments are reproducible: the
+  attestation difference between the index digest and the platform
+  manifest digest, the two-platform merge preserving four index
+  entries, and `--dry-run` printing that index without pushing.
 - **On a branch, before merging**: `gh workflow run vinga-server.yml
   --ref <branch>`, which after M1 exercises every step including the
   manifest assembly under `--dry-run`. This is the gate for each
