@@ -122,13 +122,31 @@ case where it does worse.
 
 ### The published bytes are pulled back and smoked, not exported twice
 
-Each build runs once with
+On the events that publish or assemble, `push` and
+`workflow_dispatch`, each build runs once with
 `outputs: type=image,...,push-by-digest=true,name-canonical=true,push=true`
 and nothing else. The smoke then does `docker pull "$IMAGE@$DIGEST"`
 and tags it locally, so what the smoke lane exercises is the bytes
 that were pushed, fetched by the digest that will be published. That
 is the issue's "provably what was smoked" made literal rather than
 transitive.
+
+**A pull request pushes nothing.** It publishes nothing, so it needs
+no digest: it builds with `load: true` and smokes the loaded image,
+which is what the job does today. This is one expression on the build
+step rather than a second structure, and the smoke steps after it are
+identical either way, because they read a local tag in both cases.
+
+Three things fall out of that and are the reason it is the right shape
+rather than a concession. A pull request from a fork has a read-only
+token and now needs none, so M3 covers every pull request rather than
+same-repository ones. No registry credential is ever available to fork
+code. And pull requests leave no untagged versions in GHCR, which was
+a cost the plan had accepted and no longer pays.
+
+What a pull request gives up is exercising manifest assembly.
+`workflow_dispatch` still does it in full, and dispatch is already this
+plan's pre-merge gate for every milestone.
 
 The obvious alternative is one build with two exporters, `type=image`
 plus `type=docker`, which loads locally and pushes in a single pass
@@ -229,14 +247,15 @@ commit whose tests will fail also builds an image, which costs runner
 minutes on a public repository, where they are free, and buys the
 critical path 453s.
 
-### The publish job runs on every event, dry on everything but main
+### The publish job runs on push and dispatch, dry on everything but main
 
 `docker buildx imagetools create` takes `--dry-run`, which resolves the
 sources and prints the manifest it would push without pushing
-anything. The publish job therefore runs on pull requests and
-dispatches too, assembling the real manifest from the real digests and
-pushing nothing, and only a push to `main` passes the tags and drops
-the flag.
+anything. `image-publish` therefore runs on `workflow_dispatch` as
+well as on a push, assembling the real manifest from the real digests
+and pushing nothing, and only a push to `main` passes the tags and
+drops the flag. It does not run on a pull request, which has no
+digests to assemble.
 
 This is the file's existing philosophy applied to the step that
 replaces the one it was written for: the `Tags` step is already
@@ -495,18 +514,16 @@ that quotes commands.
   than today. The measurement that matters is the second run, and the
   implementation doc reports both so the number is not quietly taken
   from the wrong one.
-- **Digests pushed on pull requests and dispatches leave untagged
-  versions in GHCR**, four per run after M3. Storage is free for a
-  public package and nothing resolves them, so this is clutter rather
-  than cost. Accepted, with the remedy named: a scheduled pruning of
-  untagged versions, if and when the package listing becomes hard to
-  read. Not built now.
-- **A pull request from a fork gets a read-only token and cannot push
-  by digest**, so M3 would fail on one. The repository has zero forks
-  today and GitHub gates a first-time contributor's run behind
-  approval anyway, so this is hypothetical. Recorded rather than
-  pre-solved; the remedy if it arrives is to build without pushing on
-  a fork head.
+- **Dispatch runs leave untagged versions in GHCR**, four per run.
+  Pull requests no longer do. Storage is free for a public package and
+  nothing resolves an untagged manifest, so this is clutter rather
+  than cost, and dispatches are rare. Accepted, with the remedy named
+  if the package listing becomes hard to read: a scheduled pruning of
+  untagged versions. Not built now.
+- **A `main` push whose tests then fail leaves an untagged manifest
+  behind.** That is the accepted price of building before the gates
+  rather than after them, and it is named under the invariant above
+  rather than hidden here.
 - **`--dry-run` could diverge from the real push.** It resolves the
   same sources and produces the same manifest; what it does not
   exercise is the registry write. The attestation assertion described
@@ -544,9 +561,11 @@ that quotes commands.
   documents the guarantee in the two moving-tag passages.
 - [ ] **M3: image-affecting pull requests build and smoke
   automatically.** `image` loses `if: github.event_name !=
-  'pull_request'` and the comment explaining the exemption;
-  `image-publish` keeps its main-only tag move and runs dry on the
-  pull request. `workflow_dispatch` stays.
+  'pull_request'` and the comment explaining the exemption, and on a
+  pull request builds with `load: true` and pushes nothing, so a fork
+  PR is covered with no token and leaves no registry trace.
+  `image-publish` and `image-promote` do not run on a pull request.
+  `workflow_dispatch` stays.
 
 ## Plan review round
 
