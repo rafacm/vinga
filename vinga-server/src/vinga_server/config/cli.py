@@ -2273,9 +2273,7 @@ def _answer(response: httpx.Response, address: Address) -> object:
 # composed there naming a command prescribes a spelling an image built
 # before a rename no longer has. The server says which state it refused
 # in, as a closed token; this side owns the grammar, so this side names
-# what to type, and the spelling is then inside the command-spellings
-# census's reach: a rename that missed one fails a test in this checkout
-# rather than reaching an operator through an old image.
+# what to type.
 #
 # Read exactly like `SPOKEN`: the sentence stands alone, names the state
 # nowhere (the server's `detail` has already said it) and the command
@@ -2285,10 +2283,12 @@ def _answer(response: httpx.Response, address: Address) -> object:
 # one the whole client keeps: an unknown state is quoted, never guessed
 # at.
 #
-# These are composed from `PROGRAM` rather than written out, so the
-# command-spellings census, which reads the tree as text, does not see
-# them. `test_every_remedy_names_a_command_this_grammar_has` is the
-# same guard over the table: every invocation quoted here names a row
+# What holds that spelling true is a test rather than the
+# command-spellings census, which reads the tree as text and cannot see
+# a sentence composed from `PROGRAM`: measured, by regenerating both
+# manifests after this table landed and finding neither had moved.
+# `test_every_remedy_names_a_command_this_grammar_has` is the same
+# guard over the table, holding every invocation quoted here to a row
 # of the registry, so a rename that missed one fails a test in this
 # checkout rather than reaching an operator through an old image.
 #
