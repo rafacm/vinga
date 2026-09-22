@@ -241,3 +241,68 @@ same way, by restoring the quoted model.
 - `uv run vinga-server config openapi > ../docs/reference/api-openapi.json`
   and a diff showing only the reload route's description moved.
 - The mutation runs named under Tests, stated in the commit bodies.
+
+## Plan review round
+
+Reviewed 2026-09-22 by codex (`codex-cli 0.155.1`, model `gpt-5.6-sol`,
+read-only sandbox, 193 s) at commit `19f7122e`. Six findings, verdict
+"ready after the P1/P2 amendments". Condensed but faithful.
+
+1. **P1: the warning prose would violate the retained JSON-log
+   contract.** The plan adds the whole `ProviderError` sentence as a
+   logging argument. `observability-surfaces.md` says structured events
+   carry no exception prose, and `logs.py` renders ordinary records
+   into the retained JSON log. Boot stderr and an API response are
+   sanitized diagnostic channels; the retained log has the stricter
+   metadata-only contract, and the issue asks for the sentence in the
+   refusal, not in the log. Keep the warning class-only, exactly as
+   today, and drop the "one diagnosis, three surfaces" claim.
+
+2. **P2: the log sentinel assertion does not inspect the retained
+   `LogRecord` arguments.** The existing pins use `caplog.text`, and the
+   `logged()` helper adds only the shipped formatter output; both
+   formatters call `record.getMessage()` and can hide unused or
+   transformed arguments. `tests/support/leaks.py` documents this trap
+   and inspects `record.__dict__`, `record.args` and the exception
+   fields. Require `tests.support.leaks.renderings(caplog)` or an
+   equivalent, and if finding 1 is accepted, pin the warning's argument
+   tuple as class-name-only.
+
+3. **P2: the factory case misses the pass-through path for a
+   `ProviderError` with a chain.** `registry.py` reconstructs a
+   chainless `ProviderError` from an ordinary factory exception, but
+   its `except (ProviderError, ConfigError): raise` passes a
+   factory-raised `ProviderError` through unchanged, which
+   `test_providers.py` confirms is intentional. The plan's factory case
+   exercises the sanitizing wrapper, not a `ProviderError` carrying an
+   SDK exception in its chain. `_built`'s delayed string extraction
+   should remove that chain, but nothing proves it. No `ExceptionGroup`
+   construction exists on the sequential `build_world` path. Add an
+   apply-level case whose factory raises a safe `ProviderError` from an
+   SDK-like exception holding the sentinel, and assert the chain is
+   empty and the sentinel absent from the response and from every
+   record representation.
+
+4. **P2: the 25-site inventory is stale and its verification command
+   cannot pass.** At `19f7122e` the exact command yields 24. Record the
+   current baseline, explain the difference if material, and require
+   reading the full output rather than treating the count as the proof.
+
+5. **P2: five category tests are not the promised whole-surface
+   sweep.** The 24 sites also include unknown option names, missing
+   required strings, a malformed `base_url`, a missing extra,
+   model-specific range rules, an invalid provider object, a missing
+   stage binding and provider-marking failures. The registry mutation
+   proves detection at one composition site only. Either give a
+   site-to-test matrix covering every raise composition, including the
+   pass-through path, or narrow the claim to representative category
+   regression tests plus a manual inventory. Do not call five cases a
+   whole-surface automated proof.
+
+6. **P3: the replacement `openai_tts.py` sentence is malformed.**
+   `the model option "model" names ignores option "speed"` is not
+   grammatical and the existing pins match only the trailing
+   substring, so they would not catch it. Specify a value-free sentence
+   such as `option "speed" is ignored by the model named by option
+   "model"; describe the pace in "instructions" instead`, with an
+   exact-message assertion beside the absence check.
