@@ -38,6 +38,7 @@ tests/support/sessions.py  _utterance  1
 tests/support/stores.py  _engine  2
 tests/support/stores.py  _to_row  1
 tests/support/uploads.py  _lock  3
+tests/tools/cli_fields.py  _act  1
 tests/tools/event_baseline.py  _applying  2
 tests/tools/event_baseline.py  _engine  8
 tests/tools/event_baseline.py  _max_total_mb  1
