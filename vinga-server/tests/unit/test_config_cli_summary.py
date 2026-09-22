@@ -32,7 +32,7 @@ import yaml
 
 from tests.support.config_cli import chain, logged, runner
 from tests.support.events import both_formats
-from vinga_server.config.cli import acts, deployment, reach
+from vinga_server.config.cli import acts, deployment
 from vinga_server.config.loader import ConfigError
 
 # What a body that is not the declared shape carries, so a refusal or a
@@ -348,7 +348,7 @@ def answering(monkeypatch: pytest.MonkeyPatch, body: object) -> None:
         assert path == "/config", path
         return body
 
-    monkeypatch.setattr(reach, "_call", call)
+    monkeypatch.setattr(acts, "_call", call)
 
 
 def document(secrets: object = (), **sections: object) -> dict[str, object]:

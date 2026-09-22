@@ -33,7 +33,7 @@ import pytest
 
 from tests.support.config_cli import chain, logged, runner
 from tests.support.events import both_formats
-from vinga_server.config.cli import deployment, reach
+from vinga_server.config.cli import acts, deployment, reach
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import ServerConfig
 from vinga_server.config.responses import RuntimeInfo
@@ -278,7 +278,7 @@ def _second(monkeypatch: pytest.MonkeyPatch, answer) -> None:
             return answer()
         return real(reached, method, path, *rest, **kwargs)
 
-    monkeypatch.setattr(reach, "_call", call)
+    monkeypatch.setattr(acts, "_call", call)
 
 
 def document(**sections: object) -> dict[str, object]:
@@ -628,7 +628,7 @@ def test_a_body_that_is_not_the_declared_shape_is_quoted_nowhere(
 ) -> None:
     """What a proxy or a captive portal answers is text nobody vouched
     for, and the fixed sentence says the status and no more."""
-    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: body)
     capsys.readouterr()
 
     assert run("info") == 1

@@ -32,7 +32,7 @@ import pytest
 
 from tests.support.config_cli import runner
 from vinga_server.config import Config
-from vinga_server.config.cli import deployment, grammar, output, reach
+from vinga_server.config.cli import acts, deployment, grammar, output, reach
 from vinga_server.config.responses import (
     AgentsReload,
     ConfigReloadResult,
@@ -145,7 +145,7 @@ def test_the_bytes_off_a_terminal_are_the_same_with_the_line_and_without(
     _captured(run, argv, terminal=False)
 
     with_the_line = _captured(run, argv, terminal=False)
-    monkeypatch.setattr(reach, "narrated", _inert)
+    monkeypatch.setattr(acts, "narrated", _inert)
     without_it = _captured(run, argv, terminal=False)
 
     assert with_the_line == without_it

@@ -953,7 +953,7 @@ def test_a_claim_performs_the_act_the_grammar_already_has(
         performed.append(act)
         dispatch(args, act, reached)
 
-    monkeypatch.setattr(acts, "_act", recording)
+    monkeypatch.setattr(simulator, "_act", recording)
     reached_before = len(run.reached)
 
     assert run("simulator", "check-in", URL, "--claim", "sam") == 0
@@ -961,7 +961,7 @@ def test_a_claim_performs_the_act_the_grammar_already_has(
     assert performed == [devices.ADD_DEVICE]
     # Exactly one configuration API request, which is the claim.
     assert len(run.reached) - reached_before == 1
-    monkeypatch.setattr(acts, "_act", dispatch)
+    monkeypatch.setattr(simulator, "_act", dispatch)
     assert run("device", "show", board.DEFAULT_MAC) == 0
 
 
