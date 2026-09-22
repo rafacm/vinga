@@ -2528,6 +2528,10 @@ UNREACHED = reach.Reached(
             dict(_acknowledgement("device aa"), applies="reload"),
             id="a word where a sequence goes",
         ),
+        pytest.param(
+            dict(_acknowledgement("device aa"), wrote={"leak": SECRET}),
+            id="an object carrying a credential where a word goes",
+        ),
     ],
 )
 def test_a_body_the_machine_arm_cannot_read_is_this_acts_own_refusal(
@@ -2544,6 +2548,12 @@ def test_a_body_the_machine_arm_cannot_read_is_this_acts_own_refusal(
     this path invented. It meets it before anything is written: the
     reading happens first, so a refused answer leaves both streams
     empty and there is no half-written document for a program to parse.
+
+    One of the three carries a credential where a word belongs, which is
+    where a paste lands and is what makes the chain assertion below
+    load-bearing: what the refusal says is the act's fixed sentence, and
+    what the exception it was raised outside of was holding is not on
+    the chain behind it.
     """
     monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: body)
     args = invocation.Invocation(mac="aa:bb:cc:dd:ee:ff", agents=("weather",))

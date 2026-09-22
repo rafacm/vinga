@@ -214,6 +214,29 @@ third-party install to carry. The changelog fragment says the same
 thing under `### Changed`, which is what the fold carries into
 `CHANGELOG.md`.
 
+### The manifests, and the reach-in named
+
+One line moved, regenerated with its generator and not edited:
+`reach-ins.txt` gains `tests/unit/test_config_cli_rendering.py  _act
+4`. The command-spellings manifest did not move, which is the answer
+to the question the guide edit raised: the sentences the two-arm cases
+pin quote `vinga apply` and `--cursor`, and both spellings were already
+classified, so the distinct set is what it was.
+
+`acts._act` is an underscore name and therefore a review flag,
+answered the way M1 answered its own reach at the same name. What
+these cases are about is the dispatch: which stream each arm writes to,
+and that the default is the human one. The dispatcher is where that
+decision is taken, so it is where it exists to be watched, and there is
+no caller-facing way in that reaches it. `Command.perform` resolves an
+address and a token before it dispatches, and these cases have no
+server; `_performed` is one loop closer and still resolves nothing, but
+it is also the caller whose whole job is to pass the default, so
+driving the cases through it would make the parameter unreachable and
+the machine arm untestable. Nothing here pins how `_act` works: the
+assertions are about the two streams, and the same file already reaches
+five renderer names beside it.
+
 ### Verification
 
 From `vinga-server/`: `uv run ruff check .` (clean),
@@ -951,3 +974,159 @@ The unit and integration lanes were not run for this milestone and do
 not need to be: it changes no file under `src/` and adds no test. The
 one file it adds is a tool the lanes do not collect, and the one
 generated file it changes is the census lane's own, which ran.
+
+## M3: the dump, the dispatch and the repricing
+
+**Attribution:** anthropic/claude-opus-5, thinking high; Claude Code 2.1.278; 2026-09-22.
+
+`answers.py` gained the vocabulary and the encoder, `acts.py` gained the
+parameter and the arm that uses it, and the CLI guide's deferral entry
+was repriced against what the encoder turned out to cost. No flag
+reaches the grammar, so every command still runs under `Output.HUMAN`
+and prints the bytes it printed before.
+
+### What landed
+
+- `Output(StrEnum)`, three members, and `encoded(shape, answer,
+  refusal, output)`, which writes the two that are documents.
+- `_read`, which is `_understood`'s body with the dump mode as a
+  parameter. Both readers call it, so the strict validation, the
+  declaration filtering and the refusal raised outside its own handler
+  are one function rather than two that have to agree. The mode is the
+  whole of what the two readers differ by, which is what the plan's
+  first review round found and what its fifth finding is about.
+- `_act(args, act, reached, output=Output.HUMAN)`. The human arm is
+  unchanged. The machine arm prints the encoded model, flushes it, and
+  runs `act.render(act.read(answer))` inside a
+  `contextlib.redirect_stdout` to a writer that drops what it is given.
+  `Act` gained no field and no renderer was edited.
+- Nine cases in `tests/unit/test_config_cli_rendering.py`: the escape
+  test on both encoders, the ASCII case, the two tolerances, two
+  refusals through the machine arm, and the two-arm cases over three
+  real acts.
+- The CLI guide's `--json` entry, repriced.
+
+### The falsification runs
+
+Every one was made, watched, and the tree restored. The two marked
+**strengthened the test** are the reason the runs are a step of the
+milestone rather than a claim in it: the case as first written stayed
+green, so the case changed.
+
+| Mutation | What it did |
+| --- | --- |
+| The escaping asserted the wrong way round | both arms of `test_a_machine_document_escapes_what_a_terminal_would_obey` red |
+| `encoded` dumping in Python mode, which is the plan's fifth finding of the first round | the YAML arm red on `RepresenterError: ('cannot represent an object', <Applies.RELOAD: 'reload'>)`, twice. The JSON arm stayed green, which is the finding's own point read from the other side: `StrEnum` is a `str`, so the standard encoder cannot tell the two modes apart and only PyYAML can |
+| `ensure_ascii=False` and `allow_unicode=True` | both arms of the ASCII case red. The JSON document then carries the surrogate raw, and `"...".encode("utf-8")` on it raises `UnicodeEncodeError: 'utf-8' codec can't encode character '\ud800' in position 50: surrogates not allowed`, which is the traceback the fourth review round named |
+| The validation dropped from `encoded` (`_declared` alone) | both refusal cases red, each writing the unreadable body to stdout instead of refusing it. The two tolerance cases stayed green, correctly: the dropping is `_declared`'s and the refusal is the validation's |
+| The null sink removed | all three two-arm cases red, stdout carrying the rendering under the machine arm |
+| `_acknowledged`'s notice printed to stdout instead of stderr | both acknowledgement cases red |
+| `MORE_PAGES` and the `SPOKEN` line reworded | four cases red **after** the notices were pinned as literals; green before it, since the first version read the constant it was checking |
+| The default flipped to `Output.JSON` | all three default cases red **after** each case pinned a line of its own rendering; green before it, since "stdout is not empty" is true of a document too |
+
+### Deviations from the plan
+
+Five, one of them a correction to the plan rather than a choice.
+
+- **A body carrying an extra member is not refused, and the plan says
+  it is.** The M3 section asks the machine arm to be driven "with a
+  body carrying an extra member and with a strict-type mismatch, and
+  asserted to meet that act's exact refusal sentence". The first half
+  is false on the tree and deliberately so: dropping what the shape
+  does not declare is the one tolerance `answers.py` documents, so an
+  extra member is read past and the answer is encoded without it. The
+  refusal half is carried by two strict mismatches instead, and the
+  extra member became a case of its own that plants a credential in the
+  dropped part and asserts it reaches neither document. A third body,
+  a boundary sequence carrying an object where a token belongs, joined
+  it for the same reason: `_declared` reads such a sequence down to the
+  field's default rather than refusing it.
+- **`_performed` is not the one production caller of `_act`.**
+  `simulator._claimed` is the second, and M1's own patch table records
+  it. `_performed` says the default out loud as the plan asks; the
+  simulator's call was left exactly as it is and takes the default
+  implicitly, since a simulated board's claim is rendered for a person
+  under either spelling and M3 has no reason to touch it.
+- **`Output.HUMAN` never reaches `encoded`.** The function is about the
+  two documents, `_act` answers the human member with the act's own
+  renderer before calling it, and the docstring says so. What a call
+  with the human member would return is YAML, which is unreachable and
+  is the one thing about this pair that is stated rather than enforced.
+- **The ASCII case carries a `é` beside the lone surrogate.**
+  PyYAML escapes a surrogate under either `allow_unicode`, so a case
+  carrying only a surrogate would have passed with the flag either way
+  and proved nothing about it. The letter is what makes the flag
+  load-bearing, and the mutation above is what found this rather than
+  the reading.
+- **The notice and a line of the rendering are pinned as literals per
+  case.** The plan asks the two-arm test to assert "the same notice
+  text"; comparing the two arms is not that, since both read one
+  renderer. Each case now carries the sentence and a line of its own
+  rendering, written out, which is the practice PR #548's review round
+  adopted for the remedies and which the two surviving mutations above
+  are the argument for.
+
+### Discoveries
+
+- **A module-level name silently redefined twelve passing cases.** The
+  first draft named the unreachable `Reached` constant `NOWHERE`, which
+  is already a name in that file, 350 lines above, for the URL an
+  unreachable-server case passes to `--api-url`. Python binds the last
+  one for every test in the module, so twelve of M4's refusal cases
+  started failing with a `Reached(...)` repr inside a URL sentence. It
+  is now `UNREACHED`. In a 2,400-line test file a new module-level
+  constant is a name in a namespace nobody can see the whole of, and
+  the failure is loud but it lands nowhere near the edit.
+- **The JSON arm alone cannot show the dump mode.** `StrEnum` is a
+  `str` subclass, so `json.dumps` writes a member as its value under
+  either mode. Only PyYAML refuses, which is why the escape test is
+  parametrized over both encoders rather than written once.
+- **The paginated listing needed no special handling, and that was the
+  claim.** `_paged` writes its notice from inside a closure over a
+  listing function, which is exactly the shape a per-act notice
+  projection could not have enumerated (five acts, one construction).
+  Under the null sink it needed nothing: the case reads the same as the
+  acknowledgement's.
+
+### The changelog
+
+No fragment. Nothing an operator can see moved: no flag reaches the
+grammar, `_performed` passes the default that was already the only
+behaviour, and every command prints the bytes it printed before, which
+is what the unchanged suite says. `Output` and `encoded` are a seam for
+the issue that adopts `--json`, and that issue is where the entry
+belongs.
+
+### Verification
+
+From `vinga-server/`, at this branch's head:
+
+| Lane | Result |
+| --- | --- |
+| `uv run ruff check .` | clean |
+| `uv run pytest tests/unit -q -n auto --dist loadfile` | 7444 passed, 19 skipped, 13m25s |
+| `uv run pytest tests/census -q` | 66 passed |
+| `uv run pytest tests/integration -q` | 346 passed, 1 failed, 9m26s, and the failure is not this milestone's: see below |
+| `python3 ../scripts/check_doc_links.py ..` | checked 263 files, 0 failures |
+
+The unit lane ran the way CI runs it rather than serially, because this
+machine shares four cores with another milestone's lanes and the serial
+run was going to take hours. It grew by exactly the fifteen cases this
+milestone adds: M1's section recorded 7,429 and this is 7,444.
+
+The integration lane's one failure is
+`test_smoke_seeds.py::test_an_interrupted_seeding_fails_and_leaves_no_server_behind`,
+which asserts that a `SIGINT` sent the moment the seeding server answers
+interrupts the script before it finishes; it fails when the script has
+already written all seven entries by the time the signal lands. It
+failed in two whole-lane runs and passed when its own file was run
+alone (9 passed). Measured rather than argued: the two source files this
+milestone changes were restored to the parent commit's versions, the
+whole lane was run again, and **the same case failed**, 346 passed and
+1 failed. The files were then restored and the rendering suite re-run.
+Nothing in M3 touches a script, a subprocess or a signal, and the lane
+is shared-machine timing.
+
+The wheel-grade lane is inside the integration lane and ran. The image
+build and the smoke conversation were not run here and are unverified
+in this section; the pull request records what CI says about them.
