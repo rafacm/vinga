@@ -524,3 +524,35 @@ never evaluated by GitHub, and the failure modes of `imagetools
 inspect` were never enumerated, only the success path and one failure.
 The decision table above now has a row per failure mode because the
 round showed the cost of not having one.
+
+#### Second review round: one finding
+
+Reviewed again at `561f68bc` after the rewrite, same backend and model,
+runtime 2m00s. One P1, verdict **mergeable after the listed fix**.
+
+**An ancestry-check error was treated as permission to move the tag.**
+`git merge-base --is-ancestor` answers 0 for yes and 1 for no, and
+anything above 1 means it could not answer. The rewrite's
+`elif ...; else move=true` collapsed the third outcome into the
+second, which is the same defect the rewrite had just fixed one level
+up, surviving one level down: an operational failure read as evidence.
+Git's own diagnostic also reached the log, and on that path it would
+have been the only far-side text there.
+
+*Resolution*: accepted. The status is captured and the three outcomes
+are three branches, only the middle one setting `move`, and the
+diagnostic is dropped rather than logged.
+
+Driven through the committed step with `git` stubbed to return each
+status in turn: 0 leaves the tag, 1 moves it, 128 leaves it with a
+fixed warning and no trace of the stub's `fatal:` text in the output.
+Mutated by widening the middle test from `-eq 1` to `-ne 0`, which
+puts the error case back to moving the tag, so the case can fail and
+is not decoration.
+
+The finding is worth keeping for its shape rather than its size. The
+first round's rewrite established the rule that the tag moves only on
+positive knowledge, and then implemented it with a two-way test on a
+three-way answer. A rule and its implementation can disagree in a
+single line, and the review that catches it has to read the line
+rather than the rule.
