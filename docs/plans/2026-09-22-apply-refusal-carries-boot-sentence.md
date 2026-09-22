@@ -102,7 +102,7 @@ finding.
 model named by option "model"; describe the pace in "instructions"
 instead`, and the `instructions` sentence becomes `option
 "instructions" is ignored by the model named by option "model"; it is
-read by the gpt-4o-mini-tts speech models, and "speed" is what this
+read by the gpt-4o speech models, and "speed" is what this
 one takes` (the prefix constant stays interpolated, as today). A model
 name is a stored option value, and the rule for this surface is that a
 refusal names the key and never the value; quoting the model was the
