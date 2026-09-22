@@ -297,7 +297,7 @@ a number rather than left implied.
 ### Builds stop waiting on the test lanes; the publish does not
 
 `image` drops `needs: [unit, integration]`. `image-publish` carries
-`needs: [unit, integration, image]`, and `image-promote` follows it.
+`needs: [unit, integration, image]`.
 
 The invariant this preserves has to be stated precisely, because the
 plan's first draft stated it wrongly ("nothing reaches the registry")
@@ -576,13 +576,13 @@ verified where matters more than usual.
   manifest digest, the two-platform merge preserving four index
   entries, and `--dry-run` printing that index without pushing.
 - **On a branch, before merging**: `gh workflow run vinga-server.yml
-  --ref <branch>`, which after M1 exercises every step up to and
-  including phase 1 of the validation, against real pushed digests. It
-  is the gate for each milestone and the run is linked on its PR.
-  **What it cannot reach**, stated because two earlier drafts claimed
-  otherwise: a dispatch creates no tag, so phase 2 does not run, and
-  it never runs `image-promote`, so nothing about the reconciler is
-  exercised by it.
+  --ref <branch>`, which after M1 exercises every step including the
+  manifest assembly and its index assertion, against real pushed
+  digests, under `--dry-run`. It is the gate for each milestone and
+  the run is linked on its PR. **What it cannot reach**, stated
+  because earlier drafts claimed otherwise: a dispatch creates no tag,
+  so nothing about tag assignment or the ordering check is exercised
+  by it.
 - **On `main`, after merging**: the first push is the only thing that
   can exercise the real tag move. M1's implementation-doc section
   records the measured job durations and cache-export times of that
