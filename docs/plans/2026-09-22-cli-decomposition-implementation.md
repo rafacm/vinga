@@ -975,6 +975,10 @@ not need to be: it changes no file under `src/` and adds no test. The
 one file it adds is a tool the lanes do not collect, and the one
 generated file it changes is the census lane's own, which ran.
 
+### PR review round, PR #550
+
+Reviewed 2026-09-22 by openai/gpt-5.6-terra, thinking high via codex CLI 0.155.1, read-only sandbox, runtime 2m51s, at commit 61023b2b. No findings, verdict mergeable as is; the low-stakes tier, since the milestone changes no source. Nothing to resolve. The PR was retargeted to `main` before #549 merged and rebased onto it afterwards, with one conflict in this document resolved by keeping the M1 round and the M2 section in order.
+
 ## M3: the dump, the dispatch and the repricing
 
 **Attribution:** anthropic/claude-opus-5, thinking high; Claude Code 2.1.278; 2026-09-22.
