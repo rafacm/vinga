@@ -7,45 +7,21 @@
 # Usage:
 #   run-pr-review.sh <worktree> <base-ref> <pr-number> "<pr-title>" "<context sentence>"
 #
-# REVIEW_BACKEND selects the reviewer CLI: codex (default) or claude,
-# the fallback for when the codex quota is exhausted. REVIEW_MODEL
-# selects the model within the backend (default gpt-5.6-sol for codex,
-# claude-opus-5 for claude). The tiering rule lives in SKILL.md: sol
-# for plans and behavior-changing milestone PRs, terra for low-stakes
-# rounds. REVIEW_EFFORT pins the reasoning effort (default high) in
-# the backend's own vocabulary, and the provenance header records
-# the run as `<provider>/<model>, thinking <level>`, the attribution
-# string the implement-issue skill defines.
+# The reviewer, its model and its reasoning effort come from
+# REVIEW_BACKEND, REVIEW_MODEL and REVIEW_EFFORT, read by
+# review-backend.sh beside this script; the tiering rule (sol for
+# plans and behavior-changing milestone PRs, terra for low-stakes
+# rounds) lives in SKILL.md. The provenance header records the run as
+# `<provider>/<model>, thinking <level>`, the attribution string the
+# implement-issue skill defines.
 #
 # Writes its working files (diff, prompt, output, posted comment) next
 # to nothing in the repository: they go to $TMPDIR (or /tmp).
 set -eu
 WORKTREE="$1"; BASE="$2"; PR="$3"; TITLE="$4"; CONTEXT="$5"
-BACKEND="${REVIEW_BACKEND:-codex}"
-case "$BACKEND" in
-  codex)  MODEL="${REVIEW_MODEL:-gpt-5.6-sol}" ;;
-  claude) MODEL="${REVIEW_MODEL:-claude-opus-5}" ;;
-  *) echo "unknown REVIEW_BACKEND: $BACKEND (codex or claude)" >&2; exit 2 ;;
-esac
-# A REVIEW_MODEL exported for one backend must not silently reach the
-# other (a stale tiering export plus REVIEW_BACKEND=claude would).
-case "$BACKEND:$MODEL" in
-  codex:claude-*|claude:gpt-*)
-    echo "model $MODEL does not belong to backend $BACKEND" >&2; exit 2 ;;
-esac
-# The effort is pinned rather than left to the backend's default,
-# because a level nothing set is a level nothing can record. Each
-# backend has its own vocabulary and a word outside it is refused
-# here rather than by the reviewer, whose refusal would post as a
-# review.
-EFFORT="${REVIEW_EFFORT:-high}"
-case "$BACKEND:$EFFORT" in
-  codex:minimal|codex:low|codex:medium|codex:high|codex:xhigh) PROVIDER=openai ;;
-  claude:low|claude:medium|claude:high|claude:xhigh|claude:max) PROVIDER=anthropic ;;
-  *) echo "effort $EFFORT is not a level backend $BACKEND accepts" >&2; exit 2 ;;
-esac
-ATTRIBUTION="$PROVIDER/$MODEL, thinking $EFFORT"
 SKILL_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SKILL_DIR/review-backend.sh"
+review_select
 WORK="${TMPDIR:-/tmp}/external-review-pr-$PR"
 mkdir -p "$WORK"
 DIFF="$WORK/diff.txt"
@@ -70,32 +46,7 @@ for key, value in [("__PR_NUMBER__", pr), ("__PR_TITLE__", title),
 open(out, "w").write(text)
 PY
 
-# Wall-clock of the reviewer run alone (not the diff or the posting),
-# stamped into the provenance header so backend timing comparisons
-# stop depending on temp-file birth times that a reboot deletes.
-STARTED="$(date +%s)"
-case "$BACKEND" in
-  codex)
-    codex exec -m "$MODEL" -c "model_reasoning_effort=$EFFORT" --sandbox read-only - < "$PROMPT" > "$OUT" 2> "$ERR"
-    CLI_STAMP="codex CLI $(codex --version | sed 's/codex-cli //'), read-only sandbox"
-    ;;
-  claude)
-    # --allowedTools alone restricts nothing: it adds allow rules and
-    # every unlisted tool stays available. The deny list is the fence,
-    # and --setting-sources ""/--strict-mcp-config keep local settings
-    # and MCP servers from widening it back.
-    claude -p --model "$MODEL" --effort "$EFFORT" \
-      --strict-mcp-config --setting-sources "" \
-      --allowedTools "Read,Glob,Grep" \
-      --disallowedTools "Bash,Write,Edit,NotebookEdit,WebFetch,WebSearch,Agent,Task,Workflow,Skill,SendMessage,CronCreate,CronDelete,RemoteTrigger,PushNotification,ScheduleWakeup,EnterWorktree,ExitWorktree,DesignSync,Monitor,LSP,ToolSearch" \
-      < "$PROMPT" > "$OUT" 2> "$ERR"
-    CLI_STAMP="claude CLI $(claude --version | sed 's/ (Claude Code)//'), read-only tool set"
-    ;;
-  *) echo "unreachable backend: $BACKEND" >&2; exit 2 ;;
-esac
-
-ELAPSED="$(( $(date +%s) - STARTED ))"
-DURATION="$(( ELAPSED / 60 ))m$(printf '%02d' "$(( ELAPSED % 60 ))")s"
+review_run "$PROMPT" "$OUT" "$ERR"
 HEAD_SHA="$(git rev-parse --short HEAD)"
 {
   printf '## External review round\n\n'
