@@ -40,6 +40,7 @@ from sqlalchemy import select, update
 
 from tests.support.apps import entered_client
 from tests.support.configs import config_with, world
+from tests.support.leaks import renderings
 from tests.support.problems import refused as refused_body
 from tests.support.providers import BrokenTts, RecordingLlm, ScriptedLlm, built_world
 from tests.support.sessions import agent_providers, call, run_reply, session_for
@@ -74,9 +75,11 @@ from vinga_server.filler import FillerClips, build_agent_fillers
 from vinga_server.generation import Generation, Generations
 from vinga_server.logs import JsonFormatter
 from vinga_server.providers import ProviderWorld
+from vinga_server.providers import mock as mock_providers
 from vinga_server.providers import world as provider_world
+from vinga_server.providers.base import ProviderError
 from vinga_server.providers.mock import MockTts
-from vinga_server.tools.mcp import McpServers
+from vinga_server.tools.mcp import RELOAD_REFUSED, McpServers
 
 DEVICE = "aa:bb:cc:dd:ee:ff"
 
@@ -878,10 +881,14 @@ async def test_an_egress_refusal_leaves_the_running_engines_exactly_as_they_were
     # answer across an await is holding: a refusal that built a model
     # and threw it away is still a refusal that moved nothing.
     assert generations.mark == 0
-    # And the sentence says nothing about the entry, the type or the
-    # option it refused on, all of which are stored values.
-    assert "voice" not in str(caught.value)
-    # Nor does anything behind it: the refusal is composed after the
+    # And the sentence is the boundary module's own, so an operator
+    # reading the answer learns which entry refused and which key it
+    # refused over, which is what a server started from this store
+    # would have printed before refusing to start.
+    assert str(caught.value).startswith(RELOAD_REFUSED)
+    assert "providers.tts.voice" in str(caught.value)
+    assert '"reach"' in str(caught.value)
+    # Nothing behind it, though: the refusal is composed after the
     # handler has closed, so neither what the provider layer raised nor
     # anything it was holding travels with it, and a traceback rendered
     # from this carries the fixed sentence and nothing else.
@@ -889,17 +896,20 @@ async def test_an_egress_refusal_leaves_the_running_engines_exactly_as_they_were
     assert caught.value.__context__ is None
 
 
-async def test_a_typed_options_refusal_reaches_the_reload_as_the_fixed_sentence(
+async def test_a_typed_options_refusal_names_the_entry_and_the_key(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """#88's refusal, met where detail is deliberately withheld.
+    """#88's refusal, met where the line between a key and a value is.
 
     A write names the field, because a caller wrote it and can correct
-    it. A reload is about stored values nobody sent, so the answer is
-    the fixed sentence and the log gets the class name, and this is the
-    case that proves the new refusal is inside that rule rather than
-    beside it: the option name and the value are both stored, and
-    neither may travel.
+    it. So does this, now: the entry and the option key are the
+    provider layer's own vocabulary, composed from the model the type
+    declared rather than from what the row holds, and an operator who
+    cannot see them has to start a second server to learn what an apply
+    already knows. What a stored value gets is the opposite treatment,
+    and this case is where the two meet in one sentence: the key is in
+    the answer and the value planted under it is in neither the answer
+    nor any rendering of the log.
     """
     planted = "sk-live-71b0c4e3-never-a-real-credential"
     running = voices()
@@ -920,12 +930,198 @@ async def test_a_typed_options_refusal_reaches_the_reload_as_the_fixed_sentence(
         await reload.apply()
 
     assert generations.current() is serving_now
-    assert planted not in str(caught.value)
-    assert "beam_size" not in str(caught.value)
+    sentence = str(caught.value)
+    assert sentence.startswith(RELOAD_REFUSED)
+    assert "providers.asr.ears" in sentence
+    assert "beam_size" in sentence
+    assert planted not in sentence
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
-    assert planted not in caplog.text
-    assert "beam_size" not in caplog.text
+    # The log keeps the shape it had: the class of the failure and
+    # nothing else, pinned as the argument tuple so that an edit adding
+    # the sentence here is a red run rather than a review finding.
+    assert refused_class(caplog) == ("ProviderError",)
+    for rendering in renderings(caplog):
+        assert planted not in rendering
+
+
+# What a refused build says, class of refusal by class of refusal
+#
+# One sentence is the whole claim, so what proves it is a sweep over the
+# classes of thing that can refuse a build rather than a module of its
+# own. Stated at its true width: for each class below, a stored world
+# whose values carry a credential-shaped sentinel is refused with a
+# sentence that names the entry, the key and the rule, and the sentinel
+# reaches neither the answer nor any rendering of the log. What the
+# sweep proves about the sites it drives is a regression; what the whole
+# surface does rests on the inventory of every `raise ProviderError(`
+# site, read line by line, which the plan records.
+
+
+# The factory a case replaces reaches for the module attribute at build
+# time, so a stored entry of type "mock" is the cheapest way to put an
+# arbitrary refusal inside a provider build. The entry is named
+# something the running world does not have, because an entry whose
+# definition did not move is carried over as the object it already was
+# and never built again.
+BROKEN_ENTRY = "broken-7d2e15-never-a-real-entry"
+
+
+def broken(**options: object) -> Config:
+    """A stored world whose llm entry is one the running world has
+    never built."""
+    return served(
+        providers={
+            "llm": {BROKEN_ENTRY: {"type": "mock", **options}},
+            "asr": {"mock": {"type": "mock"}},
+            "tts": {"voice": {"type": "mock"}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        agent_defaults={"llm": BROKEN_ENTRY, "asr": "mock", "vad": "mock"},
+        agents={"assistant": {"prompt": "A", "tts": "voice"}},
+    )
+
+
+def refused_class(caplog: pytest.LogCaptureFixture) -> tuple[object, ...]:
+    """The arguments of the one warning a refused build writes.
+
+    The arguments rather than the line, because that is what the
+    class-only contract is about: the retained JSON log is handed the
+    record, so an argument no placeholder consumed is in the log file
+    whatever the formatter printed.
+    """
+    written = [
+        record
+        for record in caplog.records
+        if str(record.msg).startswith("a reload could not build")
+    ]
+    assert len(written) == 1
+    return written[0].args or ()
+
+
+async def test_an_unknown_type_is_refused_without_the_type_being_quoted(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The one refusal whose subject is a stored value and which
+    therefore still withholds it.
+
+    A word that is not one of a closed set this repository declared is
+    not this repository's vocabulary, so the registry names the rule and
+    the set instead. Carrying the provider layer's sentence carries that
+    decision with it rather than around it, which is the point: the
+    sanitizing lives where the sentence is composed.
+    """
+    planted = "sk-live-5c93f0a2-never-a-real-type"
+    running = voices()
+    stored = served(
+        providers={
+            "llm": {"mock": {"type": planted}},
+            "asr": {"mock": {"type": "mock"}},
+            "tts": {"voice": {"type": "mock"}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        agent_defaults={"llm": "mock", "asr": "mock", "vad": "mock"},
+        agents={"assistant": {"prompt": "A", "tts": "voice"}},
+    )
+    generations, reload = applying(running, stored)
+    serving_now = generations.current()
+
+    with caplog.at_level(logging.DEBUG), pytest.raises(ProviderRefusedError) as caught:
+        await reload.apply()
+
+    assert generations.current() is serving_now
+    sentence = str(caught.value)
+    assert sentence.startswith(RELOAD_REFUSED)
+    assert "providers.llm.mock" in sentence
+    assert "names no llm provider type that exists" in sentence
+    assert planted not in sentence
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert refused_class(caplog) == ("ProviderError",)
+    for rendering in renderings(caplog):
+        assert planted not in rendering
+
+
+async def test_a_factory_that_raises_names_the_entry_and_its_class(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The sentence a boot prints for a library that will not start,
+    reaching an apply's answer.
+
+    The construction is the one `tests/integration/test_startup_failure.py`
+    pins the boot's own stderr with, raising the way a third-party client
+    does when it cannot reach its endpoint: a message quoting the URL and
+    the key it was handed. What the registry composes from it is the
+    entry, the type and the exception's class, and that is what an
+    operator now reads without starting a second server.
+    """
+    planted = "sk-live-2f8c41d7-never-a-real-credential"
+    running = voices()
+    generations, reload = applying(running, broken())
+    serving_now = generations.current()
+
+    def refuse(label: str, config: object) -> object:
+        raise ValueError(f"POST https://api.example/v1/chat failed for key {planted}")
+
+    monkeypatch.setattr(mock_providers, "build_llm", refuse)
+
+    with caplog.at_level(logging.DEBUG), pytest.raises(ProviderRefusedError) as caught:
+        await reload.apply()
+
+    assert generations.current() is serving_now
+    sentence = str(caught.value)
+    assert sentence.startswith(RELOAD_REFUSED)
+    assert f"providers.llm.{BROKEN_ENTRY}: the mock provider would not build " in sentence
+    assert "(ValueError)" in sentence
+    assert planted not in sentence
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert refused_class(caplog) == ("ProviderError",)
+    for rendering in renderings(caplog):
+        assert planted not in rendering
+
+
+async def test_a_factory_raising_its_own_refusal_arrives_with_no_chain(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The path the sanitizing wrapper does not cover, and the case that
+    proves the delayed string extraction is what covers it.
+
+    `construct_provider` reconstructs a chainless `ProviderError` from an
+    ordinary factory exception, but a `ProviderError` a factory raised
+    for itself passes through untouched, deliberately, so that the
+    wordings the rest of the provider package composes keep their exact
+    spelling. Such an error reaches the apply carrying whatever it was
+    raised `from`, and an SDK exception is exactly the thing that quotes
+    the endpoint and the credential. What strips it is that the apply
+    takes the message as a string inside the handler and raises its own
+    refusal after the handler has closed, which is asserted here rather
+    than assumed.
+    """
+    planted = "sk-live-9a41c7e3-never-a-real-credential"
+    safe = "the vendor client would not start"
+    running = voices()
+    generations, reload = applying(running, broken())
+
+    def refuse(label: str, config: object) -> object:
+        try:
+            raise RuntimeError(f"POST https://api.example/v1 failed for key {planted}")
+        except RuntimeError as exc:
+            raise ProviderError(f"{label}: {safe}") from exc
+
+    monkeypatch.setattr(mock_providers, "build_llm", refuse)
+
+    with caplog.at_level(logging.DEBUG), pytest.raises(ProviderRefusedError) as caught:
+        await reload.apply()
+
+    sentence = str(caught.value)
+    assert sentence == f"{RELOAD_REFUSED} providers.llm.{BROKEN_ENTRY}: {safe}"
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert planted not in sentence
+    assert refused_class(caplog) == ("ProviderError",)
+    for rendering in renderings(caplog):
+        assert planted not in rendering
 
 
 async def test_a_voice_that_will_not_close_still_leaves_an_applied_world(
@@ -1621,11 +1817,16 @@ def test_neither_an_answer_nor_a_refusal_carries_a_credential(
 # What an entry that will not build says on the wire, and what it does
 # not
 #
-# The refusal this milestone added, driven the whole way: a real store, a
-# real re-read, a real build that refuses, and the mounted route in
-# front of it. Everything a provider refusal has to say about is stored
-# state (the entry, the option, the type, the credential), which is why
-# the sentence it answers with is fixed and interpolates nothing.
+# The refusal driven the whole way: a real store, a real re-read, a real
+# build that refuses, and the mounted route in front of it. What the two
+# cases below add to the sweep above is the wire: the route passes
+# `ProviderRefusedError` through as itself, and this is where that is
+# proven rather than reasoned about.
+#
+# What travels is the provider layer's own vocabulary, which is the
+# entry, the key and the rule. What does not is anything an operator
+# wrote as a value, and the two cases plant one each: a value under an
+# option name, and the name of a variable under `api_key_env`.
 
 # An entry name and an option name, both of them stored keys an operator
 # chose, and both shaped so a substring check for them cannot match by
@@ -1633,6 +1834,18 @@ def test_neither_an_answer_nor_a_refusal_carries_a_credential(
 PLANTED_ENTRY = "voice-9c4a1f-never-a-real-entry"
 
 PLANTED_OPTION = "planted_option_3f9c_never_a_real_option"
+
+# What the operator wrote under that option name. A key is a name this
+# repository quotes back; a value is not, and this is the one that must
+# reach nothing.
+PLANTED_VALUE = "sk-stored-in-an-option-4e7b12-never-a-real-credential"
+
+# A variable nothing sets, named so that nothing else can have set it
+# either. `api_key_env` is a reference rather than a value, and the
+# mistake it is easiest to make with a field named for a variable is to
+# put the credential in it, which is why `kit.py` names the entry and
+# never the reference.
+UNSET_REFERENCE = "VINGA_RELOAD_UNSET_REFERENCE_6b93f1"
 
 
 def served_by(caplog: pytest.LogCaptureFixture) -> str:
@@ -1665,16 +1878,20 @@ def voiced(directory: Path, entry: dict[str, object]) -> None:
 
 
 @pytest.mark.usefixtures("keys")
-def test_an_engine_that_will_not_build_refuses_the_route_and_names_none_of_it(
+def test_an_engine_that_will_not_build_names_the_entry_on_the_wire(
     directory: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """The whole path for a provider refusal: a stored entry this server
     cannot build, applied through the route an operator calls.
 
-    What it must answer is the fixed sentence under 422, with the world
-    it is serving untouched, and none of what it refused on anywhere: not
-    the entry, not the option, not in the body and not in either shipped
-    log format.
+    What it must answer under 422 is the sentence a server started from
+    this store would print before refusing to start, behind the prefix
+    every refused reload opens with, with the world it is serving
+    untouched. The entry and the option name are in it, because they are
+    what an operator has to go and correct. The value written under that
+    option name is in neither the body nor any rendering of the log, and
+    the log line itself is still the class of the failure and nothing
+    else.
     """
     seeded(directory)
     voiced(directory, {"type": "mock"})
@@ -1690,7 +1907,7 @@ def test_an_engine_that_will_not_build_refuses_the_route_and_names_none_of_it(
         # stored, as every write is, and the apply is where it refuses.
         wrote = serving.put(
             f"{MOUNT_PATH}/providers/tts/{PLANTED_ENTRY}",
-            json={"type": "mock", PLANTED_OPTION: 1},
+            json={"type": "mock", PLANTED_OPTION: PLANTED_VALUE},
             headers=bearer(),
         )
         assert wrote.status_code == 200, wrote.text
@@ -1704,11 +1921,59 @@ def test_an_engine_that_will_not_build_refuses_the_route_and_names_none_of_it(
         assert after.providers.instances == before.providers.instances
 
     assert refused.status_code == 422
-    refused_body(refused.json(), 422)
+    detail = refused_body(refused.json(), 422)
+    assert detail.startswith(RELOAD_REFUSED)
+    assert f"providers.tts.{PLANTED_ENTRY}" in detail
+    assert PLANTED_OPTION in detail
+    assert PLANTED_VALUE not in refused.text
+    for rendering in renderings(caplog):
+        assert PLANTED_VALUE not in rendering
+    # The class of it is still all this server keeps, which is the one
+    # surface the sentence deliberately does not reach.
     written = served_by(caplog)
-    for sentinel in (PLANTED_ENTRY, PLANTED_OPTION):
-        assert sentinel not in refused.text
-        assert sentinel not in written
-    # The class of it is what this server keeps, which is what an
-    # operator has instead of the sentence.
     assert "ProviderError" in written
+    assert PLANTED_OPTION not in written
+
+
+@pytest.mark.usefixtures("keys")
+def test_an_unset_key_reference_names_the_entry_and_not_the_reference(
+    directory: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The stored credential's own refusal class, on the wire.
+
+    `api_key_env` names a variable rather than holding a value, and the
+    rule `kit.py` states is that a refusal over it names the entry and
+    stops there: the entry name is enough to find the line in the
+    configuration the operator wrote, and what is in the field is as
+    likely to be the credential itself as the name of a variable.
+    Carrying the provider layer's sentence carries that rule too.
+
+    Planted into the store after the boot has read it, which is what
+    makes this an apply's refusal rather than a boot's: the server is
+    running on the seeded world throughout.
+    """
+    seeded(directory)
+    booted = load_boot_config()
+
+    with caplog.at_level("INFO"), entered_client(
+        booted.config, booted.secrets, from_store=True
+    ) as serving:
+        composition = serving.app.state.composition
+        before = composition.generations.current()
+        voiced(
+            directory,
+            {"type": "openai", "voice": "alloy", "api_key_env": UNSET_REFERENCE},
+        )
+
+        refused = serving.post(RELOAD_PATH, headers=bearer())
+
+        assert composition.generations.current() is before
+
+    assert refused.status_code == 422
+    detail = refused_body(refused.json(), 422)
+    assert detail.startswith(RELOAD_REFUSED)
+    assert f"providers.tts.{PLANTED_ENTRY}" in detail
+    assert "api_key_env references an unset environment variable" in detail
+    assert UNSET_REFERENCE not in refused.text
+    for rendering in renderings(caplog):
+        assert UNSET_REFERENCE not in rendering

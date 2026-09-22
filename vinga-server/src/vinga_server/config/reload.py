@@ -109,27 +109,6 @@ logger = logging.getLogger(__name__)
 # candidate's, which is what the last member arriving means.
 LIVE_SECRETS: frozenset[EntityKind] = frozenset({"mcp_server", "provider"})
 
-# What a reload says when it could not build the engines the stored
-# world names.
-#
-# Fixed, and interpolating nothing, for the reason the composition
-# root's refusals are: what a provider build refuses on is stored state,
-# and the sentences the provider layer composes name the entry, the type
-# and the option key it choked on. An operator who pasted a credential
-# into an option name would find it in this answer, so the diagnosis is
-# where a diagnosis belongs, which is a server started from this store,
-# and the class of the failure goes to this server's log.
-_PROVIDERS_REFUSED = (
-    f"{mcp.RELOAD_REFUSED} the engines the stored configuration names could not all be "
-    "built: a provider type, one of its options, its stored credential or the data "
-    "boundary "
-    "rule refused. Which one is deliberately not said here, because a sentence about a "
-    "stored value is the one thing a reload's answer never carries. A server started "
-    "from this store refuses on the same state and names the location it refused on, "
-    "and the failure's kind is recorded in this server's log. Nothing was changed: the "
-    "engines this server is running are the ones it was running before this request."
-)
-
 _RELOAD_IN_PROGRESS = (
     "a reload of this server's configuration is already running. Nothing was changed by "
     "this request; make it again once the first has answered."
@@ -439,11 +418,30 @@ class ConfigReload:
         call. `ProviderError` is the provider layer's contract and is
         not a `ConfigError`, so nothing above would know what status it
         meant; here it becomes the one typed refusal an apply answers a
-        failed build with, carrying a sentence that names nothing
-        stored. The class goes to the log, which is where a diagnosis
-        that cannot be safely said belongs, and the sentence is composed
-        after the handler has closed so that neither the original nor
-        anything it was holding travels with it.
+        failed build with, behind the prefix every refused reload opens
+        with and carrying the provider layer's own sentence.
+
+        That sentence is the one a server started from this store prints
+        on stderr before refusing to start, and it is sayable here for
+        the reason it is sayable there: a `ProviderError`'s message
+        names the entry, the option key and the rule, all of them this
+        repository's vocabulary, and never the value it refused over.
+        The prefix is what says that nothing was swapped, which the
+        provider layer's sentence alone does not.
+
+        What does not travel is the exception. The message is taken
+        inside the handler as a string and the refusal is raised after
+        the handler has closed, so neither the original nor anything it
+        was holding comes with it: a factory that raised a
+        `ProviderError` of its own arrives here still chained to
+        whatever the SDK under it threw, and a chain is a rendering
+        surface like any other.
+
+        The class alone goes to the log, and that is not a shrunken copy
+        of the diagnosis but the stricter of the two contracts: an
+        operator's stderr and an API answer are the sanitized diagnostic
+        channels, and the retained JSON log carries no exception prose
+        at all (`docs/architecture/observability-surfaces.md`).
         """
         problem: str | None = None
         try:
@@ -451,14 +449,17 @@ class ConfigReload:
                 candidate.config, candidate.secrets, _carried(previous, candidate)
             )
         except ProviderError as exc:
-            # The class and never the message: what the provider layer
-            # composes names the entry, the type and the option it
-            # refused on, all of them stored.
+            # The class and never the message, on this surface alone:
+            # what the provider layer composes is safe to print to an
+            # operator, and the retained log is the one channel held to
+            # metadata only. Pinned as the argument tuple by the sweep in
+            # `tests/unit/test_config_reload.py`, because an argument no
+            # placeholder consumed is in the log file all the same.
             logger.warning(
                 "a reload could not build the stored world's providers (%s)",
                 type(exc).__name__,
             )
-            problem = _PROVIDERS_REFUSED
+            problem = f"{mcp.RELOAD_REFUSED} {exc}"
         raise ProviderRefusedError(problem)
 
     def _in_order(self) -> tuple[Loaded, int]:

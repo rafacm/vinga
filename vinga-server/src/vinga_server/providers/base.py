@@ -22,7 +22,22 @@ from vinga_server.boundary import Reach
 
 class ProviderError(Exception):
     """A provider that cannot be built as configured: an unknown type,
-    a bad option, or a missing optional dependency."""
+    a bad option, or a missing optional dependency.
+
+    Its message names identities and keys, and never a stored value.
+    The entry's label, an option's own key, the rule that was broken and
+    a failed factory's class name are all this repository's vocabulary
+    or an operator's own spelling of a name, and an unknown key goes
+    through `models.spoken_identity` like every other spoken one. What
+    an operator wrote as a VALUE stays out, the type a row names
+    included, because the type is a stored value like any other.
+
+    That rule is a contract rather than a habit, and two surfaces rest
+    on it: `main` prints this message to stderr as it is when a boot
+    refuses, and `config/reload.py` carries it into the answer a refused
+    apply sends over HTTP. A new raise site that interpolates a value
+    leaks it on both.
+    """
 
 
 class ProviderCallError(Exception):
