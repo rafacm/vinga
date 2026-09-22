@@ -2317,28 +2317,43 @@ REMEDIES: dict[RefusalReason, str] = {
 # with, which is what the reading below compares against.
 _KNOWN_REASONS = frozenset(member.value for member in RefusalReason)
 
+# And what a body whose `reason` is there and is not a token reads as,
+# which is not a body at all. A sentinel rather than the payload
+# unchanged, because `RefusalReason | None` accepts one such value,
+# `null`, so leaving it to the validation below would relay a
+# middlebox's `detail` to a terminal on the strength of a member's type.
+_UNNAMEABLE = object()
+
 
 def _nameable(payload: object) -> object:
     """A refusal body with a state this client cannot name taken out of
-    it.
+    it, or `_UNNAMEABLE` when what is in that member is not a state.
 
-    The one tolerance the refusal reader keeps, and it is `_declared`'s
-    rule one shape up: a token from a server newer than this client is
-    an older server's silence rather than a body to refuse. Without it
-    the strict validation below would turn a refusal an operator can
-    still read into "a body this client does not recognize", which is
-    the sentence reserved for a page nobody vouched for.
+    Three cases, and the difference between the first two is what a
+    strict reader gets wrong. A member that is ABSENT is what a server
+    older than the vocabulary sends, and it stays absent. A member
+    holding a token this build does not know is a server newer than it,
+    and it is read as that same silence, so a state added later meets
+    the fallback rather than the sentence reserved for a page nobody
+    vouched for. That is `_declared`'s rule one shape up.
 
-    Only a string is replaced, which is the same rule `_declared` states
-    about a token: nothing bounds what a body puts where one belongs,
-    and a list or an object there is not a state this server could have
-    meant. Those stay as they are and meet the validation, so the body
-    they arrived in is unrecognized, which is what it is.
+    A member that is PRESENT and is not a string is neither of those,
+    and it is the arm this was missing. Nothing bounds what a body puts
+    where a token belongs, and a list, an object or a number there is
+    refused by the validation below whatever this function does; an
+    explicit `null` is not, because the field's type admits it. So a
+    body carrying `"reason": null` would have had its `detail` printed
+    on a terminal, and `detail` is the one field of this shape whose
+    words a middlebox chooses. Present and not a string is therefore
+    decided here and decided the same way for all of them: this is not
+    a refusal this API wrote.
     """
-    if not isinstance(payload, Mapping):
+    if not isinstance(payload, Mapping) or "reason" not in payload:
         return payload
-    reason = payload.get("reason")
-    if not isinstance(reason, str) or reason in _KNOWN_REASONS:
+    reason = payload["reason"]
+    if not isinstance(reason, str):
+        return _UNNAMEABLE
+    if reason in _KNOWN_REASONS:
         return payload
     return dict(payload) | {"reason": None}
 
@@ -2368,6 +2383,11 @@ def _refusal(response: httpx.Response, payload: object) -> str | None:
     never raised from, because pydantic puts the input it rejected into
     its own message.
 
+    A fourth thing has to agree since the body grew a state: what is in
+    that member, where there is one, has to be a token rather than
+    whatever else JSON can hold. `_nameable` decides it, because one of
+    those values is `null`, which the model itself accepts.
+
     What is relayed is the sentence plus this client's own remedy where
     the body states a state it knows, and the sentence alone where it
     does not. The remedy is appended rather than replacing it, unlike a
@@ -2380,8 +2400,11 @@ def _refusal(response: httpx.Response, payload: object) -> str | None:
     title = PROBLEM_TITLES.get(response.status_code)
     if title is None:
         return None
+    readable = _nameable(payload)
+    if readable is _UNNAMEABLE:
+        return None
     try:
-        problem = Problem.model_validate(_nameable(payload))
+        problem = Problem.model_validate(readable)
     except ValidationError:
         return None
     if problem.status != response.status_code or problem.title != title:
