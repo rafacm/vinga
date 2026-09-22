@@ -1769,9 +1769,11 @@ jobs:
       # Whole history, because the ordering check below asks whether
       # one commit is an ancestor of another, and a depth-1 checkout
       # has none to answer from: the revision the moving tag reports
-      # would not be a known object at all, which the check reads as
-      # nothing to go backwards over, so every tag would move. Nothing
-      # else in this job reads the working tree.
+      # would be an unknown object, which that check reads as "cannot
+      # tell", so no moving tag would ever move again. The check
+      # fetches `main` again before it asks, since even a full
+      # checkout is a snapshot of the moment it ran. Nothing else in
+      # this job reads the working tree.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -1858,23 +1860,39 @@ jobs:
 
       # Pushes no longer queue, so two runs can reach this point at
       # once and the later writer of a moving tag might be the older
-      # commit. This reads what the tag points at before the step
-      # below moves it. `VINGA_REVISION` is in the image's own `ENV`,
-      # so `.Image` reports it per platform, and both platforms carry
-      # the same value because both builds were given the same build
-      # argument: the first one is the answer, not a sample of several.
+      # commit. This decides whether the step below is allowed to move
+      # it. `VINGA_REVISION` is in the image's own `ENV`, so `.Image`
+      # reports it per platform, and both platforms carry the same
+      # value because both builds were given the same build argument.
       #
-      # This is a read before a write with no lock behind it. Two
-      # publishes seconds apart can both see the old revision and both
-      # proceed, so what it buys is that a moving tag is not moved to
-      # an older commit's image, not that it is always at the newest
-      # one. It can sit a commit behind until the next push publishes.
-      # The tags it can point at are gated either way, since a run
-      # publishes only after its own lanes have passed.
+      # It moves the tag only on positive knowledge, and the shape of
+      # the script is that one rule: `move` starts false and exactly
+      # two paths set it. Either the registry says the tag is not
+      # there, or the registry answers, the answer holds one revision,
+      # that revision names a commit here, and this commit is not
+      # older than it. Every other outcome leaves the tag where it is
+      # and says why, because an unreadable answer is not evidence
+      # that moving is safe. An expired token, a timed-out registry, a
+      # response this cannot parse and a tag published by a run that
+      # started after this checkout all produce the same silence, and
+      # the first review of this milestone caught all four being read
+      # as permission.
       #
-      # Deliberately no `pipefail`: an absent tag makes the inspect
-      # fail, and an empty answer is one of the cases below rather
-      # than an error.
+      # None of that can fail the job. The immutable tags are
+      # published whatever this decides, because a registry blip that
+      # cost a commit its dated and `sha-` tags would be the very
+      # defect this milestone exists to remove.
+      #
+      # This is still a read before a write with no lock behind it.
+      # Two publishes in the same instant can both read the old tag
+      # and the older one can write last, so what it buys is that a
+      # moving tag is not moved backwards by a run that could see it,
+      # not that it is always at the newest commit.
+      #
+      # Nothing the registry returns is echoed. The revision is
+      # matched against hex and then used rather than printed, and the
+      # sentences below are fixed, so no far-side bytes reach a public
+      # log.
       - name: Whether the moving tag may move
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
@@ -1882,22 +1900,56 @@ jobs:
         run: |
           set -eu
 
-          published=$(docker buildx imagetools inspect "$IMAGE:$MOVING" \
-            --format '{{json .Image}}' 2>/dev/null \
-            | tr ',' '\n' \
-            | sed -n 's/.*VINGA_REVISION=\([0-9a-f]\{4,\}\).*/\1/p' \
-            | head -n 1)
+          # The checkout is a snapshot, and the commit being asked
+          # about may have been published by a run that started after
+          # it. A fetch that fails is not by itself fatal: a revision
+          # that still resolves is answerable whatever the fetch did,
+          # and one that does not falls into the "cannot tell" case.
+          git fetch --quiet --no-tags origin main \
+            || echo "::warning::could not fetch origin/main; a very recently published commit may not be visible below"
 
-          if [ -z "$published" ]; then
-            echo "$IMAGE:$MOVING is absent or reports no revision: nothing to go backwards over, moving it"
-          elif ! git cat-file -e "${published}^{commit}" 2>/dev/null; then
-            echo "$IMAGE:$MOVING reports $published, which names no commit here: moving it"
-          elif git merge-base --is-ancestor "$GITHUB_SHA" "$published"; then
-            echo "MOVE_MOVING=false" >> "$GITHUB_ENV"
-            echo "$IMAGE:$MOVING reports $published, which is not older than $GITHUB_SHA: leaving it where it is"
+          move=false
+          if inspect=$(docker buildx imagetools inspect "$IMAGE:$MOVING" \
+                --format '{{json .Image}}' 2>"$RUNNER_TEMP/inspect.err"); then
+            # One value or nothing: `sort -u` collapses the platforms,
+            # and two platforms disagreeing leaves a newline, which
+            # the first pattern below rejects along with the empty
+            # answer.
+            revision=$(printf '%s' "$inspect" | tr ',' '\n' \
+              | sed -n 's/.*VINGA_REVISION=\([0-9a-f]\{7,40\}\).*/\1/p' | sort -u)
+            case "$revision" in
+              "" | *[!0-9a-f]*)
+                echo "::warning::$IMAGE:$MOVING reports no single revision, so it is left where it is"
+                ;;
+              *)
+                if ! git cat-file -e "${revision}^{commit}" 2>/dev/null; then
+                  echo "::warning::$IMAGE:$MOVING reports a revision that names no commit in this history, so it is left where it is"
+                elif git merge-base --is-ancestor "$GITHUB_SHA" "$revision"; then
+                  echo "$IMAGE:$MOVING carries a commit this one is not older than: leaving it where it is"
+                else
+                  echo "$IMAGE:$MOVING carries an older commit: moving it"
+                  move=true
+                fi
+                ;;
+            esac
+          elif grep -qiE 'not found|manifest unknown|manifest_unknown' "$RUNNER_TEMP/inspect.err"; then
+            # The one failure that is an answer. Narrow on purpose: a
+            # message this does not recognise is a registry that did
+            # not answer, and leaves the tag alone. The cost of the
+            # narrowness is that a first publish into an empty package
+            # may need the tag created by hand, which is a warning in
+            # the log rather than a silent wrong move.
+            echo "$IMAGE:$MOVING does not exist yet: there is nothing to go backwards over"
+            move=true
           else
-            echo "$IMAGE:$MOVING reports $published, which is not a descendant of $GITHUB_SHA: moving it"
+            echo "::warning::$IMAGE:$MOVING could not be read, so it is left where it is"
           fi
+
+          # The last word of the log is read off the decision rather
+          # than written beside it, so a branch whose sentence stops
+          # matching what it did cannot say so quietly.
+          echo "MOVE_MOVING=$move" >> "$GITHUB_ENV"
+          echo "$IMAGE:$MOVING moves: $move. The dated and sha- tags are published either way."
 
       # One assembly, checked the same way whichever event asked for
       # it, and pushed only on a push to main. `--dry-run` resolves the
