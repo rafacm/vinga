@@ -413,6 +413,15 @@ decision site.
   `problem_response`, which takes it as a keyword defaulting to `None`.
   The token is chosen at the raise site, by the code that classified,
   never by message text.
+- `reason` is absent from the wire when it is `None`, never `null`.
+  `problem_response` dumps the model with the member excluded when it
+  is unset, so the 401s, the malformed-request 422, the routing
+  refusals, the storage 500s and every refusal outside the five keep
+  exactly the member set they have today, and an older client keeps
+  reading them. A case in `tests/unit/test_config_api_problems.py`
+  asserts an unrelated refusal's body has exactly `title`, `status`,
+  `detail` and `errors`, which is what makes the skew below five
+  bodies rather than all of them.
 - The five sentences lose their command spellings and keep their
   state. `_UNKNOWN_CODE` ends at "read the code currently on the
   device's screen and use that"; `_CLAIM_REFUSED` ends at "the code is
@@ -671,6 +680,11 @@ refer to the plan as committed at that blob.
    forbids that member. Omit `reason` from the wire when it is
    `None`, and assert in `test_config_api_problems.py` that an
    unrelated refusal keeps its exact member set.
+
+   *Resolution*: accepted, and it would have been a field defect: the
+   skew would have covered every refusal, not five. The member is
+   excluded from the dump when unset and a test pins an unrelated
+   refusal's exact member set.
 
 7. **P2: the published `Problem.detail` contract becomes false.** Its
    description says `detail` is the same sentence the CLI prints;
