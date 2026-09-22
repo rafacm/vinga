@@ -322,12 +322,17 @@ Three proofs, none of them "the tests pass".
 - `tests/unit/test_config_cli_untransportable.py` asserts the guarded
   call sites of `check_transportable` are exactly the files
   `{"cli.py", "store.py"}`. The property is that a fragment is checked
-  before it travels, on both sides of the connection, and in exactly
-  one place on each side. It becomes: the CLI's call sites are all in
-  `cli/input.py` and the repository's in `store.py`, asserted on the
-  module path rather than the basename, and the behaviour case beside
-  it (a fragment holding a NaN meets the sentence, not a traceback) is
-  unchanged.
+  before it travels, on both sides of the connection. On the CLI side
+  it becomes a statement over the registry rather than over a file:
+  for every `Command` row whose act carries a `body`, the body
+  callable reaches `check_transportable` in its call graph, resolved
+  the way `cli_fields.py` resolves a callable to its source and
+  follows its calls, so a new write command whose body skipped the
+  check is red whichever module it lands in. The repository side
+  keeps its existing assertion, and the behaviour cases beside them
+  (a fragment holding a NaN meets the sentence and no request is made,
+  nothing of the fragment leaks) are unchanged. No CLI filename is
+  asserted.
 - `tests/unit/test_cli_import_weight.py` pins the exact set of
   `vinga_server` modules `import vinga_server.config.cli` loads. The
   property is the client-install weight bound: nothing of the server
@@ -636,6 +641,11 @@ refer to the plan as committed at that blob.
    instead: every outbound fragment or document body passes through
    `check_transportable` before `_call`, plus the existing no-request
    and no-leak behaviour, with no exact CLI filename.
+
+   *Resolution*: accepted. The test becomes a statement over the
+   registry: every act body reaches `check_transportable` in its call
+   graph, resolved the way the field audit resolves callables, and no
+   CLI filename is named.
 
 5. **P2: M3's YAML encoder cannot serialize every `_understood`
    value.** `_understood` dumps in Python mode, so `StrEnum` members
