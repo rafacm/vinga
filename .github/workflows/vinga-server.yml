@@ -35,26 +35,40 @@ on:
   # steps are gated on a push to main.
   workflow_dispatch:
 
-# One live run per branch. A pull request that gets a second push
-# before its first run finishes is the ordinary shape of this
-# repository's own pipeline: a PR is opened and its milestone checkbox
-# is ticked a minute later, so two full runs of everything below start
-# on the same branch and only the second one's result is ever read.
-# Cancelling the superseded one is the whole of what this buys, and on
-# a lockfile-changing PR it buys a little more: the two runs raced to
-# save the same new uv cache key, and the loser logged "another job may
-# be creating this cache" and skipped. That is the inter-run sibling of
-# the intra-run race PR #256 fixed with `save-cache: false` on the
-# integration lane, and it goes away when there is no second run.
+# One live run per pull request, and a group of its own for everything
+# else. A pull request that gets a second push before its first run
+# finishes is the ordinary shape of this repository's own pipeline: a
+# PR is opened and its milestone checkbox is ticked a minute later, so
+# two full runs of everything below start on the same branch and only
+# the second one's result is ever read. Cancelling the superseded one
+# is the whole of what this buys, and on a lockfile-changing PR it buys
+# a little more: the two runs raced to save the same new uv cache key,
+# and the loser logged "another job may be creating this cache" and
+# skipped. That is the inter-run sibling of the intra-run race PR #256
+# fixed with `save-cache: false` on the integration lane, and it goes
+# away when there is no second run.
 #
-# Never on a push to main, which is why the cancellation is an
-# expression rather than a plain `true`. The `image` job publishes to
-# the registry on exactly that event, and a merge cancelled part-way
-# through by the next merge would leave `latest` pointing at whichever
-# build happened to survive. Merges to main run to completion, however
-# many of them queue up.
+# Every other event appends the run id, so no two pushes ever share a
+# group and nothing below is ever pending. This comment used to say
+# that merges to main "run to completion, however many of them queue
+# up", and that was false when it was written: a group holds one
+# running member and one pending member, and a third arrival replaces
+# the pending one whether or not `cancel-in-progress` is set. The
+# counterexample is on main. Run 34632623405, for d6d76dd1, was created
+# at 2026-09-11T18:19:29Z, started no job at all (its jobs list comes
+# back empty), and was terminated at 18:33:59Z, one second after the
+# next push's run was created. `sha-d6d76dd` is absent from the package
+# while the tags of the pushes either side of it are there: a merged
+# commit lost its image and nothing went red to say so.
+#
+# What the shared group used to buy, accidentally, was ordering the
+# registry writes. Two runs can now publish at once, which is why
+# `image-publish` reads what a moving tag points at before moving it
+# and leaves it alone when it already carries a newer commit.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # A pull request keeps the per-branch group this has always had; a
+  # push or a dispatch gets one nobody else can join.
+  group: ${{ github.workflow }}-${{ github.ref }}${{ github.event_name == 'pull_request' && '' || format('-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
