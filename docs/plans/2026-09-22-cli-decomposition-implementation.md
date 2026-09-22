@@ -1142,3 +1142,141 @@ is shared-machine timing.
 The wheel-grade lane is inside the integration lane and ran. The image
 build and the smoke conversation were not run here and are unverified
 in this section; the pull request records what CI says about them.
+
+### PR review round, PR #551
+
+Automated external review of this PR's diff (origin/main...df732ded).
+Reviewed 2026-09-22 by openai/gpt-5.6-sol, thinking high via codex CLI
+0.155.1, read-only sandbox, runtime 13m49s, at commit df732ded. Verdict
+as received: **mergeable after the listed fixes**. Four findings, one
+P1, all adopted.
+
+Three of the four are the same shape, and it is the shape a milestone
+that adds a second way out of a boundary should expect: the reading was
+guarded and the writing was not. The fourth is a claim in prose that
+the code does not keep.
+
+1. **P1: an answer that is everything its shape declares can still be
+   one no encoder can write, and it left as a traceback.** The reading
+   caught `ValidationError` alone, while the JSON-mode dump raises
+   `ValueError`; `ConfigDocument.config` is `dict[str, Any]` and nothing
+   bounds its depth, so a document nested 300 deep is valid under the
+   model and `ValueError: Circular reference detected (depth exceeded)`
+   out of the library. `main()` catches `ConfigError` and nothing else,
+   so that reached a terminal as a stack trace with the answer inside
+   it.
+
+   *Resolution.* Adopted whole, in `9f088b9a`. The arm now covers the
+   dump as well as the validation and the encoders as well as the dump,
+   over `_UNWRITABLE`: `TypeError`, `ValueError`, `RecursionError` and
+   PyYAML's own, which is the class `config/transport.py` names from the
+   other side. `ValidationError` is a `ValueError`, so the strict
+   reading's refusal is that same arm rather than a second one;
+   `ConfigError` is outside it, so a refusal composed further in keeps
+   its words. The sentence is recorded inside the handler and raised
+   after leaving it, which is what keeps the library's exception off the
+   chain. Measured while fixing: the python-mode dump does **not** raise
+   on that document and neither encoder does, so this was the JSON
+   mode's alone and therefore this milestone's own.
+
+   *Falsified first.* The two cases were written before the fix and
+   watched fail on the raw `ValueError` at
+   `pydantic/type_adapter.py:607`. They drive a 300-deep document with a
+   credential at the bottom through both formats and assert the act's
+   own sentence, two empty streams, and neither the credential nor
+   `Circular reference` anywhere in what the failure carries.
+
+2. **P2: the JSON encoder wrote `NaN` and `Infinity`, which are not
+   JSON.** Strict validation admits them because they are floats, and a
+   declared `float` field such as `SessionDetail.duration_s` carries one
+   through the JSON-mode dump as the float it is.
+
+   *Resolution.* Adopted whole, in `58baeac4`. The `untransportable`
+   walk this repository already has, in its numbers-only form, reads the
+   validated document before either encoder, and the act's own sentence
+   is what a non-finite answer meets under both formats;
+   `allow_nan=False` is the last guard behind it. The walk rather than
+   `check_transportable` because the two callers refuse differently: a
+   fragment names the section it was written under, and an answer meets
+   the act's fixed sentence. Six cases over the three values and both
+   formats, with a finite control beside them.
+
+   *Falsified first.* All six were watched failing, each writing `NaN`,
+   `Infinity`, `-Infinity` or `.nan` to stdout, and the control passing.
+
+3. **P2: the no-leak and refusal cases drove `Output.JSON` alone.** A
+   regression confined to the YAML branch would have leaked a dropped
+   field and refused nothing while every new case stayed green.
+
+   *Resolution.* Adopted whole, in `fd36de21`. The tolerance cases, the
+   strict refusals and the real-act machine cases are parametrized over
+   both members, keeping the empty-stream and exception-chain
+   assertions.
+
+   *Falsified twice, because the branch's two halves fail differently.*
+   With the YAML arm writing the raw answer in place of the read
+   document, the two YAML tolerance cases go red with the planted
+   credential in the output and the refusals stay green, since the
+   reading they refuse in runs before the branch. With the YAML arm
+   skipping the reading altogether, those two and all three YAML
+   refusals go red. Recorded rather than smoothed over: the machine-arm
+   case compares stdout against `encoded` itself, so it cannot catch a
+   mutation inside that function, and the tolerance cases are what pin
+   the no-leak property.
+
+4. **P2: the repriced entry claimed a command-level seam that is not
+   there.** `Command.perform` writes a command's opener before
+   `_performed` runs its acts, and a command may have several acts
+   (`info` has the opener and two), so "the model alone" and "adopting
+   the flag is the grammar setting that parameter" are not true of a
+   whole invocation.
+
+   *Resolution.* Adopted on the documentation branch the finding offers,
+   in `32cf2717`: the guide's entry and this section now say what M3
+   delivers, which is the act-level seam (one act's answer as one
+   document, notices on stderr, the default unchanged), and name the
+   opener policy and the framing of several answers as decisions for the
+   issue that adopts the flag. No command-level mechanism was built,
+   because nothing in this milestone needs one and the cheapest thing
+   that settles the claim is the claim.
+
+Beside the four, one correction the second fix made necessary:
+`config/transport.py`'s opening paragraph said two callers on opposite
+sides of the connection, which was the whole of it while each side
+asked the question in one direction (`d4f22027`).
+
+### Discovered while fixing the round
+
+A non-finite number inside `dict[str, Any]` is not written as `NaN` at
+all: the JSON-mode dump turns it into `null` before any encoder sees it,
+which is silent and is exactly the harm `config/transport.py` describes
+("a reader of this configuration would be given null in its place").
+The walk added above cannot see it, because by then the value is a
+`null` that no rule distinguishes from a null the server sent. Recorded
+rather than fixed: catching it means asking the question before the
+dump, of a body nothing has validated, which is a different check from
+the one this finding asked for and belongs with whoever needs the
+undescribed half of a document to survive a round trip.
+
+### Verification, after the round
+
+From `vinga-server/`, at this branch's head:
+
+| Lane | Result |
+| --- | --- |
+| `uv run ruff check .` | clean |
+| `uv run pytest tests/unit/test_config_cli_rendering.py -q` | 173 passed |
+| `uv run pytest tests/unit -q -n auto --dist loadfile` | 7467 passed, 19 skipped, 13m42s |
+| `uv run pytest tests/census -q` | 66 passed |
+| `python3 ../scripts/check_doc_links.py ..` | checked 263 files, 0 failures |
+
+The unit lane grew by the round's twenty-three cases and by nothing
+else: 7,444 before it and 7,467 after, which is two for the deep
+document, eight for the non-finite numbers and their control, and
+thirteen from parametrizing three groups over the second format.
+
+One manifest line moved, regenerated with its generator:
+`tests/unit/test_config_cli_rendering.py  _act` from 4 to 7, the three
+new sites being the deep document and the two numeric cases, which
+drive the dispatcher for the reason the others do. The
+command-spellings manifest did not move.
