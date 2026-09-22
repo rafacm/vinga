@@ -1987,9 +1987,12 @@ jobs:
             sources+=("$IMAGE@$(cat "$file")")
           done
 
+          # Not echoed. What comes back is a registry's bytes on a
+          # public log, and the summary the check prints below says
+          # everything reading it here would, out of values this
+          # workflow chose rather than values the far side sent.
           docker buildx imagetools create --dry-run "${sources[@]}" \
             > "$RUNNER_TEMP/index.json"
-          cat "$RUNNER_TEMP/index.json"
 
           python3 - "$RUNNER_TEMP/index.json" <<'PY'
           import json
@@ -2029,7 +2032,17 @@ jobs:
                   problems.append("no attestation manifest for " + name)
           for problem in problems:
               print("::error::the assembled index has " + problem)
-          sys.exit(1 if problems else 0)
+          if problems:
+              sys.exit(1)
+
+          # Derived from what was asked for and what was counted, so
+          # nothing the registry wrote is quoted back. It runs after
+          # the assertions rather than before them, because a summary
+          # of a document that has not been validated describes
+          # whatever it was handed.
+          print("the assembled index holds {} entries".format(len(index["manifests"])))
+          for name in ("linux/amd64", "linux/arm64"):
+              print(name + ": one manifest, with an attestation naming it")
           PY
 
           if [ "$PUBLISHING" != "true" ]; then
