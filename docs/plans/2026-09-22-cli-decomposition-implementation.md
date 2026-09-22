@@ -985,6 +985,18 @@ was repriced against what the encoder turned out to cost. No flag
 reaches the grammar, so every command still runs under `Output.HUMAN`
 and prints the bytes it printed before.
 
+What this milestone delivers is the seam on the act runner: one act's
+answer as one document on stdout, its notices on stderr, and the
+default unchanged. What it does not deliver, and does not claim, is the
+command level around that seam. `Command.perform` writes a command's
+opener before `_performed` runs its acts, and a command may have
+several acts (`info` has the opener and two), so a machine format
+passed through a whole invocation today would put human preamble in
+front of several documents. Whether the opener is suppressed under a
+machine format, and how several answers are framed as one parseable
+artifact, are decisions for the issue that adopts `--json`; the guide's
+deferral entry says so in the same words.
+
 ### What landed
 
 - `Output(StrEnum)`, three members, and `encoded(shape, answer,
