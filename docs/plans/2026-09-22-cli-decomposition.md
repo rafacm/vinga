@@ -452,6 +452,14 @@ decision site.
   server refused in, in the server's own words, which a client holding
   the `reason` may extend in its own grammar, as the CLI does. The
   regenerated document carries the new description.
+- No status changes. The issue's inventory table says `ALREADY_BOUND`
+  travels as a 409, and the tree says otherwise: `REFUSAL_STATUS` maps
+  `DeviceAlreadyBoundError` to 404 on purpose, with the reason written
+  beside it (what the request addressed, a device waiting to be
+  claimed under this code, is not there), and the pending tests pin
+  it. That row of the table is an inventory error inherited from #410
+  and not a decision; the token names the state, the status stays
+  what the code decided, and the correction is noted on the issue.
 - `loader.ConfigError` gains a keyword-only `reason` argument stored
   beside `problems`, so every raise site keeps reading as it does and
   the five gain one keyword. `api._refusal` passes it through to
@@ -889,6 +897,13 @@ three P1, verdict "not ready". Condensed but faithful.
    issue's table says 409; `api.py` maps `DeviceAlreadyBoundError` to
    404 and `test_config_api_pending.py` pins 404; M4 names no status
    change. Change the mapping and the expectation to 409.
+
+   *Resolution*: declined. The table row is an inventory claim carried
+   from #410, not a decision, and it is wrong about the tree: the 404
+   is deliberate, with its reason beside the mapping, and changing a
+   refusal's status is a behaviour change nothing in the issue asks
+   for. The M4 section now says so, and the issue gets a comment
+   correcting the row.
 
 2. **P1: `encoded()` cannot give the act's refusal.** Exact
    `_understood` behaviour needs the third `refusal` argument, and the
