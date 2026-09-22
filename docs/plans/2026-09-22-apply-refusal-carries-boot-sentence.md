@@ -82,17 +82,18 @@ chain behind it, since a factory that raised inside the provider layer
 may have been holding an SDK exception, and `registry.py` already
 reports that by class name only.
 
-### The log line carries the sentence beside the class name
+### The log line stays class-only
 
-Today the warning names the exception class and nothing else, because
-the sentence was held to be unsayable. It is the same sentence the
-answer now carries and the same one a boot prints into the retained
-surface, so the log line says it too:
-`a reload could not build the stored world's providers (%s): %s`, with
-the class name and the message as two args. One diagnosis, three
-surfaces, one composition. The sentinel test asserts absence from the
-log as well as from the answer, which is what makes the third surface
-lawful rather than assumed.
+The warning keeps naming the exception class and nothing else. The
+retained log is the strictest of the surfaces this refusal touches:
+the observability surfaces page says structured events carry no
+exception prose, and `logs.py` renders an ordinary record into that
+same retained JSON log. A boot's stderr and an API answer are the
+sanitized diagnostic channels; the log is metadata. So the sentence
+travels in the answer and nowhere else, and the sentinel test pins the
+warning's argument tuple as the class name alone, so a later edit that
+adds the sentence as an argument is a red test rather than a review
+finding.
 
 ### The two `openai_tts.py` refusals name the option, not the model
 
@@ -257,6 +258,11 @@ read-only sandbox, 193 s) at commit `19f7122e`. Six findings, verdict
    metadata-only contract, and the issue asks for the sentence in the
    refusal, not in the log. Keep the warning class-only, exactly as
    today, and drop the "one diagnosis, three surfaces" claim.
+
+   *Resolution*: accepted. The section is rewritten as "The log line
+   stays class-only": the warning keeps its shape, the sentence
+   travels in the answer only, and the sweep pins the warning's
+   argument tuple as the class name alone.
 
 2. **P2: the log sentinel assertion does not inspect the retained
    `LogRecord` arguments.** The existing pins use `caplog.text`, and the
