@@ -430,8 +430,24 @@ following `main`, permanently, with no run red.
 So `image-promote` does not ask "should I promote my commit". Holding
 its per-variant group, it fetches `origin/main` and considers the
 commits **between the moving tag's current revision and the tip**,
-newest first, promoting the first one that carries a `sha-` tag whose
-index passes validation, whichever run produced it.
+walking **first parents only**, from the tip downwards, and promotes
+the first one that carries a `sha-` tag whose index passes validation,
+whichever run produced it.
+
+First-parent is part of the algorithm and not a detail. A plain
+revision walk over `published..origin/main` reaches commits through
+every merge parent, so a tagged commit from merged or reintroduced
+history could win although it is not a position on `main`'s own
+sequence. This repository rebase-merges by convention, but the
+guarantee here is unconditional and the plan explicitly handles
+rewritten history, so the convention cannot be what defines the walk.
+Merge commits themselves are included; their side histories are not.
+
+A tip whose image job is **still running** simply has no `sha-` tag
+yet, so it is skipped for this invocation and the walk continues. Its
+own promote, or any later surviving one, reconciles once its immutable
+tag exists. That is the self-healing property doing its job rather
+than a case needing its own handling.
 
 That works because of what publishing a `sha-` tag already means.
 `image-publish` runs only after the unit lane, the integration lane
@@ -510,13 +526,37 @@ What the reconciler needs instead is four things.
 - **An idempotent exit.** If the moving tag already resolves to the
   same index as the chosen commit's `sha-` tag, the job does nothing
   and says so. That is what makes a second promote against an
-  unchanged `main` a no-op, which is the property the whole design
-  leans on and is cheap to check on a dispatch.
-- **Nothing read from the moving tag except for that comparison.** The
-  moving tag is an output of this system, never an input to its
-  decision. The decision comes from `main` and from which `sha-` tags
-  exist, both of which are facts a displaced run and a surviving run
-  agree on.
+  unchanged `main` a no-op, and it is the property the whole design
+  leans on. It is a **main-only** check: a dispatch never runs this
+  job, and an earlier draft that called it cheap to check on a
+  dispatch was wrong twice, once here and once in the verification
+  section.
+
+- **The moving tag is validated after assignment too.** Having moved
+  it, the job resolves it and requires it to equal the index it
+  validated, for the same reason `image-publish` re-checks the
+  immutable tags it wrote.
+- **The moving tag is a validated input, and the reading is
+  specified.** An earlier draft said nothing was read from it except
+  the idempotence comparison, which contradicted a range defined as
+  the commits since its revision. It is an input, so it is read
+  deliberately: inspect its index, require one config for each
+  expected platform, require both to carry the same `VINGA_REVISION`,
+  and require that value to be 7 or 12 hexadecimal characters and to
+  resolve to exactly one commit in `origin/main`. Seven is accepted
+  because the first promote after M1 lands necessarily reads a tag
+  written by the old scheme.
+
+  Three bootstrap cases are stated rather than implied. The tag is
+  **absent**: take the force-push path's bounded walk, which is the
+  correct behavior for "nothing is published yet". The tag is
+  **unusable** (missing config, platforms disagreeing, a revision that
+  is not hexadecimal or resolves to no commit or to more than one):
+  fail loudly, because a moving tag nobody can interpret is a state a
+  person should see rather than one a job should paper over. The
+  revision resolves to a commit **not in `origin/main`**: the
+  force-push path, whose behavior is stated above.
+
 
 ### The revision becomes twelve characters, and both immutable tags carry it
 
@@ -551,9 +591,25 @@ once and used in four places that already have to agree:
   uniqueness that seconds were only ever added to supply;
 - the reconciler's lookup.
 
-The existing workflow step that asserts the `sha-` tag ends in the
-revision the build reports extends to cover the new width, so the four
-stay one value rather than four that must agree. Collision falls to
+**How the value actually reaches the tags matters more than the
+intention**, and the plan's first statement of it named none.
+`REVISION` is computed in the job as `${GITHUB_SHA:0:12}`, while
+`docker/metadata-action` generates `type=sha,format=short`
+independently: changing the first does not stop the second emitting
+seven characters, and the existing assertion **detects** disagreement
+rather than creating agreement.
+
+So `type=sha` is dropped. Both immutable tags are generated as
+`type=raw` rendered from the one `REVISION` the job already computes,
+which makes "derived once" literally true rather than aspirational,
+and the existing equality assertion stays where it is as a guard,
+which is all it ever was.
+
+The alternative, setting `DOCKER_METADATA_SHORT_SHA_LENGTH=12` and
+asserting the result, is not taken: this session cannot verify that
+variable's behavior against the pinned action version, and a tag
+scheme should not rest on a mechanism that cannot be checked before it
+runs. Collision falls to
 roughly 1e-9 at a thousand commits, which is the order of assumption
 git itself makes when it abbreviates, and at that point "never reused"
 is an honest thing for the maintained pages to keep saying.
