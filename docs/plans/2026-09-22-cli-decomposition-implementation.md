@@ -349,20 +349,30 @@ had to be changed.
 branch's parent:
 
 ```
-$ uv run python -m tests.tools.cli_ast_identity cc54b763562665d876d4e37fdf613396e80d7242
-base: cc54b763562665d876d4e37fdf613396e80d7242
-definitions before: 546
-definitions after:  546
+$ uv run python -m tests.tools.cli_ast_identity 4d6aea57
+base: 4d6aea57
+definitions before: 547
+definitions after:  547
 
 definitions whose dump moved: 1
   CHANGED __all__ (now in __init__.py)
 definitions no longer defined: 0
 definitions not there before: 0
 
-identical: 545
+identical: 546
 ```
 
 The one that moved is `__all__`, and it is the deviation recorded below.
+
+The base is `main` rather than the commit this branch was cut from,
+because M4 merged as PR #548 while this milestone was being built and
+took five fixes with it. Three of those are in the file this package
+replaced, so the package has to match `main`'s `cli.py` rather than the
+one it was split from: `_UNNAMEABLE`, `_nameable`'s third arm and
+`_refusal`'s two lines were ported into `cli/reach.py` beside
+`REMEDIES`, which is where every one of their neighbours went. The
+count moved from 546 to 547 for the sentinel, and 546 of the 547 are
+identical.
 
 `tests/tools/cli_sections.py`, the section measurement adapted to the
 package, is supporting evidence about the definitions rather than the
@@ -512,7 +522,7 @@ Three lines moved, all regenerated with the generators and none edited.
 | --- | --- | --- |
 | `reach-ins.txt` | `+ tests/unit/test_config_cli_untransportable.py  _act  1` | A real new reach-in, named below |
 | `reach-ins.txt` | `tests/unit/test_config_cli_grammar.py  _click` 1 → 2 | Not a reach at all: a site is a `.` followed by an underscore name, and `typer._click.exceptions` is the import that file now spells for itself instead of reaching through the CLI for |
-| `command-spellings.txt` | `+ historical  vinga device pending list` | Not this milestone's: it is the plan's own remedy sentence at `docs/plans/2026-09-22-cli-decomposition.md`, and the base commit's manifest is missing it too |
+| `command-spellings.txt` | nothing, after the rebase | The line this milestone added, the plan's own quoted remedy, arrived on `main` first: PR #548's own review round regenerated the same manifest for the same reason. The generators were re-run on the rebased tree and agree with it |
 
 ### The reach-in, named
 
@@ -586,10 +596,13 @@ those were commands that would have failed rather than read oddly. And
   `config/responses.py`. Both were found by running the suite and
   neither by any static sweep of `cli.<name>`, because one is a string
   and the other was not in the re-export list the plan measured.
-- **The command-spellings manifest was already stale at the base.**
-  The plan's own remedy sentence quotes `vinga device pending list`, and
-  the manifest at `cc54b763` does not have that line. Regenerating here
-  fixes it; nothing in this milestone caused it.
+- **The command-spellings manifest was stale, and two milestones
+  found it independently.** The plan's own remedy sentence quotes
+  `vinga device pending list`, and the manifest did not have that line.
+  M1 regenerated it, PR #548's review round regenerated it on `main`
+  first, and the rebase dropped M1's hunk as the duplicate it had
+  become. Neither milestone caused the staleness: a plan committed to
+  `main` outside either branch did.
 - **The census counts an import path as a reach-in.** A site is a `.`
   followed by an underscore name, so `typer._click.exceptions` reads as
   a reach into `_click`. It moved one line because a file that used to
@@ -616,9 +629,9 @@ exactly why.
 
 ### Verification
 
-From `vinga-server/`: `uv run ruff check .` (clean),
-`uv run pytest tests/unit -q` (7427 passed, 19 skipped, 28m51s),
-`uv run pytest tests/integration -q` (347 passed, 9m03s) and
+Run on the rebased tree, from `vinga-server/`: `uv run ruff check .`
+(clean), `uv run pytest tests/unit -q` (7429 passed, 19 skipped,
+28m55s), `uv run pytest tests/integration -q` (347 passed, 9m04s) and
 `uv run pytest tests/census -q` (66 passed), plus the CLI reference
 drift check the server workflow runs, over the generated region and
 over the recipes inside it, both reporting no difference. The
@@ -626,10 +639,13 @@ AST-identity script and the section measurement above were run at this
 branch's head, and each package module was imported in an interpreter
 of its own.
 
-The unit lane grew by nine cases and by nothing else: 7,437 at the base
-commit and 7,446 collected here, which is the two of the cycle proof,
-the one holding the package to the relative spelling, and the six the
-transportability property and its ordering cases add. The wheel-grade
+The unit lane grew by nine cases and by nothing else, which the rebase
+is what proves: 7,446 collected on the old base and 7,448 on `main`,
+and the two are `main`'s own, the remedies-as-literals pin and the
+`null` shape its review round added. The nine are the two of the cycle
+proof, the one holding the package to the relative spelling, and the
+six the transportability property and its ordering cases add. The
+wheel-grade
 lane is inside the integration lane and ran, since `uv` is on PATH and
 nothing skipped. The image build and the smoke conversation were not
 run here and are unverified in this section; the pull request records
