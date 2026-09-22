@@ -362,10 +362,11 @@ Three proofs, none of them "the tests pass".
 
 ### M3: the dump beside the reader, and the dispatch on the render step
 
-`answers.py` gains one function, `encoded(shape, answer, format)`,
-which first performs exactly `_understood`'s reading, the strict
-`validate_python` over `_declared` with the same fixed refusal on
-failure, and then dumps that validated result in JSON mode
+`answers.py` gains one function, `encoded(shape, answer, refusal,
+output)`, which first performs exactly `_understood`'s reading, the
+strict `validate_python` over `_declared` with the act's own refusal
+sentence on failure, which is why the signature carries it, and then
+dumps that validated result in JSON mode
 (`TypeAdapter.dump_python(..., mode="json")`), so an enum member such
 as `Applies.RELOAD` leaves as its string and a date as ISO text, before
 writing it as JSON (the standard encoder,
@@ -383,17 +384,17 @@ model that carries an enum (an `Acknowledgement` with its `applies`),
 dumps it through both encoders, and asserts the character is escaped,
 the mask is the mask, and the enum is its value. Beside it, the
 machine arm is driven with a body carrying an extra member and with a
-strict-type mismatch, and asserted to meet the fixed refusal with no
-bytes on either stream, which is the read path `_understood` already
-takes, reached through the new function.
+strict-type mismatch, and asserted to meet that act's exact refusal
+sentence with no bytes on either stream, which is the read path
+`_understood` already takes, reached through the new function.
 
 The dispatch sits where the issue put it, on the act's render step.
 `answers.py` declares `Output(StrEnum)` with `human`, `json` and
 `yaml`, and `_act` takes `output: Output = Output.HUMAN` as its last
 parameter: the human arm is `act.render(act.read(answer))`, unchanged,
-and the machine arm writes `encoded(act.answers, answer, output)` to
-stdout and then the act's notices to stderr, the same ones the human
-arm prints. `_performed` passes the default and is the one production
+and the machine arm writes `encoded(act.answers, answer, act.refusal,
+output)` to stdout and then the act's notices to stderr, the same ones
+the human arm prints. `_performed` passes the default and is the one production
 caller, so the seam's default policy gets its own pin, per the
 honest-seams lens: a test drives `_act` with a fake `_call` through
 both arms and asserts what each stream received. No flag reaches the
@@ -911,6 +912,10 @@ three P1, verdict "not ready". Condensed but faithful.
    to the signature, have `_act` pass `act.refusal`, and make the
    invalid-output tests assert that exact per-act refusal and no
    output.
+
+   *Resolution*: accepted. The signature carries `refusal`, `_act`
+   passes `act.refusal`, and the two refusal cases assert the act's
+   exact sentence.
 
 3. **P1: the notice projection is assigned to four renderer functions,
    not four `Act` rows.** `_acknowledged` alone renders for many
