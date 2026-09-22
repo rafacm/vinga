@@ -147,3 +147,59 @@ site.
   makes the same move through the API; this one goes to the store
   directly, since the write path would have its own opinion about a
   reference to a variable nothing sets.
+
+### PR review round, PR #547
+
+External review of [#547](https://github.com/rafacm/vinga/pull/547)'s
+diff: codex CLI 0.155.1, model gpt-5.6-sol, read-only sandbox,
+2026-09-22, runtime 2m23s, reviewing `origin/main...6826ff82`. Verdict
+as received: **mergeable after the listed fix**. One finding, a P2,
+adopted.
+
+It is the milestone's own error committed inside its fix, and of a
+shape this repository has a name for: prose claiming more than was
+measured. The sweep had just demonstrated two classes of refusal that
+do not fit the sentence the documentation was written around, and the
+documentation was written anyway.
+
+1. **P2: public references promise an option key for refusals that have
+   none.** `docs/reference/cli.md` and
+   `config/api_descriptions/reload-refused.md` both say a provider-build
+   refusal names "the entry, the option key and the rule". The
+   unknown-type refusal this milestone's own sweep drives has no option
+   key, and the factory-failure refusal names the entry, the provider
+   type and the exception's class instead. The generated OpenAPI
+   document repeats the guarantee to every reader of the API. Concrete
+   fix: describe the answer as naming the entry and the applicable
+   key, type, rule or failure class, regenerate
+   `docs/reference/api-openapi.json`, and make the same qualification in
+   the affected docstrings.
+
+   *Resolution.* Adopted whole, in `ac23af82`. All four public
+   sentences and all four docstrings now say the entry, and with it
+   whichever that particular refusal has of an option key, a type this
+   deployment declares, the rule that was broken, or the class of the
+   exception a factory raised, with the point stated explicitly that
+   which of them appear is the refusal's own to say and that none of
+   them is ever a stored value, an unrecognized provider type included.
+
+   Two places beyond the finding's list carried the same over-claim and
+   moved with it, both found by grepping the milestone's own spellings
+   rather than by rereading the files the finding named: the two
+   section comments in `tests/unit/test_config_reload.py` that state the
+   sweep's claim, and the changelog fragment, whose headline promised
+   "which entry, which key and which rule refused". No assertion
+   changed, so nothing about what is proven moved; what moved is only
+   what was claimed. `providers/base.py`'s `ProviderError` gained one
+   further correction of the same kind while it was being reworded: the
+   identity a refusal names is the entry's label at every site but the
+   one that refuses a stage nothing binds, where it is the agent's name.
+
+   Verified: `docs/reference/api-openapi.json` regenerated through
+   `uv run vinga-server config openapi`, one line moved and the new text
+   parsed back out of the document to confirm it sits on
+   `/runtime/config/reload` `post` `422` and nowhere else;
+   `uv run ruff check .`, `uv run pytest tests/census -q` (66 passed),
+   `python3 scripts/check_doc_links.py .` (261 files, 0 failures),
+   `scripts/fold_changelog.py check` (1 fragment, 0 failures), and the
+   four touched unit suites (151 passed).
