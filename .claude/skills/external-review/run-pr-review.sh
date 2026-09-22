@@ -12,7 +12,10 @@
 # selects the model within the backend (default gpt-5.6-sol for codex,
 # claude-opus-5 for claude). The tiering rule lives in SKILL.md: sol
 # for plans and behavior-changing milestone PRs, terra for low-stakes
-# rounds.
+# rounds. REVIEW_EFFORT pins the reasoning effort (default high) in
+# the backend's own vocabulary, and the provenance header records
+# the run as `<provider>/<model>, thinking <level>`, the attribution
+# string the implement-issue skill defines.
 #
 # Writes its working files (diff, prompt, output, posted comment) next
 # to nothing in the repository: they go to $TMPDIR (or /tmp).
@@ -30,6 +33,18 @@ case "$BACKEND:$MODEL" in
   codex:claude-*|claude:gpt-*)
     echo "model $MODEL does not belong to backend $BACKEND" >&2; exit 2 ;;
 esac
+# The effort is pinned rather than left to the backend's default,
+# because a level nothing set is a level nothing can record. Each
+# backend has its own vocabulary and a word outside it is refused
+# here rather than by the reviewer, whose refusal would post as a
+# review.
+EFFORT="${REVIEW_EFFORT:-high}"
+case "$BACKEND:$EFFORT" in
+  codex:minimal|codex:low|codex:medium|codex:high|codex:xhigh) PROVIDER=openai ;;
+  claude:low|claude:medium|claude:high|claude:xhigh|claude:max) PROVIDER=anthropic ;;
+  *) echo "effort $EFFORT is not a level backend $BACKEND accepts" >&2; exit 2 ;;
+esac
+ATTRIBUTION="$PROVIDER/$MODEL, thinking $EFFORT"
 SKILL_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="${TMPDIR:-/tmp}/external-review-pr-$PR"
 mkdir -p "$WORK"
@@ -61,7 +76,7 @@ PY
 STARTED="$(date +%s)"
 case "$BACKEND" in
   codex)
-    codex exec -m "$MODEL" --sandbox read-only - < "$PROMPT" > "$OUT" 2> "$ERR"
+    codex exec -m "$MODEL" -c "model_reasoning_effort=$EFFORT" --sandbox read-only - < "$PROMPT" > "$OUT" 2> "$ERR"
     CLI_STAMP="codex CLI $(codex --version | sed 's/codex-cli //'), read-only sandbox"
     ;;
   claude)
@@ -69,7 +84,7 @@ case "$BACKEND" in
     # every unlisted tool stays available. The deny list is the fence,
     # and --setting-sources ""/--strict-mcp-config keep local settings
     # and MCP servers from widening it back.
-    claude -p --model "$MODEL" \
+    claude -p --model "$MODEL" --effort "$EFFORT" \
       --strict-mcp-config --setting-sources "" \
       --allowedTools "Read,Glob,Grep" \
       --disallowedTools "Bash,Write,Edit,NotebookEdit,WebFetch,WebSearch,Agent,Task,Workflow,Skill,SendMessage,CronCreate,CronDelete,RemoteTrigger,PushNotification,ScheduleWakeup,EnterWorktree,ExitWorktree,DesignSync,Monitor,LSP,ToolSearch" \
@@ -84,8 +99,8 @@ DURATION="$(( ELAPSED / 60 ))m$(printf '%02d' "$(( ELAPSED % 60 ))")s"
 HEAD_SHA="$(git rev-parse --short HEAD)"
 {
   printf '## External review round\n\n'
-  printf 'Automated external review of this PR'"'"'s diff (%s...%s): %s, model %s, %s, runtime %s. Posted verbatim by the review run itself; resolutions follow as replies.\n\n' \
-    "$BASE" "$HEAD_SHA" "$CLI_STAMP" "$MODEL" "$(date -u +%Y-%m-%d)" "$DURATION"
+  printf 'Automated external review of this PR'"'"'s diff (%s...%s). Reviewed %s by %s via %s, runtime %s, at commit %s. Posted verbatim by the review run itself; resolutions follow as replies.\n\n' \
+    "$BASE" "$HEAD_SHA" "$(date -u +%Y-%m-%d)" "$ATTRIBUTION" "$CLI_STAMP" "$DURATION" "$HEAD_SHA"
   printf -- '---\n\n'
   cat "$OUT"
 } > "$WORK/comment.md"

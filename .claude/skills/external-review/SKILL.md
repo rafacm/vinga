@@ -32,6 +32,18 @@ provenance header, so backend timing comparisons accumulate on the
 PRs themselves. Manual plan-mode rounds record the runtime in the
 plan's review-round section the same way.
 
+The reasoning effort is pinned as well as the model, because a
+level nothing set is a level nothing can record. `REVIEW_EFFORT`
+(default `high`) is passed to codex as `model_reasoning_effort`
+and to claude as `--effort`; the script refuses a word the chosen
+backend does not accept (codex: `minimal`, `low`, `medium`,
+`high`, `xhigh`; claude: `low`, `medium`, `high`, `xhigh`,
+`max`). Every round is then recorded as
+`<provider>/<model>, thinking <level>`, the attribution string
+the `implement-issue` skill defines under "Attribution", which
+is the same shape a plan, a commit and a PR carry for the models
+that wrote them.
+
 ### Fallback when the codex quota is exhausted
 
 When the ChatGPT plan behind codex runs out of weekly quota, set
@@ -46,19 +58,20 @@ the recorded round, and return to codex when the quota resets.
 
 ## Mechanics that are not obvious
 
-- Always `codex exec -m <model> --sandbox read-only -` with the
-  prompt on stdin. Never `codex review` with a custom prompt: it
-  ignores the prompt.
+- Always `codex exec -m <model> -c model_reasoning_effort=<level>
+  --sandbox read-only -` with the prompt on stdin, the level being
+  the one the round will record. Never `codex review` with a
+  custom prompt: it ignores the prompt.
 - The claude equivalent, used for manual (plan-mode) runs on the
   fallback backend, is the exact invocation in `run-pr-review.sh`'s
   claude arm: copy it verbatim, including `--setting-sources ""`,
-  `--strict-mcp-config` and the `--disallowedTools` list. The deny
-  list is what makes the run read-only; `--allowedTools` alone
-  restricts nothing.
+  `--strict-mcp-config`, `--effort` and the `--disallowedTools`
+  list. The deny list is what makes the run read-only;
+  `--allowedTools` alone restricts nothing.
 - Run it in the background from the worktree under review. Sol takes
   10 to 25 minutes and looks stuck; stderr shows file-reading
   activity, and only the final answer reaches stdout:
-  `codex exec -m gpt-5.6-sol --sandbox read-only - < prompt.md > out.txt 2> err.txt`
+  `codex exec -m gpt-5.6-sol -c model_reasoning_effort=high --sandbox read-only - < prompt.md > out.txt 2> err.txt`
 - The claude backend is silent on both streams until it exits, so an
   empty stderr does not mean a dead run there. Watching progress
   needs `--output-format stream-json --verbose`, at the cost of the
@@ -91,8 +104,14 @@ the reviewer confirms rather than discovers.
 3. Run the reviewer in the background; read stdout when it
    completes.
 4. Record the findings as received, condensed but faithful, in a
-   "Plan review round" section of the plan (its own commit), noting
-   backend, CLI version, model, date, and the reviewed commit hash.
+   "Plan review round" section of the plan (its own commit). Its
+   header is the review-round form of the `implement-issue`
+   skill's "Attribution": `Reviewed <date> by <provider>/<model>,
+   thinking <level> via <tool> <version> (<enforcement>), runtime
+   <n>, at commit <hash>, plan blob <hash>`. The blob hash is
+   `git rev-parse HEAD:<plan path>` at the reviewed commit; the
+   rebase merge rewrites the commit hash and leaves the blob
+   reachable, so the blob is what a later reader can resolve.
 5. Address each finding with its own amendment commit, appending a
    `*Resolution*` note under the recorded finding. A finding you
    reject gets a resolution note saying why, never silence.
