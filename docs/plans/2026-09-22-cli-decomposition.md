@@ -406,7 +406,11 @@ decision site.
   server states which, the client spells the command. `Problem` gains
   `reason: RefusalReason | None = None`, described in its docstring
   as the closed token a client may phrase a remedy from, with the
-  reading rule the issue records.
+  reading rule the issue records. `Problem.detail`'s description stops
+  claiming it is the sentence the CLI prints: it is the state the
+  server refused in, in the server's own words, which a client holding
+  the `reason` may extend in its own grammar, as the CLI does. The
+  regenerated document carries the new description.
 - `loader.ConfigError` gains a keyword-only `reason` argument stored
   beside `problems`, so every raise site keeps reading as it does and
   the five gain one keyword. `api._refusal` passes it through to
@@ -691,6 +695,9 @@ refer to the plan as committed at that blob.
    after M4 the CLI prints `detail` plus a remedy for a known reason.
    Revise the description to server-owned state prose that a client
    with the `reason` may extend, and regenerate the document.
+
+   *Resolution*: accepted. The `detail` description is revised in the
+   M4 section and travels into the regenerated document.
 
 8. **P2: the proposed cycle proof does not inspect the import graph.**
    `sections.py` excludes import-bound names, and once the file is a
