@@ -28,9 +28,28 @@ from enum import Enum, StrEnum
 from typing import Any, Literal, get_args, get_origin
 
 import yaml
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter
 
 from vinga_server.config.loader import ConfigError
+
+# What an answer nobody vouched for can provoke out of the libraries
+# this reading is built on, which is the set this module's boundary is
+# defined by rather than one exception type of it.
+#
+# `config/transport.py` names the same class from the other side: "a
+# TypeError, a ValueError or a RecursionError with a traceback, in place
+# of the sentence this file exists to produce". A body can be everything
+# a shape declares and still be something no encoder can write, and a
+# document nested past what the dump will walk is exactly that: valid,
+# and a `ValueError` out of a library. `ValidationError` is a
+# `ValueError` in pydantic, so the strict reading's own refusal is this
+# same arm rather than a second one beside it, and PyYAML's failures are
+# not exceptions of Python's at all.
+#
+# `ConfigError` is not in it and is not caught by it: it is an
+# `Exception` of this project's own, so a refusal composed further in
+# passes through with its own words.
+_UNWRITABLE = (TypeError, ValueError, RecursionError, yaml.YAMLError)
 
 
 def _understood(shape: object, answer: object, refusal: str) -> Any:
@@ -71,6 +90,13 @@ def _read(shape: object, answer: object, refusal: str, mode: Literal["python", "
     Dumping a validated model is also what leaves the extras behind:
     only what the shape declares is written back out.
 
+    The dump is inside the arm and not only the validation, because the
+    two fail for different reasons and only one of them is about the
+    shape: a body can be everything the shape declares and still be
+    something the dump cannot write, which `_UNWRITABLE` above is the
+    set of. The answer either reads as the shape and comes back, or it
+    is the act's one sentence.
+
     The refusal is built inside the handler and raised after it, and the
     exception itself is not bound to a name: `ValidationError.errors()`
     retains the input it rejected, which for this API can be a
@@ -84,7 +110,7 @@ def _read(shape: object, answer: object, refusal: str, mode: Literal["python", "
         return adapter.dump_python(
             adapter.validate_python(_declared(shape, answer), strict=True), mode=mode
         )
-    except ValidationError:
+    except _UNWRITABLE:
         problem = refusal
     raise ConfigError(problem)
 
@@ -143,8 +169,26 @@ def encoded(shape: object, answer: object, refusal: str, output: Output) -> str:
     Ends in exactly one newline, which `yaml.safe_dump` already writes
     and the JSON arm adds, so that one act's answer is one document on
     the stream and the caller prints it without a second one.
+
+    The encoding is inside the same arm the reading is, and for the same
+    reason: what a library raises over an answer is a traceback with the
+    answer in it, and this boundary answers with one sentence or with a
+    document. The sentence is recorded inside the handler and raised
+    once it has been left, so nothing of the library's own exception is
+    on the chain behind it.
     """
     document = _read(shape, answer, refusal, "json")
+    problem: str | None = None
+    try:
+        return _written(document, output)
+    except _UNWRITABLE:
+        problem = refusal
+    raise ConfigError(problem)
+
+
+def _written(document: object, output: Output) -> str:
+    """The validated document as the format asked for, and nothing about
+    whether it could be written: that is the boundary's above."""
     if output is Output.JSON:
         # Sorted, because determinism on stdout is the standing rule and
         # a mapping's order here is whatever the model happened to

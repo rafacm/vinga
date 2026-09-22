@@ -2698,3 +2698,60 @@ def test_the_machine_arm_writes_the_model_and_keeps_the_same_notice(
     # Said rather than implied by the equality above, which two empty
     # streams would also satisfy.
     assert notice in machine.err
+
+
+# How deep a structure the API's own document type accepts and the
+# JSON-mode dump refuses. `ConfigDocument.config` is `dict[str, Any]`,
+# which is the masked domain half travelling through undescribed on
+# purpose, so nothing between the wire and the encoder bounds its depth.
+# 300 is comfortably past what the dump will walk and comfortably inside
+# what this interpreter will.
+TOO_DEEP = 300
+
+
+def _nested(depth: int, leaf: object) -> dict[str, object]:
+    """One mapping inside another, `depth` times, with the leaf at the
+    bottom. The leaf is a credential sentinel in the case below: what a
+    boundary that has to say nothing of the answer must not say is at
+    the one place a walk that gave up would have reached last."""
+    document: dict[str, object] = {"leak": leaf}
+    for _ in range(depth):
+        document = {"under": document}
+    return document
+
+
+@pytest.mark.parametrize("shape", [Output.JSON, Output.YAML])
+def test_an_answer_no_encoder_can_write_is_a_sentence_and_not_a_traceback(
+    shape: Output,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The boundary's contract, over the half validation does not reach.
+
+    A body can be everything the shape declares and still be something
+    no encoder can write: this one is a document nested past what the
+    JSON-mode dump will walk, and every field in it is the type the
+    model asked for. What comes out of the library there is a
+    `ValueError`, and the CLI's own boundary catches one exception, so
+    without containment it leaves as a traceback with the answer inside
+    it.
+
+    So the sentence is the act's own, both streams are empty, and the
+    library's exception is not behind it: `ConfigError` is raised after
+    the handler is left, which is what keeps `__context__` clear for
+    anything walking the chain, and the planted credential is nowhere in
+    what the failure carries.
+    """
+    body = {"config": _nested(TOO_DEEP, SECRET), "secrets": []}
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: body)
+
+    with pytest.raises(ConfigError) as refused:
+        acts._act(invocation.Invocation(), deployment.LIST, UNREACHED, shape)
+
+    assert str(refused.value) == deployment.LIST.refusal
+    written = capsys.readouterr()
+    assert written.out == ""
+    assert written.err == ""
+    carried = _chain(refused.value)
+    assert SECRET not in carried
+    assert "Circular reference" not in carried
