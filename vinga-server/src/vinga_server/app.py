@@ -857,9 +857,10 @@ def config_reloader(
     each for a reason of its own. `ReloadInProgressError` is about this
     server's exclusion and was composed over nothing stored at all.
     `ProviderRefusedError` carries the provider layer's own sentence,
-    which names the entry, the option key and the rule and never the
-    value it refused over, so it is the one refused half whose location
-    can be said; it is composed where the failure is
+    which names the entry, with whichever that refusal has of an option
+    key, a declared type, the rule that was broken or a failed factory's
+    exception class, and never the value it refused over, so it is the
+    one refused half whose location can be said; it is composed where the failure is
     (`config/reload.py`) because that is where the class of it can be
     recorded in the log in the same breath. A failure with no type at
     all is a bug and is left alone, for the reason the comparison leaves

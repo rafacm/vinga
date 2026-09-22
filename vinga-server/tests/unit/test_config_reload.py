@@ -951,8 +951,11 @@ async def test_a_typed_options_refusal_names_the_entry_and_the_key(
 # classes of thing that can refuse a build rather than a module of its
 # own. Stated at its true width: for each class below, a stored world
 # whose values carry a credential-shaped sentinel is refused with a
-# sentence that names the entry, the key and the rule, and the sentinel
-# reaches neither the answer nor any rendering of the log. What the
+# sentence that names the entry, with whichever that class of refusal
+# has of an option key, a declared type, a rule and a failed factory's
+# exception class, and the sentinel reaches neither the answer nor any
+# rendering of the log. Which of them a case asserts on is the case's
+# own business, because no refusal carries all four. What the
 # sweep proves about the sites it drives is a regression; what the whole
 # surface does rests on the inventory of every `raise ProviderError(`
 # site, read line by line, which the plan records.
@@ -1824,9 +1827,10 @@ def test_neither_an_answer_nor_a_refusal_carries_a_credential(
 # proven rather than reasoned about.
 #
 # What travels is the provider layer's own vocabulary, which is the
-# entry, the key and the rule. What does not is anything an operator
-# wrote as a value, and the two cases plant one each: a value under an
-# option name, and the name of a variable under `api_key_env`.
+# entry and whatever the refusal has to say about it: here an option
+# key in one case and a rule in both. What does not is anything an
+# operator wrote as a value, and the two cases plant one each: a value
+# under an option name, and the name of a variable under `api_key_env`.
 
 # An entry name and an option name, both of them stored keys an operator
 # chose, and both shaped so a substring check for them cannot match by

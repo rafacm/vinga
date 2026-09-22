@@ -424,10 +424,15 @@ class ConfigReload:
         That sentence is the one a server started from this store prints
         on stderr before refusing to start, and it is sayable here for
         the reason it is sayable there: a `ProviderError`'s message
-        names the entry, the option key and the rule, all of them this
-        repository's vocabulary, and never the value it refused over.
-        The prefix is what says that nothing was swapped, which the
-        provider layer's sentence alone does not.
+        names the entry, and with it whichever that refusal has of an
+        option key, a type this deployment declares, the rule that was
+        broken or the class of the exception a factory raised, all of
+        them this repository's vocabulary, and never the value it
+        refused over. Which of them travel is the refusal's own to say
+        and not this method's: an unknown type names no option key, and
+        a factory that would not build names a class where another
+        names a rule. The prefix is what says that nothing was swapped,
+        which the provider layer's sentence alone does not.
 
         What does not travel is the exception. The message is taken
         inside the handler as a string and the refusal is raised after

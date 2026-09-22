@@ -345,9 +345,11 @@ class ProviderRefusedError(ConfigError):
     names, so nothing was applied.
 
     The provider layer's own refusal, translated. `ProviderError` is
-    that layer's contract and says which entry, which option key and
-    which rule it choked on, and never the value it choked over, which
-    is what makes it sayable over HTTP; but it is not a `ConfigError`,
+    that layer's contract and says which entry it choked on, with
+    whichever that refusal has of an option key, a declared type, the
+    rule that was broken or a failed factory's exception class, and
+    never the value it choked over, which is what makes it sayable over
+    HTTP; but it is not a `ConfigError`,
     so nothing on the API side would know what status it meant. This is
     the configuration vocabulary's word for the same event: a stored
     world this server cannot run, refused with nothing changed, under
