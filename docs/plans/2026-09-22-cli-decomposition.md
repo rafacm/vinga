@@ -548,11 +548,18 @@ falsify it: no, because M1 moves definitions and touches no fixture.
 
 Reusing what exists wherever the assertion already has a home.
 
-- **M4**, server side: `tests/unit/test_config_api_pending.py` and
-  `tests/unit/test_simulator_board.py` pin the sentences and gain the
-  token; a new case per site asserts the body carries the member and
-  the sentence names no command (`PROGRAM` and `SERVER_PROGRAM` absent
-  from `detail`, the #386 invariant extended to these five). The
+- **M4**, server side, one named home per raise path:
+  `tests/unit/test_config_api_pending.py` for the unknown code and the
+  claim refusal, `tests/unit/test_config_api_runtime.py` (the
+  unloaded-agent case near line 679) for the agent not serving,
+  `tests/unit/test_simulator_board.py` and `test_config_api_pending.py`
+  for the device already bound, and `tests/unit/test_config_api_writes.py`
+  (the secret-holder case near line 861) for the two missing-holder
+  tokens. Each pins the new sentence, asserts the exact `reason` the
+  site attaches, asserts the sentence names no command (`PROGRAM` and
+  `SERVER_PROGRAM` absent from `detail`, the #386 invariant extended
+  to these five), and keeps the no-secret and no-address checks
+  already beside it. The
   closed-set pin: `set(REMEDIES) == set(RefusalReason)`, so a member
   added on one side alone is red. Client side, in
   `tests/unit/test_config_cli_rendering.py` beside the existing
@@ -841,6 +848,10 @@ verdict "not ready" pending the P1 amendments. Condensed but faithful.
    endpoints attach their tokens. Name tests at all five raise paths,
    asserting the exact `reason`, no command spelling in `detail`, and
    the existing no-secret and no-address checks.
+
+   *Resolution*: accepted. The Tests section names a home per raise
+   path, including the runtime and secret-write files, each asserting
+   the exact token.
 
 6. **P2: the accepted old-CLI/new-server failure is an unaddressed
    upgrade hazard.** The `vinga` client installs separately to
