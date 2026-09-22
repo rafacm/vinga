@@ -258,10 +258,10 @@ same way, by restoring the quoted model.
 
 ## Milestones
 
-- [ ] **M1: the apply refusal carries the provider-build sentence
+- [x] **[M1: the apply refusal carries the provider-build sentence](2026-09-22-apply-refusal-carries-boot-sentence-implementation.md#m1-the-apply-refusal-carries-the-provider-build-sentence)
   (PR TBD).** `_built` raises `ProviderRefusedError` with the reload
-  prefix and the `ProviderError`'s message, the log line carries the
-  message beside the class name, `_PROVIDERS_REFUSED` and the four
+  prefix and the `ProviderError`'s message, the log line keeps the
+  class name alone, `_PROVIDERS_REFUSED` and the four
   docstrings and comments that argue for it move to the new rule, the
   two `openai_tts.py` refusals stop quoting the model, the sentinel
   sweep above lands with its inverted pins, the `reload-refused`
