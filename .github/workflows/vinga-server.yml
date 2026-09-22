@@ -27,12 +27,14 @@ on:
       - "docker-compose.yml"
       - "deploy/**"
       - ".github/workflows/vinga-server.yml"
-  # On-demand full runs against any branch: the image job below skips
-  # pull_request events, and a branch that touches the image's own
-  # plumbing (its name, its env vars, its volume paths) should be able
-  # to prove itself before merging rather than on main afterwards. A
-  # dispatch run builds and smokes but never publishes; the publish
-  # steps are gated on a push to main.
+  # On-demand full runs against any branch, and the only pre-merge
+  # event that reaches the publishing half. A pull request builds and
+  # smokes the image but pushes nothing, so it exercises no digest, no
+  # manifest assembly and no tag computation; a dispatch pushes by
+  # digest, assembles the real manifest from the real digests and
+  # prints it under `--dry-run`. A branch that touches the image's own
+  # plumbing (its name, its env vars, its volume paths, the publish
+  # itself) proves itself here rather than on main afterwards.
   workflow_dispatch:
 
 # One live run per pull request, and a group of its own for everything
@@ -1102,14 +1104,14 @@ jobs:
   # question. The cost is the `if: matrix.arch == 'amd64'` lines below,
   # which are the file's existing idiom rather than a new one.
   #
-  # Skipped on pull requests, deliberately and temporarily: while the
-  # pre-release simplification milestones and the rename land, PRs come
-  # quickly and this lane (four builds, arm64 under QEMU, the whole
-  # smoke conversation) is the longest pole in each round-trip. Every
-  # merge still gets the full lane on main, so no merged commit goes
-  # unsmoked; a PR that touches the image's own plumbing gets a manual
-  # workflow_dispatch run before merging. When the churn settles,
-  # delete this job's `if` so PRs run the full lane again.
+  # Runs on every event this workflow runs on, pull requests included,
+  # so a change that breaks the image says so on the PR rather than
+  # after the merge. What makes that affordable is the split above: on
+  # a pull request the build loads locally and pushes nothing, so the
+  # job needs no registry credential and leaves no untagged version
+  # behind, and a fork's read-only token is enough. The paths list at
+  # the top of this file is what "image-affecting" means here: a pull
+  # request that touches none of them never starts this job.
   #
   # Two variants, from one Dockerfile so they cannot drift. `default`
   # carries the local engines and keeps the unsuffixed tags every
@@ -1118,7 +1120,6 @@ jobs:
   # Both run the whole smoke conversation on amd64, which is what makes
   # them provably the same server rather than two that merely build.
   image:
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1670,7 +1671,7 @@ jobs:
             exit 1
           fi
 
-      # The pull-request gate uses the source tree. This non-PR image
+      # The integration lane's gate uses the source tree. This image
       # repetition proves both published variants carry the same direct
       # OTLP/HTTP path through the pinned Jaeger v2 backend.
       - name: Check the built image reached direct Jaeger
