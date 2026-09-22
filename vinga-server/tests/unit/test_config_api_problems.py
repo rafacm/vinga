@@ -1192,3 +1192,31 @@ def test_each_title_is_the_status_s_standard_reason_phrase() -> None:
         500: "Internal Server Error",
         503: "Service Unavailable",
     }
+
+
+# The member that is not there
+
+
+def test_a_refusal_with_no_token_carries_exactly_the_four_members(
+    client: TestClient,
+) -> None:
+    """`Problem.reason` is absent from the wire when a refusal is in
+    none of the states the vocabulary names, and never null.
+
+    The member set is the whole of the compatibility claim. `Problem`
+    forbids extra keys on the way in as well as out, so a client older
+    than the vocabulary refuses a body carrying a member it has never
+    heard of: a `reason` dumped as null would put that member on the
+    401s, the malformed-request 422, the routing refusals and the
+    storage 500s at once, and the skew would cover every refusal this
+    API sends rather than the handful that have something to say.
+
+    Asserted on a refusal that has no token and never will: a request
+    body this API cannot read at all.
+    """
+    response = client.put(
+        "/agents/sam", content="not json", headers={"Content-Type": "application/json"}
+    )
+
+    assert response.status_code == 422
+    assert set(response.json()) == {"title", "status", "detail", "errors"}
