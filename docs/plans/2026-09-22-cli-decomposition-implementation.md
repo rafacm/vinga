@@ -617,12 +617,20 @@ exactly why.
 ### Verification
 
 From `vinga-server/`: `uv run ruff check .` (clean),
-`uv run pytest tests/census -q` (66 passed), and the CLI reference drift
-check the server workflow runs, over the generated region and over the
-recipes inside it, both reporting no difference. The AST-identity script
-and the section measurement above were run at this branch's head, and
-each package module was imported in an interpreter of its own.
+`uv run pytest tests/unit -q` (7427 passed, 19 skipped, 28m51s),
+`uv run pytest tests/integration -q` (347 passed, 9m03s) and
+`uv run pytest tests/census -q` (66 passed), plus the CLI reference
+drift check the server workflow runs, over the generated region and
+over the recipes inside it, both reporting no difference. The
+AST-identity script and the section measurement above were run at this
+branch's head, and each package module was imported in an interpreter
+of its own.
 
-The unit and integration lanes are recorded in the pull request, with
-the counts as they ran. The image build and the smoke conversation were
-not run here and are unverified in this section.
+The unit lane grew by nine cases and by nothing else: 7,437 at the base
+commit and 7,446 collected here, which is the two of the cycle proof,
+the one holding the package to the relative spelling, and the six the
+transportability property and its ordering cases add. The wheel-grade
+lane is inside the integration lane and ran, since `uv` is on PATH and
+nothing skipped. The image build and the smoke conversation were not
+run here and are unverified in this section; the pull request records
+what CI says about them.
