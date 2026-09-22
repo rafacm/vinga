@@ -40,8 +40,13 @@ from vinga_server.config.entities import (
     PROGRAM,
     RENAME_UNSERVED_NOTICE,
 )
-from vinga_server.config.models import NOT_A_MAC, PROVIDER_STAGES, DatabaseConfig
-from vinga_server.config.responses import Applies
+from vinga_server.config.models import (
+    NOT_A_MAC,
+    PROVIDER_STAGES,
+    SERVER_PROGRAM,
+    DatabaseConfig,
+)
+from vinga_server.config.responses import Applies, RefusalReason
 from vinga_server.config.secrets import (
     MASTER_KEY_ENV,
     SecretLocation,
@@ -879,6 +884,79 @@ def test_a_secret_on_an_entity_that_is_not_there_is_404_without_either_name(
     ]
     assert all(SECRET not in str(record.__dict__) for record in served)
     assert all(OTHER_SECRET not in str(record.__dict__) for record in served)
+
+
+# And which of the two holders it was, as a token
+#
+# The refusal above is one state with two remedies: creating a provider
+# and creating an MCP server are two commands of the client's grammar,
+# and this server spells neither. So the kind travels as a token and the
+# client picks the command, which is the whole of what #488 moved here.
+# The sentence used to end with `vinga-server config <noun> set`, and an
+# image built before a rename spelled a command the CLI beside it no
+# longer had.
+HOLDERS = [
+    ("/providers/llm", "providers", RefusalReason.PROVIDER_MISSING, "api_key"),
+    ("/mcp-servers", "mcp_servers", RefusalReason.MCP_SERVER_MISSING, "env.TOKEN"),
+]
+
+
+@pytest.mark.parametrize(
+    ("prefix", "section", "reason", "slot"),
+    HOLDERS,
+    ids=[section for _, section, _, _ in HOLDERS],
+)
+def test_a_secret_for_a_holder_that_is_not_there_says_which_kind_it_was(
+    client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+    prefix: str,
+    section: str,
+    reason: RefusalReason,
+    slot: str,
+) -> None:
+    """The holder's own missing sentence with the kind beside it as a
+    token, and no command in either.
+
+    Driven with the planted credential as the entity name, so the leak
+    checks the case above makes are made about this one too: the holder
+    is addressed by something that could be a pasted credential, and
+    nothing of it reaches the body, the headers or a record.
+    """
+    path = f"{prefix}/{quote(SECRET, safe='')}/secrets/{quote(slot, safe='')}"
+
+    with caplog.at_level(logging.DEBUG):
+        written = client.put(path, json={"secret": OTHER_SECRET})
+
+    assert written.status_code == 404
+    detail = refused(written.json(), 404, reason)
+    assert detail.startswith(f"{section}:")
+    # The state, and not what to type about it.
+    assert PROGRAM not in detail
+    assert SERVER_PROGRAM not in detail
+    assert SECRET not in written.text
+    assert OTHER_SECRET not in written.text
+    assert SECRET not in str(written.headers)
+    served = [
+        record for record in caplog.records if record.name.startswith("vinga_server")
+    ]
+    assert all(SECRET not in str(record.__dict__) for record in served)
+    assert all(OTHER_SECRET not in str(record.__dict__) for record in served)
+
+
+def test_every_secret_holder_answers_in_a_token_of_its_own() -> None:
+    """A third holder cannot arrive with no state to answer in.
+
+    Held against the registry by public name: the kinds that can hold a
+    stored secret are the kinds `SECRET_HOLDERS` names, the cases above
+    drive one refusal per kind, and each of them carries a different
+    token, because what a client says about this names the holder's own
+    noun. A kind added to the registry is red here, which is where the
+    question gets asked.
+    """
+    assert {section for _, section, _, _ in HOLDERS} == {
+        holder.moved_key for holder in entities.SECRET_HOLDERS.values()
+    }
+    assert len({reason for _, _, reason, _ in HOLDERS}) == len(HOLDERS)
 
 
 # The second half of a secret's address, driven against entities that

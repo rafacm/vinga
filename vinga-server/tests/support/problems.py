@@ -34,6 +34,7 @@ pinned where the table is.
 from collections.abc import Sequence
 
 from vinga_server.config.api import PROBLEM_TITLES
+from vinga_server.config.responses import RefusalReason
 
 
 def problem(
@@ -54,7 +55,7 @@ def problem(
 PROBLEM_KEYS = frozenset(problem(422, "any refusal at all"))
 
 
-def refused(body: object, status: int) -> str:
+def refused(body: object, status: int, reason: RefusalReason | None = None) -> str:
     """One refusal, checked as a refusal, with its sentence handed back.
 
     Everything a caller may rely on is asserted here: the members and
@@ -63,9 +64,20 @@ def refused(body: object, status: int) -> str:
     `errors` carrying a string path and a string message. What the
     sentence says is returned rather than compared, so the caller can
     assert the tokens that carry meaning and leave the wording alone.
+
+    `reason` is the exception rather than a sixth member: a handful of
+    refusals carry the state they are in as a closed token, and every
+    other refusal carries exactly the four members it always has. So a
+    caller that expects a token names it and gets the member set
+    checked with it, and a caller that names none gets the strict four,
+    which is what keeps "the member is absent unless there is a token"
+    an assertion every other case in the suite is making already.
     """
     assert isinstance(body, dict), body
-    assert set(body) == PROBLEM_KEYS, body
+    expected = PROBLEM_KEYS if reason is None else PROBLEM_KEYS | {"reason"}
+    assert set(body) == expected, body
+    if reason is not None:
+        assert body["reason"] == reason.value, body
     assert body["status"] == status, body
     assert body["title"] == PROBLEM_TITLES[status], body
     detail = body["detail"]

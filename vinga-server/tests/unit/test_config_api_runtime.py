@@ -45,7 +45,7 @@ from vinga_server.config.loader import (
     RunningConfigMovedError,
     StorageError,
 )
-from vinga_server.config.models import DatabaseConfig
+from vinga_server.config.models import PROGRAM, SERVER_PROGRAM, DatabaseConfig
 from vinga_server.config.responses import (
     AgentsDiff,
     Applies,
@@ -59,6 +59,7 @@ from vinga_server.config.responses import (
     McpReloadResult,
     PromptDiff,
     PromptsReload,
+    RefusalReason,
     RuntimeInfo,
     SingletonDiff,
 )
@@ -676,19 +677,27 @@ def test_an_application_without_a_server_has_no_prompt_to_assemble(
     assert "no running server" in response.json()["detail"]
 
 
-def test_an_agent_this_server_is_not_serving_is_a_404_naming_the_reload(
+def test_an_agent_this_server_is_not_serving_is_a_404_carrying_the_state(
     database: DatabaseConfig,
 ) -> None:
-    """The 404 follows the world being served, so what it sends an
-    operator to is the reload that installs an agent rather than the
-    restart that used to."""
+    """The 404 follows the world being served, so what it says is that
+    an agent arrives with the apply that installs it rather than with a
+    restart, and it says it as a token as well as in prose.
+
+    The token is what a client phrases the next step from. The prose
+    names no command: a command is a word of a client's grammar, and a
+    server that spelled one would be prescribing a spelling to a client
+    it neither ships nor versions (#386).
+    """
     with serving(database, None, agent_prompt=previewing(prompt.know_how("P"))) as client:
         response = client.get("/runtime/agents/stranger/prompt")
 
     assert response.status_code == 404
-    detail = response.json()["detail"]
-    assert "config apply" in detail
+    detail = refused(response.json(), 404, RefusalReason.AGENT_NOT_SERVING)
+    assert "the apply that installs it" in detail
     assert "restart" not in detail
+    assert PROGRAM not in detail
+    assert SERVER_PROGRAM not in detail
     # The name arrived in the path and is not quoted back.
     assert "stranger" not in detail
 
