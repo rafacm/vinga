@@ -59,12 +59,20 @@ CONFIG_ENV_VAR = "VINGA_CONFIG"
 # for one fact would be the duplication the design guide names.
 #
 # Here rather than in `config/cli`, which is where it started, for the
-# reason `PROGRAM` sits in `models.py`: two modules read it and only one
-# is below both. `main.py` dispatches the conversations group and
-# `config/cli` gates its three commands, and both already import this
-# module for `ConfigError` and the config variable above, so the
-# definition costs its readers nothing. `cli` re-exports it, so there is
-# one string and not two.
+# reason `PROGRAM` sits in `models.py`: several modules read it and only
+# this one is below all of them. `main.py` dispatches the conversations
+# group, `config/cli/local.py` gates its three commands and `doctor.py`
+# answers the same sentence for the derivation it shares with `ota-url`,
+# and every one of them already imports this module for `ConfigError`
+# and the config variable above, so the definition costs its readers
+# nothing.
+#
+# Each of them imports this name rather than a second hop through one
+# of the others, which is what keeps it one string: the CLI is a package
+# now and re-exports nothing, so there is no `cli.NEEDS_THE_SERVER_HALF`
+# to reach for, and a reader that grew a copy of its own would be caught
+# by `test_one_sentence_answers_every_command_that_needs_the_other_half`
+# holding each consumer's binding to this one.
 #
 # A fixed constant carrying no invocation value, like every sentence
 # these entry points print. It is reached with an ImportError in hand,
@@ -676,10 +684,11 @@ _FILE_FAILURES = tuple(shape for shape, _ in _FILE_PROBLEMS)
 # What a source that will not parse says about what it is not saying.
 #
 # Here rather than in `config/cli`, where it was written, for the
-# reason `NEEDS_THE_SERVER_HALF` sits here: two modules say it and only
-# this one is below both. It is one statement about one parser, true of
-# a fragment typed at a command line and of the file a server boots on,
-# and two copies of it would be two sentences free to drift apart.
+# reason `NEEDS_THE_SERVER_HALF` sits here: two modules say it, the
+# boot path and `config/cli/input.py`, and only this one is below both.
+# It is one statement about one parser, true of a fragment typed at a
+# command line and of the file a server boots on, and two copies of it
+# would be two sentences free to drift apart.
 YAML_NOT_QUOTED = (
     "Nothing of what it holds is quoted back: a source that will not parse is one "
     "nothing here has validated, and what a parser says about one repeats the tag or "
