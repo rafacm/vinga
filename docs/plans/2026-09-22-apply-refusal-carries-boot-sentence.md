@@ -38,7 +38,7 @@ nor `check` diagnoses.
   plan it carries the message. No new vocabulary, no token, no second
   composition.
 - **Values stay out; identities and keys go in.** The issue's audit of
-  every `ProviderError` raise site (25 today, backed by the grep in
+  every `ProviderError` raise site (24 today, backed by the grep in
   Verification) found each sentence interpolates one of: the entry
   label, which `config/entities.py::provider_label` composes and
   `models.spoken_identity` escapes; the option reader's own `key`
@@ -257,8 +257,11 @@ same way, by restoring the quoted model.
   all from `vinga-server/`.
 - The raise-site inventory the settled decision rests on, run untruncated:
   `grep -rn "raise ProviderError(" src/vinga_server/providers | wc -l`
-  is 25 at `909cc06e`, and the milestone re-runs it and reads every
-  line rather than the count.
+  is 24 at `19f7122e` (the issue's 25 counted the class definition in
+  `providers/base.py`, matched by a grep on `ProviderError(` without
+  the `raise`; no site was added or removed). The milestone re-runs
+  the command and reads every line rather than the count, which is
+  the inventory and not the proof.
 - `uv run vinga-server config openapi > ../docs/reference/api-openapi.json`
   and a diff showing only the reload route's description moved.
 - The mutation runs named under Tests, stated in the commit bodies.
@@ -322,6 +325,12 @@ read-only sandbox, 193 s) at commit `19f7122e`. Six findings, verdict
    cannot pass.** At `19f7122e` the exact command yields 24. Record the
    current baseline, explain the difference if material, and require
    reading the full output rather than treating the count as the proof.
+
+   *Resolution*: accepted. The count is 24 at `19f7122e`; the 25 came
+   from a grep on `ProviderError(` that matched the class definition,
+   not from a site that has since gone. Both places in the plan now
+   say 24, and the verification names the full output as the
+   inventory.
 
 5. **P2: five category tests are not the promised whole-surface
    sweep.** The 24 sites also include unknown option names, missing
