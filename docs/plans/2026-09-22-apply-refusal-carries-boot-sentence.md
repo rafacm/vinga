@@ -155,10 +155,25 @@ next raise site reads the rule where the type is declared.
 ## Tests
 
 The claim is one sentence long, so the proof is a sentinel sweep and
-not a new test module: **for every refusal class the provider-build
-surface has, a stored world whose values all carry a credential-shaped
-sentinel is refused with a `detail` that names the entry, the key and
-the rule, and the sentinel reaches neither the answer nor the log.**
+not a new test module. Stated at its true width: **for each
+representative refusal class of the provider-build surface, a stored
+world whose values carry a credential-shaped sentinel is refused with a
+`detail` that names the entry, the key and the rule, and the sentinel
+reaches neither the answer nor the log.** The sweep is a regression
+proof for the composition sites it drives; the whole-surface claim
+rests on the manual inventory of all 24 raise sites named under
+Verification, read line by line, and the plan does not call six cases
+an automated proof of the other eighteen. The sites each case drives:
+the typed-option case drives `registry.py`'s option readers (one
+composition shape, eight sites); the boundary case drives
+`boundary.py`; the `api_key_env` case drives `kit.py`; the two factory
+cases drive `registry.py`'s wrapping and pass-through arms; the
+unknown-type case drives `registry.py`'s type lookup. Not driven and
+inventoried only: the unknown-option, required-string and mapping
+readers (the same composition shape as the typed-option case), the
+missing-extra refusal, the `openai_endpoint.py` and `openai_asr.py`
+range and shape rules, the invalid-provider-object refusal, and
+`world.py`'s missing-stage and boundary-wrapping sites.
 
 The classes, with the asset each reuses (all in
 `tests/unit/test_config_reload.py` unless said otherwise):
@@ -342,6 +357,11 @@ read-only sandbox, 193 s) at commit `19f7122e`. Six findings, verdict
    pass-through path, or narrow the claim to representative category
    regression tests plus a manual inventory. Do not call five cases a
    whole-surface automated proof.
+
+   *Resolution*: accepted, by narrowing. The Tests section now states
+   the claim at its true width, names which raise sites each case
+   drives and which are inventoried only, and the whole-surface claim
+   rests on the 24-line inventory read in full.
 
 6. **P3: the replacement `openai_tts.py` sentence is malformed.**
    `the model option "model" names ignores option "speed"` is not
