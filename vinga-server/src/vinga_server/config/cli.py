@@ -2285,6 +2285,13 @@ def _answer(response: httpx.Response, address: Address) -> object:
 # one the whole client keeps: an unknown state is quoted, never guessed
 # at.
 #
+# These are composed from `PROGRAM` rather than written out, so the
+# command-spellings census, which reads the tree as text, does not see
+# them. `test_every_remedy_names_a_command_this_grammar_has` is the
+# same guard over the table: every invocation quoted here names a row
+# of the registry, so a rename that missed one fails a test in this
+# checkout rather than reaching an operator through an old image.
+#
 # Every member has a line, because every member is a state with
 # something to run about; `test_the_remedies_cover_the_whole_vocabulary`
 # holds the two sets equal, so a token added on one side alone is red.

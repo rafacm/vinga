@@ -27,6 +27,7 @@ reach the terminal on any of them.
 
 import contextlib
 import io
+import re
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -35,7 +36,7 @@ from typing import get_args
 import httpx
 import pytest
 
-from tests.support.config_cli import API_SECRET_ENV, SECRET, TOKEN, runner
+from tests.support.config_cli import API_SECRET_ENV, SECRET, TOKEN, registered, runner
 from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import showing as _showing
 from vinga_server.config import Config, cli, entities, printing
@@ -2276,6 +2277,29 @@ def test_a_body_whose_state_is_not_a_token_is_not_this_apis_refusal(
     assert cli.UNRECOGNIZED_ANSWER in said
     assert REFUSED_DETAIL not in said
     assert SECRET not in said
+
+
+def test_every_remedy_names_a_command_this_grammar_has() -> None:
+    """The half the command-spellings census cannot see.
+
+    That census reads the tree as text, and these sentences are composed
+    from `PROGRAM` rather than written out, so a rename that missed one
+    would leave a line here naming a command nothing answers to and no
+    text match to catch it. This is the same guard over the composed
+    table: every invocation quoted in a remedy names a row of the
+    registry, read off `COMMANDS` rather than listed.
+    """
+    quoted = [
+        tuple(span.split())
+        for line in cli.REMEDIES.values()
+        for span in re.findall(r"`([^`]+)`", line)
+    ]
+    assert quoted
+    unregistered = [words for words in quoted if registered(words) is None]
+    assert unregistered == []
+    # And in the short spelling, which is the one a client of this
+    # grammar answers to.
+    assert all(words[0] == cli.PROGRAM for words in quoted)
 
 
 def test_the_remedies_cover_the_whole_vocabulary() -> None:
