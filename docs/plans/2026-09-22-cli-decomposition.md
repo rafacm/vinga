@@ -616,14 +616,15 @@ Reusing what exists wherever the assertion already has a home.
   the write, and `set_secret` runs both inside one transaction, so no
   sequenced concurrent delete can reach it deterministically. The
   fixture is a seam on the check and nothing else: the slot check
-  (`_check_slot`) is replaced on the store instance under test with a
-  function that answers as if the holder were present, the holder is
+  (`_check_slot`, a module-level function of `store.py`) is replaced
+  in that module with a function that answers as if the holder were
+  present, the holder is
   never written, and the write's update then affects no row, which is
   the synchronization point stated exactly. That the slot-check
   refusal was not taken is proven by the body's `reason`, which only
   the write path attaches. Once per holder kind at the store level
   for the two reasons, and once over HTTP through the API, with the
-  same replacement on the store the application mounts, for the
+  same replacement in place while the application serves, for the
   body's `reason`, the command-free `detail` and the no-secret and
   no-address surfaces. The replacement is a reach-in on an underscore
   name, named in the M4 section as the design question it is, with
