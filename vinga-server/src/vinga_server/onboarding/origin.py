@@ -102,7 +102,7 @@ def assemble(scheme: str, netloc: NetLoc, path: str = "") -> str:
 
     The only place that writes `scheme://authority` for an address a
     DEVICE is told about, which is the set this module is responsible
-    for. (`config/cli.py` writes one more, the loopback address of this
+    for. (`config/cli` writes one more, the loopback address of this
     machine's own API, which no device ever hears and which resolves
     from a port rather than from anything a request carried.)
 

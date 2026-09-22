@@ -58,10 +58,10 @@ CONFIG_ENV_VAR = "VINGA_CONFIG"
 # thing: the command needs the half that is not here. Three sentences
 # for one fact would be the duplication the design guide names.
 #
-# Here rather than in `config/cli.py`, which is where it started, for the
+# Here rather than in `config/cli`, which is where it started, for the
 # reason `PROGRAM` sits in `models.py`: two modules read it and only one
 # is below both. `main.py` dispatches the conversations group and
-# `config/cli.py` gates its three commands, and both already import this
+# `config/cli` gates its three commands, and both already import this
 # module for `ConfigError` and the config variable above, so the
 # definition costs its readers nothing. `cli` re-exports it, so there is
 # one string and not two.
@@ -675,7 +675,7 @@ _FILE_FAILURES = tuple(shape for shape, _ in _FILE_PROBLEMS)
 
 # What a source that will not parse says about what it is not saying.
 #
-# Here rather than in `config/cli.py`, where it was written, for the
+# Here rather than in `config/cli`, where it was written, for the
 # reason `NEEDS_THE_SERVER_HALF` sits here: two modules say it and only
 # this one is below both. It is one statement about one parser, true of
 # a fragment typed at a command line and of the file a server boots on,
@@ -697,7 +697,7 @@ YAML_NOT_QUOTED = (
 # catches the documented exception alone lets all three past as a
 # traceback carrying the source.
 #
-# Shared with `config/cli.py` for the reason the locator below is: this
+# Shared with `config/cli` for the reason the locator below is: this
 # is one statement about what one parser does, and a boot file is read
 # by the same `yaml.safe_load` a fragment is. It sat in `cli` alone
 # while the boot path caught `YAMLError`, which is exactly the drift
@@ -710,7 +710,7 @@ def stopped_at(exc: BaseException) -> str:
     exception's mark and nothing else off the exception at all. Empty
     for the failures that carry no mark.
 
-    Shared with `config/cli.py`, which imports it: the locator is the
+    Shared with `config/cli`, which imports it: the locator is the
     one thing a refusal about YAML may take from the parser, and a
     second implementation of the rule is the same rule with a bug
     pending.

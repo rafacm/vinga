@@ -1013,7 +1013,7 @@ def test_a_bad_invocation_is_a_sentence_and_exit_two() -> None:
 
 # guard
 
-FILES = ["README.md", "vinga-server/src/vinga_server/config/cli.py"]
+FILES = ["README.md", "vinga-server/src/vinga_server/config/cli/grammar.py"]
 
 
 def test_guard_passes_a_pull_request_that_leaves_the_changelog_alone() -> None:

@@ -260,7 +260,7 @@ vinga device bind aa:bb:cc:dd:ee:ff assistant
 `llm` is the stage and `local` is the name, and they are positional for
 the same reason `/api/providers/llm/local` has them in that order: they
 are what makes the entry one entry. The CLI does not choose them.
-`_identity` in `config/cli.py` reads them off the entity descriptor's
+`_identity` in `config/cli/entities.py` reads them off the entity descriptor's
 `addressing` tuple, which is also what builds the URL path, so a kind
 addressed by two segments on the API is addressed by two segments on
 the command line and cannot come to differ.

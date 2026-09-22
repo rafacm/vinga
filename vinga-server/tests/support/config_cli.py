@@ -341,7 +341,7 @@ def logged(caplog: pytest.LogCaptureFixture) -> str:
     httpx's request line is in the deployment's log file exactly as much
     as one in a line this code wrote. The config CLI holds that library
     quiet around its request for precisely that reason (`REQUEST_LOGGERS`
-    in `config/cli.py`), so there is nothing left here to filter out, and
+    in `config/cli`), so there is nothing left here to filter out, and
     a filter would hide the regression if the quieting were removed.
     """
     return "\n".join(
