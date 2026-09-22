@@ -984,3 +984,42 @@ three P1, verdict "not ready". Condensed but faithful.
 
    *Resolution*: accepted. The six sentences are written into the M4
    section and the client tests assert the complete text per token.
+
+## Plan review round, fourth
+
+Reviewed 2026-09-22 by openai/gpt-5.6-terra, thinking high via codex CLI 0.155.1, read-only sandbox, runtime 6m43s, at commit 282a74ef, plan blob b847c577.
+
+A re-review of the third round's amendments. Four findings, one P1,
+verdict "ready after the P1/P2 amendments". Condensed but faithful.
+
+1. **P1: M3's JSON arm can escape the CLI boundary as a traceback.**
+   The plan specifies JSON with no ASCII escaping after bypassing
+   `printable`, which is what rejects lone surrogates before stdout
+   today, and `main()` catches no `UnicodeEncodeError`; a lone
+   surrogate in an answer would leave as an unhandled write failure.
+   Require ASCII-safe output and test a lone surrogate through both
+   machine arms: valid bytes, no traceback.
+
+2. **P2: M4 omits the shared refusal-test contract its member breaks.**
+   `tests/support/problems.py` pins `PROBLEM_KEYS` as exactly the four
+   members and `refused()` enforces it; the unknown-code test already
+   calls it on a path M4 changes. Keep the four-key assertion by
+   default, add an explicit expected-reason mode requiring exactly
+   those four plus `reason`, use it at the five paths, and do not
+   broaden `PROBLEM_KEYS`, or the old-body pin becomes vacuous.
+
+3. **P2: the "deterministic" secret-holder fixture is still two
+   mechanisms.** A seam on the check and a sequenced concurrent delete
+   are materially different, and `set_secret` runs the check and the
+   write inside one transaction, so an unsynchronized delete is not
+   deterministic. Pick one fixture that forces the write to see no
+   row, per holder kind, reuse it over HTTP, state the synchronization
+   point, and prove the slot-check refusal was not taken.
+
+4. **P2: the transportability analysis cannot prove its ordering
+   claim.** A call graph proves reachability, not that the guard runs
+   before the return; it accepts a guard in an unreachable branch or
+   after an early return, and the runtime cases cover the two current
+   bodies and no discovered one. Specify an order-aware predicate or
+   runtime instrumentation for every discovered body, and mutation-test
+   a post-return guard as well as a removed one.
