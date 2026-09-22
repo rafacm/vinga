@@ -1082,7 +1082,7 @@ jobs:
   #
   # Skipped on pull requests, deliberately and temporarily: while the
   # pre-release simplification milestones and the rename land, PRs come
-  # quickly and this job (two variants, arm64 under QEMU, the whole
+  # quickly and this lane (four builds, arm64 under QEMU, the whole
   # smoke conversation) is the longest pole in each round-trip. Every
   # merge still gets the full lane on main, so no merged commit goes
   # unsmoked; a PR that touches the image's own plumbing gets a manual
