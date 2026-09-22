@@ -1265,21 +1265,47 @@ def test_a_secret_for_an_unknown_entity_or_slot_is_refused(store: ConfigStore) -
 # client says about a provider that is not there and about an MCP
 # server that is not there are two commands, and the token is what tells
 # them apart.
+# The identity each case addresses its holder by, one per kind and
+# distinct, and shaped like a pasted credential.
+#
+# The name IS the sentinel here, which is #132's rule read as a test: a
+# refusal about an entry that is not there names the section and the
+# fact and never what was addressed, because an identity that addresses
+# nothing is a value nothing in this deployment has validated, and the
+# door it arrives by is the one a credential is pasted into. A distinct
+# one per kind, so neither case can pass on the other's absence.
+MISSING_PROVIDER = "sk-test-1d4c7b90-never-a-real-provider"
+
+MISSING_MCP_SERVER = "sk-test-6e2a9f13-never-a-real-server"
+
 VANISHING = [
-    ("provider", CLAUDE, "providers", RefusalReason.PROVIDER_MISSING),
-    ("mcp-server", WEATHER, "mcp_servers", RefusalReason.MCP_SERVER_MISSING),
+    (
+        "provider",
+        SecretLocation.provider("llm", MISSING_PROVIDER, "api_key"),
+        MISSING_PROVIDER,
+        "providers",
+        RefusalReason.PROVIDER_MISSING,
+    ),
+    (
+        "mcp-server",
+        SecretLocation.mcp_server(MISSING_MCP_SERVER, "env.TOKEN"),
+        MISSING_MCP_SERVER,
+        "mcp_servers",
+        RefusalReason.MCP_SERVER_MISSING,
+    ),
 ]
 
 
 @pytest.mark.parametrize(
-    ("location", "section", "reason"),
-    [(location, section, reason) for _, location, section, reason in VANISHING],
-    ids=[kind for kind, _, _, _ in VANISHING],
+    ("location", "addressed", "section", "reason"),
+    [row[1:] for row in VANISHING],
+    ids=[row[0] for row in VANISHING],
 )
 def test_a_holder_that_is_not_there_at_the_write_says_which_kind_it_was(
     store: ConfigStore,
     monkeypatch: pytest.MonkeyPatch,
     location: SecretLocation,
+    addressed: str,
     section: str,
     reason: RefusalReason,
 ) -> None:
@@ -1296,8 +1322,15 @@ def test_a_holder_that_is_not_there_at_the_write_says_which_kind_it_was(
     test is raised only when the row is gone between two statements of
     one transaction, and a race has no caller-facing seam to drive it
     through.
+
+    Two sentinels, because two things a caller supplied could come back
+    and neither may: the credential, and the name the holder was
+    addressed by. The second is the one nothing was asserting, and it is
+    held to the whole chain rather than to the sentence, since a
+    validation error keeps the input it rejected and an exception raised
+    inside a handler keeps the one before it.
     """
-    monkeypatch.setattr(store_module, "_check_slot", lambda domain, addressed: None)
+    monkeypatch.setattr(store_module, "_check_slot", lambda domain, addressed_at: None)
 
     with pytest.raises(UnknownEntityError) as caught:
         store.set_secret(location, SECRET)
@@ -1315,9 +1348,12 @@ def test_a_holder_that_is_not_there_at_the_write_says_which_kind_it_was(
     # grammar's program word are absent.
     assert PROGRAM not in refusal
     assert SERVER_PROGRAM not in refusal
-    # And nothing of the credential on the way out, here or on the chain
-    # an exception raised inside a handler would carry.
-    assert SECRET not in _chain(caught.value)
+    # And nothing of what the caller supplied on the way out, here or on
+    # the chain an exception raised inside a handler would carry:
+    # neither the credential nor the name the holder was addressed by.
+    chain = _chain(caught.value)
+    assert SECRET not in chain
+    assert addressed not in chain
 
 
 def test_the_exempted_option_is_not_a_credential_slot(store: ConfigStore) -> None:

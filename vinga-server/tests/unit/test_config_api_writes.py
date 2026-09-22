@@ -900,15 +900,30 @@ def test_a_secret_on_an_entity_that_is_not_there_is_404_without_either_name(
 # creating an MCP server are two commands of the client's grammar, and
 # a client holding one token for both would be back to reading the
 # sentence to tell them apart.
+# The identity each case addresses the holder by, one per kind and
+# distinct, and shaped like a pasted credential.
+#
+# A holder is addressed by a name an operator typed, and the refusal's
+# whole rule (#132) is that it names the section and the fact and never
+# what was addressed, because an identity that addresses nothing is a
+# value nothing in this deployment has validated. So the name IS the
+# sentinel here, and each kind gets its own so a case cannot pass on the
+# other one's absence.
+MISSING_PROVIDER = "sk-test-1d4c7b90-never-a-real-provider"
+
+MISSING_MCP_SERVER = "sk-test-6e2a9f13-never-a-real-server"
+
 HOLDERS = [
     (
-        "/providers/llm/claude/secrets/api_key",
+        f"/providers/llm/{quote(MISSING_PROVIDER, safe='')}/secrets/api_key",
+        MISSING_PROVIDER,
         "provider",
         "providers",
         RefusalReason.PROVIDER_MISSING,
     ),
     (
-        "/mcp-servers/home/secrets/env.TOKEN",
+        f"/mcp-servers/{quote(MISSING_MCP_SERVER, safe='')}/secrets/env.TOKEN",
+        MISSING_MCP_SERVER,
         "mcp_server",
         "mcp_servers",
         RefusalReason.MCP_SERVER_MISSING,
@@ -917,22 +932,40 @@ HOLDERS = [
 
 
 @pytest.mark.parametrize(
-    ("path", "kind", "section", "reason"),
+    ("path", "addressed", "kind", "section", "reason"),
     HOLDERS,
-    ids=[section for _, _, section, _ in HOLDERS],
+    ids=[section for _, _, _, section, _ in HOLDERS],
 )
 def test_a_secret_for_a_holder_that_is_not_there_says_which_kind_it_was(
     client: TestClient,
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
     path: str,
+    addressed: str,
     kind: str,
     section: str,
     reason: RefusalReason,
 ) -> None:
     """The same refusal over the wire: the body carries the token, the
-    sentence names no command, and neither the credential nor the
-    address it was sent to reaches any surface.
+    sentence names no command, and neither the credential nor the holder
+    it was addressed at reaches any surface.
+
+    Two sentinels, because two things a caller sent could come back and
+    they arrive by different doors: the credential is in the body, and
+    the holder's name is in the path. The name is the one this case
+    exists for, and it is checked against the whole body, the headers
+    and every record this server wrote, rather than against the sentence
+    alone.
+
+    The two claims have different scopes, and the difference is a fact
+    about where each value travels rather than a weakening. A credential
+    is in a request body and reaches no log by any lawful route, so it
+    is held to `renderings`, which reads EVERY captured record three
+    ways. A holder's name is in the request line, so the caller's own
+    HTTP client logs it by construction, and the test client here is
+    that caller: what can be claimed of it is that nothing this server
+    wrote repeats it, which is #132's rule and the whole of what an
+    operator's deployment can keep.
 
     The synchronization point is the slot check, answered as though the
     holder were present while the holder is never written, because the
@@ -942,7 +975,7 @@ def test_a_secret_for_a_holder_that_is_not_there_says_which_kind_it_was(
     waits on the one in flight. The body's `reason` is what says the
     write path answered, since the slot check attaches none.
     """
-    monkeypatch.setattr(store_module, "_check_slot", lambda domain, addressed: None)
+    monkeypatch.setattr(store_module, "_check_slot", lambda domain, addressed_at: None)
 
     with caplog.at_level(logging.DEBUG):
         written = client.put(path, json={"secret": SECRET})
@@ -956,14 +989,22 @@ def test_a_secret_for_a_holder_that_is_not_there_says_which_kind_it_was(
     # The state, and not what to type about it.
     assert PROGRAM not in detail
     assert SERVER_PROGRAM not in detail
-    # Neither the credential nor the entity it was addressed at.
-    assert SECRET not in written.text
-    assert SECRET not in str(written.headers)
-    assert path.split("/")[2] not in detail
+    # The credential, on every surface there is.
+    answered = [written.text, str(written.headers)]
+    assert all(SECRET not in surface for surface in [*answered, *renderings(caplog)])
+    # And the holder it was addressed at, on the answer and on every
+    # record this server made, read as the object a third-party handler
+    # would serialize whole. That set is empty today, because this
+    # server writes no record for this refusal, and the reading is kept
+    # for what it would catch rather than for what it catches: a line
+    # added later that names the entry it could not find is red here,
+    # which is the shape #132 closed on the sentence.
     served = [
-        record for record in caplog.records if record.name.startswith("vinga_server")
+        str(record.__dict__)
+        for record in caplog.records
+        if record.name.startswith("vinga_server")
     ]
-    assert all(SECRET not in str(record.__dict__) for record in served)
+    assert all(addressed not in surface for surface in [*answered, *served])
 
 
 def test_every_secret_holder_answers_in_a_token_of_its_own() -> None:
@@ -976,11 +1017,14 @@ def test_every_secret_holder_answers_in_a_token_of_its_own() -> None:
     noun. A kind added to the registry is red here, which is where the
     question gets asked.
     """
-    assert {kind for _, kind, _, _ in HOLDERS} == set(entities.SECRET_HOLDERS)
-    assert {section for _, _, section, _ in HOLDERS} == {
+    assert {kind for _, _, kind, _, _ in HOLDERS} == set(entities.SECRET_HOLDERS)
+    assert {section for _, _, _, section, _ in HOLDERS} == {
         holder.moved_key for holder in entities.SECRET_HOLDERS.values()
     }
-    assert len({reason for _, _, _, reason in HOLDERS}) == len(HOLDERS)
+    assert len({reason for _, _, _, _, reason in HOLDERS}) == len(HOLDERS)
+    # And each kind is addressed by a sentinel of its own, so neither
+    # case can pass on the other one's absence.
+    assert len({addressed for _, addressed, _, _, _ in HOLDERS}) == len(HOLDERS)
 
 
 # The second half of a secret's address, driven against entities that
