@@ -29,8 +29,14 @@ class ProviderError(Exception):
     a failed factory's class name are all this repository's vocabulary
     or an operator's own spelling of a name, and an unknown key goes
     through `models.spoken_identity` like every other spoken one. What
-    an operator wrote as a VALUE stays out, the type a row names
-    included, because the type is a stored value like any other.
+    an operator wrote as a VALUE stays out.
+
+    An entry's `type` is the one that needs saying twice, because both
+    answers are here. A type the registry recognized is a member of a
+    closed set this repository declares, so a refusal quotes it back to
+    say which of them it is asking about. A type it did not recognize is
+    a stored value like any other, so the refusal names the rule and
+    lists the set instead and the word itself is never repeated.
 
     That rule is a contract rather than a habit, and two surfaces rest
     on it: `main` prints this message to stderr as it is when a boot
