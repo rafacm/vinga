@@ -323,16 +323,26 @@ Three proofs, none of them "the tests pass".
   call sites of `check_transportable` are exactly the files
   `{"cli.py", "store.py"}`. The property is that a fragment is checked
   before it travels, on both sides of the connection. On the CLI side
-  it becomes a statement over the registry rather than over a file:
-  for every `Command` row whose act carries a `body`, the body
-  callable reaches `check_transportable` in its call graph, resolved
-  the way `cli_fields.py` resolves a callable to its source and
-  follows its calls, so a new write command whose body skipped the
-  check is red whichever module it lands in. The repository side
-  keeps its existing assertion, and the behaviour cases beside them
-  (a fragment holding a NaN meets the sentence and no request is made,
-  nothing of the fragment leaks) are unchanged. No CLI filename is
-  asserted.
+  it becomes a statement over the registry rather than over a file,
+  and over the bodies that need the gate rather than all of them: the
+  CLI calls its YAML parser in exactly one place (`yaml.safe_load`
+  inside the fragment reader), and eleven distinct body callables sit
+  on the registry, of which two reach that parser, `_fragment_body`
+  (every `SET_ENTITY` row) and `_document_body` (`import`); the other
+  nine build a scalar or a record from arguments (`_binding`,
+  `_new_name`, `_secret_body` and their like) and carry nothing YAML
+  can smuggle. So the test derives both sets from the call graph,
+  resolved the way `cli_fields.py` resolves a callable to its source
+  and follows its calls: every body that reaches the parse site also
+  reaches `check_transportable` before it returns, and the set that
+  reaches the parse site is asserted to be exactly those two, so a new
+  YAML-derived body is a diff line rather than a silent widening. The
+  falsification is the removal of a real guard: the check taken out of
+  `_fragment_body` and the test watched failing, then restored. The
+  repository side keeps its existing assertion, and the behaviour
+  cases beside them (a fragment holding a NaN meets the sentence and
+  no request is made, nothing of the fragment leaks) are unchanged. No
+  CLI filename is asserted.
 - `tests/unit/test_cli_import_weight.py` pins the exact set of
   `vinga_server` modules `import vinga_server.config.cli` loads. The
   property is the client-install weight bound: nothing of the server
@@ -738,6 +748,12 @@ verdict "not ready" pending the P1 amendments. Condensed but faithful.
    Constrain the check to bodies accepting YAML-derived values, prove
    each reaches the gate before returning to `_act`, and mutation-test
    the removal of a real guard rather than the addition of a call site.
+
+   *Resolution*: accepted, on a measurement: one parse site, eleven
+   body callables, two reaching it. The property is now "every body
+   that reaches the parser reaches the gate", both sets derived from
+   the call graph, with the parser-reaching set pinned to the two, and
+   the falsification is a real guard removed.
 
 2. **P1: M3 drops stderr notices in machine mode, contrary to the
    settled requirement.** The machine arm "writes nothing to stderr",
