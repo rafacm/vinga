@@ -206,6 +206,7 @@ historical  vinga device bind
 historical  vinga device pending
 historical  vinga device pending claim
 historical  vinga device pending frobnicate
+historical  vinga device pending list
 historical  vinga device replace
 historical  vinga device show aa-bb
 historical  vinga diff
@@ -344,6 +345,7 @@ respell  vinga device pending
 respell  vinga device pending claim
 respell  vinga device pending list
 respell  vinga device replace
+respell  vinga device show
 respell  vinga diff
 respell  vinga events
 respell  vinga events tail
@@ -381,6 +383,7 @@ respell  vinga provider secret
 respell  vinga provider secret set
 respell  vinga provider secret set llm brain
 respell  vinga provider secret set llm claude
+respell  vinga provider set
 respell  vinga provider set asr ears
 respell  vinga provider set asr whisper
 respell  vinga provider set llm claude
