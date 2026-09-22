@@ -183,6 +183,14 @@ The classes, with the asset each reuses (all in
 - **An unknown type.** A stored type spelled as a sentinel, refused
   with the type not quoted back.
 
+Absence from the log is asserted over
+`tests.support.leaks.renderings(caplog)`, never over `caplog.text`
+alone: both shipped formatters call `record.getMessage()`, which hides
+an argument the message did not use, and `renderings` renders every
+record three ways, both formats and the object behind them
+(`record.__dict__`, `record.args`, the exception fields). The same
+sweep pins the warning's `args` as the one-tuple of the class name.
+
 One of these runs through the API (`entered_client` and a POST to the
 reload route, as the rotation cases do), asserting on
 `refused_body(...)` and `refused.text`, so the sentence is proven on
@@ -273,6 +281,10 @@ read-only sandbox, 193 s) at commit `19f7122e`. Six findings, verdict
    fields. Require `tests.support.leaks.renderings(caplog)` or an
    equivalent, and if finding 1 is accepted, pin the warning's argument
    tuple as class-name-only.
+
+   *Resolution*: accepted. The Tests section requires
+   `tests.support.leaks.renderings(caplog)` for every log assertion in
+   the sweep, and the warning's `args` tuple is pinned.
 
 3. **P2: the factory case misses the pass-through path for a
    `ProviderError` with a chain.** `registry.py` reconstructs a
