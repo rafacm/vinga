@@ -472,11 +472,15 @@ configuration was refused.
 
 **A stored half whose engines will not build** is refused with the
 location in the answer, in the sentence a server started from this store
-would print before refusing to start: the entry, the option key and the
-rule it broke, and never the value it refused over. A provider refusal
-is composed from this repository's own vocabulary rather than from the
-row, which is what makes it sayable where a compose refusal is not.
-`check` will not see this one, because it builds nothing.
+would print before refusing to start. It names the entry, and with it
+whatever that particular refusal has to give: the option key, a provider
+type this deployment declares, the rule that was broken, or the class of
+the exception a factory raised. Which of them appear depends on what
+refused, and none of them is ever a stored value, an unknown provider
+type included, which is not quoted back. A provider refusal is composed
+from this repository's own vocabulary rather than from the row, which is
+what makes it sayable where a compose refusal is not. `check` will not
+see this one, because it builds nothing.
 
 `check` is where the first one's location is said instead:
 

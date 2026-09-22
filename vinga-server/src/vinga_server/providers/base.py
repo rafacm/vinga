@@ -24,12 +24,18 @@ class ProviderError(Exception):
     """A provider that cannot be built as configured: an unknown type,
     a bad option, or a missing optional dependency.
 
-    Its message names identities and keys, and never a stored value.
-    The entry's label, an option's own key, the rule that was broken and
-    a failed factory's class name are all this repository's vocabulary
-    or an operator's own spelling of a name, and an unknown key goes
-    through `models.spoken_identity` like every other spoken one. What
-    an operator wrote as a VALUE stays out.
+    Its message names what an operator has to go and correct, and never
+    a stored value. Always an identity, which is the entry's label at
+    every site but the one that refuses a stage nothing binds, where it
+    is the agent's name; and with it whichever that particular refusal
+    has of an option's own key, the rule that was broken and a failed
+    factory's class name. No refusal carries all of them, and the list
+    is what may appear rather than what must: an unknown type has no
+    option key to name, and a factory that would not build names a
+    class where an option reader names a rule. Each of them is this
+    repository's vocabulary or an operator's own spelling of a name,
+    and an unknown key goes through `models.spoken_identity` like every
+    other spoken one. What an operator wrote as a VALUE stays out.
 
     An entry's `type` is the one that needs saying twice, because both
     answers are here. A type the registry recognized is a member of a
