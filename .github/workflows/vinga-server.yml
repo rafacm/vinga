@@ -1687,3 +1687,218 @@ jobs:
           docker logs "$VINGA_DB_HOST" 2>&1 | tail -50 || true
           docker rm -f "$VINGA_DB_HOST" || true
           docker network rm "$SMOKE_NETWORK" || true
+
+  # The publish, which builds nothing. It takes the digests the four
+  # jobs above pushed, assembles one manifest per variant from them and
+  # tags that, so a tag names the bytes that were smoked rather than a
+  # rebuild of the same source. There is no cache configured and no
+  # source checked out, because there is nothing here to build from:
+  # this job could not rebuild if it wanted to. The publish it replaces
+  # rebuilt both architectures a third time and spent 359s doing it, of
+  # which 267.4s was exporting a build cache nothing would read.
+  #
+  # This is where `needs: [unit, integration]` went, and it is what
+  # makes publishing conditional on the suite. Both lanes are named,
+  # and both have to be, since between them they hold every check the
+  # suite is made of; naming one would publish on half a green suite.
+  # `image` is named too, so a variant whose smoke failed gets no tag
+  # either.
+  #
+  # Runs on a push and on a dispatch, and passes `--dry-run` on
+  # everything but a push to main. That is the `Tags` step's existing
+  # philosophy applied to the step it feeds: a dispatch run assembles
+  # the real manifest from the real digests, checks its shape and
+  # prints exactly what a push to main would publish, without pushing
+  # anything. Without it the whole publishing half would first run for
+  # real on main, which is the one place this workflow is not allowed
+  # to be wrong. Not on a pull request, which pushes no digests to
+  # assemble.
+  image-publish:
+    needs: [unit, integration, image]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `moving` is the tag that follows main; `suffix` is what
+          # marks the dated and sha tags. The default variant's are
+          # unsuffixed on purpose, so `latest` keeps meaning what it
+          # has always meant.
+          - variant: default
+            moving: latest
+            suffix: ""
+          - variant: slim
+            moving: slim
+            suffix: "-slim"
+    # Nothing is checked out here, so the workflow-level default would
+    # name a directory this job does not have.
+    defaults:
+      run:
+        working-directory: .
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/vinga-server
+    steps:
+      # The same twelve characters the builds were given, from the same
+      # expression, so the check below compares the tag against the
+      # value the images actually carry.
+      - name: The revision this build is
+        run: echo "REVISION=${GITHUB_SHA:0:12}" >> "$GITHUB_ENV"
+
+      - name: Download this variant's digests
+        uses: actions/download-artifact@v5
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-${{ matrix.variant }}-*
+          merge-multiple: true
+
+      # `imagetools` is a registry client rather than a builder: this
+      # sets up a current buildx for it and no build context reaches
+      # it.
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Deliberately not gated on main, unlike the push below.
+      # Computing tags is free, and gating it meant the one step that
+      # decides what a variant is called was never exercised until
+      # after a merge, which is the worst place to find out an
+      # expression was wrong. A dispatch run prints exactly what a push
+      # to main would publish.
+      - name: Tags
+        id: meta
+        uses: docker/metadata-action@v6
+        env:
+          # The width the builds compute with `${GITHUB_SHA:0:12}`.
+          # This is the action's own knob for it, and twelve is the
+          # value its README uses as the example.
+          DOCKER_METADATA_SHORT_SHA_LENGTH: 12
+        with:
+          images: ${{ env.IMAGE }}
+          # Build times rather than versions, like the changelog's dates:
+          # there is no semver yet, and a timestamp plus a SHA says
+          # everything a rollback needs. To the second (UTC): minutes
+          # were enough while the publish took six of them and merges
+          # were serialized, and a dated tag two commits can both claim
+          # is a moving pointer wearing a release's clothes. The moving
+          # tag is the only one here that moves: `latest` for the
+          # default variant, `slim` for the slim one.
+          tags: |
+            type=raw,value=${{ matrix.moving }}
+            type=raw,value={{date 'YYYY-MM-DD-HHmmss'}}${{ matrix.suffix }}
+            type=sha,format=short,suffix=${{ matrix.suffix }}
+
+      # The agreement this is all for, checked rather than assumed:
+      # `type=sha,format=short` decides the tag's length, and if it
+      # ever stopped being the twelve characters the builds computed, a
+      # container would go back to reporting something its tag does not
+      # say, which is the defect and not a detail. The step needed no
+      # change when the width moved, because it compares against
+      # `$REVISION` rather than counting characters. Runs whenever the
+      # tags are computed, so a dispatch run catches a change in either
+      # before a merge does.
+      - name: Check the sha tag carries the revision
+        run: |
+          tag=$(printf '%s\n' "${{ steps.meta.outputs.tags }}" | grep ':sha-' || true)
+          if [ -z "$tag" ]; then
+            echo "no sha- tag was computed"
+            exit 1
+          fi
+          echo "tag: $tag"
+          echo "revision: $REVISION"
+          case "$tag" in
+            *":sha-${REVISION}${{ matrix.suffix }}") ;;
+            *)
+              echo "the sha- tag does not end in the revision this build reports"
+              exit 1
+              ;;
+          esac
+
+      # One assembly, checked the same way whichever event asked for
+      # it, and pushed only on a push to main. `--dry-run` resolves the
+      # sources and prints the index it would create without creating
+      # anything, so the shape check below runs against the real
+      # digests on a dispatch as well.
+      #
+      # What the check asserts is one manifest per expected platform
+      # and a provenance attestation naming each of them, which is the
+      # shape `ghcr.io/rafacm/vinga-server:latest` carries today. It is
+      # deliberately not an elaborate validation: the publish it
+      # replaces validated nothing and never produced a malformed
+      # index, so this is not defending against a failure with
+      # instances. It catches the one failure this design could
+      # introduce, a build given a second output reporting a platform
+      # manifest's digest where an index's was expected, which drops
+      # the attestations silently. The build above is written so that
+      # cannot happen; this is what goes red if that is ever undone.
+      - name: Assemble the manifest, check it, and publish it
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          PUBLISHING: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          set -eu
+
+          sources=()
+          for arch in amd64 arm64; do
+            file="$RUNNER_TEMP/digests/$arch"
+            if [ ! -s "$file" ]; then
+              echo "::error::the linux/$arch job left no digest for the $VARIANT variant"
+              exit 1
+            fi
+            sources+=("$IMAGE@$(cat "$file")")
+          done
+
+          docker buildx imagetools create --dry-run "${sources[@]}" \
+            > "$RUNNER_TEMP/index.json"
+          cat "$RUNNER_TEMP/index.json"
+
+          python3 - "$RUNNER_TEMP/index.json" <<'PY'
+          import json
+          import sys
+
+          index = json.load(open(sys.argv[1], encoding="utf-8"))
+          platforms = {}
+          attested = set()
+          for entry in index.get("manifests", []):
+              annotations = entry.get("annotations") or {}
+              if annotations.get("vnd.docker.reference.type") == "attestation-manifest":
+                  attested.add(annotations.get("vnd.docker.reference.digest"))
+                  continue
+              platform = entry.get("platform") or {}
+              name = "{}/{}".format(platform.get("os"), platform.get("architecture"))
+              platforms[name] = entry.get("digest")
+
+          problems = []
+          for name in ("linux/amd64", "linux/arm64"):
+              digest = platforms.get(name)
+              if digest is None:
+                  problems.append("no " + name + " manifest")
+              elif digest not in attested:
+                  problems.append("no attestation manifest for " + name)
+          for problem in problems:
+              print("::error::the assembled index has " + problem)
+          sys.exit(1 if problems else 0)
+          PY
+
+          if [ "$PUBLISHING" != "true" ]; then
+            echo "not a push to main: assembled and checked, published nothing"
+            exit 0
+          fi
+
+          tags=()
+          while IFS= read -r tag; do
+            if [ -n "$tag" ]; then
+              tags+=(--tag "$tag")
+            fi
+          done <<< "$TAGS"
+
+          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
