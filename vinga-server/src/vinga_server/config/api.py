@@ -134,6 +134,7 @@ from vinga_server.config.responses import (
     PendingDevice,
     Problem,
     PromptBlock,
+    RefusalReason,
     RuntimeInfo,
     SecretSlot,
     SecretValue,
@@ -565,6 +566,7 @@ def problem_response(
     detail: str,
     errors: Sequence[FieldProblem] = (),
     headers: Mapping[str, str] | None = None,
+    reason: RefusalReason | None = None,
 ) -> JSONResponse:
     """One refusal, as bytes. The only place in this application a
     refusal becomes any.
@@ -586,15 +588,23 @@ def problem_response(
     `headers` is for the protocol headers a status needs to be itself:
     `WWW-Authenticate` on a 401, `Allow` on a 405. Nothing
     request-derived belongs in it.
+
+    `reason` is the state, where the refusing code has a token for it.
+    Most refusals have none, and those keep exactly the members they
+    have always carried: the member is left out of the body rather than
+    sent as null, because `Problem` forbids extra keys on the way in
+    too, so a member on every refusal would be a member every client
+    had to learn at once.
     """
     body = Problem(
         title=PROBLEM_TITLES[status],
         status=status,
         detail=detail,
+        reason=reason,
         errors=[FieldError(path=problem.path, message=problem.message) for problem in errors],
     )
     return JSONResponse(
-        body.model_dump(),
+        body.model_dump(exclude=set() if reason is not None else {"reason"}),
         status_code=status,
         media_type=PROBLEM_MEDIA_TYPE,
         headers=dict(headers) if headers is not None else None,
@@ -3455,7 +3465,12 @@ def _refusal(status: int) -> Callable[[Request, Exception], Any]:
         # exception that arrived some other way has nothing structured
         # to offer and says so.
         problems = exc.problems if isinstance(exc, ConfigError) else ()
-        return problem_response(status, str(exc), problems)
+        # And the state it classified, where the raise site named one.
+        # Read off the exception rather than matched on its words: what
+        # a refusal says is prose, and what it is is the token beside
+        # it.
+        reason = exc.reason if isinstance(exc, ConfigError) else None
+        return problem_response(status, str(exc), problems, reason=reason)
 
     return handler
 
