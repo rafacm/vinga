@@ -743,3 +743,211 @@ A trap worth keeping, from the third finding's falsification: `str(x)`,
 `x + ""`, `"".join([x])` and `x[:]` all answer the same object for a
 `str` in CPython, so the first attempt at rebinding a consumer to a
 copy did not bite and read exactly like a fix that had not worked.
+
+## M2: the measurement recorded
+
+**Attribution:** anthropic/claude-opus-5, thinking high; Claude Code 2.1.278; 2026-09-22.
+
+No CLI code changed. The milestone is the second of the two
+measurements the plan was drawn from, committed as a tool and re-run
+against the package, plus the history check re-run so its numbers are
+current. The answer is the one the plan reached: one command in
+sixty-five reads a field its grammar never sets, that read cannot
+change what the command does, and the CLI's own history has never
+fixed a defect of that shape, so no invocation type is added.
+
+### The totals, re-run on the package
+
+`vinga-server/tests/tools/cli_fields.py`, run from `vinga-server/`,
+and the totals block of what it printed:
+
+```
+$ uv run python tests/tools/cli_fields.py
+# Totals
+commands: 65
+read-not-set empty: 62
+read-not-set non-empty: 3
+  of the non-empty, those whose read-not-set is entirely handler-preset via replace() (x+): 2
+  of the non-empty, those with a genuinely silent default: 1
+distinct fields ever in read-not-set: 2
+  code: simulator check-in, simulator run
+  file: memory delete
+```
+
+Every number is the plan's: 65 commands, 62 with an empty read-not-set,
+3 non-empty of which 2 are handler-preset on a `replace()` copy
+(`simulator check-in` and `simulator run`, both on `code`) and 1 is a
+silent default (`memory delete`, on `file`). Nothing in the split moved
+a number, which is what the milestone had to show: the package's
+modules import one another the way the file's sections referenced one
+another, and the audit resolves a callee through the calling function's
+own globals, so a call it used to follow within one file it now follows
+across a module boundary and reaches the same read.
+
+The rest of the report agrees with the pre-plan run line for line. The
+whole output diffs in three lines against it, and all three are the
+adaptation rather than a finding:
+
+| Line | Before | After |
+| --- | --- | --- |
+| Modules parsed | absent | `# Modules parsed (15): __init__.py, acts.py, ...`, new, since there are now fifteen files to name |
+| Coverage heading | `every function in cli.py` | `every function in the package` |
+| Unreached | `_permitted_to_destroy, _act, _performed, performs, perform` | `acts._act, acts._performed, grammar.performs, grammar.perform, input._permitted_to_destroy`, the same five with the module that defines each |
+
+The counts either side of those names are unchanged: 76 functions take
+an `Invocation`, 71 are reached by the per-command analysis and 5 are
+not, and the five are the framework's own, which no row names. The
+follow depth is unchanged too: three at most, and three commands
+(`events tail`, `simulator check-in`, `simulator run`) have reads a
+one-level follow would have missed.
+
+### The history, re-run
+
+The plan's history check ran against `config/cli.py` on a tree that did
+not yet have M4's fixes or M1's split. Re-run here at `55d65b64`, the
+head this milestone was cut from, with the path the file had and the
+path the package now has:
+
+```
+$ git log --format='%h %s' -- vinga-server/src/vinga_server/config/cli.py | wc -l
+143
+$ git log --follow --format='%h %s' -- vinga-server/src/vinga_server/config/cli.py | wc -l
+193
+$ git log --format='%h %s' -- vinga-server/src/vinga_server/config/cli | wc -l
+1
+```
+
+The plan says 138 and 188. Both denominators rose by exactly five, and
+the five are named: `5aa7a69c`, `815bcdfd`, `0bbac0b4` and `49a5f2fa`,
+which are M4's four commits in that file, and `874ff62d`, which is M1's
+split. The package path answers 1 for the same reason: the split is the
+only commit that has touched it, so the CLI's whole history is still the
+file's, and the two paths together are the same 143.
+
+The per-field sweep, over both paths so the split is inside it, for
+each of the 34 `Invocation` fields:
+
+```
+$ for f in config api_url force no_input stage name mac code slot kind agents file \
+      pairs from_env entity to location type_name half session limit before \
+      conversation scope fact all_of_it cursor view since until group level follow \
+      endpoint; do
+    git log --format='%h' -S"args.$f" -- \
+      vinga-server/src/vinga_server/config/cli.py \
+      vinga-server/src/vinga_server/config/cli
+  done | sort -u | wc -l
+28
+```
+
+Twenty-eight distinct commits, every subject read. They are feature
+work and renames: the noun-verb re-cut, the memory noun moving in front
+of the operator, the device noun gaining its name and location verbs,
+the board swap, the aggregates, the event tail, the check verb, the
+simulator taking its seat in the grammar, `args.<field>` arriving with
+`ffa2a72d` and leaving with `874ff62d`. Not one of them is a fix for a
+handler reading a field its grammar never set.
+
+The body grep, for the vocabulary such a fix would use, over the bodies
+of every commit on the path with renames followed:
+
+```
+$ git log --follow --format='@@%h %s%n%b' -- vinga-server/src/vinga_server/config/cli.py \
+  | awk '/^@@/{h=substr($0,3)} !/^@@/{if (tolower($0) ~ \
+      /silent|never set|unset|not set|no one sets|nobody sets/) print h" || "$0}' \
+  | wc -l
+7
+```
+
+Seven lines, all seven read. Three are about a terminal or a portal
+failing silently, two about an exported command's options, one about an
+unset shell variable expanding to nothing, one about an auth secret
+being unset. None is the shape. The plan's finding holds on the current
+tree: **no commit in the CLI's history fixes a command reading a field
+its grammar never set.**
+
+### The dead branch, as a discovery
+
+`memory delete` reads `file`, and its grammar never sets it. The read
+is at depth 1, in `_typed`, which the row shares with `memory set`:
+
+```
+memory delete | all_of_it,conversation,fact,file,mac,name,scope | all_of_it,fact,scope,conversation?,mac?,name? | file
+memory set    | fact,file,mac,name,scope                        | fact,file,scope,conversation?,mac?,name?      | -
+```
+
+`memory set` passes `file` to `_invocation` and `memory delete` does
+not, because `memory delete` has no `-f`. Its committed help says so in
+its own words: "for a conversation, clear one entry of its ledger by a
+name read from standard input", and its options are `--all`, the four
+globals and `--help`. So `_typed`'s first branch, `if args.file and
+args.file != "-"`, tests a field that is always `None` on this row and
+can never be taken, and every `memory delete` on a conversation reaches
+the standard-input branch, which is the documented behaviour.
+
+Recorded and not changed, which is the plan's own resolution of the
+first review round's second finding. The issue's bug class is a handler
+that silently gets a default where it needed a value; here the default
+is what the command promises, so the read is a dead branch rather than
+an exposure. Making a static error of it would mean per-family
+invocation types carrying between one and nine fields each across 26
+families, to catch a class that has produced no defect in 143 commits.
+Neither of the two outcomes the issue settled is "tidy the one dead
+branch", and tidying it would buy a reader of this section nothing they
+do not already have.
+
+So, explicitly: **no invocation type was added, per-family or
+otherwise, and the resolved-globals merge is unchanged.** `_root` still
+builds one `Globals`, `Globals.merged` still folds a command's own
+copies into the root's, and `_invocation` still sets `config`,
+`api_url`, `force`, `no_input` and `kind` for all 65 rows. No file
+under `src/` was touched by this milestone.
+
+### The reach-in, named
+
+The tool reaches one underscore name, and the census records it:
+
+```
++ tests/tools/cli_fields.py  _act  1
+```
+
+It is `acts._act`, and the site is the identity test that recognises
+the dispatcher, `if callee is acts_module._act`. The design guide's two
+answers to a reach-in are that the module lacks an interface its
+callers need or that the test pins a detail, and neither fits: this is
+not a test, and its subject is the implementation itself. An audit of
+which fields a command's internals read cannot be written against an
+interface that hides them, and the alternative, a public marker on the
+dispatcher so a measurement could find it, would put a fact about a
+tool into the CLI. The manifest line is the honest record of that, and
+it is one line and one site.
+
+### Deviations from the plan
+
+One, and it is a file the plan did not expect to move rather than a
+decision taken differently. The plan says M2 lands "no new test and no
+code", and it does; but `tests/census/reach-ins.txt` moved anyway,
+because the census reads every tracked Python file under `tests/` and
+the tool is one. It was regenerated with its own generator, not edited,
+and the line is named above.
+
+Two things the plan left open that are worth stating rather than
+leaving to a reader of the diff. The tool is wrapped to pass
+`ruff check`, which the scratch script it came from never had to; the
+reflow was checked by diffing the output before and against after, and
+it is identical. And the tool runs under both spellings its neighbours
+use, `uv run python tests/tools/cli_fields.py` and `uv run python -m
+tests.tools.cli_fields`, whose outputs were diffed against each other
+and agree.
+
+### Verification
+
+From `vinga-server/`: `uv run ruff check .` (all checks passed) and
+`uv run pytest tests/census -q` (66 passed), the second re-run after
+the tool was tracked, which is when the reach-in line appeared, and
+green again once the manifest was regenerated. `python3
+../scripts/check_doc_links.py ..` reports no broken link or anchor.
+
+The unit and integration lanes were not run for this milestone and do
+not need to be: it changes no file under `src/` and adds no test. The
+one file it adds is a tool the lanes do not collect, and the one
+generated file it changes is the census lane's own, which ran.
