@@ -470,6 +470,13 @@ RENAMED_MAC = "02:00:00:00:00:31"
 # reading ambiguous.
 SWAPPED_MAC = "02:00:00:00:00:32"
 
+# And the board the refused claim is about, which is its own for a
+# reason of the same family and worth stating exactly: that case needs a
+# board that is SHOWING a code and stays unbound, and the board the
+# onboarding case is about is bound by the time this one asks, so a
+# check-in of it answers as a configured device and mints nothing.
+REFUSED_MAC = "02:00:00:00:00:33"
+
 # And the board nobody owns, which presents its own documented default
 # rather than a third address invented here.
 SIMULATED_MAC = board.DEFAULT_MAC
@@ -887,9 +894,12 @@ def test_a_claim_naming_an_agent_that_is_not_there_is_refused_over_the_wire(
     The code stays claimable afterwards, because the board is still
     showing it.
     """
-    assert run("default-agent", "clear") in (0, 1)
+    # Unset, so an unbound board is answered with a code rather than
+    # covered. Idempotent, and it is this lane's resting state: the
+    # onboarding case leaves it cleared.
+    assert run("default-agent", "clear") == 0
     capsys.readouterr()
-    waiting = check_in(deployed, WAITING_MAC)
+    waiting = check_in(deployed, REFUSED_MAC)
     assert isinstance(waiting, board.Activating)
     code = waiting.code
 
@@ -909,7 +919,7 @@ def test_a_claim_naming_an_agent_that_is_not_there_is_refused_over_the_wire(
     # showing the number.
     assert run("device", "pending", "claim", code, "sam") == 0
     assert capsys.readouterr().out.startswith("wrote ")
-    assert run("device", "delete", WAITING_MAC) == 0
+    assert run("device", "delete", REFUSED_MAC) == 0
     capsys.readouterr()
 
 
