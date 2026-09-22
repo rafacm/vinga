@@ -42,6 +42,7 @@ from vinga_server.config.models import (
     validation_problems,
     yaml_data_var,
 )
+from vinga_server.config.responses import RefusalReason
 
 CONFIG_ENV_VAR = "VINGA_CONFIG"
 
@@ -184,11 +185,31 @@ class ConfigError(Exception):
     honest answer for the refusals that name no field of the request:
     an unreadable stored row, a reference to another entity, a body
     whose whole shape was wrong.
+
+    `reason` is the same refusal as a closed token, where this API has
+    a word for the state it is in. It carries the classification the
+    raise site already made to whatever has to answer with more than a
+    sentence: the API puts it on the wire, and the client phrases the
+    command it names nothing about. Keyword-only and defaulted to None,
+    so the raise sites that have no token keep reading as they did, and
+    chosen where the classifying happens rather than recovered from the
+    message, which is the mistake a vocabulary exists to stop.
+
+    The enum comes from `responses.py`, which imports pydantic and
+    nothing of this server: the same edge `entities` already has for
+    `Applies`, and the reason it is safe.
     """
 
-    def __init__(self, message: object, problems: Sequence[FieldProblem] = ()) -> None:
+    def __init__(
+        self,
+        message: object,
+        problems: Sequence[FieldProblem] = (),
+        *,
+        reason: RefusalReason | None = None,
+    ) -> None:
         super().__init__(message)
         self.problems: tuple[FieldProblem, ...] = tuple(problems)
+        self.reason: RefusalReason | None = reason
 
 
 # The refusals that are not simply "this configuration is wrong". They
