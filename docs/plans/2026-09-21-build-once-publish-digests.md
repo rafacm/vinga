@@ -410,9 +410,10 @@ following `main`, permanently, with no run red.
 ### image-promote reconciles, it does not publish its own commit
 
 So `image-promote` does not ask "should I promote my commit". Holding
-its per-variant group, it fetches `origin/main`, walks it from the
-tip, and promotes the first commit whose `sha-` tag exists, whichever
-run produced it, giving up after a bounded number of commits.
+its per-variant group, it fetches `origin/main` and considers the
+commits **between the moving tag's current revision and the tip**,
+newest first, promoting the first one that carries a `sha-` tag whose
+index passes validation, whichever run produced it.
 
 That works because of what publishing a `sha-` tag already means.
 `image-publish` runs only after the unit lane, the integration lane
@@ -456,12 +457,38 @@ What the reconciler needs instead is four things.
   `origin/main` before the walk. A shallow checkout has no history to
   walk, and a stale tip would promote something that is no longer the
   newest.
-- **A bound on the walk, and an honest failure at the end of it.** It
-  looks back a fixed number of commits for the first one carrying a
-  `sha-` tag. Finding none is not a silent no-op: the run fails,
-  because either the registry is unreachable or `main` has gone that
-  far without a single gated image, and both are things somebody
-  should hear about.
+- **A bound that is a distance, not a constant, and a no-op when the
+  walk finds nothing.** The previous draft said a walk that found no
+  tagged commit should fail the run. Measuring killed that rule: of
+  the last 45 commits on `main`, four carry a `sha-` tag, and there
+  are runs of 22 and 13 that do not, because a documentation-only push
+  does not match this workflow's `paths` and so never builds an image
+  at all. A fixed bound with a failure at the end of it would fire on
+  ordinary weeks.
+
+  The walk therefore spans the commits from the moving tag's current
+  revision to the tip, which is short by construction and usually one.
+  Finding nothing newer than what is published is the **normal case**
+  and is a quiet no-op. A hard cap of 200 commits exists only for the
+  case below, and reaching it fails loudly.
+
+- **Stated behavior when history is rewritten.** If the moving tag's
+  revision is not in `origin/main`'s history, something force-pushed
+  under the tag and "the commits since it" has no meaning. The
+  reconciler then considers the newest 200 commits of the current
+  history, promotes the newest tagged one, and reports that it took
+  that path. The documentation guarantee is scoped to match, since
+  after a rewrite "older" has no single meaning.
+
+- **Validation of the candidate before promoting it.** A `sha-` tag
+  exists because `image-publish` created it, and `image-publish` can
+  create it and then fail its own post-push assertion, so tag
+  existence is not proof the publication completed. The reconciler
+  runs the same topology and config assertions against the candidate
+  index and refuses a candidate that fails them, walking on to the
+  next. That is what makes the moving tag safe whatever the publish
+  side did, which matters more than the immutable tags because the
+  moving tag is the one a careless deployment follows.
 - **An idempotent exit.** If the moving tag already resolves to the
   same index as the chosen commit's `sha-` tag, the job does nothing
   and says so. That is what makes a second promote against an
@@ -473,59 +500,58 @@ What the reconciler needs instead is four things.
   exist, both of which are facts a displaced run and a surviving run
   agree on.
 
-### The dated tag carries seconds, and reuse is refused
+### The revision becomes twelve characters, and both immutable tags carry it
 
 `type=raw,value={{date 'YYYY-MM-DD-HHmm'}}` gives two commits
 publishing inside the same minute the same "immutable" tag, and the
-later registry write wins. Today serialization plus a six-minute
-publish makes that practically unreachable; M1 cuts the publish to
-seconds and M2 permits overlap, so it becomes reachable exactly when
-merges burst.
+later registry write wins. Serialization plus a six-minute publish
+makes that unreachable today; M1 cuts the publish to seconds and M2
+permits overlap, so it becomes reachable exactly when merges burst.
 
-The dated tag therefore becomes `YYYY-MM-DD-HHmmss`. That keeps what
-the tag means, the moment the build happened, and it is a
-user-visible format change that lands in the documentation footprint.
+The plan's first two answers to this were both wrong, and the second
+was wrong in a way worth recording. It argued that embedding the
+revision in the dated tag would raise its residual to the `sha-` tag's
+seven-character one. A composite tag collides only when **both** parts
+collide, which is strictly less likely than either alone; a
+conjunction is not a replacement. The argument was constructed to
+defend a conclusion rather than derived, which is the same failure as
+claiming more than was measured, wearing reasoning's clothes.
 
-And `image-publish` refuses reuse, on **both** immutable tags: if the
-dated tag or the `sha-` tag already resolves and names a digest other
-than the one being published, the job fails rather than overwriting.
-Five lines, and it converts a silent registry overwrite into a red
-run.
+So the real constraint was never the dated tag. It is the width of the
+revision, which both immutable tags depend on, and which is a
+pre-existing defect this plan surfaces rather than creates: at seven
+hexadecimal characters, two commits sharing a prefix is on the order
+of 2e-3 at a thousand commits and grows with the square.
 
-**What that does and does not buy, stated precisely**, because the
-first draft of this section claimed more. The refusal is a read
-before a write and `image-publish` is deliberately ungrouped, so it
-narrows the window rather than closing it: two publishers choosing the
-same value in the same instant would both see the tag absent and both
-push. It does not make either tag immutable by enforcement. What it
-does is ensure that every reuse the check can see ends a run red
-instead of replacing an image somebody has deployed.
+**The revision becomes twelve hexadecimal characters.** It is derived
+once and used in four places that already have to agree:
 
-Two residuals remain and they are not the same size, which is what
-decides the shape here:
+- `VINGA_REVISION` in the image's `ENV`, which `/healthz` reports;
+- the `sha-` tag;
+- the dated tag, which becomes `YYYY-MM-DD-HHmm-<revision>`, composite
+  and back to minute resolution, since the revision now carries the
+  uniqueness that seconds were only ever added to supply;
+- the reconciler's lookup.
 
-- **The dated tag** collides only if two commits complete the unit
-  lane, the integration lane, every image job and the assembly within
-  **the same second**.
-- **The `sha-` tag** collides if any two commits in the repository's
-  history share a seven-character prefix. At a thousand commits that
-  is on the order of 0.2 percent, and it grows with the square.
+The existing workflow step that asserts the `sha-` tag ends in the
+revision the build reports extends to cover the new width, so the four
+stay one value rather than four that must agree. Collision falls to
+roughly 1e-9 at a thousand commits, which is the order of assumption
+git itself makes when it abbreviates, and at that point "never reused"
+is an honest thing for the maintained pages to keep saying.
 
-The second is already the accepted cost of a seven-character tag, and
-it is the larger one by a wide margin. Embedding the revision in the
-dated tag, the obvious way to make it "intrinsically" unique, would
-therefore move the dated tag's residual **up** to meet the `sha-`
-tag's rather than down. So the revision stays out of it.
+This was confirmed with the maintainer before being adopted, because
+it is user-visible: `/healthz` changes what it reports and both
+maintained pages change their example tags.
 
-The width stays at seven for a reason of its own: `VINGA_REVISION` in
-the image's `ENV`, the `sha-` tag, and the existing workflow step that
-asserts those two are equal are all built on it and agree by
-construction. Widening is coherent, larger, and the single lever that
-would close both residuals at once, so it is recorded as the named
-remedy with a trigger rather than taken speculatively. The trigger is
-an actual collision, which after this change announces itself as a red
-run instead of as an image that quietly changed.
-
+`image-publish` also refuses reuse, on both immutable tags: if either
+already resolves and names a digest other than the one being
+published, the job fails rather than overwriting. That is enforcement
+against **sequential** reuse and it is a read before a write, so it
+does not close the concurrent case; with a twelve-character revision
+the concurrent case needs two commits sharing twelve hex characters
+and publishing at once, and the residual is recorded here rather than
+in a user-facing page.
 
 ### No new promise, no new record
 
