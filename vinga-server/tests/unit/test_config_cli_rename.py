@@ -35,7 +35,8 @@ import pytest
 from tests.support.config_cli import answering, runner
 from tests.support.leaks import renderings
 from tests.support.notices import CHECK_IN, RELOAD, STORE_BOOT, boundaries
-from vinga_server.config import cli, entities
+from vinga_server.config import entities
+from vinga_server.config.cli import grammar, output
 from vinga_server.config.responses import Applies
 
 # A name carrying a URL credential, which is the shape a paste has. It
@@ -174,7 +175,7 @@ def test_a_rename_that_moved_the_row_alone_advises_the_install(
 
     assert (code, printed) == (0, "wrote agent sam renamed to poet\n")
     assert boundaries(err) == {RELOAD}
-    assert err.splitlines() == [cli.SPOKEN[frozenset({Applies.RELOAD})]]
+    assert err.splitlines() == [output.SPOKEN[frozenset({Applies.RELOAD})]]
 
 
 @pytest.mark.parametrize("live", ["binding", "default"])
@@ -201,7 +202,7 @@ def test_a_rename_that_moved_a_live_reference_advises_both_boundaries(
     assert (code, printed) == (0, "wrote agent sam renamed to poet\n")
     assert boundaries(err) == {RELOAD, CHECK_IN}
     assert err.splitlines() == [
-        cli.SPOKEN[frozenset({Applies.RELOAD, Applies.CHECK_IN})]
+        output.SPOKEN[frozenset({Applies.RELOAD, Applies.CHECK_IN})]
     ]
     assert entities.RENAME_UNSERVED_NOTICE.sentence not in err
 
@@ -226,7 +227,7 @@ def test_a_rename_against_a_handed_configuration_prints_the_sentence_alone(
     assert (code, printed) == (0, "wrote agent sam renamed to poet\n")
     assert boundaries(err) == {STORE_BOOT}
     assert err.splitlines() == [entities.SNAPSHOT_NOTICE.sentence]
-    assert cli.INSTALLS not in err
+    assert output.INSTALLS not in err
 
 
 # What an operator meets when it is refused
@@ -310,4 +311,4 @@ def test_the_verb_asks_nothing_before_it_renames(
     code, printed, _ = out(run, capsys, "--no-input", "agent", "rename", "sam", "poet")
 
     assert (code, printed) == (0, "wrote agent sam renamed to poet\n")
-    assert not [row for row in cli.COMMANDS if row.words == ("agent", "rename")][0].destroys
+    assert not [row for row in grammar.COMMANDS if row.words == ("agent", "rename")][0].destroys

@@ -36,7 +36,7 @@ from tests.support.mcp_stdio_server import (
 from tests.support.tools_mcp import Applying, reading
 from vinga_server import logs
 from vinga_server.config import Config, McpServerConfig
-from vinga_server.config.cli import APPLY_READ_TIMEOUT_S
+from vinga_server.config.cli.deployment import APPLY_READ_TIMEOUT_S
 from vinga_server.runtime.prompt import Guidance, ServerInstructions, ServerPrompt
 from vinga_server.tools.mcp import (
     CONNECT_TIMEOUT_S,

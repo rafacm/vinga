@@ -362,7 +362,7 @@ def test_the_per_write_notice_is_one_line_and_names_no_command() -> None:
     behavior rather than as prose.
 
     The two commands this sentence used to end with are the client's to
-    name now, out of `cli.REMEDIES`, and the boundary they cross is
+    name now, out of `reach.REMEDIES`, and the boundary they cross is
     what `applies` beside the sentence carries.
     """
     assert "\n" not in APPLY_NOTICE.sentence

@@ -59,7 +59,7 @@ from pathlib import Path
 import pytest
 
 from tests.support.config_cli import registered
-from vinga_server.config import cli
+from vinga_server.config.cli import grammar, reach
 
 # The checkout, found from this file rather than from the working
 # directory: the unit lane runs from `vinga-server/` and the sweep is
@@ -118,7 +118,7 @@ _RETIRED_WORDS = frozenset(
 def _command_words() -> frozenset[str]:
     """Every word a recognized invocation may open with: the tree's own
     first words, and the ones the re-cut retired."""
-    return _RETIRED_WORDS | {row.words[0] for row in cli.COMMANDS}
+    return _RETIRED_WORDS | {row.words[0] for row in grammar.COMMANDS}
 
 
 # One invocation, as a program word and the rest of its line. The
@@ -381,8 +381,8 @@ def retired(words: frozenset[str]) -> frozenset[str]:
     checkable rather than a list: an ordinary word cannot be in it, and
     a compound nothing answers to any more can be nothing else.
     """
-    live = {word for row in cli.COMMANDS for word in row.words}
-    live |= {word for path in cli.GROUPS for word in path}
+    live = {word for row in grammar.COMMANDS for word in row.words}
+    live |= {word for path in grammar.GROUPS for word in path}
     return frozenset(word for word in _RETIRED_WORDS if "-" in word and word not in live)
 
 
@@ -488,7 +488,7 @@ def _nodes() -> frozenset[tuple[str, ...]]:
     group on the way to one."""
     return frozenset(
         row.words[:length]
-        for row in cli.COMMANDS
+        for row in grammar.COMMANDS
         for length in range(1, len(row.words) + 1)
     )
 
@@ -751,7 +751,7 @@ def mis_spelled(rows: list[Spelling]) -> list[str]:
         for row in rows
         if row.kind == "generated"
         and not row.path.startswith(_SERVER_COMPOSED + _CAPTURED)
-        and not row.invocation.startswith(f"{cli.PROGRAM} ")
+        and not row.invocation.startswith(f"{reach.PROGRAM} ")
     ]
 
 

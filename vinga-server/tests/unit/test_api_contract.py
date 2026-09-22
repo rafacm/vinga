@@ -15,7 +15,7 @@ what says the generator was pointed at the right document.
 Three things are compared, in both directions.
 
 - **Which operations exist.** The covered set is derived from
-  `cli.COMMANDS` by asking each act for the path it addresses, and the
+  `grammar.COMMANDS` by asking each act for the path it addresses, and the
   exclusion set below names every operation no act covers, with a reason
   apiece. The two are asserted to union to the whole document and to
   overlap nowhere, which is what makes a NEW route a failing test rather
@@ -45,7 +45,7 @@ from urllib.parse import unquote
 import pytest
 from pydantic import BaseModel
 
-from vinga_server.config import cli
+from vinga_server.config.cli import acts, devices, grammar, invocation
 
 DOCUMENT_PATH = Path(__file__).resolve().parents[3] / "docs" / "reference" / "api-openapi.json"
 
@@ -105,11 +105,11 @@ def operations() -> set[tuple[str, str]]:
     }
 
 
-def _addressed(kind: str) -> cli.Invocation:
+def _addressed(kind: str) -> invocation.Invocation:
     """An invocation whose identities are their own parameter names, so
     that asking an act where it goes answers with the templated path the
     document is written in."""
-    return cli.Invocation(
+    return invocation.Invocation(
         kind=kind,
         stage="{stage}",
         name="{name}",
@@ -131,7 +131,7 @@ def _addressed(kind: str) -> cli.Invocation:
     )
 
 
-def covered() -> dict[tuple[str, str], list[tuple[cli.Command, cli.Act]]]:
+def covered() -> dict[tuple[str, str], list[tuple[grammar.Command, acts.Act]]]:
     """Which operation each act of the grammar addresses, with the row
     that performs it.
 
@@ -141,8 +141,8 @@ def covered() -> dict[tuple[str, str], list[tuple[cli.Command, cli.Act]]]:
     of another. The act rather than the row, because the reverse is no
     longer one to one either: `conversation show` performs two.
     """
-    found: dict[tuple[str, str], list[tuple[cli.Command, cli.Act]]] = {}
-    for row in cli.COMMANDS:
+    found: dict[tuple[str, str], list[tuple[grammar.Command, acts.Act]]] = {}
+    for row in grammar.COMMANDS:
         # Every request the row makes, read off the row: a command whose
         # one output is assembled from two reads addresses two
         # operations, and asking it is what keeps both of them compared.
@@ -343,12 +343,12 @@ def test_the_simulator_reaches_this_api_through_an_act_it_already_had() -> None:
     thing they do to THIS API is performed through a row that is already
     here.
     """
-    simulated = [row for row in cli.COMMANDS if row.words[0] == "simulator"]
+    simulated = [row for row in grammar.COMMANDS if row.words[0] == "simulator"]
     assert simulated
     assert all(not row.acts() for row in simulated)
 
-    [claim] = [row for row in cli.COMMANDS if row.words == ("device", "pending", "claim")]
-    assert claim.does is cli.ADD_DEVICE
+    [claim] = [row for row in grammar.COMMANDS if row.words == ("device", "pending", "claim")]
+    assert claim.does is devices.ADD_DEVICE
     assert ("POST", "/devices/pending/{code}") in COVERED
 
 

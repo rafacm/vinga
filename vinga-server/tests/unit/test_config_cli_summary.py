@@ -32,7 +32,7 @@ import yaml
 
 from tests.support.config_cli import chain, logged, runner
 from tests.support.events import both_formats
-from vinga_server.config import cli
+from vinga_server.config.cli import acts, deployment, reach
 from vinga_server.config.loader import ConfigError
 
 # What a body that is not the declared shape carries, so a refusal or a
@@ -325,7 +325,7 @@ def test_export_prints_the_same_document_as_one_that_can_be_applied(
     assert run("export") == 0
 
     printed = capsys.readouterr()
-    assert printed.out == cli.EXPORT_HEADER + _settled(printed.out) + EXPORTED_SECRETS
+    assert printed.out == deployment.EXPORT_HEADER + _settled(printed.out) + EXPORTED_SECRETS
     assert printed.err == ""
 
 
@@ -348,7 +348,7 @@ def answering(monkeypatch: pytest.MonkeyPatch, body: object) -> None:
         assert path == "/config", path
         return body
 
-    monkeypatch.setattr(cli, "_call", call)
+    monkeypatch.setattr(reach, "_call", call)
 
 
 def document(secrets: object = (), **sections: object) -> dict[str, object]:
@@ -483,7 +483,7 @@ def refusal(
 
     printed = capsys.readouterr()
     assert printed.out == ""
-    assert printed.err == cli.UNREADABLE_READ + "\n"
+    assert printed.err == acts.UNREADABLE_READ + "\n"
     assert "Traceback" not in printed.err
     for surface in (printed.out, printed.err, logged(caplog), both_formats(caplog)):
         assert ANSWERED not in surface
@@ -524,9 +524,9 @@ def test_an_unknown_secret_kind_leaves_nothing_on_the_chain() -> None:
     put the answer's own value into the exception's arguments, where
     anything walking the chain would find it."""
     with pytest.raises(ConfigError) as caught:
-        cli.EXPORT_ALL.render(cli.EXPORT_ALL.read(UNKNOWN_KIND))
+        deployment.EXPORT_ALL.render(deployment.EXPORT_ALL.read(UNKNOWN_KIND))
 
-    assert str(caught.value) == cli.UNREADABLE_READ
+    assert str(caught.value) == acts.UNREADABLE_READ
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
     assert ANSWERED not in chain(caught.value)
@@ -568,7 +568,7 @@ def test_an_export_prints_back_a_section_it_never_walks_into(
         assert run("export") == 0
 
     printed = capsys.readouterr()
-    assert printed.out == cli.EXPORT_HEADER + yaml.safe_dump(
+    assert printed.out == deployment.EXPORT_HEADER + yaml.safe_dump(
         body["config"], sort_keys=False, allow_unicode=True, default_flow_style=False
     )
     assert printed.err == ""
@@ -633,9 +633,9 @@ def test_a_location_that_cannot_be_written_down_refuses_the_export(
 @pytest.mark.parametrize("body", UNWRITABLE)
 def test_no_refusal_of_a_location_is_retained_on_its_chain(body: object) -> None:
     with pytest.raises(ConfigError) as caught:
-        cli.EXPORT_ALL.render(cli.EXPORT_ALL.read(body))
+        deployment.EXPORT_ALL.render(deployment.EXPORT_ALL.read(body))
 
-    assert str(caught.value) == cli.UNREADABLE_READ
+    assert str(caught.value) == acts.UNREADABLE_READ
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
     assert ANSWERED not in chain(caught.value)
@@ -695,9 +695,9 @@ def test_no_refusal_of_a_document_is_retained_on_its_chain(body: object) -> None
     body it refused as its `__context__` for anything walking the
     chain."""
     with pytest.raises(ConfigError) as caught:
-        cli.LIST.render(cli.LIST.read(body))
+        deployment.LIST.render(deployment.LIST.read(body))
 
-    assert str(caught.value) == cli.UNREADABLE_READ
+    assert str(caught.value) == acts.UNREADABLE_READ
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
     assert ANSWERED not in chain(caught.value)
@@ -731,9 +731,9 @@ def test_a_whole_document_renderer_refuses_what_is_not_one(act: str, body: objec
     on being called by that act would be safe by arrangement rather than
     by construction."""
     with pytest.raises(ConfigError) as caught:
-        getattr(cli, act).render(body)
+        getattr(deployment, act).render(body)
 
-    assert str(caught.value) == cli.UNREADABLE_READ
+    assert str(caught.value) == acts.UNREADABLE_READ
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
     assert ANSWERED not in chain(caught.value)

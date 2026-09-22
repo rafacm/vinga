@@ -25,6 +25,7 @@ from pydantic import BaseModel, ValidationError
 from tests.support.config_cli import SECRET, chain
 from tests.support.isolation import ALLOWED_IMPORTS, imported_alone
 from vinga_server.config import cli, docgen, server_reference
+from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import (
     API_MOUNT_PATH,
     BOOT_REFUSALS,
@@ -249,7 +250,7 @@ def test_a_half_that_is_neither_names_the_two_that_are(
     assert SECRET not in captured.err
     assert SECRET not in captured.out
 
-    with pytest.raises(cli.ConfigError) as caught:
+    with pytest.raises(ConfigError) as caught:
         server_reference.render(SECRET)
     assert SECRET not in chain(caught.value)
 
@@ -604,7 +605,7 @@ def test_a_refusal_says_nothing_of_the_keys_beside_the_ones_it_names() -> None:
 
     for refusal in BOOT_REFUSALS:
         data, field = provocation(refusal)
-        with pytest.raises(cli.ConfigError) as caught:
+        with pytest.raises(ConfigError) as caught:
             load_config_from_data(data)
 
         message = str(caught.value)

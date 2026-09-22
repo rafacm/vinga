@@ -44,7 +44,7 @@ import pytest
 from tests.support.config_cli import answering, runner
 from tests.support.stores import plant_event, plant_session, plant_turn
 from vinga_server import logs
-from vinga_server.config import cli
+from vinga_server.config.cli import acts, grammar, invocation, output, records
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations.store import open_conversations
 from vinga_server.conversations.views import COMMON, VIEWS
@@ -218,7 +218,7 @@ def out(run, capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, str, 
 
 def leaf(words: tuple[str, ...]) -> Any:
     """One command of the built tree, found by its own words."""
-    found: Any = cli.command()
+    found: Any = grammar.command()
     for word in words:
         found = found.commands[word]
     return found
@@ -237,11 +237,11 @@ def test_the_noun_is_singular_and_carries_two_core_set_verbs() -> None:
     a noun in the verb slot rejects; `agent preview` is the precedent
     for not granting that exception to the first command that asks.
     """
-    words = {row.words for row in cli.COMMANDS if row.words[0].startswith("metric")}
+    words = {row.words for row in grammar.COMMANDS if row.words[0].startswith("metric")}
 
     assert words == {("metric", "list"), ("metric", "show")}
-    assert ("metric",) in cli.GROUPS
-    assert not [path for path in cli.GROUPS if path[0] == "metrics"]
+    assert ("metric",) in grammar.GROUPS
+    assert not [path for path in grammar.GROUPS if path[0] == "metrics"]
     assert {view.alias for view in VIEWS} & {row[1] for row in words} == set()
 
 
@@ -285,8 +285,11 @@ def test_the_positional_is_the_whole_address_the_route_is_written_in() -> None:
     a string here, so the CLI's address and the document's path are the
     same address. The contract check holds the templated form; this
     holds a real word."""
-    assert cli.SHOW_METRIC.path(cli.Invocation(view="stage-latency")) == "/metrics/stage-latency"
-    assert cli.LIST_METRICS.path(cli.Invocation()) == "/metrics"
+    assert (
+        records.SHOW_METRIC.path(invocation.Invocation(view="stage-latency"))
+        == "/metrics/stage-latency"
+    )
+    assert records.LIST_METRICS.path(invocation.Invocation()) == "/metrics"
 
 
 def asked(run, answer: dict[str, Any]) -> list[httpx.URL]:
@@ -377,7 +380,7 @@ def test_both_verbs_are_requests_with_no_second_way_in() -> None:
     other, which is the amendment to #190 and what the plan's review
     round restored after its first draft promised a break-glass."""
     for words in (("metric", "list"), ("metric", "show")):
-        [row] = [one for one in cli.COMMANDS if one.words == words]
+        [row] = [one for one in grammar.COMMANDS if one.words == words]
         assert row.acts()
         assert all(act.method == "GET" for act in row.acts())
         assert not row.destroys
@@ -454,8 +457,8 @@ def test_the_window_the_answer_used_is_stated_once_over_the_whole_answer(
     )
 
     assert code == 0
-    [stated] = [line for line in printed.splitlines() if line.startswith(cli.METRIC_WINDOW)]
-    assert stated == f"{cli.METRIC_WINDOW}: {SINCE} to {UNTIL}, {cli.METRIC_WINDOW_ENDS}"
+    [stated] = [line for line in printed.splitlines() if line.startswith(records.METRIC_WINDOW)]
+    assert stated == f"{records.METRIC_WINDOW}: {SINCE} to {UNTIL}, {records.METRIC_WINDOW_ENDS}"
 
 
 def test_a_rate_with_no_denominator_prints_the_placeholder_and_never_a_zero(
@@ -484,7 +487,7 @@ def test_a_rate_with_no_denominator_prints_the_placeholder_and_never_a_zero(
     cells = dict(zip(heading.split(), row.split(), strict=True))
     assert cells["TURNS"] == "0"
     assert cells["PROVIDER_FAILURES"] == "1"
-    assert cells["PROVIDER_FAILURES_PER_TURN"] == cli.NOTHING_THERE
+    assert cells["PROVIDER_FAILURES_PER_TURN"] == output.NOTHING_THERE
 
 
 def test_the_rows_come_back_newest_day_first(run, store, capsys) -> None:
@@ -527,7 +530,7 @@ def test_a_window_with_nothing_in_it_says_so_rather_than_printing_a_heading(
     )
 
     assert (code, err) == (0, "")
-    assert cli.NO_METRIC_ROWS in printed
+    assert records.NO_METRIC_ROWS in printed
     assert "DAY" not in printed
 
 
@@ -540,7 +543,7 @@ def test_a_deployment_that_never_recorded_answers_the_same_way(run, capsys, alia
     code, printed, err = out(run, capsys, "metric", "show", alias)
 
     assert (code, err) == (0, "")
-    assert cli.NO_METRIC_ROWS in printed
+    assert records.NO_METRIC_ROWS in printed
 
 
 def test_the_vocabulary_answers_on_a_deployment_that_never_recorded(run, capsys) -> None:
@@ -793,7 +796,7 @@ def test_the_device_breakdown_prints_a_board_per_row(run, store, capsys) -> None
     rows = [line.split() for line in printed.splitlines() if line.startswith(DAY)]
     assert [(row[1], row[2]) for row in rows] == [
         (BOARD_A, "Kitchen"),
-        (BOARD_B, cli.NOTHING_THERE),
+        (BOARD_B, output.NOTHING_THERE),
     ]
 
     code, ungrouped, err = out(
@@ -1156,7 +1159,7 @@ def test_a_row_that_breaks_its_own_declaration_is_refused_not_softened(
 
     assert code == 1
     assert printed == ""
-    assert cli.UNREADABLE_READ in err
+    assert acts.UNREADABLE_READ in err
     assert err.endswith("\n") and len(err.splitlines()) == 1
     for where in (printed, err, leaked(caplog)):
         assert SENTINEL not in where

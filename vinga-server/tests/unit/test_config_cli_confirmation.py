@@ -38,6 +38,8 @@ from tests.support.config_cli import document as _document
 from tests.support.config_cli import logged as _logged
 from tests.support.config_cli import runner
 from vinga_server.config import cli, entities
+from vinga_server.config.cli import grammar, input, invocation
+from vinga_server.config.loader import ConfigError
 
 
 @pytest.fixture
@@ -107,7 +109,7 @@ def test_the_table_marks_exactly_the_destructive_commands() -> None:
     in the list without the flag is a delete that stopped asking, and a
     row with the flag that is not in the list is a command that started
     asking for no stated reason."""
-    marked = {row.words for row in cli.COMMANDS if row.destroys}
+    marked = {row.words for row in grammar.COMMANDS if row.destroys}
 
     assert marked == intended()
     assert len(marked) == 13
@@ -134,7 +136,7 @@ def test_a_replacement_write_is_not_destructive() -> None:
         ("default-agent", "set"),
     }
 
-    assert never & {row.words for row in cli.COMMANDS if row.destroys} == set()
+    assert never & {row.words for row in grammar.COMMANDS if row.destroys} == set()
 
 
 # The precedence matrix
@@ -168,8 +170,8 @@ def test_a_terminal_is_asked_and_a_yes_goes_ahead(
     captured = capsys.readouterr()
     # The question is about this invocation, so it is on stderr with the
     # notices rather than in the data a caller came for.
-    assert cli.CONFIRMATION in captured.err
-    assert cli.CONFIRMATION not in captured.out
+    assert input.CONFIRMATION in captured.err
+    assert input.CONFIRMATION not in captured.out
     assert not still_stored(run, capsys)
 
 
@@ -183,7 +185,7 @@ def test_a_terminal_is_asked_and_anything_else_stops(
     assert run("agent", "delete", "kids") == 1
 
     captured = capsys.readouterr()
-    assert captured.err.endswith(cli.DECLINED + "\n")
+    assert captured.err.endswith(input.DECLINED + "\n")
     assert captured.out == ""
     assert still_stored(run, capsys)
 
@@ -197,7 +199,7 @@ def test_force_at_a_terminal_does_not_ask(
 
     assert run("agent", "delete", "kids", "--force") == 0
 
-    assert cli.CONFIRMATION not in capsys.readouterr().err
+    assert input.CONFIRMATION not in capsys.readouterr().err
     assert not still_stored(run, capsys)
 
 
@@ -213,8 +215,8 @@ def test_no_input_at_a_terminal_refuses(
     assert run("agent", "delete", "kids", "--no-input") == 1
 
     captured = capsys.readouterr()
-    assert captured.err == cli.NO_INPUT_REFUSED + "\n"
-    assert cli.CONFIRMATION not in captured.err
+    assert captured.err == input.NO_INPUT_REFUSED + "\n"
+    assert input.CONFIRMATION not in captured.err
     assert still_stored(run, capsys)
 
 
@@ -230,7 +232,7 @@ def test_force_and_no_input_together_go_ahead(
 
     assert run("agent", "delete", "kids", "--force", "--no-input") == 0
 
-    assert cli.CONFIRMATION not in capsys.readouterr().err
+    assert input.CONFIRMATION not in capsys.readouterr().err
     assert not still_stored(run, capsys)
 
 
@@ -253,7 +255,7 @@ def test_a_pipe_is_never_blocked_whatever_the_flags(
 
     assert run("agent", "delete", "kids", *flags) == 0
 
-    assert cli.CONFIRMATION not in capsys.readouterr().err
+    assert input.CONFIRMATION not in capsys.readouterr().err
     assert not still_stored(run, capsys)
 
 
@@ -274,7 +276,7 @@ def test_a_flag_given_before_the_command_survives_a_command_without_one(
 
     assert run("--no-input", "agent", "delete", "kids") == 1
 
-    assert capsys.readouterr().err == cli.NO_INPUT_REFUSED + "\n"
+    assert capsys.readouterr().err == input.NO_INPUT_REFUSED + "\n"
     assert still_stored(run, capsys)
 
 
@@ -287,7 +289,7 @@ def test_a_flag_given_after_the_command_applies(
 
     assert run("agent", "delete", "kids", "--no-input") == 1
 
-    assert capsys.readouterr().err == cli.NO_INPUT_REFUSED + "\n"
+    assert capsys.readouterr().err == input.NO_INPUT_REFUSED + "\n"
 
 
 def test_the_command_position_wins_where_both_said_something(
@@ -359,7 +361,7 @@ def test_no_input_at_a_terminal_answers_without_reading_it(
     assert run("provider", "secret", "set", "llm", "claude", "api_key", "--no-input") == 1
 
     captured = capsys.readouterr()
-    assert captured.err == cli.SECRET_EMPTY + "\n"
+    assert captured.err == input.SECRET_EMPTY + "\n"
     assert captured.out == ""
 
 
@@ -493,7 +495,7 @@ def test_the_declined_sentence_carries_no_field_of_the_command(
         assert run(*argv) == 1
 
     found = surfaces(capsys, caplog, argv)
-    assert found["stderr"] == cli.CONFIRMATION + cli.DECLINED + "\n"
+    assert found["stderr"] == input.CONFIRMATION + input.DECLINED + "\n"
     assert found["stdout"] == ""
     for sentinel in planted:
         assert [where for where, text in found.items() if sentinel in text] == []
@@ -519,7 +521,7 @@ def test_the_no_input_refusal_carries_no_field_of_the_command(
         assert run(*argv, "--no-input") == 1
 
     found = surfaces(capsys, caplog, (*argv, "--no-input"))
-    assert found["stderr"] == cli.NO_INPUT_REFUSED + "\n"
+    assert found["stderr"] == input.NO_INPUT_REFUSED + "\n"
     assert found["stdout"] == ""
     for sentinel in planted:
         assert [where for where, text in found.items() if sentinel in text] == []
@@ -529,7 +531,7 @@ def test_the_three_sentences_are_constants_with_nothing_to_fill() -> None:
     """The structural half of the claim above: a sentence with a
     placeholder in it is a sentence something could be interpolated
     into later, which is how this rule is broken by accident."""
-    for sentence in (cli.CONFIRMATION, cli.DECLINED, cli.NO_INPUT_REFUSED):
+    for sentence in (input.CONFIRMATION, input.DECLINED, input.NO_INPUT_REFUSED):
         assert "{" not in sentence
         assert "%" not in sentence
 
@@ -611,7 +613,7 @@ def test_a_terminal_that_will_not_answer_deletes_nothing_and_says_so(
         assert run("agent", "delete", "kids") == 1
 
     captured = capsys.readouterr()
-    assert captured.err == cli.CONFIRMATION + cli.CONFIRMATION_UNREADABLE + "\n"
+    assert captured.err == input.CONFIRMATION + input.CONFIRMATION_UNREADABLE + "\n"
     assert captured.out == ""
     assert "Traceback" not in captured.err
     for sentinel in (PLANTED_NAME, PLANTED_SLOT, PLANTED_MAC):
@@ -634,10 +636,10 @@ def test_the_unreadable_terminal_refusal_carries_nothing_on_its_chain(
     what it was reading from; neither is behind the sentence."""
     monkeypatch.setattr("sys.stdin", _Failing(raised))
 
-    with pytest.raises(cli.ConfigError) as caught:
-        cli._permitted_to_destroy(cli.Invocation())
+    with pytest.raises(ConfigError) as caught:
+        input._permitted_to_destroy(invocation.Invocation())
 
-    assert str(caught.value) == cli.CONFIRMATION_UNREADABLE
+    assert str(caught.value) == input.CONFIRMATION_UNREADABLE
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
     for sentinel in (PLANTED_NAME, PLANTED_SLOT, PLANTED_MAC):

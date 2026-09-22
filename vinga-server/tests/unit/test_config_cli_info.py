@@ -33,7 +33,7 @@ import pytest
 
 from tests.support.config_cli import chain, logged, runner
 from tests.support.events import both_formats
-from vinga_server.config import cli
+from vinga_server.config.cli import deployment, reach
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import ServerConfig
 from vinga_server.config.responses import RuntimeInfo
@@ -145,7 +145,7 @@ def test_info_prints_the_deployment_from_end_to_end(
     # The URL alone on its line, with its provenance on the label above
     # it: a terminal wraps a long line wherever it runs out, and this is
     # a value an operator retypes by hand.
-    label = lines.index(f"{cli.ONBOARDING_URL_LABEL}, {info.onboarding_provenance}:")
+    label = lines.index(f"{deployment.ONBOARDING_URL_LABEL}, {info.onboarding_provenance}:")
     assert lines[label].startswith("onboarding URL (")
     assert lines[label + 1] == info.onboarding_url
     # And the tally, which is the shape of the deployment rather than
@@ -271,14 +271,14 @@ def refused(monkeypatch: pytest.MonkeyPatch, problem: ConfigError) -> None:
 
 
 def _second(monkeypatch: pytest.MonkeyPatch, answer) -> None:
-    real = cli._call
+    real = reach._call
 
     def call(reached, method, path, *rest, **kwargs):
         if path == "/config":
             return answer()
         return real(reached, method, path, *rest, **kwargs)
 
-    monkeypatch.setattr(cli, "_call", call)
+    monkeypatch.setattr(reach, "_call", call)
 
 
 def document(**sections: object) -> dict[str, object]:
@@ -345,7 +345,7 @@ def test_a_configuration_a_count_cannot_walk_is_quoted_nowhere(
     printed = capsys.readouterr()
     # The first act rendered, which is the multi-act contract.
     assert "server: 0.1.0 (v0.1.0-3-gdeadbee)" in printed.out
-    assert cli.UNRECOGNIZED_ANSWER in printed.err
+    assert reach.UNRECOGNIZED_ANSWER in printed.err
     assert "Traceback" not in printed.err
     assert "configured:" not in printed.out
     for surface in (printed.out, printed.err, logged(caplog), both_formats(caplog)):
@@ -358,7 +358,7 @@ def test_a_count_refusal_leaves_nothing_on_the_chain() -> None:
     body it refused as its `__context__` for anything walking the
     chain."""
     with pytest.raises(ConfigError) as caught:
-        cli.COUNTS.render(cli.COUNTS.read(document(default_agent={"leak": ANSWERED})))
+        deployment.COUNTS.render(deployment.COUNTS.read(document(default_agent={"leak": ANSWERED})))
 
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
@@ -402,7 +402,7 @@ def tally(run, monkeypatch: pytest.MonkeyPatch, capsys, **sections: object) -> s
     capsys.readouterr()
     assert run("info") == 0
     printed = capsys.readouterr().out
-    return next(line for line in printed.splitlines() if line.startswith(cli.CONFIGURED))
+    return next(line for line in printed.splitlines() if line.startswith(deployment.CONFIGURED))
 
 
 def test_a_kind_nothing_was_written_of_is_absent(
@@ -461,7 +461,7 @@ def test_a_deployment_with_nothing_in_it_says_so(
     to be configured.
     """
     assert (
-        tally(run, monkeypatch, capsys, providers={}) == f"configured: {cli.NOTHING_YET}"
+        tally(run, monkeypatch, capsys, providers={}) == f"configured: {deployment.NOTHING_YET}"
     )
 
 
@@ -501,7 +501,7 @@ def test_a_default_agent_that_renders_to_nothing_is_still_one(
     """
     capsys.readouterr()
 
-    cli.COUNTS.render(cli.COUNTS.read(document(default_agent=stored)))
+    deployment.COUNTS.render(deployment.COUNTS.read(document(default_agent=stored)))
 
     assert capsys.readouterr().out.strip().endswith(expected)
 
@@ -514,7 +514,7 @@ def test_a_deployment_whose_only_setting_is_an_unnameable_agent_is_not_empty(
     to nothing was written."""
     capsys.readouterr()
 
-    cli.COUNTS.render(cli.COUNTS.read(document(providers={}, default_agent="   ")))
+    deployment.COUNTS.render(deployment.COUNTS.read(document(providers={}, default_agent="   ")))
 
     assert capsys.readouterr().out.strip() == "configured: no devices, default agent ?"
 
@@ -628,13 +628,13 @@ def test_a_body_that_is_not_the_declared_shape_is_quoted_nowhere(
 ) -> None:
     """What a proxy or a captive portal answers is text nobody vouched
     for, and the fixed sentence says the status and no more."""
-    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
     capsys.readouterr()
 
     assert run("info") == 1
 
     printed = capsys.readouterr()
-    assert cli.UNRECOGNIZED_ANSWER in printed.err
+    assert reach.UNRECOGNIZED_ANSWER in printed.err
     assert ANSWERED not in printed.err + printed.out
     assert "Traceback" not in printed.err
 
@@ -669,7 +669,7 @@ def test_an_answer_that_says_two_things_about_onboarding_is_refused(
     through, so what is pinned is what a command would meet.
     """
     with pytest.raises(ConfigError) as caught:
-        cli.IDENTITY.read(
+        deployment.IDENTITY.read(
             {
                 "version": "0.1.0",
                 "revision": "v0.1.0-3-gdeadbee",
@@ -679,7 +679,7 @@ def test_an_answer_that_says_two_things_about_onboarding_is_refused(
             }
         )
 
-    assert cli.UNRECOGNIZED_ANSWER in str(caught.value)
+    assert reach.UNRECOGNIZED_ANSWER in str(caught.value)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
     # And the value it was refused over is not in what it says about it.
@@ -690,8 +690,8 @@ def test_the_two_consistent_answers_are_read(monkeypatch: pytest.MonkeyPatch) ->
     """The other side of the same pin: exactly two of the eight states
     are a deployment's, and both are read."""
     info = identity(monkeypatch)
-    served = cli.IDENTITY.read(info.model_dump())
-    off = cli.IDENTITY.read(
+    served = deployment.IDENTITY.read(info.model_dump())
+    off = deployment.IDENTITY.read(
         info.model_dump()
         | {
             "onboarding_enabled": False,
@@ -709,7 +709,7 @@ def test_an_identity_refusal_leaves_nothing_on_the_chain() -> None:
     through: a refusal built inside a handler would carry the body it
     refused as its `__context__` for anything walking the chain."""
     with pytest.raises(ConfigError) as caught:
-        cli.IDENTITY.read({"version": "0.1.0", "leak": ANSWERED})
+        deployment.IDENTITY.read({"version": "0.1.0", "leak": ANSWERED})
 
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
@@ -731,7 +731,7 @@ def test_both_acts_are_answered_by_the_address_the_banner_named(
     port nothing in this test serves.
     """
     run.runtime["identity"] = identity(monkeypatch)
-    real = cli.load_file_config
+    real = reach.load_file_config
     reads: list[object] = []
 
     def moving(path: str | None = None):
@@ -742,7 +742,7 @@ def test_both_acts_are_answered_by_the_address_the_banner_named(
             return config.model_copy(update={"server": moved})
         return config
 
-    monkeypatch.setattr(cli, "load_file_config", moving)
+    monkeypatch.setattr(reach, "load_file_config", moving)
     capsys.readouterr()
 
     assert run("info") == 0

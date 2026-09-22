@@ -50,7 +50,8 @@ import pytest
 from tests.support.config_cli import chain, logged
 from vinga_server import doctor
 from vinga_server import main as entrypoint
-from vinga_server.config import cli
+from vinga_server.config import cli, docgen
+from vinga_server.config.cli import grammar, local, reach
 from vinga_server.config.loader import (
     NEEDS_THE_SERVER_HALF,
     NEEDS_THE_SIM_EXTRA,
@@ -165,7 +166,7 @@ def offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     the database this file half names, and the gate fires first."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
     monkeypatch.delenv("VINGA_API_SECRET", raising=False)
-    monkeypatch.delenv(cli.API_URL_ENV, raising=False)
+    monkeypatch.delenv(reach.API_URL_ENV, raising=False)
     monkeypatch.setenv("VINGA_AUTH_SECRET", "a-fixed-secret-for-the-vector")
     named = tmp_path / f"{CONFIG_PATH_SENTINEL}.yaml"
     named.write_text("server:\n  public_url: https://voice.example\n", encoding="utf-8")
@@ -197,7 +198,7 @@ def test_every_gated_command_answers_the_same_one_sentence(
         assert captured.out == ""
         said.append(captured.err.strip())
 
-    assert said == [cli.NEEDS_THE_SERVER_HALF] * len(_gated(offline))
+    assert said == [NEEDS_THE_SERVER_HALF] * len(_gated(offline))
 
 
 def test_a_gated_refusal_leaks_nothing_it_was_given(
@@ -241,9 +242,9 @@ def test_the_gated_refusal_carries_no_exception_chain(
     with monkeypatch.context() as patched:
         _refuses("vinga_server.config.api")(patched)
         with pytest.raises(ConfigError) as refused:
-            cli._from_an_installed_half(cli.docgen.openapi, cli.NEEDS_THE_SERVER_HALF)
+            local._from_an_installed_half(docgen.openapi, NEEDS_THE_SERVER_HALF)
 
-    assert str(refused.value) == cli.NEEDS_THE_SERVER_HALF
+    assert str(refused.value) == NEEDS_THE_SERVER_HALF
     assert refused.value.__cause__ is None
     assert refused.value.__context__ is None
     assert IMPORT_SENTINEL not in chain(refused.value)
@@ -253,7 +254,7 @@ def test_the_gated_sentence_names_no_value_at_all() -> None:
     """The two constants, held to being constants. A sentence assembled
     from an invocation would pass every case above on the day it was
     written and leak on the first command that carried something else."""
-    for sentence in (cli.NEEDS_THE_SERVER_HALF, entrypoint.CANNOT_SERVE):
+    for sentence in (NEEDS_THE_SERVER_HALF, entrypoint.CANNOT_SERVE):
         assert "{" not in sentence
         assert "%s" not in sentence
 
@@ -418,7 +419,7 @@ def test_one_sentence_answers_every_command_that_needs_the_other_half() -> None:
     """Three sites, one string, read from the module below all of them.
     Two strings for one fact is the duplication the design guide names,
     and it is the shape this started in."""
-    assert cli.NEEDS_THE_SERVER_HALF is NEEDS_THE_SERVER_HALF
+    assert NEEDS_THE_SERVER_HALF is NEEDS_THE_SERVER_HALF
 
 
 # The other gate, which is an EXTRA rather than the server half
@@ -482,7 +483,7 @@ def test_the_conversation_verb_without_its_extra_answers_its_own_sentence(
         assert cli.main(["simulator", "run", f"http://127.0.0.1:9/x/{OTA_URL_SENTINEL}/"]) == 1
 
     captured = capsys.readouterr()
-    assert captured.err.strip() == cli.NEEDS_THE_SIM_EXTRA
+    assert captured.err.strip() == NEEDS_THE_SIM_EXTRA
     assert "Traceback" not in captured.err
 
 
@@ -520,9 +521,9 @@ def test_the_extra_s_refusal_carries_no_exception_chain(
             def imports_the_extra() -> None:
                 from websockets.sync.client import connect  # noqa: F401
 
-            cli._from_an_installed_half(imports_the_extra, cli.NEEDS_THE_SIM_EXTRA)
+            local._from_an_installed_half(imports_the_extra, NEEDS_THE_SIM_EXTRA)
 
-    assert str(refused.value) == cli.NEEDS_THE_SIM_EXTRA
+    assert str(refused.value) == NEEDS_THE_SIM_EXTRA
     assert refused.value.__cause__ is None
     assert refused.value.__context__ is None
     assert IMPORT_SENTINEL not in chain(refused.value)
@@ -538,9 +539,9 @@ def test_the_two_gates_are_one_function_with_two_sentences() -> None:
     path. The sentences are two because they send a reader to two
     different places.
     """
-    assert cli.NEEDS_THE_SIM_EXTRA is NEEDS_THE_SIM_EXTRA
-    assert cli.NEEDS_THE_SIM_EXTRA != cli.NEEDS_THE_SERVER_HALF
-    for sentence in (cli.NEEDS_THE_SIM_EXTRA,):
+    assert NEEDS_THE_SIM_EXTRA is NEEDS_THE_SIM_EXTRA
+    assert NEEDS_THE_SIM_EXTRA != NEEDS_THE_SERVER_HALF
+    for sentence in (NEEDS_THE_SIM_EXTRA,):
         assert "{" not in sentence
         assert "%s" not in sentence
 
@@ -555,4 +556,4 @@ def test_the_gated_commands_of_the_grammar_are_exactly_four() -> None:
     """
     gated = {("openapi",), ("ota-url",), ("check",), ("simulator", "run")}
 
-    assert gated <= {row.words for row in cli.COMMANDS}
+    assert gated <= {row.words for row in grammar.COMMANDS}

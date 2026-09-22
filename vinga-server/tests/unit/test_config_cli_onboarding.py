@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 from vinga_server import onboarding
 from vinga_server.app import create_app
 from vinga_server.config import Config, cli
+from vinga_server.config.cli import reach
 from vinga_server.config.loader import load_file_config
 
 # Not a real secret: fixed, so the key below is a vector rather than
@@ -42,7 +43,7 @@ def _environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     exist. The command may need none of them."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
     monkeypatch.delenv(API_SECRET_ENV, raising=False)
-    monkeypatch.delenv(cli.API_URL_ENV, raising=False)
+    monkeypatch.delenv(reach.API_URL_ENV, raising=False)
     monkeypatch.setenv(AUTH_SECRET_ENV, SECRET)
 
 
@@ -129,7 +130,7 @@ def test_it_opens_no_socket_no_database_and_needs_no_token(
         raise AssertionError("ota-url reached for something it must not need")
 
     monkeypatch.setenv("VINGA_DB_PORT", "1")
-    monkeypatch.setattr(cli, "build_client", refuse)
+    monkeypatch.setattr(reach, "build_client", refuse)
     monkeypatch.setattr(socket, "socket", refuse)
 
     assert cli.main(["ota-url"]) == 0

@@ -58,6 +58,7 @@ from vinga_server.build_info import CONTAINER_ENV
 from vinga_server.config import Config, cli, entities, views
 from vinga_server.config.api import build_api
 from vinga_server.config.boot import load_boot_config
+from vinga_server.config.cli import reach
 from vinga_server.config.loader import ConfigError, StorageError, compose_config
 from vinga_server.config.models import (
     AgentConfig,
@@ -1026,7 +1027,7 @@ def _no_ambient_client(monkeypatch: pytest.MonkeyPatch) -> None:
     API address. It reaches no server, so an address would be a fact
     about nothing."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    monkeypatch.delenv(cli.API_URL_ENV, raising=False)
+    monkeypatch.delenv(reach.API_URL_ENV, raising=False)
 
 
 def test_the_check_command_names_the_stored_entry_without_its_credential(

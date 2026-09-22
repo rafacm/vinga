@@ -2,7 +2,7 @@
 
 The unit lane's acceptance spine (`tests/unit/test_config_cli.py` and its
 five neighbours) runs the same entry point against the same application,
-with one thing replaced: `cli.build_client` hands back a `TestClient`
+with one thing replaced: `reach.build_client` hands back a `TestClient`
 instead of opening a connection. That is the right seam for those suites
 and it is exactly what this one may not do. Here `build_client` is
 untouched, so every command that reaches a server resolves an address,
@@ -26,7 +26,7 @@ What that buys, and what nothing in-process can show:
 - A refusal is composed by the API, serialized, sent, parsed by the CLI
   and printed. That the sentence survives the round trip intact is a
   claim about the wire, and this is where it is made.
-- `import` has no read timeout at all (`cli.IMPORT_READ_TIMEOUT_S`), which
+- `import` has no read timeout at all (`deployment.IMPORT_READ_TIMEOUT_S`), which
   a mock transport cannot demonstrate: there is nothing to wait for.
   Both halves of the bound are proven here against a server that really
   takes time to answer.
@@ -37,7 +37,7 @@ anywhere. `test_the_lane_s_server_booted_from_the_environment_alone`
 states that as a claim rather than leaving it a property of a fixture.
 
 Coverage is derived rather than declared. `run` records the row of
-`cli.COMMANDS` each command line names, and only when the command
+`grammar.COMMANDS` each command line names, and only when the command
 succeeded, so what the recording holds is "this command completed" and
 not "this command line was typed". The last test in the file holds that
 recording to the registration table, which is what makes a command added
@@ -87,7 +87,8 @@ from tests.support.deployment import (
 )
 from vinga_server.build_info import revision
 from vinga_server.config import ConfigError, cli, docgen, entities, server_reference
-from vinga_server.config.cli import installed_version
+from vinga_server.config.cli import deployment, grammar, input, local, output, reach
+from vinga_server.config.cli.grammar import installed_version
 from vinga_server.config.loader import CONFIG_FROM_FLAG, CONFIG_NOT_FOUND
 from vinga_server.config.models import (
     API_MOUNT_PATH,
@@ -207,7 +208,7 @@ def live(module_database: str) -> Iterator[Live]:
             # an operator's shell is set up for. The `--api-url` half is
             # what the isolated server below is reached by, so both
             # resolutions are driven over a real socket.
-            patch.setenv(cli.API_URL_ENV, running.api_url)
+            patch.setenv(reach.API_URL_ENV, running.api_url)
             yield running
     finally:
         patch.undo()
@@ -244,7 +245,7 @@ def run(*argv: str, stdin: str | None = None) -> int:
     """One command, run the way the entry point runs it, over a real
     connection to a real server.
 
-    Nothing is patched. `cli.build_client` is the one the module ships,
+    Nothing is patched. `reach.build_client` is the one the module ships,
     so the address, the token, the timeouts and the transport policy are
     all the deployed ones, and what answers is uvicorn.
 
@@ -685,7 +686,7 @@ def test_one_entity_is_written_read_exported_and_deleted(
     # under it is the same read `show` renders: export is the writable
     # projection of the display one, not a second read.
     assert exported.startswith("# One ")
-    assert f"{cli.PROGRAM} {kind} set " in exported
+    assert f"{reach.PROGRAM} {kind} set " in exported
     assert document(exported) == shown
 
     assert run(kind, "set", *identity, *pairs) == 0
@@ -911,7 +912,7 @@ def test_a_claim_naming_an_agent_that_is_not_there_is_refused_over_the_wire(
         "the device showing that code could not be bound: the request's agents name at "
         "least one agent this deployment does not have. Nothing was changed and the "
         "code is still claimable. What was sent is not quoted back. "
-        + cli.REMEDIES[RefusalReason.AGENTS_UNKNOWN]
+        + reach.REMEDIES[RefusalReason.AGENTS_UNKNOWN]
     )
     assert "no-such-agent" not in printed.err
 
@@ -1031,8 +1032,8 @@ def test_a_credential_is_stored_masked_and_cleared(
     # creating write would refuse.
     # The marker is part of the exported command since the M2 round's
     # finding 6: a legal leading-dash identity must survive the argv.
-    assert f"{cli.PROGRAM} provider secret set -- llm spare api_key" in exported
-    assert f"{cli.PROGRAM} mcp-server secret set -- weather headers.Authorization" in exported
+    assert f"{reach.PROGRAM} provider secret set -- llm spare api_key" in exported
+    assert f"{reach.PROGRAM} mcp-server secret set -- weather headers.Authorization" in exported
     assert MASK not in exported
 
     assert run("provider", "secret", "clear", "llm", "spare", "api_key") == 0
@@ -1097,8 +1098,8 @@ def test_the_running_server_is_read_after_an_apply(
     # (#425), with the live kinds' own sentence under it.
     assert run("diff") == 0
     compared = capsys.readouterr().out
-    assert compared.startswith(cli.SERVING_THE_STORE + "\n")
-    assert compared.endswith(cli.READ_AS_ASKED + "\n")
+    assert compared.startswith(deployment.SERVING_THE_STORE + "\n")
+    assert compared.endswith(deployment.READ_AS_ASKED + "\n")
 
     assert run("mcp-server", "status") == 0
     running = capsys.readouterr().out
@@ -1146,7 +1147,7 @@ def test_info_names_the_deployment_it_reached(
     label = next(
         index
         for index, line in enumerate(lines)
-        if line.startswith(f"{cli.ONBOARDING_URL_LABEL}, ")
+        if line.startswith(f"{deployment.ONBOARDING_URL_LABEL}, ")
     )
     assert "guessed from the listen address" in lines[label]
     # The whole sentence, not the head of one: the fix it ends with is
@@ -1229,7 +1230,7 @@ def test_an_apply_installs_what_an_import_wrote(
         "agents.sam: wrote",
     ]
     # The write is waiting, and the sentence under it says on what.
-    assert f"{cli.PROGRAM} apply" in written_out.err
+    assert f"{reach.PROGRAM} apply" in written_out.err
 
     assert run("apply") == 0
 
@@ -1243,7 +1244,7 @@ def test_an_apply_installs_what_an_import_wrote(
     # And nothing waiting, which is the whole of what the apply buys:
     # the one line on stderr is this invocation having worked (#426),
     # not something else to run.
-    assert printed.err == cli.INSTALLED + "\n"
+    assert printed.err == deployment.INSTALLED + "\n"
 
     # The read that says the running server is serving this document
     # rather than the world it had a moment ago. Nothing in the store
@@ -1801,7 +1802,7 @@ def test_the_metric_verbs_read_the_named_aggregates_over_the_wire(
         "TURNS",
     ]
     [row] = [line for line in broken_down.splitlines() if line.startswith(METRIC_DAY)]
-    assert row.split()[1:3] == [SESSION_MAC, cli.NOTHING_THERE]
+    assert row.split()[1:3] == [SESSION_MAC, output.NOTHING_THERE]
 
     assert leaked(SECRET, logs=watched.everything()) == []
 
@@ -1837,7 +1838,7 @@ def test_the_documents_that_reach_nothing_render_in_the_same_environment(
     # working directory that is not the lane's.
     assert run("cli-reference") == 0
     rendered = capsys.readouterr().out
-    assert f"### `{cli.PROGRAM} apply`" in rendered
+    assert f"### `{reach.PROGRAM} apply`" in rendered
 
     assert run("ota-url") == 0
     printed = capsys.readouterr()
@@ -1874,7 +1875,7 @@ def test_the_check_reads_the_store_the_running_server_booted_on(
         assert run("check") == 0
     printed = capsys.readouterr()
     assert printed.out == ""
-    assert printed.err.strip() == cli.COMPOSES
+    assert printed.err.strip() == local.COMPOSES
 
     engine = open_database(DatabaseConfig())
     try:
@@ -1949,11 +1950,11 @@ def _annotated_secret_command(exported: str) -> tuple[str, ...]:
     named = [
         line.lstrip("# ")
         for line in exported.splitlines()
-        if line.lstrip("# ").startswith(cli.PROGRAM)
+        if line.lstrip("# ").startswith(reach.PROGRAM)
         and " secret set " in line
     ]
     assert len(named) == 1, f"the export named {len(named)} secret set commands"
-    return tuple(shlex.split(named[0])[len(cli.PROGRAM.split()) :])
+    return tuple(shlex.split(named[0])[len(reach.PROGRAM.split()) :])
 
 
 # Where the recovered credential is read back. Named here because it is
@@ -2237,7 +2238,7 @@ def _configuration_body(exported: str) -> str:
 # refusal the server composes cannot happen and the transport sentence
 # takes its place, and a refusal this side composes is unchanged.
 
-USAGE = cli.usage_line(cli.SECRET_NEVER_AN_ARGUMENT)
+USAGE = input.usage_line(cli.SECRET_NEVER_AN_ARGUMENT)
 
 UNRESOLVED = "the change was refused; it would leave these references unresolved:"
 
@@ -2319,7 +2320,7 @@ REFUSALS: tuple[Refusal, ...] = (
         "no device is waiting with that activation code. A code lasts ten minutes and "
         "is retired the moment it is claimed, and a device that has been waiting longer "
         "is already showing a fresh one: read the code currently on the device's screen "
-        "and use that. " + cli.REMEDIES[RefusalReason.CODE_NOT_PENDING],
+        "and use that. " + reach.REMEDIES[RefusalReason.CODE_NOT_PENDING],
         True,
     ),
     Refusal(
@@ -2493,7 +2494,7 @@ def test_every_family_of_the_grammar_has_a_refusal() -> None:
     this file.
     """
     assert {row.family for row in REFUSALS} == {
-        family_of(row.words) for row in cli.COMMANDS
+        family_of(row.words) for row in grammar.COMMANDS
     }
 
 
@@ -2631,7 +2632,7 @@ def test_a_fragment_that_will_not_parse_never_travels(
     assert run(*argv) == 1
     refused = capsys.readouterr()
     assert refused.err == (
-        f"invalid YAML in {cli.FILE_SOURCE} at line 3, column 1. Nothing of what it "
+        f"invalid YAML in {input.FILE_SOURCE} at line 3, column 1. Nothing of what it "
         f"holds is quoted back: a source that will not parse is one nothing here has "
         f"validated, and what a parser says about one repeats the tag or the key it "
         f"stopped on\n"
@@ -2675,7 +2676,7 @@ def test_a_fragment_that_will_not_parse_never_travels(
 IMPATIENT_S = 0.005
 
 
-def impatient(words: tuple[str, ...], bound: float) -> tuple[cli.Command, ...]:
+def impatient(words: tuple[str, ...], bound: float) -> tuple[grammar.Command, ...]:
     """The registration table with one command's read bound cut short.
 
     The bound is a fact of the act on that command's row, which is where
@@ -2688,7 +2689,7 @@ def impatient(words: tuple[str, ...], bound: float) -> tuple[cli.Command, ...]:
         replace(row, does=replace(row.does, read_timeout_s=bound))
         if row.words == words
         else row
-        for row in cli.COMMANDS
+        for row in grammar.COMMANDS
     )
 
 
@@ -2722,7 +2723,7 @@ def test_a_large_document_is_waited_out_however_long_it_takes(
     entries = APPLY_LIMIT - 1
     many = {f"agent-{number:03d}": {"prompt": "You are one of many."} for number in range(entries)}
     document_path = written(tmp_path, "large.yaml", {"agents": many})
-    monkeypatch.setattr(cli, "COMMANDS", impatient(("show",), IMPATIENT_S))
+    monkeypatch.setattr(grammar, "COMMANDS", impatient(("show",), IMPATIENT_S))
 
     started = time.monotonic()
     assert run("import", "-f", document_path, "--api-url", isolated.api_url) == 0
@@ -2851,7 +2852,7 @@ def test_a_preset_imports_onto_an_empty_store(
     apply is exercised on a document of this lane's own, further up.
     """
     monkeypatch.chdir(SERVER)
-    monkeypatch.setenv(cli.API_URL_ENV, isolated.api_url)
+    monkeypatch.setenv(reach.API_URL_ENV, isolated.api_url)
 
     assert run("import", "-f", str(preset.relative_to(SERVER))) == 0
     first = [line.split(": ")[-1] for line in capsys.readouterr().out.splitlines()]
@@ -2911,10 +2912,10 @@ def test_every_published_recipe_line_but_the_preset_apply_runs(
     coverage this lane does not give it.
     """
     monkeypatch.chdir(SERVER)
-    monkeypatch.setenv(cli.API_URL_ENV, isolated.api_url)
+    monkeypatch.setenv(reach.API_URL_ENV, isolated.api_url)
 
     published = [
-        line.removeprefix(f"{cli.PROGRAM} ")
+        line.removeprefix(f"{reach.PROGRAM} ")
         for recipe in docgen.recipes()
         for line in recipe.commands
     ]
@@ -2924,7 +2925,7 @@ def test_every_published_recipe_line_but_the_preset_apply_runs(
     )
     # And the page discloses it, so a reader of the reference is not told
     # a list is run that is one line short of being run.
-    assert f"{cli.PROGRAM} {' '.join(NOT_INSTALLED)}" in cli.RECIPES_INTRO, (
+    assert f"{reach.PROGRAM} {' '.join(NOT_INSTALLED)}" in grammar.RECIPES_INTRO, (
         "the published recipes intro does not name the line this lane skips"
     )
 
@@ -3043,7 +3044,7 @@ def test_the_lane_drove_every_command_of_the_registration_table(
     """The completeness claim, and the reason a command cannot skip this
     lane quietly.
 
-    The inventory is `cli.COMMANDS`, which is the grammar itself rather
+    The inventory is `grammar.COMMANDS`, which is the grammar itself rather
     than a description of it: a command exists exactly when it has a row
     there. What is held against it is what actually ran and succeeded,
     recorded by `run` off each command line, so this cannot be satisfied
@@ -3063,9 +3064,9 @@ def test_the_lane_drove_every_command_of_the_registration_table(
     if defined_here() - selected:
         pytest.skip("only part of the lane was selected, so only part of it was driven")
 
-    missing = sorted(" ".join(row.words) for row in cli.COMMANDS if row.words not in DRIVEN)
+    missing = sorted(" ".join(row.words) for row in grammar.COMMANDS if row.words not in DRIVEN)
     assert not missing, (
-        "these commands are registered in cli.COMMANDS and no case in this lane ran "
+        "these commands are registered in grammar.COMMANDS and no case in this lane ran "
         f"them successfully: {missing}"
     )
 
@@ -3073,4 +3074,4 @@ def test_the_lane_drove_every_command_of_the_registration_table(
     # other half of the tree the table describes: a group nothing was
     # driven under is a heading with no command behind it.
     reached = {words[:length] for words in DRIVEN for length in range(1, len(words) + 1)}
-    assert set(cli.GROUPS) <= reached
+    assert set(grammar.GROUPS) <= reached

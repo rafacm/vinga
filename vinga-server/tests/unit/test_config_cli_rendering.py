@@ -40,7 +40,9 @@ from tests.support.config_cli import API_SECRET_ENV, SECRET, TOKEN, registered, 
 from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import showing as _showing
 from vinga_server.config import Config, cli, entities, printing
-from vinga_server.config.cli import (
+from vinga_server.config.cli import acts, deployment, devices, invocation, output, reach
+from vinga_server.config.cli import entities as cli_entities
+from vinga_server.config.cli.deployment import (
     APPLY_SECTIONS,
     DIFF_SECTIONS,
     flags,
@@ -51,6 +53,7 @@ from vinga_server.config.cli import (
 from vinga_server.config.entities import APPLY_NOTICE
 from vinga_server.config.loader import ConfigError, ReloadInProgressError
 from vinga_server.config.responses import (
+    PROBLEM_MEDIA_TYPE,
     AgentsReload,
     Applies,
     ConfigReloadResult,
@@ -191,11 +194,11 @@ def test_status_refuses_an_answer_it_cannot_read(
     """A body without the fields a status entry carries did not come
     from this API, and a proxy's page is not rendered as though it
     had."""
-    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: {"weather": {"up": True}})
+    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: {"weather": {"up": True}})
 
     assert run("mcp-server", "status") == 1
 
-    assert cli.UNRECOGNIZED_ANSWER in capsys.readouterr().err
+    assert reach.UNRECOGNIZED_ANSWER in capsys.readouterr().err
 
 
 def _status_entry(**overrides: object) -> dict[str, object]:
@@ -241,12 +244,12 @@ def test_status_prints_nothing_from_an_answer_of_the_wrong_shape(
     terminal: a body this client cannot recognize did not come from this
     API's sanitized output, and what a proxy or a captive portal returns
     is text nobody vouched for."""
-    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
 
     assert run("mcp-server", "status") == 1
 
     captured = capsys.readouterr()
-    assert cli.UNRECOGNIZED_ANSWER in captured.err
+    assert reach.UNRECOGNIZED_ANSWER in captured.err
     assert ANSWERED not in captured.err + captured.out
     assert "Traceback" not in captured.err
 
@@ -257,7 +260,7 @@ def test_the_valid_shape_those_refusals_were_built_from_is_accepted(
     """The control for the parametrization above: each of those bodies
     is this one with a single field replaced, so this is what makes the
     refusals about the replacement."""
-    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: {"weather": _status_entry()})
+    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: {"weather": _status_entry()})
 
     assert run("mcp-server", "status") == 0
 
@@ -279,7 +282,7 @@ def test_a_status_refusal_carries_nothing_of_the_body() -> None:
     # traceback would find it there. The act is where the shape lives,
     # so it is also where the refusal comes from.
     with pytest.raises(ConfigError) as caught:
-        cli.STATUS.read(body)
+        cli_entities.STATUS.read(body)
 
     assert ANSWERED not in _chain(caught.value)
 
@@ -316,7 +319,7 @@ def test_prompt_prints_each_block_its_size_and_the_total(
         ),
         characters=26,
     )
-    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
 
     assert run("agent", "preview", "poet") == 0
 
@@ -341,7 +344,7 @@ def test_prompt_never_truncates_a_block(
         _prompt_block(text=long_block, characters=len(long_block)),
         characters=len(long_block),
     )
-    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
 
     assert run("agent", "preview", "poet") == 0
 
@@ -360,7 +363,7 @@ def test_prompt_keeps_the_newlines_and_replaces_the_control_characters(
     the terminal."""
     text = "first line\n\tindented\x1b[31mred\x07"
     body = _assembled(_prompt_block(text=text, characters=len(text)))
-    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
 
     assert run("agent", "preview", "poet") == 0
 
@@ -389,7 +392,7 @@ def test_prompt_sanitizes_a_published_prompts_name(
         ),
         characters=8,
     )
-    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
 
     assert run("agent", "preview", "poet") == 0
 
@@ -403,7 +406,7 @@ def test_prompt_sanitizes_a_published_prompts_name(
 def test_prompt_names_nothing_beside_a_block_that_has_no_name(
     run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: _assembled())
+    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: _assembled())
 
     assert run("agent", "preview", "poet") == 0
 
@@ -425,7 +428,7 @@ def test_prompt_says_what_the_server_answered_for_an_unserved_agent(
     assert run("agent", "preview", "stranger") == 1
 
     printed = capsys.readouterr().err.strip()
-    assert printed.endswith(cli.REMEDIES[RefusalReason.AGENT_NOT_SERVING])
+    assert printed.endswith(reach.REMEDIES[RefusalReason.AGENT_NOT_SERVING])
     assert printed.startswith("this server is not serving an agent of that name.")
 
 
@@ -453,12 +456,12 @@ def test_prompt_without_a_server_says_so(run, capsys: pytest.CaptureFixture[str]
 def test_prompt_prints_nothing_from_an_answer_of_the_wrong_shape(
     body: object, run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
 
     assert run("agent", "preview", "poet") == 1
 
     captured = capsys.readouterr()
-    assert cli.UNRECOGNIZED_ANSWER in captured.err
+    assert reach.UNRECOGNIZED_ANSWER in captured.err
     assert ANSWERED not in captured.err + captured.out
     assert "Traceback" not in captured.err
 
@@ -466,7 +469,7 @@ def test_prompt_prints_nothing_from_an_answer_of_the_wrong_shape(
 def test_a_prompt_refusal_carries_nothing_of_the_body() -> None:
     # Read through the act, for the reason the status refusal above gives.
     with pytest.raises(ConfigError) as caught:
-        cli.PROMPT.read({"blocks": [{"leak": ANSWERED}], "characters": 4})
+        cli_entities.PROMPT.read({"blocks": [{"leak": ANSWERED}], "characters": 4})
 
     assert ANSWERED not in _chain(caught.value)
 
@@ -636,7 +639,7 @@ def test_apply_prints_what_it_did_and_what_is_running(
     assert "weather: down since " in printed.out
     # And that it worked, on the stream that carries facts about this
     # invocation rather than about the deployment.
-    assert printed.err == cli.INSTALLED + "\n"
+    assert printed.err == deployment.INSTALLED + "\n"
 
 
 def test_a_section_answered_null_is_named_rather_than_missing() -> None:
@@ -651,7 +654,7 @@ def test_a_section_answered_null_is_named_rather_than_missing() -> None:
     body = _reload_answer()
     body["agents"] = None
 
-    assert f"agents: {cli.NOT_APPLIED}" in cli._apply_listing(body)
+    assert f"agents: {deployment.NOT_APPLIED}" in deployment._apply_listing(body)
 
 
 def test_every_outcome_an_apply_can_report_has_a_label() -> None:
@@ -673,7 +676,7 @@ def test_every_outcome_an_apply_can_report_has_a_label() -> None:
         for field in outcomes(shape) + flags(shape)
     }
 
-    assert set(cli.APPLY_LABELS) == labelled
+    assert set(deployment.APPLY_LABELS) == labelled
     for section, shape in APPLY_SECTIONS.items():
         rendered = set(outcomes(shape)) | set(flags(shape))
         # The MCP status document is the one field rendered by a
@@ -700,7 +703,7 @@ def test_the_apply_prints_only_what_has_something_to_say() -> None:
         }
     )
 
-    assert cli._apply_listing(body) == "mcp:\n  connection started: weather\n"
+    assert deployment._apply_listing(body) == "mcp:\n  connection started: weather\n"
 
 
 def test_the_apply_says_so_when_nothing_differed() -> None:
@@ -708,7 +711,7 @@ def test_the_apply_says_so_when_nothing_differed() -> None:
     nothing would read as one that failed to answer, and what this
     answers is that the store was already what the server was serving.
     """
-    assert cli._apply_listing(_every_section()) == cli.NOTHING_DIFFERED + "\n"
+    assert deployment._apply_listing(_every_section()) == deployment.NOTHING_DIFFERED + "\n"
 
 
 def test_an_apply_volunteers_nothing_about_mcp_servers_that_do_not_exist(
@@ -730,14 +733,14 @@ def test_an_apply_volunteers_nothing_about_mcp_servers_that_do_not_exist(
     assert run("apply") == 0
 
     printed = capsys.readouterr().out
-    assert cli.NOTHING_CONFIGURED not in printed
+    assert cli_entities.NOTHING_CONFIGURED not in printed
     # And no separator left hanging under the listing where the block
     # it separates is not there.
-    assert printed == cli.NOTHING_DIFFERED + "\n"
+    assert printed == deployment.NOTHING_DIFFERED + "\n"
 
     assert run("mcp-server", "status") == 0
 
-    assert capsys.readouterr().out.startswith(cli.NOTHING_CONFIGURED)
+    assert capsys.readouterr().out.startswith(cli_entities.NOTHING_CONFIGURED)
 
 
 def test_the_apply_renders_the_same_answer_as_the_same_bytes(
@@ -783,8 +786,8 @@ def test_what_an_apply_installed_is_read_before_the_success_under_it(run) -> Non
         buffered.flush()
         written = shared.getvalue().decode("utf-8")
 
-    assert cli.INSTALLED in written
-    assert written.index("  changed: sam") < written.index(cli.INSTALLED)
+    assert deployment.INSTALLED in written
+    assert written.index("  changed: sam") < written.index(deployment.INSTALLED)
 
 
 def test_a_name_the_apply_reports_does_not_steer_a_terminal(
@@ -804,7 +807,7 @@ def test_a_name_the_apply_reports_does_not_steer_a_terminal(
             "servers": {},
         }
     )
-    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
 
     assert run("apply") == 0
 
@@ -823,17 +826,17 @@ def test_apply_prints_the_refusal_the_api_answered(
 
     refused = capsys.readouterr().err
     assert "no running server" in refused
-    assert cli.INSTALLED not in refused
+    assert deployment.INSTALLED not in refused
 
 
 def test_apply_refuses_an_answer_it_cannot_read(
     run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: {"started": "weather"})
+    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: {"started": "weather"})
 
     assert run("apply") == 1
 
-    assert cli.UNRECOGNIZED_ANSWER in capsys.readouterr().err
+    assert reach.UNRECOGNIZED_ANSWER in capsys.readouterr().err
 
 
 def _reload_answer(**overrides: object) -> dict[str, object]:
@@ -882,12 +885,12 @@ def test_apply_prints_nothing_from_an_answer_of_the_wrong_shape(
     the same document the status command refuses when it cannot read
     it, so a stray shape anywhere must end in the fixed sentence rather
     than in output or a traceback."""
-    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
 
     assert run("apply") == 1
 
     captured = capsys.readouterr()
-    assert cli.UNRECOGNIZED_ANSWER in captured.err
+    assert reach.UNRECOGNIZED_ANSWER in captured.err
     assert ANSWERED not in captured.err + captured.out
     assert "Traceback" not in captured.err
 
@@ -960,7 +963,7 @@ def test_the_comparison_groups_what_is_pending_under_one_head() -> None:
     with nothing to say is not a line at all. The two columns are what
     makes it readable down the left, so the padding is part of the pin.
     """
-    assert cli._diff_listing(DIFF_PENDING) == PENDING
+    assert deployment._diff_listing(DIFF_PENDING) == PENDING
 
 
 def test_the_comparison_heads_a_group_once_however_many_kinds_wait() -> None:
@@ -970,10 +973,10 @@ def test_the_comparison_heads_a_group_once_however_many_kinds_wait() -> None:
     per-kind label under another name."""
     one = {**DIFF_EMPTY, "agent_defaults": {"applies": "reload", "changed": True}}
 
-    rendered = cli._diff_listing(one)
+    rendered = deployment._diff_listing(one)
 
-    assert rendered.count(cli.HEADS[Applies.RELOAD]) == 1
-    assert cli._diff_listing(DIFF_PENDING).count(cli.HEADS[Applies.RELOAD]) == 1
+    assert rendered.count(deployment.HEADS[Applies.RELOAD]) == 1
+    assert deployment._diff_listing(DIFF_PENDING).count(deployment.HEADS[Applies.RELOAD]) == 1
     assert "  agent_defaults  changed\n" in rendered
 
 
@@ -981,10 +984,10 @@ def test_the_comparison_says_so_when_nothing_is_pending() -> None:
     """A sentence rather than no output at all: a command that printed
     nothing would read as one that failed to answer, and what this
     answers is that the two worlds agree."""
-    rendered = cli._diff_listing(DIFF_EMPTY)
+    rendered = deployment._diff_listing(DIFF_EMPTY)
 
-    assert rendered.startswith(cli.SERVING_THE_STORE + "\n")
-    assert cli.HEADS[Applies.RELOAD] not in rendered
+    assert rendered.startswith(deployment.SERVING_THE_STORE + "\n")
+    assert deployment.HEADS[Applies.RELOAD] not in rendered
 
 
 def test_the_comparison_says_why_two_kinds_are_never_pending() -> None:
@@ -996,9 +999,9 @@ def test_the_comparison_says_why_two_kinds_are_never_pending() -> None:
 
     assert live
     for kind in live:
-        assert kind in cli.READ_AS_ASKED
-    assert cli._diff_listing(DIFF_EMPTY).endswith(cli.READ_AS_ASKED + "\n")
-    assert cli._diff_listing(DIFF_PENDING).endswith(cli.READ_AS_ASKED + "\n")
+        assert kind in deployment.READ_AS_ASKED
+    assert deployment._diff_listing(DIFF_EMPTY).endswith(deployment.READ_AS_ASKED + "\n")
+    assert deployment._diff_listing(DIFF_PENDING).endswith(deployment.READ_AS_ASKED + "\n")
 
 
 def test_every_boundary_a_comparison_can_name_has_a_head() -> None:
@@ -1010,7 +1013,7 @@ def test_every_boundary_a_comparison_can_name_has_a_head() -> None:
     member without a head is the hole, and a head for a token no field
     can carry is a line nobody will ever read.
     """
-    assert set(cli.HEADS) == set(get_args(DiffApplies))
+    assert set(deployment.HEADS) == set(get_args(DiffApplies))
 
 
 def test_the_comparison_prints_only_what_has_something_to_say() -> None:
@@ -1019,7 +1022,7 @@ def test_the_comparison_prints_only_what_has_something_to_say() -> None:
     what moved. What is filtered is a function of the two worlds, so
     two reads of one pair of worlds are still the same bytes, which the
     case further down pins."""
-    rendered = cli._diff_listing(DIFF_PENDING)
+    rendered = deployment._diff_listing(DIFF_PENDING)
 
     assert "(none)" not in rendered
     assert "removed" not in rendered
@@ -1048,7 +1051,7 @@ def test_the_comparison_names_what_moved_and_where_it_reaches() -> None:
         "filler": {"applies": "reload", "changed": ["kids"]},
     }
 
-    rendered = cli._diff_listing(body)
+    rendered = deployment._diff_listing(body)
 
     assert "  agents  changed: sam; prompt changed: sam; filler changed: kids\n" in rendered
 
@@ -1075,14 +1078,14 @@ def test_a_change_named_with_nothing_is_still_a_change(named: str) -> None:
         "providers": {"applies": "reload", "added": [named], "removed": [], "changed": []},
     }
 
-    rendered = cli._diff_listing(cli.DIFF.read(body))
+    rendered = deployment._diff_listing(deployment.DIFF.read(body))
 
-    assert cli.SERVING_THE_STORE not in rendered
-    assert f"  providers  added: {cli.UNNAMEABLE}\n" in rendered
+    assert deployment.SERVING_THE_STORE not in rendered
+    assert f"  providers  added: {output.UNNAMEABLE}\n" in rendered
     # And the count survives with it: two such names are two things.
     both = {**body, "providers": {**body["providers"], "added": [named, named]}}
-    assert f"added: {cli.UNNAMEABLE}, {cli.UNNAMEABLE}\n" in cli._diff_listing(
-        cli.DIFF.read(both)
+    assert f"added: {output.UNNAMEABLE}, {output.UNNAMEABLE}\n" in deployment._diff_listing(
+        deployment.DIFF.read(both)
     )
 
 
@@ -1108,9 +1111,9 @@ def test_the_comparison_puts_each_kind_under_its_own_boundary() -> None:
         "agents": {**DIFF_EMPTY["agents"], "added": ["assistant"]},  # type: ignore[dict-item]
     }
 
-    rendered = cli._diff_listing(cli.DIFF.read(body))
+    rendered = deployment._diff_listing(deployment.DIFF.read(body))
 
-    restart, reload = cli.HEADS[Applies.RESTART], cli.HEADS[Applies.RELOAD]
+    restart, reload = deployment.HEADS[Applies.RESTART], deployment.HEADS[Applies.RELOAD]
     assert rendered.count(restart) == 1
     assert rendered.count(reload) == 1
     # Each fact under the head of the boundary its own kind named, and
@@ -1125,7 +1128,7 @@ def test_the_comparison_puts_each_kind_under_its_own_boundary() -> None:
     # declaration rather than written out here.
     planted = (Applies.RESTART, Applies.RELOAD)
     assert [line for line in rendered.splitlines() if line in {restart, reload}] == [
-        cli.HEADS[boundary] for boundary in Applies if boundary in planted
+        deployment.HEADS[boundary] for boundary in Applies if boundary in planted
     ]
 
 
@@ -1134,7 +1137,7 @@ def test_the_comparison_renders_the_same_answer_as_the_same_bytes() -> None:
     rendering leaves out is a function of the answer alone, so two
     renders of one answer are one string; a set iterated somewhere in
     the grouping is where that would stop being true."""
-    assert cli._diff_listing(DIFF_PENDING) == cli._diff_listing(DIFF_PENDING)
+    assert deployment._diff_listing(DIFF_PENDING) == deployment._diff_listing(DIFF_PENDING)
 
 
 def test_the_comparison_does_not_let_a_name_steer_a_terminal(
@@ -1156,7 +1159,7 @@ def test_the_comparison_does_not_let_a_name_steer_a_terminal(
         "removed": [],
         "changed": [],
     }
-    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
 
     assert run("diff") == 0
 
@@ -1180,7 +1183,7 @@ def test_the_comparison_renders_every_field_of_every_kind() -> None:
         shape = unwalked.pop()
         rendered = set(named_lists(shape)) | set(flags(shape)) | set(nested(shape))
         unwalked += [
-            cli._section(shape.model_fields[name].annotation) for name in nested(shape)
+            deployment._section(shape.model_fields[name].annotation) for name in nested(shape)
         ]
         # `applies` is which group a kind's facts land in rather than a
         # fact of its own, which is the one field the three rules do not
@@ -1194,13 +1197,13 @@ def test_the_comparison_refuses_an_answer_it_cannot_read(
     """A body missing a kind is a body this client cannot read as a
     comparison, and it meets the fixed sentence rather than rendering
     most of an answer."""
-    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: {"providers": {}})
+    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: {"providers": {}})
 
     assert run("diff") == 1
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert captured.err == cli.UNREADABLE_READ + "\n"
+    assert captured.err == acts.UNREADABLE_READ + "\n"
 
 
 def test_diff_prints_the_refusal_the_api_answered(
@@ -1249,12 +1252,12 @@ def test_a_token_the_comparison_cannot_read_is_a_sentence(
     the value nor a traceback on either stream."""
     body = {**DIFF_EMPTY}
     body["providers"] = {**DIFF_EMPTY["providers"], "applies": answered}  # type: ignore[dict-item]
-    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
 
     assert run("diff") == 1
 
     captured = capsys.readouterr()
-    assert captured.err == cli.UNREADABLE_READ + "\n"
+    assert captured.err == acts.UNREADABLE_READ + "\n"
     assert captured.out == ""
     assert "Traceback" not in captured.err
     assert SECRET not in captured.err
@@ -1271,9 +1274,9 @@ def test_no_token_the_comparison_refuses_is_retained_on_its_chain(answered: obje
     body["providers"] = {**DIFF_EMPTY["providers"], "applies": answered}  # type: ignore[dict-item]
 
     with pytest.raises(ConfigError) as caught:
-        cli.DIFF.read(body)
+        deployment.DIFF.read(body)
 
-    assert str(caught.value) == cli.UNREADABLE_READ
+    assert str(caught.value) == acts.UNREADABLE_READ
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
     assert SECRET not in _chain(caught.value)
@@ -1342,7 +1345,7 @@ def test_an_import_says_what_the_write_is_waiting_on(
 
     printed = capsys.readouterr()
     assert printed.out.splitlines() == [WROTE]
-    assert printed.err.splitlines() == [f"imported 1 entry, {cli.NOT_SERVING_YET}"]
+    assert printed.err.splitlines() == [f"imported 1 entry, {output.NOT_SERVING_YET}"]
     assert len(run.clients) == 1
 
 
@@ -1383,7 +1386,7 @@ def test_an_import_that_wrote_nothing_says_no_boundary_either(
     if printed_lines:
         assert printed.out.splitlines() == printed_lines
     else:
-        assert printed.out.startswith(cli.NOTHING_IMPORTED)
+        assert printed.out.startswith(output.NOTHING_IMPORTED)
     assert printed.err == ""
 
 
@@ -1413,7 +1416,7 @@ def test_what_an_import_wrote_is_read_before_the_boundary_under_it(run) -> None:
         written = shared.getvalue().decode("utf-8")
 
     assert WROTE in written
-    assert written.index(WROTE) < written.index(cli.NOT_SERVING_YET)
+    assert written.index(WROTE) < written.index(output.NOT_SERVING_YET)
 
 
 def test_a_refused_document_is_the_whole_answer(
@@ -1452,17 +1455,17 @@ def test_a_refused_act_is_raised_with_nothing_behind_it(
         refused.__cause__ = RuntimeError(SECRET)
         raise refused
 
-    monkeypatch.setattr(cli, "_call", call)
-    first = cli.Act(
+    monkeypatch.setattr(reach, "_call", call)
+    first = acts.Act(
         method="POST",
         path=lambda _args: "/apply",
         answers=dict[str, object],
         render=lambda _answer: None,
     )
-    reached = cli.Reached(address=cli.Address(base="", query="", shown=""), token="")
+    reached = reach.Reached(address=reach.Address(base="", query="", shown=""), token="")
 
     with pytest.raises(ConfigError) as caught:
-        cli._performed(cli.Invocation(), (first, replace(first)), reached)
+        acts._performed(invocation.Invocation(), (first, replace(first)), reached)
 
     assert str(caught.value) == "the request did not complete"
     assert caught.value.__cause__ is None
@@ -1532,7 +1535,7 @@ def test_the_import_rendering_does_not_let_an_answer_steer_a_terminal(
     exercised is the shape this client insists on and then the renderer
     it feeds, which is the path an answer really takes.
     """
-    cli._imported(cli.IMPORT.read({"entries": [_entry(**overrides)]}))
+    output._imported(deployment.IMPORT.read({"entries": [_entry(**overrides)]}))
 
     printed = capsys.readouterr()
     written = printed.out + printed.err
@@ -1559,7 +1562,7 @@ def test_an_imported_notice_arrives_neutralized_rather_than_dropped(
     does know is answered in this client's own words, and a hostile
     sentence behind one is never printed at all.
     """
-    cli._imported(cli.IMPORT.read({"entries": [_entry(notice=f"wait{STEERING}")]}))
+    output._imported(deployment.IMPORT.read({"entries": [_entry(notice=f"wait{STEERING}")]}))
 
     written = capsys.readouterr().err
     assert written.splitlines()[-1].startswith("wait?")
@@ -1578,7 +1581,7 @@ def test_an_unprintable_identity_never_leaves_as_an_exception() -> None:
     stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="strict")
 
     with contextlib.redirect_stdout(stream):
-        cli._imported(cli.IMPORT.read({"entries": [_entry(identity=SURROGATE)]}))
+        output._imported(deployment.IMPORT.read({"entries": [_entry(identity=SURROGATE)]}))
 
     stream.flush()
     assert "agents" in stream.buffer.getvalue().decode("utf-8")
@@ -1605,9 +1608,9 @@ def test_an_entry_whose_outcome_and_notice_disagree_is_refused(
     body = {"entries": [_entry(outcome=outcome, notice=notice)]}
 
     with pytest.raises(ConfigError) as caught:
-        cli.IMPORT.read(body)
+        deployment.IMPORT.read(body)
 
-    assert str(caught.value) == cli.UNREADABLE_WRITE
+    assert str(caught.value) == acts.UNREADABLE_WRITE
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
 
@@ -1624,9 +1627,9 @@ def test_a_section_this_api_does_not_emit_is_refused(section: str) -> None:
     words and nothing else, which is what keeps a body's own text out of
     the left-hand side of a line."""
     with pytest.raises(ConfigError) as caught:
-        cli.IMPORT.read({"entries": [_entry(section=section)]})
+        deployment.IMPORT.read({"entries": [_entry(section=section)]})
 
-    assert str(caught.value) == cli.UNREADABLE_WRITE
+    assert str(caught.value) == acts.UNREADABLE_WRITE
     assert SECRET not in _chain(caught.value)
 
 
@@ -1637,7 +1640,7 @@ def test_no_imported_refusal_is_retained_on_its_chain() -> None:
     body = {"entries": [_entry(outcome="unchanged", identity=SECRET, notice=SECRET)]}
 
     with pytest.raises(ConfigError) as caught:
-        cli.IMPORT.read(body)
+        deployment.IMPORT.read(body)
 
     assert SECRET not in _chain(caught.value)
 
@@ -1689,7 +1692,7 @@ def test_a_write_is_read_whatever_boundaries_it_announces(
     """
     body = ACKNOWLEDGED if applies is None else ACKNOWLEDGED | {"applies": applies}
 
-    answer = cli.BIND_DEVICE.read(body)
+    answer = devices.BIND_DEVICE.read(body)
 
     assert answer["notice"] == APPLY_NOTICE.sentence
     assert answer["applies"] == expected
@@ -1709,7 +1712,7 @@ def test_an_imported_entry_is_read_whatever_boundaries_it_announces(
     goes wrong."""
     entry = _entry() if applies is None else _entry(applies=applies)
 
-    answer = cli.IMPORT.read({"entries": [entry]})
+    answer = deployment.IMPORT.read({"entries": [entry]})
 
     read = answer["entries"][0]
     assert read["notice"] == APPLY_NOTICE.sentence
@@ -1726,7 +1729,7 @@ def test_an_unknown_boundary_is_never_printed(
     words reach: an operator is told the sentence the server composed
     and nothing this client could not read.
     """
-    cli._imported(cli.IMPORT.read({"entries": [_entry(applies=[UNKNOWN_BOUNDARY])]}))
+    output._imported(deployment.IMPORT.read({"entries": [_entry(applies=[UNKNOWN_BOUNDARY])]}))
 
     printed = capsys.readouterr()
     assert APPLY_NOTICE.sentence in printed.err
@@ -1750,7 +1753,7 @@ def test_an_unknown_boundary_is_never_printed(
 # What a write waiting at a reload is answered with, read from the table
 # rather than written out again: what this asserts is which voice is
 # printed, and what it says is the table's business.
-RELOAD_LINE = cli.SPOKEN[frozenset({Applies.RELOAD})]
+RELOAD_LINE = output.SPOKEN[frozenset({Applies.RELOAD})]
 
 SPOKEN_FOR = [
     ("a set this client knows", [Applies.RELOAD.value], True),
@@ -1779,11 +1782,11 @@ def test_a_write_is_answered_in_this_clients_words_where_it_knows_the_boundary(
     """
     body = ACKNOWLEDGED if applies is None else ACKNOWLEDGED | {"applies": applies}
 
-    cli._acknowledged(cli.BIND_DEVICE.read(body))
+    output._acknowledged(devices.BIND_DEVICE.read(body))
 
     printed = capsys.readouterr()
     assert printed.err.splitlines() == [RELOAD_LINE if spoken else APPLY_NOTICE.sentence]
-    assert (cli.INSTALLS in printed.err) is spoken
+    assert (output.INSTALLS in printed.err) is spoken
 
 
 @pytest.mark.parametrize(
@@ -1803,14 +1806,14 @@ def test_an_imported_entry_is_answered_by_the_side_that_knows_the_boundary(
     """
     entry = _entry() if applies is None else _entry(applies=applies)
 
-    cli._imported(cli.IMPORT.read({"entries": [entry]}))
+    output._imported(deployment.IMPORT.read({"entries": [entry]}))
 
     printed = capsys.readouterr()
-    counted = f"imported 1 entry, {cli.NOT_SERVING_YET}" if spoken else "imported 1 entry"
+    counted = f"imported 1 entry, {output.NOT_SERVING_YET}" if spoken else "imported 1 entry"
     assert printed.err.splitlines() == [counted] + (
         [] if spoken else [APPLY_NOTICE.sentence]
     )
-    assert (cli.INSTALLS in printed.err) is spoken
+    assert (output.INSTALLS in printed.err) is spoken
 
 
 def test_a_document_waiting_on_one_install_says_so_once(
@@ -1835,7 +1838,7 @@ def test_a_document_waiting_on_one_install_says_so_once(
         ),
     ]
 
-    cli._imported(cli.IMPORT.read({"entries": entries}))
+    output._imported(deployment.IMPORT.read({"entries": entries}))
 
     printed = capsys.readouterr()
     assert printed.out.splitlines() == [
@@ -1843,7 +1846,7 @@ def test_a_document_waiting_on_one_install_says_so_once(
         "agents.alex: wrote",
         "devices.aa:bb:cc:dd:ee:ff: wrote",
     ]
-    assert printed.err.splitlines() == [f"imported 3 entries, {cli.NOT_SERVING_YET}"]
+    assert printed.err.splitlines() == [f"imported 3 entries, {output.NOT_SERVING_YET}"]
 
 
 def test_an_unchanged_entry_is_counted_by_neither_half(
@@ -1860,13 +1863,13 @@ def test_an_unchanged_entry_is_counted_by_neither_half(
     unchanged = _entry(identity="alex", outcome="unchanged", notice=None)
     entries = [_entry(identity="sam", applies=[Applies.RELOAD.value]), unchanged]
 
-    cli._imported(cli.IMPORT.read({"entries": entries}))
+    output._imported(deployment.IMPORT.read({"entries": entries}))
 
     printed = capsys.readouterr()
     assert printed.out.splitlines() == ["agents.sam: wrote", "agents.alex: unchanged"]
-    assert printed.err.splitlines() == [f"imported 1 entry, {cli.NOT_SERVING_YET}"]
+    assert printed.err.splitlines() == [f"imported 1 entry, {output.NOT_SERVING_YET}"]
 
-    cli._imported(cli.IMPORT.read({"entries": [unchanged]}))
+    output._imported(deployment.IMPORT.read({"entries": [unchanged]}))
 
     all_unchanged = capsys.readouterr()
     assert all_unchanged.out.splitlines() == ["agents.alex: unchanged"]
@@ -1894,10 +1897,10 @@ def test_the_boundaries_are_read_as_a_set_and_not_as_a_sequence(
         _entry(identity="kim", notice=unserved.sentence, applies=[*both, Applies.RELOAD.value]),
     ]
 
-    cli._imported(cli.IMPORT.read({"entries": entries}))
+    output._imported(deployment.IMPORT.read({"entries": entries}))
 
     printed = capsys.readouterr()
-    assert printed.err.splitlines() == [f"imported 3 entries, {cli.NOT_SERVING_YET}"]
+    assert printed.err.splitlines() == [f"imported 3 entries, {output.NOT_SERVING_YET}"]
     assert unserved.sentence not in printed.err
 
 
@@ -1923,7 +1926,7 @@ def test_two_entries_from_an_older_server_keep_both_sentences(
         ),
     ]
 
-    cli._imported(cli.IMPORT.read({"entries": entries}))
+    output._imported(deployment.IMPORT.read({"entries": entries}))
 
     printed = capsys.readouterr()
     assert printed.err.splitlines() == [
@@ -1931,7 +1934,7 @@ def test_two_entries_from_an_older_server_keep_both_sentences(
         APPLY_NOTICE.sentence,
         entities.BINDING_NOTICE.sentence,
     ]
-    assert cli.INSTALLS not in printed.err
+    assert output.INSTALLS not in printed.err
 
 
 def test_a_mixed_document_keeps_the_remedy_and_the_quoted_sentence(
@@ -1956,11 +1959,11 @@ def test_a_mixed_document_keeps_the_remedy_and_the_quoted_sentence(
         ),
     ]
 
-    cli._imported(cli.IMPORT.read({"entries": entries}))
+    output._imported(deployment.IMPORT.read({"entries": entries}))
 
     printed = capsys.readouterr()
     assert printed.err.splitlines() == [
-        f"imported 2 entries, {cli.NOT_SERVING_YET}",
+        f"imported 2 entries, {output.NOT_SERVING_YET}",
         entities.BINDING_NOTICE.sentence,
     ]
     assert UNKNOWN_BOUNDARY not in printed.out + printed.err
@@ -1987,16 +1990,16 @@ def test_one_answer_renders_the_same_bytes_twice(
         ]
     }
 
-    cli._imported(cli.IMPORT.read(answer))
+    output._imported(deployment.IMPORT.read(answer))
     first = capsys.readouterr()
-    cli._imported(cli.IMPORT.read(answer))
+    output._imported(deployment.IMPORT.read(answer))
     second = capsys.readouterr()
 
     assert first.out == second.out
     assert first.err == second.err
     # And it really is the answer this case is about rather than an
     # empty one compared with itself twice.
-    assert first.err.splitlines()[0] == f"imported 3 entries, {cli.NOT_SERVING_YET}"
+    assert first.err.splitlines()[0] == f"imported 3 entries, {output.NOT_SERVING_YET}"
 
 
 # What a single write's own answer may put where text belongs
@@ -2035,7 +2038,7 @@ def test_a_write_rendering_does_not_let_what_it_wrote_steer_a_terminal(
     """
     body = ACKNOWLEDGED | {"wrote": f"agent sam{planted}"}
 
-    cli._acknowledged(cli.BIND_DEVICE.read(body))
+    output._acknowledged(devices.BIND_DEVICE.read(body))
 
     printed = capsys.readouterr()
     written = printed.out + printed.err
@@ -2052,7 +2055,7 @@ def test_a_write_rendering_does_not_let_a_notice_steer_a_terminal(
     """The same rule on the other string, and the other stream."""
     body = ACKNOWLEDGED | {"notice": f"wait{STEERING}"}
 
-    cli._acknowledged(cli.BIND_DEVICE.read(body))
+    output._acknowledged(devices.BIND_DEVICE.read(body))
 
     printed = capsys.readouterr()
     written = printed.out + printed.err
@@ -2083,7 +2086,7 @@ def test_an_unprintable_line_never_leaves_as_an_exception() -> None:
 
     with contextlib.redirect_stdout(stream):
         try:
-            cli._acknowledged(cli.BIND_DEVICE.read(body))
+            output._acknowledged(devices.BIND_DEVICE.read(body))
         except UnicodeEncodeError as raised:  # pragma: no cover - the door keeps this empty
             leaked = _chain(raised)
 
@@ -2108,7 +2111,7 @@ def test_an_unprintable_notice_never_leaves_as_an_exception() -> None:
     body = ACKNOWLEDGED | {"notice": f"wait{SURROGATE}"}
 
     with contextlib.redirect_stderr(stream):
-        cli._acknowledged(cli.BIND_DEVICE.read(body))
+        output._acknowledged(devices.BIND_DEVICE.read(body))
 
     stream.flush()
     written = stream.buffer.getvalue().decode("utf-8")
@@ -2124,9 +2127,9 @@ def test_no_refused_acknowledgement_is_retained_on_its_chain() -> None:
     body = {"wrote": {"agent": SECRET}, "notice": SECRET, "applies": []}
 
     with pytest.raises(ConfigError) as caught:
-        cli.BIND_DEVICE.read(body)
+        devices.BIND_DEVICE.read(body)
 
-    assert str(caught.value) == cli.UNREADABLE_WRITE
+    assert str(caught.value) == acts.UNREADABLE_WRITE
     assert SECRET not in _chain(caught.value)
 
 
@@ -2172,11 +2175,11 @@ def _refused(monkeypatch: pytest.MonkeyPatch, body: object) -> None:
 
     def answer(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
-            404, json=body, headers={"content-type": cli.PROBLEM_MEDIA_TYPE}
+            404, json=body, headers={"content-type": PROBLEM_MEDIA_TYPE}
         )
 
     monkeypatch.setattr(
-        cli,
+        reach,
         "build_client",
         lambda base_url, token: httpx.Client(
             base_url=base_url, transport=httpx.MockTransport(answer)
@@ -2203,7 +2206,7 @@ def _said(
 # holds them.
 #
 # A test that builds its expectation from the code it checks asserts
-# that the code equals itself: with `cli.REMEDIES` on both sides, two
+# that the code equals itself: with `reach.REMEDIES` on both sides, two
 # remedies swapped between their tokens stay green, and so does any
 # rewording of the prose. These are the plan's own sentences, copied
 # from it, and the table is held to them below; the full-stderr cases
@@ -2239,7 +2242,7 @@ def test_the_remedies_are_the_sentences_this_client_publishes() -> None:
     program word is pinned: a table composed from `PROGRAM` would agree
     with itself whatever `PROGRAM` became.
     """
-    assert cli.REMEDIES == REMEDY_SENTENCES
+    assert reach.REMEDIES == REMEDY_SENTENCES
 
 
 @pytest.mark.parametrize("reason", list(RefusalReason), ids=[r.value for r in RefusalReason])
@@ -2331,7 +2334,7 @@ def test_a_body_whose_state_is_not_a_token_is_not_this_apis_refusal(
 
     said = _said(monkeypatch, capsys, _problem(detail=planted, reason=reason))
 
-    assert cli.UNRECOGNIZED_ANSWER in said
+    assert reach.UNRECOGNIZED_ANSWER in said
     assert SECRET not in said
     assert REFUSED_DETAIL not in said
 
@@ -2348,7 +2351,7 @@ def test_every_remedy_names_a_command_this_grammar_has() -> None:
     """
     quoted = [
         tuple(span.split())
-        for line in cli.REMEDIES.values()
+        for line in reach.REMEDIES.values()
         for span in re.findall(r"`([^`]+)`", line)
     ]
     assert quoted
@@ -2356,7 +2359,7 @@ def test_every_remedy_names_a_command_this_grammar_has() -> None:
     assert unregistered == []
     # And in the short spelling, which is the one a client of this
     # grammar answers to.
-    assert all(words[0] == cli.PROGRAM for words in quoted)
+    assert all(words[0] == reach.PROGRAM for words in quoted)
 
 
 def test_the_remedies_cover_the_whole_vocabulary() -> None:
@@ -2364,4 +2367,4 @@ def test_the_remedies_cover_the_whole_vocabulary() -> None:
     alone, silently, which is the right answer for a token from a newer
     server and the wrong one for a token this build declares. So the two
     sets are held equal and a member added on one side alone is red."""
-    assert set(cli.REMEDIES) == set(RefusalReason)
+    assert set(reach.REMEDIES) == set(RefusalReason)

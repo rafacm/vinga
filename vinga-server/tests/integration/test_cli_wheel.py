@@ -65,7 +65,7 @@ environment before any command runs, and the installed distribution is
 asserted to record the wheel this lane built as where it came from.
 
 **Coverage is the full registered inventory, both ways.** Every row of
-`cli.COMMANDS` is RUN, never merely imported: importing `cli` proves
+`grammar.COMMANDS` is RUN, never merely imported: importing `cli` proves
 nothing about a command whose heavy import sits inside its own arm,
 which is exactly what the gated pair is. The ungated rows are driven
 against the server and asserted to answer; the gated ones are driven and
@@ -115,7 +115,8 @@ from tests.support.tiers import (
     declared,
     requirement_names,
 )
-from vinga_server.config import cli
+from vinga_server.config.cli import deployment, grammar, reach
+from vinga_server.config.loader import NEEDS_THE_SERVER_HALF, NEEDS_THE_SIM_EXTRA
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 from vinga_server.conversations.records import TurnRecord
@@ -234,10 +235,10 @@ SCRATCH: dict[str, object] = {
 # nothing listens on, and nothing reaches it: the gate fires before any
 # request goes out.
 GATED: dict[tuple[str, ...], tuple[str, tuple[str, ...]]] = {
-    ("openapi",): (cli.NEEDS_THE_SERVER_HALF, ()),
-    ("ota-url",): (cli.NEEDS_THE_SERVER_HALF, ()),
-    ("check",): (cli.NEEDS_THE_SERVER_HALF, ()),
-    ("simulator", "run"): (cli.NEEDS_THE_SIM_EXTRA, ("http://127.0.0.1:9/x/ABCDEFGH/",)),
+    ("openapi",): (NEEDS_THE_SERVER_HALF, ()),
+    ("ota-url",): (NEEDS_THE_SERVER_HALF, ()),
+    ("check",): (NEEDS_THE_SERVER_HALF, ()),
+    ("simulator", "run"): (NEEDS_THE_SIM_EXTRA, ("http://127.0.0.1:9/x/ABCDEFGH/",)),
 }
 
 # What this lane actually ran and got an answer from, recorded off each
@@ -332,7 +333,7 @@ def _environment(live: Live) -> dict[str, str]:
     for name in ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "VINGA_CONFIG"):
         environment.pop(name, None)
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
-    environment[cli.API_URL_ENV] = live.api_url
+    environment[reach.API_URL_ENV] = live.api_url
     return environment
 
 
@@ -637,7 +638,7 @@ def test_the_running_server_is_read_after_an_apply(run) -> None:
     # Grouped by the boundary its changes wait at since #425, so what a
     # bare install answers whatever the state is the live kinds'
     # sentence: it says why two of the seven are never in the list.
-    assert cli.READ_AS_ASKED in answered(run("diff"), "diff")
+    assert deployment.READ_AS_ASKED in answered(run("diff"), "diff")
     assert "house" in answered(run("mcp-server", "status"), "mcp-server", "status")
 
     # And the read that says which deployment answered at all. From the
@@ -1034,7 +1035,7 @@ def test_the_documents_render_from_the_installed_wheel(run) -> None:
 
     rendered = answered(run("cli-reference"), "cli-reference")
     assert rendered.strip()
-    assert f"{cli.PROGRAM} import -f examples/" in rendered, (
+    assert f"{reach.PROGRAM} import -f examples/" in rendered, (
         "the recipes rendered empty, so the example fragments are not in the wheel"
     )
 
@@ -1063,7 +1064,7 @@ def test_the_gated_commands_refuse_from_the_bare_install(run) -> None:
 def test_the_gated_set_is_what_the_table_says_it_is() -> None:
     """The inventory held closed against the registration table, so a
     command that left the gated set fails from the side it left."""
-    assert set(GATED) <= {row.words for row in cli.COMMANDS}
+    assert set(GATED) <= {row.words for row in grammar.COMMANDS}
     for words in GATED:
         assert registered(list(words)) == words
 
@@ -1230,7 +1231,7 @@ def test_the_lane_ran_every_command_of_the_registration_table(
 ) -> None:
     """The completeness claim, both ways.
 
-    The inventory is `cli.COMMANDS`, which is the grammar itself rather
+    The inventory is `grammar.COMMANDS`, which is the grammar itself rather
     than a description of it. Every ungated row has to have been RUN
     from the installed binary and answered; no gated row may have
     answered; and nothing may have been driven that the table does not
@@ -1251,12 +1252,12 @@ def test_the_lane_ran_every_command_of_the_registration_table(
     if defined_here() - selected:
         pytest.skip("only part of the lane was selected, so only part of it was driven")
 
-    rows = {row.words for row in cli.COMMANDS}
+    rows = {row.words for row in grammar.COMMANDS}
     assert set(GATED) & DRIVEN == set(), "a gated command answered, which it must not"
 
     missing = sorted(" ".join(words) for words in rows - set(GATED) - DRIVEN)
     assert not missing, (
-        "these commands are registered in cli.COMMANDS and no case in this lane ran "
+        "these commands are registered in grammar.COMMANDS and no case in this lane ran "
         f"them successfully from the installed wheel: {missing}"
     )
 
