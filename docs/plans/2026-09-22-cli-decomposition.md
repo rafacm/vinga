@@ -379,22 +379,40 @@ The dispatch sits where the issue put it, on the act's render step.
 `yaml`, and `_act` takes `output: Output = Output.HUMAN` as its last
 parameter: the human arm is `act.render(act.read(answer))`, unchanged,
 and the machine arm writes `encoded(act.answers, answer, output)` to
-stdout and nothing to stderr. `_performed` passes the default and is
-the one production caller, so the seam's default policy gets its own
-pin, per the honest-seams lens: a test drives `_act` with a fake
-`_call` through both arms and asserts what each stream received. No
-flag reaches the grammar, so every command runs under `Output.HUMAN`;
-adopting `--json` later is the grammar setting the parameter, one
-line, and the guide's deferral entry says so. Notices are not a second
-stream the machine arm has to route: what the human renderers say on
-stderr (a write's notice, a boundary sentence, a page cursor) is
-derived from fields of the model the act read, so it travels in the
-data and the machine arm prints nothing else. The deferral is repriced
-in `docs/architecture/cli-guide.md`: the second bullet ("a second
-format is a second no-leak audit") is replaced by the fact that the
-audit is one test on the model, the entry keeps its "what would change
-the answer" paragraph, since no consumer has appeared, and the
-sentence about notices joins it.
+stdout and then the act's notices to stderr, the same ones the human
+arm prints. `_performed` passes the default and is the one production
+caller, so the seam's default policy gets its own pin, per the
+honest-seams lens: a test drives `_act` with a fake `_call` through
+both arms and asserts what each stream received. No flag reaches the
+grammar, so every command runs under `Output.HUMAN`; adopting `--json`
+later is the grammar setting the parameter, one line, and the guide's
+deferral entry says so.
+
+Notices stay on stderr under any format, which the issue settled, and
+the mechanism is one projection per act that has any. Measured on the
+tree: four act renderers write to stderr, `_acknowledged` (a write's
+boundary sentence from `SPOKEN`), `_imported` (the same, over a
+document), `_applied` (the apply answer's notice) and the page notice
+of the paginated listings; every other stderr write in the file is a
+command handler's or the progress line's, outside the act seam. `Act`
+gains `notices: Callable[[Any], tuple[str, ...]]`, defaulting to a
+function answering none, and the four rows name a projection. The
+projection is extracted from each of the four renderers, which then
+print what it answers, so the human arm and the machine arm read one
+function and cannot disagree about what the notice is; the machine arm
+prints the model, flushes, and prints the projection's lines, so the
+order a script sees is the order a person sees. Those four
+extractions are the one place M3 edits a renderer, they come after
+M1's identity proof, and each is proven by the renderer's existing
+pins being byte-unchanged. The two-arm test uses a real
+acknowledgement and a real imported document rather than a shape with
+no notice, and asserts the notice reaches stderr under both arms.
+
+The deferral is repriced in `docs/architecture/cli-guide.md`: the
+second bullet ("a second format is a second no-leak audit") is
+replaced by the fact that the audit is one test on the model, the
+entry keeps its "what would change the answer" paragraph, since no
+consumer has appeared, and the notices sentence joins it.
 
 ### M4: an extension member, not the RFC's `type`
 
@@ -481,8 +499,10 @@ decision site.
   names, which is what they did as one file, and the one seam that
   exists (the `Invocation` type and the `Act` row) is unchanged.
 - **M2** deepens nothing and changes no code.
-- **M3** deepens `answers.py` by one function and one token, and adds
-  one parameter to the act runner, pinned at its default.
+- **M3** deepens `answers.py` by one function and one token, adds one
+  parameter to the act runner, pinned at its default, and one field to
+  `Act`, the notice projection, defaulted to none and named by the
+  four rows that have notices.
 
 ## Documentation footprint
 
@@ -541,10 +561,12 @@ Reusing what exists wherever the assertion already has a home.
 - **M3**: `tests/unit/test_config_cli_rendering.py` gains the escape
   test on both encoders, watched failing with the escaping asserted
   the wrong way round, and the two-arm test through `_act` with a
-  fake `_call`: the default arm renders and prints its notice on
-  stderr, the machine arm writes the encoded model to stdout and
-  nothing to stderr, and the default is asserted by calling `_act`
-  without the parameter.
+  fake `_call` answering a real acknowledgement and a real imported
+  document: the default arm renders and prints its notice on stderr,
+  the machine arm writes the encoded model to stdout and the same
+  notice to stderr, and the default is asserted by calling `_act`
+  without the parameter. The four renderers' existing pins are
+  byte-unchanged after the projection is extracted.
 - **Reach-ins**: a new test reaches public names or the names the
   existing tests already reach; any new underscore reach-in is
   recorded in the manifest and named in the PR as the design question
@@ -601,8 +623,9 @@ Reusing what exists wherever the assertion already has a home.
   tier.
 - [ ] **M3: the dump, the dispatch and the repricing.** `Output` and
   `encoded` in `answers.py`, the `output` parameter on `_act` with
-  `_performed` passing the default, the escape test and the two-arm
-  test, the CLI guide entry. Stacked on M1, beside M2.
+  `_performed` passing the default, `Act.notices` with the four
+  projections extracted from their renderers, the escape test and the
+  two-arm test, the CLI guide entry. Stacked on M1, beside M2.
 
 ## Verification
 
@@ -763,6 +786,13 @@ verdict "not ready" pending the P1 amendments. Condensed but faithful.
    equivalent seam: machine mode emits the model on stdout and the
    same applicable notices on stderr, preserving order, tested with
    real acknowledgement and document shapes.
+
+   *Resolution*: accepted; the first amendment had contradicted the
+   issue's own sentence. Measured: four act renderers write to stderr.
+   `Act` gains a notice projection, defaulted to none, extracted from
+   those four renderers so both arms read one function, and the
+   machine arm prints the model then the notices. The two-arm test
+   uses a real acknowledgement and a real imported document.
 
 3. **P2: `encoded()` is described as validating, but the named
    operation does not validate.** `dump_python(mode="json")` dumps;
