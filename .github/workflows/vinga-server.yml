@@ -1748,14 +1748,26 @@ jobs:
           - variant: slim
             moving: slim
             suffix: "-slim"
-    # Nothing is checked out here, so the workflow-level default would
-    # name a directory this job does not have.
+    # This job builds nothing and runs no server code. Its checkout is
+    # there for git history alone, and every step below is a registry
+    # or git operation at the repository root, so the workflow-level
+    # `vinga-server` default would name the wrong directory.
     defaults:
       run:
         working-directory: .
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/vinga-server
     steps:
+      # Whole history, because the ordering check below asks whether
+      # one commit is an ancestor of another, and a depth-1 checkout
+      # has none to answer from: the revision the moving tag reports
+      # would not be a known object at all, which the check reads as
+      # nothing to go backwards over, so every tag would move. Nothing
+      # else in this job reads the working tree.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
       # The same twelve characters the builds were given, from the same
       # expression, so the check below compares the tag against the
       # value the images actually carry.
@@ -1836,6 +1848,49 @@ jobs:
               ;;
           esac
 
+      # Pushes no longer queue, so two runs can reach this point at
+      # once and the later writer of a moving tag might be the older
+      # commit. This reads what the tag points at before the step
+      # below moves it. `VINGA_REVISION` is in the image's own `ENV`,
+      # so `.Image` reports it per platform, and both platforms carry
+      # the same value because both builds were given the same build
+      # argument: the first one is the answer, not a sample of several.
+      #
+      # This is a read before a write with no lock behind it. Two
+      # publishes seconds apart can both see the old revision and both
+      # proceed, so what it buys is that a moving tag is not moved to
+      # an older commit's image, not that it is always at the newest
+      # one. It can sit a commit behind until the next push publishes.
+      # The tags it can point at are gated either way, since a run
+      # publishes only after its own lanes have passed.
+      #
+      # Deliberately no `pipefail`: an absent tag makes the inspect
+      # fail, and an empty answer is one of the cases below rather
+      # than an error.
+      - name: Whether the moving tag may move
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          MOVING: ${{ matrix.moving }}
+        run: |
+          set -eu
+
+          published=$(docker buildx imagetools inspect "$IMAGE:$MOVING" \
+            --format '{{json .Image}}' 2>/dev/null \
+            | tr ',' '\n' \
+            | sed -n 's/.*VINGA_REVISION=\([0-9a-f]\{4,\}\).*/\1/p' \
+            | head -n 1)
+
+          if [ -z "$published" ]; then
+            echo "$IMAGE:$MOVING is absent or reports no revision: nothing to go backwards over, moving it"
+          elif ! git cat-file -e "${published}^{commit}" 2>/dev/null; then
+            echo "$IMAGE:$MOVING reports $published, which names no commit here: moving it"
+          elif git merge-base --is-ancestor "$GITHUB_SHA" "$published"; then
+            echo "MOVE_MOVING=false" >> "$GITHUB_ENV"
+            echo "$IMAGE:$MOVING reports $published, which is not older than $GITHUB_SHA: leaving it where it is"
+          else
+            echo "$IMAGE:$MOVING reports $published, which is not a descendant of $GITHUB_SHA: moving it"
+          fi
+
       # One assembly, checked the same way whichever event asked for
       # it, and pushed only on a push to main. `--dry-run` resolves the
       # sources and prints the index it would create without creating
@@ -1858,6 +1913,7 @@ jobs:
           TAGS: ${{ steps.meta.outputs.tags }}
           PUBLISHING: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           VARIANT: ${{ matrix.variant }}
+          MOVING: ${{ matrix.moving }}
         run: |
           set -eu
 
@@ -1923,9 +1979,14 @@ jobs:
 
           tags=()
           while IFS= read -r tag; do
-            if [ -n "$tag" ]; then
-              tags+=(--tag "$tag")
+            if [ -z "$tag" ]; then
+              continue
             fi
+            if [ "$tag" = "$IMAGE:$MOVING" ] && [ "${MOVE_MOVING:-true}" != "true" ]; then
+              echo "not moving $tag"
+              continue
+            fi
+            tags+=(--tag "$tag")
           done <<< "$TAGS"
 
           docker buildx imagetools create "${tags[@]}" "${sources[@]}"
