@@ -55,7 +55,7 @@ def problem(
 PROBLEM_KEYS = frozenset(problem(422, "any refusal at all"))
 
 
-def refused(body: object, status: int, reason: RefusalReason | None = None) -> str:
+def refused(body: object, status: int, *, reason: RefusalReason | None = None) -> str:
     """One refusal, checked as a refusal, with its sentence handed back.
 
     Everything a caller may rely on is asserted here: the members and
@@ -65,13 +65,14 @@ def refused(body: object, status: int, reason: RefusalReason | None = None) -> s
     sentence says is returned rather than compared, so the caller can
     assert the tokens that carry meaning and leave the wording alone.
 
-    `reason` is the exception rather than a sixth member: a handful of
-    refusals carry the state they are in as a closed token, and every
-    other refusal carries exactly the four members it always has. So a
-    caller that expects a token names it and gets the member set
-    checked with it, and a caller that names none gets the strict four,
-    which is what keeps "the member is absent unless there is a token"
-    an assertion every other case in the suite is making already.
+    `reason` is an expectation and not a tolerance. `PROBLEM_KEYS` stays
+    the four members every refusal in this namespace carries, because
+    that set is what pins every other refusal's body; a caller meeting
+    one of the handful that state which of a few states they are in
+    names the token it expects, and gets the four plus that member,
+    holding that value. A caller that names none gets the strict four,
+    so "the member is absent unless the refusal has a state" is an
+    assertion every other case in the suite makes by default.
     """
     assert isinstance(body, dict), body
     expected = PROBLEM_KEYS if reason is None else PROBLEM_KEYS | {"reason"}

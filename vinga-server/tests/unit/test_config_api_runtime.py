@@ -693,7 +693,7 @@ def test_an_agent_this_server_is_not_serving_is_a_404_carrying_the_state(
         response = client.get("/runtime/agents/stranger/prompt")
 
     assert response.status_code == 404
-    detail = refused(response.json(), 404, RefusalReason.AGENT_NOT_SERVING)
+    detail = refused(response.json(), 404, reason=RefusalReason.AGENT_NOT_SERVING)
     assert "the apply that installs it" in detail
     assert "restart" not in detail
     assert PROGRAM not in detail

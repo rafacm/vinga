@@ -32,9 +32,10 @@ from dataclasses import replace
 from pathlib import Path
 from typing import get_args
 
+import httpx
 import pytest
 
-from tests.support.config_cli import SECRET, runner
+from tests.support.config_cli import API_SECRET_ENV, SECRET, TOKEN, runner
 from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import showing as _showing
 from vinga_server.config import Config, cli, entities, printing
@@ -58,6 +59,7 @@ from vinga_server.config.responses import (
     McpReloadResult,
     PromptsReload,
     ProvidersReload,
+    RefusalReason,
 )
 from vinga_server.tools.mcp import McpServers
 
@@ -410,13 +412,20 @@ def test_prompt_names_nothing_beside_a_block_that_has_no_name(
 def test_prompt_says_what_the_server_answered_for_an_unserved_agent(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Printed verbatim from what the server answered, which sends an
-    operator to the apply that installs an agent."""
+    """What the server said, and what this client says to do about it.
+
+    Both halves through a real application rather than a planted body:
+    the server states the state it refused in and names no command, and
+    this side appends the line for the state it recognized. The pair is
+    what an operator reads, so the pair is what is asserted.
+    """
     run.runtime["agent_prompt"] = _previewing(_assembled())
 
     assert run("agent", "preview", "stranger") == 1
 
-    assert "config apply" in capsys.readouterr().err
+    printed = capsys.readouterr().err.strip()
+    assert printed.endswith(cli.REMEDIES[RefusalReason.AGENT_NOT_SERVING])
+    assert printed.startswith("this server is not serving an agent of that name.")
 
 
 def test_prompt_without_a_server_says_so(run, capsys: pytest.CaptureFixture[str]) -> None:
@@ -2118,3 +2127,160 @@ def test_no_refused_acknowledgement_is_retained_on_its_chain() -> None:
 
     assert str(caught.value) == cli.UNREADABLE_WRITE
     assert SECRET not in _chain(caught.value)
+
+
+# What this client says about a state the API states
+#
+# The refusal half of the boundary vocabulary above, and the same pair
+# of rules (#386, #488). The server says which of a handful of states it
+# refused in, as a closed token, and never what to type, because the
+# command is a word of this grammar and an image built before a rename
+# would spell one this client no longer has. This side holds the
+# grammar, so this side appends the remedy, and only for a token it can
+# name: everything else prints the server's sentence alone.
+#
+# Driven through `main` with a transport of this case's own rather than
+# through the reader, so what is asserted is the whole of what reaches
+# an operator: the line is composed, printed and captured the way a
+# refusal really arrives.
+
+# A state no version of this server has ever named, spelled the way a
+# later one plausibly would. The boundary cases above use the same
+# shape for the same reason.
+UNKNOWN_REASON = "sometime-in-the-future"
+
+REFUSED_DETAIL = "devices: nothing was changed, and this is the server's own sentence."
+
+NOWHERE = "http://127.0.0.1:9/api"
+
+
+def _problem(**overrides: object) -> dict[str, object]:
+    """One refusal body as this API writes it, with whatever the case
+    puts where the token belongs."""
+    return {
+        "title": "Not Found",
+        "status": 404,
+        "detail": REFUSED_DETAIL,
+        "errors": [],
+    } | overrides
+
+
+def _refused(monkeypatch: pytest.MonkeyPatch, body: object) -> None:
+    """Something answering every request with that body, under this
+    API's own media type and status."""
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            404, json=body, headers={"content-type": cli.PROBLEM_MEDIA_TYPE}
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "build_client",
+        lambda base_url, token: httpx.Client(
+            base_url=base_url, transport=httpx.MockTransport(answer)
+        ),
+    )
+
+
+def _said(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], body: object
+) -> str:
+    """The whole of what one refusal puts on stderr."""
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+    monkeypatch.setenv(API_SECRET_ENV, TOKEN)
+    _refused(monkeypatch, body)
+
+    assert cli.main(["--api-url", NOWHERE, "list"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    return captured.err.strip()
+
+
+@pytest.mark.parametrize("reason", list(RefusalReason), ids=[r.value for r in RefusalReason])
+def test_a_state_this_client_knows_is_answered_with_its_own_remedy(
+    reason: RefusalReason,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The server's sentence, a space, and this client's line for the
+    state it names.
+
+    The whole of stderr rather than a phrase in it, for the reason the
+    live lane's refusal table gives: a refusal is serialized, sent,
+    parsed and printed before an operator sees it, and a substring check
+    passes for a sentence something appended to.
+
+    Appended rather than replacing, unlike a write's boundary line: a
+    refusal's `detail` is what was refused, which this side does not
+    know and cannot restate.
+    """
+    said = _said(monkeypatch, capsys, _problem(reason=reason.value))
+
+    assert said == f"{REFUSED_DETAIL} {cli.REMEDIES[reason]}"
+
+
+def test_a_state_this_client_cannot_name_is_quoted_and_not_guessed_at(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A token from a server newer than this client.
+
+    Two things have to be true at once, and the second is the one a
+    strict reader gets wrong: the refusal is still printed, because the
+    sentence is readable whatever the token beside it says, and nothing
+    is invented about the state, because this client has no line for it.
+    The token itself never reaches the terminal: what a body put in a
+    closed field is not this client's to echo.
+    """
+    said = _said(monkeypatch, capsys, _problem(reason=UNKNOWN_REASON))
+
+    assert said == REFUSED_DETAIL
+    assert UNKNOWN_REASON not in said
+
+
+def test_a_refusal_from_a_server_older_than_the_vocabulary_is_unchanged(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No member at all, which is every refusal this API sends outside
+    the handful with a state, and every refusal a server older than the
+    vocabulary sends. The sentence alone, exactly as before."""
+    said = _said(monkeypatch, capsys, _problem())
+
+    assert said == REFUSED_DETAIL
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        pytest.param([RefusalReason.AGENTS_UNKNOWN.value], id="a list of tokens"),
+        pytest.param({"leak": SECRET}, id="an object carrying a credential"),
+        pytest.param(7, id="a number"),
+    ],
+)
+def test_a_body_whose_state_is_not_a_token_is_not_this_apis_refusal(
+    reason: object,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The tolerance is for a token this client does not know, and for
+    nothing else.
+
+    Nothing bounds what a body can put where a state belongs, and a body
+    that put something else there is a body nobody vouched for: it meets
+    the fixed sentence with none of itself in it, which is the same
+    answer a proxy's page gets.
+    """
+    said = _said(monkeypatch, capsys, _problem(reason=reason))
+
+    assert cli.UNRECOGNIZED_ANSWER in said
+    assert REFUSED_DETAIL not in said
+    assert SECRET not in said
+
+
+def test_the_remedies_cover_the_whole_vocabulary() -> None:
+    """A state with no line here would print the server's sentence
+    alone, silently, which is the right answer for a token from a newer
+    server and the wrong one for a token this build declares. So the two
+    sets are held equal and a member added on one side alone is red."""
+    assert set(cli.REMEDIES) == set(RefusalReason)

@@ -236,7 +236,7 @@ def test_a_claim_retires_the_code(client: TestClient, pending: PendingDevices) -
     # A claimed code is a code nothing is waiting under, which is the
     # same state as an unknown one and carries the same token.
     assert "activation code" in refusal_body(
-        second.json(), 404, RefusalReason.CODE_NOT_PENDING
+        second.json(), 404, reason=RefusalReason.CODE_NOT_PENDING
     )
 
 
@@ -246,7 +246,7 @@ def test_an_unknown_code_points_at_the_screen(client: TestClient) -> None:
     assert response.status_code == 404
     # Where to look instead, which is the whole of what this refusal is
     # for: the number on the screen is the live one.
-    detail = refusal_body(response.json(), 404, RefusalReason.CODE_NOT_PENDING)
+    detail = refusal_body(response.json(), 404, reason=RefusalReason.CODE_NOT_PENDING)
     assert "the device's screen" in detail
     # And the state as a token, so a client can say where a live code is
     # listed in a grammar of its own. This server names no command for
@@ -271,7 +271,7 @@ def test_an_expired_code_is_answered_the_same_way(
     # The same state and the same token: an expired code and a code that
     # never existed are one thing to a caller.
     assert "the device's screen" in refusal_body(
-        expired.json(), 404, RefusalReason.CODE_NOT_PENDING
+        expired.json(), 404, reason=RefusalReason.CODE_NOT_PENDING
     )
 
 
@@ -354,7 +354,7 @@ def test_a_refused_claim_does_not_quote_the_names_it_refused(
         refused = _claim(client, code, sentinel)
 
     assert refused.status_code == 422
-    detail = refusal_body(refused.json(), 422, RefusalReason.AGENTS_UNKNOWN)
+    detail = refusal_body(refused.json(), 422, reason=RefusalReason.AGENTS_UNKNOWN)
     rendered = (
         refused.text
         + str(refused.headers)
@@ -461,7 +461,7 @@ def test_a_claim_will_not_replace_a_binding_made_underneath_it(
     # And the state as a token, with no command in the sentence: what to
     # read it back with is a verb of the client's grammar.
     assert (
-        refusal_body(refused.json(), 404, RefusalReason.DEVICE_ALREADY_BOUND)
+        refusal_body(refused.json(), 404, reason=RefusalReason.DEVICE_ALREADY_BOUND)
         == ALREADY_BOUND
     )
     assert PROGRAM not in ALREADY_BOUND
