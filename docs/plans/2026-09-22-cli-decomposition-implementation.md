@@ -301,3 +301,328 @@ Written out rather than composed from `PROGRAM`, the remedy sentences
 are inside that census's reach for the first time, which is the guard
 the M4 section above had to write a test for because the census could
 not see them.
+
+## M1: the package
+
+**Attribution:** anthropic/claude-opus-5, thinking high; Claude Code 2.1.278; 2026-09-22.
+
+`config/cli.py` is `config/cli/`: fifteen modules along the seams the
+file already had, every definition moved unchanged, the suite re-pointed
+at the module that defines each name, and two structural tests restated
+as the properties they guard. What a command prints did not move, which
+the generated reference proves byte for byte rather than by argument.
+
+### The module map as it landed
+
+The order below is the order the modules may import one another in, and
+`tests/unit/test_cli_import_graph.py` is what holds them to it. Counts
+are `tests/tools/cli_sections.py`'s, run on the head of this branch.
+
+| Module | Definitions | Lines | What it owns |
+| --- | ---: | ---: | --- |
+| `invocation.py` | 1 | 187 | `Invocation`, the resolved-arguments type, alone. It reads nothing else here and everything else here reads it |
+| `answers.py` | 3 | 157 | Reading an answer as the shape the API declared, and the tolerances this client keeps against a server of another age |
+| `reach.py` | 43 | 1144 | The transport policy, the sanitized refusal and its remedies, and the line a long wait draws |
+| `input.py` | 47 | 636 | Everything a command reads that did not ride argv: YAML, inline pairs, the confirmation, the credential, the memory noun's content |
+| `output.py` | 24 | 479 | Which stream a thing goes to, how a value is bounded, how a table is aligned, and the boundary a write is waiting at |
+| `acts.py` | 7 | 195 | `Act`, `_act`, `_performed`, `_path`, `_printed` and the two fixed unreadable-answer sentences |
+| `entities.py` | 51 | 645 | The five commanded kinds and the default agent: their acts, their renderers, their secret rows, and the masked document's shapes |
+| `devices.py` | 23 | 232 | The device noun: the record, the binding by MAC and by code, and the boards waiting |
+| `deployment.py` | 59 | 1143 | The whole-deployment verbs: export, import, apply, diff, list, show, info, with the documents each of them prints |
+| `records.py` | 98 | 1161 | The conversation store: sessions, conversations, memory and the aggregates over them |
+| `local.py` | 13 | 272 | The five commands that reach no API, and the gate that says which half of the distribution is missing |
+| `simulator.py` | 23 | 397 | The simulated board, and the seam that keeps the two credentials apart |
+| `events.py` | 28 | 435 | The live event stream: the frame vocabulary, the envelope check and the one-line rendering |
+| `grammar.py` | 114 | 2689 | The registry, the argument declarations, the tree `command()` builds, and the committed reference rendered off it |
+| `__init__.py` | 12 | 368 | The door: an argument vector to an exit code and one sentence, whichever entry point it came in by. It re-exports nothing |
+| **total** | **546** | | |
+
+The 65 commands went to the family their noun names, and the eight the
+plan fixed by hand went where it said: `info`, `list` and `show` to
+deployment, `check` and `ota-url` to local, `cli-reference` to grammar,
+`default-agent` to entities, the memory rows to records. No assignment
+had to be changed.
+
+### The proof that nothing was edited on the way
+
+`tests/tools/cli_ast_identity.py`, run from `vinga-server/` against this
+branch's parent:
+
+```
+$ uv run python -m tests.tools.cli_ast_identity cc54b763562665d876d4e37fdf613396e80d7242
+base: cc54b763562665d876d4e37fdf613396e80d7242
+definitions before: 546
+definitions after:  546
+
+definitions whose dump moved: 1
+  CHANGED __all__ (now in __init__.py)
+definitions no longer defined: 0
+definitions not there before: 0
+
+identical: 545
+```
+
+The one that moved is `__all__`, and it is the deviation recorded below.
+
+`tests/tools/cli_sections.py`, the section measurement adapted to the
+package, is supporting evidence about the definitions rather than the
+cycle proof. Its verdict:
+
+```
+== Acyclic: YES ==
+== The stated order is a topological order: no edge points forward ==
+```
+
+And the generated reference did not move. The workflow's own drift
+check, run here, reports no difference on the region between the
+markers, and the inner recipes check reports no difference either.
+
+### The cycle proof, and each module in a fresh interpreter
+
+`tests/unit/test_cli_import_graph.py` builds the package's
+module-import graph from every `import` and `from ... import` statement
+of every module, `__init__.py` included, in both the relative and the
+absolute spelling and at any depth of a body, and asserts that no
+module can reach itself. It is a lasting test because a package's
+cycles are about modules rather than definitions: an import runs when
+the module is first loaded, the load order decides which names exist
+when, and `__init__.py` runs first.
+
+Beside it, each module imported in an interpreter of its own, from
+`vinga-server/`:
+
+```
+vinga_server.config.cli                  ok
+vinga_server.config.cli.invocation       ok
+vinga_server.config.cli.answers          ok
+vinga_server.config.cli.reach            ok
+vinga_server.config.cli.input            ok
+vinga_server.config.cli.output           ok
+vinga_server.config.cli.acts             ok
+vinga_server.config.cli.entities         ok
+vinga_server.config.cli.devices          ok
+vinga_server.config.cli.deployment       ok
+vinga_server.config.cli.records          ok
+vinga_server.config.cli.local            ok
+vinga_server.config.cli.simulator        ok
+vinga_server.config.cli.events           ok
+vinga_server.config.cli.grammar          ok
+```
+
+### The tests, re-pointed
+
+43 files changed under `tests/`: 41 re-pointed at the modules that
+define the names they reach, one new (the cycle proof above) and one
+whose only CLI reference was a path in a fixture list. Eight files that
+name the module are unchanged, because every name they reach stayed in
+`__init__.py` or was never a name at all.
+
+The fourteen names `cli.py` only re-exported come from their own
+modules: `ConfigError` and the two missing-half sentences from
+`config/loader.py`, the Click classes from the copy Typer ships,
+`check_transportable` from `config/transport.py`, `docgen` and
+`entities` from `config/`. Three are read off a module of the package
+instead, because what the test asserts is about the CLI's own reading
+rather than about the name: `UNPARSEABLE` off `cli/input.py`, whose
+fragment boundary is what `test_both_yaml_readers_catch_one_family`
+says shares one tuple with the boot path, and `getpass` and
+`load_file_config` off the modules whose functions call them.
+
+### The patch retargets, and the proof each still reaches
+
+A `monkeypatch.setattr` reaches a consumer only when it targets the
+module whose globals that consumer reads. Three of the nine patched
+names are looked up somewhere other than where they are defined:
+
+| Name | Defined in | Looked up by | Patched on |
+| --- | --- | --- | --- |
+| `_call` | `reach` | `acts._act` | `acts` |
+| `narrated` | `reach` | `acts._act` | `acts` |
+| `_act` | `acts` | `acts._performed`, `simulator._claimed` | `simulator`, which is the consumer the one test that patches it drives |
+| `build_client` | `reach` | `reach._sent`, `reach._reading` | `reach` |
+| `PROGRESS_CADENCE_S` | `reach` | `reach.narrated` | `reach` |
+| `threading` | stdlib, imported by `reach` | `reach._ProgressLine`, `reach.narrated` | `reach` |
+| `load_file_config` | `loader`, imported by `reach` and `local` | `reach._reached` on this path | `reach` |
+| `check_transportable` | `transport`, imported by `entities` and `deployment` | `entities._fragment_body`, `deployment._document_body` | both |
+| `COMMANDS` | `grammar` | `grammar.command` | `grammar` |
+
+Every one of the eight a unit test makes was proven to reach rather
+than argued: the replacement was made to raise (or, for the cadence, to
+be the one value its reader refuses), the test was run and watched fail,
+and it was restored.
+
+| Patch | What failed with the replacement made to raise |
+| --- | --- |
+| `acts._call` | `test_config_cli_summary.py::test_a_document_a_rendering_cannot_walk_is_quoted_nowhere[list-providers-is-a-list]` |
+| `acts.narrated` | `test_config_cli_progress.py::test_the_bytes_off_a_terminal_are_the_same_with_the_line_and_without[import]` |
+| `simulator._act` | `test_simulator_board.py::test_a_claim_performs_the_act_the_grammar_already_has` |
+| `reach.build_client` | `test_config_cli_transport.py::test_a_body_that_is_not_this_api_s_own_is_not_relayed` |
+| `reach.PROGRESS_CADENCE_S` | `test_config_cli_progress.py::test_a_wedged_redraw_does_not_stop_an_answered_import_reporting` |
+| `reach.threading` | `test_config_cli_progress.py::test_a_writer_that_will_not_start_changes_nothing_about_the_command` |
+| `reach.load_file_config` | `test_config_cli_info.py::test_both_acts_are_answered_by_the_address_the_banner_named` |
+| `entities.check_transportable`, `deployment.check_transportable` | the three `spy` cases of `test_config_cli_untransportable.py`, under the two guard mutations below |
+
+`COMMANDS` is the ninth and is patched only in the live lane, so the
+lane's own run is what says it reaches.
+
+No surviving mutation was found. The three that would have survived are
+the three retargeted above, and they are the reason the proof is a step
+of the milestone rather than a claim in it.
+
+### The two structural tests, and their falsifications
+
+**`test_config_cli_untransportable.py`** asserted that the guarded call
+sites are exactly `{"cli.py", "store.py"}`. The CLI half is now a
+statement over the registry: every `Command` row's acts are read for the
+bodies they carry (eleven), each is resolved to its source through its
+code object's first line and followed through its calls, and the set
+that can reach the one place this CLI calls a YAML parser is pinned to
+the two that take one. Every member of that set is asserted to reach the
+guard. The repository side keeps its own filename. No module of the
+package is named anywhere in the file.
+
+Reachability is not order, so the ordering is proven at run time over
+the same discovered set: each member is driven through `_act` with the
+request seam replaced by a recorder, and the recorder stays empty. A
+discovered member with no invocation builder is an error rather than a
+skip.
+
+| Mutation | What caught it |
+| --- | --- |
+| `check_transportable` taken out of `_fragment_body` | eight cases, `test_every_body_that_parses_yaml_reaches_the_guard[_fragment_body]` and `test_the_guard_runs_before_the_request_is_made[_fragment_body]` among them |
+| `check_transportable` moved after the body's `return`, so it is reachable and never runs | seven cases. `test_every_body_that_parses_yaml_reaches_the_guard` stayed GREEN, which is exactly the finding the plan's fourth review round made, and `test_the_guard_runs_before_the_request_is_made[_fragment_body]` is what went red |
+
+**`test_cli_import_weight.py`** keeps its exact inventory, which grows
+by the package's own fourteen modules and by nothing else, listed one
+by one rather than allowed as a prefix. The one-importer claim is
+restated for a package: what it counts is edges from outside, and a
+second test holds the package's own modules to the relative spelling,
+which is what keeps the inside and the outside two different questions.
+
+| Mutation | What caught it |
+| --- | --- |
+| `from vinga_server.config.store import ConfigStore` planted in `devices.py` | `test_the_cli_reaches_exactly_this_much_of_the_server`, on five extra modules including `vinga_server.db` and `vinga_server.config.store` |
+| `from .grammar import DESCRIPTION` planted in `invocation.py` | `test_the_package_imports_itself_in_one_direction_only`, reporting `grammar -> acts -> invocation -> grammar` |
+
+### The manifests
+
+Three lines moved, all regenerated with the generators and none edited.
+
+| Manifest | Line | Why |
+| --- | --- | --- |
+| `reach-ins.txt` | `+ tests/unit/test_config_cli_untransportable.py  _act  1` | A real new reach-in, named below |
+| `reach-ins.txt` | `tests/unit/test_config_cli_grammar.py  _click` 1 → 2 | Not a reach at all: a site is a `.` followed by an underscore name, and `typer._click.exceptions` is the import that file now spells for itself instead of reaching through the CLI for |
+| `command-spellings.txt` | `+ historical  vinga device pending list` | Not this milestone's: it is the plan's own remedy sentence at `docs/plans/2026-09-22-cli-decomposition.md`, and the base commit's manifest is missing it too |
+
+### The reach-in, named
+
+`acts._act` is reached by `test_the_guard_runs_before_the_request_is_made`
+in `tests/unit/test_config_cli_untransportable.py`. It is an underscore
+name and therefore a review flag, answered explicitly: what the case
+proves is that the guard runs BEFORE the request, and the dispatcher is
+the one place where a body meets a request, so it is where the order
+exists to be watched. The design guide's two answers are "the module
+lacks an interface callers need" and "the test pins a detail"; the
+first is the live question, since `Command.perform` is the public way in
+and it resolves an address and a token before it dispatches, which this
+case has no server for. Nothing here pins how `_act` works, only that
+its body ran and its request did not.
+
+### Deviations from the plan
+
+Six, five of them decisions the plan left to the milestone and one a
+genuine change.
+
+- **`__all__` is the one definition that changed.** It named five
+  names the package does not define, and the package re-exports
+  nothing, so it is `["main"]`. Its own commit, and the AST-identity
+  report names it.
+- **`_from_an_installed_half` lives in `local.py`, and `simulator.py`
+  imports it from there.** The plan puts the gate nowhere. Three of the
+  four gated commands are local's and the fourth is `simulator run`, and
+  the alternatives were worse: `acts.py` is "only the helpers every
+  family reaches" and this is reached by two of six, and a module of its
+  own for one function is a name that hides nothing.
+- **`_paged` and `MORE_PAGES` are `output.py`'s**, though every one of
+  their five consumers is in `records.py`. They are a renderer
+  combinator over any listing and the third of the stderr-notice
+  writers that module owns; `records.py` would otherwise hold a paging
+  primitive that is about no record in particular.
+- **`_device_summary` is `devices.py`'s**, though its one consumer is
+  `deployment._summary`. It renders a device body, which is the devices
+  module's subject, and the edge it costs is one import.
+- **`_halves`, `_sections`, `_nesting` and `_counted` are
+  `entities.py`'s**, though every caller is in `deployment.py`. The plan
+  assigns "the `_sections` reading" to entities and it is right: what
+  those four know is what the registry says a section of the document
+  is, which is entity knowledge, and keeping them together is what
+  stops a count and a tree walking one document two ways.
+- **`_version_asked` and `_root_options` are `__init__.py`'s**, which
+  is the plan's "the version answer" read as the answer given in front
+  of the parse. `_print_version` could not join them: `grammar`'s
+  `--version` callback calls it, so it lives there and `main` imports
+  it.
+
+Two smaller ones, both additive. The stale paths were corrected: sixteen
+comments and two workflow commands named `config/cli.py`, and two of
+those were commands that would have failed rather than read oddly. And
+`__init__.py` carries the usage-problem section comment that
+`MISSING_ARGUMENT` used to carry, since that constant went to
+`input.py` with its raise site.
+
+### Discoveries
+
+- **A patch aimed at the defining module is silent, not red.** The
+  re-pointing aimed every `monkeypatch.setattr` at the module that
+  defines the name, which is the obvious reading and is wrong for three
+  of them: `acts.py` imports `_call` by name, so `reach._call` is a
+  different binding and patching it changes nothing about what `_act`
+  calls. It was caught by 112 failures across three files rather than by
+  anything subtle, which is luck: a patch whose test asserts only the
+  happy path would have gone green.
+- **Two reaches no import rewrite can see.** `getattr(cli, name)` in
+  two files, which is how a parametrized row names the sentence it
+  expects, and `cli.PROBLEM_MEDIA_TYPE`, a re-export of
+  `config/responses.py`. Both were found by running the suite and
+  neither by any static sweep of `cli.<name>`, because one is a string
+  and the other was not in the re-export list the plan measured.
+- **The command-spellings manifest was already stale at the base.**
+  The plan's own remedy sentence quotes `vinga device pending list`, and
+  the manifest at `cc54b763` does not have that line. Regenerating here
+  fixes it; nothing in this milestone caused it.
+- **The census counts an import path as a reach-in.** A site is a `.`
+  followed by an underscore name, so `typer._click.exceptions` reads as
+  a reach into `_click`. It moved one line because a file that used to
+  get the Click classes through the CLI now imports them itself.
+
+### The #489 bookkeeping
+
+The issue's 2026-09-20 comment asks, for the eighteen test files it
+names, whether the storage dependency became explicit in a signature.
+The answer is **no, for every one of them**, which is the prediction the
+plan recorded.
+
+Measured rather than asserted: of the nineteen `test_config_cli_*.py`
+files in the tree plus `test_config_api.py`,
+`test_config_api_events.py`, `test_config_examples.py` and
+`test_config_snapshot_mode.py`, twenty-three files in all, **zero**
+gained a storage dependency in any signature and **twenty-three** did
+not. Three of them have a signature line in their diff at all, and none
+of the three is a storage dependency: a return annotation that stopped
+saying `cli.ConfigError`, a call that stopped saying `cli.command()`,
+and the transportability file's new helpers, which take `tmp_path` and
+`monkeypatch`. M1 moved definitions and touched no fixture, which is
+exactly why.
+
+### Verification
+
+From `vinga-server/`: `uv run ruff check .` (clean),
+`uv run pytest tests/census -q` (66 passed), and the CLI reference drift
+check the server workflow runs, over the generated region and over the
+recipes inside it, both reporting no difference. The AST-identity script
+and the section measurement above were run at this branch's head, and
+each package module was imported in an interpreter of its own.
+
+The unit and integration lanes are recorded in the pull request, with
+the counts as they ran. The image build and the smoke conversation were
+not run here and are unverified in this section.
