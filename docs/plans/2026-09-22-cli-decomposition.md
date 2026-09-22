@@ -558,9 +558,16 @@ Reusing what exists wherever the assertion already has a home.
 - **The older-CLI skew reading as a defect in the field.** Stated in
   the changelog fragment and in the M4 section; nothing bridges it,
   and the pre-release stance is the recorded one.
-- **Cycles reappearing.** The DAG holds only with the four prelude
-  definitions placed as described; the M1 section re-runs
-  `sections.py` against the package and quotes "acyclic: yes".
+- **Cycles reappearing.** The definition graph is acyclic only with
+  the four prelude definitions placed as described, and a package has
+  cycle mechanisms a definition graph cannot see: module imports,
+  initialization order and `__init__.py` running first. So the proof
+  is a lasting test beside `test_cli_import_weight.py` that builds
+  the package's module-import graph from each module's import
+  statements, `__init__.py` included, and asserts it is acyclic, plus
+  an import of each module in a fresh interpreter in the milestone's
+  verification, output quoted. `sections.py` re-run against the
+  package is supporting evidence about the definitions, not the proof.
 
 ## Milestones
 
@@ -574,7 +581,8 @@ Reusing what exists wherever the assertion already has a home.
   every definition moved unchanged, the 47 test files re-pointed, the
   five patches retargeted, the two structural tests rewritten, the
   manifests regenerated, the AST-identity script and `cli_sections.py`
-  under `tests/tools/` with their output in the section, the #489
+  under `tests/tools/` with their output in the section, the
+  import-graph test, the fresh-interpreter imports quoted, the #489
   bookkeeping line. Stacked on M4.
 - [ ] **M2: the measurement recorded.** `cli_fields.py` under
   `tests/tools/`, adapted to the package and re-run, and the section
@@ -594,8 +602,11 @@ Reusing what exists wherever the assertion already has a home.
 - The generated-document drift checks: `vinga-server config openapi`
   against `docs/reference/api-openapi.json` (M4), and the CLI
   reference regeneration (M1, byte-identical).
-- M1's AST-identity script, output quoted; `sections.py` re-run on
-  the package, "acyclic: yes" quoted.
+- M1's AST-identity script, output quoted; the import-graph test
+  green; each package module imported in a fresh interpreter
+  (`uv run python -c "import vinga_server.config.cli.<module>"`, one
+  per module, from `vinga-server/`), output quoted; `sections.py`
+  re-run on the package as supporting evidence.
 - The wheel-grade lane, which installs the CLI bare and drives it
   against a live server, on M1 and M4.
 
@@ -706,3 +717,8 @@ refer to the plan as committed at that blob.
    module-import graph check including `__init__.py`, import each
    module in a fresh interpreter, and keep the definition-reference
    measurement as supporting evidence.
+
+   *Resolution*: accepted. A lasting import-graph test over the
+   package, `__init__.py` included, is the cycle proof, each module
+   is imported in a fresh interpreter in the verification, and
+   `sections.py` is demoted to supporting evidence.
