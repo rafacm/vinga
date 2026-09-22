@@ -2257,6 +2257,11 @@ def test_a_refusal_from_a_server_older_than_the_vocabulary_is_unchanged(
         pytest.param([RefusalReason.AGENTS_UNKNOWN.value], id="a list of tokens"),
         pytest.param({"leak": SECRET}, id="an object carrying a credential"),
         pytest.param(7, id="a number"),
+        # The one present non-string the `Problem` model would accept on
+        # its own, which is what makes it the dangerous one: every shape
+        # above is refused by validation whatever this client does, and
+        # this one is refused only because the reading decided to.
+        pytest.param(None, id="an explicit null"),
     ],
 )
 def test_a_body_whose_state_is_not_a_token_is_not_this_apis_refusal(
@@ -2271,12 +2276,21 @@ def test_a_body_whose_state_is_not_a_token_is_not_this_apis_refusal(
     that put something else there is a body nobody vouched for: it meets
     the fixed sentence with none of itself in it, which is the same
     answer a proxy's page gets.
+
+    The sentence is the planted credential in every one of these, so
+    what the case says is not only that the body was refused but that
+    refusing it printed nothing of it. A member spelled `null` is a
+    member a middlebox writes as easily as any other, and the shape the
+    model accepts, so this is where relaying `detail` on the strength of
+    the member's type would have shown.
     """
-    said = _said(monkeypatch, capsys, _problem(reason=reason))
+    planted = f"{REFUSED_DETAIL} {SECRET}"
+
+    said = _said(monkeypatch, capsys, _problem(detail=planted, reason=reason))
 
     assert cli.UNRECOGNIZED_ANSWER in said
-    assert REFUSED_DETAIL not in said
     assert SECRET not in said
+    assert REFUSED_DETAIL not in said
 
 
 def test_every_remedy_names_a_command_this_grammar_has() -> None:
