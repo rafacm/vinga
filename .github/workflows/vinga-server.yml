@@ -68,7 +68,15 @@ on:
 concurrency:
   # A pull request keeps the per-branch group this has always had; a
   # push or a dispatch gets one nobody else can join.
-  group: ${{ github.workflow }}-${{ github.ref }}${{ github.event_name == 'pull_request' && '' || format('-{0}', github.run_id) }}
+  #
+  # Both alternatives are written out in full because neither may be
+  # empty. GitHub's `a && b || c` is not a ternary: it yields `c`
+  # whenever `b` is falsy, and the empty string is falsy, so the
+  # shorter spelling that appended nothing on a pull request fell
+  # through and appended the run id to every event. That gives each
+  # pull-request run a group of its own, which is the one thing
+  # `cancel-in-progress` below cannot survive.
+  group: ${{ github.event_name == 'pull_request' && format('{0}-{1}', github.workflow, github.ref) || format('{0}-{1}-{2}', github.workflow, github.ref, github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
