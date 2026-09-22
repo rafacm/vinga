@@ -484,12 +484,15 @@ _SECRET_BODY = (
 # The two refusals a claim by code can meet. Neither quotes the code
 # back: it is what arrived in the path, and what is worth saying about
 # it is what the operator should read instead.
+#
+# The first says the state and stops there. Where to look for a live
+# code is a command of the client's grammar, so the client says it,
+# from the token beside the sentence (#386).
 _UNKNOWN_CODE = (
     "no device is waiting with that activation code. A code lasts ten minutes and is "
     "retired the moment it is claimed, and a device that has been waiting longer is "
     "already showing a fresh one: read the code currently on the device's screen and "
-    "use that. `vinga-server config device pending list` lists the codes this "
-    "server is showing right now."
+    "use that."
 )
 
 _CODE_IN_FLIGHT = (
@@ -506,8 +509,7 @@ _CODE_IN_FLIGHT = (
 _CLAIM_REFUSED = (
     "the device showing that code could not be bound: the request's agents name at "
     "least one agent this deployment does not have. Nothing was changed and the code "
-    "is still claimable. What was sent is not quoted back; run "
-    "`vinga-server config list` to see the agents that exist."
+    "is still claimable. What was sent is not quoted back."
 )
 
 # What clearing the default agent says it did. The one acknowledgement
@@ -616,9 +618,8 @@ def problem_response(
 _UNLOADED_AGENT = (
     "this server is not serving an agent of that name. The agents a server can serve "
     "are the agents of the world it has installed, so one written since is served by "
-    "the apply that installs it (`vinga-server config apply`), and one that never "
-    "existed is a name nothing answers to. `vinga-server config list` shows the agents "
-    "that are stored."
+    "the apply that installs it, and one that never existed is a name nothing answers "
+    "to."
 )
 
 _UNLOADED_AGENT_DESCRIPTION = _description("unloaded-agent")
@@ -1781,7 +1782,9 @@ def _runtime(api: FastAPI) -> None:
             raise NoRuntimeError(PROBLEM_DESCRIPTIONS[503])
         assembled = await assemble(name)
         if assembled is None:
-            raise UnknownEntityError(_UNLOADED_AGENT)
+            raise UnknownEntityError(
+                _UNLOADED_AGENT, reason=RefusalReason.AGENT_NOT_SERVING
+            )
         return {
             "blocks": [
                 {
@@ -2561,7 +2564,7 @@ def _writes(api: FastAPI) -> None:
         if claim.in_flight:
             raise ClaimInFlightError(_CODE_IN_FLIGHT)
         if claim.device is None:
-            raise UnknownEntityError(_UNKNOWN_CODE)
+            raise UnknownEntityError(_UNKNOWN_CODE, reason=RefusalReason.CODE_NOT_PENDING)
         # A refusal is the repository's decision and its own sentence
         # everywhere else in this file, and here it is the decision but
         # not the sentence. `bind_device` refuses an unresolved
@@ -2602,7 +2605,7 @@ def _writes(api: FastAPI) -> None:
             elif bound is None:
                 pending.release(code)
         if refused:
-            raise ConfigError(_CLAIM_REFUSED)
+            raise ConfigError(_CLAIM_REFUSED, reason=RefusalReason.AGENTS_UNKNOWN)
         pending.consume(code)
         # Both the line and the notice are built from what the row
         # holds, never from what the request sent, exactly as the write

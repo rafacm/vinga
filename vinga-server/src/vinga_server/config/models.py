@@ -151,14 +151,23 @@ PROVIDER_STAGES = ("llm", "asr", "tts", "vad")
 # three. `entities` re-exports it, so there is one string and not two.
 PROGRAM = "vinga"
 
-# And how the same command is spelled by a sentence a SERVER composes:
-# a boot refusal, a runtime refusal, an event message. A server runs
-# inside the image, where `vinga-server` is what a shell answers to and
-# `config` is the word that dispatches away from serving, so that is
-# what a sentence composed there tells an operator to type. The two
-# names are the same grammar reached two ways, and which of them a
-# surface uses is decided by who composes it rather than by what it
+# And how the same command is spelled by a sentence a SERVER composes.
+# A server runs inside the image, where `vinga-server` is what a shell
+# answers to and `config` is the word that dispatches away from serving,
+# so that is what a sentence composed there tells an operator to type.
+# The two names are the same grammar reached two ways, and which of them
+# a surface uses is decided by who composes it rather than by what it
 # says.
+#
+# One composer is left, and it is `loader.served`: the boot refusals
+# naming where a moved configuration section went, which are read by an
+# operator watching a container fail to start and are therefore the one
+# case whose reader really does have the image's invocation. The comment
+# here used to claim three, a boot refusal, a runtime refusal and an
+# event message; #386's census found the second had stopped composing
+# with it and the third never did, and the runtime refusals that still
+# named a command lost that half in #488, where the state became a token
+# and the command became the client's to spell.
 SERVER_PROGRAM = "vinga-server config"
 
 

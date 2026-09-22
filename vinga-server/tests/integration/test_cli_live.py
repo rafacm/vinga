@@ -2258,8 +2258,7 @@ REFUSALS: tuple[Refusal, ...] = (
         "no device is waiting with that activation code. A code lasts ten minutes and "
         "is retired the moment it is claimed, and a device that has been waiting longer "
         "is already showing a fresh one: read the code currently on the device's screen "
-        "and use that. `vinga-server config device pending list` lists the codes this "
-        "server is showing right now.",
+        "and use that.",
         True,
     ),
     Refusal(

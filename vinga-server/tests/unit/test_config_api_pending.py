@@ -29,7 +29,8 @@ from vinga_server.config.api import (
     mount_api,
 )
 from vinga_server.config.loader import DatabaseBusyError
-from vinga_server.config.models import DatabaseConfig
+from vinga_server.config.models import PROGRAM, SERVER_PROGRAM, DatabaseConfig
+from vinga_server.config.responses import RefusalReason
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 from vinga_server.config.store import ALREADY_BOUND, ALREADY_COVERED, ConfigStore
 from vinga_server.db import open_database
@@ -232,7 +233,11 @@ def test_a_claim_retires_the_code(client: TestClient, pending: PendingDevices) -
     assert client.get("/devices/pending").json() == {}
     second = _claim(client, code)
     assert second.status_code == 404
-    assert "activation code" in refusal_body(second.json(), 404)
+    # A claimed code is a code nothing is waiting under, which is the
+    # same state as an unknown one and carries the same token.
+    assert "activation code" in refusal_body(
+        second.json(), 404, RefusalReason.CODE_NOT_PENDING
+    )
 
 
 def test_an_unknown_code_points_at_the_screen(client: TestClient) -> None:
@@ -241,7 +246,15 @@ def test_an_unknown_code_points_at_the_screen(client: TestClient) -> None:
     assert response.status_code == 404
     # Where to look instead, which is the whole of what this refusal is
     # for: the number on the screen is the live one.
-    assert "the device's screen" in refusal_body(response.json(), 404)
+    detail = refusal_body(response.json(), 404, RefusalReason.CODE_NOT_PENDING)
+    assert "the device's screen" in detail
+    # And the state as a token, so a client can say where a live code is
+    # listed in a grammar of its own. This server names no command for
+    # it: a command is a word of a client this server neither ships nor
+    # versions, which is what left an old image prescribing a spelling
+    # the CLI beside it no longer had (#386).
+    assert PROGRAM not in detail
+    assert SERVER_PROGRAM not in detail
     # Never quoted back: what arrived is whatever was typed into the
     # path, and what is worth saying is what to read instead.
     assert "000000" not in response.text
@@ -255,7 +268,11 @@ def test_an_expired_code_is_answered_the_same_way(
 
     expired = _claim(client, code)
     assert expired.status_code == 404
-    assert "the device's screen" in refusal_body(expired.json(), 404)
+    # The same state and the same token: an expired code and a code that
+    # never existed are one thing to a caller.
+    assert "the device's screen" in refusal_body(
+        expired.json(), 404, RefusalReason.CODE_NOT_PENDING
+    )
 
 
 def test_a_code_being_claimed_right_now_is_a_retryable_refusal(
@@ -337,7 +354,7 @@ def test_a_refused_claim_does_not_quote_the_names_it_refused(
         refused = _claim(client, code, sentinel)
 
     assert refused.status_code == 422
-    detail = refusal_body(refused.json(), 422)
+    detail = refusal_body(refused.json(), 422, RefusalReason.AGENTS_UNKNOWN)
     rendered = (
         refused.text
         + str(refused.headers)
@@ -345,9 +362,11 @@ def test_a_refused_claim_does_not_quote_the_names_it_refused(
         + "".join(logs.JsonFormatter().format(record) for record in caplog.records)
     )
     assert sentinel not in rendered
-    # And the refusal is still one an operator can act on: it sends them
-    # to the listing of the agents that exist.
-    assert "config list" in detail
+    # And the refusal is still one an operator can act on, without this
+    # server naming a command to act with: the token says the state, and
+    # the client that owns the grammar spells the listing (#386).
+    assert PROGRAM not in detail
+    assert SERVER_PROGRAM not in detail
 
 
 def test_a_busy_database_still_answers_as_itself(
@@ -439,6 +458,14 @@ def test_a_claim_will_not_replace_a_binding_made_underneath_it(
     # interpolating it would hand the caller the address the race
     # resolved, in a body and in every log that keeps one.
     assert refused.json()["detail"] == ALREADY_BOUND
+    # And the state as a token, with no command in the sentence: what to
+    # read it back with is a verb of the client's grammar.
+    assert (
+        refusal_body(refused.json(), 404, RefusalReason.DEVICE_ALREADY_BOUND)
+        == ALREADY_BOUND
+    )
+    assert PROGRAM not in ALREADY_BOUND
+    assert SERVER_PROGRAM not in ALREADY_BOUND
     assert MAC not in refused.text
     # The newer decision stands.
     assert client.get(f"/devices/{MAC}").json()["entity"]["agents"] == [
@@ -459,7 +486,10 @@ def test_a_claim_will_not_bind_a_device_a_default_agent_now_covers(
     refused = _claim(client, code, "written-since-boot")
 
     assert refused.status_code == 404
-    assert refused.json()["detail"] == ALREADY_COVERED
+    # Its sibling and not one of the five: this refusal names no command
+    # either, so it has nothing to say a token about, and its body
+    # carries exactly the four members it always has.
+    assert refusal_body(refused.json(), 404) == ALREADY_COVERED
     assert MAC not in refused.text
     assert client.get("/devices").json() == {}
 

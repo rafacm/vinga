@@ -61,7 +61,6 @@ from vinga_server.config.models import (
     DOMAIN_KEYS,
     PROMPT_FRAGMENT_NAME_RULE,
     PROVIDER_STAGES,
-    SERVER_PROGRAM,
     AgentConfig,
     AgentDefaults,
     DeviceRecord,
@@ -96,6 +95,7 @@ from vinga_server.config.provider_options import (
     checked_options,
     options_model,
 )
+from vinga_server.config.responses import RefusalReason
 from vinga_server.config.secrets import (
     MASK,
     EntityKind,
@@ -380,11 +380,13 @@ _LIVE_BINDING_LOCATION = "the stored device bindings"
 # fixed sentence in this package already has (`NO_SUCH_DEVICE` names no
 # MAC either). What is lost is nothing: the caller is holding the code,
 # and both sentences send them to the command that lists what is bound.
+# What is bound and how to bind it again are commands of the client's
+# grammar, so the token beside this sentence is what says which state it
+# is, and the client names what to type (#386).
 ALREADY_BOUND = (
     "devices: this device has been bound since it started showing that activation "
     "code, so the code binds nothing now. Nothing was changed, and the device reaches "
-    "its agents at its next check. Read what it is bound to with "
-    "`vinga-server config device show <mac>`, or bind it again by its MAC"
+    "its agents at its next check."
 )
 
 ALREADY_COVERED = (
@@ -1250,7 +1252,9 @@ class ConfigStore:
                 raise UnknownEntityError(_NO_SUCH_DEVICE)
             if unconfigured:
                 if stored is not None:
-                    raise DeviceAlreadyBoundError(ALREADY_BOUND)
+                    raise DeviceAlreadyBoundError(
+                        ALREADY_BOUND, reason=RefusalReason.DEVICE_ALREADY_BOUND
+                    )
                 if domain.default_agent is not None:
                     raise DeviceAlreadyBoundError(ALREADY_COVERED)
             held = _names_held(domain)
@@ -1707,6 +1711,19 @@ _KEYED_BY_NAME = tuple(
 _HOLDER_OF = entities.SECRET_HOLDERS
 _SECRET_HOLDERS = tuple(_HOLDER_OF.values())
 
+# And which state a secret addressed at a holder that is not there is
+# in, by the same key. Two entries because the two kinds are two
+# remedies: creating a provider and creating an MCP server are two
+# commands, and one token for both would leave a client reading the
+# sentence to tell them apart, which is the reading a vocabulary exists
+# to end (#386). Keyed exactly like the mapping above, and a kind added
+# to the registry with no token here is red in
+# `test_every_secret_holder_answers_in_a_token_of_its_own`.
+_MISSING_HOLDER: dict[str, RefusalReason] = {
+    "provider": RefusalReason.PROVIDER_MISSING,
+    "mcp_server": RefusalReason.MCP_SERVER_MISSING,
+}
+
 
 def _table(descriptor: EntityDescriptor) -> Table:
     """The table one kind is rowed in. The descriptor names it rather
@@ -1727,6 +1744,25 @@ def _missing(descriptor: EntityDescriptor) -> str:
     """
     assert descriptor.missing is not None, f"{descriptor.name} has no missing entry"
     return descriptor.missing
+
+
+def _no_holder(location: SecretLocation) -> UnknownEntityError:
+    """The entity a stored secret would hang on is not there.
+
+    One home for a state three checks can reach: the two in `_check_slot`
+    that run before a write and the one in `_write_secrets` that catches
+    a row deleted under the transaction. The sentence and the token are
+    one structure here rather than a sentence at each site and a token
+    somewhere else, which is what stops a fourth check from arriving
+    with the words and without the state.
+
+    The sentence is the kind's own and names no command: what a client
+    creates the holder with is a verb of the client's grammar, and the
+    token is what lets it pick one.
+    """
+    return UnknownEntityError(
+        _missing(_HOLDER_OF[location.kind]), reason=_MISSING_HOLDER[location.kind]
+    )
 
 
 def _from_row(descriptor: EntityDescriptor, row: Row) -> BaseModel:
@@ -3073,21 +3109,10 @@ def _write_secrets(
     table, where = _secret_row(location)
     result = connection.execute(update(table).where(*where).values(secrets=dict(stored)))
     if result.rowcount == 0:
-        # The kind's own missing sentence with the next step after it,
-        # so this and the check that runs before it say one thing about
-        # what is not there rather than two.
-        #
-        # The command is built from the kind's own descriptor rather
-        # than written out, which is what stops it prescribing a
-        # spelling the grammar no longer has: a noun and its verb, in
-        # the noun's own word. The program half stays the long one,
-        # because this sentence is composed by a server and a server
-        # runs inside the image, where that is what a shell answers to.
-        holder = _HOLDER_OF[location.kind]
-        raise UnknownEntityError(
-            f"{_missing(holder)}; create it first with "
-            f"{SERVER_PROGRAM} {holder.name} set"
-        )
+        # The row went while this transaction held it, so what is said
+        # is the same state the checks before the write say, from the
+        # one place that says it.
+        raise _no_holder(location)
 
 
 def _secret_section(location: SecretLocation) -> str:
@@ -3128,7 +3153,7 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
         # The stage is an argument here rather than a stored value, so
         # it meets the same refusal a caller's typo meets anywhere else.
         if _entry(domain, descriptor, (_stage(stage), name)) is None:
-            raise UnknownEntityError(_missing(descriptor))
+            raise _no_holder(location)
         if location.slot.lower().endswith("_env") or not is_secret_option(location.slot):
             raise ConfigError(_NOT_A_PROVIDER_SLOT)
         # A slot is addressed in a path of its own, so it obeys the same
@@ -3137,7 +3162,7 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
         return
 
     if _entry(domain, descriptor, identity) is None:
-        raise UnknownEntityError(_missing(descriptor))
+        raise _no_holder(location)
     written_at = entity_location(descriptor, *identity)
     group, _, key = location.slot.partition(".")
     if group not in MCP_SECRET_GROUPS or not key:
