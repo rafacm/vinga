@@ -62,12 +62,13 @@ the recorded round, and return to codex when the quota resets.
   --sandbox read-only -` with the prompt on stdin, the level being
   the one the round will record. Never `codex review` with a
   custom prompt: it ignores the prompt.
-- The claude equivalent, used for manual (plan-mode) runs on the
-  fallback backend, is the exact invocation in `run-pr-review.sh`'s
-  claude arm: copy it verbatim, including `--setting-sources ""`,
-  `--strict-mcp-config`, `--effort` and the `--disallowedTools`
-  list. The deny list is what makes the run read-only;
-  `--allowedTools` alone restricts nothing.
+- Both modes run the reviewer through `review-backend.sh` beside
+  the scripts, which is the one home of the backend choice, the
+  effort pin and the two invocations. The claude arm is read-only
+  by its `--disallowedTools` list, with `--setting-sources ""` and
+  `--strict-mcp-config` keeping local settings and MCP servers
+  from widening it back; `--allowedTools` alone restricts nothing.
+  A manual run copies the arm from there, verbatim.
 - Run it in the background from the worktree under review. Sol takes
   10 to 25 minutes and looks stuck; stderr shows file-reading
   activity, and only the final answer reaches stdout:
@@ -93,25 +94,33 @@ the reviewer confirms rather than discovers.
 
 ## Plan mode
 
-1. The plan must already be committed on its feature branch.
-2. Assemble the prompt: start from `plan-review-prompt.md` in this
-   skill's directory, fill the placeholders, and append the issue
-   body. Keep the reading list explicit and complete: the plan, the
-   prior plans and implementation docs it builds on, the code it
-   touches, AGENTS.md, `docs/architecture/product-promises.md` and
+1. The plan must already be committed on its feature branch; the
+   script refuses a plan HEAD does not hold or that has uncommitted
+   edits, before the reviewer runs.
+2. Write the reading list to a file, as the markdown list that
+   fills the prompt's "Then the substrate it builds on" slot. Keep
+   it explicit and complete: the prior plans and implementation
+   docs the plan builds on, the code it touches, AGENTS.md,
+   `docs/architecture/product-promises.md` and
    `docs/architecture/guidelines.md`, the CI workflow, and the test
-   assets it converts.
-3. Run the reviewer in the background; read stdout when it
-   completes.
+   assets it converts. The plan itself and the issue body are
+   filled in by the script.
+3. Run `run-plan-review.sh` in this skill's directory, in the
+   background from the worktree:
+   `run-plan-review.sh <worktree> <plan path> <issue> <reading list file>`.
+   It fetches the issue body, fills `plan-review-prompt.md`, runs
+   the reviewer, and writes `round.md` under `$TMPDIR` (or `/tmp`):
+   the header, a rule, and the findings verbatim. It prints that
+   path when it finishes.
 4. Record the findings as received, condensed but faithful, in a
-   "Plan review round" section of the plan (its own commit). Its
-   header is the review-round form of the `implement-issue`
-   skill's "Attribution": `Reviewed <date> by <provider>/<model>,
-   thinking <level> via <tool> <version> (<enforcement>), runtime
-   <n>, at commit <hash>, plan blob <hash>`. The blob hash is
-   `git rev-parse HEAD:<plan path>` at the reviewed commit; the
-   rebase merge rewrites the commit hash and leaves the blob
-   reachable, so the blob is what a later reader can resolve.
+   "Plan review round" section of the plan (its own commit), with
+   the header line copied from `round.md` verbatim. That line is
+   the review-round form of the `implement-issue` skill's
+   "Attribution": reviewer as `<provider>/<model>, thinking
+   <level>`, tool and enforcement, runtime, the reviewed commit and
+   the plan's blob hash. The rebase merge rewrites the commit hash
+   and leaves the blob reachable, so the blob is what a later reader
+   can resolve.
 5. Address each finding with its own amendment commit, appending a
    `*Resolution*` note under the recorded finding. A finding you
    reject gets a resolution note saying why, never silence.
@@ -119,7 +128,7 @@ the reviewer confirms rather than discovers.
 ## PR mode
 
 Use `run-pr-review.sh` in this skill's directory, which is
-self-posting: it generates the diff, runs codex, and chains the
+self-posting: it generates the diff, runs the reviewer, and chains the
 result into `gh pr comment` with a provenance header, so the review
 lands on the PR even if the driving session dies mid-run.
 
