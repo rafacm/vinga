@@ -22,6 +22,7 @@ say so.
 """
 
 import ast
+import io
 import json
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -31,8 +32,9 @@ import pytest
 from cryptography.fernet import Fernet, MultiFernet
 
 from tests.support.config_cli import chain, logged, runner
-from vinga_server.config import cli, transport
 from vinga_server.config import store as config_store
+from vinga_server.config import transport
+from vinga_server.config.cli import acts, deployment, entities, grammar, invocation, reach
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.secrets import generate_key
@@ -61,14 +63,14 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[..
     request it would have sent recorded."""
     driver = runner(monkeypatch)
     sent: list[httpx.Request] = []
-    built = cli.build_client
+    built = reach.build_client
 
     def recording(base_url: str, token: str) -> object:
         client = built(base_url, token)
         client.event_hooks["request"] = [sent.append]
         return client
 
-    monkeypatch.setattr(cli, "build_client", recording)
+    monkeypatch.setattr(reach, "build_client", recording)
     driver.sent = sent
     yield driver
 
@@ -212,6 +214,12 @@ def test_the_stored_row_walk_names_no_key_either() -> None:
 
 SOURCE = Path(__file__).resolve().parents[2] / "src" / "vinga_server"
 
+CLI_PACKAGE = SOURCE / "config" / "cli"
+
+# The package's own modules, as filenames, so the walk below can say
+# "the CLI, wherever in it" without naming a module of it.
+_CLI_MODULES = frozenset(path.name for path in CLI_PACKAGE.glob("*.py"))
+
 GUARDED = "check_transportable"
 
 # The argument expressions a call to it may pass, as they are written.
@@ -305,14 +313,19 @@ def test_every_written_call_passes_a_fixed_section() -> None:
     """The static half: what the source says, on every path, driven or
     not.
 
-    Both call sites are named, so a third one arriving is a review event
-    with a name rather than a silent widening, and a call site that
-    disappeared would fail here too: a walk that finds nothing is a
-    guard that proves nothing.
+    The client side is stated over the registry below rather than over a
+    filename: which module of the CLI package holds a body is that
+    package's business, and a test that named one would break on the day
+    it moved while proving nothing about the guard. What is named here
+    is the repository's own caller, which is one file and stays one.
+
+    A call site that disappeared fails here too: a walk that finds
+    nothing is a guard that proves nothing.
     """
     received = _sections_passed()
 
-    assert set(received) == {"cli.py", "store.py"}, received
+    assert "store.py" in received, received
+    assert set(received) - _CLI_MODULES == {"store.py"}, received
     for module, expressions in received.items():
         for written in expressions:
             assert written in FIXED_ARGUMENTS, (module, written)
@@ -334,6 +347,206 @@ def test_the_walk_would_see_an_address_if_one_came_back() -> None:
         assert reintroduced not in FIXED_ARGUMENTS
 
 
+# Every body the registry carries, and which of them parse YAML
+#
+# The property this file used to state was a filename: the guarded call
+# sites are exactly `{"cli.py", "store.py"}`. That was true of a tree
+# with one CLI module in it and says nothing about what the guard is
+# for, which is that a fragment somebody wrote is refused before it
+# travels.
+#
+# So the client side is derived instead. The CLI calls its YAML parser
+# in exactly one place, and a body that cannot reach that parser cannot
+# be handed a value YAML says and JSON cannot: `_binding`, `_new_name`,
+# `_secret_body` and their like build a scalar or a record out of
+# arguments and carry nothing to smuggle. The set that CAN reach it is
+# read off the call graph and pinned, so a new YAML-derived body is a
+# diff line here rather than a silent widening, and every member of it
+# is asserted to reach the guard.
+#
+# Reachability is not order, which is the half a call graph cannot
+# answer: a guard in an unreachable branch, or one after an early
+# return, reaches just as well and runs never. So the ordering is proven
+# at run time, per discovered member, by driving the act and watching
+# the request not be made.
+
+PARSE_SITE = "yaml.safe_load"
+
+
+def _module_trees() -> dict[str, ast.Module]:
+    return {
+        path.name: ast.parse(path.read_text(encoding="utf-8"))
+        for path in sorted(CLI_PACKAGE.glob("*.py"))
+    }
+
+
+_TREES = _module_trees()
+
+# Every function node of the package by (file, first line), which is how
+# a callable the registry holds is resolved to its source, and the
+# top-level definition each of them sits in, which is what names it.
+_NODES: dict[tuple[str, int], ast.AST] = {}
+_NAMED: dict[int, str] = {}
+for _name, _tree in _TREES.items():
+    for _top in _tree.body:
+        if not isinstance(_top, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for _inner in ast.walk(_top):
+            if isinstance(_inner, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                _NODES.setdefault((_name, _inner.lineno), _inner)
+                _NAMED.setdefault(id(_inner), _top.name)
+
+# Every top-level function of the package by name, which is what a bare
+# call resolves through. The names are unique across the package, which
+# the AST-identity run that landed the split reported.
+_TOP: dict[str, tuple[str, ast.AST]] = {
+    node.name: (module, node)
+    for module, tree in _TREES.items()
+    for node in tree.body
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+}
+
+
+def _node_of(called: object) -> ast.AST | None:
+    """The source of one callable the registry holds."""
+    code = getattr(called, "__code__", None)
+    if code is None:
+        return None
+    return _NODES.get((Path(code.co_filename).name, code.co_firstlineno))
+
+
+def _reaches(node: ast.AST, target: str, seen: set[int] | None = None) -> bool:
+    """Whether one callable can reach a name by following its calls.
+
+    A bare call resolves to the package's own definition of that name; a
+    dotted one is compared as it is written, which is how the parser
+    site (`yaml.safe_load`) is recognized without resolving the library.
+    """
+    seen = set() if seen is None else seen
+    if id(node) in seen:
+        return False
+    seen.add(id(node))
+    for inner in ast.walk(node):
+        if not isinstance(inner, ast.Call):
+            continue
+        called = inner.func
+        if isinstance(called, ast.Attribute) and isinstance(called.value, ast.Name):
+            if f"{called.value.id}.{called.attr}" == target:
+                return True
+            spelled = called.attr
+        elif isinstance(called, ast.Name):
+            spelled = called.id
+        else:
+            continue
+        if spelled == target:
+            return True
+        if spelled in _TOP and _reaches(_TOP[spelled][1], target, seen):
+            return True
+    return False
+
+
+def _registry_bodies() -> dict[str, object]:
+    """Every body callable the registry carries, by the definition it
+    was written in, with one act that carries it."""
+    found: dict[str, object] = {}
+    for row in grammar.COMMANDS:
+        for act in row.acts():
+            if act.body is None:
+                continue
+            node = _node_of(act.body)
+            assert node is not None, act
+            found.setdefault(_NAMED[id(node)], act)
+    return found
+
+
+BODIES = _registry_bodies()
+
+PARSING = sorted(
+    name for name, act in BODIES.items() if _reaches(_node_of(act.body), PARSE_SITE)
+)
+
+
+def test_the_registry_carries_the_bodies_this_file_is_about() -> None:
+    """The walk found something, stated first because every claim under
+    it is about a subset: an empty registry would satisfy the two below
+    perfectly."""
+    assert len(BODIES) == 11, sorted(BODIES)
+    assert "_fragment_body" in BODIES
+    assert "_document_body" in BODIES
+
+
+def test_exactly_two_bodies_can_reach_the_yaml_parser() -> None:
+    """Which bodies carry something nobody has validated.
+
+    The others build a scalar or a record out of arguments the grammar
+    read, so there is nothing in them for YAML to have said and JSON to
+    be unable to carry. A third arriving here is a body that takes a
+    fragment, and it is a diff line rather than a silent widening.
+    """
+    assert PARSING == ["_document_body", "_fragment_body"]
+
+
+@pytest.mark.parametrize("name", PARSING)
+def test_every_body_that_parses_yaml_reaches_the_guard(name: str) -> None:
+    """The property, over the set the call graph discovered rather than
+    over a list written beside it."""
+    assert _reaches(_node_of(BODIES[name].body), GUARDED), name
+
+
+# What each discovered body is handed to prove the ordering, keyed by
+# the body's own name so that a body discovered above with no builder
+# here is an error rather than a skip: the pin and the runtime cases
+# move together or the pin stops meaning anything.
+def _nan_fragment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> invocation.Invocation:
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"type: anthropic\n{KEY_SENTINEL}: .nan\n"))
+    return invocation.Invocation(kind="provider", stage="llm", name="claude", file="-")
+
+
+def _nan_document(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> invocation.Invocation:
+    document = tmp_path / "document.yaml"
+    document.write_text(
+        f"providers:\n  llm:\n    claude:\n      type: anthropic\n      {KEY_SENTINEL}: .nan\n"
+    )
+    return invocation.Invocation(file=str(document))
+
+
+BUILDERS = {"_fragment_body": _nan_fragment, "_document_body": _nan_document}
+
+NOWHERE = reach.Reached(
+    address=reach.Address(base="http://127.0.0.1:1", query="", shown="http://127.0.0.1:1"),
+    token="never-a-real-token",
+)
+
+
+@pytest.mark.parametrize("name", PARSING)
+def test_the_guard_runs_before_the_request_is_made(
+    name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ordering, at run time, because a call graph cannot answer it.
+
+    The act is driven through the dispatcher, which is the one caller of
+    a body and the one place a request is made, with the request seam
+    replaced by a recorder. A guard in a branch nothing takes, or one
+    written after the body has already returned, reaches in the graph
+    above and leaves a record here.
+    """
+    assert name in BUILDERS, f"{name} was discovered and has no invocation to drive it"
+    args = BUILDERS[name](tmp_path, monkeypatch)
+    made: list[object] = []
+    monkeypatch.setattr(acts, "_call", lambda *arguments, **keywords: made.append(arguments))
+
+    with pytest.raises(ConfigError) as refused:
+        acts._act(args, BODIES[name], NOWHERE)
+
+    said = str(refused.value)
+    # The guard's own composition, and the walk's own sentence for the
+    # value it was handed: both halves, so a ConfigError raised by
+    # anything else on the way cannot pass for this one.
+    assert said.startswith("invalid "), said
+    assert "cannot be written as JSON" in said, said
+    assert made == [], name
+
+
 @pytest.fixture
 def spy(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Every section a production call actually receives, whichever
@@ -344,7 +557,8 @@ def spy(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         received.append(section)
         transport.check_transportable(section, fragment)
 
-    monkeypatch.setattr(cli, "check_transportable", recording)
+    monkeypatch.setattr(entities, "check_transportable", recording)
+    monkeypatch.setattr(deployment, "check_transportable", recording)
     monkeypatch.setattr(config_store, "check_transportable", recording)
     return received
 
