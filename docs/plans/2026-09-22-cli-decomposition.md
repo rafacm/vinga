@@ -505,7 +505,20 @@ decision site.
   beside `_refusal`, its only consumer, spelled with `PROGRAM` the way
   `SPOKEN` is, and the printed sentence is `detail`, a space, and the
   remedy where the token is known, `detail` alone where it is not or
-  where there is none.
+  where there is none. The six sentences, each fixed, in the short
+  spelling, quoting nothing back, with `vinga` standing for `PROGRAM`:
+  - `code-not-pending`: "`vinga device pending list` lists the codes
+    this server is showing right now."
+  - `agents-unknown`: "Run `vinga list` to see the agents that exist."
+  - `agent-not-serving`: "`vinga apply` installs an agent written
+    since; `vinga list` shows the agents that are stored."
+  - `device-already-bound`: "Read what it is bound to with `vinga
+    device show <mac>`, or bind it again by its MAC."
+  - `provider-missing`: "Create it first with `vinga provider set`."
+  - `mcp-server-missing`: "Create it first with `vinga mcp-server
+    set`."
+  The client tests assert the complete stderr text for each known
+  token: the server's `detail`, the space, and the sentence above.
 - The skew, stated rather than hidden, and the order that avoids it.
   A newer CLI reads an older server's body because the member
   defaults to absent. An older CLI against a newer server refuses the
@@ -968,3 +981,6 @@ three P1, verdict "not ready". Condensed but faithful.
    defined and their sentences are not; the closed-set pin proves
    completeness, not the grammar or the no-address rule. List the six
    sentences and assert the complete stderr text per token.
+
+   *Resolution*: accepted. The six sentences are written into the M4
+   section and the client tests assert the complete text per token.
