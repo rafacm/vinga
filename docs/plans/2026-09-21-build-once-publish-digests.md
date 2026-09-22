@@ -11,6 +11,18 @@ conversational capability. The whole change is how CI builds, smokes
 and publishes an image that is byte-for-byte the one it builds today;
 a deployment reaches none of it.
 
+**Scope:** cut back after five review rounds, on 2026-09-22, at the
+maintainer's call. The rounds converged on a correct design that was
+out of proportion to the problem: a second publish job, a reconciler
+walking `main`'s history, a two-phase index validation and a widened
+revision, none of which saved any time and all of which protected a
+moving tag the documentation already says not to deploy from. What
+remains is the issue: build each architecture once, publish the tested
+digests, let validation overlap, and run the image lane on pull
+requests. The rounds are kept below as the record, and
+["The review rounds, and what was cut afterwards"](#the-review-rounds-and-what-was-cut-afterwards)
+says exactly what left.
+
 **Cheapest alternative:** replace only the `Publish` step's rebuild,
 leaving the single `image` job intact: push the two already-loaded
 images under per-arch scratch tags and assemble the manifest from
@@ -179,69 +191,31 @@ The corollary is a rule the implementation must not drift from:
 **publish from `containerimage.digest` as reported by a build whose
 only output is the image exporter.**
 
-A second experiment closed half of the topology question the first one
-left open. Two single-platform builds, pushed by digest separately and
-then merged by one `imagetools create`, produce an index with four
-entries: one `linux/amd64` manifest, one `linux/arm64` manifest, and
-two `attestation-manifest` entries. That is the same shape
-`ghcr.io/rafacm/vinga-server:latest` carries today, read back with
-`imagetools inspect --raw` on the live tag. So merging two indexes
-preserves both platforms and both attestations.
+A second experiment closed the topology question for the shape this
+plan actually publishes. Two single-platform builds, pushed by digest
+separately and then merged by one `imagetools create`, produce an
+index with four entries: one `linux/amd64` manifest, one `linux/arm64`
+manifest, and two `attestation-manifest` entries. That is the same
+shape `ghcr.io/rafacm/vinga-server:latest` carries today, read back
+with `imagetools inspect --raw` on the live tag.
 
-It does not show that each attestation is associated with the right
-subject, that no nested or duplicate platform index crept in, or that
-the configs say what they should, and an alpine image cannot show
-those for this repository's Dockerfile anyway. Those are properties of
-the real artifact, so they are asserted on the real artifact rather
-than inferred. `image-publish` reads the assembled index back and
-requires all four:
+So `image-publish` asserts that shape on what it assembled: **both
+expected platforms present, and an attestation manifest for each**.
+One check, run on the assembled index.
 
-- exactly one manifest for each expected platform, and no others;
-- for each, an attestation manifest whose
-  `vnd.docker.reference.digest` names **that** platform manifest;
-- no nested index and no duplicate platform entry;
-- both platform configs carrying the expected `VINGA_REVISION` and
-  `VINGA_VARIANT`.
-
-**The order it runs in is the whole of whether it works**, and the
-first two attempts at stating that order both specified something that
-cannot run.
-
-The mechanism is settled by a local check rather than by reading the
-flags: `imagetools create --dry-run --metadata-file <f>` exits 0 and
-**writes no file**, while a real `create` writes one carrying
-`containerimage.descriptor.digest`. So there is no way to learn the
-dry-run index's digest, and any design that compares it to the pushed
-one is not implementable. That comparison is dropped.
-
-What replaces it is validating the same four properties twice, which
-needs no parent digest and is executable in both places:
-
-1. **Before any tag exists**, against the dry-run index.
-   `imagetools create --dry-run` prints it; its entries are resolved
-   individually with `imagetools inspect "$IMAGE@<entry-digest>"`,
-   raw for the manifests and `--format '{{json .Image}}'` for the
-   configs. This works precisely because the per-platform manifests
-   were pushed by digest before anything was tagged, so every entry is
-   already addressable.
-2. **After the push**, against **every** final tag this job creates,
-   not one of them: the dated tag and the `sha-` tag, each resolved
-   and each required to carry the same validated topology. The
-   reconciler trusts the `sha-` tag, so checking only the dated one
-   would check the tag nothing depends on.
-
-A failure in phase 2 leaves an immutable tag behind, which is a red
-run somebody sees, and the moving tag is protected from it separately
-by the reconciler validating its candidate.
-
-The stronger alternative was verified and not taken: push the
-assembled index under a run-scoped staging tag, validate that, then
-create the final tags from it, which works and preserves the index
-digest exactly (checked locally: three tags, one digest). It closes
-the same hole as reconciler-side validation and costs a second tag
-namespace to name, race and prune, so it is recorded here as the
-option to reach for if the reconciler's validation ever proves
-insufficient.
+That is deliberately not the elaborate version. A review round
+proposed validating four properties in two phases, before and after
+tagging, against every tag, including each attestation's subject
+association and both configs' revision and variant. Each assertion was
+individually reasonable and the whole was cut on proportion: today's
+publish validates **nothing** and has never produced a malformed
+index, so the failure being defended against has no instances. The
+one failure mode this change genuinely introduces, the exporter
+silently reporting a platform manifest instead of an index and
+dropping provenance, is prevented **by construction** rather than by
+assertion, because the build never gets a second output. The check
+above exists to catch that construction being undone, which is the
+thing that could plausibly happen, and it fails loudly when it is.
 
 The local experiments are what they are:
 evidence that the exporter choice matters. This check is what
@@ -361,273 +335,121 @@ main would publish". Without it, M1's entire publishing half would
 first execute on `main`, which is the one place the workflow is not
 allowed to be wrong.
 
-### Publication splits by what needs ordering
+### The moving tag is ordered by a check, not by a group
 
 M2 narrows the workflow-level `concurrency` so it no longer serializes
 `main`: a pull request keeps
 `${{ github.workflow }}-${{ github.ref }}` with `cancel-in-progress`,
 and a push appends the run id so each one gets a group of its own.
 
-The serialization that remains is placed by asking which tag actually
-needs it, and the answer is only the moving one. So publication splits
-in two:
+**Removing that group is what fixes the live defect**, and it is worth
+being clear that nothing else is needed for it. A concurrency group
+holds one running member and one pending member, and a third arrival
+replaces the pending one whether or not `cancel-in-progress` is set.
+That is not a hazard this plan must avoid introducing, it is a defect
+running today, and the 2026-09-11 burst contains the evidence: a
+fourth run the issue does not mention,
+`2026-09-11T18:19:29Z d6d76dd push completed cancelled`.
 
-- **`image-publish`** assembles the manifest and pushes the immutable
-  dated and `sha-` tags. It takes **no concurrency group**, because a
-  group is exactly what could displace it.
-- **`image-promote`** moves the moving tag and nothing else, in a
-  group of `publish-${{ matrix.variant }}` with
-  `cancel-in-progress: false`. It is a **reconciler, not a publisher
-  of its own commit**: see below.
-
-The split is what makes the design safe rather than the group being
-non-cancelling, and the reason is a semantic of GitHub Actions that is
-easy to read past: a group holds one running member and one pending
-member, and a third arrival **replaces the pending one** whether or not
-`cancel-in-progress` is set. Anything whose output is per-commit and
-irreplaceable must therefore not be in a group at all.
-
-**This is a live defect today, not a hazard the plan avoids
-introducing.** The current workflow-level group has the same
-semantics, and the 2026-09-11 burst contains a fourth run the issue
-does not mention: `2026-09-11T18:19:29Z d6d76dd push completed
-cancelled`.
-
-The evidence that carries this is the run's own record, run
-`34632623405`, and not the missing tag, which on its own would also be
-consistent with a later deletion or with some other failure:
+The evidence is the run's own record, run `34632623405`, not the
+missing tag, which alone would also be consistent with a later
+deletion:
 
 - `GET /actions/runs/34632623405/jobs` returns an **empty job list**.
-  Not a failed job, not a cancelled job, none at all. Nothing ran, so
+  Not a failed job, not a cancelled one, none at all. Nothing ran, so
   nothing failed, and the image job never started.
 - `created_at` and `run_started_at` are both `18:19:29Z`, and
   `updated_at` is `18:33:59Z`, one second after `f943bc6`'s run was
   created at `18:33:58Z`. It sat pending for fourteen minutes and was
-  terminated at the moment the next push entered its group.
+  terminated when the next push entered its group.
 
-`d6d76dd1` is an ancestor of `origin/main`, and
-`ghcr.io/rafacm/vinga-server:sha-d6d76dd` does not exist while
+`d6d76dd1` is an ancestor of `origin/main` and
+`ghcr.io/rafacm/vinga-server:sha-d6d76dd` does not exist, while
 `sha-2f9675f`, `sha-f943bc6` and `sha-623f170` all do. With the empty
-job list, the tag's absence needs no deletion to explain it: the job
-that would have created it never started. A merged commit on `main`
-has no image, and no run went red to say so.
+job list, that absence needs no deletion to explain it. A merged
+commit on `main` has no image and no run went red to say so, and the
+workflow's own comment that "Merges to main run to completion, however
+many of them queue up" has been false since it was written.
 
-The workflow's own comment that "Merges to main run to completion,
-however many of them queue up" has been false since it was written.
+Once each push has its own group, nothing is ever pending, nothing is
+displaced, and every merged commit gets its image. **No second job and
+no ordered group are added**, because the thing they would protect is
+the thing the group removal already fixed.
 
-Displacing a pending `image-promote` would not be harmless if the job
-promoted its own commit, and the second review round is where that
-became clear. Replacement follows **eligibility**, not commit order.
-For commits A < B < C, A can be promoting while C finishes its gates
-and becomes pending, and a slower B can then become eligible and
-displace C. B is newer than A, so an ancestry check waves it through,
-and the moving tag settles on B while C, the newest gated commit,
-never gets it. The tag has not gone backwards; it has stopped
-following `main`, permanently, with no run red.
+### What orders the moving tag, and what that is worth
 
-### image-promote reconciles, it does not publish its own commit
+What remains is that two overlapping runs could both move a moving
+tag, and the later writer might be the older commit. The issue names
+both remedies and this plan takes the second: "an ordered,
+non-cancelling group **(or an equivalent ordering check, such as
+refusing to move a tag over a newer commit's image)**".
 
-So `image-promote` does not ask "should I promote my commit". Holding
-its per-variant group, it fetches `origin/main` and considers the
-commits **between the moving tag's current revision and the tip**,
-walking **first parents only**, from the tip downwards, and promotes
-the first one that carries a `sha-` tag whose index passes validation,
-whichever run produced it.
+So `image-publish` reads the revision of what the moving tag points at
+before moving it:
 
-First-parent is part of the algorithm and not a detail. A plain
-revision walk over `published..origin/main` reaches commits through
-every merge parent, so a tagged commit from merged or reintroduced
-history could win although it is not a position on `main`'s own
-sequence. This repository rebase-merges by convention, but the
-guarantee here is unconditional and the plan explicitly handles
-rewritten history, so the convention cannot be what defines the walk.
-Merge commits themselves are included; their side histories are not.
+```
+docker buildx imagetools inspect "$IMAGE:$MOVING" --format '{{json .Image}}'
+```
 
-A tip whose image job is **still running** simply has no `sha-` tag
-yet, so it is skipped for this invocation and the walk continues. Its
-own promote, or any later surviving one, reconciles once its immutable
-tag exists. That is the self-healing property doing its job rather
-than a case needing its own handling.
+That returns the per-platform configs including `VINGA_REVISION` from
+the image's own `ENV` (verified against
+`ghcr.io/rafacm/vinga-server:latest`, which reports
+`VINGA_REVISION=a81608d` for both platforms). If that revision is a
+descendant of this run's commit, this run is the older one and leaves
+the moving tag alone, publishing its immutable tags as normal. The
+job checks out with `fetch-depth: 0`, since depth 1 has no history and
+every ancestry question would answer wrong. A moving tag that is
+absent, or whose config carries no `VINGA_REVISION`, means there is
+nothing to go backwards over: the run proceeds and says so.
 
-That works because of what publishing a `sha-` tag already means.
-`image-publish` runs only after the unit lane, the integration lane
-and every image job have passed, so "the newest commit on `main`
-carrying a `sha-` tag" is exactly "the newest gated image". The walk
-order supplies the ordering guarantee, so there is no separate
-ancestry check to get wrong and no read-then-write window to reason
-about.
+**What this is worth, and what it is not, priced rather than
+asserted.** The check is a read before a write and there is no group,
+so two publishes inside the same few seconds can both see the old
+revision and both proceed, and the moving tag ends at whichever wrote
+last. The consequence is that `latest` can sit one commit behind for
+as long as it takes the next push to publish. It cannot point at
+ungated bytes, because every run publishes only after its own gates.
 
-Three properties follow, and they are why this shape rather than a
-smarter group:
+That residual is acceptable because of what a moving tag is for, which
+both maintained pages already say: "the tags to pull when trying the
+server and **the wrong ones to deploy from**". Closing it completely
+needs an ordered group, which needs the publish split in two so the
+immutable tags cannot be displaced, which needs a reconciler to make
+displacement safe. That machinery was designed, reviewed over three
+rounds and then cut: it is roughly five times the code, it protects a
+tag nobody should deploy from against being briefly stale, and it buys
+no wall time. The design is recorded in the review rounds below and
+`image-promote` is the name to bring back if a moving tag ever needs
+to be exact.
 
-- **Idempotent and invocation-independent.** Any surviving promote
-  computes the same answer, so displacement is harmless for a reason
-  instead of by assertion.
-- **Self-healing.** A moving tag left stale by an earlier
-  displacement is corrected by the next promote that runs. Both the
-  current design and this plan's first draft left it stale forever.
-- **It needs no digest artifacts**, because it addresses images by
-  name, across runs. That is also why the promotion source cannot be a
-  digest carried as a job output: by design this job publishes images
-  its own run did not build.
-
-The promotion itself is one more
-`docker buildx imagetools create`, copying an index rather than
-building anything.
-
-### What the reconciler needs in order to be right
-
-The ancestry check this section used to specify is gone with the
-design that needed it. A run no longer asks whether its own commit is
-newer than the published one, so `git merge-base --is-ancestor` is not
-used at all, and the AGENTS.md trap about ancestry across a rebase
-merge stops being something this workflow has to reason about. That is
-a real simplification and not just a move: one fewer wrong answer
-available.
-
-What the reconciler needs instead is four things.
-
-- **History and a current tip.** `fetch-depth: 0` and a fetch of
-  `origin/main` before the walk. A shallow checkout has no history to
-  walk, and a stale tip would promote something that is no longer the
-  newest.
-- **A bound that is a distance, not a constant, and a no-op when the
-  walk finds nothing.** The previous draft said a walk that found no
-  tagged commit should fail the run. Measuring killed that rule: of
-  the last 45 commits on `main`, four carry a `sha-` tag, and there
-  are runs of 22 and 13 that do not, because a documentation-only push
-  does not match this workflow's `paths` and so never builds an image
-  at all. A fixed bound with a failure at the end of it would fire on
-  ordinary weeks.
-
-  The walk therefore spans the commits from the moving tag's current
-  revision to the tip, which is short by construction and usually one.
-  Finding nothing newer than what is published is the **normal case**
-  and is a quiet no-op. A hard cap of 200 commits exists only for the
-  case below, and reaching it fails loudly.
-
-- **Stated behavior when history is rewritten.** If the moving tag's
-  revision is not in `origin/main`'s history, something force-pushed
-  under the tag and "the commits since it" has no meaning. The
-  reconciler then considers the newest 200 commits of the current
-  history, promotes the newest tagged one, and reports that it took
-  that path. The documentation guarantee is scoped to match, since
-  after a rewrite "older" has no single meaning.
-
-- **Validation of the candidate before promoting it.** A `sha-` tag
-  exists because `image-publish` created it, and `image-publish` can
-  create it and then fail its own post-push assertion, so tag
-  existence is not proof the publication completed. The reconciler
-  runs the same topology and config assertions against the candidate
-  index and refuses a candidate that fails them, walking on to the
-  next. That is what makes the moving tag safe whatever the publish
-  side did, which matters more than the immutable tags because the
-  moving tag is the one a careless deployment follows.
-- **An idempotent exit.** If the moving tag already resolves to the
-  same index as the chosen commit's `sha-` tag, the job does nothing
-  and says so. That is what makes a second promote against an
-  unchanged `main` a no-op, and it is the property the whole design
-  leans on. It is a **main-only** check: a dispatch never runs this
-  job, and an earlier draft that called it cheap to check on a
-  dispatch was wrong twice, once here and once in the verification
-  section.
-
-- **The moving tag is validated after assignment too.** Having moved
-  it, the job resolves it and requires it to equal the index it
-  validated, for the same reason `image-publish` re-checks the
-  immutable tags it wrote.
-- **The moving tag is a validated input, and the reading is
-  specified.** An earlier draft said nothing was read from it except
-  the idempotence comparison, which contradicted a range defined as
-  the commits since its revision. It is an input, so it is read
-  deliberately: inspect its index, require one config for each
-  expected platform, require both to carry the same `VINGA_REVISION`,
-  and require that value to be 7 or 12 hexadecimal characters and to
-  resolve to exactly one commit in `origin/main`. Seven is accepted
-  because the first promote after M1 lands necessarily reads a tag
-  written by the old scheme.
-
-  Three bootstrap cases are stated rather than implied. The tag is
-  **absent**: take the force-push path's bounded walk, which is the
-  correct behavior for "nothing is published yet". The tag is
-  **unusable** (missing config, platforms disagreeing, a revision that
-  is not hexadecimal or resolves to no commit or to more than one):
-  fail loudly, because a moving tag nobody can interpret is a state a
-  person should see rather than one a job should paper over. The
-  revision resolves to a commit **not in `origin/main`**: the
-  force-push path, whose behavior is stated above.
-
-
-### The revision becomes twelve characters, and both immutable tags carry it
+### The dated tag gains seconds
 
 `type=raw,value={{date 'YYYY-MM-DD-HHmm'}}` gives two commits
 publishing inside the same minute the same "immutable" tag, and the
 later registry write wins. Serialization plus a six-minute publish
 makes that unreachable today; M1 cuts the publish to seconds and M2
-permits overlap, so it becomes reachable exactly when merges burst.
+permits overlap, so it becomes reachable exactly when merges burst,
+and that reachability is something this plan creates rather than
+inherits.
 
-The plan's first two answers to this were both wrong, and the second
-was wrong in a way worth recording. It argued that embedding the
-revision in the dated tag would raise its residual to the `sha-` tag's
-seven-character one. A composite tag collides only when **both** parts
-collide, which is strictly less likely than either alone; a
-conjunction is not a replacement. The argument was constructed to
-defend a conclusion rather than derived, which is the same failure as
-claiming more than was measured, wearing reasoning's clothes.
+The dated tag therefore becomes `YYYY-MM-DD-HHmmss`, keeping its
+variant suffix. It keeps what the tag means, the moment the build
+happened, and takes the collision back to needing two commits to
+finish every lane and the assembly **within the same second**. It is
+a user-visible format change and lands in the documentation
+footprint.
 
-So the real constraint was never the dated tag. It is the width of the
-revision, which both immutable tags depend on, and which is a
-pre-existing defect this plan surfaces rather than creates: at seven
-hexadecimal characters, two commits sharing a prefix is on the order
-of 2e-3 at a thousand commits and grows with the square.
-
-**The revision becomes twelve hexadecimal characters.** It is derived
-once and used in four places that already have to agree:
-
-- `VINGA_REVISION` in the image's `ENV`, which `/healthz` reports;
-- the `sha-` tag, which keeps its variant suffix;
-- the dated tag, which becomes `YYYY-MM-DD-HHmm-<revision>` plus that
-  same suffix, composite and back to minute resolution, since the
-  revision now carries the uniqueness that seconds were only ever
-  added to supply;
-- the reconciler's lookup, which is per variant and so looks up the
-  suffixed name.
-
-**How the value actually reaches the tags matters more than the
-intention**, and the plan's first statement of it named none.
-`REVISION` is computed in the job as `${GITHUB_SHA:0:12}`, while
-`docker/metadata-action` generates `type=sha,format=short`
-independently: changing the first does not stop the second emitting
-seven characters, and the existing assertion **detects** disagreement
-rather than creating agreement.
-
-So `type=sha` is dropped. Both immutable tags are generated as
-`type=raw` rendered from the one `REVISION` the job already computes,
-which makes "derived once" literally true rather than aspirational,
-and the existing equality assertion stays where it is as a guard,
-which is all it ever was.
-
-The alternative, setting `DOCKER_METADATA_SHORT_SHA_LENGTH=12` and
-asserting the result, is not taken: this session cannot verify that
-variable's behavior against the pinned action version, and a tag
-scheme should not rest on a mechanism that cannot be checked before it
-runs. Collision falls to
-roughly 1e-9 at a thousand commits, which is the order of assumption
-git itself makes when it abbreviates, and at that point "never reused"
-is an honest thing for the maintained pages to keep saying.
-
-This was confirmed with the maintainer before being adopted, because
-it is user-visible: `/healthz` changes what it reports and both
-maintained pages change their example tags.
-
-`image-publish` also refuses reuse, on both immutable tags: if either
-already resolves and names a digest other than the one being
-published, the job fails rather than overwriting. That is enforcement
-against **sequential** reuse and it is a read before a write, so it
-does not close the concurrent case; with a twelve-character revision
-the concurrent case needs two commits sharing twelve hex characters
-and publishing at once, and the residual is recorded here rather than
-in a user-facing page.
+**Not taken: widening the revision.** The `sha-` tag is seven
+characters, so two commits sharing that prefix collide, on the order
+of 2e-3 at a thousand commits and growing with the square. That is
+real, and a review round argued convincingly for fixing it here, since
+one derived value feeds `VINGA_REVISION`, the tag and the step that
+asserts they agree. It is not taken because it is **pre-existing and
+orthogonal**: it is not made reachable by anything in this issue, it
+would change what `/healthz` reports and every example tag on three
+pages, and it is a clean half-hour change on its own. It is recorded
+as a follow-up rather than carried, so that a plan about build time
+does not also become a plan about image identity.
 
 ### No new promise, no new record
 
@@ -642,17 +464,16 @@ gain a sentence saying what the tag now guarantees.
 ```
 unit ─────────────┐
 integration ──────┤
-                  ├─> image-publish ──> image-promote
-image (matrix: variant x arch) ─┘       (matrix: variant, both)
-  amd64: build, smoke                   publish: immutable tags, no group
-  arm64: build, import check            promote: the moving tag, ordered group
+                  ├─> image-publish (matrix: variant)
+image (matrix: variant x arch) ─┘   assembles, tags, builds nothing
+  amd64: build, push by digest, pull back, smoke
+  arm64: build, push by digest, import check
 ```
 
 `image` runs on push, pull_request and workflow_dispatch after M3.
 `image-publish` runs on push and workflow_dispatch, with `--dry-run`
-on everything but a push to `main`. `image-promote` runs only on a
-push to `main`, since it exists to move a tag and there is no dry
-version of that worth running.
+on everything but a push to `main`. Three jobs, which is one more than
+today.
 
 ## Design footprint
 
@@ -671,15 +492,12 @@ digest, which is the point of the issue.
 - **M1 deepens `image`.** It stops being a job that builds, smokes and
   publishes, and becomes a job that proves one architecture of one
   variant. The publishing half leaves it entirely.
-- **M2 adds `image-promote` and shrinks what ordering costs.** The new
-  module's one responsibility is moving a tag, and what its callers
-  stop having to know is how ordering is achieved: everything upstream
-  of it runs unordered. It passes the deletion test because inlining
-  it back into `image-publish` is precisely the shape that loses a
-  merged commit's image, which is the defect the round found. This is
-  the issue's own sentence read one level sharper: the ordering
-  guarantee is needed by the moving tag, not by the publish, and
-  certainly not by everything.
+- **M2 deepens `image-publish` rather than adding a module beside
+  it.** The ordering check goes in the only job that moves a tag. An
+  earlier draft of this plan added a second job and a reconciler here;
+  the deletion test is what removed them, since inlining the ordering
+  check back into `image-publish` makes it shorter and no harder to
+  read.
 - **M3 adds nothing.** It is one `if:` deleted and a paths list; the
   whole of what makes it affordable was built by M1.
 
@@ -688,8 +506,8 @@ digest, which is the point of the issue.
 Two maintained pages and `AGENTS.md` describe today's behavior in ways
 this work falsifies. The pages are in the "maintained maps and
 explanations" class of `docs/README.md` and `AGENTS.md` is in the
-"guidelines" class; both describe the system as it is now and are
-corrected when it moves.
+"guidelines" class, which outranks them; both describe the system as
+it is now and are corrected when it moves.
 
 - **M1, `vinga-server/README.md` §Choosing an image.** "**Pair the two
   variants by their SHA tag, not their dated one.** They are built by
@@ -697,58 +515,45 @@ corrected when it moves.
   `2026-08-06-1048` and `2026-08-06-1047-slim`." After M1 the two
   variants are published by jobs that start together and assemble a
   manifest in seconds, so the dated tags will usually agree. The
-  advice to pair by SHA stays correct and stays the advice; its
-  stated reason stops being true and is corrected. The same section's
-  "each has passed the unit, integration, and smoke lanes" gains the
+  advice to pair by SHA stays correct and stays the advice; its stated
+  reason stops being true and is corrected. The same section's "each
+  has passed the unit, integration, and smoke lanes" gains the
   stronger fact M1 creates: the published bytes are the smoked bytes,
   by digest.
 - **M1, `docs/deployment.md` §Choosing a tag.** Carries the same
   "built by separate jobs that finish minutes apart" reason and gets
   the same correction. It summarizes the server README and links it,
-  so the correction goes to the README and this page keeps pointing
-  at it.
-- **M1, the revision width and both tag formats, in both pages and
-  the server README's variant table.** Every example tag moves:
-  `2026-08-03-1200` becomes `2026-08-03-1200-3f9362a1b2c3` and
-  `sha-3f9362a` becomes `sha-3f9362a1b2c3`, in the variant table, in
-  `docs/deployment.md`'s "Pin an immutable tag" paragraph, and in the
-  "finish minutes apart" passages that quote a pair of them. The
-  pages call these tags immutable and never reused, and the twelve
-  character revision is what lets that sentence stay as written
-  rather than be reworded; the dependency runs that way round and
-  the milestone must not split them.
-  `vinga-server/README.md` also documents what `/healthz` reports, so
-  wherever a seven-character revision appears as an example of that,
-  it moves too. The inventory is a grep for the literal example
-  revisions across the tracked tree, run whole and not through
-  `head`, and its output is what the milestone works from.
-- **M2, both pages.** The moving-tag paragraphs gain one sentence for
-  the guarantee the reconciler makes explicit: on ordinary
-  fast-forward history a moving tag never moves to an older commit's
-  image. The scope clause is part of the sentence, not a footnote,
-  because after a force-push "older" has no single meaning and the
-  reconciler's stated behavior there is different. This strengthens
-  rather than weakens the existing advice not to deploy from a moving
-  tag, and must not be written in a way that reads as permission to.
-- **M2, `.github/workflows/vinga-server.yml` L52-54.** "Never on a
-  push to main ... Merges to main run to completion, however many of
-  them queue up" is false today, and `d6d76dd` is the counterexample.
-  The comment is rewritten to say what the split actually guarantees:
-  immutable tags for every merged commit, because nothing that
-  produces them sits in a group, and a moving tag that only ever moves
-  forward. A comment is not a maintained page, but it is the load
-  bearing explanation of the block it sits on, and leaving it would
-  leave the next reader with the belief that cost this repository an
-  image.
+  so the correction goes to the README and this page keeps pointing at
+  it.
+- **M1, the dated tag format, in both pages and the variant table.**
+  `2026-08-03-1200` becomes `2026-08-03-120015` and
+  `2026-08-06-1047-slim` becomes `2026-08-06-104715-slim`, in the
+  variant table's example tags, in `docs/deployment.md`'s "Pin an
+  immutable tag" paragraph, and in the "finish minutes apart"
+  passages that quote a pair of them. The `sha-` examples do not move,
+  since the revision is unchanged. The inventory is a grep for the
+  literal example tags across the tracked tree, run whole and not
+  through `head`, and its output is what the milestone works from.
 - **M1 and M3, `AGENTS.md`.** Its CI summary says "A third job,
   `image`, builds and smokes both image variants on everything but a
   pull request". M1 falsifies the first half (it becomes a
-  variant-by-architecture matrix plus a publish job) and M3 falsifies
-  the second. Each half is corrected in the milestone that breaks it,
-  not both at the end. `AGENTS.md` is in the **guidelines** class of
-  the authority taxonomy, which outranks the maintained maps, so
-  leaving it stale is worse than leaving a README stale and it was
-  wrong to have it in neither milestone.
+  variant-by-architecture matrix plus a publish job) and M3 the
+  second. Each half is corrected in the milestone that breaks it.
+- **M2, both pages.** The moving-tag paragraphs gain one sentence for
+  what the ordering check buys: a moving tag is not moved to an older
+  commit's image. Written as what the check does rather than as a
+  guarantee, because the check is a read before a write with no lock
+  behind it, and the residual is in this plan rather than on a
+  user-facing page. It must strengthen, and must not be written so as
+  to read as permission to deploy from a moving tag.
+- **M2, `.github/workflows/vinga-server.yml` L52-54.** "Never on a
+  push to main ... Merges to main run to completion, however many of
+  them queue up" is false today, and `d6d76dd` is the counterexample.
+  The comment is rewritten to say what per-push groups actually
+  guarantee. A comment is not a maintained page, but it is the
+  load-bearing explanation of the block it sits on, and leaving it
+  would leave the next reader with the belief that cost this
+  repository an image.
 - **M3, the maintained pages: nothing.** The server README's
   smoke-lane section says "CI runs it against the image it just
   built", which stays true when pull requests run it too, and no page
@@ -797,15 +602,12 @@ verified where matters more than usual.
   with the reason. It can be provoked rather than waited for, by
   merging M3 and a documentation commit in quick succession once M2 is
   on `main`, and that is the intended discharge.
-- **Main-only, and unchecked until a merge exercises them**: phase 2
-  of the validation, the reconciler's idempotence (a second promote
-  against an unchanged `main` is a no-op), and its repair of a moving
-  tag left stale. A previous draft called these provable on a
-  dispatch. They are not, because a dispatch creates no tag and never
-  runs the promote job, and claiming a gate that cannot run is worse
-  than having none, since it stops anybody looking for a real one.
-  M2's implementation-doc section records them unchecked with this
-  reason and ticks them from the first merges.
+- **Main-only, and unchecked until a merge exercises it**: the
+  ordering check skipping a moving tag whose image is newer. A
+  dispatch creates no tag and takes the publish's dry path, so it
+  cannot reach it, and claiming a gate that cannot run is worse than
+  having none. M2's implementation-doc section records it unchecked
+  with this reason.
 
 The `tests/census` lane is run before each PR: the command-spellings
 census sweeps every tracked file, and this work edits documentation
@@ -841,10 +643,8 @@ that quotes commands.
 
 ## Milestones
 
-Rewritten from the settled decisions after review round 4, which found
-this list still instructing three designs that earlier rounds had
-replaced. Where this list and the decisions above disagree, the
-decisions are right and this list is a bug.
+Rewritten after the scope reduction. Where this list and the decisions
+above disagree, the decisions are right and this list is a bug.
 
 - [ ] **M1: build each architecture once, publish the tested digests.**
 
@@ -859,65 +659,77 @@ decisions are right and this list is a bug.
   exported exactly once each. `needs: [unit, integration]` moves off
   `image` and onto `image-publish`.
 
-  *Identity.* `REVISION` becomes `${GITHUB_SHA:0:12}`. `type=sha` is
-  dropped from `docker/metadata-action`; both immutable tags are
-  `type=raw` rendered from that one value. **`matrix.suffix` stays on
-  both of them**, so the default variant publishes `sha-<revision>`
-  and `YYYY-MM-DD-HHmm-<revision>` while slim publishes
-  `sha-<revision>-slim` and `YYYY-MM-DD-HHmm-<revision>-slim`. The
-  suffix is what keeps the two variants in separate names; rendering
-  the immutable tags from the revision alone would give both variants
-  identical tags, so they would race or trip the reuse refusal instead
-  of publishing. The existing step asserting the tag ends in the
-  revision **and the suffix** stays, as a guard.
-
   *Publishing.* A new `image-publish` job assembles the manifest with
   `docker buildx imagetools create`, builds nothing and configures no
-  cache. It runs on `push` and `workflow_dispatch` only, **not** on a
-  pull request. It creates the two immutable tags and **no moving
-  tag**, which is M2's. It refuses to reuse either immutable tag that
-  already resolves to a different digest. Validation is phase 1 on
-  both events (the `--dry-run` index, entries resolved by digest
-  before any tag exists) and phase 2 on a push to `main` only (both
-  immutable tags resolved after assignment), each checking the same
-  four properties.
+  cache. It runs on `push` and `workflow_dispatch` only, not on a pull
+  request, and passes `--dry-run` on everything but a push to `main`.
+  It asserts the assembled index carries both expected platforms and
+  an attestation manifest for each. The dated tag becomes
+  `YYYY-MM-DD-HHmmss`, keeping its variant suffix; the `sha-` tag and
+  the revision are unchanged.
 
-  *Documenting.* Both "finish minutes apart" passages, both tag
-  formats, and the revision width wherever it appears as an example,
-  including `/healthz` output. The revision width and the tag formats
-  land together; splitting them leaves the maintained pages claiming
-  an immutability the narrower revision does not support.
+  *Documenting.* Both "finish minutes apart" passages, the dated tag
+  format wherever it appears as an example, and the first half of
+  `AGENTS.md`'s CI summary.
 
-- [ ] **M2: validation overlaps across main pushes; the moving tag
-  alone stays ordered.**
-
-  The workflow-level concurrency group stops serializing `main`, each
-  push getting its own group, and keeps cancelling superseded
-  pull-request runs.
-
-  A new `image-promote` job owns the moving tag, and only it. Ordered,
-  non-cancelling, `publish-${{ matrix.variant }}`, on a push to `main`
-  only, `fetch-depth: 0`. It reconciles rather than publishing its own
-  commit: read and validate the moving tag's revision, select the
-  range (first-parent from the tip to that revision; the bounded
-  force-push path when it is absent or outside history; fail loudly
-  when it is unusable), walk newest first, and promote the first
-  commit whose `sha-` tag exists and whose index passes the same
-  validation. Finding nothing is a no-op. Having moved the tag, it
-  resolves it and requires it to equal the validated index.
-
-  Corrects the workflow comment at L52-54, which claims merges run to
-  completion and is false. Documents the guarantee in the two
-  moving-tag passages, with its fast-forward scope in the sentence.
+- [ ] **M2: validation overlaps across main pushes; the moving tag is
+  ordered by a check.** The workflow-level concurrency group stops
+  serializing `main`, each push getting its own group, and keeps
+  cancelling superseded pull-request runs. That alone is what stops a
+  merged commit losing its image. `image-publish` checks out with
+  `fetch-depth: 0` and, before moving a moving tag, reads the
+  `VINGA_REVISION` of the image that tag points at and leaves the tag
+  alone when that revision is a descendant of this run's commit,
+  publishing its immutable tags regardless. No second job and no
+  concurrency group are added. Corrects the workflow comment at
+  L52-54, and documents what the check buys in the two moving-tag
+  passages.
 
 - [ ] **M3: image-affecting pull requests build and smoke
   automatically.** `image` loses `if: github.event_name !=
   'pull_request'` and the comment explaining the exemption, and on a
   pull request builds with `load: true` and pushes nothing, so a fork
   PR is covered with no token and leaves no registry trace.
-  `image-publish` and `image-promote` do not run on a pull request.
-  `workflow_dispatch` stays.
+  `image-publish` does not run on a pull request. `workflow_dispatch`
+  stays. Corrects the second half of `AGENTS.md`'s CI summary.
 
+## Follow-up, not carried here
+
+The `sha-` tag is seven characters, so two commits sharing that prefix
+publish under the same supposedly immutable tag, on the order of 2e-3
+at a thousand commits and growing with the square. Review round 3
+argued for fixing it in this plan and the argument was good: one
+derived value feeds `VINGA_REVISION`, the `sha-` tag and the existing
+step that asserts they agree, so widening it is a contained change.
+
+It is not carried because it is pre-existing and orthogonal to build
+time: nothing in this issue makes it more reachable, and it would
+change what `/healthz` reports and every example tag on three pages.
+It is its own small issue, and this paragraph exists so that decision
+is recorded rather than lost with the review round that raised it.
+
+## The review rounds, and what was cut afterwards
+
+Five external rounds produced 27 findings and every one was accepted;
+they are recorded below in full, as received, with a resolution note
+under each. **Read them as history rather than as the specification.**
+After round 5 the plan was cut back on proportion, and three things
+those rounds designed are no longer in it: the `image-publish` /
+`image-promote` split, the reconciler that walked `main`'s first
+parents to promote the newest gated commit, and the two-phase
+four-property index validation. The twelve-character revision went
+with them, to the follow-up above.
+
+Each of those was a correct answer to a real finding. What none of
+them had was a price against not being there, and the answer turned
+out to be: roughly five times the workflow code, no wall time, and the
+thing protected was a moving tag being briefly stale, against pages
+that already say not to deploy from one. The findings were right about
+their mechanisms and the mechanisms were not worth having, which is
+the proportion test applied one level further out than the rounds were
+asked to look. The sections below are kept intact because the design
+they converged on is the one to bring back if a moving tag ever has to
+be exact, and because the reasoning is worth more than the conclusion.
 
 ## Plan review round
 
