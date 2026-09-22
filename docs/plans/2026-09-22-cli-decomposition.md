@@ -704,7 +704,7 @@ Reusing what exists wherever the assertion already has a home.
 
 ## Milestones
 
-- [ ] **M4: refusal reasons.** `RefusalReason` and `Problem.reason`
+- [x] **[M4: refusal reasons](2026-09-22-cli-decomposition-implementation.md#m4-refusal-reasons)** (PR TBD). `RefusalReason` and `Problem.reason`
   in `responses.py`, `ConfigError.reason` in `loader.py`, the five
   raise sites, the five sentences without their commands, the handler
   passing the token, the tolerant read and `REMEDIES` in the CLI, the
