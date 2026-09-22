@@ -18,7 +18,7 @@ from sqlalchemy import insert, select, update
 
 from tests.support.stores import bindings, planted, stored_row, stored_rows
 from vinga_server.boundary import Reach
-from vinga_server.config import ConfigError
+from vinga_server.config import ConfigError, entities
 from vinga_server.config import store as store_module
 from vinga_server.config.loader import StorageError, UnknownEntityError, compose_config
 from vinga_server.config.models import (
@@ -1302,7 +1302,11 @@ def test_a_holder_that_is_not_there_at_the_write_says_which_kind_it_was(
     with pytest.raises(UnknownEntityError) as caught:
         store.set_secret(location, SECRET)
 
+    # The kind's own missing sentence and nothing after it, which is
+    # what "alone" has to mean to be worth asserting: the command that
+    # used to follow it would pass a `startswith`.
     refusal = str(caught.value)
+    assert refusal == entities.SECRET_HOLDERS[location.kind].missing
     assert refusal.startswith(f"{section}:")
     # The token is also what says the slot check is not what answered:
     # its refusal carries none.

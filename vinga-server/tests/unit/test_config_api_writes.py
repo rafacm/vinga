@@ -903,11 +903,13 @@ def test_a_secret_on_an_entity_that_is_not_there_is_404_without_either_name(
 HOLDERS = [
     (
         "/providers/llm/claude/secrets/api_key",
+        "provider",
         "providers",
         RefusalReason.PROVIDER_MISSING,
     ),
     (
         "/mcp-servers/home/secrets/env.TOKEN",
+        "mcp_server",
         "mcp_servers",
         RefusalReason.MCP_SERVER_MISSING,
     ),
@@ -915,15 +917,16 @@ HOLDERS = [
 
 
 @pytest.mark.parametrize(
-    ("path", "section", "reason"),
+    ("path", "kind", "section", "reason"),
     HOLDERS,
-    ids=[section for _, section, _ in HOLDERS],
+    ids=[section for _, _, section, _ in HOLDERS],
 )
 def test_a_secret_for_a_holder_that_is_not_there_says_which_kind_it_was(
     client: TestClient,
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
     path: str,
+    kind: str,
     section: str,
     reason: RefusalReason,
 ) -> None:
@@ -945,7 +948,10 @@ def test_a_secret_for_a_holder_that_is_not_there_says_which_kind_it_was(
         written = client.put(path, json={"secret": SECRET})
 
     assert written.status_code == 404
+    # The kind's own missing sentence and nothing after it: the command
+    # that used to follow it would pass a `startswith`.
     detail = refused(written.json(), 404, reason=reason)
+    assert detail == entities.SECRET_HOLDERS[kind].missing
     assert detail.startswith(f"{section}:")
     # The state, and not what to type about it.
     assert PROGRAM not in detail
@@ -970,10 +976,11 @@ def test_every_secret_holder_answers_in_a_token_of_its_own() -> None:
     noun. A kind added to the registry is red here, which is where the
     question gets asked.
     """
-    assert {section for _, section, _ in HOLDERS} == {
+    assert {kind for _, kind, _, _ in HOLDERS} == set(entities.SECRET_HOLDERS)
+    assert {section for _, _, section, _ in HOLDERS} == {
         holder.moved_key for holder in entities.SECRET_HOLDERS.values()
     }
-    assert len({reason for _, _, reason in HOLDERS}) == len(HOLDERS)
+    assert len({reason for _, _, _, reason in HOLDERS}) == len(HOLDERS)
 
 
 # The second half of a secret's address, driven against entities that
