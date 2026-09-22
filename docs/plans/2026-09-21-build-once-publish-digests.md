@@ -748,8 +748,8 @@ above disagree, the decisions are right and this list is a bug.
   L52-54, and documents what the check buys in the two moving-tag
   passages.
 
-- [ ] **M3: image-affecting pull requests build and smoke
-  automatically.** `image` loses `if: github.event_name !=
+- [x] **[M3: image-affecting pull requests build and smoke
+  automatically](2026-09-21-build-once-publish-digests-implementation.md#m3-image-affecting-pull-requests-build-and-smoke-automatically)** (PR TBD). `image` loses `if: github.event_name !=
   'pull_request'` and the comment explaining the exemption, and on a
   pull request builds with `load: true` and pushes nothing, so a fork
   PR is covered with no token and leaves no registry trace.
