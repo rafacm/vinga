@@ -1103,6 +1103,61 @@ PROBLEM_TITLES: dict[int, str] = {
 }
 
 
+# And which state a refusal is in, where it is one of a handful this
+# API has a word for.
+#
+# The vocabulary a client phrases a remedy from (#386). What used to be
+# in the five sentences below the token is a CLIENT command, and a
+# client is a program this server neither ships nor versions, so an
+# image built before a rename told an operator to type a command the CLI
+# beside it no longer had. The server states what it refused in; the
+# side that owns the grammar names what to run about it, the way
+# `Applies` already splits a write's boundary from the command that
+# crosses it.
+#
+# An extension member and not the RFC's `type`, for the reason `Problem`
+# gives below: `type` is a URI reference, an absent one means
+# `about:blank`, and a token drawn at a decision site is exactly what
+# RFC 9457 says an extension member is for.
+
+
+class RefusalReason(StrEnum):
+    """Which of a handful of states a refusal is in, as a closed token.
+
+    Six of them, one per refusal whose next step is a command rather
+    than a correction to what was sent, because those are the refusals
+    a sentence composed here could only answer by naming a command it
+    does not own.
+
+    `code-not-pending` is an activation code no device is waiting under:
+    expired, already claimed, or never issued. `agents-unknown` is a
+    claim by code naming at least one agent this deployment does not
+    have, refused with nothing changed and the code still claimable.
+    `agent-not-serving` is a read of an agent this server has not
+    installed, which is a different thing from one that does not exist.
+    `device-already-bound` is a conditional bind by code meeting a
+    device that has been configured since the code was issued.
+    `provider-missing` and `mcp-server-missing` are a stored secret
+    written to a holder that is not there, and they are two states
+    rather than one because the remedy names the holder's own noun.
+
+    How to read one: map a token you know to a sentence of your own
+    grammar, and quote `detail` for one you do not. A token this
+    vocabulary gains later arrives at an older client as a state it
+    cannot name, which is not a state to guess at, and `detail` is
+    already the whole of what was refused. The member is absent from
+    every refusal in none of these six states, so nothing else about
+    this API's refusals changed when it was added.
+    """
+
+    CODE_NOT_PENDING = "code-not-pending"
+    AGENTS_UNKNOWN = "agents-unknown"
+    AGENT_NOT_SERVING = "agent-not-serving"
+    DEVICE_ALREADY_BOUND = "device-already-bound"
+    PROVIDER_MISSING = "provider-missing"
+    MCP_SERVER_MISSING = "mcp-server-missing"
+
+
 class Problem(BaseModel):
     """A refusal, as RFC 9457 problem details.
 
@@ -1110,6 +1165,14 @@ class Problem(BaseModel):
     deliberately absent: an absent `type` means `about:blank`, which is
     the truth here, since these problems are described by their status
     and their prose rather than by a URI registry nobody serves.
+
+    Which is why `reason` is an extension member rather than a `type`.
+    RFC 9457 makes `type` a URI reference into a registry of problem
+    types, and an extension member is what the same document offers a
+    body that has more to say; a handful of refusals here have a state
+    worth branching on, and they carry the token for it beside the
+    prose. It is absent everywhere else, so a refusal that is in none of
+    those states carries exactly the members it always has.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1133,11 +1196,24 @@ class Problem(BaseModel):
     )
     detail: str = Field(
         description=(
-            "What was refused and why, the same sentence the `vinga-server config` "
-            "command prints for it. It names the entity the request addressed and "
-            "the rule that was broken; it never quotes a secret, a configuration "
-            "value that was rejected, or a key the request invented."
+            "What was refused and why: the state this server refused in, in its own "
+            "words. It names the entity the request addressed and the rule that was "
+            "broken; it never quotes a secret, a configuration value that was "
+            "rejected, or a key the request invented. A client holding the `reason` "
+            "below may extend it in its own grammar rather than relay it alone, "
+            "which is what the `vinga` command does with the states it knows."
         )
+    )
+    reason: RefusalReason | None = Field(
+        default=None,
+        description=(
+            "Which state this refusal is in, for a client that wants to say what to "
+            "do about it in its own words. Absent rather than null wherever this "
+            "server has no token for the state, which is every refusal but a handful: "
+            "a member that appeared on all of them would be a member every client had "
+            "to know about. Chosen by the code that classified the refusal and never "
+            "read back out of the prose beside it."
+        ),
     )
     errors: list[FieldError] = Field(
         description=(
