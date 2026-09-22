@@ -14,20 +14,24 @@ from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet, MultiFernet
-from sqlalchemy import insert, select, update
+from sqlalchemy import delete, insert, select, update
 
 from tests.support.stores import bindings, planted, stored_row, stored_rows
 from vinga_server.boundary import Reach
 from vinga_server.config import ConfigError
+from vinga_server.config import store as store_module
 from vinga_server.config.loader import StorageError, UnknownEntityError, compose_config
 from vinga_server.config.models import (
     NOT_A_MAC,
+    PROGRAM,
     PROVIDER_STAGES,
+    SERVER_PROGRAM,
     DatabaseConfig,
     FileConfig,
     domain_fields,
     mcp_entry_fragment,
 )
+from vinga_server.config.responses import RefusalReason
 from vinga_server.config.secrets import MASK, SecretLocation, generate_key
 from vinga_server.config.store import ConfigStore, verify_secrets
 from vinga_server.db import open_database, schema
@@ -1234,6 +1238,95 @@ def test_a_secret_for_an_unknown_entity_or_slot_is_refused(store: ConfigStore) -
         with pytest.raises(ConfigError) as caught:
             store.set_secret(location, SECRET)
         assert SECRET not in _chain(caught.value)
+
+
+# The holder that goes while the write is in flight
+#
+# The one path that reaches `_write_secrets`'s own refusal. Every other
+# way of addressing a secret at a holder that is not there is answered
+# by `_check_slot` before the write, so this sentence is composed only
+# when the row is deleted between the check and the UPDATE, by another
+# connection, inside the window one transaction holds.
+#
+# Made deterministic with a seam inside the window rather than with
+# threads: the last read before the UPDATE runs for real, and then the
+# holder's row is deleted on the write's own connection, which leaves
+# the UPDATE matching nothing exactly as a committed delete from another
+# connection would. On this engine every transaction takes the chain's
+# advisory lock in its begin listener, so a second connection deleting
+# the row would wait on the one in flight and time out rather than race
+# it; the state is reproduced instead of the schedule.
+#
+# One case per holder kind, because the state is two states: what a
+# client says about a provider that is not there and about an MCP server
+# that is not there are two commands, and the token is what tells them
+# apart.
+VANISHING = [
+    (
+        "provider",
+        CLAUDE,
+        "providers",
+        RefusalReason.PROVIDER_MISSING,
+        delete(schema.providers).where(schema.providers.c.name == "claude"),
+    ),
+    (
+        "mcp-server",
+        WEATHER,
+        "mcp_servers",
+        RefusalReason.MCP_SERVER_MISSING,
+        delete(schema.mcp_servers).where(schema.mcp_servers.c.name == "weather"),
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("location", "section", "reason", "removal"),
+    [(location, section, reason, removal) for _, location, section, reason, removal in VANISHING],
+    ids=[kind for kind, _, _, _, _ in VANISHING],
+)
+def test_a_holder_deleted_under_the_write_says_which_kind_it_was(
+    store: ConfigStore,
+    monkeypatch: pytest.MonkeyPatch,
+    location: SecretLocation,
+    section: str,
+    reason: RefusalReason,
+    removal: object,
+) -> None:
+    """The kind's own missing sentence, with the kind beside it as a
+    token and no command in it.
+
+    The sentence used to end by naming the command that creates the
+    holder, in the server's spelling of a client's grammar, which is the
+    coupling #386 measured: an image built before a rename prescribes a
+    spelling the client beside it no longer has. The state is the
+    server's to say and the command is the client's to spell.
+    """
+    store.set_provider("llm", "claude", {"type": "anthropic", "model": "claude-sonnet-5"})
+    store.set_mcp_server(
+        "weather", {"transport": "streamable_http", "url": "https://example.invalid/mcp"}
+    )
+    read = store_module._stored_secrets  # noqa: SLF001
+
+    def vanishing(connection: object, addressed: object) -> object:
+        stored = read(connection, addressed)
+        connection.execute(removal)
+        return stored
+
+    monkeypatch.setattr(store_module, "_stored_secrets", vanishing)
+
+    with pytest.raises(UnknownEntityError) as caught:
+        store.set_secret(location, SECRET)
+
+    refusal = str(caught.value)
+    assert refusal.startswith(f"{section}:")
+    assert caught.value.reason is reason
+    # The state, and nothing about what to type: both spellings of this
+    # grammar's program word are absent.
+    assert PROGRAM not in refusal
+    assert SERVER_PROGRAM not in refusal
+    # And nothing of the credential on the way out, here or on the chain
+    # an exception raised inside a handler would carry.
+    assert SECRET not in _chain(caught.value)
 
 
 def test_the_exempted_option_is_not_a_credential_slot(store: ConfigStore) -> None:
