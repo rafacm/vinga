@@ -585,11 +585,13 @@ of 2e-3 at a thousand commits and grows with the square.
 once and used in four places that already have to agree:
 
 - `VINGA_REVISION` in the image's `ENV`, which `/healthz` reports;
-- the `sha-` tag;
-- the dated tag, which becomes `YYYY-MM-DD-HHmm-<revision>`, composite
-  and back to minute resolution, since the revision now carries the
-  uniqueness that seconds were only ever added to supply;
-- the reconciler's lookup.
+- the `sha-` tag, which keeps its variant suffix;
+- the dated tag, which becomes `YYYY-MM-DD-HHmm-<revision>` plus that
+  same suffix, composite and back to minute resolution, since the
+  revision now carries the uniqueness that seconds were only ever
+  added to supply;
+- the reconciler's lookup, which is per variant and so looks up the
+  suffixed name.
 
 **How the value actually reaches the tags matters more than the
 intention**, and the plan's first statement of it named none.
@@ -683,10 +685,11 @@ digest, which is the point of the issue.
 
 ## Documentation footprint
 
-Three maintained pages describe today's behavior in ways this work
-falsifies. All three are in the "maintained maps and explanations"
-class of `docs/README.md`, so they describe the system as it is now
-and are corrected when it moves.
+Two maintained pages and `AGENTS.md` describe today's behavior in ways
+this work falsifies. The pages are in the "maintained maps and
+explanations" class of `docs/README.md` and `AGENTS.md` is in the
+"guidelines" class; both describe the system as it is now and are
+corrected when it moves.
 
 - **M1, `vinga-server/README.md` §Choosing an image.** "**Pair the two
   variants by their SHA tag, not their dated one.** They are built by
@@ -737,10 +740,19 @@ and are corrected when it moves.
   bearing explanation of the block it sits on, and leaving it would
   leave the next reader with the belief that cost this repository an
   image.
-- **M3: nothing.** The server README's smoke-lane section says "CI
-  runs it against the image it just built", which stays true when
-  pull requests run it too. No page claims the image job skips pull
-  requests.
+- **M1 and M3, `AGENTS.md`.** Its CI summary says "A third job,
+  `image`, builds and smokes both image variants on everything but a
+  pull request". M1 falsifies the first half (it becomes a
+  variant-by-architecture matrix plus a publish job) and M3 falsifies
+  the second. Each half is corrected in the milestone that breaks it,
+  not both at the end. `AGENTS.md` is in the **guidelines** class of
+  the authority taxonomy, which outranks the maintained maps, so
+  leaving it stale is worse than leaving a README stale and it was
+  wrong to have it in neither milestone.
+- **M3, the maintained pages: nothing.** The server README's
+  smoke-lane section says "CI runs it against the image it just
+  built", which stays true when pull requests run it too, and no page
+  claims the image job skips pull requests.
 
 The generated references under `docs/reference/` are untouched:
 nothing here changes a CLI command, a configuration field, the API or
@@ -849,9 +861,15 @@ decisions are right and this list is a bug.
 
   *Identity.* `REVISION` becomes `${GITHUB_SHA:0:12}`. `type=sha` is
   dropped from `docker/metadata-action`; both immutable tags are
-  `type=raw` rendered from that one value, `sha-<revision>` and
-  `YYYY-MM-DD-HHmm-<revision>`. The existing step asserting the tag
-  ends in the revision the build reports stays, as a guard.
+  `type=raw` rendered from that one value. **`matrix.suffix` stays on
+  both of them**, so the default variant publishes `sha-<revision>`
+  and `YYYY-MM-DD-HHmm-<revision>` while slim publishes
+  `sha-<revision>-slim` and `YYYY-MM-DD-HHmm-<revision>-slim`. The
+  suffix is what keeps the two variants in separate names; rendering
+  the immutable tags from the revision alone would give both variants
+  identical tags, so they would race or trip the reuse refusal instead
+  of publishing. The existing step asserting the tag ends in the
+  revision **and the suffix** stays, as a guard.
 
   *Publishing.* A new `image-publish` job assembles the manifest with
   `docker buildx imagetools create`, builds nothing and configures no
@@ -1517,3 +1535,73 @@ time this exact claim has had to be removed, having been corrected in
 one section while surviving in another, which is what a plan amended
 fourteen times does when a correction is applied where it was found
 rather than everywhere it appears.
+
+## Plan review round 5
+
+Re-review at `3f587647` on 2026-09-22, codex with `gpt-5.6-sol`,
+read-only, runtime 152s. The prompt gave this round one job, whether a
+competent implementer who had read only this plan and the repository
+could build the three milestones correctly, and explicitly ruled
+design improvements and extra hardening out of scope, since four
+rounds of those had already converged.
+
+Three findings, and the first verdict that is not "not ready":
+**ready after the P1/P2 amendments**. It also records no finding
+against the measurement sections, and confirms that no later amendment
+falsified the measured values or the labelled ~500s projection.
+
+### 1 (P1): the slim variant's immutable tags are unspecified
+
+The rewritten M1 gave the immutable tags as `sha-<revision>` and
+`YYYY-MM-DD-HHmm-<revision>` with no variant suffix, while the
+documentation footprint and the README preserve `sha-...-slim` and
+`...-1047-slim`. An implementer would render identical tags for both
+variants, and the two publishers would race or trip the reuse refusal
+instead of publishing.
+
+*Resolution*: accepted; this is a defect the milestone **rewrite**
+introduced, one commit earlier, by restating a decision more crisply
+than it was true. `matrix.suffix` exists today on both immutable tags
+(`.github/workflows/vinga-server.yml` L1601-1602) and on the assertion
+at L1621, and dropping it was not a decision anybody took. M1 now says
+the suffix stays on both tags and shows all four spellings, and the
+reconciler's lookup is stated as per variant, since it resolves a
+suffixed name.
+
+Worth recording for its shape rather than its size: rounds 1 to 4
+found defects in the design and this one found a defect in the
+document's account of a design that was already right. A rewrite is an
+edit like any other and gets the same scrutiny, which is exactly why
+the round after a rewrite is not optional.
+
+### 2 (P2): the burst verification cannot create the runs it needs
+
+The verification proposed provoking the three-run case by merging M3
+and a documentation commit in quick succession. This workflow's
+`paths` do not match an ordinary documentation change, which runs
+`docs.yml` instead, so that commit creates no run here and cannot
+enter the promotion group.
+
+*Resolution*: accepted, and it is the same fact as the measurement two
+sections earlier in this very plan, which found 22 consecutive `main`
+commits with no image precisely because documentation pushes do not
+trigger this workflow. Measuring something and then writing a
+verification that contradicts it is a failure to carry a finding
+across a document. The discharge is now three pushes that each touch a
+watched path, arranged so the newest run's promote becomes pending
+before an older one becomes eligible, which is the ordering the case
+actually turns on.
+
+### 3 (P2): the footprint says M3 changes no documentation
+
+`AGENTS.md` says "A third job, `image`, builds and smokes both image
+variants on everything but a pull request". M1 falsifies the first
+half and M3 the second, and the footprint listed neither.
+
+*Resolution*: accepted. `AGENTS.md` is in the **guidelines** class of
+the authority taxonomy, which outranks the maintained maps, so it was
+the worst page to have missed and the footprint's own framing
+("beyond what the generated-reference drift checks already catch")
+should have caught it. Each half is corrected in the milestone that
+breaks it. The footprint's opening sentence, which counted three
+maintained pages, is corrected with it.
