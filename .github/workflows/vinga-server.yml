@@ -1050,13 +1050,35 @@ jobs:
             exit 1
           fi
 
-  # The image is built and smoke-tested on every push to main and on
-  # every manual dispatch, and published only on a push to main.
-  # `needs: [unit, integration]` is what makes publishing conditional on
-  # the suite: nothing reaches the registry that did not pass it. Both
-  # lanes are named, and both have to be, since between them they hold
-  # every check the suite is made of; naming one would publish on half a
-  # green suite.
+  # One architecture of one variant, built once and proved once: four
+  # jobs, `{default,slim} x {amd64,arm64}`. Nothing here publishes.
+  # Each build pushes its bytes to the registry addressed by their own
+  # digest, under no tag at all, and records that digest for the
+  # `image-publish` job below, which assembles a manifest from the
+  # digests and builds nothing. What a tag names is then provably the
+  # bytes that were smoked rather than a rebuild of the same source.
+  #
+  # The builds no longer wait on the test lanes. Nothing about building
+  # or smoking an image depends on the suite having passed; what
+  # depends on it is publishing, so `needs: [unit, integration]` moved
+  # to `image-publish`. The invariant has to be stated precisely,
+  # because the obvious sentence about it is false: on a push to main a
+  # content-addressed manifest CAN reach GHCR before either lane
+  # finishes, and no tag of any kind, moving or immutable, is created
+  # until both lanes and all four of these jobs have passed. An
+  # untagged manifest is unreachable by name, resolved by no
+  # deployment, and is not what any documented pull command names. A
+  # push whose tests then fail leaves one behind, which is the accepted
+  # price of building before the gates rather than after them, and it
+  # buys the 7.5 minutes this job used to spend waiting.
+  #
+  # The architecture is a matrix dimension rather than a second job, so
+  # the build step, its build arguments, its cache configuration and
+  # its digest handling exist once. Two structures that must agree are
+  # one structure with a bug pending, and the build step is the one
+  # thing here that must not drift, since what got built is the whole
+  # question. The cost is the `if: matrix.arch == 'amd64'` lines below,
+  # which are the file's existing idiom rather than a new one.
   #
   # Skipped on pull requests, deliberately and temporarily: while the
   # pre-release simplification milestones and the rename land, PRs come
@@ -1071,31 +1093,21 @@ jobs:
   # carries the local engines and keeps the unsuffixed tags every
   # existing puller expects; `slim` carries neither and takes `-slim`
   # ones, for a deployment whose ASR and TTS are external providers.
-  # Both run the whole smoke conversation, which is what makes them
-  # provably the same server rather than two that merely build.
+  # Both run the whole smoke conversation on amd64, which is what makes
+  # them provably the same server rather than two that merely build.
   image:
-    needs: [unit, integration]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     strategy:
-      # Both variants are reported even when one fails: which of them
-      # broke is the first thing worth knowing.
+      # Every combination is reported even when one fails: which of
+      # them broke is the first thing worth knowing.
       fail-fast: false
       matrix:
-        include:
-          # `moving` is the tag that follows main; `suffix` is what
-          # marks the dated and sha tags. The default variant's are
-          # unsuffixed on purpose, so `latest` keeps meaning what it
-          # has always meant.
-          - variant: default
-            moving: latest
-            suffix: ""
-          - variant: slim
-            moving: slim
-            suffix: "-slim"
+        variant: [default, slim]
+        arch: [amd64, arm64]
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/vinga-server
       # Throwaway, and only ever inside this job: the smoke lane needs
@@ -1123,23 +1135,40 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # The seven characters `docker/metadata-action`'s
+      # The twelve characters `docker/metadata-action`'s
       # `type=sha,format=short` puts in the image tag, computed once so
       # every place below agrees with the tag by construction. What a
       # container reports and what its tag says are then the same
-      # string, which is what a post-deploy check compares.
+      # string, which is what a post-deploy check compares. The publish
+      # job sets `DOCKER_METADATA_SHORT_SHA_LENGTH: 12` to match, and
+      # asserts the match rather than trusting it.
+      #
+      # Twelve rather than seven because the `sha-` tag is supposed to
+      # be immutable: at seven, two commits sharing a prefix publish
+      # under one tag, which is about one chance in fifteen thousand at
+      # this repository's size today and roughly one in twelve after
+      # five years at the current rate. Twelve is what
+      # `docker/metadata-action`'s own README uses as its example and
+      # what the kernel treats as a durable abbreviation.
       #
       # Deliberately not `git rev-parse --short`, whose length git
       # widens as the object count grows: what this has to agree with
-      # is the tag, and the tag is seven characters whatever git would
-      # rather abbreviate to.
+      # is the tag, and the tag is whatever width is set here whatever
+      # git would rather abbreviate to.
       - name: The revision this build is
-        run: echo "REVISION=${GITHUB_SHA:0:7}" >> "$GITHUB_ENV"
+        run: echo "REVISION=${GITHUB_SHA:0:12}" >> "$GITHUB_ENV"
 
       # The database the containers below talk to, on a network they
       # join. Health-gated before anything is provisioned, so a step
       # never races the instance.
+      #
+      # This and everything else the smoke conversation needs runs on
+      # the amd64 jobs alone. The arm64 jobs build, push their digest
+      # and import the extras, which is what this lane has ever asked
+      # of arm64; a native arm64 smoke is a coverage change rather than
+      # part of this split.
       - name: Start the database the smoke containers share
+        if: matrix.arch == 'amd64'
         run: |
           docker network create "$SMOKE_NETWORK"
           docker run -d --name "$VINGA_DB_HOST" \
@@ -1170,6 +1199,7 @@ jobs:
       # step is the development-and-test maintenance connection that
       # does.
       - name: Provision the scenario databases
+        if: matrix.arch == 'amd64'
         run: |
           for name in vinga_slim_boot vinga_slim_refuse vinga_smoke; do
             docker run --rm --network "$SMOKE_NETWORK" \
@@ -1180,7 +1210,10 @@ jobs:
                 -c "create database $name owner $VINGA_DB_USER"
           done
 
+      # uv is here for the smoke suite, which is pytest, so it is asked
+      # for on the jobs that run it.
       - uses: astral-sh/setup-uv@v9.0.0
+        if: matrix.arch == 'amd64'
         with:
           enable-cache: true
           cache-dependency-glob: "vinga-server/uv.lock"
@@ -1191,34 +1224,131 @@ jobs:
       # exactly what a contributor types, and it is the one door no
       # other lane would notice breaking.
       - name: Install dependencies
+        if: matrix.arch == 'amd64'
         run: uv sync --frozen
 
+      # Only the arm64 jobs emulate anything. An amd64 build on an
+      # amd64 runner needs no binfmt handler, and installing one there
+      # was free only while one job built both architectures.
       - uses: docker/setup-qemu-action@v4
+        if: matrix.arch == 'arm64'
 
       - uses: docker/setup-buildx-action@v4
 
-      - name: Build the amd64 image
+      # Before the build rather than after the smoke, because the build
+      # is what pushes now. A pull request pushes nothing and needs no
+      # credential, which is what lets a fork's pull request run this
+      # job at all.
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The OCI labels the published image carries, `image.source`
+      # among them, which is what ties the GHCR package to this
+      # repository. They are computed here and not only in the publish
+      # job because a label lives in the image config, which is written
+      # by the build: a manifest assembled afterwards cannot add one.
+      # Only the labels are read from this step; the tags are the
+      # publish job's, computed there from the same context.
+      - name: Labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+
+      # One architecture, one build, and exactly one output.
+      #
+      # On a push or a dispatch that output is the image exporter,
+      # pushing by digest under no tag, and `containerimage.digest` is
+      # then the OCI index: the platform manifest and the provenance
+      # attestation beside it. Adding a second `type=docker` output to
+      # load the image locally in the same pass works, warns about
+      # nothing, and silently changes that reported digest to the bare
+      # platform manifest, from which `imagetools create` assembles a
+      # manifest carrying no attestation at all. Verified both ways
+      # against a throwaway registry. So the pushed bytes are fetched
+      # back below rather than exported twice, and this step keeps one
+      # output whatever else changes around it.
+      #
+      # A pull request publishes nothing, so it needs no digest: it
+      # loads the image locally under the tag the steps below read,
+      # which is what this job did for every event before the split.
+      - name: Build the ${{ matrix.arch }} image
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: vinga-server
-          platforms: linux/amd64
-          load: true
-          tags: vinga-server:ci-amd64
-          # The same arguments the publish step passes, so the whole
-          # route from build argument to what the server reports is
-          # exercised by the smoke lane on every run, rather than first
-          # being exercised by a publish to main.
+          platforms: linux/${{ matrix.arch }}
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: ${{ github.event_name == 'pull_request' && format('vinga-server:ci-{0}', matrix.arch) || '' }}
+          outputs: ${{ github.event_name != 'pull_request' && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.IMAGE) || '' }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # The arguments the published image carries, passed to the
+          # one build that produces it, so the whole route from build
+          # argument to what the server reports is exercised by the
+          # smoke lane rather than first being exercised by a publish
+          # to main. Nothing rebuilds after this step.
           build-args: |
             VINGA_REVISION=${{ env.REVISION }}
             VINGA_VARIANT=${{ matrix.variant }}
-          # Scoped per variant. The two carry different dependency
-          # layers, and an unscoped gha cache is one namespace, so
-          # without this they overwrite each other's manifests every
-          # run and each variant pays for the other's churn. Not a
-          # correctness risk (BuildKit cache is content addressed), a
-          # hit-rate one.
-          cache-from: type=gha,scope=${{ matrix.variant }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
+          # Scoped per variant AND architecture, and written by exactly
+          # one step per scope. The variants carry different dependency
+          # layers and the architectures different wheels, and a gha
+          # cache scope is one namespace whose index the last writer
+          # owns, so a shared scope means importing an index some other
+          # build wrote last. Three exports into one scope per variant
+          # were 409.7s of the 781s this job used to take.
+          #
+          # Splitting the key cold-starts the cache once, on the first
+          # run after this lands, and also stops each architecture
+          # seeing the other's export. Whether anything was gaining
+          # from that is measured on the second warm run rather than
+          # assumed; if the arm64 build got slower, the scopes merge
+          # back to one per variant.
+          cache-from: type=gha,scope=${{ matrix.variant }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}-${{ matrix.arch }}
+
+      # The published bytes, fetched back by the digest that will be
+      # published, so everything below exercises the image the tag will
+      # name rather than a sibling built from the same source.
+      # `--platform` is not optional: the index just pushed holds one
+      # entry, and docker resolves an index against the host platform
+      # unless it is told which one to take.
+      - name: Pull the pushed image back
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -eu
+          docker pull --platform "linux/${{ matrix.arch }}" "$IMAGE@$DIGEST"
+          docker tag "$IMAGE@$DIGEST" "vinga-server:ci-${{ matrix.arch }}"
+
+      # The seam between this job and the publish, and the whole point
+      # of the split: a content address rather than a shared builder
+      # cache the publish hopes is warm. One file per architecture,
+      # named by the architecture, so the publish requires both rather
+      # than assembling whatever it happens to find.
+      - name: Record the digest
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/digests"
+          printf '%s' "$DIGEST" > "$RUNNER_TEMP/digests/${{ matrix.arch }}"
+
+      - name: Upload the digest
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v5
+        with:
+          name: digests-${{ matrix.variant }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 1
 
       # The marker the image sets for itself, asked of the image rather
       # than assumed from the Dockerfile. Everything else that reads it
@@ -1234,6 +1364,7 @@ jobs:
       # share and both are published; amd64 alone, since an environment
       # variable does not vary by architecture the way a wheel does.
       - name: Check the image says it is a container
+        if: matrix.arch == 'amd64'
         run: |
           if ! docker run --rm --entrypoint python vinga-server:ci-amd64 -c \
               "from vinga_server.build_info import in_container; raise SystemExit(0 if in_container() else 1)"; then
@@ -1252,7 +1383,7 @@ jobs:
       # would import with the generated REST client gone, and that
       # client is the whole of what the capture uploader uses it for.
       - name: Check the extras import (amd64)
-        if: matrix.variant == 'default'
+        if: matrix.arch == 'amd64' && matrix.variant == 'default'
         run: docker run --rm --entrypoint python vinga-server:ci-amd64 -c "import faster_whisper, piper, opentelemetry.sdk, opentelemetry.exporter.otlp.proto.http, langfuse.api.client"
 
       # The quick start, run against the image this job just built. The
@@ -1265,13 +1396,13 @@ jobs:
       # The default variant only: the file is variant-agnostic, and the
       # image it defaults to is `latest`, which is the default variant.
       #
-      # Deliberately before the arm64 build and everything after it,
-      # because this publishes 8003 and the seeded smoke container
-      # below publishes the same port. The teardown is a trap rather
-      # than a later step for the same reason: nothing after this may
-      # inherit a port or a volume from it.
+      # Deliberately before everything after it, because this publishes
+      # 8003 and the seeded smoke container below publishes the same
+      # port. The teardown is a trap rather than a later step for the
+      # same reason: nothing after this may inherit a port or a volume
+      # from it.
       - name: Check the compose file boots the built image
-        if: matrix.variant == 'default'
+        if: matrix.arch == 'amd64' && matrix.variant == 'default'
         working-directory: .
         env:
           VINGA_IMAGE: vinga-server:ci-amd64
@@ -1301,7 +1432,7 @@ jobs:
       # asserted rather than assumed: an extra creeping back in would
       # otherwise show up only as an image that quietly grew.
       - name: Check the extras are absent (amd64)
-        if: matrix.variant == 'slim'
+        if: matrix.arch == 'amd64' && matrix.variant == 'slim'
         run: |
           for module in faster_whisper piper; do
             if docker run --rm --entrypoint python vinga-server:ci-amd64 \
@@ -1324,27 +1455,8 @@ jobs:
           docker run --rm --entrypoint python vinga-server:ci-amd64 \
             -c "import opentelemetry.sdk, opentelemetry.exporter.otlp.proto.http, langfuse.api.client"
 
-      - name: Build the arm64 image
-        uses: docker/build-push-action@v7
-        with:
-          context: vinga-server
-          platforms: linux/arm64
-          load: true
-          tags: vinga-server:ci-arm64
-          build-args: |
-            VINGA_REVISION=${{ env.REVISION }}
-            VINGA_VARIANT=${{ matrix.variant }}
-          # Scoped per variant. The two carry different dependency
-          # layers, and an unscoped gha cache is one namespace, so
-          # without this they overwrite each other's manifests every
-          # run and each variant pays for the other's churn. Not a
-          # correctness risk (BuildKit cache is content addressed), a
-          # hit-rate one.
-          cache-from: type=gha,scope=${{ matrix.variant }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
-
       - name: Check the extras import (arm64, under QEMU)
-        if: matrix.variant == 'default'
+        if: matrix.arch == 'arm64' && matrix.variant == 'default'
         run: docker run --rm --platform linux/arm64 --entrypoint python vinga-server:ci-arm64 -c "import faster_whisper, piper, opentelemetry.sdk, opentelemetry.exporter.otlp.proto.http, langfuse.api.client"
 
       # What the slim variant exists for, and what it must refuse. Both
@@ -1369,7 +1481,7 @@ jobs:
       # provider to build, which is what makes the first start on an
       # empty database a valid one.
       - name: Check the slim image boots on external providers
-        if: matrix.variant == 'slim'
+        if: matrix.arch == 'amd64' && matrix.variant == 'slim'
         run: |
           docker run --rm --network "$SMOKE_NETWORK" \
             -e VINGA_AUTH_SECRET \
@@ -1407,7 +1519,7 @@ jobs:
       # the exit code, so a refactor that turns this into a generic
       # crash is caught.
       - name: Check the slim image refuses local engines
-        if: matrix.variant == 'slim'
+        if: matrix.arch == 'amd64' && matrix.variant == 'slim'
         run: |
           docker run --rm --network "$SMOKE_NETWORK" \
             -e VINGA_AUTH_SECRET \
@@ -1450,6 +1562,7 @@ jobs:
       # secrets, and nothing else, because an empty domain half builds no
       # provider and so needs no provider credential.
       - name: Seed the domain configuration
+        if: matrix.arch == 'amd64'
         run: |
           docker run --rm --network "$SMOKE_NETWORK" \
             -e VINGA_AUTH_SECRET \
@@ -1462,6 +1575,7 @@ jobs:
             --entrypoint sh vinga-server:ci-amd64 /smoke/seed.sh
 
       - name: Start the container
+        if: matrix.arch == 'amd64'
         run: |
           docker run -d --name vinga-jaeger \
             -p 16686:16686 \
@@ -1493,6 +1607,7 @@ jobs:
             vinga-server:ci-amd64
 
       - name: Wait for the healthcheck
+        if: matrix.arch == 'amd64'
         run: |
           for _ in $(seq 60); do
             status=$(docker inspect --format '{{.State.Health.Status}}' vinga-smoke)
@@ -1505,6 +1620,7 @@ jobs:
           exit 1
 
       - name: Smoke tests
+        if: matrix.arch == 'amd64'
         env:
           VINGA_SMOKE_OTA_URL: http://127.0.0.1:8003/xiaozhi/ota/
           # What the image above was built with, so the smoke lane can
@@ -1523,6 +1639,7 @@ jobs:
       # `|| true`: this asserts that the shutdown ran, and a cleanup
       # command that cannot fail cannot assert anything.
       - name: Stop the container and check it drained
+        if: matrix.arch == 'amd64'
         run: |
           docker stop -t 30 vinga-smoke
           if ! docker logs vinga-smoke 2>&1 | grep -q "shutting down: draining conversations"; then
@@ -1535,6 +1652,7 @@ jobs:
       # repetition proves both published variants carry the same direct
       # OTLP/HTTP path through the pinned Jaeger v2 backend.
       - name: Check the built image reached direct Jaeger
+        if: matrix.arch == 'amd64'
         run: |
           set -eu
           url='http://127.0.0.1:16686/api/traces?service=vinga-server&lookback=1h&limit=20'
@@ -1550,11 +1668,11 @@ jobs:
           exit 1
 
       - name: Container logs
-        if: always()
+        if: always() && matrix.arch == 'amd64'
         run: docker logs vinga-smoke || true
 
       - name: Remove the container
-        if: always()
+        if: always() && matrix.arch == 'amd64'
         run: |
           docker rm -f vinga-smoke || true
           docker rm -f vinga-jaeger || true
@@ -1564,88 +1682,8 @@ jobs:
       # a container and a network holding a port and a name, and the
       # next run on the same runner would collide with them.
       - name: Remove the database and its network
-        if: always()
+        if: always() && matrix.arch == 'amd64'
         run: |
           docker logs "$VINGA_DB_HOST" 2>&1 | tail -50 || true
           docker rm -f "$VINGA_DB_HOST" || true
           docker network rm "$SMOKE_NETWORK" || true
-
-      - name: Log in to GHCR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Deliberately not gated on main, unlike the login and the publish
-      # below. Computing tags is free, and gating it meant the one step
-      # that decides what a variant is called was never exercised until
-      # after a merge, which is the worst place to find out an
-      # expression was wrong. A dispatch run prints exactly what a
-      # push to main would publish.
-      - name: Tags
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.IMAGE }}
-          # Build times rather than versions, like the changelog's dates:
-          # there is no semver yet, and a timestamp plus a SHA says
-          # everything a rollback needs. To the minute (UTC), not the
-          # day: several merges land on a good day, and a tag a later
-          # build can claim is a moving pointer wearing a release's
-          # clothes. The moving tag is the only one here that moves:
-          # `latest` for the default variant, `slim` for the slim one.
-          tags: |
-            type=raw,value=${{ matrix.moving }}
-            type=raw,value={{date 'YYYY-MM-DD-HHmm'}}${{ matrix.suffix }}
-            type=sha,format=short,suffix=${{ matrix.suffix }}
-
-      # The agreement this is all for, checked rather than assumed:
-      # `type=sha,format=short` decides the tag's length, and if it ever
-      # stopped being the seven characters computed above, a container
-      # would go back to reporting something its tag does not say, which
-      # is the defect and not a detail. Runs whenever the tags are
-      # computed, so a dispatch run catches a change in either before
-      # a merge does.
-      - name: Check the sha tag carries the revision
-        run: |
-          tag=$(printf '%s\n' "${{ steps.meta.outputs.tags }}" | grep ':sha-' || true)
-          if [ -z "$tag" ]; then
-            echo "no sha- tag was computed"
-            exit 1
-          fi
-          echo "tag: $tag"
-          echo "revision: $REVISION"
-          case "$tag" in
-            *":sha-${REVISION}${{ matrix.suffix }}") ;;
-            *)
-              echo "the sha- tag does not end in the revision this build reports"
-              exit 1
-              ;;
-          esac
-
-      - name: Publish
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v7
-        with:
-          context: vinga-server
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # What makes a running container able to name its own build.
-          # The same seven characters the `sha-` tag carries, so
-          # /healthz and the image tag are equal rather than one being
-          # a prefix of the other.
-          build-args: |
-            VINGA_REVISION=${{ env.REVISION }}
-            VINGA_VARIANT=${{ matrix.variant }}
-          # Scoped per variant. The two carry different dependency
-          # layers, and an unscoped gha cache is one namespace, so
-          # without this they overwrite each other's manifests every
-          # run and each variant pays for the other's churn. Not a
-          # correctness risk (BuildKit cache is content addressed), a
-          # hit-rate one.
-          cache-from: type=gha,scope=${{ matrix.variant }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
