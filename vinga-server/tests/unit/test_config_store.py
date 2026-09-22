@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet, MultiFernet
-from sqlalchemy import delete, insert, select, update
+from sqlalchemy import insert, select, update
 
 from tests.support.stores import bindings, planted, stored_row, stored_rows
 from vinga_server.boundary import Reach
@@ -1240,57 +1240,48 @@ def test_a_secret_for_an_unknown_entity_or_slot_is_refused(store: ConfigStore) -
         assert SECRET not in _chain(caught.value)
 
 
-# The holder that goes while the write is in flight
+# The holder that is not there when the write lands
 #
 # The one path that reaches `_write_secrets`'s own refusal. Every other
 # way of addressing a secret at a holder that is not there is answered
 # by `_check_slot` before the write, so this sentence is composed only
-# when the row is deleted between the check and the UPDATE, by another
-# connection, inside the window one transaction holds.
+# when the UPDATE matches no row, which on a live deployment is the
+# holder deleted between the two.
 #
-# Made deterministic with a seam inside the window rather than with
-# threads: the last read before the UPDATE runs for real, and then the
-# holder's row is deleted on the write's own connection, which leaves
-# the UPDATE matching nothing exactly as a committed delete from another
-# connection would. On this engine every transaction takes the chain's
-# advisory lock in its begin listener, so a second connection deleting
-# the row would wait on the one in flight and time out rather than race
-# it; the state is reproduced instead of the schedule.
+# No schedule can be raced into that window from a test. `set_secret`
+# runs the check and the write inside one transaction, and every
+# transaction on this engine takes the chain's advisory lock in its
+# begin listener, so a second connection deleting the row waits on the
+# one in flight and times out: what comes back is a busy-database
+# refusal rather than the state under test.
+#
+# So the synchronization point is the check itself, answered as though
+# the holder were present while the holder is never written. The write
+# then updates no row, which is the state, and the token on the refusal
+# is the proof the slot check was not what answered: only this path
+# attaches one.
 #
 # One case per holder kind, because the state is two states: what a
-# client says about a provider that is not there and about an MCP server
-# that is not there are two commands, and the token is what tells them
-# apart.
+# client says about a provider that is not there and about an MCP
+# server that is not there are two commands, and the token is what tells
+# them apart.
 VANISHING = [
-    (
-        "provider",
-        CLAUDE,
-        "providers",
-        RefusalReason.PROVIDER_MISSING,
-        delete(schema.providers).where(schema.providers.c.name == "claude"),
-    ),
-    (
-        "mcp-server",
-        WEATHER,
-        "mcp_servers",
-        RefusalReason.MCP_SERVER_MISSING,
-        delete(schema.mcp_servers).where(schema.mcp_servers.c.name == "weather"),
-    ),
+    ("provider", CLAUDE, "providers", RefusalReason.PROVIDER_MISSING),
+    ("mcp-server", WEATHER, "mcp_servers", RefusalReason.MCP_SERVER_MISSING),
 ]
 
 
 @pytest.mark.parametrize(
-    ("location", "section", "reason", "removal"),
-    [(location, section, reason, removal) for _, location, section, reason, removal in VANISHING],
-    ids=[kind for kind, _, _, _, _ in VANISHING],
+    ("location", "section", "reason"),
+    [(location, section, reason) for _, location, section, reason in VANISHING],
+    ids=[kind for kind, _, _, _ in VANISHING],
 )
-def test_a_holder_deleted_under_the_write_says_which_kind_it_was(
+def test_a_holder_that_is_not_there_at_the_write_says_which_kind_it_was(
     store: ConfigStore,
     monkeypatch: pytest.MonkeyPatch,
     location: SecretLocation,
     section: str,
     reason: RefusalReason,
-    removal: object,
 ) -> None:
     """The kind's own missing sentence, with the kind beside it as a
     token and no command in it.
@@ -1300,25 +1291,21 @@ def test_a_holder_deleted_under_the_write_says_which_kind_it_was(
     coupling #386 measured: an image built before a rename prescribes a
     spelling the client beside it no longer has. The state is the
     server's to say and the command is the client's to spell.
+
+    A reach-in on `_check_slot`, and a considered one: the refusal under
+    test is raised only when the row is gone between two statements of
+    one transaction, and a race has no caller-facing seam to drive it
+    through.
     """
-    store.set_provider("llm", "claude", {"type": "anthropic", "model": "claude-sonnet-5"})
-    store.set_mcp_server(
-        "weather", {"transport": "streamable_http", "url": "https://example.invalid/mcp"}
-    )
-    read = store_module._stored_secrets  # noqa: SLF001
-
-    def vanishing(connection: object, addressed: object) -> object:
-        stored = read(connection, addressed)
-        connection.execute(removal)
-        return stored
-
-    monkeypatch.setattr(store_module, "_stored_secrets", vanishing)
+    monkeypatch.setattr(store_module, "_check_slot", lambda domain, addressed: None)
 
     with pytest.raises(UnknownEntityError) as caught:
         store.set_secret(location, SECRET)
 
     refusal = str(caught.value)
     assert refusal.startswith(f"{section}:")
+    # The token is also what says the slot check is not what answered:
+    # its refusal carries none.
     assert caught.value.reason is reason
     # The state, and nothing about what to type: both spellings of this
     # grammar's program word are absent.

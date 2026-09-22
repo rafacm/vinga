@@ -162,6 +162,7 @@ from vinga_server.config.responses import (
     MetricViews,
     PendingDevice,
     Problem,
+    RefusalReason,
     RuntimeInfo,
     SecretValue,
     SessionDetail,
@@ -2263,6 +2264,78 @@ def _answer(response: httpx.Response, address: Address) -> object:
     raise ConfigError(detail if detail is not None else _unreadable(response, address))
 
 
+# What this client says to do about a state the API states
+#
+# The other half of the boundary vocabulary above, for refusals (#386).
+# The rule is the same one, and it is the same rule for the same reason:
+# a remedy is a command, a command is a word of THIS grammar, and the
+# server neither ships this program nor versions it, so a sentence
+# composed there naming a command prescribes a spelling an image built
+# before a rename no longer has. The server says which state it refused
+# in, as a closed token; this side owns the grammar, so this side names
+# what to type, and the spelling is then inside the command-spellings
+# census's reach: a rename that missed one fails a test in this checkout
+# rather than reaching an operator through an old image.
+#
+# Read exactly like `SPOKEN`: the sentence stands alone, names the state
+# nowhere (the server's `detail` has already said it) and the command
+# once. A token with no line here, and a token this client cannot name
+# at all, both print `detail` by itself, which is what a refusal from a
+# server newer than this client arrives as. The rule either way is the
+# one the whole client keeps: an unknown state is quoted, never guessed
+# at.
+#
+# Every member has a line, because every member is a state with
+# something to run about; `test_the_remedies_cover_the_whole_vocabulary`
+# holds the two sets equal, so a token added on one side alone is red.
+REMEDIES: dict[RefusalReason, str] = {
+    RefusalReason.CODE_NOT_PENDING: (
+        f"`{PROGRAM} device pending list` lists the codes this server is showing "
+        f"right now."
+    ),
+    RefusalReason.AGENTS_UNKNOWN: f"Run `{PROGRAM} list` to see the agents that exist.",
+    RefusalReason.AGENT_NOT_SERVING: (
+        f"`{PROGRAM} apply` installs an agent written since; `{PROGRAM} list` shows "
+        f"the agents that are stored."
+    ),
+    RefusalReason.DEVICE_ALREADY_BOUND: (
+        f"Read what it is bound to with `{PROGRAM} device show <mac>`, or bind it "
+        f"again by its MAC."
+    ),
+    RefusalReason.PROVIDER_MISSING: f"Create it first with `{PROGRAM} provider set`.",
+    RefusalReason.MCP_SERVER_MISSING: f"Create it first with `{PROGRAM} mcp-server set`.",
+}
+
+# The tokens this client can name, as the strings a body spells them
+# with, which is what the reading below compares against.
+_KNOWN_REASONS = frozenset(member.value for member in RefusalReason)
+
+
+def _nameable(payload: object) -> object:
+    """A refusal body with a state this client cannot name taken out of
+    it.
+
+    The one tolerance the refusal reader keeps, and it is `_declared`'s
+    rule one shape up: a token from a server newer than this client is
+    an older server's silence rather than a body to refuse. Without it
+    the strict validation below would turn a refusal an operator can
+    still read into "a body this client does not recognize", which is
+    the sentence reserved for a page nobody vouched for.
+
+    Only a string is replaced, which is the same rule `_declared` states
+    about a token: nothing bounds what a body puts where one belongs,
+    and a list or an object there is not a state this server could have
+    meant. Those stay as they are and meet the validation, so the body
+    they arrived in is unrecognized, which is what it is.
+    """
+    if not isinstance(payload, Mapping):
+        return payload
+    reason = payload.get("reason")
+    if not isinstance(reason, str) or reason in _KNOWN_REASONS:
+        return payload
+    return dict(payload) | {"reason": None}
+
+
 def _refusal(response: httpx.Response, payload: object) -> str | None:
     """The sentence this API wrote, or None when what answered is not
     this API's refusal.
@@ -2287,6 +2360,13 @@ def _refusal(response: httpx.Response, payload: object) -> str | None:
     substitute for; the validation error is dropped inside the arm and
     never raised from, because pydantic puts the input it rejected into
     its own message.
+
+    What is relayed is the sentence plus this client's own remedy where
+    the body states a state it knows, and the sentence alone where it
+    does not. The remedy is appended rather than replacing it, unlike a
+    write's boundary line above: a refusal's `detail` is the whole of
+    what was refused and this side knows only what to do next, so
+    replacing it would drop the half nothing else says.
     """
     if _media_type(response) != PROBLEM_MEDIA_TYPE:
         return None
@@ -2294,12 +2374,13 @@ def _refusal(response: httpx.Response, payload: object) -> str | None:
     if title is None:
         return None
     try:
-        problem = Problem.model_validate(payload)
+        problem = Problem.model_validate(_nameable(payload))
     except ValidationError:
         return None
     if problem.status != response.status_code or problem.title != title:
         return None
-    return problem.detail
+    remedy = REMEDIES.get(problem.reason) if problem.reason is not None else None
+    return problem.detail if remedy is None else f"{problem.detail} {remedy}"
 
 
 def _media_type(response: httpx.Response) -> str:

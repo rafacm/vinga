@@ -95,6 +95,7 @@ from vinga_server.config.models import (
     NOT_A_MAC,
     DatabaseConfig,
 )
+from vinga_server.config.responses import RefusalReason
 from vinga_server.config.secrets import (
     MASK,
     MASTER_KEY_ENV,
@@ -866,6 +867,50 @@ def test_a_board_is_onboarded_by_the_code_on_its_screen(
     assert made_there
     assert {record.threadName for record in made_there} != {threading.current_thread().name}
     assert any(record.name.startswith("vinga_server.") for record in made_there)
+
+
+def test_a_claim_naming_an_agent_that_is_not_there_is_refused_over_the_wire(
+    deployed: Live, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The second refusal of the claim route, end to end, which the
+    table above cannot reach: it needs a code a board is really showing,
+    and the code is minted by a check-in rather than typed.
+
+    What it proves is the whole path of #488's vocabulary against a real
+    connection: the repository classifies, the API puts the state on the
+    wire as a token beside a sentence that names no command, and this
+    client appends the line for the state it recognized. The name that
+    was refused is not quoted back, which is this route's own rule,
+    since an agent name typed beside an activation code is where a
+    pasted credential goes.
+
+    The code stays claimable afterwards, because the board is still
+    showing it.
+    """
+    assert run("default-agent", "clear") in (0, 1)
+    capsys.readouterr()
+    waiting = check_in(deployed, WAITING_MAC)
+    assert isinstance(waiting, board.Activating)
+    code = waiting.code
+
+    assert run("device", "pending", "claim", code, "no-such-agent") == 1
+
+    printed = capsys.readouterr()
+    assert printed.out == ""
+    assert printed.err.strip() == (
+        "the device showing that code could not be bound: the request's agents name at "
+        "least one agent this deployment does not have. Nothing was changed and the "
+        "code is still claimable. What was sent is not quoted back. "
+        + cli.REMEDIES[RefusalReason.AGENTS_UNKNOWN]
+    )
+    assert "no-such-agent" not in printed.err
+
+    # Still claimable: nothing was changed, and the board is still
+    # showing the number.
+    assert run("device", "pending", "claim", code, "sam") == 0
+    assert capsys.readouterr().out.startswith("wrote ")
+    assert run("device", "delete", WAITING_MAC) == 0
+    capsys.readouterr()
 
 
 def test_an_agent_is_renamed_with_its_binding_over_the_wire(
@@ -2252,13 +2297,19 @@ REFUSALS: tuple[Refusal, ...] = (
     ),
     Refusal(("agent-defaults",), ("agent-defaults", "show", "extra"), USAGE, False),
     Refusal(("device",), ("device", "bind", "not-a-mac", "sam"), NOT_A_MAC, True),
+    # The one row whose sentence is composed by both ends: the server
+    # states which of a handful of states it refused in, as a token, and
+    # this client appends its own line for the state. So the whole of
+    # stderr here is the server's `detail`, a space, and the table's
+    # entry, and a client that stopped appending is as red as a server
+    # that stopped saying.
     Refusal(
         ("device", "pending"),
         ("device", "pending", "claim", "000000", "sam"),
         "no device is waiting with that activation code. A code lasts ten minutes and "
         "is retired the moment it is claimed, and a device that has been waiting longer "
         "is already showing a fresh one: read the code currently on the device's screen "
-        "and use that.",
+        "and use that. " + cli.REMEDIES[RefusalReason.CODE_NOT_PENDING],
         True,
     ),
     Refusal(

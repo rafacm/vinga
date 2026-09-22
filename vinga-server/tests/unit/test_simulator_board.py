@@ -33,6 +33,7 @@ from vinga_server import device_endpoint
 from vinga_server.config import cli
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import NOT_A_MAC, DatabaseConfig
+from vinga_server.config.responses import RefusalReason
 from vinga_server.config.store import ALREADY_BOUND, ConfigStore
 from vinga_server.db import open_database
 from vinga_server.device_endpoint import SUPPLIED_ENDPOINT
@@ -1006,7 +1007,13 @@ def test_a_claim_the_configuration_superseded_says_the_condition_and_no_address(
         "chain": chain(caught.value),
     }
 
-    assert captured.err.strip() == ALREADY_BOUND
+    # The server's sentence and this client's line for the state it
+    # named, which is the whole of what reaches an operator: the
+    # repository says what it refused in, and the side holding the
+    # grammar says what to type (#386).
+    assert captured.err.strip() == (
+        f"{ALREADY_BOUND} {cli.REMEDIES[RefusalReason.DEVICE_ALREADY_BOUND]}"
+    )
     assert [name for name, text in surfaces.items() if board.DEFAULT_MAC in text] == []
 
 
