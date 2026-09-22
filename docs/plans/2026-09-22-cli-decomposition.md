@@ -491,14 +491,22 @@ decision site.
   `SPOKEN` is, and the printed sentence is `detail`, a space, and the
   remedy where the token is known, `detail` alone where it is not or
   where there is none.
-- The skew, stated rather than hidden. A newer CLI reads an older
-  server's body because the member defaults to absent. An older CLI
-  against a newer server refuses the five bodies as unrecognized,
-  because its `Problem` forbids the member it does not know. That is
-  pre-release skew between two halves that ship together, and the
-  wheel-grade lane tests the installed CLI against a server of the
-  same tree; it is recorded here and in the changelog fragment, and
-  nothing is built to bridge it.
+- The skew, stated rather than hidden, and the order that avoids it.
+  A newer CLI reads an older server's body because the member
+  defaults to absent. An older CLI against a newer server refuses the
+  five bodies as unrecognized, because its `Problem` forbids the
+  member it does not know, and the `vinga` client installs separately
+  from the image it administers, so the two do not upgrade as one.
+  The upgrade order is therefore stated where an operator meets
+  upgrades: upgrade every administering CLI before the server, and
+  until that is done these five refusals read as the unreadable-body
+  sentence and every other refusal reads as before. The changelog
+  fragment says so under `### Changed`, which is the document the
+  fold carries into `CHANGELOG.md`, and the M4 section records it. No
+  version negotiation is added: #386 recorded the stance that the two
+  halves compare no versions, the failure mode is a degraded sentence
+  and never a command that misbehaves, and the project is pre-release
+  with no third-party install to carry.
 
 ## Design footprint
 
@@ -861,3 +869,11 @@ verdict "not ready" pending the P1 amendments. Condensed but faithful.
    upgrade order, at minimum that administering CLIs upgrade before a
    server emits `reason`, where operators meet upgrades; or redesign
    the wire transition.
+
+   *Resolution*: accepted in its documentation half, and declined in
+   its redesign half with the reasons written into the M4 section:
+   the upgrade order (CLI before server) is stated in the changelog
+   fragment, which is the upgrade-facing document, and the failure
+   mode under the wrong order is a degraded sentence rather than a
+   misbehaving command; #386's recorded stance of no version
+   negotiation stands, and the project is pre-release.
