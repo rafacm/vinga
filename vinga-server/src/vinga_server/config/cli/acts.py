@@ -9,13 +9,18 @@ What its callers stop knowing: how one act becomes one request and one
 rendering. A family writes a row; that the body is built before the
 narration opens and the answer rendered after it has closed, that a
 sequence stops at the first refusal, and that an answer is read as the
-shape the row declares before any renderer sees it are decided here.
+shape the row declares before any renderer sees it are decided here. So
+is which shape the answer leaves in, which is one parameter on `_act`
+with a person as its default and no branch in any renderer.
 
 Nothing entity-shaped lives here, and that is a boundary rather than an
 omission: the per-kind tables name the entity renderers, so keeping
 them here would make this module import the family that imports it.
 """
 
+import contextlib
+import io
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -23,7 +28,7 @@ from urllib.parse import quote
 
 from vinga_server.config.loader import ConfigError
 
-from .answers import _understood
+from .answers import Output, _understood, encoded
 from .invocation import Invocation
 from .reach import _NOTHING, READ_TIMEOUT_S, UNRECOGNIZED_ANSWER, Reached, _call, narrated
 
@@ -128,7 +133,35 @@ class Act:
         return _understood(self.answers, answer, self.refusal)
 
 
-def _act(args: Invocation, act: Act, reached: Reached) -> None:
+class _Discarded(io.TextIOBase):
+    """A stdout for an arm that has already written the answer.
+
+    What it is for is below: the machine arm runs the act's own renderer
+    for the notices it writes to stderr, and the rendering it writes to
+    stdout is the one thing that arm has already answered in another
+    shape. Writing and dropping rather than not rendering at all, so
+    there is one renderer under both arms and nothing to keep in
+    agreement with it.
+
+    A writer of its own rather than a `StringIO`, because a rendering
+    nobody will read is a rendering nobody should hold: a listing is
+    bounded by a page and a prompt is not, and the point of this arm is
+    that those bytes are not wanted.
+    """
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, text: str) -> int:
+        return len(text)
+
+
+# One of them, because it holds nothing: what a write costs here is the
+# length it answers with.
+_DISCARDED = _Discarded()
+
+
+def _act(args: Invocation, act: Act, reached: Reached, output: Output = Output.HUMAN) -> None:
     """One act: one request, and its answer printed.
 
     The acknowledgement and the notice are the API's, read as the shape
@@ -144,6 +177,24 @@ def _act(args: Invocation, act: Act, reached: Reached) -> None:
     document off standard input is not waiting for a server, and a
     rendering printed under a line still being redrawn would be a
     rendering nobody can read.
+
+    `output` is where this grammar would put a `--json`, and it is
+    defaulted here rather than declared anywhere a command can reach:
+    every command runs under `Output.HUMAN` today, and adopting the flag
+    is the grammar setting this parameter and nothing else.
+
+    The machine arm is the data and then the notices, which is the order
+    a person reads them in too: the encoded model goes to stdout and is
+    flushed, and then the act's own renderer runs with stdout bound to a
+    sink that drops what it writes. What that buys is that there is no
+    second structure listing which acts have a notice. Four renderers
+    write to stderr and they render for far more than four acts, so a
+    projection attached per act construction would be a table every one
+    of those constructions has to keep in agreement with its renderer,
+    and the one left off it would lose its notice silently. Here a
+    notice a renderer prints tomorrow is on stderr under both arms with
+    nobody attaching anything, `Act` gains no field, and no renderer is
+    edited.
     """
     body = act.body(args) if act.body is not None else _NOTHING
     query = act.query(args) if act.query is not None else {}
@@ -156,7 +207,17 @@ def _act(args: Invocation, act: Act, reached: Reached) -> None:
             read_timeout_s=act.read_timeout_s,
             query=query,
         )
-    act.render(act.read(answer))
+    if output is Output.HUMAN:
+        act.render(act.read(answer))
+        return
+    print(encoded(act.answers, answer, act.refusal, output), end="")
+    # Flushed before the renderer runs, for the reason the renderers
+    # flush between their own two halves: stderr is unbuffered and
+    # stdout is not, so a notice would otherwise land above the document
+    # it is about.
+    sys.stdout.flush()
+    with contextlib.redirect_stdout(_DISCARDED):
+        act.render(act.read(answer))
 
 
 def _performed(args: Invocation, acts: "tuple[Act, ...]", reached: Reached) -> None:
@@ -176,7 +237,11 @@ def _performed(args: Invocation, acts: "tuple[Act, ...]", reached: Reached) -> N
     problem: str | None = None
     for act in acts:
         try:
-            _act(args, act, reached)
+            # The default said out loud, because this is where a format
+            # a command asked for would be handed on and there is no
+            # such format yet: every act of every invocation is rendered
+            # for a person.
+            _act(args, act, reached, Output.HUMAN)
             continue
         except ConfigError as refused:
             problem = str(refused)
