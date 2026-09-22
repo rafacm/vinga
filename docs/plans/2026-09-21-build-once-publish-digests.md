@@ -648,19 +648,29 @@ and are corrected when it moves.
   the same correction. It summarizes the server README and links it,
   so the correction goes to the README and this page keeps pointing
   at it.
-- **M1, the dated tag format, in both pages and the server README's
-  variant table.** `2026-08-03-1200` becomes `2026-08-03-120015` in
-  the table's example tags, in `docs/deployment.md`'s "Pin an
-  immutable tag" paragraph, and in the "finish minutes apart"
-  passages that quote a pair of them. The pages call these tags
-  immutable and never reused, which is the claim the seconds and the
-  reuse refusal make true rather than likely, so the correction is to
-  the examples and not to the promise.
+- **M1, the revision width and both tag formats, in both pages and
+  the server README's variant table.** Every example tag moves:
+  `2026-08-03-1200` becomes `2026-08-03-1200-3f9362a1b2c3` and
+  `sha-3f9362a` becomes `sha-3f9362a1b2c3`, in the variant table, in
+  `docs/deployment.md`'s "Pin an immutable tag" paragraph, and in the
+  "finish minutes apart" passages that quote a pair of them. The
+  pages call these tags immutable and never reused, and the twelve
+  character revision is what lets that sentence stay as written
+  rather than be reworded; the dependency runs that way round and
+  the milestone must not split them.
+  `vinga-server/README.md` also documents what `/healthz` reports, so
+  wherever a seven-character revision appears as an example of that,
+  it moves too. The inventory is a grep for the literal example
+  revisions across the tracked tree, run whole and not through
+  `head`, and its output is what the milestone works from.
 - **M2, both pages.** The moving-tag paragraphs gain one sentence for
-  the guarantee the ordering check makes explicit: a moving tag never
-  moves to an older commit's image. This strengthens rather than
-  weakens the existing advice not to deploy from a moving tag, and
-  must not be written in a way that reads as permission to.
+  the guarantee the reconciler makes explicit: on ordinary
+  fast-forward history a moving tag never moves to an older commit's
+  image. The scope clause is part of the sentence, not a footnote,
+  because after a force-push "older" has no single meaning and the
+  reconciler's stated behavior there is different. This strengthens
+  rather than weakens the existing advice not to deploy from a moving
+  tag, and must not be written in a way that reads as permission to.
 - **M2, `.github/workflows/vinga-server.yml` L52-54.** "Never on a
   push to main ... Merges to main run to completion, however many of
   them queue up" is false today, and `d6d76dd` is the counterexample.
@@ -790,8 +800,12 @@ that quotes commands.
   so it cannot be displaced while pending; a new `image-promote` moves
   the moving tag in an ordered, non-cancelling group per variant. It
   reconciles rather than publishing its own commit: `fetch-depth: 0`,
-  fetch `origin/main`, walk from the tip and promote the first commit
-  carrying a `sha-` tag, bounded, whichever run produced it. That is
+  fetch `origin/main`, consider the commits between the moving tag's
+  revision and the tip newest first, and promote the first whose
+  `sha-` tag exists and whose index passes the same validation
+  `image-publish` runs, whichever run produced it. Finding nothing is
+  a no-op, not a failure. A 200-commit cap covers the force-push case,
+  whose behavior is stated rather than left to happen. That is
   idempotent, self-healing and independent of which run survives
   displacement. Corrects the workflow's false comment about merges
   running to completion, and documents the guarantee in the two
