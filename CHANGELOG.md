@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-09-22
+
+### Changed
+
+- **A published image is now the image that was smoked** (#490). CI built each architecture, smoked the amd64 one, and then rebuilt both a third time to publish, so what a tag named was a rebuild of the same source rather than the bytes any check had run against. The image job now builds each variant for each architecture in a job of its own, with the image exporter as its only output, pushes those bytes addressed by their own digest, and pulls them back by that digest for the smoke. A new `image-publish` job assembles one manifest per variant from the digests with `docker buildx imagetools create`; it builds nothing, configures no cache and checks out nothing, and it asserts that what it assembled carries one manifest per expected platform and a provenance attestation naming each of them. The rebuild it replaces was 359s of the default variant's 781s, of which 267.4s was exporting a build cache, and the builds no longer wait on the test lanes, which is another 453s off the critical path. What that costs is stated rather than hidden: on a push to `main` a content-addressed manifest can now reach the registry before the test lanes finish, and no tag of any kind, moving or immutable, is created until both lanes and every image job have passed, so a push whose tests then fail leaves behind an untagged manifest that is unreachable by name and named by no documented pull command.
+
+- **The dated tag is `YYYY-MM-DD-HHmmss` and the `sha-` tag carries twelve characters.** Minutes were unambiguous only while the publish took six of them and merges were serialized; the publish now takes seconds, so two builds landing in the same minute would have shared a supposedly immutable tag. The revision widens for the same reason one step further out: at seven characters, two commits sharing a prefix publish under one `sha-` tag, which is about one chance in fifteen thousand at this repository's size today and not negligible on a five-year view. `/healthz` reports the same twelve characters its image tag carries, so a post-deploy check is still an equality check, and the CI step that asserts the tag ends in the revision the build reports needed no change to guard the new width. Existing tags are unaffected and nothing in this repository reads a `sha-` tag programmatically.
+
 ## 2026-09-21
 
 ### Added
