@@ -723,7 +723,7 @@ Reusing what exists wherever the assertion already has a home.
   quoting the totals, the history result and the one dead branch as a
   discovery. No CLI code changes. Stacked on M1; low-stakes review
   tier.
-- [ ] **M3: the dump, the dispatch and the repricing.** `Output` and
+- [x] **[M3: the dump, the dispatch and the repricing](2026-09-22-cli-decomposition-implementation.md#m3-the-dump-the-dispatch-and-the-repricing)** (PR TBD). `Output` and
   `encoded` in `answers.py`, the `output` parameter on `_act` with
   `_performed` passing the default, the machine arm's null-sink
   rendering for notices, the escape test and the two-arm test, the
