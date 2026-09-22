@@ -1924,11 +1924,25 @@ jobs:
               *)
                 if ! git cat-file -e "${revision}^{commit}" 2>/dev/null; then
                   echo "::warning::$IMAGE:$MOVING reports a revision that names no commit in this history, so it is left where it is"
-                elif git merge-base --is-ancestor "$GITHUB_SHA" "$revision"; then
-                  echo "$IMAGE:$MOVING carries a commit this one is not older than: leaving it where it is"
                 else
-                  echo "$IMAGE:$MOVING carries an older commit: moving it"
-                  move=true
+                  # --is-ancestor answers 0 for yes and 1 for no, and
+                  # anything above 1 means it could not answer at all.
+                  # Those are three outcomes, not two, and only the
+                  # middle one is permission to move: collapsing the
+                  # third into it is the same defect as moving on a
+                  # failed inspect, one level further down. Its
+                  # diagnostic is dropped rather than logged, since it
+                  # would be the only far-side text on this path.
+                  answer=0
+                  git merge-base --is-ancestor "$GITHUB_SHA" "$revision" 2>/dev/null || answer=$?
+                  if [ "$answer" -eq 0 ]; then
+                    echo "$IMAGE:$MOVING carries a commit this one is not older than: leaving it where it is"
+                  elif [ "$answer" -eq 1 ]; then
+                    echo "$IMAGE:$MOVING carries an older commit: moving it"
+                    move=true
+                  else
+                    echo "::warning::ancestry could not be decided for $IMAGE:$MOVING, so it is left where it is"
+                  fi
                 fi
                 ;;
             esac
