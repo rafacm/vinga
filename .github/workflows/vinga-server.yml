@@ -745,7 +745,7 @@ jobs:
       # those two apart.
       - name: Check the committed CLI recipes are current
         run: |
-          uv run python -c 'import sys; from vinga_server.config import cli; sys.stdout.write(cli.cli_recipes())' > "$RUNNER_TEMP/cli-recipes.md"
+          uv run python -c 'import sys; from vinga_server.config.cli import grammar; sys.stdout.write(grammar.cli_recipes())' > "$RUNNER_TEMP/cli-recipes.md"
           awk '/^<!-- end generated: cli recipes -->$/{f=0} f{print} /^<!-- generated: cli recipes -->$/{f=1}' ../docs/reference/cli.md > "$RUNNER_TEMP/committed-recipes.md"
           if [ ! -s "$RUNNER_TEMP/committed-recipes.md" ]; then
             echo "::error::the recipe markers are not on docs/reference/cli.md, so nothing was compared"
@@ -1053,7 +1053,8 @@ jobs:
           import sys
 
           import vinga_server
-          from vinga_server.config import cli, docgen
+          from vinga_server.config import docgen
+          from vinga_server.config.cli import grammar
 
           installed = pathlib.Path(vinga_server.__file__).resolve()
           if "site-packages" not in installed.parts:
@@ -1061,7 +1062,7 @@ jobs:
           examples = pathlib.Path(str(docgen.EXAMPLE_DIR)).resolve()
           if not examples.is_relative_to(installed.parent):
               sys.exit(f"the recipes were read from outside the wheel: {examples}")
-          sys.stdout.write(cli.cli_reference())
+          sys.stdout.write(grammar.cli_reference())
           print(f"rendered the CLI reference from {installed.parent}", file=sys.stderr)
           PY
           cd "$GITHUB_WORKSPACE/vinga-server"

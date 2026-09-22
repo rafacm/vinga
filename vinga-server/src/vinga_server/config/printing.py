@@ -22,7 +22,7 @@ configuration's own URL-shaped values (`is_url_credential_parameter`,
 which `url_credential` and `without_url_credential` read too), and
 `shown_url` filters through the same predicate.
 
-Two callers, `config/cli.py` and `doctor.py`, and neither may import the
+Two callers, the `config/cli` package and `doctor.py`, and neither may
 other: the doctor must not pull the config CLI's machinery, and the
 config CLI reading URL hygiene out of the doctor would be backwards. So
 this lives beside the failure type `parsed_url` raises and the predicate
@@ -123,7 +123,7 @@ def printable(value: str, limit: int | None = GLIMPSE_LENGTH) -> str:
     where the sentence is what the reader came for; it is wrong for a
     value that IS what the reader came for, because a renderer that
     quietly cut one would make it lie about the one thing it exists to
-    show. `config/cli.py` draws that line twice: `_block` prints a
+    show. `config/cli` draws that line twice: `_block` prints a
     prompt whole with a rule of its own, since a prompt is written in
     newlines, and the onboarding URL is printed whole through here,
     since a URL that reaches a terminal with a newline in it is a URL on

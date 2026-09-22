@@ -1071,7 +1071,7 @@ class FieldError(BaseModel):
 PROBLEM_MEDIA_TYPE = "application/problem+json"
 
 # And what the event stream is served as, here for the same reason and
-# read by both ends: the route answers with it and `config/cli.py`
+# read by both ends: the route answers with it and `config/cli`
 # refuses to read a body that arrives under anything else. A 200 is not
 # by itself a reason to parse what came back, since a proxy, a captive
 # portal or a gateway can answer one with a body of its own, and the
@@ -1084,7 +1084,7 @@ EVENT_STREAM_MEDIA_TYPE = "text/event-stream"
 # carry.
 #
 # Here rather than beside the descriptions the document renders, because
-# this is the half a client reads too: `config/cli.py` believes a
+# this is the half a client reads too: `config/cli` believes a
 # `detail` only from a body that is this shape, under this media type,
 # carrying this title for the status it arrived under, and a second copy
 # of the phrases would be a second thing to keep true. The phrases are

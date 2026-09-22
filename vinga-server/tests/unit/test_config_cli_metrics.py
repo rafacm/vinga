@@ -4,7 +4,7 @@ The fourth reading of the conversation record and the one that answers
 about days. It reads it the way every other verb here does, as requests
 through the client seam against a server built per command: there is no
 local-database path and there is not going to be one, which is the rule
-`config/cli.py` states and which the plan's review round put back after
+`config/cli` states and which the plan's review round put back after
 a first draft promised a break-glass.
 
 Four properties this file exists for.

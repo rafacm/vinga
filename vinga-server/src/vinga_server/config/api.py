@@ -2051,7 +2051,7 @@ class _EventStream(StreamingResponse):
     """
 
     # Read from `responses.py` rather than written here, because the
-    # client half checks it: `config/cli.py` will not read a body that
+    # client half checks it: `config/cli` will not read a body that
     # did not arrive under this type, and two spellings of one wire fact
     # would be a tail that silently stopped reading a stream this route
     # still serves.

@@ -149,7 +149,7 @@ def main() -> None:
     #
     # Not the only site, and deliberately not: the console script `vinga`
     # never reaches this function, so the configuration grammar applies
-    # the same floor at its own command boundary (`config/cli.py`'s
+    # the same floor at its own command boundary (`config/cli`'s
     # `_Verbatim.invoke`), which is what makes the two spellings one
     # program. Both run for a `vinga-server config` invocation, which
     # costs nothing.

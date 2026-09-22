@@ -33,7 +33,7 @@ quoted, and every websockets exception is reported by its class alone,
 recorded inside its handler and raised outside it.
 
 **The only `websockets` import in `src/` is here**, which is what makes
-the `[sim]` extra a real gate: `config/cli.py` reaches this module inside
+the `[sim]` extra a real gate: `config/cli` reaches this module inside
 `run`'s own arm, and nothing else in the package imports it at all. An
 `__init__` that re-exported this would drag the dependency into every
 import of the simulator package, which is the gate defeating itself.
