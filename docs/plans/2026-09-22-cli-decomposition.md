@@ -346,17 +346,23 @@ Three proofs, none of them "the tests pass".
 ### M3: the dump beside the reader, and the dispatch on the render step
 
 `answers.py` gains one function, `encoded(shape, answer, format)`,
-which reads an answer through `_understood` and writes it back as
-JSON (the standard encoder, sorted keys, no ASCII escaping of
-non-ASCII) or YAML (`yaml.safe_dump`, block style, the flags the
-export already uses). Both encoders escape a control character
+which validates an answer as its shape the way `_understood` does and
+dumps it in JSON mode (`TypeAdapter.dump_python(..., mode="json")`),
+so an enum member such as `Applies.RELOAD` leaves as its string and a
+date as ISO text, before writing it as JSON (the standard encoder,
+sorted keys, no ASCII escaping of non-ASCII) or YAML (`yaml.safe_dump`,
+block style, the flags the export already uses). `_understood`'s own
+Python-mode dump keeps enum members as members, which PyYAML's safe
+dumper has no representer for, so the dump mode is the whole
+difference between the two readers. Both encoders escape a control character
 natively, verified on the tree while this plan was written: the
 standard encoder writes `\u001b`, PyYAML writes `"\e"` inside a
 double-quoted scalar. That is the whole of the "second no-leak audit"
 the CLI guide prices, and it is proven once, on the model: a test
 plants a control character and the fixed-length mask in a response
-model, dumps it through both encoders, and asserts the character is
-escaped and the mask is the mask.
+model that carries an enum (an `Acknowledgement` with its `applies`),
+dumps it through both encoders, and asserts the character is escaped,
+the mask is the mask, and the enum is its value.
 
 The dispatch sits where the issue put it, on the act's render step.
 `answers.py` declares `Output(StrEnum)` with `human`, `json` and
@@ -653,6 +659,10 @@ refer to the plan as committed at that blob.
    representer for them. The control-character test would not meet
    this. Serialize a JSON-mode dump through both encoders and include
    an enum-bearing answer such as an acknowledgement in the test.
+
+   *Resolution*: accepted. `encoded` dumps in JSON mode, the section
+   says why that is the difference from `_understood`, and the escape
+   test carries an acknowledgement's `applies`.
 
 6. **P2: a defaulted `Problem.reason` alters every refusal body.**
    `problem_response` dumps the model without excluding `None`, so
