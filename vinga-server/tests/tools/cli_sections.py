@@ -25,6 +25,11 @@ and are not in the matrix: a name a module imports from a sibling is
 counted as a reference to that sibling's definition, which is the fact
 the matrix is about.
 
+The exit status is 0 when the definition graph is acyclic and no name
+is defined twice, and 1 otherwise. A duplicate fails it because every
+number here is keyed by name: one would be a measurement of a package
+smaller than the one on disk.
+
 Usage, from `vinga-server/`::
 
     uv run python -m tests.tools.cli_sections
@@ -188,28 +193,45 @@ def tarjan_scc(nodes, edges):
     return out
 
 
-def read() -> tuple[dict[str, ast.AST], dict[str, str]]:
-    """Every definition of the package, and the module that defines it."""
+def read() -> tuple[dict[str, ast.AST], dict[str, str], list[str]]:
+    """Every definition of the package, the module that defines it, and
+    every name two modules both define.
+
+    The duplicate is collected rather than printed and forgotten. Every
+    number under it is keyed by name, so a name defined twice is a
+    definition missing from the matrix, from the per-module counts and
+    from the reference graph the acyclicity verdict is read off: the
+    measurement would be of a package one definition smaller than the
+    one on disk, and it said so in a line and then exited 0.
+    """
     defs: dict[str, ast.AST] = {}
     home: dict[str, str] = {}
+    twice: list[str] = []
     for module in ORDER:
         tree = ast.parse((PACKAGE / f"{module}.py").read_text())
         for name, node in top_level_definitions(tree):
             if name in defs:
-                print(f"  DUPLICATE {name}: {home[name]} and {module}")
+                twice.append(f"{name}: {home[name]} and {module}")
                 continue
             defs[name] = node
             home[name] = module
-    return defs, home
+    return defs, home, twice
 
 
 def main() -> int:
     print(f"package: {PACKAGE}")
-    defs, home = read()
+    defs, home, twice = read()
 
     per_module: dict[str, list[str]] = defaultdict(list)
     for name in defs:
         per_module[home[name]].append(name)
+
+    print()
+    print("== Names two modules both define ==")
+    for spelled in twice:
+        print(f"  DUPLICATE {spelled}")
+    if not twice:
+        print("  none")
 
     print()
     print("== Definitions per module ==")
@@ -308,7 +330,7 @@ def main() -> int:
             print(f"  {referrer}: {ref} (top-level in {module})")
     else:
         print("  none")
-    return 0 if not components else 1
+    return 0 if not (components or twice) else 1
 
 
 if __name__ == "__main__":

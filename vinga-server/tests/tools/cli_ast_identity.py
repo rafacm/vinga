@@ -37,7 +37,7 @@ applies to a tool that prints for the same reason it applies to a
 command that does.
 
 The exit status is 0 when every definition is identical and 1
-otherwise.
+otherwise, a name two modules both define included.
 """
 
 from __future__ import annotations
@@ -199,24 +199,35 @@ def before(root: Path, base: str) -> dict[str, str]:
     return {name: dumped(node) for name, node in definitions(committed(root, base, BEFORE)).items()}
 
 
-def after(root: Path) -> tuple[dict[str, str], dict[str, str]]:
-    """Every definition of the package at the working tree, and its home."""
+def after(root: Path) -> tuple[dict[str, str], dict[str, str], list[str]]:
+    """Every definition of the package at the working tree, its home, and
+    every name two modules both define.
+
+    The duplicate is collected rather than printed and forgotten, and
+    the first definition is the one kept rather than the last. Both
+    halves matter. This map is keyed by name, so a second definition
+    used to replace the first and the comparison then held the survivor
+    against the base: a name defined twice is a name whose other
+    definition nobody compared, and the report said the totals matched.
+    """
     dumps: dict[str, str] = {}
     home: dict[str, str] = {}
+    twice: list[str] = []
     for path in sorted((root / AFTER).glob("*.py")):
         for name, node in definitions(path.read_text()).items():
             if name in dumps:
-                print(f"DUPLICATE {name}: {home[name]} and {path.name}")
+                twice.append(f"{name}: {home[name]} and {path.name}")
+                continue
             dumps[name] = dumped(node)
             home[name] = path.name
-    return dumps, home
+    return dumps, home, twice
 
 
 def main(argv: list[str]) -> int:
     root = repository_root()
     base = argv[0] if argv else merge_base(root)
     was = before(root, base)
-    now, home = after(root)
+    now, home, twice = after(root)
 
     print(f"base: {base}")
     print(f"definitions before: {len(was)}")
@@ -236,10 +247,13 @@ def main(argv: list[str]) -> int:
     print(f"definitions not there before: {len(added)}")
     for name in added:
         print(f"  ADDED {name} (in {home[name]})")
+    print(f"names two modules both define: {len(twice)}")
+    for spelled in twice:
+        print(f"  DUPLICATE {spelled}")
     print()
     identical = len(was.keys() & now.keys()) - len(moved)
     print(f"identical: {identical}")
-    return 0 if not (moved or gone or added) else 1
+    return 0 if not (moved or gone or added or twice) else 1
 
 
 if __name__ == "__main__":
