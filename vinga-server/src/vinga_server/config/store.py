@@ -1746,25 +1746,6 @@ def _missing(descriptor: EntityDescriptor) -> str:
     return descriptor.missing
 
 
-def _no_holder(location: SecretLocation) -> UnknownEntityError:
-    """The entity a stored secret would hang on is not there.
-
-    One home for a state three checks can reach: the two in `_check_slot`
-    that run before a write and the one in `_write_secrets` that catches
-    a row deleted under the transaction. The sentence and the token are
-    one structure here rather than a sentence at each site and a token
-    somewhere else, which is what stops a fourth check from arriving
-    with the words and without the state.
-
-    The sentence is the kind's own and names no command: what a client
-    creates the holder with is a verb of the client's grammar, and the
-    token is what lets it pick one.
-    """
-    return UnknownEntityError(
-        _missing(_HOLDER_OF[location.kind]), reason=_MISSING_HOLDER[location.kind]
-    )
-
-
 def _from_row(descriptor: EntityDescriptor, row: Row) -> BaseModel:
     """One stored row as its model: the body validated through the model
     the kind's descriptor names, at the location the row's own key
@@ -3109,10 +3090,14 @@ def _write_secrets(
     table, where = _secret_row(location)
     result = connection.execute(update(table).where(*where).values(secrets=dict(stored)))
     if result.rowcount == 0:
-        # The row went while this transaction held it, so what is said
-        # is the same state the checks before the write say, from the
-        # one place that says it.
-        raise _no_holder(location)
+        # The kind's own missing sentence, and the kind beside it as a
+        # token. What used to follow the sentence was the command that
+        # creates the holder, and creating one is a verb of the client's
+        # grammar: the server says which kind is not there, and the
+        # client spells what to type (#386).
+        raise UnknownEntityError(
+            _missing(_HOLDER_OF[location.kind]), reason=_MISSING_HOLDER[location.kind]
+        )
 
 
 def _secret_section(location: SecretLocation) -> str:
@@ -3153,7 +3138,7 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
         # The stage is an argument here rather than a stored value, so
         # it meets the same refusal a caller's typo meets anywhere else.
         if _entry(domain, descriptor, (_stage(stage), name)) is None:
-            raise _no_holder(location)
+            raise UnknownEntityError(_missing(descriptor))
         if location.slot.lower().endswith("_env") or not is_secret_option(location.slot):
             raise ConfigError(_NOT_A_PROVIDER_SLOT)
         # A slot is addressed in a path of its own, so it obeys the same
@@ -3162,7 +3147,7 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
         return
 
     if _entry(domain, descriptor, identity) is None:
-        raise _no_holder(location)
+        raise UnknownEntityError(_missing(descriptor))
     written_at = entity_location(descriptor, *identity)
     group, _, key = location.slot.partition(".")
     if group not in MCP_SECRET_GROUPS or not key:

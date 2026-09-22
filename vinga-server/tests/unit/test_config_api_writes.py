@@ -21,12 +21,14 @@ from urllib.parse import quote
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import delete
 
 from tests.support.leaks import renderings
 from tests.support.notices import CHECK_IN, RELOAD, boundaries
 from tests.support.problems import PROBLEM_KEYS, refused
 from tests.support.stores import bindings, holding_the_write_lock, the_lock_held
 from vinga_server.config import entities
+from vinga_server.config import store as store_module
 
 # `_renamed` is the acknowledgement's line composer, reached by its own
 # name for the one assertion the route cannot carry: a stored name
@@ -54,7 +56,7 @@ from vinga_server.config.secrets import (
     load_keys,
 )
 from vinga_server.config.store import ConfigStore, Renamed
-from vinga_server.db import open_database
+from vinga_server.db import open_database, schema
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
@@ -888,44 +890,73 @@ def test_a_secret_on_an_entity_that_is_not_there_is_404_without_either_name(
 
 # And which of the two holders it was, as a token
 #
-# The refusal above is one state with two remedies: creating a provider
-# and creating an MCP server are two commands of the client's grammar,
-# and this server spells neither. So the kind travels as a token and the
-# client picks the command, which is the whole of what #488 moved here.
-# The sentence used to end with `vinga-server config <noun> set`, and an
-# image built before a rename spelled a command the CLI beside it no
-# longer had.
+# The refusal `_write_secrets` composes when the holder's row is not
+# there to be updated. Every other way of addressing a secret at a
+# holder that is not there is answered by the slot check before the
+# write, so this is the one sentence #488 changed here: it used to end
+# with `vinga-server config <noun> set`, and an image built before a
+# rename spells a command the CLI beside it no longer has.
+#
+# One state and two remedies, so two tokens: creating a provider and
+# creating an MCP server are two commands of the client's grammar, and
+# a client holding one token for both would be back to reading the
+# sentence to tell them apart.
+#
+# Driven over HTTP with the holder deleted inside the write's own
+# transaction, which is the state a committed delete from another
+# connection leaves; the store-level cases beside this one say why the
+# schedule is reproduced rather than raced.
 HOLDERS = [
-    ("/providers/llm", "providers", RefusalReason.PROVIDER_MISSING, "api_key"),
-    ("/mcp-servers", "mcp_servers", RefusalReason.MCP_SERVER_MISSING, "env.TOKEN"),
+    (
+        "/providers/llm/claude",
+        {"type": "anthropic", "model": "m"},
+        "/providers/llm/claude/secrets/api_key",
+        "providers",
+        RefusalReason.PROVIDER_MISSING,
+        delete(schema.providers).where(schema.providers.c.name == "claude"),
+    ),
+    (
+        "/mcp-servers/home",
+        {"transport": "stdio", "command": "uvx"},
+        "/mcp-servers/home/secrets/env.TOKEN",
+        "mcp_servers",
+        RefusalReason.MCP_SERVER_MISSING,
+        delete(schema.mcp_servers).where(schema.mcp_servers.c.name == "home"),
+    ),
 ]
 
 
 @pytest.mark.parametrize(
-    ("prefix", "section", "reason", "slot"),
+    ("entity", "body", "path", "section", "reason", "removal"),
     HOLDERS,
-    ids=[section for _, section, _, _ in HOLDERS],
+    ids=[section for _, _, _, section, _, _ in HOLDERS],
 )
-def test_a_secret_for_a_holder_that_is_not_there_says_which_kind_it_was(
+def test_a_secret_for_a_holder_that_went_says_which_kind_it_was(
     client: TestClient,
     caplog: pytest.LogCaptureFixture,
-    prefix: str,
+    monkeypatch: pytest.MonkeyPatch,
+    entity: str,
+    body: dict[str, object],
+    path: str,
     section: str,
     reason: RefusalReason,
-    slot: str,
+    removal: object,
 ) -> None:
-    """The holder's own missing sentence with the kind beside it as a
-    token, and no command in either.
+    """The same refusal over the wire: the body carries the token, the
+    sentence names no command, and neither the credential nor the
+    address it was sent to reaches any surface."""
+    assert client.put(entity, json=body).status_code == 200
+    read = store_module._stored_secrets  # noqa: SLF001
 
-    Driven with the planted credential as the entity name, so the leak
-    checks the case above makes are made about this one too: the holder
-    is addressed by something that could be a pasted credential, and
-    nothing of it reaches the body, the headers or a record.
-    """
-    path = f"{prefix}/{quote(SECRET, safe='')}/secrets/{quote(slot, safe='')}"
+    def vanishing(connection: object, addressed: object) -> object:
+        stored = read(connection, addressed)
+        connection.execute(removal)
+        return stored
+
+    monkeypatch.setattr(store_module, "_stored_secrets", vanishing)
 
     with caplog.at_level(logging.DEBUG):
-        written = client.put(path, json={"secret": OTHER_SECRET})
+        written = client.put(path, json={"secret": SECRET})
 
     assert written.status_code == 404
     detail = refused(written.json(), 404, reason)
@@ -933,14 +964,14 @@ def test_a_secret_for_a_holder_that_is_not_there_says_which_kind_it_was(
     # The state, and not what to type about it.
     assert PROGRAM not in detail
     assert SERVER_PROGRAM not in detail
+    # Neither the credential nor the entity it was addressed at.
     assert SECRET not in written.text
-    assert OTHER_SECRET not in written.text
     assert SECRET not in str(written.headers)
+    assert entity.rsplit("/", 1)[-1] not in detail
     served = [
         record for record in caplog.records if record.name.startswith("vinga_server")
     ]
     assert all(SECRET not in str(record.__dict__) for record in served)
-    assert all(OTHER_SECRET not in str(record.__dict__) for record in served)
 
 
 def test_every_secret_holder_answers_in_a_token_of_its_own() -> None:
@@ -953,10 +984,10 @@ def test_every_secret_holder_answers_in_a_token_of_its_own() -> None:
     noun. A kind added to the registry is red here, which is where the
     question gets asked.
     """
-    assert {section for _, section, _, _ in HOLDERS} == {
+    assert {section for _, _, _, section, _, _ in HOLDERS} == {
         holder.moved_key for holder in entities.SECRET_HOLDERS.values()
     }
-    assert len({reason for _, _, reason, _ in HOLDERS}) == len(HOLDERS)
+    assert len({reason for _, _, _, _, reason, _ in HOLDERS}) == len(HOLDERS)
 
 
 # The second half of a secret's address, driven against entities that
