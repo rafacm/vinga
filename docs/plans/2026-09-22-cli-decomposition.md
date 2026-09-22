@@ -710,7 +710,7 @@ Reusing what exists wherever the assertion already has a home.
   passing the token, the tolerant read and `REMEDIES` in the CLI, the
   `SERVER_PROGRAM` comment, the regenerated OpenAPI document, the
   tests above, a changelog fragment. Own PR, from this branch, first.
-- [ ] **M1: the package.** `config/cli/` with the fifteen modules,
+- [x] **[M1: the package](2026-09-22-cli-decomposition-implementation.md#m1-the-package)** (PR TBD). `config/cli/` with the fifteen modules,
   every definition moved unchanged, the 47 test files re-pointed, the
   five patches retargeted, the two structural tests rewritten, the
   manifests regenerated, the AST-identity script and `cli_sections.py`
