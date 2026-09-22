@@ -1106,14 +1106,13 @@ PROBLEM_TITLES: dict[int, str] = {
 # And which state a refusal is in, where it is one of a handful this
 # API has a word for.
 #
-# The vocabulary a client phrases a remedy from (#386). What used to be
-# in the five sentences below the token is a CLIENT command, and a
-# client is a program this server neither ships nor versions, so an
-# image built before a rename told an operator to type a command the CLI
-# beside it no longer had. The server states what it refused in; the
-# side that owns the grammar names what to run about it, the way
-# `Applies` already splits a write's boundary from the command that
-# crosses it.
+# The vocabulary a client phrases a remedy from (#386). Five refusals
+# used to end by naming a command, and the command was the CLIENT's: a
+# program this server neither ships nor versions, so an image built
+# before a rename told an operator to type a command the CLI beside it
+# no longer had. The server states what it refused in; the side that
+# owns the grammar names what to run about it, the way `Applies`
+# already splits a write's boundary from the command that crosses it.
 #
 # An extension member and not the RFC's `type`, for the reason `Problem`
 # gives below: `type` is a URI reference, an absent one means

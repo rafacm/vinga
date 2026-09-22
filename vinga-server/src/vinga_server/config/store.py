@@ -378,11 +378,17 @@ _LIVE_BINDING_LOCATION = "the stored device bindings"
 #
 # So they say the condition and not the value, which is the shape every
 # fixed sentence in this package already has (`NO_SUCH_DEVICE` names no
-# MAC either). What is lost is nothing: the caller is holding the code,
-# and both sentences send them to the command that lists what is bound.
-# What is bound and how to bind it again are commands of the client's
-# grammar, so the token beside this sentence is what says which state it
-# is, and the client names what to type (#386).
+# MAC either). What is lost is nothing: the caller is holding the code.
+#
+# Neither says what to run about it either, and the first carries a
+# token instead. Reading a device's binding back and binding it again
+# by its MAC are verbs of the client's grammar, and a client is a
+# program this server neither ships nor versions, so a sentence
+# composed here naming one prescribes a spelling an image built before
+# a rename no longer has (#386). The state travels as
+# `device-already-bound` and the client spells the commands. Its
+# sibling below has no token because it has no command either: what a
+# default agent covers is a state an operator reads the sentence for.
 ALREADY_BOUND = (
     "devices: this device has been bound since it started showing that activation "
     "code, so the code binds nothing now. Nothing was changed, and the device reaches "

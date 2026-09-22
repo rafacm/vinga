@@ -189,9 +189,9 @@ class ConfigError(Exception):
     `reason` is the same refusal as a closed token, where this API has
     a word for the state it is in. It carries the classification the
     raise site already made to whatever has to answer with more than a
-    sentence: the API puts it on the wire, and the client phrases the
-    command it names nothing about. Keyword-only and defaulted to None,
-    so the raise sites that have no token keep reading as they did, and
+    sentence: the API puts the token on the wire, and the client names
+    the command the sentence no longer does. Keyword-only and defaulted
+    to None, so every raise site that has no token reads as it did, and
     chosen where the classifying happens rather than recovered from the
     message, which is the mistake a vocabulary exists to stop.
 
