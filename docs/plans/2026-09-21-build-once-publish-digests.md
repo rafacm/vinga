@@ -736,7 +736,7 @@ above disagree, the decisions are right and this list is a bug.
   `AGENTS.md`'s CI summary.
 
 - [x] **[M2: validation overlaps across main pushes; the moving tag is
-  ordered by a check](2026-09-21-build-once-publish-digests-implementation.md#m2-validation-overlaps-across-main-pushes-the-moving-tag-is-ordered-by-a-check)** (PR TBD). The workflow-level concurrency group stops
+  ordered by a check](2026-09-21-build-once-publish-digests-implementation.md#m2-validation-overlaps-across-main-pushes-the-moving-tag-is-ordered-by-a-check)** (PR [#545](https://github.com/rafacm/vinga/pull/545)). The workflow-level concurrency group stops
   serializing `main`, each push getting its own group, and keeps
   cancelling superseded pull-request runs. That alone is what stops a
   merged commit losing its image. `image-publish` checks out with
