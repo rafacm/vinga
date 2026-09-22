@@ -9325,9 +9325,22 @@
         "title": "FieldError",
         "type": "object"
       },
+      "RefusalReason": {
+        "description": "Which of a handful of states a refusal is in, as a closed token.\n\nSix of them, one per refusal whose next step is a command rather\nthan a correction to what was sent, because those are the refusals\na sentence composed here could only answer by naming a command it\ndoes not own.\n\n`code-not-pending` is an activation code no device is waiting under:\nexpired, already claimed, or never issued. `agents-unknown` is a\nclaim by code naming at least one agent this deployment does not\nhave, refused with nothing changed and the code still claimable.\n`agent-not-serving` is a read of an agent this server has not\ninstalled, which is a different thing from one that does not exist.\n`device-already-bound` is a conditional bind by code meeting a\ndevice that has been configured since the code was issued.\n`provider-missing` and `mcp-server-missing` are a stored secret\nwritten to a holder that is not there, and they are two states\nrather than one because the remedy names the holder's own noun.\n\nHow to read one: map a token you know to a sentence of your own\ngrammar, and quote `detail` for one you do not. A token this\nvocabulary gains later arrives at an older client as a state it\ncannot name, which is not a state to guess at, and `detail` is\nalready the whole of what was refused. The member is absent from\nevery refusal in none of these six states, so nothing else about\nthis API's refusals changed when it was added.",
+        "enum": [
+          "code-not-pending",
+          "agents-unknown",
+          "agent-not-serving",
+          "device-already-bound",
+          "provider-missing",
+          "mcp-server-missing"
+        ],
+        "title": "RefusalReason",
+        "type": "string"
+      },
       "Problem": {
         "additionalProperties": false,
-        "description": "A refusal, as RFC 9457 problem details.\n\nServed as `application/problem+json`. `type` and `instance` are\ndeliberately absent: an absent `type` means `about:blank`, which is\nthe truth here, since these problems are described by their status\nand their prose rather than by a URI registry nobody serves.",
+        "description": "A refusal, as RFC 9457 problem details.\n\nServed as `application/problem+json`. `type` and `instance` are\ndeliberately absent: an absent `type` means `about:blank`, which is\nthe truth here, since these problems are described by their status\nand their prose rather than by a URI registry nobody serves.\n\nWhich is why `reason` is an extension member rather than a `type`.\nRFC 9457 makes `type` a URI reference into a registry of problem\ntypes, and an extension member is what the same document offers a\nbody that has more to say; a handful of refusals here have a state\nworth branching on, and they carry the token for it beside the\nprose. It is absent everywhere else, so a refusal that is in none of\nthose states carries exactly the members it always has.",
         "properties": {
           "title": {
             "description": "The status code's standard HTTP reason phrase, such as `Not Found`. It is the phrase and not a description of this API's own, because with `type` absent the problem type is `about:blank`, whose title RFC 9457 says should be the status's recommended phrase; a title of this server's own would imply a problem type the body does not identify. What was actually refused is `detail`.",
@@ -9340,9 +9353,21 @@
             "type": "integer"
           },
           "detail": {
-            "description": "What was refused and why, the same sentence the `vinga-server config` command prints for it. It names the entity the request addressed and the rule that was broken; it never quotes a secret, a configuration value that was rejected, or a key the request invented.",
+            "description": "What was refused and why: the state this server refused in, in its own words. It names the entity the request addressed and the rule that was broken; it never quotes a secret, a configuration value that was rejected, or a key the request invented. A client holding the `reason` below may extend it in its own grammar rather than relay it alone, which is what the `vinga` command does with the states it knows.",
             "title": "Detail",
             "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RefusalReason"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Which state this refusal is in, for a client that wants to say what to do about it in its own words. Absent rather than null wherever this server has no token for the state, which is every refusal but a handful: a member that appeared on all of them would be a member every client had to know about. Chosen by the code that classified the refusal and never read back out of the prose beside it."
           },
           "errors": {
             "description": "The fields of the submitted body the refusal names, one entry each, for a client that wants to mark the offending field rather than show a paragraph. Present on every refusal and empty where there is no field to name: a body whose whole shape was wrong, a reference to another entity, a failure that was not the caller's. The entries are the same problems `detail` lists, in the same order and the same words.",
