@@ -403,24 +403,30 @@ later is the grammar setting the parameter, one line, and the guide's
 deferral entry says so.
 
 Notices stay on stderr under any format, which the issue settled, and
-the mechanism is one projection per act that has any. Measured on the
-tree: four act renderers write to stderr, `_acknowledged` (a write's
-boundary sentence from `SPOKEN`), `_imported` (the same, over a
-document), `_applied` (the apply answer's notice) and the page notice
-of the paginated listings; every other stderr write in the file is a
-command handler's or the progress line's, outside the act seam. `Act`
-gains `notices: Callable[[Any], tuple[str, ...]]`, defaulting to a
-function answering none, and the four rows name a projection. The
-projection is extracted from each of the four renderers, which then
-print what it answers, so the human arm and the machine arm read one
-function and cannot disagree about what the notice is; the machine arm
-prints the model, flushes, and prints the projection's lines, so the
-order a script sees is the order a person sees. Those four
-extractions are the one place M3 edits a renderer, they come after
-M1's identity proof, and each is proven by the renderer's existing
-pins being byte-unchanged. The two-arm test uses a real
-acknowledgement and a real imported document rather than a shape with
-no notice, and asserts the notice reaches stderr under both arms.
+the mechanism is the renderer the act already has. Measured on the
+tree: four renderer functions write to stderr, `_acknowledged` (a
+write's boundary sentence from `SPOKEN`), `_imported` (the same, over
+a document), `_applied` (the apply answer's notice) and the page
+notice of the paginated listings, and those four functions render for
+far more than four acts: `_acknowledged` is the renderer of every
+entity write the per-kind tables generate and of the device and
+secret writes, and `_paged` constructs five listing acts around the
+page notice. So a projection attached per act construction would be a
+second structure that every one of those constructions has to keep in
+agreement with its renderer, and the one left unnamed would lose its
+notice silently. The machine arm does not build that structure: it
+writes the encoded model to stdout, flushes, and then runs
+`act.render(read)` with `sys.stdout` bound to a null sink, so the
+renderer's stdout is discarded and its stderr reaches the terminal
+exactly as the human arm would have printed it. One renderer, one
+function, nothing extracted and nothing to enumerate; a notice a
+renderer prints tomorrow is on stderr under both arms without anyone
+attaching it. The order a script sees is the model then the notices,
+which is the order a person sees the data then the notices. `Act`
+gains no field. The two-arm test uses a real acknowledgement, a real
+imported document and a paginated listing rather than a shape with no
+notice, and asserts the notice reaches stderr under both arms and
+that stdout under the machine arm is the encoded model alone.
 
 The deferral is repriced in `docs/architecture/cli-guide.md`: the
 second bullet ("a second format is a second no-leak audit") is
@@ -529,10 +535,9 @@ decision site.
   names, which is what they did as one file, and the one seam that
   exists (the `Invocation` type and the `Act` row) is unchanged.
 - **M2** deepens nothing and changes no code.
-- **M3** deepens `answers.py` by one function and one token, adds one
-  parameter to the act runner, pinned at its default, and one field to
-  `Act`, the notice projection, defaulted to none and named by the
-  four rows that have notices.
+- **M3** deepens `answers.py` by one function and one token, and adds
+  one parameter to the act runner, pinned at its default. `Act` gains
+  no field: the machine arm reuses the act's renderer for its notices.
 
 ## Documentation footprint
 
@@ -598,12 +603,12 @@ Reusing what exists wherever the assertion already has a home.
 - **M3**: `tests/unit/test_config_cli_rendering.py` gains the escape
   test on both encoders, watched failing with the escaping asserted
   the wrong way round, and the two-arm test through `_act` with a
-  fake `_call` answering a real acknowledgement and a real imported
-  document: the default arm renders and prints its notice on stderr,
-  the machine arm writes the encoded model to stdout and the same
-  notice to stderr, and the default is asserted by calling `_act`
-  without the parameter. The four renderers' existing pins are
-  byte-unchanged after the projection is extracted.
+  fake `_call` answering a real acknowledgement, a real imported
+  document and a paginated listing: the default arm renders and prints
+  its notice on stderr, the machine arm writes the encoded model and
+  nothing else to stdout and the same notice to stderr, and the
+  default is asserted by calling `_act` without the parameter. No
+  renderer is edited.
 - **Reach-ins**: a new test reaches public names or the names the
   existing tests already reach; any new underscore reach-in is
   recorded in the manifest and named in the PR as the design question
@@ -660,9 +665,9 @@ Reusing what exists wherever the assertion already has a home.
   tier.
 - [ ] **M3: the dump, the dispatch and the repricing.** `Output` and
   `encoded` in `answers.py`, the `output` parameter on `_act` with
-  `_performed` passing the default, `Act.notices` with the four
-  projections extracted from their renderers, the escape test and the
-  two-arm test, the CLI guide entry. Stacked on M1, beside M2.
+  `_performed` passing the default, the machine arm's null-sink
+  rendering for notices, the escape test and the two-arm test, the
+  CLI guide entry. Stacked on M1, beside M2.
 
 ## Verification
 
@@ -925,6 +930,15 @@ three P1, verdict "not ready". Condensed but faithful.
    Enumerate every notice-producing construction and attach its
    projection, with a structural pin and a machine-mode paginated
    listing test.
+
+   *Resolution*: accepted, and it changed the mechanism rather than
+   adding the enumeration: the enumeration the finding asks for is
+   the second structure the design guide warns of, one entry per act
+   construction that must agree with its renderer. The machine arm
+   now runs the act's own renderer with stdout bound to a null sink
+   after writing the model, so notices come from the one function
+   under both arms, no renderer is edited, `Act` gains no field, and
+   the paginated-listing case joins the two-arm test.
 
 4. **P2: the named secret-holder test does not reach the
    command-bearing refusal.** `test_config_api_writes.py` near 861
