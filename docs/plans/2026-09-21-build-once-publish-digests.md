@@ -1073,3 +1073,182 @@ explain it, because the job that would have created it never started.
 The claim stands as written, and the plan now cites the empty job list
 and the timestamp coincidence rather than the tag's absence alone,
 which is the evidence that actually carries it.
+
+## Plan review round 3
+
+Re-review at `3ec504ef` on 2026-09-21, codex with `gpt-5.6-sol`,
+read-only, runtime 201s. The prompt asked per finding whether round
+2's amendments closed it, told the reviewer which two amendments had
+changed the design and invited it to break them, and asked it to judge
+the two remedies that had been declined **on their reasoning rather
+than their conclusion**. That last instruction is what produced the
+round's most valuable finding, against an argument of mine that was
+simply wrong.
+
+Round 2's finding 5 came back closed. The other four came back open,
+with eight findings, four of them P1.
+
+Three facts were established by experiment and measurement while
+resolving these, and each one changed a decision:
+
+- **`imagetools create --dry-run --metadata-file` writes nothing.**
+  Verified locally: exit 0, no file. A real `create` does write it,
+  carrying `containerimage.descriptor.digest`. So the round's finding
+  4 is right that the dry-run index digest is not obtainable, and the
+  comparison the previous amendment specified is not executable.
+- **A tag created from another tag preserves the index digest
+  exactly.** Staging under one tag, then creating two more from it,
+  gave all three the same digest, so validate-then-tag is executable.
+- **Most `main` commits legitimately have no image.** In the last 45
+  commits on `main`, four have a `sha-` tag, and there are runs of 22
+  and 13 consecutive commits without one, because a documentation
+  push does not trigger this workflow at all. This falsifies a rule
+  the previous amendment had introduced.
+
+### 1 (P1): a failed phase-2 assertion leaves a `sha-` tag the reconciler trusts
+
+Phase 2 pushes the immutable tags and only then asserts. If the
+assertion fails the tag already exists, and a later reconciler walking
+by tag existence alone can promote that publication, so "a `sha-` tag
+means every gate passed" is false.
+
+*Resolution*: accepted. Closed by making the reconciler validate what
+it is about to promote rather than trusting a name: before moving the
+moving tag it runs the same topology and config assertions against the
+candidate index, and refuses a candidate that fails them. That closes
+it for the moving tag whatever the publish side did, which is the
+property that matters, since the moving tag is what a careless
+deployment follows. An immutable tag left behind by a red publish
+remains, and is a red run somebody sees; the plan says that rather
+than implying otherwise. The reviewer's staging-reference remedy was
+verified to work and is recorded as the stronger option, not taken
+because reconciler-side validation closes the same hole without a
+second tag namespace to create, name, race and prune.
+
+### 2 (P1): the dated-tag collision argument is mathematically backwards
+
+Appending the revision does not replace the same-second residual with
+the prefix residual. A composite `timestamp-revision` tag collides
+only when **both** collide, which is strictly less likely than either.
+"Would move the dated tag's residual up" is wrong.
+
+*Resolution*: accepted without reservation. The argument was wrong,
+and it was mine, written to justify a conclusion rather than derived.
+A conjunction is not a replacement, and stating it as one is the same
+error as claiming more than was measured, in a form that looks like
+reasoning.
+
+The conclusion goes with it. The dated tag becomes
+`YYYY-MM-DD-HHmm-<revision>`, composite, and the argument for it is
+the reviewer's: it narrows the collision domain to the conjunction.
+Minute resolution returns, since the revision now carries the
+uniqueness and seconds were only ever there to do that job.
+
+### 3 (P1): the documentation is still planned to claim immutability the design does not provide
+
+Round 2 conceded that concurrent publishers can both see an absent tag
+and overwrite each other, while the documentation footprint kept
+"immutable and never reused" as an unconditional guarantee.
+
+*Resolution*: accepted, and closed by finding 6's remedy rather than
+by weakening the documentation. With a 12-character revision in both
+immutable tags, a collision requires two commits sharing twelve hex
+characters, on the order of 1e-9 at this repository's size, which is
+the same order of assumption git itself makes when it abbreviates. At
+that point "never reused" is an honest thing to write, the reuse
+refusal enforces it against sequential reuse, and the residual is
+named in the plan rather than in the user-facing pages. Had the width
+stayed at seven, the pages would have had to be reworded instead, and
+the plan says so explicitly so the dependency between the two is not
+lost.
+
+### 4 (P1): phase 1 cannot obtain the digest phase 2 compares
+
+Parsing and reserializing the dry-run index does not yield its digest,
+and the plan named no mechanism that would.
+
+*Resolution*: accepted; verified; the comparison is removed. The local
+check above shows `--dry-run --metadata-file` writes no file at all,
+so the previous amendment specified something that cannot run. The
+digest comparison is dropped and replaced by validating the **same
+four properties twice**: once against the dry-run index, whose entries
+are resolvable by digest because the per-platform manifests were
+pushed before any tag existed, and once against each final tag after
+the push. Neither validation needs a parent digest, both are
+executable with commands the plan now names, and the second one
+catches anything the push could have changed.
+
+### 5 (P2): dispatch cannot execute the claimed two-phase validation or the reconciler verification
+
+Dispatch creates no tag and never runs `image-promote`, so the
+post-tag phase and the claims that idempotence and stale-tag repair
+are "provable on a dispatch" are not executable.
+
+*Resolution*: accepted; both claims were false and are corrected
+rather than rescued. Dispatch runs phase 1 only. Phase 2, the
+reconciler's idempotence and its stale-tag repair are **main-only
+checks**, recorded in the verification section as such, unchecked
+until a merge exercises them, with the reason. The previous round
+added the idempotence check as a cheap pre-merge reassurance and it
+was not one; claiming a gate that cannot run is worse than having no
+gate, because it stops anybody looking for a real one.
+
+### 6 (P2): the seven-character remedy defers a cheap fix until after it breaks a publication
+
+Coordinating `VINGA_REVISION`, the tag and its assertion is exactly
+what a workflow-only plan can do, and "wait for a collision" is not a
+sound trigger for an avoidable namespace defect.
+
+*Resolution*: accepted, and adopted after asking the maintainer,
+because the change is user-visible: `/healthz` reports the revision
+and both maintained pages show example tags. **The revision becomes 12
+hexadecimal characters**, derived once and used in four places that
+already have to agree, `VINGA_REVISION` in the image's `ENV`, the
+`sha-` tag, the dated tag's suffix and the reconciler's lookup, with
+the existing workflow step that asserts tag and revision are equal
+extending to cover it. Collision falls from roughly 2e-3 to roughly
+2e-9 at a thousand commits. This is the finding that also closes 2 and
+3, which is why it is worth its own milestone footprint rather than a
+line.
+
+### 7 (P2): the reconciler's bound and history-rewrite behavior are not decided
+
+The bound is never given or derived, and force-push behavior is
+undefined while the documentation footprint proposes an unconditional
+"never moves to an older commit's image".
+
+*Resolution*: accepted, and measuring it found that the previous
+amendment's rule was wrong rather than merely unspecified. It said a
+walk that finds no tagged commit fails the run. In the last 45 commits
+on `main` only four carry a `sha-` tag, with runs of 22 and 13
+without, because a documentation-only push does not match this
+workflow's `paths` and so never builds an image. A fixed bound with a
+failure at the end of it would fire on ordinary weeks.
+
+The walk is therefore bounded by **distance from what is already
+published**, not by a constant: candidates are the commits between the
+moving tag's current revision and the tip, newest first, and the first
+one carrying a validated `sha-` tag wins. Finding none is the **normal
+case** and is a quiet no-op, not a failure, because it means nothing
+newer than the published image has produced one yet. A hard cap of 200
+commits remains only for the case where the published revision is not
+an ancestor of the tip, and reaching it fails loudly.
+
+That case is the force-push one, and it is now stated: if the moving
+tag's revision is not in `origin/main`'s history, history was
+rewritten under the tag, the reconciler promotes the newest tagged
+commit in the current history within the cap, and it reports that it
+did so. The documentation guarantee is scoped to match, "never moves
+to an older commit's image on ordinary fast-forward history", because
+after a rewrite "older" no longer has a single meaning.
+
+### 8 (P2): phase 2 does not say that every final tag must be checked
+
+M1 creates dated and `sha-` tags, and the reconciler trusts the
+latter, but the assertion named only "the tag".
+
+*Resolution*: accepted, one word for one word. Every final tag this
+job creates, the dated one, the `sha-` one and the moving one when it
+is written, is resolved after assignment and required to equal the
+validated index. With a 12-character revision there are two immutable
+tags per publish and the check is a loop, not a special case.
