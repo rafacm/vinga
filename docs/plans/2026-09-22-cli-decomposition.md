@@ -722,3 +722,62 @@ refer to the plan as committed at that blob.
    package, `__init__.py` included, is the cycle proof, each module
    is imported in a fresh interpreter in the verification, and
    `sections.py` is demoted to supporting evidence.
+
+## Plan review round, second
+
+Reviewed 2026-09-22 by openai/gpt-5.6-terra, thinking high via codex CLI 0.155.1, read-only sandbox, runtime 5m15s, at commit 235a5c3a, plan blob 587e57e3.
+
+A re-review of the eight amendments above. Six findings, two P1,
+verdict "not ready" pending the P1 amendments. Condensed but faithful.
+
+1. **P1: the new transportability property is false for the current
+   registry.** Many legitimate bodies never reach `check_transportable`
+   (`_new_name`, `_binding`); only the YAML-derived fragment and
+   document bodies need the gate, via `SET_ENTITY` and `_document_body`.
+   As written the property contradicts M1's unchanged-definition proof.
+   Constrain the check to bodies accepting YAML-derived values, prove
+   each reaches the gate before returning to `_act`, and mutation-test
+   the removal of a real guard rather than the addition of a call site.
+
+2. **P1: M3 drops stderr notices in machine mode, contrary to the
+   settled requirement.** The machine arm "writes nothing to stderr",
+   and the issue requires notices to remain on stderr under every
+   format; `_acknowledged` and `_imported` emit meaningful notices
+   there. Introduce an explicit act-level notice projection or an
+   equivalent seam: machine mode emits the model on stdout and the
+   same applicable notices on stderr, preserving order, tested with
+   real acknowledgement and document shapes.
+
+3. **P2: `encoded()` is described as validating, but the named
+   operation does not validate.** `dump_python(mode="json")` dumps;
+   validation in `_understood` is the separate strict
+   `validate_python` over `_declared`. Dumping an unvalidated proxy
+   body could serialize an invalid value instead of taking the
+   refusal path. State that `encoded()` performs the exact
+   `_understood` validation and declaration filtering first, and add a
+   machine-arm test with an extra field and a strict mismatch,
+   asserting the fixed refusal and no bytes on either stream.
+
+4. **P2: M1 leaves two commands without a family.** The flat `show`
+   is not in the deployment list, and `cli-reference` with its handler
+   `_cli_reference` is not in the local list; moving the public
+   builder to `grammar.py` does not place the handler. Assign `show`
+   to deployment and the reference command where the dependency stays
+   acyclic.
+
+5. **P2: M4's per-site tests do not name homes for two of the five
+   refusal paths.** The unloaded-agent refusal is exercised in
+   `test_config_api_runtime.py` and the secret-holder path in
+   `test_config_api_writes.py`; the closed-set pin cannot prove those
+   endpoints attach their tokens. Name tests at all five raise paths,
+   asserting the exact `reason`, no command spelling in `detail`, and
+   the existing no-secret and no-address checks.
+
+6. **P2: the accepted old-CLI/new-server failure is an unaddressed
+   upgrade hazard.** The `vinga` client installs separately to
+   administer remote deployments, so "the halves ship together" does
+   not hold operationally; a server-first upgrade turns five useful
+   refusals into the unreadable-body sentence. State and support an
+   upgrade order, at minimum that administering CLIs upgrade before a
+   server emits `reason`, where operators meet upgrades; or redesign
+   the wire transition.
