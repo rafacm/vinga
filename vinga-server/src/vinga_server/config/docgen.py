@@ -32,15 +32,22 @@ Importing this module no longer reaches the repository either, which is
 a narrower claim than it sounds and is worth stating exactly. The
 whole-domain model used to be declared in `store.py`, so this module's
 import list pulled SQLAlchemy and cryptography in to reach one class;
-it is declared in `models.py` now and this imports it from there. The
-`vinga-server config` commands still pay for both, because `cli.py`
-imports three pure helpers from `store.py` (the transportability check,
-the apply location and the identity splitter) and so loads that module.
-It opens no database with them: since #281 removed the break-glass path
-the CLI holds no repository, no database opener and no key loader at
-all. What the removed edge buys is that the markdown reference and the
-JSON Schema
-render with nothing loaded but the models and the registry;
+it is declared in `models.py` now and this imports it from there.
+
+Nor do the `vinga-server config` commands pay for it any more, which
+they did while three pure helpers they need were declared in
+`store.py`: the transportability check and the apply location are
+`transport.py`'s, and the identity splitter is the entity registry's,
+so the CLI imports each from the module that owns it and loads no
+repository at all. That is a pinned fact rather than a reading of the
+import lines: `test_cli_import_weight.py` writes down the exact set of
+`vinga_server` modules `import vinga_server.config.cli` loads, and
+`config.store` is not in it. Since #281 removed the break-glass path
+the CLI holds no repository, no database opener and no key loader
+either.
+
+What the removed edge buys is that the markdown reference and the JSON
+Schema render with nothing loaded but the models and the registry;
 `openapi()` is the deliberate exception and says so where it is
 defined. `test_config_docgen.py` pins that in a child interpreter, so
 the edge cannot come back unnoticed.
