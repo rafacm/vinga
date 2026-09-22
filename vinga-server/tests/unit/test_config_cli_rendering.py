@@ -194,7 +194,7 @@ def test_status_refuses_an_answer_it_cannot_read(
     """A body without the fields a status entry carries did not come
     from this API, and a proxy's page is not rendered as though it
     had."""
-    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: {"weather": {"up": True}})
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: {"weather": {"up": True}})
 
     assert run("mcp-server", "status") == 1
 
@@ -244,7 +244,7 @@ def test_status_prints_nothing_from_an_answer_of_the_wrong_shape(
     terminal: a body this client cannot recognize did not come from this
     API's sanitized output, and what a proxy or a captive portal returns
     is text nobody vouched for."""
-    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: body)
 
     assert run("mcp-server", "status") == 1
 
@@ -260,7 +260,7 @@ def test_the_valid_shape_those_refusals_were_built_from_is_accepted(
     """The control for the parametrization above: each of those bodies
     is this one with a single field replaced, so this is what makes the
     refusals about the replacement."""
-    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: {"weather": _status_entry()})
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: {"weather": _status_entry()})
 
     assert run("mcp-server", "status") == 0
 
@@ -319,7 +319,7 @@ def test_prompt_prints_each_block_its_size_and_the_total(
         ),
         characters=26,
     )
-    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: body)
 
     assert run("agent", "preview", "poet") == 0
 
@@ -344,7 +344,7 @@ def test_prompt_never_truncates_a_block(
         _prompt_block(text=long_block, characters=len(long_block)),
         characters=len(long_block),
     )
-    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: body)
 
     assert run("agent", "preview", "poet") == 0
 
@@ -363,7 +363,7 @@ def test_prompt_keeps_the_newlines_and_replaces_the_control_characters(
     the terminal."""
     text = "first line\n\tindented\x1b[31mred\x07"
     body = _assembled(_prompt_block(text=text, characters=len(text)))
-    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: body)
 
     assert run("agent", "preview", "poet") == 0
 
@@ -392,7 +392,7 @@ def test_prompt_sanitizes_a_published_prompts_name(
         ),
         characters=8,
     )
-    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: body)
 
     assert run("agent", "preview", "poet") == 0
 
@@ -406,7 +406,7 @@ def test_prompt_sanitizes_a_published_prompts_name(
 def test_prompt_names_nothing_beside_a_block_that_has_no_name(
     run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: _assembled())
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: _assembled())
 
     assert run("agent", "preview", "poet") == 0
 
@@ -456,7 +456,7 @@ def test_prompt_without_a_server_says_so(run, capsys: pytest.CaptureFixture[str]
 def test_prompt_prints_nothing_from_an_answer_of_the_wrong_shape(
     body: object, run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: body)
 
     assert run("agent", "preview", "poet") == 1
 
@@ -807,7 +807,7 @@ def test_a_name_the_apply_reports_does_not_steer_a_terminal(
             "servers": {},
         }
     )
-    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: body)
 
     assert run("apply") == 0
 
@@ -832,7 +832,7 @@ def test_apply_prints_the_refusal_the_api_answered(
 def test_apply_refuses_an_answer_it_cannot_read(
     run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: {"started": "weather"})
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: {"started": "weather"})
 
     assert run("apply") == 1
 
@@ -885,7 +885,7 @@ def test_apply_prints_nothing_from_an_answer_of_the_wrong_shape(
     the same document the status command refuses when it cannot read
     it, so a stray shape anywhere must end in the fixed sentence rather
     than in output or a traceback."""
-    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: body)
 
     assert run("apply") == 1
 
@@ -1159,7 +1159,7 @@ def test_the_comparison_does_not_let_a_name_steer_a_terminal(
         "removed": [],
         "changed": [],
     }
-    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: body)
 
     assert run("diff") == 0
 
@@ -1197,7 +1197,7 @@ def test_the_comparison_refuses_an_answer_it_cannot_read(
     """A body missing a kind is a body this client cannot read as a
     comparison, and it meets the fixed sentence rather than rendering
     most of an answer."""
-    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: {"providers": {}})
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: {"providers": {}})
 
     assert run("diff") == 1
 
@@ -1252,7 +1252,7 @@ def test_a_token_the_comparison_cannot_read_is_a_sentence(
     the value nor a traceback on either stream."""
     body = {**DIFF_EMPTY}
     body["providers"] = {**DIFF_EMPTY["providers"], "applies": answered}  # type: ignore[dict-item]
-    monkeypatch.setattr(reach, "_call", lambda *_args, **_kwargs: body)
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: body)
 
     assert run("diff") == 1
 
@@ -1455,7 +1455,7 @@ def test_a_refused_act_is_raised_with_nothing_behind_it(
         refused.__cause__ = RuntimeError(SECRET)
         raise refused
 
-    monkeypatch.setattr(reach, "_call", call)
+    monkeypatch.setattr(acts, "_call", call)
     first = acts.Act(
         method="POST",
         path=lambda _args: "/apply",
