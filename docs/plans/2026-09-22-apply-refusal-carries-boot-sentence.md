@@ -1,0 +1,243 @@
+# An apply's provider-build refusal carries the sentence a boot prints
+
+Plan for [#487](https://github.com/rafacm/vinga/issues/487), as re-cut
+on 2026-09-22. Its companion is
+`docs/plans/2026-09-22-apply-refusal-carries-boot-sentence-implementation.md`,
+one section per milestone, appended in the same change that ticks the
+milestone.
+
+**Local baseline:** not applicable. A refusal's wording changes no
+conversational capability.
+
+**Cheapest alternative:** none. This is the one-function change. The
+four-milestone vocabulary the issue carried until the re-cut (a bounded
+name type, closed failure tokens, a problem-type transport, per-surface
+display rules) was the expensive alternative, and the re-cut recorded on
+the issue why each of its parts is either already in the tree under
+another name or aimed at a harm its surface cannot suffer.
+
+## Goal
+
+An operator whose `apply` is refused because a provider would not
+build learns from the answer which entry, which key and which rule
+refused, in the words a server started from the same store would print
+before refusing to start. Today the answer is
+`_PROVIDERS_REFUSED` in `config/reload.py`: the four categories of
+thing that could have refused, a sentence saying which is withheld, and
+an instruction to start a second server. `check` was added for the
+compose-time refusals (#443) and deliberately builds no provider, so
+this is the one class of stored-state refusal that neither the answer
+nor `check` diagnoses.
+
+## What is settled and not re-litigated
+
+- **The sentence is the provider layer's own.** `_built` in
+  `config/reload.py` catches a `ProviderError` whose message a boot
+  prints verbatim on stderr (`serving.py`, the `ConfigError,
+  ProviderError` arm) and substitutes the fixed sentence. After this
+  plan it carries the message. No new vocabulary, no token, no second
+  composition.
+- **Values stay out; identities and keys go in.** The issue's audit of
+  every `ProviderError` raise site (25 today, backed by the grep in
+  Verification) found each sentence interpolates one of: the entry
+  label, which `config/entities.py::provider_label` composes and
+  `models.spoken_identity` escapes; the option reader's own `key`
+  argument, which is code; an unknown key, spoken through the strip; a
+  provider type the registry has already recognized (the unknown-type
+  refusal says the type is not quoted back); the server's own data
+  boundary; a factory failure's class name. The exception is
+  `providers/openai_tts.py`, whose two model-shape refusals quote the
+  stored `model` option verbatim, and this plan fixes them.
+- **The problem-type token is #488 M4's**, where its one consumer is.
+  Exception class names stay on the event surface. Neither is touched
+  here.
+- **`check` keeps its scope.** The re-cut asked whether `check` should
+  grow a provider-build phase once the answer is actionable. It should
+  not: `check` is the boot's read and stops before anything is built,
+  which its docstring lists as what it does not do, and a provider
+  build loads local models and opens network clients. The answer now
+  covers the gap `check` was leaving, and the CLI reference says which
+  refusals each one diagnoses.
+
+## The smaller decisions
+
+### The sentence keeps the reload's prefix
+
+`ProviderRefusedError` carries `f"{mcp.RELOAD_REFUSED} {exc}"`: the
+prefix every refused reload already opens with ("the reload was refused
+and nothing was changed:"), then the provider layer's sentence. The
+shape is the one `_read` in the same module composes for a compose
+refusal, so the two phases of one apply refuse in one voice, and the
+prefix is what tells an operator reading the answer that nothing was
+swapped, which the provider sentence alone does not say.
+
+### Composed after the handler closes, as today
+
+`_built` keeps its shape: the message is taken inside the `except` arm
+as a string, and the typed refusal is raised after the block, so
+`__cause__` and `__context__` stay `None`. The existing pins on both
+stay byte-unchanged. What the arm holds is a `ProviderError` whose
+message is value-free by the audit above; what it must not hold is the
+chain behind it, since a factory that raised inside the provider layer
+may have been holding an SDK exception, and `registry.py` already
+reports that by class name only.
+
+### The log line carries the sentence beside the class name
+
+Today the warning names the exception class and nothing else, because
+the sentence was held to be unsayable. It is the same sentence the
+answer now carries and the same one a boot prints into the retained
+surface, so the log line says it too:
+`a reload could not build the stored world's providers (%s): %s`, with
+the class name and the message as two args. One diagnosis, three
+surfaces, one composition. The sentinel test asserts absence from the
+log as well as from the answer, which is what makes the third surface
+lawful rather than assumed.
+
+### The two `openai_tts.py` refusals name the option, not the model
+
+`model "{model}" ignores option "speed"` becomes
+`the model option "model" names ignores option "speed"`, and the
+`instructions` sentence the same way. A model name is a stored option
+value, and the rule for this surface is that a refusal names the key
+and never the value; quoting the model was the one place the surface
+broke it. The phrase `ignores option "speed"` survives, so the three
+existing `match=` pins hold, and each gains an assertion that the
+configured model string is absent from the sentence.
+
+### Words that become false, and where they live
+
+Five places state that the answer names no location, and each moves in
+this milestone:
+
+- `_built`'s docstring and the comment inside its `except` arm
+  (`config/reload.py`).
+- `ProviderRefusedError`'s docstring (`config/loader.py`), which says
+  the entry, type and option are "stored values that a refusal over
+  HTTP must not carry".
+- `config_reloader`'s docstring (`app.py`), which calls it "the apply's
+  own fixed sentence".
+- The `reload-refused` route description
+  (`config/api_descriptions/reload-refused.md`), which says the
+  `detail` is fixed and names no location and lists an unbuildable
+  engine among the reasons; after this plan the compose-time reasons
+  keep that sentence and the provider-build reason names its location.
+  This is a generated-reference input, so `docs/reference/api-openapi.json`
+  is regenerated through `uv run vinga-server config openapi`.
+- The "When an apply is refused" section of `docs/reference/cli.md`,
+  which now says two things: a stored half that will not compose is
+  refused without a location and `check` is where the location is
+  said; a stored half whose provider will not build is refused with the
+  location in the answer, in the sentence a boot would print, and
+  `check` will not see it because it builds nothing.
+
+## Design footprint
+
+One module deepened, `config/reload.py`: its callers stop having to
+know that a refused build's diagnosis lives in a second server's
+stderr. No seam is added and no module is created. `providers/base.py`'s
+`ProviderError` docstring gains the contract this plan relies on, that
+a message names identities and keys and never a stored value, so the
+next raise site reads the rule where the type is declared.
+
+## Documentation footprint
+
+- `docs/reference/cli.md`, the "When an apply is refused" section
+  (hand-written reference prose per the authority taxonomy in
+  `docs/README.md`).
+- `docs/reference/api-openapi.json`, regenerated.
+- `changelog.d/487-apply-refusal-names-the-entry.md`, `### Changed`.
+- Nothing under `docs/architecture/`: the observability surfaces page
+  lists the API body as a sanitized channel and says nothing about this
+  sentence. The root README makes no claim about apply refusals.
+
+## Tests
+
+The claim is one sentence long, so the proof is a sentinel sweep and
+not a new test module: **for every refusal class the provider-build
+surface has, a stored world whose values all carry a credential-shaped
+sentinel is refused with a `detail` that names the entry, the key and
+the rule, and the sentinel reaches neither the answer nor the log.**
+
+The classes, with the asset each reuses (all in
+`tests/unit/test_config_reload.py` unless said otherwise):
+
+- **An option of the wrong type.** The existing typed-options case
+  plants a sentinel as `beam_size` and asserts that neither the value
+  nor the key travels. The key assertion inverts: `beam_size` is in the
+  sentence and in the log, the sentinel is in neither, and the chain is
+  still empty.
+- **A boundary refusal.** The existing `reach: host` case asserts
+  `voice` is absent from the sentence. It inverts: `providers.tts.voice`
+  is named, and the sentence is the boundary module's own.
+- **An unset `api_key_env`.** New case beside the rotation cases:
+  `api_key_env` naming a variable that is not set, with a sentinel as
+  the variable's name, so the answer names the entry and not the
+  reference, which is the rule `kit.py` states.
+- **A factory that raises.** The mock that refuses to build is what
+  `tests/integration/test_startup_failure.py` pins the boot sentence
+  with (`providers.llm.mock: the mock provider would not build
+  (ValueError)`); the same construction raises with a sentinel in its
+  message, and the answer carries the class name and not the words.
+- **An unknown type.** A stored type spelled as a sentinel, refused
+  with the type not quoted back.
+
+One of these runs through the API (`entered_client` and a POST to the
+reload route, as the rotation cases do), asserting on
+`refused_body(...)` and `refused.text`, so the sentence is proven on
+the wire and not only on the exception. The rest run at
+`ConfigReload.apply()` where the existing cases live, since the route
+passes `ProviderRefusedError` through unchanged (`app.py`,
+`config_reloader`) and the wire case proves that once.
+
+**Falsify before claiming.** Every inverted `in` assertion fails
+against the current tree by construction and is watched failing. The
+`not in` assertions need a mutation: one sentence in `registry.py`
+temporarily interpolates the rejected value, and the sweep is run to
+show which case catches it; the mutation is reverted, and the commit
+body says the check was done. The `openai_tts.py` pins are mutated the
+same way, by restoring the quoted model.
+
+## Risks
+
+- **A future raise site quotes a value.** The sweep covers the classes
+  the surface has today, not a site written tomorrow. Mitigation is
+  the contract in `ProviderError`'s docstring and the sweep's shape,
+  which is one parametrized world per class and cheap to extend; the
+  reach-in census and the sentinel lens in review are what catch the
+  next site, as they caught `openai_tts.py` in the re-cut.
+- **The CLI reference edit stales the command-spellings census.** The
+  section quotes `vinga-server config check`; the edit must not start
+  or stop quoting a command without regenerating the manifest. Run
+  `tests/census` after the edit.
+- **The regenerated OpenAPI document moves more than the one
+  description.** It should not, since only `reload-refused.md` changes;
+  the milestone diffs the regenerated file and reports anything else
+  that moved rather than committing it unread.
+
+## Milestones
+
+- [ ] **M1: the apply refusal carries the provider-build sentence
+  (PR TBD).** `_built` raises `ProviderRefusedError` with the reload
+  prefix and the `ProviderError`'s message, the log line carries the
+  message beside the class name, `_PROVIDERS_REFUSED` and the four
+  docstrings and comments that argue for it move to the new rule, the
+  two `openai_tts.py` refusals stop quoting the model, the sentinel
+  sweep above lands with its inverted pins, the `reload-refused`
+  description and the CLI reference say which refusals each surface
+  diagnoses, the OpenAPI document is regenerated, and the changelog
+  fragment records the changed answer. Design footprint: `config/reload.py`
+  deepened; no new module. Documentation footprint: as listed above.
+
+## Verification
+
+- `uv run ruff check .`, `uv run pytest tests/unit -q`,
+  `uv run pytest tests/integration -q`, `uv run pytest tests/census -q`,
+  all from `vinga-server/`.
+- The raise-site inventory the settled decision rests on, run untruncated:
+  `grep -rn "raise ProviderError(" src/vinga_server/providers | wc -l`
+  is 25 at `909cc06e`, and the milestone re-runs it and reads every
+  line rather than the count.
+- `uv run vinga-server config openapi > ../docs/reference/api-openapi.json`
+  and a diff showing only the reload route's description moved.
+- The mutation runs named under Tests, stated in the commit bodies.
