@@ -13,9 +13,12 @@ lands as three tests that fail when it stops being true.
    gap census becomes a diff of this set rather than fresh archaeology.
 
 2. **The dependency arrow points one way.** Nothing under
-   `vinga_server` imports `config.cli` except `main.py`, in the branch
-   that dispatches to it. That one edge is the declared exception and
-   the only one an extraction would have to cut.
+   `vinga_server` and outside the `config/cli` package imports it
+   except `main.py`, in the branch that dispatches to it. That one edge
+   is the declared exception and the only one an extraction would have
+   to cut. The package's own modules import each other, which is what
+   they did as one file, and they do it relatively, which is what keeps
+   the inside and the outside of the package two different questions.
 
 3. **Answers are read through `config/responses.py` alone.** That
    module imports nothing of this server, because it is the half a
@@ -40,7 +43,16 @@ SOURCE = Path(__file__).resolve().parents[2] / "src" / "vinga_server"
 # Every `vinga_server` module importing `config.cli` loads, and the
 # reason each is on the list.
 #
-# Twenty-six, and each of them is the client half of something: the
+# Fourteen of them are the package's own, and they are the one entry
+# here that costs the client half nothing: `config.cli` is a package
+# whose modules import each other, so importing it loads all of them and
+# the weight is the same code it always was. They are listed one by one
+# rather than allowed as a prefix, because an exact inventory is what
+# catches a stray import and a prefix rule would admit a module of this
+# package that reached anywhere.
+#
+# The rest are the reach the split did not change, twenty-eight, and
+# each of them is the client half of something: the
 # models and the registry the grammar is derived from, the loader that
 # reads the file half, the renderers the four document commands print,
 # the response shapes the answers are read through, the transport policy
@@ -102,6 +114,20 @@ CLI_REACH = frozenset(
         "vinga_server.broken_pipe",
         "vinga_server.config",
         "vinga_server.config.cli",
+        "vinga_server.config.cli.acts",
+        "vinga_server.config.cli.answers",
+        "vinga_server.config.cli.deployment",
+        "vinga_server.config.cli.devices",
+        "vinga_server.config.cli.entities",
+        "vinga_server.config.cli.events",
+        "vinga_server.config.cli.grammar",
+        "vinga_server.config.cli.input",
+        "vinga_server.config.cli.invocation",
+        "vinga_server.config.cli.local",
+        "vinga_server.config.cli.output",
+        "vinga_server.config.cli.reach",
+        "vinga_server.config.cli.records",
+        "vinga_server.config.cli.simulator",
         "vinga_server.config.docgen",
         "vinga_server.config.entities",
         "vinga_server.config.loader",
@@ -136,6 +162,12 @@ GATED_MODULE = "vinga_server.simulator.conversation"
 # `main.py` dispatches `vinga-server config ...` to it, inside the
 # branch that recognized the word.
 CLI_IMPORTERS = frozenset({"vinga_server/main.py"})
+
+# The package itself, so that "imports the CLI" can mean what it meant
+# when the CLI was one file: an edge from outside it. Its own modules
+# import each other by construction, and counting those would turn the
+# assertion above into a list of the package's contents.
+CLI_PACKAGE = SOURCE / "config" / "cli"
 
 RESPONSES = SOURCE / "config" / "responses.py"
 
@@ -213,18 +245,39 @@ def test_the_simulator_s_conversation_half_is_not_imported_eagerly() -> None:
 
 
 def test_nothing_but_the_entry_point_imports_the_cli() -> None:
-    """The arrow, held to one edge.
+    """The arrow, held to one edge, from outside the package.
 
     An extraction is only as cheap as the number of places that reach
     back. One reaches back, it is the dispatch that exists to reach it,
     and it is the edge #287 removes.
+
+    The package's own modules are not places that reach back: they are
+    the thing being reached, and an edge between two of them is what a
+    call between two of its functions was before the split.
     """
     importers = {
         str(path.relative_to(SOURCE.parent))
         for path in SOURCE.rglob("*.py")
-        if "vinga_server.config.cli" in _imports(path)
+        if CLI_PACKAGE not in path.parents and "vinga_server.config.cli" in _imports(path)
     }
     assert importers == CLI_IMPORTERS
+
+
+def test_the_package_reaches_its_own_modules_relatively() -> None:
+    """And what makes the inside and the outside two questions.
+
+    Every module of the package names its siblings relatively, so the
+    absolute spelling means one thing wherever it appears: somebody
+    outside reaching in. A sibling named absolutely would read as an
+    outside importer to the assertion above and quietly widen the one
+    edge it holds.
+    """
+    absolute = {
+        str(path.relative_to(SOURCE.parent))
+        for path in sorted(CLI_PACKAGE.glob("*.py"))
+        if any(name.startswith("vinga_server.config.cli") for name in _imports(path))
+    }
+    assert absolute == set()
 
 
 def test_the_response_shapes_import_nothing_of_this_server() -> None:
