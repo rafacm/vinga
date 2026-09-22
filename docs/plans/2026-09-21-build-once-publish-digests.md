@@ -704,7 +704,7 @@ that quotes commands.
 Rewritten after the scope reduction. Where this list and the decisions
 above disagree, the decisions are right and this list is a bug.
 
-- [ ] **M1: build each architecture once, publish the tested digests.**
+- [x] **[M1: build each architecture once, publish the tested digests](2026-09-21-build-once-publish-digests-implementation.md#m1-build-each-architecture-once-publish-the-tested-digests)** (PR TBD).
 
   *Building.* `image` gains an `arch` matrix dimension and loses its
   publishing half, becoming four jobs. Each builds once with the image
