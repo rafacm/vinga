@@ -212,6 +212,11 @@ Shared infrastructure, in the DAG's order:
   translation, the entry-point constants and the version answer. What
   callers stop knowing: how an argument vector becomes an exit code
   and one sentence, whichever of the two entry points it came in by.
+- `cli/invocation.py`: `Invocation`, the one resolved-arguments type,
+  alone. Every other module reads it and it reads nothing, which is
+  what a seam stated as a type looks like, and it is the lowest module
+  of the package for that reason. It is not in `acts.py` because
+  `reach.py` annotates with it and `acts.py` imports `reach.py`.
 - `cli/reach.py` (the "Reaching the API" section): `Address`,
   `Reached`, `build_client`, `_call`, `_permitted`, `_sent`,
   `_refusal`, `_payload`, `narrated` and `_ProgressLine`, with
@@ -233,12 +238,14 @@ Shared infrastructure, in the DAG's order:
   every family shares (`_section`, `_acknowledged`, the column
   writers, the notice-on-stderr rule). Callers stop knowing which
   stream a thing goes to and how a table is aligned.
-- `cli/acts.py`: `Act`, `_act`, `_performed`, `_path`, and the
-  builders every family's tables use (`_entity_path`, the per-kind
-  `SET_ENTITY`/`SHOW_ENTITY`/`EXPORT_ENTITY`/`DELETE_ENTITY` tables,
-  since one row per kind is what the entity family is made of).
-  Callers stop knowing how one act becomes one request and one
-  rendering.
+- `cli/acts.py`: `Act`, `_act`, `_performed`, `_path`, and only the
+  helpers every family reaches (the fixed unreadable-answer sentences,
+  the address helpers). Nothing entity-shaped: the per-kind
+  `SET_ENTITY`/`SHOW_ENTITY`/`EXPORT_ENTITY`/`DELETE_ENTITY` tables
+  and `_entity_path` are the entity family's, and `SHOW_ENTITY` names
+  the entity renderer, so keeping them here would make `acts` import
+  `entities` while `entities` imports `Act`. Callers stop knowing how
+  one act becomes one request and one rendering.
 - `cli/grammar.py`: `Globals`, `Command`, `_Grouped`, `_Verbatim`,
   the declare shapes, `GROUPS`, `COMMANDS`, `command()`, and the
   committed-reference builders `cli_reference` and `cli_recipes`,
@@ -250,8 +257,9 @@ sentences together, which is the issue's stated shape:
 
 - `cli/entities.py`: provider, mcp-server, prompt-fragment, agent,
   agent-defaults, default-agent, and the secret rows of the two
-  holders; the entity renderers and the masked-configuration shapes
-  (`BODY`, `ENTRIES`, the `_sections` reading).
+  holders; the per-kind act tables and `_entity_path`; the entity
+  renderers and the masked-configuration shapes (`BODY`, `ENTRIES`,
+  the `_sections` reading).
 - `cli/deployment.py`: the commands about the deployment as a whole:
   export, import, apply, diff, list, info, with the export document,
   the apply and diff listings, `SPOKEN` and `INSTALLS`.
@@ -266,7 +274,15 @@ sentences together, which is the issue's stated shape:
   `_server_config`, the one function of the onboarding-URL section,
   which is its only caller.
 
-Fourteen modules. Each passes the deletion test in the direction the
+The prelude's constants and fixed sentences are not a module. Each
+moves to the module of its consumer, and one with consumers in several
+modules moves to the lowest of them in the DAG order, the one the
+others already import; `sections.py`'s per-name referrer lists say
+which that is for every name, and the AST-identity map records where
+each landed. `PROGRAM`, `CONSOLE_SCRIPT`, `DISPATCHED` and
+`DISTRIBUTION` follow the same rule rather than an exception to it.
+
+Fifteen modules. Each passes the deletion test in the direction the
 guide asks it in both ways: inlining any family back into the acts
 module puts a family's renderers beside every other family's, which
 is the file this plan exists to end; and no module forwards its
@@ -426,7 +442,7 @@ decision site.
   its raiser knows) and the CLI's refusal reader (it phrases what it
   knows and quotes what it does not). No new module; `REMEDIES` is a
   table beside its one consumer, per #386's own reasoning.
-- **M1** turns one module into fourteen, listed above with what each
+- **M1** turns one module into fifteen, listed above with what each
   hides. No seam is added: the package's modules import each other's
   names, which is what they did as one file, and the one seam that
   exists (the `Invocation` type and the `Act` row) is unchanged.
@@ -530,7 +546,7 @@ Reusing what exists wherever the assertion already has a home.
   passing the token, the tolerant read and `REMEDIES` in the CLI, the
   `SERVER_PROGRAM` comment, the regenerated OpenAPI document, the
   tests above, a changelog fragment. Own PR, from this branch, first.
-- [ ] **M1: the package.** `config/cli/` with the fourteen modules,
+- [ ] **M1: the package.** `config/cli/` with the fifteen modules,
   every definition moved unchanged, the 47 test files re-pointed, the
   five patches retargeted, the two structural tests rewritten, the
   manifests regenerated, the AST-identity script and `cli_sections.py`
@@ -604,6 +620,14 @@ refer to the plan as committed at that blob.
    (`Invocation`, `Act`, `_act`, `_performed`, genuinely shared
    helpers) and put every entity-specific builder, table, renderer
    and secret row in `entities.py`.
+
+   *Resolution*: accepted, and it exposed an omission: the plan had
+   not said where `Invocation` lives. The entity tables and
+   `_entity_path` move to `entities.py`, `acts.py` keeps only what
+   every family reaches, `Invocation` gets `cli/invocation.py` as the
+   package's lowest module (so `reach.py` can annotate with it without
+   importing `acts.py`), and a rule for where each prelude constant
+   lands is written down. Fifteen modules.
 
 4. **P2: the rewritten transportability test still pins a filename,
    and the wrong one.** The calls sit inside `_fragment_body` and
