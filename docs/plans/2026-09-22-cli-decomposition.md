@@ -356,10 +356,12 @@ Three proofs, none of them "the tests pass".
 ### M3: the dump beside the reader, and the dispatch on the render step
 
 `answers.py` gains one function, `encoded(shape, answer, format)`,
-which validates an answer as its shape the way `_understood` does and
-dumps it in JSON mode (`TypeAdapter.dump_python(..., mode="json")`),
-so an enum member such as `Applies.RELOAD` leaves as its string and a
-date as ISO text, before writing it as JSON (the standard encoder,
+which first performs exactly `_understood`'s reading, the strict
+`validate_python` over `_declared` with the same fixed refusal on
+failure, and then dumps that validated result in JSON mode
+(`TypeAdapter.dump_python(..., mode="json")`), so an enum member such
+as `Applies.RELOAD` leaves as its string and a date as ISO text, before
+writing it as JSON (the standard encoder,
 sorted keys, no ASCII escaping of non-ASCII) or YAML (`yaml.safe_dump`,
 block style, the flags the export already uses). `_understood`'s own
 Python-mode dump keeps enum members as members, which PyYAML's safe
@@ -372,7 +374,11 @@ the CLI guide prices, and it is proven once, on the model: a test
 plants a control character and the fixed-length mask in a response
 model that carries an enum (an `Acknowledgement` with its `applies`),
 dumps it through both encoders, and asserts the character is escaped,
-the mask is the mask, and the enum is its value.
+the mask is the mask, and the enum is its value. Beside it, the
+machine arm is driven with a body carrying an extra member and with a
+strict-type mismatch, and asserted to meet the fixed refusal with no
+bytes on either stream, which is the read path `_understood` already
+takes, reached through the new function.
 
 The dispatch sits where the issue put it, on the act's render step.
 `answers.py` declares `Output(StrEnum)` with `human`, `json` and
@@ -803,6 +809,11 @@ verdict "not ready" pending the P1 amendments. Condensed but faithful.
    `_understood` validation and declaration filtering first, and add a
    machine-arm test with an extra field and a strict mismatch,
    asserting the fixed refusal and no bytes on either stream.
+
+   *Resolution*: accepted as a clarification the sentence needed:
+   `encoded` performs `_understood`'s exact validation and declaration
+   filtering first, then dumps; the two refusal cases are added to the
+   machine-arm test.
 
 4. **P2: M1 leaves two commands without a family.** The flat `show`
    is not in the deployment list, and `cli-reference` with its handler
