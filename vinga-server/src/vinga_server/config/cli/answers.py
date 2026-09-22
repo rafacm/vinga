@@ -31,6 +31,7 @@ import yaml
 from pydantic import BaseModel, TypeAdapter
 
 from vinga_server.config.loader import ConfigError
+from vinga_server.config.transport import untransportable
 
 # What an answer nobody vouched for can provoke out of the libraries
 # this reading is built on, which is the set this module's boundary is
@@ -180,7 +181,14 @@ def encoded(shape: object, answer: object, refusal: str, output: Output) -> str:
     document = _read(shape, answer, refusal, "json")
     problem: str | None = None
     try:
-        return _written(document, output)
+        if untransportable(document, numbers_only=True) is None:
+            return _written(document, output)
+        # The walk's own sentence is not repeated: it says where the
+        # value sits, in structural steps, which is the right answer
+        # about a fragment an operator wrote and more than this boundary
+        # says about a body nobody vouched for. What an act answers with
+        # is its own fixed sentence.
+        problem = refusal
     except _UNWRITABLE:
         problem = refusal
     raise ConfigError(problem)
@@ -192,8 +200,12 @@ def _written(document: object, output: Output) -> str:
     if output is Output.JSON:
         # Sorted, because determinism on stdout is the standing rule and
         # a mapping's order here is whatever the model happened to
-        # declare rather than anything the answer said.
-        return json.dumps(document, sort_keys=True, ensure_ascii=True) + "\n"
+        # declare rather than anything the answer said. `allow_nan` off
+        # is the last guard behind the walk above: the encoder's own
+        # default writes `NaN` and `Infinity`, which are not JSON and
+        # which a parser on the other side either refuses or reads as
+        # something nobody sent.
+        return json.dumps(document, sort_keys=True, ensure_ascii=True, allow_nan=False) + "\n"
     # Block style and unsorted, which is the export's shape: what a YAML
     # document is read in is the order the shape declares, top to bottom,
     # and flow style would put a whole answer on one line.

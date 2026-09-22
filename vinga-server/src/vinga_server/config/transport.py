@@ -12,12 +12,20 @@ JSON column in the first place.
 The policy lives in a module of its own because two callers apply it and
 they are on opposite sides of the connection. The repository asks it of
 every fragment it parses and of every row it reads back; the CLI asks it
-of a fragment before that fragment travels as a request body, which is
-the only place a mistake can still be met by a sentence rather than by a
-stack trace. One rule and one wording, so whichever of them sees the
-value first says the same thing about it. The alternative is what the
-encoder does on its own: a TypeError, a ValueError or a RecursionError
-with a traceback, in place of the sentence this file exists to produce.
+of a fragment before that fragment travels as a request body, and of an
+answer before that answer is written as a machine-readable document,
+which are the places a mistake can still be met by a sentence rather
+than by a stack trace. One rule and one wording, so whichever of them
+sees the value first says the same thing about it. The alternative is
+what the encoder does on its own: a TypeError, a ValueError or a
+RecursionError with a traceback, in place of the sentence this file
+exists to produce.
+
+The two questions below are why the answer side reads the walk rather
+than the guard: a fragment is refused with the section it was written
+under, and an answer is refused with the fixed sentence of the act that
+asked for it, so the caller there wants what the walk found and not the
+sentence it would compose.
 
 Nothing here quotes a value. A fragment refused by these rules is one
 nothing has validated yet, so it may hold anything, including a
