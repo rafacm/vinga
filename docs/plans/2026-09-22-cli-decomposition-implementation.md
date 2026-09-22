@@ -650,3 +650,96 @@ lane is inside the integration lane and ran, since `uv` is on PATH and
 nothing skipped. The image build and the smoke conversation were not
 run here and are unverified in this section; the pull request records
 what CI says about them.
+
+### PR review round, PR #549
+
+Automated external review of this PR's diff (origin/main...55d65b64).
+Reviewed 2026-09-22 by openai/gpt-5.6-sol, thinking high via codex CLI
+0.155.1, read-only sandbox, runtime 17m59s, at commit 55d65b64. Verdict
+as received: **not mergeable until the P1 and P2 findings are fixed**.
+Five findings, all adopted.
+
+Four of the five are the same shape, and it is the one this milestone
+was supposed to be about: a check that reports a problem and passes
+anyway. Two tools print a duplicate and exit 0, a cycle proof drops the
+shortest cycle there is, and two locality tests assert a string against
+itself. Each of them would have gone on being read as evidence.
+
+1. **P1: the documented AST-checker path emits a raw traceback.** It
+   defaulted to `HEAD^`, which on a milestone of more than one commit
+   is already the package, so the documented no-argument run asked git
+   for a file that is not there and the `CalledProcessError` left as a
+   traceback. A supplied revision that names nothing did the same and
+   put the rejected revision in it.
+
+   *Resolution*: accepted, in `4e1b38f4`. The default is the merge base
+   of this checkout and the branch it merges into, resolved rather than
+   guessed at; a checkout with neither `origin/main` nor `main` is
+   refused, because a base this tool invented would report the
+   difference as a definition somebody edited. Every git call goes
+   through one function that answers `None` rather than raising, so
+   there is nothing to chain, and the three refusals are fixed
+   sentences naming no revision, no path and no word of git's own.
+   Falsified four ways, each watched before and after: no argument, a
+   bogus revision spelled as a credential, outside a checkout, and
+   inside one with no upstream branch.
+
+2. **P2: the import-cycle proof silently removed self-cycles**, and did
+   not read `from .. import cli` or `from vinga_server.config import
+   cli` as edges to `__init__`, so a self-import or a cycle through the
+   package door stayed green.
+
+   *Resolution*: accepted, in `dba5a479`. Self-edges are kept, both
+   door spellings are edges to `__init__`, and `from ..cli import reach`
+   is read as the sibling it is. Four regression cases, one per
+   spelling, planted in a package of the test's own with a no-cycle
+   control beside them. Falsified twice: against the old walk the three
+   it missed go red and `import vinga_server.config.cli` stays green,
+   which is why that one is kept as a case; and planted one at a time
+   in the real package, each of the three turns
+   `test_the_package_imports_itself_in_one_direction_only` red.
+
+3. **P2: two locality tests were reduced to tautologies.**
+   `NEEDS_THE_SERVER_HALF is NEEDS_THE_SERVER_HALF` and the same for
+   `NEEDS_THE_SIM_EXTRA` are true of every name there has ever been,
+   while what their docstrings claim is that there is one string and
+   not two. `loader.py` still said `cli` re-exports the constant.
+
+   *Resolution*: accepted, in `b083def2`. Each consumer's binding is
+   held to the loader's: `local`, `doctor` and `main` for the server
+   half, `simulator` for the extra. The comment names its three readers
+   and says that each imports this module rather than hopping through
+   another, since the package re-exports nothing; the parser sentence's
+   comment named the CLI as a file and now names the module. Falsified
+   by rebinding each consumer to a copy of the sentence, equal and not
+   the same, which turns both tests red.
+
+4. **P3: both definition measurements could report success after
+   finding duplicates.** Both printed a duplicate and exited on
+   something else.
+
+   *Resolution*: accepted, in `c8a33318`. Both collect duplicates, keep
+   the first definition, report them under a heading of their own and
+   fail on them. It was not only a status: `cli_ast_identity` let the
+   second definition replace the first and compared the survivor, and
+   `cli_sections` dropped it and went on to build the matrix and the
+   reference graph its verdict is read off. Falsified with `UNNAMEABLE`
+   planted in `answers.py` beside `output.py`'s: before, `cli_sections`
+   exited 0 and `cli_ast_identity` reported the totals matching; after,
+   both exit 1 and name the pair.
+
+5. **P3: a live module docstring still described the removed
+   architecture.** `docgen.py` said the configuration commands pay for
+   SQLAlchemy and cryptography because `cli.py` imports three helpers
+   from `store.py`.
+
+   *Resolution*: accepted, in `e82db44c`. The paragraph says where the
+   three helpers actually are, `transport.py` and the entity registry,
+   and names the test that pins it. Checked against `CLI_REACH` rather
+   than asserted: `config.store` absent, `config.transport` and
+   `config.entities` present.
+
+A trap worth keeping, from the third finding's falsification: `str(x)`,
+`x + ""`, `"".join([x])` and `x[:]` all answer the same object for a
+`str` in CPython, so the first attempt at rebinding a consumer to a
+copy did not bite and read exactly like a fix that had not worked.
