@@ -575,9 +575,19 @@ Reusing what exists wherever the assertion already has a home.
   claim refusal, `tests/unit/test_config_api_runtime.py` (the
   unloaded-agent case near line 679) for the agent not serving,
   `tests/unit/test_simulator_board.py` and `test_config_api_pending.py`
-  for the device already bound, and `tests/unit/test_config_api_writes.py`
-  (the secret-holder case near line 861) for the two missing-holder
-  tokens. Each pins the new sentence, asserts the exact `reason` the
+  for the device already bound, and, for the two missing-holder
+  tokens, a deterministic race fixture rather than the existing
+  secret-write case: that case near line 861 of
+  `test_config_api_writes.py` meets `_check_slot`'s ordinary
+  missing-entity refusal, while the sentence M4 changes is the one
+  `_write_secrets` composes when its update affects no row, which is
+  reached only when the holder disappears between the slot check and
+  the write. The fixture removes the holder at that point (a seam on
+  the check, or a concurrent delete the test sequences), once per
+  holder kind, at the store level for the two reasons and once over
+  HTTP through the API for the body's `reason`, the command-free
+  `detail` and the no-secret and no-address surfaces. Each of the
+  five paths pins the new sentence, asserts the exact `reason` the
   site attaches, asserts the sentence names no command (`PROGRAM` and
   `SERVER_PROGRAM` absent from `detail`, the #386 invariant extended
   to these five), and keeps the no-secret and no-address checks
@@ -947,6 +957,12 @@ three P1, verdict "not ready". Condensed but faithful.
    `SERVER_PROGRAM`. Specify a deterministic race fixture for both
    holder kinds that reaches that path, then pin the reason, the
    command-free detail and the no-leak surfaces over HTTP.
+
+   *Resolution*: accepted, and it is a fact worth having on record:
+   the fifth refusal is reached only under a race. The Tests section
+   now asks for a deterministic fixture that removes the holder
+   between the slot check and the write, per holder kind, at the
+   store level and once over HTTP.
 
 5. **P2: `REMEDIES` has no specified contents.** The six tokens are
    defined and their sentences are not; the closed-set pin proves
