@@ -340,12 +340,20 @@ Three proofs, none of them "the tests pass".
   `_new_name`, `_secret_body` and their like) and carry nothing YAML
   can smuggle. So the test derives both sets from the call graph,
   resolved the way `cli_fields.py` resolves a callable to its source
-  and follows its calls: every body that reaches the parse site also
-  reaches `check_transportable` before it returns, and the set that
-  reaches the parse site is asserted to be exactly those two, so a new
-  YAML-derived body is a diff line rather than a silent widening. The
-  falsification is the removal of a real guard: the check taken out of
-  `_fragment_body` and the test watched failing, then restored. The
+  and follows its calls: the set of bodies that reach the parse site
+  is derived from the call graph and asserted to be exactly those two,
+  so a new YAML-derived body is a diff line rather than a silent
+  widening. Reachability is not order, so the ordering claim, that
+  the guard runs before the body returns, is proven at runtime for
+  every member of that set rather than read off the graph: the cases
+  are parametrized over the discovered set, each member has an
+  invocation builder keyed by its name that hands it an untransportable
+  fragment (a NaN), and each asserts the transport sentence is raised
+  and `_call` was never reached; a discovered body with no builder is
+  an error, not a skip, so the pin above and the runtime cases move
+  together. The falsification is twofold: the check taken out of
+  `_fragment_body`, and the check moved after the return so it is
+  reachable and never runs, each watched failing, then restored. The
   repository side keeps its existing assertion, and the behaviour
   cases beside them (a fragment holding a NaN meets the sentence and
   no request is made, nothing of the fragment leaks) are unchanged. No
@@ -1063,3 +1071,8 @@ verdict "ready after the P1/P2 amendments". Condensed but faithful.
    bodies and no discovered one. Specify an order-aware predicate or
    runtime instrumentation for every discovered body, and mutation-test
    a post-return guard as well as a removed one.
+
+   *Resolution*: accepted. The call graph keeps the set pin, the
+   ordering is proven by runtime cases parametrized over the
+   discovered set with a builder per member, and the mutation run
+   covers a post-return guard as well as a removed one.
