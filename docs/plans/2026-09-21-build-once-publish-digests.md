@@ -1318,3 +1318,119 @@ job creates, the dated one, the `sha-` one and the moving one when it
 is written, is resolved after assignment and required to equal the
 validated index. With a 12-character revision there are two immutable
 tags per publish and the check is a loop, not a special case.
+
+## Plan review round 4
+
+Re-review at `b73ce98f` on 2026-09-22, codex with `gpt-5.6-sol`,
+read-only, runtime 236s. The prompt named the four things round 3 had
+changed and asked the reviewer to attack those hardest, to hunt for
+contradictions left by fourteen amendment commits, and to say plainly
+whether someone outside these conversations could implement the plan
+as written.
+
+**Every round-3 finding came back closed on the design**, and the
+verdict says the build-once and validation design is coherent and the
+~500s projection is supportable as a projection from the measured
+critical paths. What is still open is the plan as a **contract**: its
+milestone list and parts of its algorithm section had not caught up
+with three rounds of amendments, which the verdict says plainly is
+enough for an implementer to build the wrong tag format, the wrong
+event scope or the wrong history walk.
+
+That is the right place for a fourth round to land, and it is a
+failure mode worth naming: fourteen amendments that each corrected a
+decision left the sections that *restate* those decisions behind, and
+a plan is read by its milestone list more often than by its reasoning.
+
+### 1 (P1): the milestone contract still instructs the superseded design
+
+M1 still said seconds in the dated tag, `image-publish` running on
+every event, that it "moves the tags", and phase 2 checking "the tag"
+singular. None of those survived rounds 2 and 3, the moving tag now
+belongs to M2, and the twelve-character revision was in no milestone
+at all despite the footprint saying it must not be split from the tag
+changes.
+
+*Resolution*: accepted in full. Both milestones are rewritten from the
+settled design rather than patched, and the revision widening is
+assigned explicitly to M1 with its documentation. This is the finding
+that most justified a fourth round: everything it names was decided
+correctly somewhere else in the document and instructed wrongly here.
+
+### 2 (P1): the reconciler cannot both start at the moving tag and treat it as no input
+
+The range is defined as the commits between the moving tag's revision
+and the tip, and the force-push branch turns on whether that revision
+is in `origin/main`, while the requirements said nothing is read from
+the moving tag except the idempotence comparison. Nothing said how the
+revision is extracted from a multi-platform index, whether the two
+platform configs must agree, or what happens when the tag is absent,
+malformed, or still carries a seven-character revision from before
+this change.
+
+*Resolution*: accepted; the contradiction is mine and the sentence
+that created it was written for a design that no longer exists. The
+moving tag is now an explicit, validated input to range selection,
+with the reading specified: inspect its index, require one config per
+expected platform and one common `VINGA_REVISION` of 7 or 12
+hexadecimal characters, and resolve it to a unique commit. The
+bootstrap cases are stated rather than implied, and the seven
+character case is one of them, because the first promote after M1
+lands necessarily reads a tag written by the old scheme.
+
+### 3 (P2): "derived once" does not say how a twelve-character tag is produced
+
+`REVISION` is `${GITHUB_SHA:0:7}` in the workflow while
+`docker/metadata-action` independently generates
+`type=sha,format=short`, and the existing step only detects
+disagreement afterwards. Changing the first does not stop the second
+producing a seven-character tag, and nothing said how the same value
+reaches the dated tag.
+
+*Resolution*: accepted, and it is the finding most likely to have cost
+an implementation cycle: "derived once" described an intention with no
+mechanism, and the assertion I leaned on detects disagreement rather
+than creating agreement.
+
+`type=sha` is dropped. Both immutable tags are generated as `type=raw`
+from the one `REVISION` the job already computes, so there is one
+value and two tags rendered from it, and "derived once" becomes
+literally true instead of aspirational. The existing equality
+assertion stays as a guard, which is all it ever was. The reviewer's
+other option, `DOCKER_METADATA_SHORT_SHA_LENGTH=12`, is not taken:
+this session cannot verify that environment variable's behavior
+against the pinned action version, and a mechanism that cannot be
+checked before it runs is the wrong one to build a tag scheme on.
+
+### 4 (P2): "newest first" is undefined when the range contains merge commits
+
+A plain revision walk over `published..origin/main` reaches commits
+through every merge parent, so a tagged commit from merged or
+reintroduced history could be selected although it is not a position
+on `main`'s own sequence. The repository rebase-merges by convention,
+but the plan makes an unconditional guarantee and explicitly handles
+rewritten history, so convention does not define the algorithm.
+
+*Resolution*: accepted. The walk is specified as **first-parent**,
+from the tip toward the published revision, including merge commits
+themselves and excluding their side histories, with the same rule
+applied to the newest 200 commits on the force-push path. The
+reviewer's note about a tip whose image job is still running is
+adopted as written, because it states the correct behavior and the
+reason: that commit is skipped for this invocation, and its own
+promote, or any later surviving one, reconciles once its immutable tag
+exists. That is the self-healing property doing its job rather than an
+edge case needing separate handling.
+
+### 5 (P2): a superseded dispatch claim survives in the reconciler requirements
+
+One sentence still called idempotence "cheap to check on a dispatch",
+which round 3 had already recorded as false and corrected in the
+verification section.
+
+*Resolution*: accepted. The sentence is replaced with the settled
+rule. Worth recording rather than fixing silently: this is the second
+time this exact claim has had to be removed, having been corrected in
+one section while surviving in another, which is what a plan amended
+fourteen times does when a correction is applied where it was found
+rather than everywhere it appears.
