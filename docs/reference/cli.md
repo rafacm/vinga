@@ -459,16 +459,26 @@ credentials are the step before it.
 
 ## When an apply is refused
 
-`apply` refuses a stored configuration that does not compose into one a
-server could run, and its refusal deliberately says nothing about where
-the problem is. That is not an oversight and it is not a gap to be
-filled in the answer: what a reload refuses on is arbitrary stored
-state, and a sentence composed over that state can quote a value
-somebody wrote into the wrong field. The same is true of `diff`, which
-composes the same snapshot to compare it. So neither of them will ever
-say more than that the stored configuration was refused.
+`apply` refuses a stored configuration a server could not run, and what
+its refusal says depends on which half of the preparation refused.
 
-`check` is where the location is said instead:
+**A stored half that will not compose** is refused without a location.
+That is not an oversight and it is not a gap to be filled in the answer:
+what a compose refuses on is arbitrary stored state, and a sentence
+composed over that state can quote a value somebody wrote into the wrong
+field. The same is true of `diff`, which composes the same snapshot to
+compare it. So neither of them will ever say more than that the stored
+configuration was refused.
+
+**A stored half whose engines will not build** is refused with the
+location in the answer, in the sentence a server started from this store
+would print before refusing to start: the entry, the option key and the
+rule it broke, and never the value it refused over. A provider refusal
+is composed from this repository's own vocabulary rather than from the
+row, which is what makes it sayable where a compose refusal is not.
+`check` will not see this one, because it builds nothing.
+
+`check` is where the first one's location is said instead:
 
 ```bash
 vinga-server config check
