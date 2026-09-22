@@ -35,6 +35,7 @@ from pydantic import BaseModel
 from tests.support.apps import mounted
 from vinga_server.config import cli
 from vinga_server.config.api import build_api
+from vinga_server.config.cli import reach
 from vinga_server.config.loader import load_file_config
 from vinga_server.config.models import ServerConfig
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
@@ -49,7 +50,7 @@ TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
 # The command a fragment's header names, as in
 #   vinga provider set llm claude -f examples/llm-anthropic.yaml
-COMMAND = re.compile(rf"^#\s+{cli.PROGRAM} (\S+ set\b.*?) -f ")
+COMMAND = re.compile(rf"^#\s+{reach.PROGRAM} (\S+ set\b.*?) -f ")
 
 # Providers, MCP servers and prompt fragments have to exist before
 # anything references them: a write leaving a reference unresolved is
@@ -98,7 +99,7 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     fragment is installed through CLI parsing, HTTP and the repository
     rather than through a shortcut none of them takes."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    monkeypatch.delenv(cli.API_URL_ENV, raising=False)
+    monkeypatch.delenv(reach.API_URL_ENV, raising=False)
     monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
@@ -120,7 +121,7 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             )
         )
 
-    monkeypatch.setattr(cli, "build_client", factory)
+    monkeypatch.setattr(reach, "build_client", factory)
 
     def _run(*argv: str) -> int:
         nonlocal lifespans

@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from tests.support.configs import load_config_from_data
 from vinga_server.boundary import Reach
 from vinga_server.config import Config, ConfigError, docgen, load_file_config
+from vinga_server.config.cli import input
 from vinga_server.config.entities import PROGRAM, SERVER_PROGRAM
 from vinga_server.config.loader import (
     CONFIG_ENV_VAR,
@@ -774,10 +775,9 @@ def test_both_yaml_readers_catch_one_family(tmp_path: Path) -> None:
     parser, so what either of them treats as unparseable is one tuple:
     two of them would be the drift that left the boot path catching
     `YAMLError` alone while the fragment path caught four families."""
-    from vinga_server.config import cli
     from vinga_server.config.loader import UNPARSEABLE
 
-    assert cli.UNPARSEABLE is UNPARSEABLE
+    assert input.UNPARSEABLE is UNPARSEABLE
     assert yaml.YAMLError in UNPARSEABLE
 
 

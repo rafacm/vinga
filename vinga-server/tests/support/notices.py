@@ -16,7 +16,7 @@ What it no longer does is guess. A body carries `applies` beside the
 sentence, so the boundary is read off the field where there is a body;
 what a command printed is matched against the lines either side
 composes, each of which carries its own boundaries (`entities.Notice`
-for the server's, `cli.SPOKEN` for the ones the client says instead of
+for the server's, `output.SPOKEN` for the ones the client says instead of
 one). Neither is a table of phrases kept by hand beside the real one,
 which is what this module used to be and what a prose edit could
 silently move.
@@ -40,7 +40,8 @@ once, which is why the answer is a set rather than a token.
 
 from collections.abc import Mapping
 
-from vinga_server.config import cli, entities
+from vinga_server.config import entities
+from vinga_server.config.cli import output
 from vinga_server.config.responses import Applies
 
 CHECK_IN = Applies.CHECK_IN
@@ -67,7 +68,7 @@ _COMPOSED: tuple[entities.Notice, ...] = (
 # it knows (#426). A rendering prints one voice or the other, so a
 # reader of output that knew only the server's would answer "no
 # boundary at all" for every write whose set this client can name, which
-# is most of them. Read off `cli.SPOKEN` rather than restated here, for
+# is most of them. Read off `output.SPOKEN` rather than restated here, for
 # the reason the sentences above are read off `entities`: a table of
 # phrases kept by hand beside the real one is what this module used to
 # be, and what a prose edit could silently move.
@@ -79,7 +80,7 @@ _COMPOSED: tuple[entities.Notice, ...] = (
 # that line as bytes instead.
 _ANNOUNCED: tuple[tuple[str, tuple[Applies, ...]], ...] = (
     *((notice.sentence, notice.applies) for notice in _COMPOSED),
-    *((line, tuple(applies)) for applies, line in cli.SPOKEN.items()),
+    *((line, tuple(applies)) for applies, line in output.SPOKEN.items()),
 )
 
 

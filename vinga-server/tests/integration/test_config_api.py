@@ -19,8 +19,8 @@ from fastapi.testclient import TestClient
 from tests.support.problems import PROBLEM_KEYS
 from tests.support.stores import holding_the_write_lock, the_lock_held
 from vinga_server.app import create_app
-from vinga_server.config import cli
 from vinga_server.config.boot import load_boot_config
+from vinga_server.config.cli import reach
 
 # The pipeline a first deployment writes, in the order the write-time
 # reference checks require: providers, then what names them.
@@ -123,14 +123,14 @@ def test_a_contended_write_answers_over_a_real_socket(
     read timeout outlasts the production lock timeout is asserted
     directly in the unit suite, where nothing is shortened."""
     with holding_the_write_lock(monkeypatch), served_api() as api_url:
-        opener = cli.build_client(api_url, _token())
+        opener = reach.build_client(api_url, _token())
         try:
             assert opener.get("/config").status_code == 200
         finally:
             opener.close()
 
         with the_lock_held():
-            client = cli.build_client(api_url, _token())
+            client = reach.build_client(api_url, _token())
             try:
                 response = client.put("/agents/sam", json={"prompt": "You are Sam."})
             finally:
@@ -141,7 +141,7 @@ def test_a_contended_write_answers_over_a_real_socket(
 
         # And with the lock let go the same request is answered, which is
         # what makes the refusal above the retryable one it says it is.
-        client = cli.build_client(api_url, _token())
+        client = reach.build_client(api_url, _token())
         try:
             answered = client.put("/agents/sam", json={"prompt": "You are Sam."})
         finally:
@@ -160,7 +160,7 @@ def test_the_reload_answers_over_a_real_socket(served_api) -> None:
     holding a connected MCP server and a live grant.
     """
     with served_api() as api_url:
-        client = cli.build_client(api_url, _token())
+        client = reach.build_client(api_url, _token())
         try:
             applied = client.post(RELOAD)
         finally:

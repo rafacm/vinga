@@ -44,7 +44,7 @@ import pytest
 from tests.support.config_cli import runner
 from tests.support.configs import DEVICE_MAC
 from vinga_server import logs
-from vinga_server.config import cli
+from vinga_server.config.cli import reach
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.responses import PROBLEM_MEDIA_TYPE
 from vinga_server.conversations.records import TurnRecord
@@ -480,7 +480,7 @@ def answering(
     def factory(base_url: str, token: str) -> httpx.Client:
         return httpx.Client(base_url=base_url, transport=httpx.MockTransport(answer))
 
-    monkeypatch.setattr(cli, "build_client", factory)
+    monkeypatch.setattr(reach, "build_client", factory)
 
 
 def test_a_json_body_with_a_detail_is_not_this_apis_refusal(

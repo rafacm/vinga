@@ -38,6 +38,7 @@ from tests.integration.conftest import booted, mock_voice
 from tests.support.config_cli import API_SECRET_ENV
 from tests.support.deployment import Live, served
 from vinga_server.config import Config, cli
+from vinga_server.config.cli import reach, simulator
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 from vinga_server.ota import OTA_PATH
 from vinga_server.simulator import board, conversation, utterance
@@ -117,7 +118,7 @@ def live(monkeypatch: pytest.MonkeyPatch) -> Iterator[Live]:
     monkeypatch.setenv(API_SECRET_ENV, SECRET)
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
     with served(booted(deployment())) as running:
-        monkeypatch.setenv(cli.API_URL_ENV, running.api_url)
+        monkeypatch.setenv(reach.API_URL_ENV, running.api_url)
         yield running
 
 
@@ -135,7 +136,7 @@ def open_live(monkeypatch: pytest.MonkeyPatch) -> Iterator[Live]:
     monkeypatch.setenv(API_SECRET_ENV, SECRET)
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
     with served(booted(open_deployment())) as running:
-        monkeypatch.setenv(cli.API_URL_ENV, running.api_url)
+        monkeypatch.setenv(reach.API_URL_ENV, running.api_url)
         yield running
 
 
@@ -285,7 +286,7 @@ def test_a_board_nobody_claimed_is_refused_rather_than_reported(
     """
     assert ran(live) == 1
 
-    assert capsys.readouterr().err.strip() == cli.CANNOT_CONVERSE
+    assert capsys.readouterr().err.strip() == simulator.CANNOT_CONVERSE
 
 
 def test_the_utterance_is_paced_rather_than_burst(

@@ -41,8 +41,8 @@ from tests.support.problems import paths
 from tests.support.problems import refused as refusal_body
 from tests.support.stores import body, planted
 from vinga_server import logs
-from vinga_server.config import cli
 from vinga_server.config.api import build_api
+from vinga_server.config.cli import deployment
 from vinga_server.config.entities import PROGRAM
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import DatabaseConfig, ProviderConfig
@@ -598,14 +598,14 @@ def test_the_export_footer_puts_the_credentials_where_the_header_does() -> None:
     importing = f"{PROGRAM} import"
     applying = f"{PROGRAM} apply"
 
-    for named in (cli.EXPORT_HEADER, cli.EXPORT_SECRETS_HEADING):
+    for named in (deployment.EXPORT_HEADER, deployment.EXPORT_SECRETS_HEADING):
         assert importing in named, named
         assert applying in named, named
         assert named.index(importing) < named.index(applying), named
 
     # And the sentence that was true of the old grammar is gone rather
     # than merely outnumbered.
-    assert "after applying" not in cli.EXPORT_SECRETS_HEADING
+    assert "after applying" not in deployment.EXPORT_SECRETS_HEADING
 
 
 # The three ways a secret reaches an entity, all three seeded below,

@@ -40,7 +40,7 @@ from sqlalchemy import insert
 from tests.support.config_cli import answering, runner
 from tests.support.stores import memory, memory_rows
 from vinga_server import logs
-from vinga_server.config import cli
+from vinga_server.config.cli import output
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.db import write_engine
 from vinga_server.memory import schema
@@ -243,7 +243,7 @@ def test_the_limit_is_the_apis_rule_and_the_apis_sentence(run, capsys) -> None:
     assert code == 0
     assert len(printed.splitlines()) == 2
     # One of the two, so the page is not the listing and says so.
-    assert err.startswith(cli.MORE_PAGES)
+    assert err.startswith(output.MORE_PAGES)
     assert refused[0] == 1
     assert "limit has to be a whole number" in refused[2]
 
@@ -275,7 +275,7 @@ def test_a_listing_longer_than_a_page_is_walked_by_its_own_notice(
         if not err:
             cursor = None
             break
-        assert err.startswith(cli.MORE_PAGES)
+        assert err.startswith(output.MORE_PAGES)
         cursor = err.split()[-1]
 
     assert cursor is None
@@ -311,7 +311,7 @@ def test_a_stored_fact_is_printed_whole(run, capsys) -> None:
     concealed tail is exactly what the operator came to see: the rule
     `agent preview` draws, applied to the same content one layer down.
     """
-    long_fact = "the user said " + "x" * (cli.CELL_LENGTH * 2)
+    long_fact = "the user said " + "x" * (output.CELL_LENGTH * 2)
     told(MemoryScope.AGENT, AGENT, long_fact)
 
     code, printed, err = out(run, capsys, "memory", "list", "agent", AGENT)

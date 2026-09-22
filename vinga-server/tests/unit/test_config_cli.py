@@ -46,7 +46,8 @@ from tests.support.config_cli import document as _document
 from tests.support.config_cli import logged as _logged
 from tests.support.config_cli import showing as _showing
 from tests.support.notices import CHECK_IN, RELOAD, boundaries
-from vinga_server.config import cli
+from vinga_server.config.cli import input, output
+from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import NOT_A_MAC, DatabaseConfig, is_device_id
 from vinga_server.config.responses import Applies
 from vinga_server.db import open_database, schema
@@ -205,7 +206,7 @@ def test_every_way_a_fragment_file_fails_has_one_sentence_of_its_own(
     captured = capsys.readouterr()
     # The whole of stderr, not a substring of it: what is under test is
     # that this row has a sentence rather than the next row's.
-    assert captured.err == getattr(cli, sentence) + "\n"
+    assert captured.err == getattr(input, sentence) + "\n"
     assert captured.out == ""
     assert caplog.records == []
     assert SECRET not in _logged(caplog)
@@ -226,10 +227,10 @@ def test_no_fragment_file_refusal_carries_what_the_failure_held(
     """
     refusing_read(raised)
 
-    with pytest.raises(cli.ConfigError) as caught:
-        cli._file(str(tmp_path / FRAGMENT_NAME))
+    with pytest.raises(ConfigError) as caught:
+        input._file(str(tmp_path / FRAGMENT_NAME))
 
-    assert str(caught.value) == getattr(cli, sentence)
+    assert str(caught.value) == getattr(input, sentence)
     assert SECRET not in _chain(caught.value)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
@@ -248,7 +249,7 @@ def test_a_missing_fragment_file_really_does_take_that_row(
     assert run("agent", "set", "sam", "-f", str(missing)) == 1
 
     captured = capsys.readouterr()
-    assert captured.err == cli.FILE_NOT_FOUND + "\n"
+    assert captured.err == input.FILE_NOT_FOUND + "\n"
     assert str(missing) not in captured.err
     assert SECRET not in captured.err + captured.out
 
@@ -262,7 +263,7 @@ def test_a_directory_where_a_fragment_belongs_really_does_take_its_row(
     assert run("agent", "set", "sam", "-f", str(directory)) == 1
 
     captured = capsys.readouterr()
-    assert captured.err == cli.FILE_NOT_READABLE + "\n"
+    assert captured.err == input.FILE_NOT_READABLE + "\n"
     assert "Is a directory" not in captured.err
     assert SECRET not in captured.err + captured.out
 
@@ -286,7 +287,7 @@ def test_a_fragment_file_that_is_not_text_is_refused_rather_than_thrown(
         assert run("agent", "set", "sam", "-f", str(binary)) == 1
 
     captured = capsys.readouterr()
-    assert captured.err == cli.FILE_NOT_TEXT + "\n"
+    assert captured.err == input.FILE_NOT_TEXT + "\n"
     assert captured.out == ""
     assert SECRET not in captured.err
     assert "Traceback" not in captured.err
@@ -306,7 +307,7 @@ def test_a_fragment_file_that_will_not_parse_is_not_named_either(
     assert run("agent", "set", "sam", "-f", str(broken)) == 1
 
     captured = capsys.readouterr()
-    assert f"invalid YAML in {cli.FILE_SOURCE} at line" in captured.err
+    assert f"invalid YAML in {input.FILE_SOURCE} at line" in captured.err
     assert SECRET not in captured.err
     assert str(broken) not in captured.err
 
@@ -333,7 +334,7 @@ def test_every_mutating_command_says_when_the_write_applies(
     run("agent", "set", "sam", "-f", "-", stdin="llm: claude\n")
     written = capsys.readouterr().err
     assert boundaries(written) == {RELOAD}
-    assert written.splitlines() == [cli.SPOKEN[frozenset({Applies.RELOAD})]]
+    assert written.splitlines() == [output.SPOKEN[frozenset({Applies.RELOAD})]]
 
     run("default-agent", "set", "sam")
     # The application this fixture builds is told of no servable agents,
@@ -787,8 +788,8 @@ def test_a_source_that_will_not_parse_carries_no_parser_exception(
     written = tmp_path / "unreadable.yaml"
     written.write_text(source, encoding="utf-8")
 
-    with pytest.raises(cli.ConfigError) as caught:
-        cli._fragment(str(written))
+    with pytest.raises(ConfigError) as caught:
+        input._fragment(str(written))
 
     assert "invalid YAML" in str(caught.value)
     assert SECRET not in _chain(caught.value)
@@ -886,16 +887,16 @@ def test_a_parser_failure_carries_no_parser_exception(tmp_path: Path) -> None:
     # assert; a __cause__ or a __context__ still holding the library's
     # own exception is reachable only from where the refusal is raised,
     # and anything that renders a traceback would find it there.
-    with pytest.raises(cli.ConfigError) as caught:
-        cli._fragment(str(fragment))
+    with pytest.raises(ConfigError) as caught:
+        input._fragment(str(fragment))
 
     assert "invalid YAML" in str(caught.value)
     assert SECRET not in str(caught.value)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
 
-    with pytest.raises(cli.ConfigError) as missing:
-        cli._fragment(str(tmp_path / "nowhere.yaml"))
+    with pytest.raises(ConfigError) as missing:
+        input._fragment(str(tmp_path / "nowhere.yaml"))
 
     assert missing.value.__cause__ is None
     assert missing.value.__context__ is None
@@ -1180,7 +1181,7 @@ def test_neither_way_of_writing_an_entity_is_the_missing_argument(
     assert run("agent", "set", "sam") == 1
 
     captured = capsys.readouterr()
-    assert cli.MISSING_ARGUMENT in captured.err
+    assert input.MISSING_ARGUMENT in captured.err
     assert "run with --help for the grammar" in captured.err
     assert captured.out == ""
 
@@ -1194,7 +1195,7 @@ def test_both_ways_at_once_is_refused(
     assert run("agent", "set", "sam", "prompt=hi", "-f", str(fragment)) == 1
 
     captured = capsys.readouterr()
-    assert cli.BOTH_INPUTS in captured.err
+    assert input.BOTH_INPUTS in captured.err
     assert captured.out == ""
     # And nothing was written either way.
     assert run("agent", "show", "sam") == 1
@@ -1213,21 +1214,21 @@ def test_both_ways_at_once_is_refused(
 # the headline rather than as the whole sentence because the position
 # moves with the input, and the position is the only thing about the
 # failure the refusal carries.
-_UNREADABLE_VALUE = f"invalid YAML in {cli.PAIR_SOURCE}"
+_UNREADABLE_VALUE = f"invalid YAML in {input.PAIR_SOURCE}"
 
 MALFORMED = [
-    ("no separator at all", (SECRET,), cli.PAIR_NEEDS_EQUALS),
-    ("an empty key", (f"={SECRET}",), cli.PAIR_EMPTY_KEY),
-    ("an empty dotted segment", (f"a..b={SECRET}",), cli.PAIR_EMPTY_KEY),
-    ("a leading dot", (f".a={SECRET}",), cli.PAIR_EMPTY_KEY),
-    ("the same key twice", (f"model={SECRET}", f"model={SECRET}"), cli.PAIR_DUPLICATE_KEY),
-    ("a key nested inside another", (f"a.b={SECRET}", f"a={SECRET}"), cli.PAIR_NESTED_KEY),
+    ("no separator at all", (SECRET,), input.PAIR_NEEDS_EQUALS),
+    ("an empty key", (f"={SECRET}",), input.PAIR_EMPTY_KEY),
+    ("an empty dotted segment", (f"a..b={SECRET}",), input.PAIR_EMPTY_KEY),
+    ("a leading dot", (f".a={SECRET}",), input.PAIR_EMPTY_KEY),
+    ("the same key twice", (f"model={SECRET}", f"model={SECRET}"), input.PAIR_DUPLICATE_KEY),
+    ("a key nested inside another", (f"a.b={SECRET}", f"a={SECRET}"), input.PAIR_NESTED_KEY),
     ("a value that will not parse", (f"model='{SECRET}",), _UNREADABLE_VALUE),
     # Not a YAMLError at all: CPython refuses to parse an integer of
     # more than 4300 digits, and PyYAML lets that ValueError through.
     ("a value the parser cannot construct", (f"model={'1' * 5000}",), _UNREADABLE_VALUE),
-    ("a value that is a list", (f"model=[{SECRET}]",), cli.PAIR_NOT_SCALAR),
-    ("a value that is a mapping", (f"model={{a: {SECRET}}}",), cli.PAIR_NOT_SCALAR),
+    ("a value that is a list", (f"model=[{SECRET}]",), input.PAIR_NOT_SCALAR),
+    ("a value that is a mapping", (f"model={{a: {SECRET}}}",), input.PAIR_NOT_SCALAR),
 ]
 
 
@@ -1269,8 +1270,8 @@ def test_a_malformed_pair_carries_no_parser_exception(
     was parsing, which here is the value, so the refusal is built inside
     the handler and raised outside it and nothing walking the chain
     finds the value behind it."""
-    with pytest.raises(cli.ConfigError) as caught:
-        cli._pairs(pairs)
+    with pytest.raises(ConfigError) as caught:
+        input._pairs(pairs)
 
     assert sentence in str(caught.value)
     assert SECRET not in _chain(caught.value)
@@ -1350,7 +1351,7 @@ def test_import_writes_a_whole_deployment_from_one_file(
     # One line for the document since #426, in this client's own words:
     # the four entries carry two different boundary sets and are waiting
     # on the one install either of them names.
-    assert written.err.splitlines() == [f"imported 4 entries, {cli.NOT_SERVING_YET}"]
+    assert written.err.splitlines() == [f"imported 4 entries, {output.NOT_SERVING_YET}"]
     assert run("show") == 0
     shown = _document(capsys.readouterr().out)
     assert shown["agents"]["sam"]["prompt"] == "You are Sam."
@@ -1605,7 +1606,7 @@ def test_reading_a_document_from_a_terminal_says_so_rather_than_hanging(
     assert run(*argv) == 1
 
     captured = capsys.readouterr()
-    assert captured.err == cli.usage_line(cli.STDIN_AT_A_TERMINAL) + "\n"
+    assert captured.err == input.usage_line(input.STDIN_AT_A_TERMINAL) + "\n"
     assert captured.out == ""
 
 

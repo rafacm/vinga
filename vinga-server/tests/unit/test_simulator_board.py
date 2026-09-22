@@ -31,6 +31,7 @@ import pytest
 from tests.support.config_cli import API_SECRET_ENV, chain, logged, runner
 from vinga_server import device_endpoint
 from vinga_server.config import cli
+from vinga_server.config.cli import acts, devices, invocation, reach, simulator
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import NOT_A_MAC, DatabaseConfig
 from vinga_server.config.responses import RefusalReason
@@ -407,8 +408,8 @@ def test_an_open_admission_says_that_deployment_issues_no_tokens(
 
     captured = capsys.readouterr()
     assert "is admitted" in captured.out
-    assert cli.NO_TOKEN_ISSUED in captured.out
-    assert cli.TOKEN_ISSUED not in captured.out
+    assert simulator.NO_TOKEN_ISSUED in captured.out
+    assert simulator.TOKEN_ISSUED not in captured.out
 
 
 def test_an_admission_with_a_credential_says_a_token_was_issued(
@@ -420,7 +421,7 @@ def test_an_admission_with_a_credential_says_a_token_was_issued(
 
     assert run("simulator", "check-in", URL) == 0
 
-    assert cli.TOKEN_ISSUED in capsys.readouterr().out
+    assert simulator.TOKEN_ISSUED in capsys.readouterr().out
 
 
 def test_the_trap_state_names_every_reading_that_produces_it(
@@ -441,7 +442,7 @@ def test_the_trap_state_names_every_reading_that_produces_it(
     assert run("simulator", "check-in", URL) == 0
 
     said = capsys.readouterr().out
-    assert cli.MAY_NOT_SPEAK in said
+    assert simulator.MAY_NOT_SPEAK in said
     assert "onboarding is turned off" in said
     assert "default_agent" in said
     assert "not serving yet" in said
@@ -459,9 +460,9 @@ def test_the_conversation_refusal_advises_the_claim_only_where_it_applies() -> N
     back. It points at the check-in's own answer first now, and
     conditions the claim on the state that has something to claim.
     """
-    assert "check-in" in cli.CANNOT_CONVERSE
-    assert cli.CANNOT_CONVERSE.index("check-in") < cli.CANNOT_CONVERSE.index("--claim")
-    assert "showing an activation code" in cli.CANNOT_CONVERSE
+    assert "check-in" in simulator.CANNOT_CONVERSE
+    assert simulator.CANNOT_CONVERSE.index("check-in") < simulator.CANNOT_CONVERSE.index("--claim")
+    assert "showing an activation code" in simulator.CANNOT_CONVERSE
 
 
 @pytest.mark.parametrize(
@@ -509,12 +510,12 @@ def test_a_reply_this_client_has_no_word_for_is_read_by_the_token_alone(
 @pytest.mark.parametrize(
     ("block", "expected"),
     [
-        ({"version": board.FIRMWARE_VERSION, "url": ""}, cli.FIRMWARE_UP_TO_DATE),
-        ({"version": "9.9.9", "url": "https://voice.example/fw.bin"}, cli.FIRMWARE_OFFERED),
+        ({"version": board.FIRMWARE_VERSION, "url": ""}, simulator.FIRMWARE_UP_TO_DATE),
+        ({"version": "9.9.9", "url": "https://voice.example/fw.bin"}, simulator.FIRMWARE_OFFERED),
         ({"version": board.FIRMWARE_VERSION, "url": "https://voice.example/fw.bin"},
-         cli.FIRMWARE_OFFERED),
-        ({"version": "9.9.9", "url": ""}, cli.FIRMWARE_UNEXPECTED_VERSION),
-        ({}, cli.FIRMWARE_UNEXPECTED_VERSION),
+         simulator.FIRMWARE_OFFERED),
+        ({"version": "9.9.9", "url": ""}, simulator.FIRMWARE_UNEXPECTED_VERSION),
+        ({}, simulator.FIRMWARE_UNEXPECTED_VERSION),
     ],
     ids=[
         "the version echoed back with nothing to fetch",
@@ -561,7 +562,7 @@ def test_the_firmware_block_is_reported_without_a_word_of_it(
         assert run("simulator", "check-in", URL) == 0
     captured = capsys.readouterr()
 
-    assert cli.FIRMWARE_OFFERED in captured.out
+    assert simulator.FIRMWARE_OFFERED in captured.out
     assert PASTED not in captured.out + captured.err + logged(caplog)
 
 
@@ -946,21 +947,21 @@ def test_a_claim_performs_the_act_the_grammar_already_has(
         answering(body=admitted()),
     )
     performed: list[object] = []
-    dispatch = cli._act  # noqa: SLF001
+    dispatch = acts._act  # noqa: SLF001
 
-    def recording(args: cli.Invocation, act: cli.Act, reached: cli.Reached) -> None:
+    def recording(args: invocation.Invocation, act: acts.Act, reached: reach.Reached) -> None:
         performed.append(act)
         dispatch(args, act, reached)
 
-    monkeypatch.setattr(cli, "_act", recording)
+    monkeypatch.setattr(acts, "_act", recording)
     reached_before = len(run.reached)
 
     assert run("simulator", "check-in", URL, "--claim", "sam") == 0
 
-    assert performed == [cli.ADD_DEVICE]
+    assert performed == [devices.ADD_DEVICE]
     # Exactly one configuration API request, which is the claim.
     assert len(run.reached) - reached_before == 1
-    monkeypatch.setattr(cli, "_act", dispatch)
+    monkeypatch.setattr(acts, "_act", dispatch)
     assert run("device", "show", board.DEFAULT_MAC) == 0
 
 
@@ -1012,7 +1013,7 @@ def test_a_claim_the_configuration_superseded_says_the_condition_and_no_address(
     # repository says what it refused in, and the side holding the
     # grammar says what to type (#386).
     assert captured.err.strip() == (
-        f"{ALREADY_BOUND} {cli.REMEDIES[RefusalReason.DEVICE_ALREADY_BOUND]}"
+        f"{ALREADY_BOUND} {reach.REMEDIES[RefusalReason.DEVICE_ALREADY_BOUND]}"
     )
     assert [name for name, text in surfaces.items() if board.DEFAULT_MAC in text] == []
 
@@ -1044,7 +1045,7 @@ def test_a_claim_needs_a_code_and_says_so_when_there_is_none(
     assert run("simulator", "check-in", URL, "--claim", "sam") == 1
 
     assert len(endpoint.requests) == 1
-    assert capsys.readouterr().err.strip() == cli.NOTHING_TO_CLAIM
+    assert capsys.readouterr().err.strip() == simulator.NOTHING_TO_CLAIM
 
 
 def test_the_post_ceremony_trap_names_the_deployment_that_issues_none(
@@ -1069,7 +1070,7 @@ def test_the_post_ceremony_trap_names_the_deployment_that_issues_none(
     assert run("simulator", "check-in", URL, "--claim", "sam") == 1
 
     said = capsys.readouterr().err
-    assert said.strip().splitlines()[-1] == cli.NOT_ADMITTED_AFTER_CLAIM
+    assert said.strip().splitlines()[-1] == simulator.NOT_ADMITTED_AFTER_CLAIM
     assert "issues no device tokens and is too old to say so" in said
 
 
@@ -1134,7 +1135,7 @@ def test_the_poll_keeps_the_firmware_s_cadence_exactly(
     assert len(polls) == board.POLL_ATTEMPTS
     assert stopped_clock.slept == [board.POLL_INTERVAL_S] * (board.POLL_ATTEMPTS - 1)
     # The claim's own notice comes first, because the claim happened.
-    assert capsys.readouterr().err.splitlines()[-1] == cli.NOT_ADMITTED_YET
+    assert capsys.readouterr().err.splitlines()[-1] == simulator.NOT_ADMITTED_YET
 
 
 def test_a_smaller_far_side_bound_shortens_the_burst(
@@ -1223,7 +1224,7 @@ def test_a_poll_that_spends_the_ceiling_ends_the_burst(
     polls = [target for target in endpoint.targets() if target == ACTIVATION_URL]
     assert len(polls) == 1
     assert stopped_clock.slept == []
-    assert capsys.readouterr().err.splitlines()[-1] == cli.NOT_ADMITTED_YET
+    assert capsys.readouterr().err.splitlines()[-1] == simulator.NOT_ADMITTED_YET
 
 
 # The other verb, and the two no-leak cases only its ANSWER can produce
@@ -1258,7 +1259,7 @@ def test_the_conversation_verb_refuses_a_board_that_may_not_speak(
 
         assert run("simulator", "run", URL) == 1
 
-        assert capsys.readouterr().err.strip() == cli.CANNOT_CONVERSE
+        assert capsys.readouterr().err.strip() == simulator.CANNOT_CONVERSE
 
 
 def test_the_conversation_verb_goes_on_where_the_deployment_issues_no_tokens(
@@ -1289,7 +1290,7 @@ def test_the_conversation_verb_goes_on_where_the_deployment_issues_no_tokens(
 
     captured = capsys.readouterr()
     assert "admitted this board" in captured.out
-    assert cli.CANNOT_CONVERSE not in captured.err
+    assert simulator.CANNOT_CONVERSE not in captured.err
     assert captured.err.strip().startswith("cannot open a conversation with ")
 
 

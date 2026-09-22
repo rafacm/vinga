@@ -21,7 +21,8 @@ from typing import get_args
 import pytest
 
 from tests.support.config_cli import registered
-from vinga_server.config import cli, docgen
+from vinga_server.config import docgen
+from vinga_server.config.cli import grammar
 from vinga_server.protocol.messages import MESSAGE_TYPES, SERVER_MESSAGE_TYPES
 from vinga_server.simulator import capabilities
 
@@ -369,7 +370,7 @@ def test_both_verbs_are_claimed_and_the_third_side_is_empty() -> None:
 
     assert [row for row in capabilities.rows() if row.side == capabilities.PENDING] == []
 
-    registered = {row.words for row in cli.COMMANDS}
+    registered = {row.words for row in grammar.COMMANDS}
     assert capabilities.CHECK_IN in registered
     assert capabilities.RUN in registered
 
@@ -425,7 +426,7 @@ def test_the_epilog_is_what_the_help_page_carries() -> None:
     """The table reaches an operator through the command's own page, and
     through the committed reference that renders that page. One
     rendering, so the three cannot disagree."""
-    [row] = [row for row in cli.COMMANDS if row.words == capabilities.CHECK_IN]
+    [row] = [row for row in grammar.COMMANDS if row.words == capabilities.CHECK_IN]
 
     assert row.epilog == capabilities.epilog(WIDTH)
     assert capabilities.INTRODUCTION.split(".")[0] in row.epilog

@@ -25,6 +25,7 @@ from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import logged as _logged
 from tests.support.config_cli import runner
 from vinga_server.config import cli
+from vinga_server.config.cli import grammar, reach
 from vinga_server.config.loader import DOTENV_UNREADABLE, ConfigError, load_environment_file
 
 # What a `.env` holds, shaped so a substring check for one cannot match
@@ -81,9 +82,9 @@ def test_a_dotenv_is_read_and_the_real_environment_still_wins(
     command does with it is observable: the address the client is built
     on is recorded by the seam.
     """
-    a_dotenv(tmp_path, f"{cli.API_URL_ENV}={PLANTED_URL}\n")
+    a_dotenv(tmp_path, f"{reach.API_URL_ENV}={PLANTED_URL}\n")
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv(cli.API_URL_ENV, raising=False)
+    monkeypatch.delenv(reach.API_URL_ENV, raising=False)
 
     assert run("list") == 0
 
@@ -94,7 +95,7 @@ def test_a_dotenv_is_read_and_the_real_environment_still_wins(
 
     # And the real environment wins over the file, which is the rule
     # both entry points document.
-    monkeypatch.setenv(cli.API_URL_ENV, "http://127.0.0.1:9232/api")
+    monkeypatch.setenv(reach.API_URL_ENV, "http://127.0.0.1:9232/api")
 
     assert run("list") == 0
 
@@ -116,7 +117,7 @@ def test_a_dotenv_that_is_not_text_is_refused_without_quoting_its_bytes(
     `.env`, which is to say somebody's credentials.
     """
     (tmp_path / ".env").write_bytes(
-        f"{cli.API_URL_ENV}={PLANTED_URL}\nA_KEY={PLANTED_SECRET}\n".encode() + b"\xff\xfe"
+        f"{reach.API_URL_ENV}={PLANTED_URL}\nA_KEY={PLANTED_SECRET}\n".encode() + b"\xff\xfe"
     )
     monkeypatch.chdir(tmp_path)
     capsys.readouterr()
@@ -224,7 +225,7 @@ def an_unreadable_dotenv(directory: Path, monkeypatch: pytest.MonkeyPatch) -> No
     """The refusal case, in the directory the search starts from: bytes
     no encoding will decode, carrying what a real `.env` carries."""
     (directory / ".env").write_bytes(
-        f"{cli.API_URL_ENV}={PLANTED_URL}\nA_KEY={PLANTED_SECRET}\n".encode() + b"\xff\xfe"
+        f"{reach.API_URL_ENV}={PLANTED_URL}\nA_KEY={PLANTED_SECRET}\n".encode() + b"\xff\xfe"
     )
     monkeypatch.chdir(directory)
 
@@ -239,7 +240,7 @@ def test_the_version_answers_through_the_dispatch_with_a_broken_dotenv(
 
     assert left.value.code == 0
     captured = capsys.readouterr()
-    assert captured.out == f"{cli.DISTRIBUTION} {cli.installed_version()}\n"
+    assert captured.out == f"{grammar.DISTRIBUTION} {grammar.installed_version()}\n"
     assert captured.err == ""
 
 
@@ -254,7 +255,7 @@ def test_the_version_answers_through_the_script_with_a_broken_dotenv(
 
     assert left.value.code == 0
     captured = capsys.readouterr()
-    assert captured.out == f"{cli.DISTRIBUTION} {cli.installed_version()}\n"
+    assert captured.out == f"{grammar.DISTRIBUTION} {grammar.installed_version()}\n"
     assert captured.err == ""
 
 
@@ -271,7 +272,7 @@ def test_a_root_option_before_the_version_is_still_the_root(
         cli.main(["--config", str(tmp_path / "nowhere.yaml"), "--no-input", "--version"])
 
     assert left.value.code == 0
-    assert capsys.readouterr().out.startswith(cli.DISTRIBUTION)
+    assert capsys.readouterr().out.startswith(grammar.DISTRIBUTION)
 
 
 @pytest.mark.parametrize(

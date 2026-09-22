@@ -21,6 +21,8 @@ from tests.support.config_cli import SECRET, chain, registered
 from tests.support.events import both_formats
 from tests.support.isolation import ALLOWED_IMPORTS, imported_alone
 from vinga_server.config import cli, docgen
+from vinga_server.config.cli import grammar, reach
+from vinga_server.config.loader import ConfigError
 from vinga_server.config.secrets import MASTER_KEY_ENV
 
 COMMITTED = Path(__file__).resolve().parents[3] / "docs" / "reference" / "domain-config.md"
@@ -438,11 +440,11 @@ def test_the_recipes_read_the_examples_this_suite_reads() -> None:
 def test_every_recipe_line_is_a_command_of_the_grammar() -> None:
     """A recipe that named a command the grammar does not have would be
     a page telling an operator to type something that cannot work. The
-    inventory is `cli.COMMANDS`, which is the grammar itself."""
+    inventory is `grammar.COMMANDS`, which is the grammar itself."""
     for recipe in docgen.recipes():
         assert recipe.commands, f"{recipe.title}: a heading with no commands under it"
         for line in recipe.commands:
-            words = tuple(line.removeprefix(f"{cli.PROGRAM} ").split())
+            words = tuple(line.removeprefix(f"{reach.PROGRAM} ").split())
             assert registered(words) is not None, line
 
 
@@ -454,7 +456,7 @@ def test_every_command_an_example_quotes_is_published_as_a_recipe() -> None:
         line.strip().removeprefix("# ").strip()
         for path in (*sorted(EXAMPLES.glob("*.yaml")), *sorted(PRESETS.glob("*.yaml")))
         for line in path.read_text(encoding="utf-8").splitlines()
-        if line.startswith(f"#   {cli.PROGRAM} ")
+        if line.startswith(f"#   {reach.PROGRAM} ")
     }
     published = {line for recipe in docgen.recipes() for line in recipe.commands}
 
@@ -473,8 +475,8 @@ def test_every_preset_import_is_followed_by_its_apply() -> None:
     ever installs. That is a hole a byte-for-byte diff of the page
     cannot see, because the page and the renderer would agree.
     """
-    installs = f"{cli.PROGRAM} apply"
-    imports = f"{cli.PROGRAM} import "
+    installs = f"{reach.PROGRAM} apply"
+    imports = f"{reach.PROGRAM} import "
     (presets,) = [
         recipe for recipe in docgen.recipes() if recipe.title == "A whole deployment"
     ]
@@ -492,7 +494,7 @@ def test_the_cli_reference_is_deterministic() -> None:
     varied between two runs would turn the lane red on an unrelated
     change. Click's help formatter measures the terminal it prints into
     unless it is told not to, which is the one thing here that could."""
-    assert cli.cli_reference() == cli.cli_reference()
+    assert grammar.cli_reference() == grammar.cli_reference()
 
 
 def test_the_cli_reference_needs_no_database_and_no_key(
@@ -565,7 +567,7 @@ def _refused() -> BaseException:
     chain claim can be made: `main` catches this by design and answers
     with a sentence, so no caller-facing surface ever holds it.
     """
-    with pytest.raises(cli.ConfigError) as caught:
+    with pytest.raises(ConfigError) as caught:
         docgen.recipes()
     return caught.value
 
@@ -582,7 +584,7 @@ def test_a_quoted_command_with_no_topic_says_nothing_of_the_command(
     block and is therefore where a credential would be.
     """
     planted("vad-silero.yaml", lambda path: path.write_text(
-        f"#   {cli.PROGRAM} {SECRET}\n\ntype: silero\n", encoding="utf-8"
+        f"#   {reach.PROGRAM} {SECRET}\n\ntype: silero\n", encoding="utf-8"
     ))
 
     out, err = _rendered(run, capsys, caplog)
@@ -663,8 +665,8 @@ def _generated(page: str) -> str:
     after the opening one: a paragraph pressed against an HTML comment
     is swallowed into it by every markdown renderer there is, so the
     layout is part of the contract rather than a formatting taste."""
-    _, _, tail = page.partition(cli.REFERENCE_BEGIN + "\n\n")
-    region, _, _ = tail.partition(cli.REFERENCE_END)
+    _, _, tail = page.partition(grammar.REFERENCE_BEGIN + "\n\n")
+    region, _, _ = tail.partition(grammar.REFERENCE_END)
     return region
 
 
@@ -674,9 +676,9 @@ def test_the_committed_cli_reference_matches_the_grammar() -> None:
     compared, so the prose above it is nobody's to regenerate."""
     page = COMMITTED_CLI.read_text(encoding="utf-8")
 
-    assert page.count(cli.REFERENCE_BEGIN) == 1
-    assert page.count(cli.REFERENCE_END) == 1
-    assert _generated(page) == cli.cli_reference(), (
+    assert page.count(grammar.REFERENCE_BEGIN) == 1
+    assert page.count(grammar.REFERENCE_END) == 1
+    assert _generated(page) == grammar.cli_reference(), (
         "the generated region of docs/reference/cli.md is stale; regenerate it with "
         "`uv run vinga-server config cli-reference`"
     )
@@ -685,8 +687,8 @@ def test_the_committed_cli_reference_matches_the_grammar() -> None:
 def _recipes(page: str) -> str:
     """The recipes region of the committed page, which is the lines
     between the inner pair of markers."""
-    _, _, tail = page.partition(cli.RECIPES_BEGIN + "\n")
-    region, _, _ = tail.partition(cli.RECIPES_END)
+    _, _, tail = page.partition(grammar.RECIPES_BEGIN + "\n")
+    region, _, _ = tail.partition(grammar.RECIPES_END)
     return region
 
 
@@ -702,14 +704,14 @@ def test_the_committed_cli_recipes_match_the_example_fragments() -> None:
     """
     page = COMMITTED_CLI.read_text(encoding="utf-8")
 
-    assert page.count(cli.RECIPES_BEGIN) == 1
-    assert page.count(cli.RECIPES_END) == 1
+    assert page.count(grammar.RECIPES_BEGIN) == 1
+    assert page.count(grammar.RECIPES_END) == 1
     # Inside the outer region, so the whole-page rebuild owns these
     # bytes too and neither check is looking at something the other one
     # is not.
-    assert cli.RECIPES_BEGIN in _generated(page)
-    assert cli.RECIPES_END in _generated(page)
-    assert _recipes(page) == cli.cli_recipes(), (
+    assert grammar.RECIPES_BEGIN in _generated(page)
+    assert grammar.RECIPES_END in _generated(page)
+    assert _recipes(page) == grammar.cli_recipes(), (
         "the recipes on docs/reference/cli.md are stale; they are read out of the "
         "example fragments, so regenerate the page with "
         "`uv run vinga-server config cli-reference`"

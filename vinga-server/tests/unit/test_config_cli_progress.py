@@ -31,7 +31,8 @@ from pathlib import Path
 import pytest
 
 from tests.support.config_cli import runner
-from vinga_server.config import Config, cli
+from vinga_server.config import Config
+from vinga_server.config.cli import deployment, grammar, output, reach
 from vinga_server.config.responses import (
     AgentsReload,
     ConfigReloadResult,
@@ -144,7 +145,7 @@ def test_the_bytes_off_a_terminal_are_the_same_with_the_line_and_without(
     _captured(run, argv, terminal=False)
 
     with_the_line = _captured(run, argv, terminal=False)
-    monkeypatch.setattr(cli, "narrated", _inert)
+    monkeypatch.setattr(reach, "narrated", _inert)
     without_it = _captured(run, argv, terminal=False)
 
     assert with_the_line == without_it
@@ -165,8 +166,8 @@ def test_the_line_is_drawn_at_a_terminal_and_leaves_stdout_alone(
     piped = _captured(run, argv, terminal=False)
     at_a_terminal = _captured(run, argv, terminal=True)
 
-    assert f"{cli.PROGRESS_PHASE}: 0s" in at_a_terminal[1]
-    assert cli.PROGRESS_PHASE not in piped[1]
+    assert f"{reach.PROGRESS_PHASE}: 0s" in at_a_terminal[1]
+    assert reach.PROGRESS_PHASE not in piped[1]
     assert at_a_terminal[0] == piped[0]
 
 
@@ -183,7 +184,7 @@ def test_the_import_count_line_is_the_same_bytes_either_way(
     meets an empty database of its own, which is the only way the two
     are comparable at all.
     """
-    counted = f"imported 2 entries, {cli.NOT_SERVING_YET}\n"
+    counted = f"imported 2 entries, {output.NOT_SERVING_YET}\n"
 
     piped = _captured(runner(monkeypatch), _argv("import", document), terminal=False)
     at_a_terminal = _captured(
@@ -212,8 +213,8 @@ def test_the_apply_success_line_is_the_same_bytes_either_way(run) -> None:
     piped = _captured(run, ("apply",), terminal=False)
     at_a_terminal = _captured(run, ("apply",), terminal=True)
 
-    assert piped[1] == cli.INSTALLED + "\n"
-    assert _after_the_line(at_a_terminal[1]) == cli.INSTALLED + "\n"
+    assert piped[1] == deployment.INSTALLED + "\n"
+    assert _after_the_line(at_a_terminal[1]) == deployment.INSTALLED + "\n"
     assert at_a_terminal[0] == piped[0]
 
 
@@ -225,9 +226,9 @@ def test_the_line_takes_itself_back_off_the_screen(run, document: Path, verb: st
     behind it."""
     _, err = _captured(run, _argv(verb, document), terminal=True)
 
-    drawn = f"{cli.PROGRESS_PHASE}: 0s"
+    drawn = f"{reach.PROGRESS_PHASE}: 0s"
     assert f"\r{' ' * len(drawn)}\r" in err
-    assert cli.PROGRESS_PHASE not in _after_the_line(err)
+    assert reach.PROGRESS_PHASE not in _after_the_line(err)
 
 
 def test_the_line_repeats_nothing_the_caller_typed(run, document: Path) -> None:
@@ -259,12 +260,12 @@ def test_a_writer_that_will_not_start_changes_nothing_about_the_command(
     argv = _argv("import", document)
     _captured(run, argv, terminal=False)
     expected = _captured(run, argv, terminal=False)
-    monkeypatch.setattr(cli, "threading", _NoThreads)
+    monkeypatch.setattr(reach, "threading", _NoThreads)
 
     printed, err = _captured(run, argv, terminal=True)
 
     assert printed == expected[0]
-    assert cli.PROGRESS_PHASE not in _after_the_line(err)
+    assert reach.PROGRESS_PHASE not in _after_the_line(err)
     assert _after_the_line(err) == expected[1]
 
 
@@ -292,7 +293,7 @@ def test_only_the_two_long_waits_narrate() -> None:
     third command that quietly asked for a progress line fails this
     instead of shipping. `events tail` is the deliberate absence: there
     the stream is the answer rather than the wait."""
-    narrating = {row.words for row in cli.COMMANDS if any(act.narrates for act in row.acts())}
+    narrating = {row.words for row in grammar.COMMANDS if any(act.narrates for act in row.acts())}
 
     assert narrating == {("import",), ("apply",)}
 
@@ -303,7 +304,7 @@ def test_a_read_at_a_terminal_says_nothing_about_waiting(run) -> None:
     not."""
     _, err = _captured(run, ("list",), terminal=True)
 
-    assert cli.PROGRESS_PHASE not in err
+    assert reach.PROGRESS_PHASE not in err
 
 
 # The mechanism, driven directly
@@ -324,7 +325,7 @@ def test_the_number_on_the_line_moves() -> None:
     errors = _Stream(terminal=True)
 
     with contextlib.redirect_stderr(errors):
-        with cli.narrated(True, cadence_s=0.001, clock=ticking):
+        with reach.narrated(True, cadence_s=0.001, clock=ticking):
             _until(lambda: len(_seconds(errors.getvalue())) >= 3)
 
     assert _seconds(errors.getvalue())[:3] == ["0s", "1s", "2s"]
@@ -342,7 +343,7 @@ def test_a_cadence_that_is_not_a_cadence_is_refused(cadence: float) -> None:
 
     with contextlib.redirect_stderr(errors):
         with pytest.raises(ValueError, match="cadence"):
-            with cli.narrated(True, cadence_s=cadence):
+            with reach.narrated(True, cadence_s=cadence):
                 pass  # pragma: no cover - the refusal is on the way in
 
     assert errors.getvalue() == ""
@@ -369,7 +370,7 @@ def test_a_redraw_held_inside_a_live_stream_cannot_land_after_the_erase() -> Non
     stream = _Holding()
 
     with contextlib.redirect_stderr(stream):
-        with cli.narrated(True, cadence_s=0.001, erase_wait_s=HELD_FOR_S * 4):
+        with reach.narrated(True, cadence_s=0.001, erase_wait_s=HELD_FOR_S * 4):
             _until(stream.held.is_set)
             # Let go well after the context is left, so the erase meets
             # a redraw that is still inside the stream rather than one
@@ -382,7 +383,7 @@ def test_a_redraw_held_inside_a_live_stream_cannot_land_after_the_erase() -> Non
     # it lands here, which is the failure.
     _until(lambda: len(stream.taken()) >= 3)
     at_the_exit = stream.taken()
-    assert cli.PROGRESS_PHASE not in at_the_exit[-1]
+    assert reach.PROGRESS_PHASE not in at_the_exit[-1]
     # Several cadences later, and the writer is still running: what
     # stops it writing is the erase rather than the clock.
     time.sleep(0.05)
@@ -412,7 +413,7 @@ def test_a_wedged_redraw_does_not_stop_an_answered_import_reporting(
     what is new, and what this is about, is a command blocked by a line
     drawn over its own wait.
     """
-    monkeypatch.setattr(cli, "PROGRESS_CADENCE_S", 0.001)
+    monkeypatch.setattr(reach, "PROGRESS_CADENCE_S", 0.001)
     stream = _Wedged()
     printed = _Stream(terminal=True)
 
@@ -436,7 +437,7 @@ def test_a_wedged_redraw_does_not_stop_a_refusal_arriving(
     """The same bound on the path where the command has a sentence to
     say rather than an answer to print, which is the one a progress line
     could do the most damage to."""
-    monkeypatch.setattr(cli, "PROGRESS_CADENCE_S", 0.001)
+    monkeypatch.setattr(reach, "PROGRESS_CADENCE_S", 0.001)
     run.runtime["reload"] = None
     stream = _Wedged()
     printed = _Stream(terminal=True)
@@ -469,7 +470,7 @@ def test_a_stream_that_will_not_be_written_to_takes_nothing_down() -> None:
     refusing = _Refusing()
 
     with contextlib.redirect_stderr(refusing):
-        with cli.narrated(True, cadence_s=0.01):
+        with reach.narrated(True, cadence_s=0.01):
             _until(lambda: refusing.attempts >= 3)
 
     assert refusing.attempts >= 3
@@ -669,7 +670,7 @@ def _captured(
 
 def _seconds(err: str) -> list[str]:
     """Every elapsed value the line has been drawn with, in order."""
-    return re.findall(rf"{re.escape(cli.PROGRESS_PHASE)}: (\d+s)", err)
+    return re.findall(rf"{re.escape(reach.PROGRESS_PHASE)}: (\d+s)", err)
 
 
 def _after_the_line(err: str) -> str:

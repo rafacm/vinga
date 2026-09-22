@@ -34,7 +34,7 @@ import yaml
 from tests.support.config_cli import OTHER_SECRET, SECRET, runner
 from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import logged as _logged
-from vinga_server.config import cli
+from vinga_server.config.cli import input, invocation
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.secrets import MASK, MASTER_KEY_ENV
 
@@ -169,7 +169,7 @@ def test_that_refusal_carries_the_name_in_no_chain_either(
     chain is not printed, and is reachable only from where the refusal
     is raised."""
     with pytest.raises(ConfigError) as caught:
-        cli._read_secret(cli.Invocation(from_env=SECRET))
+        input._read_secret(invocation.Invocation(from_env=SECRET))
 
     assert SECRET not in _chain(caught.value)
     assert caught.value.__cause__ is None
@@ -189,7 +189,7 @@ def test_an_interactive_terminal_is_read_without_echo(
 
     asked: list[str] = []
     monkeypatch.setattr(sys, "stdin", Terminal("this is never read\n"))
-    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: asked.append(prompt) or SECRET)
+    monkeypatch.setattr(input.getpass, "getpass", lambda prompt: asked.append(prompt) or SECRET)
 
     assert run("provider", "secret", "set", "llm", "claude", "api_key") == 0
 
@@ -509,7 +509,7 @@ def test_a_secret_that_cannot_be_read_is_a_sentence_rather_than_a_traceback(
         assert run("provider", "secret", "set", "llm", "claude", "api_key") == 1
 
     captured = capsys.readouterr()
-    assert captured.err == cli.SECRET_UNREADABLE + "\n"
+    assert captured.err == input.SECRET_UNREADABLE + "\n"
     assert captured.out == ""
     assert "Traceback" not in captured.err
     for sentinel in (SECRET, PASTED):
@@ -532,9 +532,9 @@ def test_the_unreadable_secret_refusal_carries_nothing_on_its_chain(
     monkeypatch.setattr(sys, "stdin", _FailingPipe(raised))
 
     with pytest.raises(ConfigError) as caught:
-        cli._read_secret(cli.Invocation())
+        input._read_secret(invocation.Invocation())
 
-    assert str(caught.value) == cli.SECRET_UNREADABLE
+    assert str(caught.value) == input.SECRET_UNREADABLE
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
     for sentinel in (SECRET, PASTED):
@@ -556,5 +556,5 @@ def test_no_input_at_a_failing_terminal_never_reaches_the_read(
     assert run("provider", "secret", "set", "llm", "claude", "api_key", "--no-input") == 1
 
     captured = capsys.readouterr()
-    assert captured.err == cli.SECRET_EMPTY + "\n"
+    assert captured.err == input.SECRET_EMPTY + "\n"
     assert PASTED not in captured.err

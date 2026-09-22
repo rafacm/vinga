@@ -34,6 +34,7 @@ from fastapi.testclient import TestClient
 from tests.support.apps import mounted
 from vinga_server.config import cli
 from vinga_server.config.api import MOUNT_PATH, build_api
+from vinga_server.config.cli import grammar, reach
 from vinga_server.config.loader import load_file_config
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 from vinga_server.onboarding import PendingDevices
@@ -77,7 +78,7 @@ def runner(monkeypatch: pytest.MonkeyPatch, database: str | None = None):
     is how long the application itself lasts here.
     """
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    monkeypatch.delenv(cli.API_URL_ENV, raising=False)
+    monkeypatch.delenv(reach.API_URL_ENV, raising=False)
     # A database of this runner's own when the caller names one, which
     # is how a test gets two stores: the round trip's whole claim is
     # that the document one deployment exports is the document another
@@ -134,13 +135,13 @@ def runner(monkeypatch: pytest.MonkeyPatch, database: str | None = None):
         if transport:
             # A real `httpx.Client`, which is what the entry point
             # builds on a deployment, on a transport of the test's own.
-            # Built with the timeouts `cli.build_client` builds with,
+            # Built with the timeouts `reach.build_client` builds with,
             # because a command that sets its own overwrites them and a
             # command that does not is entitled to the module's.
             given = httpx.Client(
                 base_url=base_url,
                 headers={"Authorization": f"Bearer {token}"},
-                timeout=httpx.Timeout(cli.READ_TIMEOUT_S, connect=cli.CONNECT_TIMEOUT_S),
+                timeout=httpx.Timeout(reach.READ_TIMEOUT_S, connect=reach.CONNECT_TIMEOUT_S),
                 transport=transport[-1],
             )
             clients.append(given)
@@ -179,7 +180,7 @@ def runner(monkeypatch: pytest.MonkeyPatch, database: str | None = None):
         clients.append(client)
         return client
 
-    monkeypatch.setattr(cli, "build_client", factory)
+    monkeypatch.setattr(reach, "build_client", factory)
 
     def _run(*argv: str, stdin: str | None = None) -> int:
         nonlocal lifespans
@@ -202,7 +203,7 @@ def answering(run, handler: Any) -> None:
     rather than from an application built per request.
 
     The seam is the same one every suite here runs through,
-    `cli.build_client`; what changes is what the client is built on. A
+    `reach.build_client`; what changes is what the client is built on. A
     handler takes an `httpx.Request` and answers an `httpx.Response`,
     and a response built over an iterator is one whose body arrives in
     pieces, which is the whole point: the event stream is an answer that
@@ -242,18 +243,18 @@ def answering(run, handler: Any) -> None:
 # than listed here: a command's positional arguments are its budget, and
 # a variadic one is no budget at all.
 
-_BY_WORDS: dict[tuple[str, ...], cli.Command] = {row.words: row for row in cli.COMMANDS}
+_BY_WORDS: dict[tuple[str, ...], grammar.Command] = {row.words: row for row in grammar.COMMANDS}
 
-_FIRST_WORDS = {row.words[0] for row in cli.COMMANDS}
+_FIRST_WORDS = {row.words[0] for row in grammar.COMMANDS}
 
-_DEEPEST = max(len(row.words) for row in cli.COMMANDS)
+_DEEPEST = max(len(row.words) for row in grammar.COMMANDS)
 
 
 def _budgets() -> dict[tuple[str, ...], int | None]:
     """How many words each leaf of the built tree takes after its own,
     or None where it takes any number.
 
-    Walked off `cli.command()` rather than off `COMMANDS`, because what
+    Walked off `grammar.command()` rather than off `COMMANDS`, because what
     a command accepts is declared in the signature its `declare` builds
     and only the tree has read it. Duck-typed rather than checked
     against `click`, because Typer builds its own vendored classes and
@@ -275,7 +276,7 @@ def _budgets() -> dict[tuple[str, ...], int | None]:
             ]
             budgets[words] = None if any(count < 0 for count in counts) else sum(counts)
 
-    walk(cli.command(), ())
+    walk(grammar.command(), ())
     return budgets
 
 
@@ -305,7 +306,7 @@ def _fits(words: tuple[str, ...], rest: Sequence[str]) -> bool:
 
 
 def registered(argv: Sequence[str]) -> tuple[str, ...] | None:
-    """Which row of `cli.COMMANDS` this command line names, or None.
+    """Which row of `grammar.COMMANDS` this command line names, or None.
 
     The words are found rather than assumed to be first, because the
     global options are accepted before the command word as well as after

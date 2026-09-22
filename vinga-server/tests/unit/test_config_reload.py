@@ -48,9 +48,10 @@ from tests.support.stores import memory as lane_memory
 from tests.support.tools_mcp import reading
 from vinga_server.app import _prompt_preview, config_diff_reader, config_reloader
 from vinga_server.boundary import Reach
-from vinga_server.config import Config, cli
+from vinga_server.config import Config
 from vinga_server.config.api import MOUNT_PATH
 from vinga_server.config.boot import BootConfig, load_boot_config
+from vinga_server.config.cli import deployment
 from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
@@ -639,8 +640,8 @@ async def test_a_synthesis_failure_reaches_the_response_body_and_the_rendering()
     # field names above them (#426): what an operator reads off this is
     # that the mask went off and that the failure phrase is shown
     # without being spoken.
-    assert "  filled pause off, synthesis failed: assistant" in cli._apply_listing(body)
-    assert "  failure phrase shown, not spoken: assistant" in cli._apply_listing(body)
+    assert "  filled pause off, synthesis failed: assistant" in deployment._apply_listing(body)
+    assert "  failure phrase shown, not spoken: assistant" in deployment._apply_listing(body)
 
 
 async def test_an_agent_defaults_filler_edit_reaches_an_inheriting_agent() -> None:

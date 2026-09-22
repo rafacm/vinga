@@ -57,6 +57,7 @@ from sqlalchemy import insert
 from tests.support.config_cli import chain, logged
 from vinga_server import logs
 from vinga_server.config import cli
+from vinga_server.config.cli import invocation, local, reach
 from vinga_server.config.loader import ConfigError, load_file_config
 from vinga_server.config.secrets import (
     MASTER_KEY_ENV,
@@ -108,9 +109,9 @@ def _environment(monkeypatch: pytest.MonkeyPatch) -> None:
     a server fails here rather than passing quietly.
     """
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    monkeypatch.delenv(cli.API_URL_ENV, raising=False)
+    monkeypatch.delenv(reach.API_URL_ENV, raising=False)
     monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
-    monkeypatch.setattr(cli, "build_client", _never_a_client)
+    monkeypatch.setattr(reach, "build_client", _never_a_client)
 
 
 def _never_a_client(base_url: str, token: str):
@@ -181,14 +182,14 @@ def test_a_store_that_composes_is_one_line_and_an_exit_of_zero(
 
     printed = capsys.readouterr()
     assert printed.out == ""
-    assert printed.err.strip() == cli.COMPOSES
+    assert printed.err.strip() == local.COMPOSES
 
 
 def test_an_empty_store_composes(capsys: pytest.CaptureFixture[str]) -> None:
     """A deployment that has configured nothing yet is not a broken one:
     it is what a fresh database holds, and a server boots on it."""
     assert cli.main(["check"]) == 0
-    assert capsys.readouterr().err.strip() == cli.COMPOSES
+    assert capsys.readouterr().err.strip() == local.COMPOSES
 
 
 def test_a_store_that_does_not_compose_names_the_entry_and_the_rule(
@@ -486,7 +487,7 @@ def test_no_refusal_carries_a_sentinel_on_any_surface(
     path = arrange(tmp_path, monkeypatch)
 
     with caplog.at_level(0), pytest.raises(ConfigError) as refused:
-        cli._check(cli.Invocation(config=path or None))
+        local._check(invocation.Invocation(config=path or None))
 
     # The marker is what keeps the parameterization honest: five cases
     # that all fell into one boundary would satisfy the absence claim

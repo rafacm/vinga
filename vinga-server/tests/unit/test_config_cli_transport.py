@@ -37,7 +37,8 @@ from tests.support.config_cli import logged as _logged
 from tests.support.stores import holding_the_write_lock, the_lock_held
 from vinga_server.config import cli
 from vinga_server.config.api import MOUNT_PATH, build_api
-from vinga_server.config.cli import outcomes
+from vinga_server.config.cli import deployment, reach
+from vinga_server.config.cli.deployment import outcomes
 from vinga_server.config.loader import CONFIG_FROM_FLAG, CONFIG_NOT_FOUND, ConfigError
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.responses import McpReloadResult
@@ -87,7 +88,7 @@ def test_the_default_target_is_this_machine_on_the_configured_port(
 def test_the_environment_names_the_target_and_the_flag_beats_it(
     run, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv(cli.API_URL_ENV, "http://127.0.0.1:9001/api")
+    monkeypatch.setenv(reach.API_URL_ENV, "http://127.0.0.1:9001/api")
     assert run("list") == 0
 
     assert run("--api-url", "http://localhost:9002/api", "list") == 0
@@ -189,7 +190,7 @@ def test_a_url_refusal_carries_no_parser_exception(
     # own exception is reachable only from where the refusal is raised,
     # and anything that renders a traceback would find it there.
     with pytest.raises(ConfigError) as caught:
-        cli._permitted(f"http://localhost:{SECRET}/api", "--api-url")
+        reach._permitted(f"http://localhost:{SECRET}/api", "--api-url")
 
     assert SECRET not in _chain(caught.value)
     assert caught.value.__cause__ is None
@@ -318,7 +319,7 @@ def test_a_body_that_is_not_this_api_s_own_is_not_relayed(
         return HTMLResponse(f"<html>502 {SECRET}</html>", status_code=502)
 
     monkeypatch.setattr(
-        cli, "build_client", lambda base_url, token: TestClient(gateway, base_url=base_url)
+        reach, "build_client", lambda base_url, token: TestClient(gateway, base_url=base_url)
     )
 
     assert run("list") == 1
@@ -348,7 +349,7 @@ def test_an_accepted_url_keeps_its_query_credential_only_for_the_request() -> No
     """The seam the two failures below read: what a request is built
     from and what may be shown are different strings, and only the first
     holds the credential."""
-    address = cli._permitted(REACHABLE_NOWHERE, "--api-url")
+    address = reach._permitted(REACHABLE_NOWHERE, "--api-url")
 
     assert address.base == "https://127.0.0.1:1/api"
     assert address.query == f"token={SECRET}"
@@ -361,7 +362,7 @@ def test_an_accepted_url_keeps_its_query_credential_only_for_the_request() -> No
 
 
 def test_an_address_with_no_query_composes_a_path_and_nothing_else() -> None:
-    address = cli._permitted("https://config.example.invalid/api/", "--api-url")
+    address = reach._permitted("https://config.example.invalid/api/", "--api-url")
 
     assert address.base == "https://config.example.invalid/api"
     assert address.query == ""
@@ -390,7 +391,7 @@ def test_a_query_carrying_base_sends_the_path_and_the_query_it_was_given(
         built.append(base_url)
         return httpx.Client(base_url=base_url, transport=httpx.MockTransport(answer))
 
-    monkeypatch.setattr(cli, "build_client", factory)
+    monkeypatch.setattr(reach, "build_client", factory)
 
     assert run(
         "--api-url", REACHABLE_NOWHERE, "import", "-f", "-", stdin="{}\n"
@@ -455,7 +456,7 @@ def test_an_unreadable_answer_from_an_accepted_url_names_it_sanitized(
     def factory(base_url: str, token: str) -> httpx.Client:
         return httpx.Client(base_url=base_url, transport=httpx.MockTransport(answer))
 
-    monkeypatch.setattr(cli, "build_client", factory)
+    monkeypatch.setattr(reach, "build_client", factory)
 
     with caplog.at_level(logging.DEBUG):
         assert cli.main(["--api-url", REACHABLE_NOWHERE, "list"]) == 1
@@ -527,10 +528,10 @@ def test_that_refusal_carries_no_library_exception_either(
     refused, and an exception raised inside the handler would keep it on
     `__context__`."""
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
-    address = cli._permitted(UNOPENABLE, "--api-url")
+    address = reach._permitted(UNOPENABLE, "--api-url")
 
     with pytest.raises(ConfigError) as caught:
-        cli._sent("GET", "/agents", cli._NOTHING, address, TOKEN, cli.READ_TIMEOUT_S)
+        reach._sent("GET", "/agents", reach._NOTHING, address, TOKEN, reach.READ_TIMEOUT_S)
 
     rendered = _chain(caught.value)
     assert SECRET not in rendered
@@ -565,7 +566,7 @@ def test_no_request_this_command_makes_narrates_itself(
     the credential is in the URL whether or not anything went wrong.
     """
     monkeypatch.setattr(
-        cli,
+        reach,
         "build_client",
         lambda base_url, token: httpx.Client(base_url=base_url, transport=_answering()),
     )
@@ -619,7 +620,7 @@ def test_neither_library_can_narrate_while_the_request_is_open(
         return httpx.Response(200, json={"entries": []})
 
     monkeypatch.setattr(
-        cli,
+        reach,
         "build_client",
         lambda base_url, token: httpx.Client(
             base_url=base_url, transport=httpx.MockTransport(answer)
@@ -649,9 +650,9 @@ def test_the_quiet_lasts_exactly_as_long_as_the_request(
     raised would have silenced a library for whatever runs next. Every
     name the boundary holds, since a restore that put one back is not a
     restore."""
-    before = {name: logging.getLogger(name).level for name in cli.REQUEST_LOGGERS}
+    before = {name: logging.getLogger(name).level for name in reach.REQUEST_LOGGERS}
     monkeypatch.setattr(
-        cli,
+        reach,
         "build_client",
         lambda base_url, token: httpx.Client(base_url=base_url, transport=_answering()),
     )
@@ -660,11 +661,11 @@ def test_the_quiet_lasts_exactly_as_long_as_the_request(
         "--api-url", REACHABLE_NOWHERE, "import", "-f", "-", stdin="{}\n"
     ) == 0
 
-    assert {name: logging.getLogger(name).level for name in cli.REQUEST_LOGGERS} == before
+    assert {name: logging.getLogger(name).level for name in reach.REQUEST_LOGGERS} == before
     # Read off the production tuple above, and checked to be the pair it
     # is: a name dropped from it would otherwise be a name this test
     # stopped asserting about at the same moment it stopped being held.
-    assert cli.REQUEST_LOGGERS == ("httpx", "httpcore")
+    assert reach.REQUEST_LOGGERS == ("httpx", "httpcore")
 
 
 def test_neither_failure_carries_the_credential_in_its_chain(
@@ -677,13 +678,13 @@ def test_neither_failure_carries_the_credential_in_its_chain(
     `__cause__` or a `__context__` is not printed, and is reachable only
     from where the refusal is raised.
     """
-    address = cli._permitted(REACHABLE_NOWHERE, "--api-url")
+    address = reach._permitted(REACHABLE_NOWHERE, "--api-url")
 
     def refuse(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused", request=request)
 
     monkeypatch.setattr(
-        cli,
+        reach,
         "build_client",
         lambda base_url, token: httpx.Client(
             base_url=base_url, transport=httpx.MockTransport(refuse)
@@ -691,7 +692,7 @@ def test_neither_failure_carries_the_credential_in_its_chain(
     )
 
     with pytest.raises(ConfigError) as unreachable:
-        cli._sent("GET", "/agents", cli._NOTHING, address, TOKEN, cli.READ_TIMEOUT_S)
+        reach._sent("GET", "/agents", reach._NOTHING, address, TOKEN, reach.READ_TIMEOUT_S)
 
     assert SECRET not in _chain(unreachable.value)
     assert unreachable.value.__cause__ is None
@@ -699,7 +700,7 @@ def test_neither_failure_carries_the_credential_in_its_chain(
 
     answered = httpx.Response(502, html=f"<html>{SECRET}</html>")
     with pytest.raises(ConfigError) as unreadable:
-        cli._answer(answered, address)
+        reach._answer(answered, address)
 
     assert SECRET not in _chain(unreadable.value)
     assert unreadable.value.__cause__ is None
@@ -725,22 +726,22 @@ def test_the_read_timeout_outlasts_the_database_s_lock_timeout() -> None:
     rather than a transport error."""
     lock_timeout_s = LOCK_TIMEOUT_MS / 1000
 
-    assert cli.READ_TIMEOUT_S > lock_timeout_s
+    assert reach.READ_TIMEOUT_S > lock_timeout_s
     # Margin, not just order: a read timeout a hair above the lock
     # timeout would still turn a slow answer into a transport error.
-    assert cli.READ_TIMEOUT_S >= lock_timeout_s * 2
+    assert reach.READ_TIMEOUT_S >= lock_timeout_s * 2
     # And the connect timeout is bounded, which is the other half: a
     # server that is not there must not take the read timeout to say so.
-    assert cli.CONNECT_TIMEOUT_S < lock_timeout_s
+    assert reach.CONNECT_TIMEOUT_S < lock_timeout_s
 
 
 def test_the_client_is_built_with_those_timeouts() -> None:
     """The constants are only worth asserting if the client is built
     from them."""
-    client = cli.build_client("http://127.0.0.1:8003/api", TOKEN)
+    client = reach.build_client("http://127.0.0.1:8003/api", TOKEN)
     try:
-        assert client.timeout.read == cli.READ_TIMEOUT_S
-        assert client.timeout.connect == cli.CONNECT_TIMEOUT_S
+        assert client.timeout.read == reach.READ_TIMEOUT_S
+        assert client.timeout.connect == reach.CONNECT_TIMEOUT_S
     finally:
         client.close()
 
@@ -754,7 +755,7 @@ def test_the_client_carries_the_token_it_was_built_with() -> None:
     through a request. The token is a required argument now: every
     caller resolves one before it builds a client, and the untaken
     branch a default kept was a branch nothing was checking."""
-    client = cli.build_client("http://127.0.0.1:8003/api", TOKEN)
+    client = reach.build_client("http://127.0.0.1:8003/api", TOKEN)
     try:
         assert client.headers["Authorization"] == f"Bearer {TOKEN}"
     finally:
@@ -780,8 +781,8 @@ def test_apply_gives_the_server_longer_to_answer_than_a_write(
         + mcp_module.STOP_TIMEOUT_S
         + mcp_module.CANCEL_TIMEOUT_S
     )
-    assert cli.APPLY_READ_TIMEOUT_S > cli.READ_TIMEOUT_S
-    assert cli.APPLY_READ_TIMEOUT_S >= 2 * envelope
+    assert deployment.APPLY_READ_TIMEOUT_S > reach.READ_TIMEOUT_S
+    assert deployment.APPLY_READ_TIMEOUT_S >= 2 * envelope
 
     made: list[httpx.Client] = []
     empty = {
@@ -799,22 +800,22 @@ def test_apply_gives_the_server_longer_to_answer_than_a_write(
         client = httpx.Client(
             base_url=base_url,
             transport=httpx.MockTransport(answer),
-            timeout=httpx.Timeout(cli.READ_TIMEOUT_S, connect=cli.CONNECT_TIMEOUT_S),
+            timeout=httpx.Timeout(reach.READ_TIMEOUT_S, connect=reach.CONNECT_TIMEOUT_S),
         )
         made.append(client)
         return client
 
-    monkeypatch.setattr(cli, "build_client", factory)
+    monkeypatch.setattr(reach, "build_client", factory)
 
     assert run("mcp-server", "status") == 0
     assert run("apply") == 0
 
     status_client, apply_client = made
-    assert status_client.timeout.read == cli.READ_TIMEOUT_S
-    assert apply_client.timeout.read == cli.APPLY_READ_TIMEOUT_S
+    assert status_client.timeout.read == reach.READ_TIMEOUT_S
+    assert apply_client.timeout.read == deployment.APPLY_READ_TIMEOUT_S
     # And the connect bound is untouched: a server that is not there
     # must not take a minute to say so.
-    assert apply_client.timeout.connect == cli.CONNECT_TIMEOUT_S
+    assert apply_client.timeout.connect == reach.CONNECT_TIMEOUT_S
 
 
 def test_import_waits_for_the_server_however_long_it_takes(
@@ -835,7 +836,7 @@ def test_import_waits_for_the_server_however_long_it_takes(
     reason the apply's case is: the fixture's TestClient carries a
     timeout from another copy of httpx entirely.
     """
-    assert cli.IMPORT_READ_TIMEOUT_S is None
+    assert deployment.IMPORT_READ_TIMEOUT_S is None
 
     made: list[httpx.Client] = []
 
@@ -846,18 +847,18 @@ def test_import_waits_for_the_server_however_long_it_takes(
         client = httpx.Client(
             base_url=base_url,
             transport=httpx.MockTransport(answer),
-            timeout=httpx.Timeout(cli.READ_TIMEOUT_S, connect=cli.CONNECT_TIMEOUT_S),
+            timeout=httpx.Timeout(reach.READ_TIMEOUT_S, connect=reach.CONNECT_TIMEOUT_S),
         )
         made.append(client)
         return client
 
-    monkeypatch.setattr(cli, "build_client", factory)
+    monkeypatch.setattr(reach, "build_client", factory)
 
     assert run("import", "-f", "-", stdin="{}\n") == 0
 
     (imported,) = made
     assert imported.timeout.read is None
-    assert imported.timeout.connect == cli.CONNECT_TIMEOUT_S
+    assert imported.timeout.connect == reach.CONNECT_TIMEOUT_S
 
 
 def test_a_write_that_cannot_take_the_lock_prints_the_retryable_refusal(
@@ -880,7 +881,7 @@ def test_a_write_that_cannot_take_the_lock_prints_the_retryable_refusal(
     run("agent", "set", "sam", "-f", "-", stdin="prompt: You are Sam.\n")
     capsys.readouterr()
     holding = contextlib.ExitStack()
-    built = cli.build_client
+    built = reach.build_client
 
     def build_then_hold_the_lock(base_url: str, token: str) -> TestClient:
         """The command's client, and then a writer nobody expected.
@@ -895,7 +896,7 @@ def test_a_write_that_cannot_take_the_lock_prints_the_retryable_refusal(
         return client
 
     with holding_the_write_lock(monkeypatch):
-        monkeypatch.setattr(cli, "build_client", build_then_hold_the_lock)
+        monkeypatch.setattr(reach, "build_client", build_then_hold_the_lock)
         with TestClient(
             build_api(TOKEN, DatabaseConfig()),
             headers={"Authorization": f"Bearer {TOKEN}"},
@@ -911,5 +912,5 @@ def test_a_write_that_cannot_take_the_lock_prints_the_retryable_refusal(
             assert captured.err.rstrip("\n") == over_http.json()["detail"]
             assert captured.out == ""
             # And with the lock let go, the same command is answered.
-            monkeypatch.setattr(cli, "build_client", built)
+            monkeypatch.setattr(reach, "build_client", built)
             assert run("agent", "set", "sam", "-f", "-", stdin="prompt: Still Sam.\n") == 0

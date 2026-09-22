@@ -55,7 +55,7 @@ subprocesses of the installed binary, a bounded few at a time rather
 than one after another: the fresh interpreter per command is the claim,
 and its turn in a queue never was. The `vinga-server` entry point's own gated
 sibling, the conversations group, is driven here too: it is outside the
-grammar's tree, so nothing about `cli.COMMANDS` would ever reach it.
+grammar's tree, so nothing about `grammar.COMMANDS` would ever reach it.
 M3 widens that to the full registered inventory
 against a live server; what is here is the tier, and a command that
 moved between the two sets fails from whichever side it left.
@@ -99,7 +99,8 @@ from tests.support.tiers import (
     Tiers,
     declared,
 )
-from vinga_server.config import cli
+from vinga_server.config.cli import grammar
+from vinga_server.config.loader import NEEDS_THE_SERVER_HALF, NEEDS_THE_SIM_EXTRA
 
 PROJECT = Path(__file__).resolve().parents[2]
 
@@ -123,7 +124,7 @@ GATED = frozenset({("openapi",), ("ota-url",), ("check",)})
 # split, so the two halves cannot come to disagree about which rows
 # either of them covers, and so the coverage assertion beside GATED's
 # own has one thing to hold the pools to.
-UNGATED = tuple(row.words for row in cli.COMMANDS if row.words not in GATED)
+UNGATED = tuple(row.words for row in grammar.COMMANDS if row.words not in GATED)
 
 # A port nothing listens on, which is how the serve door below is asked
 # to refuse rather than to serve. The lane's own instance is reachable
@@ -664,7 +665,7 @@ def test_the_gated_commands_refuse_from_the_client_install(client_env: Path) -> 
 
     for words, refusal in zip(gated, refusals, strict=True):
         assert refusal.returncode == 1, (words, refusal.stdout, refusal.stderr)
-        assert refusal.stderr.strip() == cli.NEEDS_THE_SERVER_HALF, words
+        assert refusal.stderr.strip() == NEEDS_THE_SERVER_HALF, words
         assert refusal.stdout == "", words
         assert "Traceback" not in refusal.stderr, words
 
@@ -681,7 +682,7 @@ def test_the_conversations_group_refuses_from_the_client_install(client_env: Pat
     finished = _ran(client_env, "vinga-server", "conversations", "schema")
 
     assert finished.returncode == 1, (finished.stdout, finished.stderr)
-    assert finished.stderr.strip() == cli.NEEDS_THE_SERVER_HALF
+    assert finished.stderr.strip() == NEEDS_THE_SERVER_HALF
     assert finished.stdout == ""
     assert "Traceback" not in finished.stderr
 
@@ -713,7 +714,7 @@ def test_the_doctor_diagnoses_a_given_url_from_the_client_install(
 
     assert finished.returncode == 1, (finished.stdout, finished.stderr)
     assert "cannot reach" in finished.stderr, finished.stderr
-    assert cli.NEEDS_THE_SERVER_HALF not in finished.stderr
+    assert NEEDS_THE_SERVER_HALF not in finished.stderr
     assert "Traceback" not in finished.stderr
 
 
@@ -730,7 +731,7 @@ def test_the_doctor_with_no_url_refuses_from_the_client_install(client_env: Path
     finished = _ran(client_env, "vinga-server", "doctor")
 
     assert finished.returncode == 1, (finished.stdout, finished.stderr)
-    assert finished.stderr.strip() == cli.NEEDS_THE_SERVER_HALF
+    assert finished.stderr.strip() == NEEDS_THE_SERVER_HALF
     assert finished.stdout == ""
     assert "Traceback" not in finished.stderr
     assert "fastapi" not in finished.stderr.lower()
@@ -743,7 +744,7 @@ def test_the_doctor_with_no_url_derives_one_from_the_serve_install(serve_env: Pa
     finished = _ran(serve_env, "vinga-server", "doctor")
 
     assert finished.returncode == 1, (finished.stdout, finished.stderr)
-    assert cli.NEEDS_THE_SERVER_HALF not in finished.stderr
+    assert NEEDS_THE_SERVER_HALF not in finished.stderr
     assert finished.stderr.strip(), "the derivation said nothing at all"
 
 
@@ -757,7 +758,7 @@ def test_the_gated_set_is_what_the_table_says_it_is() -> None:
     a count would not catch a row that moved between the halves, so the
     pin is the two sets against the table rather than a number.
     """
-    table = [row.words for row in cli.COMMANDS]
+    table = [row.words for row in grammar.COMMANDS]
 
     assert GATED <= set(table)
     for words in GATED:
@@ -893,7 +894,7 @@ def test_the_conversation_verb_answers_from_the_sim_install(sim_env: Path) -> No
     finished = _ran(sim_env, "vinga", "simulator", "run", "http://127.0.0.1:9/x/ABCDEFGH/")
 
     assert finished.returncode == 1, (finished.stdout, finished.stderr)
-    assert cli.NEEDS_THE_SIM_EXTRA not in finished.stderr
+    assert NEEDS_THE_SIM_EXTRA not in finished.stderr
     assert "cannot reach" in finished.stderr, finished.stderr
     assert "Traceback" not in finished.stderr
 
@@ -910,7 +911,7 @@ def test_the_conversation_verb_refuses_from_the_client_install(client_env: Path)
     finished = _ran(client_env, "vinga", "simulator", "run", "http://127.0.0.1:9/x/ABCDEFGH/")
 
     assert finished.returncode == 1, (finished.stdout, finished.stderr)
-    assert finished.stderr.strip() == cli.NEEDS_THE_SIM_EXTRA
+    assert finished.stderr.strip() == NEEDS_THE_SIM_EXTRA
     assert finished.stdout == ""
     assert "Traceback" not in finished.stderr
 

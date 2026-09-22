@@ -47,7 +47,8 @@ from tests.support.config_cli import TOKEN, answering, chain, logged, runner
 from tests.support.events import both_formats
 from vinga_server.broken_pipe import BROKEN_PIPE_STATUS
 from vinga_server.config import cli
-from vinga_server.config.cli import MAX_FRAME_DEPTH
+from vinga_server.config.cli import events, reach
+from vinga_server.config.cli.events import MAX_FRAME_DEPTH
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.responses import EVENT_STREAM_MEDIA_TYPE
 
@@ -372,7 +373,7 @@ def test_with_follow_it_prints_until_the_stream_ends(
         f'10:11:12 ota_check device="{MAC}"',
         f'10:11:12 session_open session="{SESSION}"',
     ]
-    assert printed.err.strip() == cli.STREAM_ENDED
+    assert printed.err.strip() == reach.STREAM_ENDED
 
 
 @pytest.mark.parametrize("argv", [("events", "tail"), ("events", "tail", "--follow")])
@@ -389,7 +390,7 @@ def test_an_end_before_any_event_is_the_same_failure_in_both_modes(
 
     printed = capsys.readouterr()
     assert printed.out == ""
-    assert printed.err.strip() == cli.STREAM_ENDED
+    assert printed.err.strip() == reach.STREAM_ENDED
 
 
 def test_a_connection_that_dies_mid_stream_ends_it_the_same_way(
@@ -412,7 +413,7 @@ def test_a_connection_that_dies_mid_stream_ends_it_the_same_way(
 
     printed = capsys.readouterr()
     assert printed.out == f'10:11:12 ota_check device="{MAC}"\n'
-    assert printed.err.strip() == cli.STREAM_ENDED
+    assert printed.err.strip() == reach.STREAM_ENDED
     assert "run the command again" in printed.err
 
 
@@ -587,7 +588,7 @@ def test_the_stream_waits_for_the_server_and_not_for_a_clock(run) -> None:
 
     [client] = run.clients
     assert client.timeout.read is None
-    assert client.timeout.connect == cli.CONNECT_TIMEOUT_S
+    assert client.timeout.connect == reach.CONNECT_TIMEOUT_S
 
 
 def test_the_bearer_token_reaches_the_stream(run) -> None:
@@ -643,7 +644,7 @@ def test_a_frame_this_client_cannot_read_is_never_quoted_back(
 
     printed = capsys.readouterr()
     assert printed.out == ""
-    assert cli.UNRECOGNIZED_ANSWER in printed.err
+    assert reach.UNRECOGNIZED_ANSWER in printed.err
     assert ANSWERED not in printed.err
 
 
@@ -679,7 +680,7 @@ def test_a_2xx_that_is_not_the_event_stream_is_not_read_at_all(
 
     printed = capsys.readouterr()
     assert printed.out == ""
-    assert printed.err.strip() == cli.NOT_THE_EVENT_STREAM
+    assert printed.err.strip() == reach.NOT_THE_EVENT_STREAM
     for surface in (printed.out, printed.err, logged(caplog), both_formats(caplog)):
         assert ANSWERED not in surface
 
@@ -731,7 +732,7 @@ def test_a_frame_that_is_not_this_stream_s_is_never_printed(
 
     printed = capsys.readouterr()
     assert printed.out == ""
-    assert cli.UNRECOGNIZED_ANSWER in printed.err
+    assert reach.UNRECOGNIZED_ANSWER in printed.err
     for surface in (printed.out, printed.err, logged(caplog), both_formats(caplog)):
         assert ANSWERED not in surface
 
@@ -774,7 +775,7 @@ def test_a_frame_nested_past_an_event_ends_in_a_sentence(
 
     printed = capsys.readouterr()
     assert printed.out == ""
-    assert printed.err.strip() == cli.UNREADABLE_EVENT
+    assert printed.err.strip() == events.UNREADABLE_EVENT
     assert "Traceback" not in printed.err
     assert ANSWERED not in printed.err
 
@@ -811,7 +812,7 @@ def test_an_unreadable_frame_leaves_nothing_on_the_chain(run) -> None:
 
     caught = refused(["events", "tail"])
 
-    assert cli.UNRECOGNIZED_ANSWER in str(caught)
+    assert reach.UNRECOGNIZED_ANSWER in str(caught)
     assert caught.__cause__ is None
     assert caught.__context__ is None
     assert ANSWERED not in carried(caught)

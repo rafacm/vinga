@@ -44,6 +44,7 @@ from vinga_server import logs
 from vinga_server.app import _prompt_preview
 from vinga_server.config import Config, cli
 from vinga_server.config.api import build_api, mount_api
+from vinga_server.config.cli import reach
 from vinga_server.config.models import API_MOUNT_PATH, DatabaseConfig
 from vinga_server.events import Emission, attach_server_tap, detach_server_tap
 from vinga_server.tools.mcp import CONNECTED, REDACTED, McpServers, transport
@@ -116,7 +117,7 @@ def cli_status(
     point runs it against an application holding these managers, and
     everything it printed on either stream."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    monkeypatch.delenv(cli.API_URL_ENV, raising=False)
+    monkeypatch.delenv(reach.API_URL_ENV, raising=False)
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
 
     def factory(base_url: str, token: str) -> TestClient:
@@ -126,7 +127,7 @@ def cli_status(
             served, base_url=base_url, headers={"Authorization": f"Bearer {token}"}
         )
 
-    monkeypatch.setattr(cli, "build_client", factory)
+    monkeypatch.setattr(reach, "build_client", factory)
     assert cli.main(["mcp-server", "status"]) == 0
     captured = capsys.readouterr()
     return captured.out + captured.err
@@ -174,7 +175,7 @@ def cli_prompt(
     rather than a glimpse of them, which is what makes it the surface
     worth checking here."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    monkeypatch.delenv(cli.API_URL_ENV, raising=False)
+    monkeypatch.delenv(reach.API_URL_ENV, raising=False)
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
 
     def factory(base_url: str, token: str) -> TestClient:
@@ -184,7 +185,7 @@ def cli_prompt(
             headers={"Authorization": f"Bearer {token}"},
         )
 
-    monkeypatch.setattr(cli, "build_client", factory)
+    monkeypatch.setattr(reach, "build_client", factory)
     assert cli.main(["agent", "preview", "assistant"]) == 0
     captured = capsys.readouterr()
     return captured.out + captured.err

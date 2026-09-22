@@ -29,10 +29,13 @@ from pathlib import Path
 
 import pytest
 from typer._click.core import Context
+from typer._click.exceptions import BadArgumentUsage, BadParameter, ClickException, NoSuchOption
 
 from tests.support.config_cli import SECRET, chain, logged, registered, runner
 from tests.support.events import both_formats
 from vinga_server.config import cli, docgen, entities
+from vinga_server.config.cli import acts, deployment, grammar, input, reach
+from vinga_server.config.loader import ConfigError
 
 
 @pytest.fixture
@@ -179,7 +182,7 @@ def test_asking_for_help_carries_no_library_exception_with_it(
 # makes it so is that each group raises from its own context. A group
 # whose parent's page were printed instead would list commands the words
 # already typed cannot reach.
-BARE: list[tuple[str, ...]] = [(), *sorted(cli.GROUPS)]
+BARE: list[tuple[str, ...]] = [(), *sorted(grammar.GROUPS)]
 
 
 def _bare_id(path: tuple[str, ...]) -> str:
@@ -371,7 +374,7 @@ def test_a_usage_mistake_says_nothing_of_what_was_typed(
     assert SECRET not in both_formats(caplog)
 
 
-def _refusal(argv: tuple[str, ...]) -> cli.ConfigError:
+def _refusal(argv: tuple[str, ...]) -> ConfigError:
     """The refusal one command line earns, as the exception rather than
     as the sentence `main` prints.
 
@@ -381,7 +384,7 @@ def _refusal(argv: tuple[str, ...]) -> cli.ConfigError:
     surface ever holds it, and what is being asserted is what a chain
     walker would find on it.
     """
-    with pytest.raises(cli.ConfigError) as caught:
+    with pytest.raises(ConfigError) as caught:
         cli._parsed(list(argv), cli.DISPATCHED)
     return caught.value
 
@@ -426,17 +429,17 @@ def test_a_refusal_carries_nothing_of_the_command_line_on_its_chain(
 # The base `UsageError` is reached through a subclass `cli` imports
 # rather than through a second import of Typer's private copy of Click:
 # one place breaking on a Typer upgrade is enough.
-USAGE_ERROR = cli.NoSuchOption.__base__
+USAGE_ERROR = NoSuchOption.__base__
 
 CONSTRUCTED = [
     (
         "a value the command does not take",
-        cli.BadParameter(f"Invalid value for 'STAGE': '{SECRET}' is not one of 'llm', 'asr'."),
+        BadParameter(f"Invalid value for 'STAGE': '{SECRET}' is not one of 'llm', 'asr'."),
         "an argument was given a value this command does not take",
     ),
     (
         "an argument in a shape it does not take",
-        cli.BadArgumentUsage(f"Got unexpected extra arguments ({SECRET})"),
+        BadArgumentUsage(f"Got unexpected extra arguments ({SECRET})"),
         "an argument was given in a shape this command does not take",
     ),
     (
@@ -451,7 +454,7 @@ CONSTRUCTED = [
     ),
     (
         "a Click failure that is not a usage error",
-        cli.ClickException(f"something else went wrong with {SECRET}"),
+        ClickException(f"something else went wrong with {SECRET}"),
         "the command line could not be parsed",
     ),
 ]
@@ -487,7 +490,7 @@ def _leaf(words: tuple[str, ...]):
     """One command of the grammar, by the words that name it. Walked
     down the tree the entry point runs, so what is inspected is what an
     operator reaches rather than a second construction of it."""
-    found = cli.command()
+    found = grammar.command()
     for word in words:
         found = found.commands[word]
     return found
@@ -497,14 +500,14 @@ def _page(words: tuple[str, ...]) -> str:
     """One command's help page, rendered the way the committed
     reference renders it: a stated width and no color, so what is read
     here does not depend on the terminal."""
-    shape = cli.command()
+    shape = grammar.command()
     context = Context(
         shape,
-        info_name=cli.PROGRAM,
+        info_name=reach.PROGRAM,
         terminal_width=80,
         max_content_width=80,
         color=False,
-        help_option_names=cli.HELP_OPTION_NAMES,
+        help_option_names=grammar.HELP_OPTION_NAMES,
     )
     # Down the tree with the contexts chained, which is what the
     # committed reference does and what carries the help spellings from
@@ -581,7 +584,7 @@ def _first_sentence(description: str | None) -> str:
 
 
 @pytest.mark.parametrize(
-    "row", cli.COMMANDS, ids=[" ".join(row.words) for row in cli.COMMANDS]
+    "row", grammar.COMMANDS, ids=[" ".join(row.words) for row in grammar.COMMANDS]
 )
 def test_every_command_describes_every_parameter_it_declares(
     run, capsys: pytest.CaptureFixture[str], row
@@ -621,7 +624,7 @@ def test_every_command_describes_every_parameter_it_declares(
 # asserted below rather than assumed.
 WRITING_KINDS = [
     row.kind
-    for row in cli.COMMANDS
+    for row in grammar.COMMANDS
     if row.words == (row.kind, "set") and row.kind in set(docgen.entity_names())
 ]
 
@@ -672,8 +675,8 @@ def test_a_set_help_says_a_credential_is_never_one_of_its_arguments(
     is on every `set` page because every one of them takes pairs."""
     helped = printed_help(run, capsys, kind, "set")
 
-    assert _said(cli.SECRET_NOT_A_PAIR) in _said(helped)
-    assert _said(f"{cli.PROGRAM} <kind> secret set") in _said(helped)
+    assert _said(grammar.SECRET_NOT_A_PAIR) in _said(helped)
+    assert _said(f"{reach.PROGRAM} <kind> secret set") in _said(helped)
 
 
 # The two positions a global option is given in
@@ -708,7 +711,7 @@ ROOT_ONLY = frozenset({"-h", "--help", "--version"})
 
 ROOT_OPTIONS = frozenset(
     spelling
-    for parameter in cli.command().params
+    for parameter in grammar.command().params
     for spelling in parameter.opts
     if spelling not in ROOT_ONLY
 )
@@ -733,7 +736,7 @@ def test_the_root_position_takes_every_global_option() -> None:
 
 
 @pytest.mark.parametrize(
-    "row", cli.COMMANDS, ids=[" ".join(row.words) for row in cli.COMMANDS]
+    "row", grammar.COMMANDS, ids=[" ".join(row.words) for row in grammar.COMMANDS]
 )
 def test_every_command_takes_the_global_options_in_its_own_position(row) -> None:
     """The leaf half: a command declares its own copy of each global
@@ -790,7 +793,7 @@ def _configured(tmp_path: Path, port: int) -> str:
 FLAG_OPTIONS = tuple(
     sorted(
         spelling
-        for parameter in cli.command().params
+        for parameter in grammar.command().params
         for spelling in parameter.opts
         if spelling not in ROOT_ONLY and getattr(parameter, "is_flag", False)
     )
@@ -909,8 +912,8 @@ def test_a_flag_after_the_command_is_taken_on_its_own(
 
 def _described() -> list[tuple[str, str]]:
     return [
-        *((" ".join(path), described) for path, described in cli.GROUPS.items()),
-        *((" ".join(row.words), row.help) for row in cli.COMMANDS),
+        *((" ".join(path), described) for path, described in grammar.GROUPS.items()),
+        *((" ".join(row.words), row.help) for row in grammar.COMMANDS),
     ]
 
 
@@ -929,9 +932,9 @@ def test_the_version_is_asked_of_the_root_alone() -> None:
     once and not once per command: a `--version` on every page would be
     forty-eight ways to ask the same question."""
     assert "--version" in {
-        spelling for parameter in cli.command().params for spelling in parameter.opts
+        spelling for parameter in grammar.command().params for spelling in parameter.opts
     }
-    for row in cli.COMMANDS:
+    for row in grammar.COMMANDS:
         declared = {
             spelling for parameter in _leaf(row.words).params for spelling in parameter.opts
         }
@@ -939,7 +942,7 @@ def test_the_version_is_asked_of_the_root_alone() -> None:
 
 
 @pytest.mark.parametrize(
-    "row", cli.COMMANDS, ids=[" ".join(row.words) for row in cli.COMMANDS]
+    "row", grammar.COMMANDS, ids=[" ".join(row.words) for row in grammar.COMMANDS]
 )
 def test_every_page_answers_the_short_spelling_of_help(row) -> None:
     """clig 7: `-h` and `--help` both, on every page, because `-h` is
@@ -986,7 +989,7 @@ def test_the_version_is_the_same_bytes_through_either_spelling(
     scripted = capsys.readouterr().out
 
     assert dispatched == scripted
-    assert dispatched == f"{cli.DISTRIBUTION} {cli.installed_version()}\n"
+    assert dispatched == f"{grammar.DISTRIBUTION} {grammar.installed_version()}\n"
 
 
 def test_a_tree_with_nothing_installed_says_so_rather_than_guessing(
@@ -995,11 +998,11 @@ def test_a_tree_with_nothing_installed_says_so_rather_than_guessing(
     """A version this code invented would be worse than none, since what
     the read is for is comparing two halves of a deployment."""
     def missing(_name: str) -> str:
-        raise metadata.PackageNotFoundError(cli.DISTRIBUTION)
+        raise metadata.PackageNotFoundError(grammar.DISTRIBUTION)
 
     monkeypatch.setattr(metadata, "version", missing)
 
-    assert cli.installed_version() == cli.VERSION_UNKNOWN
+    assert grammar.installed_version() == grammar.VERSION_UNKNOWN
 
 
 # The tree, held to the table
@@ -1013,7 +1016,7 @@ def test_a_tree_with_nothing_installed_says_so_rather_than_guessing(
 
 
 @pytest.mark.parametrize(
-    "row", cli.COMMANDS, ids=[" ".join(row.words) for row in cli.COMMANDS]
+    "row", grammar.COMMANDS, ids=[" ".join(row.words) for row in grammar.COMMANDS]
 )
 def test_every_row_is_reachable_by_its_own_words(row) -> None:
     """Walked down the built tree word by word, so a row registered
@@ -1023,7 +1026,7 @@ def test_every_row_is_reachable_by_its_own_words(row) -> None:
     The failure it exists for is silent: a completeness test that cannot
     see a command reports full coverage of a tree with a hole in it.
     """
-    found = cli.command()
+    found = grammar.command()
     for word in row.words[:-1]:
         assert word in getattr(found, "commands", {}), " ".join(row.words)
         found = found.commands[word]
@@ -1052,12 +1055,12 @@ def test_the_flat_status_word_is_gone_and_the_noun_spelling_answers(
 ) -> None:
     """`status` moved under `mcp-server` in #341, with no alias left
     behind."""
-    assert ("status",) not in {row.words for row in cli.COMMANDS}
-    assert "status" not in cli.command().commands
+    assert ("status",) not in {row.words for row in grammar.COMMANDS}
+    assert "status" not in grammar.command().commands
 
     assert run("status") == 1
     refused = capsys.readouterr()
-    assert refused.err.strip() == cli.usage_line("that is not a command")
+    assert refused.err.strip() == input.usage_line("that is not a command")
     assert refused.out == ""
 
     assert run("mcp-server", "status") == 0
@@ -1085,13 +1088,13 @@ def test_the_reload_word_is_gone(run, capsys: pytest.CaptureFixture[str]) -> Non
     """The retired half of the swap, from both ends: the word is gone
     from the table and from the page a reader lists commands off, and
     the invocation answers the refusal any other invented word gets."""
-    assert ("reload",) not in {row.words for row in cli.COMMANDS}
-    assert "reload" not in cli.command().commands
+    assert ("reload",) not in {row.words for row in grammar.COMMANDS}
+    assert "reload" not in grammar.command().commands
 
     assert run("reload") == 1
 
     refused = capsys.readouterr()
-    assert refused.err.strip() == cli.usage_line("that is not a command")
+    assert refused.err.strip() == input.usage_line("that is not a command")
     assert refused.out == ""
 
 
@@ -1118,7 +1121,7 @@ def test_an_option_the_new_grammar_dropped_is_refused(
     assert run(*argv) == 1, argv
 
     refused = capsys.readouterr()
-    assert refused.err.strip() == cli.usage_line(
+    assert refused.err.strip() == input.usage_line(
         "that is not an option of this command"
     ), argv
     assert refused.out == "", argv
@@ -1148,16 +1151,16 @@ def test_the_write_refusal_says_written_rather_than_applied() -> None:
     """
     carrying = [
         act
-        for row in cli.COMMANDS
+        for row in grammar.COMMANDS
         for act in row.acts()
-        if act.refusal == cli.UNREADABLE_WRITE
+        if act.refusal == acts.UNREADABLE_WRITE
     ]
 
     assert len(carrying) > 1
-    assert cli.APPLY not in carrying, "the install carries the write's refusal"
-    assert cli.IMPORT in carrying
-    assert "written" in cli.UNREADABLE_WRITE
-    assert "applied" not in cli.UNREADABLE_WRITE
+    assert deployment.APPLY not in carrying, "the install carries the write's refusal"
+    assert deployment.IMPORT in carrying
+    assert "written" in acts.UNREADABLE_WRITE
+    assert "applied" not in acts.UNREADABLE_WRITE
 
 
 def test_the_applys_help_carries_the_three_clocks(
@@ -1181,20 +1184,20 @@ def test_every_group_of_the_tree_carries_a_command() -> None:
     """A noun path with no command under it is a heading nothing
     answers to, which is what a discarded intermediate word leaves
     behind."""
-    for path in cli.GROUPS:
-        assert any(row.words[: len(path)] == path for row in cli.COMMANDS), " ".join(path)
+    for path in grammar.GROUPS:
+        assert any(row.words[: len(path)] == path for row in grammar.COMMANDS), " ".join(path)
         assert getattr(_leaf(path), "commands", {}), " ".join(path)
 
 
 @pytest.mark.parametrize(
-    "row", cli.COMMANDS, ids=[" ".join(row.words) for row in cli.COMMANDS]
+    "row", grammar.COMMANDS, ids=[" ".join(row.words) for row in grammar.COMMANDS]
 )
 def test_a_rows_kind_is_a_kind_the_registry_has(row) -> None:
     """`kind` stopped being the last word when the tree grew a third
     level, so what is left to check is that the explicit fact names
     something: a kind the registry has, the device, or nothing at all
     for a row that addresses no kind."""
-    known = {kind.name for kind in cli.entities.ENTITIES} | {"device", ""}
+    known = {kind.name for kind in entities.ENTITIES} | {"device", ""}
 
     assert row.kind in known, " ".join(row.words)
 
@@ -1204,7 +1207,7 @@ def test_the_deep_rows_resolve_to_their_own_kind() -> None:
     positional rule reads wrongly: a provider secret's kind is the noun
     it sits under and not `set`, and a pending claim's kind is the
     device its two-word noun path opens with."""
-    by_words = {row.words: row for row in cli.COMMANDS}
+    by_words = {row.words: row for row in grammar.COMMANDS}
 
     assert by_words[("provider", "secret", "set")].kind == "provider"
     assert by_words[("provider", "secret", "clear")].kind == "provider"
@@ -1217,12 +1220,12 @@ def test_the_reference_carries_a_heading_for_every_level() -> None:
     """The renderer's own case: a discarded intermediate group would be
     a missing heading in the committed reference, which CI would catch
     as drift without saying why."""
-    rendered = cli.cli_reference()
+    rendered = grammar.cli_reference()
 
-    assert f"### `{cli.PROGRAM} provider secret`" in rendered
-    assert f"### `{cli.PROGRAM} provider secret set`" in rendered
-    assert f"### `{cli.PROGRAM} device pending`" in rendered
-    assert f"### `{cli.PROGRAM} device pending claim`" in rendered
+    assert f"### `{reach.PROGRAM} provider secret`" in rendered
+    assert f"### `{reach.PROGRAM} provider secret set`" in rendered
+    assert f"### `{reach.PROGRAM} device pending`" in rendered
+    assert f"### `{reach.PROGRAM} device pending claim`" in rendered
 
 
 # What the program was invoked as
@@ -1275,14 +1278,14 @@ def test_no_surface_interpolates_what_the_program_was_invoked_as(
         assert run("export") == 0
     exported = capsys.readouterr().out
 
-    with pytest.raises(cli.ConfigError) as refused:
+    with pytest.raises(ConfigError) as refused:
         cli._parsed(["agent", "show", "no-such-agent"], cli.DISPATCHED)
 
     surfaces = {
         "help": root_help,
         "leaf help": leaf_help,
-        "recipes": cli.cli_recipes(),
-        "reference": cli.cli_reference(),
+        "recipes": grammar.cli_recipes(),
+        "reference": grammar.cli_reference(),
         "export": exported,
         "logs": logged(caplog),
         "chain": chain(refused.value),
