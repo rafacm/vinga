@@ -166,16 +166,24 @@ def check_steering(
     if not is_openai:
         return
     prose_steered = model.startswith(_PROSE_STEERED_PREFIX)
+    # The key and never the value, which is the rule every other refusal
+    # on this surface already kept and these two were the one place that
+    # broke it. What is wrong is the pairing of two stored options, so
+    # naming both keys says all of it; the model an entry stored is a
+    # value like any other, and this sentence is printed to an
+    # operator's stderr and carried by an apply's answer as it is. The
+    # prefix is still interpolated, because it is written in this
+    # repository rather than in the entry.
     if speed is not None and prose_steered:
         raise ProviderError(
-            f'{label}: model "{model}" ignores option "speed"; describe the pace '
-            f'in "instructions" instead'
+            f'{label}: option "speed" is ignored by the model named by option '
+            f'"model"; describe the pace in "instructions" instead'
         )
     if instructions is not None and not prose_steered:
         raise ProviderError(
-            f'{label}: model "{model}" ignores option "instructions"; it is read '
-            f'by the {_PROSE_STEERED_PREFIX} speech models, and "speed" is what '
-            f"this one takes"
+            f'{label}: option "instructions" is ignored by the model named by '
+            f'option "model"; it is read by the {_PROSE_STEERED_PREFIX} speech '
+            f'models, and "speed" is what this one takes'
         )
     low, high = SPEED_RANGE
     if speed is not None and not low <= speed <= high:

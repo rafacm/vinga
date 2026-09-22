@@ -21,7 +21,25 @@ from vinga_server.boundary import Reach
 from vinga_server.config.models import ProviderConfig
 from vinga_server.providers import ProviderCallError, ProviderCallTimeout, build_entry
 from vinga_server.providers.base import ProviderError
-from vinga_server.providers.openai_tts import OpenAiTts
+from vinga_server.providers.openai_tts import DEFAULT_MODEL, OpenAiTts
+
+# The two steering refusals, spelled out rather than matched on a
+# fragment. They name the option keys and the rule, and never the model
+# the entry stored: a model name is an option's value, and a value is
+# the one thing a provider refusal does not repeat, since this sentence
+# is printed to an operator's stderr and carried by an apply's answer as
+# it is. Exact rather than a substring so that a wording that degrades
+# is caught here and not only a wording that leaks.
+SPEED_REFUSAL = (
+    'providers.tts.voice: option "speed" is ignored by the model named by option '
+    '"model"; describe the pace in "instructions" instead'
+)
+
+INSTRUCTIONS_REFUSAL = (
+    'providers.tts.voice: option "instructions" is ignored by the model named by '
+    'option "model"; it is read by the gpt-4o speech models, and "speed" is what '
+    "this one takes"
+)
 
 # Not a real credential, and shaped so a substring check for it cannot
 # match by accident. It stands in for what an endpoint can echo back
@@ -114,15 +132,17 @@ async def test_the_sample_rate_is_what_the_pcm_format_produces(
 
 async def test_speed_is_refused_on_a_model_that_ignores_it(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_KEY", "secret")
-    with pytest.raises(ProviderError, match='ignores option "speed"'):
+    with pytest.raises(ProviderError) as excinfo:
         await build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY", speed=1.2)
+    assert str(excinfo.value) == SPEED_REFUSAL
+    assert DEFAULT_MODEL not in str(excinfo.value)
 
 
 async def test_instructions_are_refused_on_a_model_that_ignores_them(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OPENAI_KEY", "secret")
-    with pytest.raises(ProviderError, match='ignores option "instructions"'):
+    with pytest.raises(ProviderError) as excinfo:
         await build_tts(
             type="openai",
             voice="alloy",
@@ -130,6 +150,8 @@ async def test_instructions_are_refused_on_a_model_that_ignores_them(
             model="tts-1",
             instructions="Speak cheerfully",
         )
+    assert str(excinfo.value) == INSTRUCTIONS_REFUSAL
+    assert "tts-1" not in str(excinfo.value)
 
 
 async def test_speed_is_accepted_on_the_model_that_takes_it(
@@ -170,7 +192,7 @@ async def test_every_spelling_of_openai_keeps_the_startup_guarantees(
         await build_tts(type="openai", voice="alloy", base_url=base_url)
 
     monkeypatch.setenv("OPENAI_KEY", "secret")
-    with pytest.raises(ProviderError, match='ignores option "speed"'):
+    with pytest.raises(ProviderError) as excinfo:
         await build_tts(
             type="openai",
             voice="alloy",
@@ -178,6 +200,8 @@ async def test_every_spelling_of_openai_keeps_the_startup_guarantees(
             base_url=base_url,
             speed=1.2,
         )
+    assert str(excinfo.value) == SPEED_REFUSAL
+    assert DEFAULT_MODEL not in str(excinfo.value)
 
 
 @pytest.mark.parametrize("base_url", ["not-a-url", "api.openai.com/v1", "https://"])
