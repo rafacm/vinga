@@ -182,6 +182,18 @@ The classes, with the asset each reuses (all in
   message, and the answer carries the class name and not the words.
 - **An unknown type.** A stored type spelled as a sentinel, refused
   with the type not quoted back.
+- **A factory that raises a `ProviderError` of its own, from an SDK
+  exception.** `registry.py` passes a factory-raised `ProviderError`
+  through unchanged (`except (ProviderError, ConfigError): raise`),
+  which `test_providers.py` pins as intentional, so such an error
+  reaches `_built` carrying whatever it was raised `from`. The case
+  registers a factory that raises a value-free `ProviderError` from an
+  SDK-like exception whose message holds the sentinel, applies, and
+  asserts the refusal's `__cause__` and `__context__` are `None`, the
+  sentinel is absent from the answer and from every record rendering,
+  and the value-free sentence is what the answer carries. This is the
+  case that proves `_built`'s delayed string extraction is what strips
+  the chain, rather than assuming it.
 
 Absence from the log is asserted over
 `tests.support.leaks.renderings(caplog)`, never over `caplog.text`
@@ -300,6 +312,11 @@ read-only sandbox, 193 s) at commit `19f7122e`. Six findings, verdict
    SDK-like exception holding the sentinel, and assert the chain is
    empty and the sentinel absent from the response and from every
    record representation.
+
+   *Resolution*: accepted. A sixth case is added under Tests, a
+   factory raising its own `ProviderError` from an SDK-like exception,
+   asserting the empty chain and the sentinel's absence from the
+   answer and every record rendering.
 
 4. **P2: the 25-site inventory is stale and its verification command
    cannot pass.** At `19f7122e` the exact command yields 24. Record the
