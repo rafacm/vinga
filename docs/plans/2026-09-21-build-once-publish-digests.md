@@ -829,43 +829,69 @@ that quotes commands.
 
 ## Milestones
 
+Rewritten from the settled decisions after review round 4, which found
+this list still instructing three designs that earlier rounds had
+replaced. Where this list and the decisions above disagree, the
+decisions are right and this list is a bug.
+
 - [ ] **M1: build each architecture once, publish the tested digests.**
-  `image` gains an `arch` matrix dimension and loses its publishing
-  half; each of the four jobs builds once with the image exporter
-  alone, pushes by digest, and records
-  `containerimage.digest` as an artifact. The amd64 jobs pull that
-  digest back and run the existing smoke unchanged against it. A new
-  `image-publish` job assembles the multi-arch manifest with
-  `docker buildx imagetools create`, moves the tags, builds nothing
-  and configures no cache; it runs on every event and passes
-  `--dry-run` on everything but a push to `main`, and asserts the
-  assembled index carries an attestation manifest per platform. Cache
-  scopes become `variant-arch`, exported exactly once each. `needs:
-  [unit, integration]` moves from the build to the publish. The dated
-  tag gains seconds, `YYYY-MM-DD-HHmmss`, and the job refuses to reuse
-  either immutable tag when it already names different bytes. The
-  index topology is validated in two phases, against the `--dry-run`
-  index resolved by digest before anything is tagged, then re-checked
-  against the tag afterwards. Documents the two "finish
-  minutes apart" passages and the new tag format.
+
+  *Building.* `image` gains an `arch` matrix dimension and loses its
+  publishing half, becoming four jobs. Each builds once with the image
+  exporter **alone** (never a second `type=docker` output, which
+  changes the reported digest from the index to the platform manifest
+  and drops provenance), pushes by digest on `push` and
+  `workflow_dispatch`, and records `containerimage.digest` as an
+  artifact. The amd64 jobs pull that digest back and run the existing
+  smoke against it, unchanged. Cache scopes become `variant-arch`,
+  exported exactly once each. `needs: [unit, integration]` moves off
+  `image` and onto `image-publish`.
+
+  *Identity.* `REVISION` becomes `${GITHUB_SHA:0:12}`. `type=sha` is
+  dropped from `docker/metadata-action`; both immutable tags are
+  `type=raw` rendered from that one value, `sha-<revision>` and
+  `YYYY-MM-DD-HHmm-<revision>`. The existing step asserting the tag
+  ends in the revision the build reports stays, as a guard.
+
+  *Publishing.* A new `image-publish` job assembles the manifest with
+  `docker buildx imagetools create`, builds nothing and configures no
+  cache. It runs on `push` and `workflow_dispatch` only, **not** on a
+  pull request. It creates the two immutable tags and **no moving
+  tag**, which is M2's. It refuses to reuse either immutable tag that
+  already resolves to a different digest. Validation is phase 1 on
+  both events (the `--dry-run` index, entries resolved by digest
+  before any tag exists) and phase 2 on a push to `main` only (both
+  immutable tags resolved after assignment), each checking the same
+  four properties.
+
+  *Documenting.* Both "finish minutes apart" passages, both tag
+  formats, and the revision width wherever it appears as an example,
+  including `/healthz` output. The revision width and the tag formats
+  land together; splitting them leaves the maintained pages claiming
+  an immutability the narrower revision does not support.
+
 - [ ] **M2: validation overlaps across main pushes; the moving tag
-  alone stays ordered.** The workflow-level concurrency group stops
-  serializing `main` (each push gets its own group) and keeps
-  cancelling superseded pull-request runs. Publication splits:
-  `image-publish` keeps the immutable tags and takes no group at all,
-  so it cannot be displaced while pending; a new `image-promote` moves
-  the moving tag in an ordered, non-cancelling group per variant. It
-  reconciles rather than publishing its own commit: `fetch-depth: 0`,
-  fetch `origin/main`, consider the commits between the moving tag's
-  revision and the tip newest first, and promote the first whose
-  `sha-` tag exists and whose index passes the same validation
-  `image-publish` runs, whichever run produced it. Finding nothing is
-  a no-op, not a failure. A 200-commit cap covers the force-push case,
-  whose behavior is stated rather than left to happen. That is
-  idempotent, self-healing and independent of which run survives
-  displacement. Corrects the workflow's false comment about merges
-  running to completion, and documents the guarantee in the two
-  moving-tag passages.
+  alone stays ordered.**
+
+  The workflow-level concurrency group stops serializing `main`, each
+  push getting its own group, and keeps cancelling superseded
+  pull-request runs.
+
+  A new `image-promote` job owns the moving tag, and only it. Ordered,
+  non-cancelling, `publish-${{ matrix.variant }}`, on a push to `main`
+  only, `fetch-depth: 0`. It reconciles rather than publishing its own
+  commit: read and validate the moving tag's revision, select the
+  range (first-parent from the tip to that revision; the bounded
+  force-push path when it is absent or outside history; fail loudly
+  when it is unusable), walk newest first, and promote the first
+  commit whose `sha-` tag exists and whose index passes the same
+  validation. Finding nothing is a no-op. Having moved the tag, it
+  resolves it and requires it to equal the validated index.
+
+  Corrects the workflow comment at L52-54, which claims merges run to
+  completion and is false. Documents the guarantee in the two
+  moving-tag passages, with its fast-forward scope in the sentence.
+
 - [ ] **M3: image-affecting pull requests build and smoke
   automatically.** `image` loses `if: github.event_name !=
   'pull_request'` and the comment explaining the exemption, and on a
@@ -873,6 +899,7 @@ that quotes commands.
   PR is covered with no token and leaves no registry trace.
   `image-publish` and `image-promote` do not run on a pull request.
   `workflow_dispatch` stays.
+
 
 ## Plan review round
 
