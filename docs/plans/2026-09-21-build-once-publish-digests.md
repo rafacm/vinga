@@ -203,29 +203,47 @@ requires all four:
 - both platform configs carrying the expected `VINGA_REVISION` and
   `VINGA_VARIANT`.
 
-**The order it runs in is the whole of whether it works**, which the
-first draft of this check left unsaid. A tagged `imagetools create`
-has to push before its tag can be read back, so a post-push assertion
-finds a malformed index only after the immutable tags exist; and
-`--dry-run` prints an index without creating a tag, so there is
-nothing for `.Image` to read the configs from. Neither half alone
-checks anything before publication.
+**The order it runs in is the whole of whether it works**, and the
+first two attempts at stating that order both specified something that
+cannot run.
 
-So validation is two phases, and the thing that makes it possible is
-that the per-platform manifests were pushed **by digest before any tag
-existed**, so every one of them is already addressable:
+The mechanism is settled by a local check rather than by reading the
+flags: `imagetools create --dry-run --metadata-file <f>` exits 0 and
+**writes no file**, while a real `create` writes one carrying
+`containerimage.descriptor.digest`. So there is no way to learn the
+dry-run index's digest, and any design that compares it to the pushed
+one is not implementable. That comparison is dropped.
 
-1. `imagetools create --dry-run`, parse its raw index, and resolve
-   each entry by digest against the same repository
-   (`imagetools inspect "$IMAGE@<digest>"`, raw for the manifests and
-   `--format '{{json .Image}}'` for the configs). All four properties
-   above are checked here, before anything is tagged.
-2. Only then the tagged push, and afterwards one inspect of the tag,
-   required to resolve to the same index digest phase 1 validated.
+What replaces it is validating the same four properties twice, which
+needs no parent digest and is executable in both places:
 
-This costs one extra inspect and makes the dispatch gate genuinely
-equivalent to the push gate for this check, which the first draft
-intended and did not achieve. The local experiments are what they are:
+1. **Before any tag exists**, against the dry-run index.
+   `imagetools create --dry-run` prints it; its entries are resolved
+   individually with `imagetools inspect "$IMAGE@<entry-digest>"`,
+   raw for the manifests and `--format '{{json .Image}}'` for the
+   configs. This works precisely because the per-platform manifests
+   were pushed by digest before anything was tagged, so every entry is
+   already addressable.
+2. **After the push**, against **every** final tag this job creates,
+   not one of them: the dated tag and the `sha-` tag, each resolved
+   and each required to carry the same validated topology. The
+   reconciler trusts the `sha-` tag, so checking only the dated one
+   would check the tag nothing depends on.
+
+A failure in phase 2 leaves an immutable tag behind, which is a red
+run somebody sees, and the moving tag is protected from it separately
+by the reconciler validating its candidate.
+
+The stronger alternative was verified and not taken: push the
+assembled index under a run-scoped staging tag, validate that, then
+create the final tags from it, which works and preserves the index
+digest exactly (checked locally: three tags, one digest). It closes
+the same hole as reconciler-side validation and costs a second tag
+namespace to name, race and prune, so it is recorded here as the
+option to reach for if the reconciler's validation ever proves
+insufficient.
+
+The local experiments are what they are:
 evidence that the exporter choice matters. This check is what
 validates the topology.
 
@@ -675,9 +693,13 @@ verified where matters more than usual.
   manifest digest, the two-platform merge preserving four index
   entries, and `--dry-run` printing that index without pushing.
 - **On a branch, before merging**: `gh workflow run vinga-server.yml
-  --ref <branch>`, which after M1 exercises every step including the
-  manifest assembly under `--dry-run`. This is the gate for each
-  milestone, and the run is linked on its PR.
+  --ref <branch>`, which after M1 exercises every step up to and
+  including phase 1 of the validation, against real pushed digests. It
+  is the gate for each milestone and the run is linked on its PR.
+  **What it cannot reach**, stated because two earlier drafts claimed
+  otherwise: a dispatch creates no tag, so phase 2 does not run, and
+  it never runs `image-promote`, so nothing about the reconciler is
+  exercised by it.
 - **On `main`, after merging**: the first push is the only thing that
   can exercise the real tag move. M1's implementation-doc section
   records the measured job durations and cache-export times of that
@@ -697,11 +719,15 @@ verified where matters more than usual.
   with the reason. It can be provoked rather than waited for, by
   merging M3 and a documentation commit in quick succession once M2 is
   on `main`, and that is the intended discharge.
-- **Cheap to check and worth checking first**: the reconciler is
-  idempotent, so running `image-promote` twice against an unchanged
-  `main` must be a no-op the second time, and running it when the
-  moving tag is deliberately left stale must repair it. Both are
-  provable on a dispatch against a branch, without a burst.
+- **Main-only, and unchecked until a merge exercises them**: phase 2
+  of the validation, the reconciler's idempotence (a second promote
+  against an unchanged `main` is a no-op), and its repair of a moving
+  tag left stale. A previous draft called these provable on a
+  dispatch. They are not, because a dispatch creates no tag and never
+  runs the promote job, and claiming a gate that cannot run is worse
+  than having none, since it stops anybody looking for a real one.
+  M2's implementation-doc section records them unchecked with this
+  reason and ticks them from the first merges.
 
 The `tests/census` lane is run before each PR: the command-spellings
 census sweeps every tracked file, and this work edits documentation
