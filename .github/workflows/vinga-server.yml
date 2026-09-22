@@ -1865,10 +1865,23 @@ jobs:
           import json
           import sys
 
-          index = json.load(open(sys.argv[1], encoding="utf-8"))
+          # Every failure here is reported as one fixed sentence. A
+          # traceback would carry the exception's own words and, from
+          # JSONDecodeError, a slice of the document it was reading,
+          # onto a surface this job writes to a public log.
+          # JSONDecodeError and UnicodeDecodeError are both ValueError.
+          try:
+              with open(sys.argv[1], encoding="utf-8") as handle:
+                  index = json.load(handle)
+          except (OSError, ValueError):
+              print("::error::the assembled index could not be read as JSON")
+              sys.exit(1)
+          if not isinstance(index, dict) or not isinstance(index.get("manifests"), list):
+              print("::error::the assembled index is not an OCI index document")
+              sys.exit(1)
           platforms = {}
           attested = set()
-          for entry in index.get("manifests", []):
+          for entry in index["manifests"]:
               annotations = entry.get("annotations") or {}
               if annotations.get("vnd.docker.reference.type") == "attestation-manifest":
                   attested.add(annotations.get("vnd.docker.reference.digest"))
