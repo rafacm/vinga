@@ -1158,19 +1158,27 @@ adopting it later is a decision rather than a drift.
   are JSON. That is the shape of the artifact, not a mode of the
   reader.
 
-Notices stay on stderr under every format, and the data stream carries
-the model alone. A machine format writes the encoded answer to stdout
-and then runs the act's own renderer with its stdout discarded, so the
-sentences a renderer puts on stderr arrive exactly as a person would
-have read them and nothing else joins the document.
+Notices stay on stderr under every format. The seam that does it is on
+the act runner: one act's answer is one document on stdout, and then
+that act's own renderer runs with its stdout discarded, so the
+sentences it puts on stderr arrive exactly as a person would have read
+them and no rendering joins the document.
+
+What is not settled, and belongs to the issue that adopts the flag:
+what a command does around its acts. A command may print an opener
+before its first request (`info` says which deployment it reached), and
+a command may have several acts, so the stream for one invocation is
+not one document by the seam alone. Whether the opener is suppressed
+under a machine format, and how several answers are framed as one
+parseable artifact, are decisions about the command level that nothing
+here takes.
 
 What would change the answer: a real consumer that cannot parse YAML
 and cannot reach the API. Then it is its own issue, and `--json` is the
 name to use, because it is the name all three guides use. What such an
-issue no longer has to build is the dispatch: the act runner takes the
-shape its answer leaves in as a parameter, defaulted to the rendering a
-person reads, so adopting the flag is the grammar setting that
-parameter.
+issue starts from is the act-level seam above, already built and
+defaulted to the rendering a person reads; what it has to decide is the
+paragraph above this one.
 
 ### Output is deterministic, and an answer cannot steer a terminal
 
