@@ -150,3 +150,59 @@ status check on `main`, that setting points at a job that will never
 report again and would block every merge. Nothing in the repository
 records what the branch protection requires, so this was not checked
 from here.
+
+### Measured on a runner: the projection held
+
+Discharges the first of the two obligations above.
+[Dispatch run 35697656584](https://github.com/rafacm/vinga/actions/runs/35697656584)
+against this branch is green in every job, both `image-publish` jobs
+included, so the whole structure has run: build once per architecture
+with the image exporter alone, push by digest, pull back, smoke the
+pulled bytes, assemble the manifest and check its topology. Only the
+final tag push is unreached, being gated on a push to `main`.
+
+| job | duration | started |
+| --- | --- | --- |
+| unit | 477s | +0s |
+| integration | 200s | +0s |
+| image (default, amd64) | 260s | +0s |
+| image (default, arm64) | 281s | +2s |
+| image (slim, amd64) | 181s | +0s |
+| image (slim, arm64) | 183s | +0s |
+| image-publish (default) | 19s | +480s |
+| image-publish (slim) | 20s | +480s |
+| **critical path** | **500s** | |
+
+Against the plan's baseline, run `35617743274` on `main` at
+`a81608d`: 1241s wall, of which the default variant's image job alone
+was 781s. The plan projected "~500s" and the measured figure is 500s.
+The publish is the sharpest number in it: **19s against the 359s
+`Publish` step it replaces**, because it assembles a manifest rather
+than building a third time.
+
+Two things this run does not say, recorded so the numbers are not read
+wider than they are.
+
+**The cache was cold**, because the scope key changed from `<variant>`
+to `<variant>-<arch>`, so the image jobs are at their pessimistic
+worst here and a warm run should be faster. That is also why this run
+cannot discharge the second obligation, the arm64 cached-versus-
+executed comparison, which needs the second push after the merge.
+
+**The critical path is now the unit lane**, 477s of the 500s, with
+every image job finishing inside it. So the `variant-arch` scope
+question is no longer a wall-clock question at all: even a large
+regression in image build time would be invisible until it exceeded
+the unit lane. The scopes stay split on the reasoning in the plan,
+and the warm measurement is still worth recording, but it decides a
+number nobody is waiting on any more. Anyone coming here to make CI
+faster should read #489 and #537 rather than this milestone.
+
+### The branch-protection question above, answered
+
+`main` is **unprotected** and has no required status checks
+(`repos/rafacm/vinga/branches/main` reports `"protected": false` with
+an empty `required_status_checks.contexts`), so the matrix rename
+breaks nothing. Recorded rather than deleted, because the question was
+the right one to ask and the answer is a fact about this repository
+that the next renaming change will want.
