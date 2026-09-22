@@ -33,6 +33,64 @@ retargeting discipline under "Merging".
   implementation docs of the work this builds on, and the code the
   issue touches.
 
+## Attribution
+
+Every artifact the pipeline produces says which model produced it
+and at what thinking level, in one shape whatever the provider, so
+a plan, a review round, a commit and a PR read as the work of a
+named agent rather than of "the session". The shape is one string:
+
+    <provider>/<model>, thinking <level>
+
+- `provider` is the vendor in lower case: `anthropic`, `openai`.
+- `model` is the exact id the tool ran, never an alias: the
+  orchestrating session's own id (`claude-fable-5-1` at the time of
+  writing), the id the agent definition names for a subagent, the
+  id `REVIEW_MODEL` selects for a reviewer (`gpt-5.6-sol`).
+- `level` is the provider's own word for the thinking or reasoning
+  effort the run was pinned to, or `n/a` when the tool exposes no
+  such setting for that run. It is read from where the tool holds
+  it, never guessed:
+  - the orchestrating session: the `--effort` flag if one was
+    passed, else `effortLevel` in `~/.claude/settings.json`, else
+    `n/a` (Claude Code's own default applies and is not exposed).
+  - a milestone subagent: the `effort` key of its agent definition,
+    `.claude/agents/milestone-implementer.md`, which pins the model
+    and the level so the brief states both as facts.
+  - a reviewer: `REVIEW_EFFORT`, which `run-pr-review.sh` passes to
+    codex as `model_reasoning_effort` and to claude as `--effort`,
+    and stamps; the plan-mode command in the `external-review`
+    skill passes the same value by hand.
+
+The display name beside a commit's string is the model's name as
+its vendor writes it: `Claude Fable 5.1`, `Claude Opus 5`.
+
+Where the string lands, and in what form:
+
+- **The plan header**, below the "Cheapest alternative" line:
+  `**Attribution:** <string>; Claude Code <version>; <date>.`
+- **Each milestone section of the implementation doc**, as its
+  first line: the same form, for the subagent that implemented
+  the milestone.
+- **Every review round header**, plan and PR alike: `Reviewed
+  <date> by <string> via <tool> <version> (<enforcement>), runtime
+  <n>, at commit <hash>`; a plan round adds the plan's blob hash
+  (`git rev-parse HEAD:<plan path>`), which is what still resolves
+  after the rebase merge has rewritten the commit.
+- **Every commit**, as two trailers: `Co-Authored-By: <display
+  name> <noreply@anthropic.com>` naming the model that wrote the
+  commit, and `Attribution: <string>`.
+- **The PR body**, as one `Attribution:` line naming, each as the
+  string, the author of the plan and of the PR text, the author of
+  the commits, and the reviewer of each round.
+
+A resolution note under a finding is by the author of the document
+it amends unless the note says otherwise. What the block never does
+is inherit: a subagent's commits carry the subagent's string and
+display name, not the orchestrator's. The #547 run got exactly this
+wrong, twelve Opus commits signed as Fable, because the brief said
+"the Claude trailer" and the trailer at hand was the orchestrator's.
+
 ## Step 1: the plan
 
 `docs/plans/YYYY-MM-DD-<slug>.md` (today's date) on a
@@ -50,7 +108,9 @@ workflow publishes an image on every push to `main`, so every merge
 in the stack must leave `main` releasable, with no state that
 violates a settled decision (two co-equal write paths, a mandatory
 variable CI does not set). Cut milestones so behavior changes sit
-alone in review. Commit the plan.
+alone in review. Commit the plan, its header carrying the
+Attribution line and the commit its two trailers, both in the
+shape under "Attribution" above.
 
 Each milestone also names its design footprint: the modules it
 deepens, the seams it adds, and for any new module the one sentence
@@ -166,14 +226,17 @@ merely land near each other in the queue are still two plans.
 ## Step 2: external plan review
 
 Use the `external-review` skill in plan mode. Record the findings
-as received in a "Plan review round" section (own commit), then
+as received in a "Plan review round" section (own commit) whose
+header is the review-round form under "Attribution", then
 address each finding with its own amendment commit, appending a
 `*Resolution*` note under the recorded finding.
 
 ## Step 3: implement, one subagent per milestone
 
-One general-purpose subagent with model opus per milestone, each in
-its own scratchpad worktree, on a branch stacked on the previous
+One `milestone-implementer` subagent per milestone (the agent
+definition in `.claude/agents/`, which pins the model and the
+effort its attribution string reports), each in its own
+scratchpad worktree, on a branch stacked on the previous
 milestone's branch.
 
 **Launch milestone N+1's subagent when N's PR OPENS, not when it
@@ -197,7 +260,12 @@ The subagent's brief states, verbatim where possible:
   round; where the brief and the plan disagree, the plan wins.
 - uv only, never pip; everything runs from `vinga-server/`.
 - Small commits: one logical change, imperative ~50-char title, a
-  body explaining what and why, ending with the Claude trailer.
+  body explaining what and why, ending with the two attribution
+  trailers, which the brief spells out verbatim: the subagent's
+  own display name and string, read off its agent definition,
+  never the orchestrator's.
+- The implementation-doc section it writes opens with its own
+  Attribution line, in the form under "Attribution".
 - No em-dashes anywhere. `config.example.yaml` updates in the same
   change as any server-section schema change. A changelog entry is
   a `changelog.d/<issue>-<slug>.md` fragment, `### <Class>` headings
@@ -255,7 +323,9 @@ breaks extension turns every newline into a line break): one line
 per paragraph and per list item. The body covers what and why,
 decisions and recorded deviations, and a Verification section as a
 task list with honestly checked and unchecked boxes; an unchecked
-box carries a note saying why it is not yet verifiable. Substitute
+box carries a note saying why it is not yet verifiable; and the
+Attribution line under "Attribution", extended with each review
+round's reviewer as the rounds land. Substitute
 the PR number into the plan's milestone tick once the PR exists.
 **Start the external review round as soon as the PR is pushed, in
 parallel with its first CI run.** A reviewer reads the diff and not the
@@ -280,8 +350,9 @@ the run on the PR as the evidence.
 
 Use the `external-review` skill in PR mode (the self-posting
 script). Fix every finding with its own commit, delegating to the
-milestone's subagent, which has the context. Record the round in
-the implementation doc, reply on the PR with per-finding
+milestone's subagent, which has the context, so the fix commits
+carry its trailers. Record the round in the implementation doc
+under the review-round header form, reply on the PR with per-finding
 resolutions and commit hashes, update the PR description, and wait
 for CI again. A finding that invalidates a claim gets a transparent
 correction on the PR.
