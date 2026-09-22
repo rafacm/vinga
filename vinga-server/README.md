@@ -3320,14 +3320,14 @@ distinguishes one deploy from another.
 
 ```console
 $ curl -s localhost:8003/healthz
-{"status":"ok","version":"0.1.0","revision":"a1b2c3d"}
+{"status":"ok","version":"0.1.0","revision":"a1b2c3d4e5f6"}
 ```
 
 **A running pod's revision equals its image tag's suffix**: a container
-from the image tagged `sha-9fd3de5` reports `9fd3de5`, so a post-deploy
-check is an equality check. CI passes the same seven characters
-`docker/metadata-action` puts in the tag, computed from one expression,
-so the two cannot drift. It used to pass the full 40-character SHA,
+from the image tagged `sha-9fd3de5e1c4b` reports `9fd3de5e1c4b`, so a
+post-deploy check is an equality check. CI passes the same twelve
+characters `docker/metadata-action` puts in the tag, computed from one
+expression, so the two cannot drift. It used to pass the full 40-character SHA,
 which made the match a prefix check; a deployment scripted it as
 equality, which is the natural reading, and got a false failure.
 
@@ -3825,8 +3825,8 @@ extras are installed.
 
 | Variant | Tags | Carries | Use it when |
 | --- | --- | --- | --- |
-| default | `latest`, `2026-08-03-1200`, `sha-3f9362a` | both local engines | any config naming `faster_whisper` or `piper`, and anything fully local |
-| slim | `slim`, `2026-08-03-1200-slim`, `sha-3f9362a-slim` | neither | ASR and TTS both name external providers |
+| default | `latest`, `2026-08-03-120015`, `sha-3f9362a2b1c8` | both local engines | any config naming `faster_whisper` or `piper`, and anything fully local |
+| slim | `slim`, `2026-08-03-120015-slim`, `sha-3f9362a2b1c8-slim` | neither | ASR and TTS both name external providers |
 
 The default variant is the unsuffixed one, following the convention
 that an unqualified tag is the batteries-included image (as in
@@ -3856,19 +3856,25 @@ is not to install anything but to pull the default variant instead.
 
 Both variants are published for amd64 and arm64, and each has passed the
 unit, integration, and smoke lanes: the same whole-conversation smoke
-test runs against both.
+test runs against both. What a tag names is what was smoked, by digest:
+each architecture is built exactly once, pushed to the registry
+addressed by the digest of those bytes, and pulled back by that digest
+for the smoke, and the manifest a tag points at is assembled from the
+digests rather than from a rebuild of the same source.
 
 The moving tag is the only one that moves, `latest` for the default
 variant and `slim` for slim, so it is the tag to pull when trying the
 server and the wrong one to deploy from. The dated and SHA tags are
 never reused: several merges can land on one day, and each gets its own
-timestamp, so a rollback names the build it wants.
+timestamp to the second, so a rollback names the build it wants.
 
-**Pair the two variants by their SHA tag, not their dated one.** They
-are built by separate jobs that finish minutes apart, so one commit can
-produce `2026-08-06-1048` and `2026-08-06-1047-slim`. The dated tag is
-honest about when each image was built; `sha-<short>` is the one that
-says which commit, and it matches across both.
+**Pair the two variants by their SHA tag, not their dated one.** Each
+variant's dated tag is the second its own manifest was assembled, and
+the two are assembled by jobs that start together, so the two
+timestamps now usually agree and are not guaranteed to. The dated tag
+is honest about when each image was published; `sha-<revision>` is the
+one that says which commit, and it is equal across both variants by
+construction.
 
 The default image contains `piper-tts` (GPL-3.0) alongside the MIT
 server. That is aggregation, not a derived work; the slim variant

@@ -116,7 +116,7 @@ spec:
       containers:
         - name: vinga
           # A moving tag, and the one thing here that should not stay as
-          # committed. Pin an immutable `YYYY-MM-DD-HHmm` or
+          # committed. Pin an immutable `YYYY-MM-DD-HHmmss` or
           # `sha-<revision>` tag before this runs anywhere real: `latest`
           # is a pointer that moves under a pod that reschedules, and
           # "Choosing an image" in the server README says the rest.

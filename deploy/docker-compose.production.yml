@@ -47,11 +47,11 @@ name: vinga
 services:
   vinga:
     # Required and unset, so this file cannot boot something nobody
-    # chose. Pin an immutable tag: `YYYY-MM-DD-HHmm` or
+    # chose. Pin an immutable tag: `YYYY-MM-DD-HHmmss` or
     # `sha-<revision>`. `latest` and `slim` are moving pointers, and a
     # moving pointer under a restart policy is a deployment that
     # upgrades itself at the worst possible moment.
-    image: "${VINGA_IMAGE:?set VINGA_IMAGE in deploy/.env to a pinned image tag, an immutable YYYY-MM-DD-HHmm or sha-<revision> tag rather than latest}"
+    image: "${VINGA_IMAGE:?set VINGA_IMAGE in deploy/.env to a pinned image tag, an immutable YYYY-MM-DD-HHmmss or sha-<revision> tag rather than latest}"
 
     # What the trial file deliberately does without. The server refuses
     # a database it cannot reach rather than waiting for one, and
