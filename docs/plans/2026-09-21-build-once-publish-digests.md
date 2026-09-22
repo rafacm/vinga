@@ -735,8 +735,8 @@ above disagree, the decisions are right and this list is a bug.
   formats wherever they appear as examples, and the first half of
   `AGENTS.md`'s CI summary.
 
-- [ ] **M2: validation overlaps across main pushes; the moving tag is
-  ordered by a check.** The workflow-level concurrency group stops
+- [x] **[M2: validation overlaps across main pushes; the moving tag is
+  ordered by a check](2026-09-21-build-once-publish-digests-implementation.md#m2-validation-overlaps-across-main-pushes-the-moving-tag-is-ordered-by-a-check)** (PR TBD). The workflow-level concurrency group stops
   serializing `main`, each push getting its own group, and keeps
   cancelling superseded pull-request runs. That alone is what stops a
   merged commit losing its image. `image-publish` checks out with
