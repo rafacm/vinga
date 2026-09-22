@@ -315,7 +315,7 @@ Three proofs, none of them "the tests pass".
   modules import each other and `main.py` is still the one importer
   from outside.
 
-### M3: the dump beside the reader, and no unreachable arm
+### M3: the dump beside the reader, and the dispatch on the render step
 
 `answers.py` gains one function, `encoded(shape, answer, format)`,
 which reads an answer through `_understood` and writes it back as
@@ -330,19 +330,27 @@ plants a control character and the fixed-length mask in a response
 model, dumps it through both encoders, and asserts the character is
 escaped and the mask is the mask.
 
-What M3 does not add is the dispatch line in `_act`. The issue's
-re-cut text calls it a "format dispatch point on the act's render
-step", and with no flag in the grammar that point would be an `if`
-whose second arm nothing can reach, which is the honest-seams lens's
-own counterexample. The function is the dispatch's target and exists
-today; the arm is one line written on the day a `--json` decision
-adopts it, and the guide's deferral entry says so. The deferral is
-repriced in `docs/architecture/cli-guide.md`: the second bullet ("a
-second format is a second no-leak audit") is replaced by the fact that
-the audit is one test on the model, and the entry keeps its "what
-would change the answer" paragraph, since no consumer has appeared.
-Notices stay on stderr under any format, and the data stream carries
-the model alone; that sentence joins the entry.
+The dispatch sits where the issue put it, on the act's render step.
+`answers.py` declares `Output(StrEnum)` with `human`, `json` and
+`yaml`, and `_act` takes `output: Output = Output.HUMAN` as its last
+parameter: the human arm is `act.render(act.read(answer))`, unchanged,
+and the machine arm writes `encoded(act.answers, answer, output)` to
+stdout and nothing to stderr. `_performed` passes the default and is
+the one production caller, so the seam's default policy gets its own
+pin, per the honest-seams lens: a test drives `_act` with a fake
+`_call` through both arms and asserts what each stream received. No
+flag reaches the grammar, so every command runs under `Output.HUMAN`;
+adopting `--json` later is the grammar setting the parameter, one
+line, and the guide's deferral entry says so. Notices are not a second
+stream the machine arm has to route: what the human renderers say on
+stderr (a write's notice, a boundary sentence, a page cursor) is
+derived from fields of the model the act read, so it travels in the
+data and the machine arm prints nothing else. The deferral is repriced
+in `docs/architecture/cli-guide.md`: the second bullet ("a second
+format is a second no-leak audit") is replaced by the fact that the
+audit is one test on the model, the entry keeps its "what would change
+the answer" paragraph, since no consumer has appeared, and the
+sentence about notices joins it.
 
 ### M4: an extension member, not the RFC's `type`
 
@@ -417,7 +425,8 @@ decision site.
   exists (the `Invocation` type and the `Act` row) is unchanged.
 - **M2** deepens nothing; `_typed` stops reading a field its caller
   did not give it.
-- **M3** deepens `answers.py` by one function and adds no seam.
+- **M3** deepens `answers.py` by one function and one token, and adds
+  one parameter to the act runner, pinned at its default.
 
 ## Documentation footprint
 
@@ -476,7 +485,11 @@ Reusing what exists wherever the assertion already has a home.
   `memory delete` reading stdin, both pinned today.
 - **M3**: `tests/unit/test_config_cli_rendering.py` gains the escape
   test on both encoders, watched failing with the escaping asserted
-  the wrong way round.
+  the wrong way round, and the two-arm test through `_act` with a
+  fake `_call`: the default arm renders and prints its notice on
+  stderr, the machine arm writes the encoded model to stdout and
+  nothing to stderr, and the default is asserted by calling `_act`
+  without the parameter.
 - **Reach-ins**: a new test reaches public names or the names the
   existing tests already reach; any new underscore reach-in is
   recorded in the manifest and named in the PR as the design question
@@ -522,9 +535,10 @@ Reusing what exists wherever the assertion already has a home.
   `tests/tools/`, adapted to the package and re-run, the section
   quoting the totals and the history result, and `_typed` taking its
   source as an argument. Stacked on M1; low-stakes review tier.
-- [ ] **M3: the dump and the repricing.** `encoded` in `answers.py`,
-  the escape test, the CLI guide entry. Stacked on M1, beside M2;
-  low-stakes review tier.
+- [ ] **M3: the dump, the dispatch and the repricing.** `Output` and
+  `encoded` in `answers.py`, the `output` parameter on `_act` with
+  `_performed` passing the default, the escape test and the two-arm
+  test, the CLI guide entry. Stacked on M1, beside M2.
 
 ## Verification
 
@@ -554,6 +568,14 @@ refer to the plan as committed at that blob.
    selection at the `Act` rendering seam, defaulted to human without
    a CLI flag, route machine formats to `encoded()`, say how notices
    stay on stderr, and test both arms directly through `_act`.
+
+   *Resolution*: accepted. The M3 section now puts the dispatch on
+   `_act` as an `output` parameter defaulted to human, with
+   `_performed` as the one production caller and a pin on the
+   default; the machine arm writes the encoded model to stdout and
+   nothing to stderr, and the section says why notices need no second
+   route. The milestone drops its low-stakes tier, since it now
+   changes the act runner.
 
 2. **P1: M2 takes a third path the issue excludes.** The settled rule
    is per-family types on exposure, measurement and no code on none.
