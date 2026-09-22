@@ -90,6 +90,14 @@ Each was performed, watched and reverted.
 
 No mutation survived a test.
 
+The `PROGRAM`-absent and `SERVER_PROGRAM`-absent assertions need no
+mutation: every one of the five sentences held one of those spellings
+before this change, so each assertion is red against the pre-change
+tree by construction. `PROGRAM` is `vinga`, which is a substring of
+`vinga-server config`, so the first of the two would catch either
+spelling on its own; both are asserted because the two constants are
+two decisions and a sentence may come to hold either.
+
 ### Deviations from the plan
 
 Five, all additive, none changing what the plan specifies.
