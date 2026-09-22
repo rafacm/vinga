@@ -2199,6 +2199,49 @@ def _said(
     return captured.err.strip()
 
 
+# The six sentences, written out rather than read from the table that
+# holds them.
+#
+# A test that builds its expectation from the code it checks asserts
+# that the code equals itself: with `cli.REMEDIES` on both sides, two
+# remedies swapped between their tokens stay green, and so does any
+# rewording of the prose. These are the plan's own sentences, copied
+# from it, and the table is held to them below; the full-stderr cases
+# read these and never the table.
+REMEDY_SENTENCES: dict[RefusalReason, str] = {
+    RefusalReason.CODE_NOT_PENDING: (
+        "`vinga device pending list` lists the codes this server is showing right now."
+    ),
+    RefusalReason.AGENTS_UNKNOWN: "Run `vinga list` to see the agents that exist.",
+    RefusalReason.AGENT_NOT_SERVING: (
+        "`vinga apply` installs an agent written since; `vinga list` shows the agents "
+        "that are stored."
+    ),
+    RefusalReason.DEVICE_ALREADY_BOUND: (
+        "Read what it is bound to with `vinga device show <mac>`, or bind it again by "
+        "its MAC."
+    ),
+    RefusalReason.PROVIDER_MISSING: "Create it first with `vinga provider set`.",
+    RefusalReason.MCP_SERVER_MISSING: "Create it first with `vinga mcp-server set`.",
+}
+
+
+def test_the_remedies_are_the_sentences_this_client_publishes() -> None:
+    """The table, held to the wording and to the pairing at once.
+
+    Equality of the whole mapping rather than of its keys, which is what
+    catches the two changes a closed-set pin cannot see: a remedy
+    reworded, and two remedies swapped between their tokens. Both are
+    exactly the mistake that sends an operator to the wrong command
+    while every other test in this file stays green.
+
+    The spelling is the short one written out, so this is also where the
+    program word is pinned: a table composed from `PROGRAM` would agree
+    with itself whatever `PROGRAM` became.
+    """
+    assert cli.REMEDIES == REMEDY_SENTENCES
+
+
 @pytest.mark.parametrize("reason", list(RefusalReason), ids=[r.value for r in RefusalReason])
 def test_a_state_this_client_knows_is_answered_with_its_own_remedy(
     reason: RefusalReason,
@@ -2219,7 +2262,7 @@ def test_a_state_this_client_knows_is_answered_with_its_own_remedy(
     """
     said = _said(monkeypatch, capsys, _problem(reason=reason.value))
 
-    assert said == f"{REFUSED_DETAIL} {cli.REMEDIES[reason]}"
+    assert said == f"{REFUSED_DETAIL} {REMEDY_SENTENCES[reason]}"
 
 
 def test_a_state_this_client_cannot_name_is_quoted_and_not_guessed_at(
