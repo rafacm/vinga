@@ -162,6 +162,16 @@ Five, all additive, none changing what the plan specifies.
   token, so the reachable one gives a client nothing to phrase a remedy
   from. Extending the vocabulary to the slot check is a change to the
   published contract and belongs in its own issue.
+- **The live lane's deployment is shared, and a case that mints a code
+  needs a board of its own.** The end-to-end claim refusal first used
+  the board the onboarding case is about, which that case binds, so by
+  the time this one checked in it was answered as a configured device
+  and no code was minted: `Unwelcome(...)` where `Activating` was
+  expected, caught by the integration lane and not by anything
+  smaller. Two of the lane's addresses already carried that reasoning
+  in a comment; this is a third, and the reason it needs one is
+  different enough to be written out, since what it needs is a board
+  that stays unbound rather than one nothing else reads.
 - **The published API document carries issue references already**
   (`#19`, `#88`, `#384`), so the reasoning that names `#386` was kept in
   comments above the declarations rather than in the docstrings the
@@ -206,10 +216,14 @@ thing under `### Changed`, which is what the fold carries into
 
 ### Verification
 
-From `vinga-server/`: `uv run ruff check .`,
-`uv run pytest tests/unit -q`, `uv run pytest tests/integration -q`,
-`uv run pytest tests/census -q`, and the two generated-document drift
-checks run the way the workflow runs them. The wheel-grade lane, the
-image build and the smoke conversation were not run here and are
-unverified in this section; the pull request records what CI says about
-them.
+From `vinga-server/`: `uv run ruff check .` (clean),
+`uv run pytest tests/unit -q` (7418 passed, 19 skipped, 28m37s),
+`uv run pytest tests/integration -q` (347 passed, 9m01s) and
+`uv run pytest tests/census -q` (66 passed), plus the two
+generated-document drift checks run the way the workflow runs them:
+the OpenAPI document matches the committed copy and the CLI
+reference's generated region has no difference. The wheel-grade lane
+is inside the integration lane and ran, since `uv` is on PATH and
+nothing skipped. The image build and the smoke conversation were not
+run here and are unverified in this section; the pull request records
+what CI says about them.
