@@ -87,6 +87,7 @@ tests/unit/test_config_cli_grammar.py  _parsed  2
 tests/unit/test_config_cli_grammar.py  _usage_problem  1
 tests/unit/test_config_cli_info.py  _call  1
 tests/unit/test_config_cli_rendering.py  _acknowledged  5
+tests/unit/test_config_cli_rendering.py  _act  4
 tests/unit/test_config_cli_rendering.py  _apply_listing  3
 tests/unit/test_config_cli_rendering.py  _diff_listing  13
 tests/unit/test_config_cli_rendering.py  _imported  13
