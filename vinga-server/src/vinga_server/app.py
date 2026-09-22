@@ -854,14 +854,16 @@ def config_reloader(
     into a status; the sentence is replaced by one of the three fixed
     ones above, because the apply composes its refusals over the stored
     state it refused on. Two refusals pass through as themselves, and
-    for one reason: their sentences are this server's own and were
-    composed over nothing at all. `ReloadInProgressError` is about this
-    server's exclusion, and `ProviderRefusedError` is the apply's own
-    fixed sentence about a world whose engines would not build, said
-    where the failure is (`config/reload.py`) because that is where the
-    class of it can be recorded in the log in the same breath. A failure
-    with no type at all is a bug and is left alone, for the reason the
-    comparison leaves one alone.
+    each for a reason of its own. `ReloadInProgressError` is about this
+    server's exclusion and was composed over nothing stored at all.
+    `ProviderRefusedError` carries the provider layer's own sentence,
+    which names the entry, the option key and the rule and never the
+    value it refused over, so it is the one refused half whose location
+    can be said; it is composed where the failure is
+    (`config/reload.py`) because that is where the class of it can be
+    recorded in the log in the same breath. A failure with no type at
+    all is a bug and is left alone, for the reason the comparison leaves
+    one alone.
     """
     applying = ConfigReload(generations, servers, read, held)
 

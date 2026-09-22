@@ -345,13 +345,20 @@ class ProviderRefusedError(ConfigError):
     names, so nothing was applied.
 
     The provider layer's own refusal, translated. `ProviderError` is
-    that layer's contract and says which entry, which type and which
-    option it choked on, all of which are stored values that a refusal
-    over HTTP must not carry; and it is not a `ConfigError`, so nothing
-    on the API side would know what status it meant. This is the
-    configuration vocabulary's word for the same event: a stored world
-    this server cannot run, refused with nothing changed, under the
-    status every other unservable stored half answers with.
+    that layer's contract and says which entry, which option key and
+    which rule it choked on, and never the value it choked over, which
+    is what makes it sayable over HTTP; but it is not a `ConfigError`,
+    so nothing on the API side would know what status it meant. This is
+    the configuration vocabulary's word for the same event: a stored
+    world this server cannot run, refused with nothing changed, under
+    the status every other unservable stored half answers with.
+
+    It is the one refusal in this family that carries a sentence rather
+    than replacing it. The others are composed over arbitrary stored
+    state and lose their words at the composition root; this one's
+    words are the sentence a server started from the same store prints
+    on stderr before refusing to start, behind the prefix that says
+    nothing was swapped.
 
     Here rather than beside its raiser for the reason the refusals above
     are: what raises it is the apply, on the conversation side of the
