@@ -19,9 +19,10 @@ another name or aimed at a harm its surface cannot suffer.
 ## Goal
 
 An operator whose `apply` is refused because a provider would not
-build learns from the answer which entry, which key and which rule
-refused, in the words a server started from the same store would print
-before refusing to start. Today the answer is
+build learns from the answer which entry refused and, as that refusal
+has them, which option key, which declared type, which rule or which
+failed factory class, in the words a server started from the same
+store would print before refusing to start. Today the answer is
 `_PROVIDERS_REFUSED` in `config/reload.py`: the four categories of
 thing that could have refused, a sentence saying which is withheld, and
 an instruction to start a second server. `check` was added for the
@@ -163,8 +164,9 @@ The claim is one sentence long, so the proof is a sentinel sweep and
 not a new test module. Stated at its true width: **for each
 representative refusal class of the provider-build surface, a stored
 world whose values carry a credential-shaped sentinel is refused with a
-`detail` that names the entry, the key and the rule, and the sentinel
-reaches neither the answer nor the log.** The sweep is a regression
+`detail` that names the entry and whichever of an option key, a
+declared type, a rule or a failed factory's class that refusal has,
+and the sentinel reaches neither the answer nor the log.** The sweep is a regression
 proof for the composition sites it drives; the whole-surface claim
 rests on the manual inventory of all 24 raise sites named under
 Verification, read line by line, and the plan does not call six cases
