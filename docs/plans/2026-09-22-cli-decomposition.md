@@ -605,11 +605,21 @@ Reusing what exists wherever the assertion already has a home.
   missing-entity refusal, while the sentence M4 changes is the one
   `_write_secrets` composes when its update affects no row, which is
   reached only when the holder disappears between the slot check and
-  the write. The fixture removes the holder at that point (a seam on
-  the check, or a concurrent delete the test sequences), once per
-  holder kind, at the store level for the two reasons and once over
-  HTTP through the API for the body's `reason`, the command-free
-  `detail` and the no-secret and no-address surfaces. Each of the
+  the write, and `set_secret` runs both inside one transaction, so no
+  sequenced concurrent delete can reach it deterministically. The
+  fixture is a seam on the check and nothing else: the slot check
+  (`_check_slot`) is replaced on the store instance under test with a
+  function that answers as if the holder were present, the holder is
+  never written, and the write's update then affects no row, which is
+  the synchronization point stated exactly. That the slot-check
+  refusal was not taken is proven by the body's `reason`, which only
+  the write path attaches. Once per holder kind at the store level
+  for the two reasons, and once over HTTP through the API, with the
+  same replacement on the store the application mounts, for the
+  body's `reason`, the command-free `detail` and the no-secret and
+  no-address surfaces. The replacement is a reach-in on an underscore
+  name, named in the M4 section as the design question it is, with
+  the answer that a race has no caller-facing seam to reach it by. Each of the
   five paths pins the new sentence, asserts the exact `reason` the
   site attaches, asserts the sentence names no command (`PROGRAM` and
   `SERVER_PROGRAM` absent from `detail`, the #386 invariant extended
@@ -1040,6 +1050,11 @@ verdict "ready after the P1/P2 amendments". Condensed but faithful.
    deterministic. Pick one fixture that forces the write to see no
    row, per holder kind, reuse it over HTTP, state the synchronization
    point, and prove the slot-check refusal was not taken.
+
+   *Resolution*: accepted. One fixture: the slot check replaced on the
+   store instance so the write sees no row, the synchronization point
+   stated, the reason token as the proof the check path was not taken,
+   and the reach-in named for what it is.
 
 4. **P2: the transportability analysis cannot prove its ordering
    claim.** A call graph proves reachability, not that the guard runs
