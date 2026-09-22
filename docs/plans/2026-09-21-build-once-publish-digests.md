@@ -439,17 +439,64 @@ finish every lane and the assembly **within the same second**. It is
 a user-visible format change and lands in the documentation
 footprint.
 
-**Not taken: widening the revision.** The `sha-` tag is seven
-characters, so two commits sharing that prefix collide, on the order
-of 2e-3 at a thousand commits and growing with the square. That is
-real, and a review round argued convincingly for fixing it here, since
-one derived value feeds `VINGA_REVISION`, the tag and the step that
-asserts they agree. It is not taken because it is **pre-existing and
-orthogonal**: it is not made reachable by anything in this issue, it
-would change what `/healthz` reports and every example tag on three
-pages, and it is a clean half-hour change on its own. It is recorded
-as a follow-up rather than carried, so that a plan about build time
-does not also become a plan about image identity.
+### The revision widens to twelve characters
+
+The `sha-` tag is seven characters, so two commits sharing that prefix
+publish under the same supposedly immutable tag. This is pre-existing
+rather than something the issue creates, and it was nearly deferred to
+its own issue on two arguments that both turned out to be wrong.
+
+**The risk was overstated, and the corrected number is the weaker
+argument for fixing it.** The first estimate put it "on the order of
+2e-3 at a thousand commits", which computed the birthday bound over
+*commits*. A push publishes one image, not one per commit, and this
+workflow has had **186 push runs on `main` in the project's lifetime**
+(`actions/workflows/vinga-server.yml/runs?event=push&branch=main`).
+Against 16^7 that is:
+
+| published images | collision chance | when, at ~3.7 publishes a day |
+| --- | --- | --- |
+| 186 | **0.006%** | today |
+| 1,000 | 0.19% | ~9 months |
+| 2,000 | 0.74% | ~18 months |
+| 6,800 | 8.3% | ~5 years |
+
+So it is about 1 in 15,500 today and not urgent, and it is not
+negligible on a two-to-five year view. At twelve characters, 6,800
+images gives 0.000008%.
+
+**The cost was overstated too, and that is the real argument.** Review
+round 4 recorded `DOCKER_METADATA_SHORT_SHA_LENGTH` as "not taken",
+because this session could not verify the variable against the pinned
+action version and a tag scheme should not rest on an unverifiable
+mechanism. That caution was right in form and wrong in fact: the
+variable is documented in `docker/metadata-action`'s own README, which
+uses **12 as its example value**, and the action's tracker carries an
+issue titled "Tag's sha hash is not long enough in the hash collision
+case". This is the ecosystem's own knob for exactly this problem, not
+a scheme invented here, and twelve is the Linux kernel's convention
+for a durable abbreviated reference. This repository's git already
+abbreviates to eight under `core.abbrev=auto`.
+
+With the variable available, `type=sha` stays and the change is three
+lines:
+
+- `REVISION` becomes `${GITHUB_SHA:0:12}`;
+- the metadata step gets `env: DOCKER_METADATA_SHORT_SHA_LENGTH: 12`;
+- the existing step that asserts the `sha-` tag ends in the revision
+  the build reports needs **no change at all**, because it already
+  compares against `$REVISION`, so it guards the new width for free.
+
+That is three lines in the block M1 is already rewriting, and the
+documentation examples that move are the paragraphs M1 is already
+editing. Deferring it would mean touching the same three lines and the
+same paragraphs twice, which is why it rides M1 rather than becoming
+its own issue.
+
+One caveat, from the action's tracker: widening is treated as a
+breaking change there, because tag names change shape. Nothing in this
+repository consumes a `sha-` tag programmatically, and the existing
+tags keep existing, so it costs nothing here.
 
 ### No new promise, no new record
 
@@ -525,15 +572,26 @@ it is now and are corrected when it moves.
   the same correction. It summarizes the server README and links it,
   so the correction goes to the README and this page keeps pointing at
   it.
-- **M1, the dated tag format, in both pages and the variant table.**
-  `2026-08-03-1200` becomes `2026-08-03-120015` and
-  `2026-08-06-1047-slim` becomes `2026-08-06-104715-slim`, in the
-  variant table's example tags, in `docs/deployment.md`'s "Pin an
-  immutable tag" paragraph, and in the "finish minutes apart"
-  passages that quote a pair of them. The `sha-` examples do not move,
-  since the revision is unchanged. The inventory is a grep for the
-  literal example tags across the tracked tree, run whole and not
-  through `head`, and its output is what the milestone works from.
+- **M1, both tag formats, in both pages and the variant table.**
+  `2026-08-03-1200` becomes `2026-08-03-120015`,
+  `2026-08-06-1047-slim` becomes `2026-08-06-104715-slim`, and
+  `sha-3f9362a` becomes a twelve-character example, in the variant
+  table's example tags, in `docs/deployment.md`'s "Pin an immutable
+  tag" paragraph, and in the "finish minutes apart" passages that
+  quote a pair of them. `vinga-server/README.md:3327` also shows a
+  revision as `/healthz` output ("from the image tagged `sha-9fd3de5`
+  reports `9fd3de5`"), and that pair must stay equal, which is the
+  whole point of the sentence.
+
+  The inventory is a grep for `sha-[0-9a-f]\{7\}` and for the literal
+  dated examples across the tracked tree, run whole and not through
+  `head`. Measured at plan time it is **9 literals in 4 files**:
+  `vinga-server/README.md` (3), `vinga-server/tests/unit/test_doctor.py`
+  (2, fixture strings in a fake OTA response rather than real tags),
+  and two dated feature docs under `docs/features/`. **The feature
+  docs do not move**: they record what was true when they were
+  written, which is the historical-record class, not a maintained
+  description of current behavior.
 - **M1 and M3, `AGENTS.md`.** Its CI summary says "A third job,
   `image`, builds and smokes both image variants on everything but a
   pull request". M1 falsifies the first half (it becomes a
@@ -664,12 +722,17 @@ above disagree, the decisions are right and this list is a bug.
   cache. It runs on `push` and `workflow_dispatch` only, not on a pull
   request, and passes `--dry-run` on everything but a push to `main`.
   It asserts the assembled index carries both expected platforms and
-  an attestation manifest for each. The dated tag becomes
-  `YYYY-MM-DD-HHmmss`, keeping its variant suffix; the `sha-` tag and
-  the revision are unchanged.
+  an attestation manifest for each.
 
-  *Documenting.* Both "finish minutes apart" passages, the dated tag
-  format wherever it appears as an example, and the first half of
+  *Identity.* The dated tag becomes `YYYY-MM-DD-HHmmss`, keeping its
+  variant suffix. `REVISION` becomes `${GITHUB_SHA:0:12}` and the
+  metadata step gets `DOCKER_METADATA_SHORT_SHA_LENGTH: 12`, so
+  `type=sha` renders `sha-<12>`; the step asserting the tag ends in
+  the revision the build reports is unchanged and guards the new
+  width for free.
+
+  *Documenting.* Both "finish minutes apart" passages, both tag
+  formats wherever they appear as examples, and the first half of
   `AGENTS.md`'s CI summary.
 
 - [ ] **M2: validation overlaps across main pushes; the moving tag is
@@ -692,21 +755,6 @@ above disagree, the decisions are right and this list is a bug.
   PR is covered with no token and leaves no registry trace.
   `image-publish` does not run on a pull request. `workflow_dispatch`
   stays. Corrects the second half of `AGENTS.md`'s CI summary.
-
-## Follow-up, not carried here
-
-The `sha-` tag is seven characters, so two commits sharing that prefix
-publish under the same supposedly immutable tag, on the order of 2e-3
-at a thousand commits and growing with the square. Review round 3
-argued for fixing it in this plan and the argument was good: one
-derived value feeds `VINGA_REVISION`, the `sha-` tag and the existing
-step that asserts they agree, so widening it is a contained change.
-
-It is not carried because it is pre-existing and orthogonal to build
-time: nothing in this issue makes it more reachable, and it would
-change what `/healthz` reports and every example tag on three pages.
-It is its own small issue, and this paragraph exists so that decision
-is recorded rather than lost with the review round that raised it.
 
 ## The review rounds, and what was cut afterwards
 
