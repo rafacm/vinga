@@ -1137,12 +1137,18 @@ adopting it later is a decision rather than a drift.
   generated from the models that define it. A second serialization
   would not add machine-readability; it would add a second format of
   it.
-- **A second format is a second no-leak audit.** Every field that
-  renders has to honour the masking and the no-leak discipline
-  independently per format: the fixed-length mask, the credential that
-  never travels in a read, `printable`'s bounding of anything an answer
-  contains. Two renderers means those properties are proven twice or
-  true once.
+- **The no-leak audit is one test on the model, and it is paid.** It
+  was priced here as a second audit per format, on the reading that a
+  second format means a second renderer honouring the mask, the
+  credential that never travels in a read and `printable`'s bounding
+  one field at a time. It does not: the machine encoders are handed the
+  same validated answer the renderers are handed, so what a field is
+  worth was decided once, and what each encoder does with a character a
+  terminal would obey is its own (the standard encoder writes
+  `\u001b`, PyYAML writes `\e`, and both escape to ASCII). So the
+  property is proven once, on the model, by a test that plants a
+  control character, the mask and a closed token in one answer and
+  reads both documents.
 - **No consumer needs it.** The admin UI consumes the configuration API
   directly, not the CLI, and the API's JSON is already specified by
   `docs/reference/api-openapi.json`. An integration wanting JSON has a
@@ -1152,10 +1158,19 @@ adopting it later is a decision rather than a drift.
   are JSON. That is the shape of the artifact, not a mode of the
   reader.
 
+Notices stay on stderr under every format, and the data stream carries
+the model alone. A machine format writes the encoded answer to stdout
+and then runs the act's own renderer with its stdout discarded, so the
+sentences a renderer puts on stderr arrive exactly as a person would
+have read them and nothing else joins the document.
+
 What would change the answer: a real consumer that cannot parse YAML
-and cannot reach the API. Then it is its own issue, with the per-format
-no-leak audit priced into it, and `--json` is the name to use, because
-it is the name all three guides use.
+and cannot reach the API. Then it is its own issue, and `--json` is the
+name to use, because it is the name all three guides use. What such an
+issue no longer has to build is the dispatch: the act runner takes the
+shape its answer leaves in as a parameter, defaulted to the rendering a
+person reads, so adopting the flag is the grammar setting that
+parameter.
 
 ### Output is deterministic, and an answer cannot steer a terminal
 
