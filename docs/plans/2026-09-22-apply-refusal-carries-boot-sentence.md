@@ -277,7 +277,7 @@ same way, by restoring the quoted model.
   all from `vinga-server/`.
 - The raise-site inventory the settled decision rests on, run untruncated:
   `grep -rn "raise ProviderError(" src/vinga_server/providers | wc -l`
-  is 24 at `19f7122e` (the issue's 25 counted the class definition in
+  is 24 at `19f7122e` (the plan's earlier 25 counted the class definition in
   `providers/base.py`, matched by a grep on `ProviderError(` without
   the `raise`; no site was added or removed). The milestone re-runs
   the command and reads every line rather than the count, which is
