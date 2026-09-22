@@ -97,14 +97,19 @@ finding.
 
 ### The two `openai_tts.py` refusals name the option, not the model
 
-`model "{model}" ignores option "speed"` becomes
-`the model option "model" names ignores option "speed"`, and the
-`instructions` sentence the same way. A model name is a stored option
-value, and the rule for this surface is that a refusal names the key
-and never the value; quoting the model was the one place the surface
-broke it. The phrase `ignores option "speed"` survives, so the three
-existing `match=` pins hold, and each gains an assertion that the
-configured model string is absent from the sentence.
+`model "{model}" ignores option "speed"; describe the pace in
+"instructions" instead` becomes `option "speed" is ignored by the
+model named by option "model"; describe the pace in "instructions"
+instead`, and the `instructions` sentence becomes `option
+"instructions" is ignored by the model named by option "model"; it is
+read by the gpt-4o-mini-tts speech models, and "speed" is what this
+one takes` (the prefix constant stays interpolated, as today). A model
+name is a stored option value, and the rule for this surface is that a
+refusal names the key and never the value; quoting the model was the
+one place the surface broke it. The three existing `match=` pins on
+the trailing substring are replaced by exact-message assertions, so a
+degraded wording is caught and not only a leak, and each gains an
+assertion that the configured model string is absent.
 
 ### Words that become false, and where they live
 
@@ -370,3 +375,7 @@ read-only sandbox, 193 s) at commit `19f7122e`. Six findings, verdict
    such as `option "speed" is ignored by the model named by option
    "model"; describe the pace in "instructions" instead`, with an
    exact-message assertion beside the absence check.
+
+   *Resolution*: accepted. Both sentences are specified in full and
+   the three pins become exact-message assertions beside the absence
+   check.
