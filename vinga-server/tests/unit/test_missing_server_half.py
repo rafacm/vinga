@@ -50,8 +50,8 @@ import pytest
 from tests.support.config_cli import chain, logged
 from vinga_server import doctor
 from vinga_server import main as entrypoint
-from vinga_server.config import cli, docgen
-from vinga_server.config.cli import grammar, local, reach
+from vinga_server.config import cli, docgen, loader
+from vinga_server.config.cli import grammar, local, reach, simulator
 from vinga_server.config.loader import (
     NEEDS_THE_SERVER_HALF,
     NEEDS_THE_SIM_EXTRA,
@@ -418,8 +418,18 @@ def test_the_doctor_refusal_carries_no_exception_chain(
 def test_one_sentence_answers_every_command_that_needs_the_other_half() -> None:
     """Three sites, one string, read from the module below all of them.
     Two strings for one fact is the duplication the design guide names,
-    and it is the shape this started in."""
-    assert NEEDS_THE_SERVER_HALF is NEEDS_THE_SERVER_HALF
+    and it is the shape this started in.
+
+    Asserted of the CONSUMERS' bindings, which is the whole claim. The
+    name this file imports and the name the loader defines are the same
+    object by construction, so holding those two to each other asserts
+    that a string equals itself; what can actually come apart is a
+    consumer that stopped reading the loader's copy and grew one of its
+    own, which is exactly the shape the sentence above says this
+    started in.
+    """
+    for consumer in (local, doctor, entrypoint):
+        assert consumer.NEEDS_THE_SERVER_HALF is loader.NEEDS_THE_SERVER_HALF, consumer
 
 
 # The other gate, which is an EXTRA rather than the server half
@@ -539,7 +549,11 @@ def test_the_two_gates_are_one_function_with_two_sentences() -> None:
     path. The sentences are two because they send a reader to two
     different places.
     """
-    assert NEEDS_THE_SIM_EXTRA is NEEDS_THE_SIM_EXTRA
+    # The consumer's binding, for the reason the server half's case
+    # states: what can come apart is the module that reads it, not the
+    # name this file imported.
+    assert simulator.NEEDS_THE_SIM_EXTRA is loader.NEEDS_THE_SIM_EXTRA
+    assert local.NEEDS_THE_SERVER_HALF is loader.NEEDS_THE_SERVER_HALF
     assert NEEDS_THE_SIM_EXTRA != NEEDS_THE_SERVER_HALF
     for sentence in (NEEDS_THE_SIM_EXTRA,):
         assert "{" not in sentence
