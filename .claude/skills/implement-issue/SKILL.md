@@ -62,9 +62,6 @@ named agent rather than of "the session". The shape is one string:
     and stamps; the plan-mode command in the `external-review`
     skill passes the same value by hand.
 
-The display name beside a commit's string is the model's name as
-its vendor writes it: `Claude Fable 5.1`, `Claude Opus 5`.
-
 Where the string lands, and in what form:
 
 - **The plan header**, below the "Cheapest alternative" line:
@@ -77,17 +74,20 @@ Where the string lands, and in what form:
   <n>, at commit <hash>`; a plan round adds the plan's blob hash
   (`git rev-parse HEAD:<plan path>`), which is what still resolves
   after the rebase merge has rewritten the commit.
-- **Every commit**, as two trailers: `Co-Authored-By: <display
-  name> <noreply@anthropic.com>` naming the model that wrote the
-  commit, and `Attribution: <string>`.
+- **Every commit**, as its one trailer: `Attribution: <string>`,
+  for the model that wrote the commit. It replaces the vendor
+  co-author line Claude Code would add on its own, which
+  `.claude/settings.json` turns off (`attribution.commit`),
+  because that line names one vendor's model in one vendor's
+  form and the string names any.
 - **The PR body**, as one `Attribution:` line naming, each as the
   string, the author of the plan and of the PR text, the author of
   the commits, and the reviewer of each round.
 
 A resolution note under a finding is by the author of the document
 it amends unless the note says otherwise. What the block never does
-is inherit: a subagent's commits carry the subagent's string and
-display name, not the orchestrator's. The #547 run got exactly this
+is inherit: a subagent's commits carry the subagent's string, not
+the orchestrator's. The #547 run got exactly this
 wrong, twelve Opus commits signed as Fable, because the brief said
 "the Claude trailer" and the trailer at hand was the orchestrator's.
 
@@ -109,8 +109,8 @@ in the stack must leave `main` releasable, with no state that
 violates a settled decision (two co-equal write paths, a mandatory
 variable CI does not set). Cut milestones so behavior changes sit
 alone in review. Commit the plan, its header carrying the
-Attribution line and the commit its two trailers, both in the
-shape under "Attribution" above.
+Attribution line and the commit its trailer, both in the shape
+under "Attribution" above.
 
 Each milestone also names its design footprint: the modules it
 deepens, the seams it adds, and for any new module the one sentence
@@ -260,10 +260,10 @@ The subagent's brief states, verbatim where possible:
   round; where the brief and the plan disagree, the plan wins.
 - uv only, never pip; everything runs from `vinga-server/`.
 - Small commits: one logical change, imperative ~50-char title, a
-  body explaining what and why, ending with the two attribution
-  trailers, which the brief spells out verbatim: the subagent's
-  own display name and string, read off its agent definition,
-  never the orchestrator's.
+  body explaining what and why, ending with the Attribution
+  trailer, which the brief spells out verbatim: the subagent's
+  own string, read off its agent definition, never the
+  orchestrator's.
 - The implementation-doc section it writes opens with its own
   Attribution line, in the form under "Attribution".
 - No em-dashes anywhere. `config.example.yaml` updates in the same
@@ -351,7 +351,7 @@ the run on the PR as the evidence.
 Use the `external-review` skill in PR mode (the self-posting
 script). Fix every finding with its own commit, delegating to the
 milestone's subagent, which has the context, so the fix commits
-carry its trailers. Record the round in the implementation doc
+carry its trailer. Record the round in the implementation doc
 under the review-round header form, reply on the PR with per-finding
 resolutions and commit hashes, update the PR description, and wait
 for CI again. A finding that invalidates a claim gets a transparent

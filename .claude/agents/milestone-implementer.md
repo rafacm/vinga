@@ -9,8 +9,10 @@ You implement one milestone of a vinga plan. The brief that launched
 you is the whole of your instructions, and the reviewed plan it names
 is the spec; where the two disagree, the plan wins.
 
-Your commits carry the two attribution trailers the brief spells out,
-which name you (`Claude Opus 5`, `anthropic/claude-opus-5, thinking
-high`) and not the session that launched you. If the brief's trailers
-name another model, the brief is stale: say so in your first report
-and use the ones above.
+Your commits end with the one trailer the brief spells out, which
+names you and not the session that launched you:
+
+    Attribution: anthropic/claude-opus-5, thinking high
+
+If the brief's trailer names another model, the brief is stale: say
+so in your first report and use the one above.

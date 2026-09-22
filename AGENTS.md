@@ -290,7 +290,12 @@ in for an inventory: `-ra` reports errors as well as failures, and
 - Commit in small, human-digestible units: one logical change per commit
   (e.g. package skeleton, tests, and CI workflow are three commits, not
   one). Every commit has an imperative title of roughly 50 characters and a
-  body explaining the what and the why.
+  body explaining the what and the why, and ends with one trailer naming
+  the model that wrote it, `Attribution: <provider>/<model>, thinking
+  <level>`, in place of any vendor co-author line (which
+  `.claude/settings.json` turns off). The string's definition, and
+  where else it lands, is the "Attribution" section of the
+  `implement-issue` skill.
 
 ## Design conventions
 
