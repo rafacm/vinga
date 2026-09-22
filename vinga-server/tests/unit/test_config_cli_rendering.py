@@ -2755,3 +2755,96 @@ def test_an_answer_no_encoder_can_write_is_a_sentence_and_not_a_traceback(
     carried = _chain(refused.value)
     assert SECRET not in carried
     assert "Circular reference" not in carried
+
+
+def _session_detail(duration_s: float) -> dict[str, object]:
+    """One session read out, with its measured number the case's own.
+
+    Written out rather than built from the model, because what makes
+    this case work is that `duration_s` is a declared `float` and not an
+    undescribed value: a number the shape names survives the JSON-mode
+    dump as the float it is, and one that arrived inside a `dict[str,
+    Any]` does not.
+    """
+    return {
+        "id": 1,
+        "session": "8d3a1f6c4b2e47c0a9f5d2e1b0c3a4f7",
+        "device": None,
+        "device_name": None,
+        "client": None,
+        "agent": "weather",
+        "agents": None,
+        "protocol": None,
+        "started_at": "2026-09-22T10:00:00Z",
+        "closed_at": "2026-09-22T10:00:02Z",
+        "duration_s": duration_s,
+        "close_reason": None,
+        "server_version": None,
+        "revision": None,
+        "providers": None,
+        "telemetry": True,
+        "text": False,
+        "dropped": 0,
+        "turns": 1,
+        "events": 3,
+    }
+
+
+@pytest.mark.parametrize("shape", [Output.JSON, Output.YAML])
+@pytest.mark.parametrize(
+    "duration_s",
+    [
+        pytest.param(float("nan"), id="not a number"),
+        pytest.param(float("inf"), id="infinity"),
+        pytest.param(float("-inf"), id="negative infinity"),
+    ],
+)
+def test_a_number_json_cannot_write_is_refused_rather_than_written(
+    duration_s: float,
+    shape: Output,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The rule this repository already states, applied where it had
+    not been.
+
+    `config/transport.py` says it about a fragment on its way out: NaN
+    and the infinities are floats no JSON encoder has a spelling for,
+    and a configuration carrying one cannot be stored or read back as
+    what it says. Strict validation admits them, because they are
+    floats, and the standard encoder's own default then writes `NaN`,
+    `Infinity` and `-Infinity`, which no JSON parser is obliged to read
+    and several read as something nobody sent.
+
+    So the same walk that guards a request body guards an answer, on the
+    validated document both formats share, and the refusal is the act's
+    own under either: what a reader would be handed otherwise is a
+    number in JSON's clothing on one arm and `.nan` on the other.
+    """
+    monkeypatch.setattr(
+        acts, "_call", lambda *_args, **_kwargs: _session_detail(duration_s)
+    )
+    args = invocation.Invocation(session="8d3a1f6c4b2e47c0a9f5d2e1b0c3a4f7")
+
+    with pytest.raises(ConfigError) as refused:
+        acts._act(args, records.SHOW_SESSION, UNREACHED, shape)
+
+    assert str(refused.value) == records.SHOW_SESSION.refusal
+    written = capsys.readouterr()
+    assert written.out == ""
+    assert written.err == ""
+
+
+@pytest.mark.parametrize("shape", [Output.JSON, Output.YAML])
+def test_a_number_json_can_write_is_written(
+    shape: Output, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The control beside the three above, so that what they say is
+    about the value and not about the shape: the same act, the same
+    document and a finite number, written out under both formats."""
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: _session_detail(2.5))
+    args = invocation.Invocation(session="8d3a1f6c4b2e47c0a9f5d2e1b0c3a4f7")
+
+    acts._act(args, records.SHOW_SESSION, UNREACHED, shape)
+
+    assert "2.5" in capsys.readouterr().out
