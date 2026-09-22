@@ -168,14 +168,21 @@ file's 138 commits (188 with `--follow`) and read every subject, plus a
 body grep for the vocabulary such a fix would use: no commit in the
 CLI's history fixes a command reading a field its grammar never set.
 
-So M2 finds no exposure worth a type. Per-family types would carry
-between one and nine fields each across 26 families, to make a static
-error of a shape that has happened once, harmlessly, in the code's
-whole life. M2 lands as the measurement recorded and the one instance
-tidied: `_typed` takes the content source as an argument rather than
-reading `args.file`, so `memory delete` stops reading a field it is
-never given. No invocation type is added and the resolved-globals
-merge stays the one seam it is.
+So the question is whether that one instance is the exposure the
+issue priced, and it is not. The issue's bug class is a handler that
+silently gets a default where it needed a value; here the default is
+the documented behaviour, since `memory delete` takes its key from
+standard input by design and `_typed`'s file branch is simply
+unreachable for it. A read that cannot change behaviour is a dead
+branch, not an exposure, and the history confirms the class has never
+produced a defect. Per-family types would carry between one and nine
+fields each across 26 families to make a static error of that. M2
+lands as the measurement recorded and no code: no invocation type is
+added, the resolved-globals merge stays the one seam it is, and the
+dead branch is recorded in the M2 section as a discovery rather than
+changed, because changing it is neither of the two outcomes the issue
+settled and buys nothing a reader of the measurement does not already
+have.
 
 ## The smaller decisions
 
@@ -423,8 +430,7 @@ decision site.
   hides. No seam is added: the package's modules import each other's
   names, which is what they did as one file, and the one seam that
   exists (the `Invocation` type and the `Act` row) is unchanged.
-- **M2** deepens nothing; `_typed` stops reading a field its caller
-  did not give it.
+- **M2** deepens nothing and changes no code.
 - **M3** deepens `answers.py` by one function and one token, and adds
   one parameter to the act runner, pinned at its default.
 
@@ -480,9 +486,8 @@ Reusing what exists wherever the assertion already has a home.
   against a planted violation (a second `check_transportable` call
   site in a family module; a server module added to the package's
   imports) before the rewrite is claimed.
-- **M2**: no new test; `memory delete`'s existing cases hold, and the
-  `_typed` change is covered by `memory set` reading a file and
-  `memory delete` reading stdin, both pinned today.
+- **M2**: no new test and no code; the committed measurement script
+  and the section's quoted totals are the record.
 - **M3**: `tests/unit/test_config_cli_rendering.py` gains the escape
   test on both encoders, watched failing with the escaping asserted
   the wrong way round, and the two-arm test through `_act` with a
@@ -532,9 +537,10 @@ Reusing what exists wherever the assertion already has a home.
   under `tests/tools/` with their output in the section, the #489
   bookkeeping line. Stacked on M4.
 - [ ] **M2: the measurement recorded.** `cli_fields.py` under
-  `tests/tools/`, adapted to the package and re-run, the section
-  quoting the totals and the history result, and `_typed` taking its
-  source as an argument. Stacked on M1; low-stakes review tier.
+  `tests/tools/`, adapted to the package and re-run, and the section
+  quoting the totals, the history result and the one dead branch as a
+  discovery. No CLI code changes. Stacked on M1; low-stakes review
+  tier.
 - [ ] **M3: the dump, the dispatch and the repricing.** `Output` and
   `encoded` in `answers.py`, the `output` parameter on `_act` with
   `_performed` passing the default, the escape test and the two-arm
@@ -583,6 +589,12 @@ refer to the plan as committed at that blob.
    reading an unset `file`) and the plan proposes a one-off `_typed`
    refactor. Either classify it as exposure and add the prescribed
    type, or justify that it is not exposure and land no code.
+
+   *Resolution*: accepted, on the second branch. The measurement
+   section now argues that a read whose default is the documented
+   behaviour is a dead branch and not the exposure the issue priced,
+   and M2 lands as the measurement and no code; the `_typed` tidy is
+   withdrawn and the branch is recorded as a discovery.
 
 3. **P1: `acts.py` keeps entity-family code and creates the cycle M1
    claims to remove.** `SHOW_ENTITY` needs `_print_entity`, which the
