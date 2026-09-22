@@ -718,7 +718,7 @@ Reusing what exists wherever the assertion already has a home.
   import-graph test, the fresh-interpreter imports quoted, the #489
   bookkeeping line. Stacked on M4.
 - [x] **[M2: the measurement recorded](2026-09-22-cli-decomposition-implementation.md#m2-the-measurement-recorded)**
-  (PR TBD). `cli_fields.py` under
+  (PR #550). `cli_fields.py` under
   `tests/tools/`, adapted to the package and re-run, and the section
   quoting the totals, the history result and the one dead branch as a
   discovery. No CLI code changes. Stacked on M1; low-stakes review
