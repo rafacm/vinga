@@ -538,3 +538,72 @@ Reusing what exists wherever the assertion already has a home.
   the package, "acyclic: yes" quoted.
 - The wheel-grade lane, which installs the CLI bare and drives it
   against a live server, on M1 and M4.
+
+## Plan review round
+
+Reviewed 2026-09-22 by openai/gpt-5.6-sol, thinking high via codex CLI 0.155.1, read-only sandbox, runtime 14m44s, at commit 30f951f5, plan blob 41694179.
+
+Eight findings, verdict "not ready" pending the three P1 design
+decisions. Condensed but faithful; the reviewer's evidence lines
+refer to the plan as committed at that blob.
+
+1. **P1: M3 omits the serialization dispatch the issue settled.** The
+   plan declines the act-level dispatch, so `encoded()` has no caller
+   and fails the deletion test: removing it changes nothing.
+   Execution still ends in `act.render(act.read(answer))`. Add format
+   selection at the `Act` rendering seam, defaulted to human without
+   a CLI flag, route machine formats to `encoded()`, say how notices
+   stay on stderr, and test both arms directly through `_act`.
+
+2. **P1: M2 takes a third path the issue excludes.** The settled rule
+   is per-family types on exposure, measurement and no code on none.
+   The measurement finds exactly the targeted shape (`memory delete`
+   reading an unset `file`) and the plan proposes a one-off `_typed`
+   refactor. Either classify it as exposure and add the prescribed
+   type, or justify that it is not exposure and land no code.
+
+3. **P1: `acts.py` keeps entity-family code and creates the cycle M1
+   claims to remove.** `SHOW_ENTITY` needs `_print_entity`, which the
+   plan puts in `entities.py`, while the entity and secret rows need
+   `Act`: `acts -> entities -> acts`. The builders are not shared by
+   every family. Keep only shared execution concepts in `acts.py`
+   (`Invocation`, `Act`, `_act`, `_performed`, genuinely shared
+   helpers) and put every entity-specific builder, table, renderer
+   and secret row in `entities.py`.
+
+4. **P2: the rewritten transportability test still pins a filename,
+   and the wrong one.** The calls sit inside `_fragment_body` and
+   `_document_body`, which the family split puts in `entities.py` and
+   `deployment.py`, not `input.py`. Assert the semantic property
+   instead: every outbound fragment or document body passes through
+   `check_transportable` before `_call`, plus the existing no-request
+   and no-leak behaviour, with no exact CLI filename.
+
+5. **P2: M3's YAML encoder cannot serialize every `_understood`
+   value.** `_understood` dumps in Python mode, so `StrEnum` members
+   such as `Applies` survive, and PyYAML's safe dumper has no
+   representer for them. The control-character test would not meet
+   this. Serialize a JSON-mode dump through both encoders and include
+   an enum-bearing answer such as an acknowledgement in the test.
+
+6. **P2: a defaulted `Problem.reason` alters every refusal body.**
+   `problem_response` dumps the model without excluding `None`, so
+   `"reason": null` would appear on 401s, malformed requests,
+   unmatched routes and every other problem, and an older client
+   forbids that member. Omit `reason` from the wire when it is
+   `None`, and assert in `test_config_api_problems.py` that an
+   unrelated refusal keeps its exact member set.
+
+7. **P2: the published `Problem.detail` contract becomes false.** Its
+   description says `detail` is the same sentence the CLI prints;
+   after M4 the CLI prints `detail` plus a remedy for a known reason.
+   Revise the description to server-owned state prose that a client
+   with the `reason` may extend, and regenerate the document.
+
+8. **P2: the proposed cycle proof does not inspect the import graph.**
+   `sections.py` excludes import-bound names, and once the file is a
+   package the relevant cycle mechanisms are module imports,
+   initialization order and `__init__.py`. Add a static
+   module-import graph check including `__init__.py`, import each
+   module in a fresh interpreter, and keep the definition-reference
+   measurement as supporting evidence.
