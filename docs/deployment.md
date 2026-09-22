@@ -148,7 +148,7 @@ and the file mounted into the container's environment are one file,
 
 ```bash
 # The image, pinned. See "Choosing a tag" below.
-VINGA_IMAGE=ghcr.io/rafacm/vinga-server:2026-09-05-1430
+VINGA_IMAGE=ghcr.io/rafacm/vinga-server:2026-09-05-143012
 
 # The two secrets, each generated once with `openssl rand -hex 32` and
 # kept wherever this deployment keeps its secrets.
@@ -511,12 +511,13 @@ whose ASR and TTS both name external providers. The full comparison,
 sizes included, is
 [Choosing an image](../vinga-server/README.md#choosing-an-image).
 
-**Pin an immutable tag.** `YYYY-MM-DD-HHmm` for the build, or
+**Pin an immutable tag.** `YYYY-MM-DD-HHmmss` for the build, or
 `sha-<revision>` for the commit. Neither is ever reused, so a rollback
 names the build it wants, and `sha-<revision>` is the one that matches
-across both variants: they are built by separate jobs that finish
-minutes apart, so one commit can produce a dated tag and a `-slim`
-dated tag a minute earlier.
+across both variants: each variant's dated tag is the second its own
+manifest was assembled, and the two are assembled by jobs that start
+together, so the two timestamps usually agree without being guaranteed
+to.
 
 **`latest` and `slim` are the moving pointers**, which makes them the
 tags to pull when trying the server and the wrong ones to deploy from.
