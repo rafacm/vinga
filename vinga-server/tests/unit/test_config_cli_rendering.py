@@ -40,8 +40,18 @@ from tests.support.config_cli import API_SECRET_ENV, SECRET, TOKEN, registered, 
 from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import showing as _showing
 from vinga_server.config import Config, cli, entities, printing
-from vinga_server.config.cli import acts, deployment, devices, invocation, output, reach
+from vinga_server.config.cli import (
+    acts,
+    deployment,
+    devices,
+    invocation,
+    output,
+    reach,
+    records,
+)
 from vinga_server.config.cli import entities as cli_entities
+from vinga_server.config.cli.acts import Act
+from vinga_server.config.cli.answers import Output, encoded
 from vinga_server.config.cli.deployment import (
     APPLY_SECTIONS,
     DIFF_SECTIONS,
@@ -52,8 +62,10 @@ from vinga_server.config.cli.deployment import (
 )
 from vinga_server.config.entities import APPLY_NOTICE
 from vinga_server.config.loader import ConfigError, ReloadInProgressError
+from vinga_server.config.models import MASK
 from vinga_server.config.responses import (
     PROBLEM_MEDIA_TYPE,
+    Acknowledgement,
     AgentsReload,
     Applies,
     ConfigReloadResult,
@@ -2368,3 +2380,311 @@ def test_the_remedies_cover_the_whole_vocabulary() -> None:
     server and the wrong one for a token this build declares. So the two
     sets are held equal and a member added on one side alone is red."""
     assert set(reach.REMEDIES) == set(RefusalReason)
+
+
+# The two machine shapes, and the arm that writes them
+#
+# An answer leaves in one of three shapes (`Output`), and two of them
+# are documents a program reads rather than renderings a person does.
+# What the cases below hold is the pair of properties that made the
+# `--json` question answerable at all: that the document is escaped and
+# bounded by the same reading the renderers are given, proven once on
+# the model rather than once per format, and that the arm which writes
+# it keeps the notices on stderr where every other arm puts them.
+#
+# No command sets the parameter, so these drive `_act` directly, which
+# is the name the existing cases in this suite already reach for.
+
+# What a terminal would obey, planted in a value an answer carries.
+STEERING = "\x1b[31m"
+
+# How each encoder writes that character. They spell it differently and
+# both spell it, which is the fact the deferral entry in the CLI guide
+# now rests on: escaping is the encoders' own and not something a second
+# renderer here has to do again.
+ESCAPED = {Output.JSON: "\\u001b", Output.YAML: "\\e"}
+
+
+def _acknowledgement(wrote: str) -> dict[str, object]:
+    """One real acknowledgement, as the API sends it: what the write
+    did, the sentence saying what it is waiting for, and the boundary as
+    the closed token that sentence is the reader's half of."""
+    return {
+        "wrote": wrote,
+        "notice": "stored, and the server is not serving it yet",
+        "applies": [Applies.RELOAD.value],
+    }
+
+
+@pytest.mark.parametrize("shape", [Output.JSON, Output.YAML])
+def test_a_machine_document_escapes_what_a_terminal_would_obey(shape: Output) -> None:
+    """The no-leak audit the second format was priced at, paid once.
+
+    It is one test on the model rather than a second pass over every
+    renderer, because what the encoders are given is the validated
+    answer and what they do with a character is theirs: both write an
+    escape sequence for one a terminal would obey, so nothing an answer
+    carries steers a terminal on this path either.
+
+    Three things at once, because they are three properties of one
+    document: the control character is escaped and does not appear as
+    itself, the mask is the mask (a value the shape declares travels
+    exactly as it was sent, so a masked field stays masked and is not
+    re-encoded into something else), and the closed token is its value.
+    The token is the one that needed the JSON-mode dump: the human
+    reading keeps it as the member its renderers print, and PyYAML's
+    safe dumper has no representer for a member.
+    """
+    body = _acknowledgement(f"provider llm/claude {STEERING} {MASK}")
+
+    document = encoded(Acknowledgement, body, acts.UNREADABLE_WRITE, shape)
+
+    assert ESCAPED[shape] in document
+    assert STEERING not in document
+    assert MASK in document
+    assert Applies.RELOAD.value in document
+    assert "Applies" not in document
+
+
+@pytest.mark.parametrize("shape", [Output.JSON, Output.YAML])
+def test_a_machine_document_is_ascii_whatever_the_answer_carried(shape: Output) -> None:
+    """A lone surrogate reaches neither stream raw, on either arm.
+
+    This is the half of the human path that `printable` holds: a lone
+    surrogate cannot be encoded, `main()` catches no encoding failure,
+    and a command that wrote one to stdout would leave as a traceback
+    rather than as a sentence. The machine arms do not go through
+    `printable`, so the escaping is what stands there instead, and it is
+    asserted about the bytes rather than about the call: the document is
+    ASCII, so it encodes whatever the terminal's encoding is.
+
+    A character outside ASCII that is perfectly writable is planted
+    beside the surrogate on purpose. PyYAML refuses a surrogate under
+    either setting, so a case carrying only one would pass with
+    `allow_unicode` either way and prove nothing about the setting; the
+    letter is what makes it load-bearing.
+    """
+    body = _acknowledgement("a\ud800b, and a café")
+
+    document = encoded(Acknowledgement, body, acts.UNREADABLE_WRITE, shape)
+
+    assert document.isascii(), document
+    # Nothing raised on the way out either, which is the failure this
+    # exists to prevent rather than a property of the string above.
+    assert document.encode("ascii")
+    assert "ud800" in document.lower()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(
+            dict(_acknowledgement("device aa:bb:cc:dd:ee:ff"), token=SECRET),
+            id="a field this client has never heard of",
+        ),
+        pytest.param(
+            dict(_acknowledgement("device aa:bb:cc:dd:ee:ff"), applies=[{"leak": SECRET}]),
+            id="a boundary that is not a token",
+        ),
+    ],
+)
+def test_a_machine_document_leaves_out_what_the_shape_does_not_declare(
+    body: dict[str, object],
+) -> None:
+    """The tolerances this client keeps, on this path too.
+
+    A newer server that answers more than this client knows about is
+    readable, and what it said beyond the shape is not written out,
+    because it was not read: a field nobody declared is dropped, and a
+    sequence of tokens with something in it that is not one is read as
+    the silence an older server would have sent, which is the field's
+    own default.
+
+    That matters more here than on the human path rather than less. A
+    renderer prints the fields it names, and an encoder writes the whole
+    of what it is handed, so a document built from the body instead of
+    from the reading would publish whatever arrived beside the answer.
+    Each body carries a credential in the part that is dropped, which is
+    what makes the case about the dropping rather than about the shape.
+    """
+    document = encoded(Acknowledgement, body, acts.UNREADABLE_WRITE, Output.JSON)
+
+    assert SECRET not in document
+    assert "token" not in document
+    assert "leak" not in document
+
+
+UNREACHED = reach.Reached(
+    address=reach.Address(base="http://127.0.0.1:1", query="", shown="http://127.0.0.1:1"),
+    token="never-a-real-token",
+)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(dict(_acknowledgement("device aa"), wrote=7), id="a size where a word goes"),
+        pytest.param(
+            dict(_acknowledgement("device aa"), applies="reload"),
+            id="a word where a sequence goes",
+        ),
+    ],
+)
+def test_a_body_the_machine_arm_cannot_read_is_this_acts_own_refusal(
+    body: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The read path is the one `_understood` already took, reached
+    through the encoder.
+
+    Nothing is coerced on the way in, so a body putting a number where a
+    word belongs is a body nobody vouched for, and what it meets is the
+    sentence written on the act's own row rather than a second sentence
+    this path invented. It meets it before anything is written: the
+    reading happens first, so a refused answer leaves both streams
+    empty and there is no half-written document for a program to parse.
+    """
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: body)
+    args = invocation.Invocation(mac="aa:bb:cc:dd:ee:ff", agents=("weather",))
+
+    with pytest.raises(ConfigError) as refused:
+        acts._act(args, devices.BIND_DEVICE, UNREACHED, Output.JSON)
+
+    assert str(refused.value) == acts.UNREADABLE_WRITE
+    written = capsys.readouterr()
+    assert written.out == ""
+    assert written.err == ""
+    assert SECRET not in _chain(refused.value)
+
+
+# What each case expects on stderr, written out rather than read from
+# the constant that composes it, for the reason the remedy sentences
+# above are written out: an expectation built from the code it checks
+# asserts that the code equals itself, and a notice reworded on its way
+# out of a renderer would stay green under one.
+#
+# Each is a fragment of the line rather than the whole of it, because
+# what a case here is about is that the notice survived the arm, and two
+# of the three carry a value off the answer that the case has no reason
+# to spell. The same goes for the rendering beside it, which is what the
+# default arm puts on stdout and what the machine arm does not: a line
+# of it, written out, so that the two arms can be told apart by what
+# each wrote rather than only by their not being equal.
+Noticed = tuple[Act, invocation.Invocation, dict[str, object], str, str]
+
+
+def _bind(tmp_path: Path) -> Noticed:
+    """A write acknowledged: the renderer that puts the boundary on
+    stderr, and the one the per-kind tables, the device rows and the
+    secret rows all share."""
+    return (
+        devices.BIND_DEVICE,
+        invocation.Invocation(mac="aa:bb:cc:dd:ee:ff", agents=("weather",)),
+        _acknowledgement("device aa:bb:cc:dd:ee:ff"),
+        "stored, not serving yet: run `vinga apply` to install it on the running server",
+        "wrote device aa:bb:cc:dd:ee:ff",
+    )
+
+
+def _import(tmp_path: Path) -> Noticed:
+    """A whole document imported: one line per entry on stdout, and what
+    the entries that wrote are waiting on underneath."""
+    document = tmp_path / "deployment.yaml"
+    document.write_text("providers:\n  llm:\n    claude:\n      type: anthropic\n")
+    return (
+        deployment.IMPORT,
+        invocation.Invocation(file=str(document)),
+        {
+            "entries": [
+                {
+                    "section": "providers",
+                    "identity": "llm.claude",
+                    "outcome": "wrote",
+                    "notice": "stored, and the server is not serving it yet",
+                    "applies": [Applies.RELOAD.value],
+                }
+            ]
+        },
+        "imported 1 entry, not serving yet: run `vinga apply`",
+        "providers.llm.claude: wrote",
+    )
+
+
+def _page(tmp_path: Path) -> Noticed:
+    """A listing that is one page of more: the third stderr notice, and
+    the one that is about how to read the rest rather than about a
+    write."""
+    return (
+        records.LIST_AGENT_MEMORIES,
+        invocation.Invocation(limit="1"),
+        {"items": [{"owner": "weather", "facts": 3}], "next_cursor": "weather"},
+        "this is one page and there is more; the next one is --cursor weather",
+        "weather  3",
+    )
+
+
+# The three notice-bearing shapes, named by what they are rather than by
+# which renderer writes them: an acknowledgement, a document and a page.
+NOTICED = {"an acknowledgement": _bind, "an imported document": _import, "a page of more": _page}
+
+
+@pytest.fixture(params=sorted(NOTICED))
+def noticed(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """One real act, the invocation that addresses it and the answer it
+    is given, with the request seam replaced.
+
+    Real rows off the registry rather than a shape built here, because
+    what these cases are about is a notice a renderer writes, and a
+    renderer written for a case would write whatever the case wanted.
+    """
+    act, args, answer, notice, rendering = NOTICED[request.param](tmp_path)
+    monkeypatch.setattr(acts, "_call", lambda *_args, **_kwargs: answer)
+    return act, args, answer, notice, rendering
+
+
+def test_the_default_arm_renders_the_answer_and_keeps_its_notice(
+    noticed, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The arm every command runs under, pinned by being asked for the
+    way every command asks for it: by not asking.
+
+    The default is the seam's policy rather than a caller's, so it is
+    asserted where a caller would have passed something, and the case
+    below is the same act with the parameter given.
+    """
+    act, args, _answer, notice, rendering = noticed
+
+    acts._act(args, act, UNREACHED)
+
+    rendered = capsys.readouterr()
+    assert rendering in rendered.out
+    assert notice in rendered.err
+
+
+def test_the_machine_arm_writes_the_model_and_keeps_the_same_notice(
+    noticed, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The two arms differ on stdout and agree on stderr.
+
+    Stdout carries the encoded model and nothing else, which is what
+    makes it parseable: a rendering printed beside it would be a
+    document with a listing in front of it. Stderr carries the same
+    bytes the default arm wrote, because it is the same renderer that
+    wrote them, run with its stdout bound to a sink. That is the whole
+    of the mechanism, and it is why this case can be parametrized over
+    three unrelated renderers without any of them being edited.
+    """
+    act, args, answer, notice, rendering = noticed
+    acts._act(args, act, UNREACHED)
+    human = capsys.readouterr()
+
+    acts._act(args, act, UNREACHED, Output.JSON)
+
+    machine = capsys.readouterr()
+    assert machine.out == encoded(act.answers, answer, act.refusal, Output.JSON)
+    assert rendering not in machine.out
+    assert machine.err == human.err
+    # Said rather than implied by the equality above, which two empty
+    # streams would also satisfy.
+    assert notice in machine.err
