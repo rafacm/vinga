@@ -877,3 +877,44 @@ verdict "not ready" pending the P1 amendments. Condensed but faithful.
    mode under the wrong order is a degraded sentence rather than a
    misbehaving command; #386's recorded stance of no version
    negotiation stands, and the project is pre-release.
+
+## Plan review round, third
+
+Reviewed 2026-09-22 by openai/gpt-5.6-terra, thinking high via codex CLI 0.155.1, read-only sandbox, runtime 6m02s, at commit 5fa35eb4, plan blob fc7c8975.
+
+A re-review of the second round's six amendments. Five findings,
+three P1, verdict "not ready". Condensed but faithful.
+
+1. **P1: M4 leaves `ALREADY_BOUND` at the wrong settled status.** The
+   issue's table says 409; `api.py` maps `DeviceAlreadyBoundError` to
+   404 and `test_config_api_pending.py` pins 404; M4 names no status
+   change. Change the mapping and the expectation to 409.
+
+2. **P1: `encoded()` cannot give the act's refusal.** Exact
+   `_understood` behaviour needs the third `refusal` argument, and the
+   machine call passes only `act.answers` and `answer`. Add `refusal`
+   to the signature, have `_act` pass `act.refusal`, and make the
+   invalid-output tests assert that exact per-act refusal and no
+   output.
+
+3. **P1: the notice projection is assigned to four renderer functions,
+   not four `Act` rows.** `_acknowledged` alone renders for many
+   constructed acts (the entity-table generators, the device and
+   secret acts) and `_paged` builds five distinct acts. An unnamed row
+   would silently take the no-op and lose its notices in machine mode.
+   Enumerate every notice-producing construction and attach its
+   projection, with a structural pin and a machine-mode paginated
+   listing test.
+
+4. **P2: the named secret-holder test does not reach the
+   command-bearing refusal.** `test_config_api_writes.py` near 861
+   meets `_check_slot`'s ordinary missing-entity path, not the
+   rowcount-zero path in `_write_secrets` that composes
+   `SERVER_PROGRAM`. Specify a deterministic race fixture for both
+   holder kinds that reaches that path, then pin the reason, the
+   command-free detail and the no-leak surfaces over HTTP.
+
+5. **P2: `REMEDIES` has no specified contents.** The six tokens are
+   defined and their sentences are not; the closed-set pin proves
+   completeness, not the grammar or the no-address rule. List the six
+   sentences and assert the complete stderr text per token.
