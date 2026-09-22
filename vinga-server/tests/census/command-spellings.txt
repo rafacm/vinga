@@ -208,6 +208,7 @@ historical  vinga device pending claim
 historical  vinga device pending frobnicate
 historical  vinga device pending list
 historical  vinga device replace
+historical  vinga device show
 historical  vinga device show aa-bb
 historical  vinga diff
 historical  vinga events

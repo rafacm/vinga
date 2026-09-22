@@ -227,3 +227,77 @@ is inside the integration lane and ran, since `uv` is on PATH and
 nothing skipped. The image build and the smoke conversation were not
 run here and are unverified in this section; the pull request records
 what CI says about them.
+
+### PR review round, PR #548
+
+Automated external review of this PR's diff (origin/main...cc54b763).
+Reviewed 2026-09-22 by openai/gpt-5.6-sol, thinking high via codex CLI
+0.155.1, read-only sandbox, runtime 12m54s, at commit cc54b763. Verdict
+as received: **mergeable after the listed fixes**. Three findings, one
+P1, all adopted.
+
+Two of the three are the same shape and it is one this repository has a
+name for: a test that asserts something narrower than the sentence
+beside it claims. The third is a real leak, and the milestone's own
+tolerance is what opened it.
+
+1. **P1: an explicit `reason: null` bypassed the refusal trust boundary
+   and printed `detail`.** `_nameable` normalized only unknown strings
+   and left every other value alone, and `RefusalReason | None` accepts
+   `null`, so a problem-shaped body carrying `"reason": null` validated
+   and its `detail` reached a terminal. `detail` is the field of that
+   shape whose words a middlebox chooses. The plan's own requirement is
+   that a non-string reason be unrecognized, and the test matrix had
+   every non-string but that one.
+
+   *Resolution.* Adopted whole, in `638a029d`. `_nameable` now tells an
+   ABSENT member from a PRESENT one: absent stays absent, an unknown
+   string is read as that same silence, and anything present that is not
+   a string answers `_UNNAMEABLE`, which `_refusal` turns into the fixed
+   unreadable-body sentence with none of the body on either stream. The
+   `an explicit null` case joined the matrix with the planted credential
+   in `detail`, and it was watched failing first, with the credential on
+   stderr.
+
+2. **P2: the remedy wording and the token-to-remedy pairing were not
+   pinned.** The full-stderr cases built their expectation from
+   `cli.REMEDIES`, which is the table under test, so they asserted that
+   it equals itself: a remedy reworded, or two remedies swapped between
+   their tokens, stayed green, and the implementation record above
+   claimed a string-by-string comparison that only ever happened once,
+   by hand, at authoring time.
+
+   *Resolution.* Adopted whole, in `83384d05`.
+   `REMEDY_SENTENCES` in `tests/unit/test_config_cli_rendering.py` is
+   the plan's six sentences written out, `cli.REMEDIES` is held equal to
+   it as a whole mapping, and the full-stderr cases read the literals.
+   Two mutations were watched failing; a third, moving the two whole
+   dictionary lines, was a no-op, because dict equality does not see
+   order, and the test was right to stay green.
+
+3. **P2: the secret-holder cases did not prove their stated no-address
+   contract.** The HTTP case asserted `path.split("/")[2]`, which for
+   `/providers/llm/claude/...` is the stage `llm` and not the identity
+   that was refused, so it checked a word the refusal is entitled to
+   say. The store-level case asserted nothing about the address at all.
+
+   *Resolution.* Adopted whole, in `2563def7`. Each case addresses its
+   holder by a credential-shaped sentinel of its own, distinct per kind
+   and held so by the guard beside them, and asserts it absent from the
+   body, the headers, the records this server wrote and, at the store,
+   the whole exception chain. The two no-leak claims have different
+   scopes and the test says why: a credential travels in a body and is
+   held to `renderings`, every captured record read three ways, while a
+   holder's name travels in the request line, so the caller's own HTTP
+   client logs it by construction and what can be claimed is that
+   nothing this server wrote repeats it. Both readings were watched
+   failing on leaks the sentence pin cannot see.
+
+Beside the three, the command-spellings manifest was stale on the
+rebased tree and is regenerated in `850b8d6a`: three pairs, the plan's
+own quoted remedies as `historical`, and `vinga device show` and
+`vinga provider set` as `respell`, which is a gain rather than a cost.
+Written out rather than composed from `PROGRAM`, the remedy sentences
+are inside that census's reach for the first time, which is the guard
+the M4 section above had to write a test for because the census could
+not see them.
