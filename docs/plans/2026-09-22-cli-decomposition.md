@@ -614,7 +614,14 @@ Reusing what exists wherever the assertion already has a home.
   site attaches, asserts the sentence names no command (`PROGRAM` and
   `SERVER_PROGRAM` absent from `detail`, the #386 invariant extended
   to these five), and keeps the no-secret and no-address checks
-  already beside it. The
+  already beside it. The shared helper those checks go through,
+  `tests/support/problems.py`, pins `PROBLEM_KEYS` as exactly the four
+  members and `refused()` enforces it, so it gains an explicit
+  expected-reason mode that requires exactly those four plus
+  `reason` with the given value, used at the five paths; the four-key
+  default stays as it is and `PROBLEM_KEYS` is not broadened, because
+  the default is what pins every other refusal's body and the
+  old-client compatibility with it. The
   closed-set pin: `set(REMEDIES) == set(RefusalReason)`, so a member
   added on one side alone is red. Client side, in
   `tests/unit/test_config_cli_rendering.py` beside the existing
@@ -1021,6 +1028,10 @@ verdict "ready after the P1/P2 amendments". Condensed but faithful.
    default, add an explicit expected-reason mode requiring exactly
    those four plus `reason`, use it at the five paths, and do not
    broaden `PROBLEM_KEYS`, or the old-body pin becomes vacuous.
+
+   *Resolution*: accepted. `refused()` gains an expected-reason mode
+   requiring exactly the four members plus `reason`; the default and
+   `PROBLEM_KEYS` are unchanged.
 
 3. **P2: the "deterministic" secret-holder fixture is still two
    mechanisms.** A seam on the check and a sequenced concurrent delete
