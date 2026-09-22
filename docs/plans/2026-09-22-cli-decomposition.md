@@ -370,8 +370,16 @@ dumps that validated result in JSON mode
 (`TypeAdapter.dump_python(..., mode="json")`), so an enum member such
 as `Applies.RELOAD` leaves as its string and a date as ISO text, before
 writing it as JSON (the standard encoder,
-sorted keys, no ASCII escaping of non-ASCII) or YAML (`yaml.safe_dump`,
-block style, the flags the export already uses). `_understood`'s own
+sorted keys, `ensure_ascii=True`) or YAML (`yaml.safe_dump`, block
+style, sorted keys off, `allow_unicode=False`). Both arms are
+ASCII-safe on purpose: `printable` is what keeps a lone surrogate off
+stdout on the human path, the machine path bypasses it, and `main()`
+catches no encoding failure, so a surrogate that reached the stream
+raw would leave as a traceback. With escaping on, both encoders write
+it as an escape sequence and the bytes are valid whatever the
+terminal's encoding; the export's `allow_unicode=True` is a choice
+about a document a person reads, and this is a stream a program
+reads. `_understood`'s own
 Python-mode dump keeps enum members as members, which PyYAML's safe
 dumper has no representer for, so the dump mode is the whole
 difference between the two readers. Both encoders escape a control character
@@ -382,7 +390,9 @@ the CLI guide prices, and it is proven once, on the model: a test
 plants a control character and the fixed-length mask in a response
 model that carries an enum (an `Acknowledgement` with its `applies`),
 dumps it through both encoders, and asserts the character is escaped,
-the mask is the mask, and the enum is its value. Beside it, the
+the mask is the mask, and the enum is its value; a second case plants
+a lone surrogate and asserts both arms write valid ASCII bytes with
+the surrogate escaped, and that nothing is raised. Beside it, the
 machine arm is driven with a body carrying an extra member and with a
 strict-type mismatch, and asserted to meet that act's exact refusal
 sentence with no bytes on either stream, which is the read path
@@ -999,6 +1009,10 @@ verdict "ready after the P1/P2 amendments". Condensed but faithful.
    surrogate in an answer would leave as an unhandled write failure.
    Require ASCII-safe output and test a lone surrogate through both
    machine arms: valid bytes, no traceback.
+
+   *Resolution*: accepted. Both machine encoders escape to ASCII, the
+   section says why that differs from the export's choice, and the
+   surrogate case joins the escape test.
 
 2. **P2: M4 omits the shared refusal-test contract its member breaks.**
    `tests/support/problems.py` pins `PROBLEM_KEYS` as exactly the four
