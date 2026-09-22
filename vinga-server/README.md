@@ -3864,12 +3864,15 @@ digests rather than from a rebuild of the same source.
 
 The moving tag is the only one that moves, `latest` for the default
 variant and `slim` for slim, so it is the tag to pull when trying the
-server and the wrong one to deploy from. It is not moved backwards:
-before moving one, CI reads which commit the image it currently points
-at was built from and leaves the tag where it is when that commit is
-the newer one, so two merges landing together cannot rewind `latest`
-to the older of them. It still moves under whatever is pulling it,
-which is the reason it is the wrong tag to deploy from. The dated and
+server and the wrong one to deploy from. Before moving one, CI reads
+which commit the image it currently points at was built from, and
+leaves the tag where it is when that commit is the newer one or when
+it cannot tell. That is a check rather than a lock: two merges
+publishing in the same instant can both read the tag before either
+writes, so a moving tag can still end up on the older of them until
+the next push moves it on. It moves under whatever is pulling it
+either way, which is the reason it is the wrong tag to deploy from.
+The dated and
 SHA tags are never reused: several merges can land on one day, and
 each gets its own timestamp to the second, so a rollback names the
 build it wants.
