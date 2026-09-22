@@ -2488,8 +2488,9 @@ def test_a_machine_document_is_ascii_whatever_the_answer_carried(shape: Output) 
         ),
     ],
 )
+@pytest.mark.parametrize("shape", [Output.JSON, Output.YAML])
 def test_a_machine_document_leaves_out_what_the_shape_does_not_declare(
-    body: dict[str, object],
+    body: dict[str, object], shape: Output
 ) -> None:
     """The tolerances this client keeps, on this path too.
 
@@ -2506,8 +2507,13 @@ def test_a_machine_document_leaves_out_what_the_shape_does_not_declare(
     from the reading would publish whatever arrived beside the answer.
     Each body carries a credential in the part that is dropped, which is
     what makes the case about the dropping rather than about the shape.
+
+    Both formats, because they are two branches and a regression in one
+    of them is a leak in one of them: an arm that dumped what arrived
+    instead of what was read would put the planted credential on stdout
+    under that format alone and leave every other case here green.
     """
-    document = encoded(Acknowledgement, body, acts.UNREADABLE_WRITE, Output.JSON)
+    document = encoded(Acknowledgement, body, acts.UNREADABLE_WRITE, shape)
 
     assert SECRET not in document
     assert "token" not in document
@@ -2534,8 +2540,10 @@ UNREACHED = reach.Reached(
         ),
     ],
 )
+@pytest.mark.parametrize("shape", [Output.JSON, Output.YAML])
 def test_a_body_the_machine_arm_cannot_read_is_this_acts_own_refusal(
     body: dict[str, object],
+    shape: Output,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -2549,6 +2557,10 @@ def test_a_body_the_machine_arm_cannot_read_is_this_acts_own_refusal(
     reading happens first, so a refused answer leaves both streams
     empty and there is no half-written document for a program to parse.
 
+    Both formats, for the reason the tolerance cases above are run
+    under both: the reading is shared and the writing is not, and a
+    branch that reached its encoder without it would refuse nothing.
+
     One of the three carries a credential where a word belongs, which is
     where a paste lands and is what makes the chain assertion below
     load-bearing: what the refusal says is the act's fixed sentence, and
@@ -2559,7 +2571,7 @@ def test_a_body_the_machine_arm_cannot_read_is_this_acts_own_refusal(
     args = invocation.Invocation(mac="aa:bb:cc:dd:ee:ff", agents=("weather",))
 
     with pytest.raises(ConfigError) as refused:
-        acts._act(args, devices.BIND_DEVICE, UNREACHED, Output.JSON)
+        acts._act(args, devices.BIND_DEVICE, UNREACHED, shape)
 
     assert str(refused.value) == acts.UNREADABLE_WRITE
     written = capsys.readouterr()
@@ -2672,8 +2684,9 @@ def test_the_default_arm_renders_the_answer_and_keeps_its_notice(
     assert notice in rendered.err
 
 
+@pytest.mark.parametrize("shape", [Output.JSON, Output.YAML])
 def test_the_machine_arm_writes_the_model_and_keeps_the_same_notice(
-    noticed, capsys: pytest.CaptureFixture[str]
+    noticed, shape: Output, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The two arms differ on stdout and agree on stderr.
 
@@ -2684,15 +2697,19 @@ def test_the_machine_arm_writes_the_model_and_keeps_the_same_notice(
     wrote them, run with its stdout bound to a sink. That is the whole
     of the mechanism, and it is why this case can be parametrized over
     three unrelated renderers without any of them being edited.
+
+    Under both formats, since the framing claim is about the stream
+    rather than about the encoder: one act's answer is one document,
+    whichever document it is.
     """
     act, args, answer, notice, rendering = noticed
     acts._act(args, act, UNREACHED)
     human = capsys.readouterr()
 
-    acts._act(args, act, UNREACHED, Output.JSON)
+    acts._act(args, act, UNREACHED, shape)
 
     machine = capsys.readouterr()
-    assert machine.out == encoded(act.answers, answer, act.refusal, Output.JSON)
+    assert machine.out == encoded(act.answers, answer, act.refusal, shape)
     assert rendering not in machine.out
     assert machine.err == human.err
     # Said rather than implied by the equality above, which two empty
