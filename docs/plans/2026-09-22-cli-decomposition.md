@@ -261,8 +261,9 @@ sentences together, which is the issue's stated shape:
   renderers and the masked-configuration shapes (`BODY`, `ENTRIES`,
   the `_sections` reading).
 - `cli/deployment.py`: the commands about the deployment as a whole:
-  export, import, apply, diff, list, info, with the export document,
-  the apply and diff listings, `SPOKEN` and `INSTALLS`.
+  export, import, apply, diff, list, show, info, with the export
+  document, the masked-configuration rendering `show` prints, the
+  apply and diff listings, `SPOKEN` and `INSTALLS`.
 - `cli/devices.py`: device and device pending, with the binding and
   record renderers.
 - `cli/records.py`: conversation, session, memory and metric, with
@@ -272,7 +273,12 @@ sentences together, which is the issue's stated shape:
 - `cli/local.py` (the "commands that reach no API" block): ota-url,
   schema, openapi, reference, check, with `_ota_url` beside
   `_server_config`, the one function of the onboarding-URL section,
-  which is its only caller.
+  which is its only caller. Not `cli-reference`: its handler
+  `_cli_reference` exists to call the `cli_reference()` builder, which
+  calls `command()`, and the grammar names the handler in `COMMANDS`,
+  so a handler in `local.py` would make `local` import `grammar` while
+  `grammar` imports `local`. The handler lives in `grammar.py` beside
+  the builder it calls.
 
 The prelude's constants and fixed sentences are not a module. Each
 moves to the module of its consumer, and one with consumers in several
@@ -287,9 +293,10 @@ guide asks it in both ways: inlining any family back into the acts
 module puts a family's renderers beside every other family's, which
 is the file this plan exists to end; and no module forwards its
 arguments to another. The assignment of each of the 65 commands to a
-family follows its noun; the six that are not obvious are fixed here:
-`info` and `list` are deployment, `check` and `ota-url` are local,
-`default-agent` is entities, and the memory rows are records. The
+family follows its noun; the eight that are not obvious are fixed
+here: `info`, `list` and `show` are deployment, `check` and `ota-url`
+are local, `cli-reference` is grammar, `default-agent` is entities,
+and the memory rows are records. The
 subagent records any assignment it has to change, with the reason.
 
 ### The proof that M1 changes nothing
@@ -821,6 +828,11 @@ verdict "not ready" pending the P1 amendments. Condensed but faithful.
    builder to `grammar.py` does not place the handler. Assign `show`
    to deployment and the reference command where the dependency stays
    acyclic.
+
+   *Resolution*: accepted. `show` is deployment. `cli-reference`'s
+   handler cannot be local without a `local`/`grammar` cycle, so it
+   lives in `grammar.py` beside the builder it exists to call; the
+   module list says why.
 
 5. **P2: M4's per-site tests do not name homes for two of the five
    refusal paths.** The unloaded-agent refusal is exercised in
