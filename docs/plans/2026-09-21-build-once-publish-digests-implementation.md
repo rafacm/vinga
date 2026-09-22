@@ -206,3 +206,133 @@ an empty `required_status_checks.contexts`), so the matrix rename
 breaks nothing. Recorded rather than deleted, because the question was
 the right one to ask and the answer is a fact about this repository
 that the next renaming change will want.
+
+## M2: validation overlaps across main pushes; the moving tag is ordered by a check
+
+### What landed
+
+| Piece | Where |
+| --- | --- |
+| A group per push, and the pull request's cancelling group kept | `.github/workflows/vinga-server.yml`, the workflow-level `concurrency` block |
+| The comment that claimed the opposite, rewritten around its counterexample | the block above it, L38-72 |
+| The ordering check, eighteen lines of shell | `image-publish`, the `Whether the moving tag may move` step |
+| The checkout the check needs | `image-publish`, `actions/checkout@v7` with `fetch-depth: 0` |
+| The moving tag dropped from the tag list when the check says so | `Assemble the manifest, check it, and publish it`, the `tags=()` loop |
+| The maintained pages | `vinga-server/README.md` (the moving-tag paragraph in "Choosing an image"), `docs/deployment.md` (the moving-pointer paragraph in "Choosing a tag") |
+| The changelog fragment | `changelog.d/490-build-once-publish-digests.md`, a `### Fixed` entry added to M1's file |
+
+No second job, no reconciler, no concurrency group on any publish job,
+and nothing walks `main`'s history. The design that did all of that is
+in the plan's review rounds, and was cut before this milestone started.
+
+### Deviations from the plan
+
+Two, both small, and one of them reverses a deviation M1 recorded.
+
+**The per-run group covers every event that is not a pull request,
+not only a push.** The plan says "a pull request keeps
+`${{ github.workflow }}-${{ github.ref }}` with `cancel-in-progress`,
+and a push appends the run id". It says nothing about
+`workflow_dispatch`, which shares the same group today and carries the
+same defect: a second dispatch of one ref queues behind the first, and
+a third replaces the queued one. The expression is written as "a pull
+request keeps the group it had; everything else appends the run id",
+which leaves the pull-request group byte-identical to the old one and
+closes the dispatch case for free. Writing it as the plan's literal
+two cases would have left a known displacement in the one event this
+repository uses to gate a milestone before merging it.
+
+**`image-publish` checks out after all**, which reverses M1's fifth
+recorded deviation ("`image-publish` checks nothing out"). The
+ordering check is an ancestry question and git is what answers it, so
+the job takes `actions/checkout@v7` with `fetch-depth: 0`. The
+job-level `defaults.run.working-directory: .` M1 added stays and is
+still right, for a different reason than it was added for: the
+workspace now exists, and every step in this job is a registry or git
+operation at the repository root rather than a server one. Its comment
+says that instead.
+
+### The check was driven as logic, against this repository's commits
+
+The check is shell with four branches, so it was tested as shell
+rather than read. The step's `run:` body was extracted from the
+workflow by `yaml.safe_load` (so the thing under test is the committed
+text, not a copy of it), `docker` was replaced on `PATH` by a stub
+printing an `imagetools inspect --format '{{json .Image}}'` payload
+for a named case, and the script was run in this worktree so that
+`git merge-base` and `git cat-file` answered against real objects.
+Eight cases, all as intended:
+
+| case | `published` | this run's commit | outcome |
+| --- | --- | --- | --- |
+| the tag is an ancestor | `HEAD~5` | `HEAD` | moves the tag |
+| the tag is a descendant | `HEAD` | `HEAD~5` | `MOVE_MOVING=false`, leaves it |
+| the tag is this same commit | `HEAD` | `HEAD` | leaves it |
+| the tag is absent | inspect exits 1 | `HEAD` | moves it, "nothing to go backwards over" |
+| the config carries no `VINGA_REVISION` | no match | `HEAD` | the same sentence, the same outcome |
+| the revision names no commit here | `deadbeefdead` | `HEAD` | moves it, saying so |
+| a sibling commit, neither ancestor nor descendant | a `commit-tree` child of `HEAD~3` | `HEAD` | moves it |
+| a full 40-character revision rather than twelve | `HEAD~5` in full | `HEAD` | moves it |
+
+Two of those are worth naming. **The same commit leaves the tag
+alone**: `git merge-base --is-ancestor` is reflexive, so republishing
+the commit a moving tag already points at is read as "not older" and
+skipped, which is a no-op either way since the tag already names those
+bytes. And **every unreadable answer moves the tag**. An absent tag, a
+config without the variable and a revision git cannot resolve all
+fall through to publishing, which is the plan's rule ("nothing to go
+backwards over") and is the safe direction: the failure mode of a
+misread is a tag that moved, not a tag pinned forever by a bad read.
+
+The tag-dropping loop in the assembly step was driven separately, with
+`MOVE_MOVING` true, false and unset, for both variants. Unset behaves
+as true, which is what the dry and non-main paths need. The slim
+variant is the case worth checking rather than the default one: its
+moving tag `slim` is a substring of its own dated and `sha-` tags, and
+the comparison is an equality on the whole tag rather than a substring
+test, so only `ghcr.io/rafacm/vinga-server:slim` is dropped.
+
+**Three mutations, two killed and one survivor.** Reversing the
+ancestry arguments flips both the descendant and the ancestor case, so
+the test kills it. Deleting `head -n 1` makes the two platforms' equal
+revisions arrive as two lines, which `git cat-file` then refuses, so
+that is killed too, by the fall-through that sends an unreadable
+answer to "move it". The survivor is the `git cat-file -e` guard:
+removing it leaves every decision identical, because `merge-base`
+exits non-zero on an unknown revision and the `elif` reads that as
+false. What the guard buys is the log, not the decision: without it
+the step prints `fatal: Not a valid object name deadbeefdead` above
+its own sentence. That is worth keeping in a job whose log is public,
+and it is recorded here as a finding about the test rather than
+dressed up as a behavior the test proves.
+
+### What could not be verified here, and is not claimed
+
+- **Unverified: that either change behaves on a runner.**
+  `actionlint` and a YAML parse are the whole of what a checkout can
+  say about a workflow. No dispatch was triggered from this branch.
+- **Unverified, and unverifiable before a merge: the ordering check
+  skipping a real moving tag.** The step is gated on a push to `main`,
+  because that is the only event that moves a tag, so a dispatch run
+  takes the dry path and never reaches it. The plan says this in its
+  verification section and it is repeated here rather than left
+  implied: the first push to `main` after this merges is the first
+  execution of the step against a real registry, and the one thing
+  that has never run is `imagetools inspect --format '{{json .Image}}'`
+  against `ghcr.io/rafacm/vinga-server:latest` on a runner. The plan
+  verified that format against the live tag at plan time, which is the
+  evidence that it reports `VINGA_REVISION`; the stub above stands in
+  for it here.
+- **Unverified: that a burst behaves.** Displacement needs three runs,
+  and what has to happen is that a newer commit becomes pending before
+  an older commit becomes eligible. Nothing on a branch can produce
+  that. The intended discharge is the plan's: merge M3 and a
+  documentation commit in quick succession once this is on `main`, and
+  check that all of the commits get their dated and `sha-` tags and
+  that the moving tag ends at the newest of them.
+- **Not claimed: that the moving tag is always at the newest commit.**
+  The check is a read before a write with no lock behind it. Two
+  publishes in the same instant can both see the old revision, so
+  `latest` can sit a commit behind until the next push publishes. That
+  residual is in the plan, and the two maintained pages say what the
+  check does rather than promising a guarantee.

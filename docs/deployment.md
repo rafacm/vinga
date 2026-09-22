@@ -525,7 +525,10 @@ A moving pointer under a restart policy, or under a pod that
 reschedules, is a deployment that upgrades itself at the worst possible
 moment. The compose file refuses to start without a tag for exactly
 this reason; the Deployment ships with `latest` as a placeholder that
-is the one value in it that should not stay as committed.
+is the one value in it that should not stay as committed. CI does not
+move one backwards, which is a smaller promise than it sounds: two
+merges landing together cannot rewind `latest` to the older of them,
+and it still moves whenever the newer one publishes.
 
 ## Telemetry backends
 
