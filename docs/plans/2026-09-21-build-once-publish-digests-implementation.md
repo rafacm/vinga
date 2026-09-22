@@ -556,3 +556,145 @@ positive knowledge, and then implemented it with a two-way test on a
 three-way answer. A rule and its implementation can disagree in a
 single line, and the review that catches it has to read the line
 rather than the rule.
+
+## M3: image-affecting pull requests build and smoke automatically
+
+### What landed
+
+| Piece | Where |
+| --- | --- |
+| The exemption, deleted | `.github/workflows/vinga-server.yml`, `image` no longer carries `if: github.event_name != 'pull_request'` |
+| The comment that called it temporary, replaced by what makes the lane affordable | the comment block above `image:` |
+| The `workflow_dispatch` comment, which said the image job skips pull requests | the `on:` block |
+| The Jaeger step's "non-PR image repetition", which names the integration lane's gate instead | `Check the built image reached direct Jaeger` |
+| `image-publish` unchanged, still `if: github.event_name != 'pull_request'` | the publish job |
+| The maintained pages | `AGENTS.md` (the CI summary's second half); no other page described the exemption |
+| The changelog fragment | `changelog.d/490-image-lane-on-pull-requests.md`, `### Changed` |
+
+Four lines of workflow behavior changed, all of them deletions of one
+`if` and of the prose explaining it. Everything that makes a
+pull-request run work was written by M1 and has been dead code since:
+the build step's `load`, `tags` and `outputs` already branch on the
+event, and the four registry steps are already gated on it
+individually.
+
+### Deviations from the plan
+
+One, and it is a comment rather than behavior.
+
+**Two workflow comments outside `image`'s own block were falsified by
+this milestone and are corrected here.** The plan's documentation
+footprint names `AGENTS.md` and says the maintained pages need nothing,
+which is right, and it does not mention either comment. The
+`workflow_dispatch` comment said "the image job below skips
+pull_request events" as the reason the event exists; the reason is now
+the publishing half, which a pull request still does not reach, so the
+comment says that instead. The Jaeger check called itself "the non-PR
+image repetition"; what it contrasts with is the integration lane's
+source-tree test, which is what it now names. Both are of the same
+class as M2's L52-54 correction: not a maintained page, but the
+load-bearing explanation of the block it sits on.
+
+The plan's design footprint says M3 is "one `if:` deleted and a paths
+list". There is no paths list to add: the `pull_request` trigger's
+paths already decide which pull requests are image-affecting, and
+`vinga-server/**` covers the Dockerfile. The phrase is a leftover from
+a draft, and the milestone text, which is the contract, does not
+repeat it.
+
+### Every step of the `image` job, and what a pull-request run reaches
+
+The one verification worth designing for, since deleting a gate is
+only safe if nothing behind it needed the event. Thirty steps, in file
+order. "Reached" means the step's `if` is true for a pull-request run
+of that matrix leg.
+
+| # | Step | Gate | Reached on a PR | Correct, because |
+| --- | --- | --- | --- | --- |
+| 1 | `actions/checkout@v7` | none | yes | the build context is the source tree |
+| 2 | `The revision this build is` | none | yes | a build argument and the value `/healthz` is compared against; no registry |
+| 3 | `Start the database the smoke containers share` | `arch == amd64` | yes (amd64) | the smoke needs it, and the smoke now runs |
+| 4 | `Provision the scenario databases` | `arch == amd64` | yes (amd64) | same |
+| 5 | `astral-sh/setup-uv@v9.0.0` | `arch == amd64` | yes (amd64) | the smoke suite is pytest |
+| 6 | `Install dependencies` | `arch == amd64` | yes (amd64) | same |
+| 7 | `docker/setup-qemu-action@v4` | `arch == arm64` | yes (arm64) | the arm64 build and its extras import need the handler |
+| 8 | `docker/setup-buildx-action@v4` | none | yes | the builder, whatever the exporter |
+| 9 | `Log in to GHCR` | `event != pull_request` | **no** | a PR pushes nothing; this is the step a fork could not run |
+| 10 | `Labels` (`docker/metadata-action@v6`) | none | yes | computes label strings from the event context; contacts no registry |
+| 11 | `Build the <arch> image` | none, branches inside | yes | on a PR: `load: true`, tag `vinga-server:ci-<arch>`, `outputs: ''`, so no push and no credential |
+| 12 | `Pull the pushed image back` | `event != pull_request` | **no** | the build already loaded the image under the tag every step below reads |
+| 13 | `Record the digest` | `event != pull_request` | **no** | a load-only build reports no `containerimage.digest` |
+| 14 | `Upload the digest` | `event != pull_request` | **no** | there is no file, and `if-no-files-found: error` would fail the job |
+| 15 | `Check the image says it is a container` | `arch == amd64` | yes (amd64) | reads the local tag |
+| 16 | `Check the extras import (amd64)` | `amd64 && default` | yes | local tag |
+| 17 | `Check the compose file boots the built image` | `amd64 && default` | yes | `VINGA_IMAGE=vinga-server:ci-amd64`, and compose's default pull policy leaves a present image alone |
+| 18 | `Check the extras are absent (amd64)` | `amd64 && slim` | yes | local tag |
+| 19 | `Check the extras import (arm64, under QEMU)` | `arm64 && default` | yes (arm64) | the loaded arm64 image, run through the handler from step 7 |
+| 20 | `Check the slim image boots on external providers` | `amd64 && slim` | yes | local tag |
+| 21 | `Check the slim image refuses local engines` | `amd64 && slim` | yes | local tag |
+| 22 | `Seed the domain configuration` | `arch == amd64` | yes (amd64) | local tag |
+| 23 | `Start the container` | `arch == amd64` | yes (amd64) | local tag, plus Jaeger by digest from Docker Hub, which needs no credential |
+| 24 | `Wait for the healthcheck` | `arch == amd64` | yes (amd64) | local container |
+| 25 | `Smoke tests` | `arch == amd64` | yes (amd64) | pytest against the container |
+| 26 | `Stop the container and check it drained` | `arch == amd64` | yes (amd64) | local container |
+| 27 | `Check the built image reached direct Jaeger` | `arch == amd64` | yes (amd64) | local Jaeger |
+| 28 | `Container logs` | `always() && amd64` | yes (amd64) | cleanup |
+| 29 | `Remove the container` | `always() && amd64` | yes (amd64) | cleanup |
+| 30 | `Remove the database and its network` | `always() && amd64` | yes (amd64) | cleanup |
+
+**No step that pushes, logs in or reads a digest artifact is reached by
+a pull-request run.** Those are exactly steps 9, 12, 13 and 14, and all
+four carry the event gate M1 gave them. The only registry traffic a
+pull-request run generates is anonymous pulls of `postgres:17-alpine`
+and the pinned Jaeger image from Docker Hub, which the job already made
+on every other event.
+
+Two job-level facts belong with the table. `image` requests
+`permissions: packages: write`, which cannot take an expression; on a
+pull request from a fork the `GITHUB_TOKEN` is read-only whatever a
+workflow requests, so the request is capped rather than refused, and no
+step on the pull-request path uses the permission. And `image-publish`
+keeps `if: github.event_name != 'pull_request'` beside
+`needs: [unit, integration, image]`, so it is skipped rather than
+started and starved: a pull request uploads no `digests-*` artifact and
+its `Download this variant's digests` step would find nothing.
+
+### The pull-request build path is M1's, and it is the pre-split mechanism
+
+Worth recording because it is the reason this milestone is small
+rather than risky. Before M1, the `image` job built each architecture
+with `load: true` under the tags `vinga-server:ci-amd64` and
+`vinga-server:ci-arm64` and ran every check below against those local
+images, on every event the job ran on (`87570d30`, the last commit
+before `image-publish` existed). M1 kept that exact shape and made it
+the pull-request branch of one build step. So the path this milestone
+switches on is not new code: it is what the lane did for every run
+until M1, including the arm64 extras import against a locally loaded
+arm64 image under QEMU.
+
+What has genuinely never executed is that path *under a
+`pull_request` event*, because the `if` deleted here is older than M1.
+The difference between the events, for these steps, is the value of
+`github.event_name` in three expressions and the token's scope, and
+nothing on the path uses the token.
+
+### What could not be verified here, and is not claimed
+
+- **Unverified: that any of this behaves on a runner.** `actionlint`
+  and a YAML parse are the whole of what a checkout can say about a
+  workflow. No dispatch was triggered from this branch and no CI
+  outcome is claimed. The pull request that carries this milestone is
+  itself the first execution of the pull-request path, which is the
+  neatest available discharge and still not something this session can
+  assert.
+- **Unverified: that a fork's pull request runs the lane.** No fork
+  exists to test with. The argument is that the four steps needing a
+  credential are skipped by an event gate, which the table above walks
+  step by step, and that the rest touch only Docker Hub and the local
+  daemon. That is a reading of the workflow, not a run of one.
+- **Unverified: what the lane costs a pull request in wall time.** M1
+  measured the job on a push; a pull-request run skips the pull-back
+  (~50s per amd64 job) and pushes nothing, and four jobs now run on
+  every image-affecting pull request where none ran before. Whether
+  that lengthens a round-trip depends on the runner concurrency the
+  repository gets, which only a real pull request shows.

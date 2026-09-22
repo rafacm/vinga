@@ -53,11 +53,15 @@ integration steps in two parallel jobs: `unit` (the compose file's two
 resolutions, lint, the events package's type check, the unit tests) and
 `integration` (the integration tests, the generated-document drift
 checks, the wheel migration). A third job, `image`, builds and smokes
-the image on everything but a pull request: one job per variant per
-architecture, each building once and pushing those bytes to the
+the image on every event, pull requests included: one job per variant
+per architecture, each building once and pushing those bytes to the
 registry addressed by their own digest, and the amd64 ones pulling the
 pushed image back to run the whole smoke conversation and boot the
-committed compose file against it. A fourth, `image-publish`,
+committed compose file against it. A pull request is the exception to
+the pushing: it builds the image into the runner's own daemon and
+smokes that, so it needs no registry credential and leaves nothing
+behind, which is what lets a fork's pull request run the job at all.
+A fourth, `image-publish`,
 assembles one manifest per variant from those digests and tags it,
 building nothing; it is the one that waits on the test lanes, and it
 pushes tags only on a push to `main`. The workflow
