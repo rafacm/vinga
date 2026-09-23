@@ -48,7 +48,7 @@ import asyncio
 import contextlib
 import functools
 import uuid
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Protocol
@@ -105,8 +105,6 @@ from vinga_server.generation import Generation, Generations
 from vinga_server.memory.store import NOTHING_REMEMBERED, MemoryStore
 from vinga_server.providers import (
     AgentProviders,
-    LlmEvent,
-    StreamStarted,
     TextDelta,
     ToolCall,
     ToolChoice,
@@ -118,6 +116,7 @@ from vinga_server.providers import (
 )
 from vinga_server.runtime import prompt, resumption
 from vinga_server.runtime.filler_runner import FillerRunner
+from vinga_server.runtime.provider_watch import ProviderWatch
 from vinga_server.runtime.speech import _Synthesis, speak_after, withhold_tool_shaped
 from vinga_server.runtime.turns import BUILTIN, MCP, UNKNOWN, TurnUnderway, tool_source
 from vinga_server.runtime.turntaking import Confirmation, TurnTaking, Utterance
@@ -289,20 +288,6 @@ class DeviceRecords(Protocol):
     async def resolve_record(self, attached: LiveDevice) -> LiveDevice | None: ...
 
 
-def _reported(usage: Usage | None) -> tuple[int | None, int | None]:
-    """What a round says about its size.
-
-    Token counts appear where the provider reported them; their absence
-    is a fact about the endpoint rather than a zero. Plain numbers,
-    because the same two answers are read twice over: the event wraps
-    them in its own value types, and the turn's record counts them.
-    """
-    return (
-        usage.prompt_tokens if usage is not None else None,
-        usage.completion_tokens if usage is not None else None,
-    )
-
-
 def _coercions(sent: Mapping[str, Any], executing: Mapping[str, Any]) -> int:
     """How many of a call's arguments the coercion changed.
 
@@ -452,14 +437,6 @@ def _sentence_withheld(
     return assembly.unnamed_sentence_withheld(agent, conversation, source, characters)
 
 
-class FirstTokenTimeout(TimeoutError):
-    """The LLM produced nothing within the first-token watchdog window,
-    twice in a row. The class name is what the `provider_failed` event
-    carries in `error`, which is what makes a provider that stalls
-    before answering distinguishable in the retained logs from one
-    whose own SDK timed out."""
-
-
 class AgentNotAllowed(ValueError):
     """Something asked a session to become an agent its device is not
     bound to. The switch_agent tool turns this into a spoken refusal,
@@ -533,14 +510,17 @@ class PipelineRuntime:
     no codec. Built by `bespoke_runtime_factory` below, which is what
     the composition root hands the device edge.
 
-    Two of the things it used to do are now modules of their own. Who
+    Three of the things it used to do are now modules of their own. Who
     holds the floor is `TurnTaking` ([turntaking.py](turntaking.py)),
     which reaches back into four of this class's methods and nothing
     else; this world's cached speech is `FillerRunner`
     ([filler_runner.py](filler_runner.py)), which reads the floor with
-    two questions and never writes it. What stays here is the
+    two questions and never writes it; and how a provider call is
+    watched is `ProviderWatch` ([provider_watch.py](provider_watch.py)),
+    which is handed the round and the turn it reports on rather than
+    reading either off this class. What stays here is the
     orchestration: the reply task, the conversation history, the tool
-    loop, agent handover, and the provider observability.
+    loop, and agent handover.
 
     The runner owns two verbs and this class uses both: the reply path
     arms the latency mask at the transcription and settles it at the
@@ -590,9 +570,9 @@ class PipelineRuntime:
       into the store, absent where the deployment did not ask for
       resumption, which is what makes both conversation tools answer a
       spoken refusal instead of moving anything.
-    - `_llm_round`: reset per reply, counted up per round, read by the
-      watchdog's retry line and by `llm_round`, which is what makes the
-      generation after a handover a round of its own.
+    - `_llm_round`: reset per reply, counted up per round, and handed
+      to the watch for its retry line and for `llm_round`, which is
+      what makes the generation after a handover a round of its own.
     - `_remembering`: whether the agent speaking may reach memory,
       written by `_tool_loop` alone where it takes the tool snapshot and
       read through `_remembering_now` by the builtin source's offer and
@@ -716,6 +696,16 @@ class PipelineRuntime:
         # what "the flag off stages nothing" means concretely.
         self._llm_input = llm_input
         self._transcripts = transcripts
+        # How every provider call a reply makes is watched: a failure
+        # reported and raised on, an LLM's first token bounded and
+        # retried once, a finished round reported and filed
+        # ([provider_watch.py](provider_watch.py)). The bound is the
+        # server section's, taken once for the reason `_server` above
+        # is; the round and the turn are the reply's, handed over per
+        # call.
+        self._watch = ProviderWatch(
+            events, conversations, self._server.llm_first_token_timeout_s, llm_input
+        )
         # How this session's threads lose their memory when it closes,
         # and absent wherever a thread outlives its connection. Present
         # only on a deployment that records nothing, where a closed
@@ -1118,282 +1108,6 @@ class PipelineRuntime:
         await self._filler.tail()
         await self._output.send_audio(batch)
 
-    @contextlib.asynccontextmanager
-    async def _watching(self, stage: str, provider: object) -> AsyncIterator[None]:
-        """Report a provider that fails, then let the failure carry on
-        as before.
-
-        A failing ASR, LLM or TTS call used to reach the operator as a
-        traceback under "reply failed", with none of the fields every
-        other conversation record is queried by: no `event`, no
-        `session`, no provider, and above all no host, which is the one
-        an outbound policy is diagnosed from. The reply still ends the
-        same way, and the traceback is still logged where it was; this
-        adds the structured half the observability ADR says is the
-        surface (#53)."""
-        started = asyncio.get_running_loop().time()
-        try:
-            yield
-        except Exception as exc:
-            self._provider_failed(
-                stage, provider, exc, asyncio.get_running_loop().time() - started
-            )
-            raise
-
-    async def _watched_stream(
-        self,
-        provider: object,
-        events: AsyncIterator[Any],
-        *,
-        invocation: str,
-        purpose: LlmPurpose,
-    ) -> AsyncIterator[Any]:
-        """An LLM stream, with a failure raised by the stream itself
-        reported as that provider's.
-
-        A plain `async with` around the consuming loop would blame the
-        LLM for a TTS failure raised while speaking what the model had
-        already said, and report one failure twice. Pulling the stream
-        by hand is what separates the two: what the consumer raises
-        closes this generator rather than passing through the guard."""
-        started = asyncio.get_running_loop().time()
-        iterator = events.__aiter__()
-        while True:
-            try:
-                event = await iterator.__anext__()
-            except StopAsyncIteration:
-                return
-            except Exception as exc:
-                self._provider_failed(
-                    "llm",
-                    provider,
-                    exc,
-                    asyncio.get_running_loop().time() - started,
-                    invocation=invocation,
-                    purpose=purpose,
-                )
-                raise
-            yield event
-
-    async def _watchdog_stream(
-        self,
-        provider: object,
-        make_stream: Callable[[], AsyncIterator[LlmEvent]],
-        *,
-        invocation: str,
-    ) -> AsyncIterator[LlmEvent]:
-        """An LLM stream whose wait for the first event is bounded.
-
-        Nothing used to bound the gap between sending the request and
-        the first byte of the answer, so a provider that stalled there
-        froze the pipeline: a 17 s stall held the session in replying,
-        deaf to a user who politely waits, until a barge-in rescued it
-        (#68). The bound covers only that gap. Once anything has
-        arrived the stream is streaming and no timeout applies, because
-        a long generation that is delivering is healthy: a 17.7 s story
-        round with a 635 ms first token is fine.
-
-        "First token" is the stream's first event of any kind. The
-        adapters announce their first raw chunk off the wire as a
-        `StreamStarted`, because both buffer tool-call fragments until
-        the stream has ended: without the announcement a round that
-        streams only a tool call (a handover does) would look exactly
-        like a stalled request and be cancelled at the timeout while
-        healthily delivering. The announcement is consumed here, being
-        evidence rather than content, so nothing downstream sees it.
-
-        One timeout cancels the request and retries the round once,
-        since the field data says the retry answers quickly (6.16 s
-        total against the 17 s stall it replaced). A second timeout
-        gives up: the failure is reported as the provider's, with
-        `FirstTokenTimeout` telling it apart from the provider's own
-        classes, and the reply ends the way any provider failure ends
-        it, so the failure mode is a silent turn rather than a wedged
-        session. Barge-in keeps working through the whole window: it
-        cancels the reply task, and that cancellation lands in the wait
-        here like in any other await.
-
-        The provider's own timeout classes pass through untouched: the
-        `expired()` check is what keeps an SDK timeout raised just
-        before the watchdog's deadline from being retried as if the
-        watchdog had fired."""
-        timeout_s = self._server.llm_first_token_timeout_s
-        loop = asyncio.get_running_loop()
-        for attempt in ("first", "retry"):
-            events = self._watched_stream(
-                provider,
-                make_stream(),
-                invocation=invocation,
-                purpose=LlmPurpose.REPLY,
-            )
-            started = loop.time()
-            try:
-                async with asyncio.timeout(timeout_s) as watchdog:
-                    first = await events.__anext__()
-            except StopAsyncIteration:
-                return
-            except TimeoutError as exc:
-                if not watchdog.expired():
-                    raise
-                elapsed = loop.time() - started
-                if attempt == "retry":
-                    failure = FirstTokenTimeout(
-                        f"no first token within {timeout_s:.0f} s, twice"
-                    )
-                    self._provider_failed(
-                        "llm",
-                        provider,
-                        failure,
-                        elapsed,
-                        invocation=invocation,
-                        purpose=LlmPurpose.REPLY,
-                    )
-                    raise failure from exc
-                # The loop variable is read by a thunk the emitter calls
-                # before this iteration ends, so there is no late binding
-                # for B023 to be about.
-                self._events.emit(
-                    lambda: assembly.llm_retried(
-                        self._agent,
-                        self._conversation,
-                        "llm",
-                        provider,
-                        self._llm_round,
-                        elapsed,  # noqa: B023
-                    )
-                )
-                continue
-            if not isinstance(first, StreamStarted):
-                yield first
-            async for event in events:
-                yield event
-            return
-
-    def _llm_round_done(
-        self,
-        provider: object,
-        working: Sequence[Turn],
-        began: float,
-        first_token_at: float | None,
-        usage: Usage | None,
-        *,
-        invocation: str,
-        purpose: LlmPurpose = LlmPurpose.REPLY,
-        round_: int | None = None,
-    ) -> None:
-        """One `llm_round` event, which is where a slow reply becomes
-        attributable.
-
-        Stage latency was otherwise inferred from the gaps between
-        events, and the gap between `heard` and `speaking_started`
-        holds the LLM and the TTS time to first byte with nothing
-        between them. A field session lost 19.04 s inside that gap
-        against a session median of 1.18 s, and the logs could not say
-        whether the payload or the vendor was responsible (#55).
-
-        `turns` is the cheap proxy for payload size, and `round` counts
-        the whole reply rather than one agent's leg, so the generation
-        after a handover is a round of its own rather than another
-        first round. Token counts appear when the provider reported
-        them; their absence is a fact about the endpoint. They are named
-        `input_tokens` and `output_tokens`, the GenAI conventions'
-        vocabulary adapted to this project's field style (#120), which
-        is also what the store's `turns` columns have been called since
-        their first migration. The `Usage` dataclass keeps the SDK-shaped
-        names it is filled from: it is not surface.
-
-        `first_token_ms` times the first spoken token, so a round that
-        only asked for a tool carries none: there was no token, and
-        timing the tool call instead would report the whole generation
-        as its own time to first token, since both providers assemble
-        calls after the stream has ended."""
-        loop = asyncio.get_running_loop()
-        elapsed = loop.time() - began
-        first_token_ms = (
-            None if first_token_at is None else round((first_token_at - began) * 1000)
-        )
-        inputs, outputs = _reported(usage)
-        reply_round = (
-            self._llm_round
-            if round_ is None and purpose is LlmPurpose.REPLY
-            else round_
-        )
-        if self._llm_input is not None:
-            self._llm_input.finish(invocation)
-        self._events.emit(
-            lambda: assembly.llm_rounded(
-                self._agent,
-                self._conversation,
-                "llm",
-                provider,
-                reply_round,
-                len(working),
-                elapsed,
-                inputs,
-                outputs,
-                first_token_ms,
-                invocation,
-                purpose,
-            )
-        )
-        # Counted here rather than where the round starts, so that the
-        # turn's rounds, its summed duration and its token totals all
-        # describe one set of rounds: the ones that finished, which is
-        # the set an `llm_round` row exists for.
-        if purpose is LlmPurpose.REPLY:
-            self._turn.round_done(round(elapsed * 1000), first_token_ms, inputs, outputs)
-
-    def _provider_failed(
-        self,
-        stage: str,
-        provider: object,
-        exc: BaseException,
-        elapsed: float,
-        *,
-        invocation: str | None = None,
-        purpose: LlmPurpose | None = None,
-    ) -> None:
-        """One `provider_failed` event, and the sentence that goes with
-        it. A timeout is worded as one, because where traffic is
-        dropped rather than refused the whole symptom is a wait.
-
-        Which failure is a wait is a question of type. Every provider
-        raises `ProviderCallTimeout` for its SDK's timeouts and that is
-        a `TimeoutError`, as are `asyncio.TimeoutError` and the
-        watchdog's own `FirstTokenTimeout`, so one `isinstance` covers
-        the lot (#137). It used to be decided by looking for "Timeout"
-        in the class name, because the SDKs' own classes agreed on
-        nothing: `openai.APITimeoutError` is an `APIConnectionError` and
-        `httpx.TimeoutException` inherits from neither.
-
-        The class name is reported and the exception's message is not.
-        The five real providers raise the request-time taxonomy, whose
-        messages carry trusted metadata only (`providers/kit.py`), but
-        this takes a `BaseException` from four call sites and one of
-        them is the LLM stream, so anything an SDK or a transport
-        raises can arrive here unwrapped, and an exception raised near
-        a response body can embed one in its message. That would land
-        in the sentence, in the record's arguments, and from there in
-        front of every consumer attached to the session, which is the
-        same reason `_reply`'s catch prints a class name and nothing
-        else. What the class does not say, the fields do: the stage,
-        the entry, its type, and the host.
-        """
-        if stage == "llm" and invocation is not None and self._llm_input is not None:
-            self._llm_input.finish(invocation)
-        self._events.emit(
-            lambda: assembly.provider_failure(
-                self._agent,
-                self._conversation,
-                stage,
-                provider,
-                exc,
-                elapsed,
-                invocation=invocation,
-                purpose=purpose,
-            )
-        )
-
     def _activate_agent(self, name: str) -> None:
         """Talk as this agent from now on: its prompt, its providers, and a
         fresh endpointer from its VAD, since the previous agent's endpointer
@@ -1522,7 +1236,7 @@ class PipelineRuntime:
                     # sits beside.
                     started = self._events.now()
                     try:
-                        async with self._watching("asr", providers.asr):
+                        async with self._watch.watching("asr", providers.asr):
                             result = await providers.asr.transcribe(
                                 pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
                             )
@@ -1535,7 +1249,7 @@ class PipelineRuntime:
                         #
                         # Said here rather than left to the arm below,
                         # and said as its own event rather than as a
-                        # provider failure. `_watching` catches
+                        # provider failure. `watching` catches
                         # `Exception` and a cancellation is not one, so
                         # nothing else on this path ever reports the ASR
                         # stage at all, and a turn whose only records
@@ -2047,7 +1761,7 @@ class PipelineRuntime:
             target = transition.agent
             self._activate_agent(target)
             # Read by a thunk the emitter calls before this method
-            # returns, the way the retry above is.
+            # returns, the way the watch's retry line is.
             self._events.emit(
                 lambda: Handover(
                     from_agent=Identifier(previous),
@@ -2163,10 +1877,11 @@ class PipelineRuntime:
                     choice=choice,
                 )
             try:
-                async for event in self._watchdog_stream(
+                async for event in self._watch.reply_stream(
                     providers.llm,
                     functools.partial(providers.llm.stream, system, working, tools, choice),
                     invocation=invocation,
+                    round_=self._llm_round,
                 ):
                     if self._llm_input is not None:
                         self._llm_input.observe(invocation, event)
@@ -2199,7 +1914,9 @@ class PipelineRuntime:
                 # mid-execution), and a call the model issued belongs on
                 # the record whether or not it ever ran.
                 slots = self._reserve_tools(calls)
-                self._llm_round_done(
+                self._watch.reply_round_done(
+                    self._turn,
+                    self._llm_round,
                     providers.llm,
                     working,
                     began,
@@ -2611,7 +2328,7 @@ class PipelineRuntime:
             )
         try:
             async with asyncio.timeout(RECAP_ROUND_TIMEOUT_S) as deadline:
-                async for event in self._watched_stream(
+                async for event in self._watch.watched(
                     providers.llm,
                     providers.llm.stream(RECAP_INSTRUCTION, turns, (), "none"),
                     invocation=invocation,
@@ -2627,7 +2344,7 @@ class PipelineRuntime:
                         usage = event
         except TimeoutError as exc:
             if deadline.expired():
-                self._provider_failed(
+                self._watch.failed(
                     "llm",
                     providers.llm,
                     exc,
@@ -2651,14 +2368,13 @@ class PipelineRuntime:
                 type(exc).__name__,
             )
             return None
-        self._llm_round_done(
+        self._watch.recap_round_done(
             providers.llm,
             turns,
             began,
             first_token_at,
             usage,
             invocation=invocation,
-            purpose=LlmPurpose.RECAP,
         )
         text = "".join(said).strip()
         return text or None
@@ -3169,7 +2885,7 @@ class PipelineRuntime:
             speaking,
             sentence,
             tts,
-            lambda exc, elapsed: self._provider_failed("tts", tts, exc, elapsed),
+            lambda exc, elapsed: self._watch.failed("tts", tts, exc, elapsed),
             lambda elapsed_ms: self._turn.first_audio(index, elapsed_ms),
             lambda first_chunk_ms, stream_ms: self._sentence_synthesized(
                 index, len(sentence), tts, first_chunk_ms, stream_ms
@@ -3362,9 +3078,9 @@ class PipelineRuntime:
         barge-in can ask what was actually said.
 
         Injected into the gate ladder whole rather than assembled there,
-        which is what lets the provider-observability cluster and the
-        session's language lock stay here: the ladder needs an answer,
-        not the machinery that produces one. Failures propagate, and the
+        which is what lets the provider watch and the session's language
+        lock stay on this side: the ladder needs an answer, not the
+        machinery that produces one. Failures propagate, and the
         ladder's own catch decides what an unanswerable confirmation
         means.
 
@@ -3378,7 +3094,7 @@ class PipelineRuntime:
         that turns it into four names takes."""
         assert self._providers is not None
         ears = self._providers.asr
-        async with self._watching("asr", ears):
+        async with self._watch.watching("asr", ears):
             return Confirmation(
                 result=await ears.transcribe(
                     pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
