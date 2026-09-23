@@ -173,6 +173,37 @@ class SessionConversations:
 - `device` is the session identity half of the issue title. See the
   next decision.
 
+### The factory's new signature
+
+`RuntimeFactory` (`device/boundary.py`) is a positional callable, and
+the owner takes the third position, directly after the events object
+it stands beside and before everything it does not:
+
+```python
+RuntimeFactory = Callable[
+    [DeviceOutput, SessionEvents, SessionConversations, Sequence[str],
+     "Generation", "LiveDevice | None"],
+    SessionInput,
+]
+# bespoke_runtime_factory's inner builder:
+def build(output, events, conversations, agents, generation, device=None): ...
+```
+
+The owner is required, with no default at any layer: not in the
+protocol, not in `build`, not in `PipelineRuntime.__init__`, and no
+runtime ever constructs a fallback owner of its own, because a runtime
+that could make one would be a second authority the moment a caller
+forgot to pass it. The trailing `device` record keeps its `None`
+default, so direct callers that omit it today (`test_boundary_contract.py`
+lines 298-304) change only by the one inserted argument. The comment
+above the protocol gains the owner's paragraph, in the style of the
+two it already has. The runtime holds it as a public attribute,
+`conversations`, as the stub already holds `events`, so tests reach it
+through the interface. `test_boundary_contract.py` asserts that the
+runtime the edge built holds the identical object the edge constructed
+(`is`, not equality), which is the proof that one owner crosses the
+seam rather than a copy.
+
 ### The device MAC
 
 Today the edge writes the MAC to `SessionEvents.device` at the
@@ -353,8 +384,11 @@ own.
   base and records the count, and deleting the attributes turns any
   missed reader into an `AttributeError` the lanes catch.
 - **The factory signature is a seam other code constructs against.**
-  Two builders exist (`bespoke_runtime_factory`, the stub); the milestone greps
-  for every `RuntimeFactory` implementer and call site.
+  Two builders exist (`bespoke_runtime_factory`, the stub); the
+  milestone greps, untruncated, for every `RuntimeFactory` implementer
+  and every call site, and records the count, so an argument inserted
+  in the wrong position is found by a type check or a lane rather than
+  by a positional mix-up that happens to type-check.
 - **No-leak.** Conversation ids are server-minted metadata and the MAC
   is already an event identity; no new value reaches any surface.
   Nothing here composes an exception message.
@@ -453,6 +487,8 @@ Reviewed 2026-09-23 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.0, 
    *Resolution:* Accepted. `settled` keeps the off-loop wait, and its test is now a gated handle plus a loop heartbeat, asserting both that the loop kept running and the exact timeout argument; the on-loop mutation is added to the falsification list.
 
 6. **P2: The changed factory contract is not specified concretely enough.** Evidence: `RuntimeFactory` is currently a positional callable with an optional final device argument (`device/boundary.py:261-291`), and direct callers omit that final argument (`test_boundary_contract.py:298-304`). The plan says only that the factory “takes” the owner. It should state the exact signature, with a required `SessionConversations` beside `SessionEvents` and before the optional device argument, and explicitly forbid a default that constructs a fallback owner inside a runtime. The boundary test should assert that the runtime received the identical owner held by the edge.
+
+   *Resolution:* Accepted. The plan now states the exact signature (owner third, after `SessionEvents`, before the agents; the trailing device record keeps its default), forbids a default or a runtime-constructed fallback owner at every layer, makes the owner a public `conversations` attribute on the runtime, and requires the boundary test to assert identity with `is`.
 
 7. **P2: The required #489 inventory is unavailable from the plan.** Evidence: `#489's bookkeeping`, lines 313-322, refers to “the seven files the #489 comment lists” without naming them or giving a reproducing command. That list is not recorded elsewhere in this checkout, so the milestone cannot be completed or reviewed from the repository alone. The plan should enumerate all seven paths and state the exact before/after classification and counting command.
 
