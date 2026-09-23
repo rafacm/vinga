@@ -125,8 +125,8 @@ class Active:
     conversation: str
 
 class SessionConversations:
-    def __init__(self, device: str | None) -> None: ...
-    device: str | None                # read-only property
+    def __init__(self, device: str) -> None: ...
+    device: str                       # read-only property
     active: Active | None             # read-only property
     def history(self) -> list[Turn]   # the active thread's, mutable
     def activate(self, agent: str) -> Active
@@ -182,19 +182,35 @@ stamps every event with it, and the runtime reads it back through a
 property (`pipeline.py` `_device`) as the fallback address for device
 memory where no device record was resolved.
 
-Decision: **the owner carries the MAC as an immutable construction
-value, the runtime reads it there, and `SessionEvents.device` stays as
-the emission stamp.** The events object has to keep a device of its
-own, because the edge's rejections are emitted before any owner can
-exist (the owner is built with the runtime, after the handshake has
-accepted the connection) and they must name the device they turned
-away. Both are written once, by the edge, from the same normalized
-local, and neither is ever written again; the events object's copy is
-exactly the "immutable snapshot for emission" the issue's direction
-asks for. The edge's `_mac` property over the events object becomes a
-field of the edge, which is the side that normalized it. Rejected: the
-runtime keeping its read of `events.device`, which is the hidden seam
-this issue exists to close, for a single fallback read.
+Decision: **the owner is constructed by the edge the moment the MAC is
+normalized, it is the one authority for the device from then on, and
+the events object takes a write-once snapshot of it for emission.**
+
+- The edge constructs `SessionConversations(device=mac)` on the line
+  that normalizes the MAC today (`device/session.py` line 433), which
+  is before the binding lookup and the no-agent rejection
+  (lines 478-491) that name the device; the owner needs nothing but
+  the normalized value. Every later edge read (the rejections, the
+  capture manifest, the factory call) reads `owner.device`. The edge
+  keeps no `_mac` copy: its `_mac` property reads the owner, and
+  answers None only before normalization, where there is no owner.
+- `SessionEvents.device` stops being a settable attribute. The edge
+  hands it the owner's value once, through a write-once method
+  (`identify(device)`, name the implementer's), which refuses a second
+  call; `_identities` keeps stamping from it. That is a snapshot in the
+  literal sense: taken once from the authority, never written back,
+  never read by domain code.
+- The runtime's `_device` fallback reads the owner. Nothing outside
+  `events/` reads `SessionEvents.device` afterwards, which the
+  milestone's closing grep proves.
+- A connection whose Device-Id does not normalize never gets an owner
+  and emits its rejection with no device, as today.
+
+Rejected: keeping the runtime's read of `events.device`, the hidden
+seam this issue exists to close; and the plan's first shape, an edge
+field plus an owner value plus a settable events attribute, which the
+review round showed was three copies resting on a false premise (that
+the rejections precede any possible owner).
 
 ### The events object after M2
 
@@ -396,6 +412,8 @@ Reviewed 2026-09-23 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.0, 
    *Resolution:* Accepted. Renamed `current_threads()`, defined as each agent's current thread, with a test that a replaced thread is excluded. Measured while resolving: the divergence is not reachable today, since the purge is wired only where nothing is recorded (`bespoke_runtime_factory` passes `memory.purge_threads` only when `conversations is None`) and the thread reads that enable `start_new`/`reactivate` exist only when something is (`app.py` line 635). The two sets are therefore equal on every deployment that purges, and the rename keeps them so by definition rather than by that coincidence.
 
 2. **P1: The proposed MAC placement still has multiple authorities.** Evidence: the plan stores the MAC in `SessionConversations.device`, a new edge `_mac` field, and `SessionEvents.device` (`The device MAC`, lines 149-169). The issue explicitly rejects duplicated identity state. The rationale that rejection events occur before an owner can exist is false: normalization completes at `device/session.py:433`, while agent rejection occurs at `device/session.py:478-491`, and the proposed owner constructor needs only the normalized device. The plan should construct the owner immediately after successful normalization, use `owner.device` for subsequent edge work and the factory, avoid a persistent edge `_mac` copy, and make the event value a write-once observability snapshot. The invalid-Device-Id path can continue emitting with no owner and no device.
+
+   *Resolution:* Accepted as proposed. The owner is constructed at normalization, it is the device's one authority after that, the edge keeps no copy, and `SessionEvents` takes the value once through a write-once method in place of a settable attribute. Its `device` is now `str`, not `str | None`: there is no owner before a device.
 
 3. **P2: M1 lands the duplication the issue says not to introduce.** Evidence: M1 stores the active pair in the owner while mirroring it into mutable `SessionEvents` fields, which the edge and `FillerRunner` continue reading (`Why two milestones`, lines 201-214; M1, lines 326-337). Those reads include clip selection, so this is not merely an immutable emission snapshot. The plan should wire the owner through the factory and remove the event pair atomically in one milestone, or otherwise ensure no independently stored pair is merged to `main`.
 
