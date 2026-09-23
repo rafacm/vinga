@@ -1,6 +1,10 @@
 # Normalize the hardware edge with a device-facing boundary
 
-**Status:** Accepted
+**Status:** Accepted; the active-agent attribution clause (that
+`SessionEvents` owns "the active-agent attribution both sides read") is
+superseded by
+[2026-09-23-the-session-owns-its-conversations.md](2026-09-23-the-session-owns-its-conversations.md),
+and the rest of this record stands
 
 ## Context
 
