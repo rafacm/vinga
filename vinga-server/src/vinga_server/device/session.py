@@ -114,6 +114,7 @@ from vinga_server.generation import Generation, Generations
 from vinga_server.protocol import framing, messages
 from vinga_server.protocol import mcp as mcp_protocol
 from vinga_server.providers.base import ToolDef
+from vinga_server.session_conversations import Active, SessionConversations
 from vinga_server.telemetry import Telemetry
 from vinga_server.tools.device import DeviceToolClient
 
@@ -258,9 +259,18 @@ class DeviceSession:
         self.session_id = uuid.uuid4().hex
         # Created at construction with the session id and no device
         # identity yet, so the bad-Device-Id rejection carries
-        # `device: None` the way it does today; the edge writes the MAC
-        # onto it as soon as one is understood.
+        # `device: None` the way it does today; the edge identifies the
+        # device to it as soon as the MAC is understood.
         self._events = SessionEvents(self.session_id)
+        # The device session's conversations: which thread each agent is
+        # on, their histories, the store's handles, and who is talking
+        # now. None until the MAC is normalized, which is the line that
+        # constructs it (`_mac` below), and None for good on a
+        # connection whose Device-Id never normalized: nothing is ever
+        # talked about on one. Constructed here at the edge rather than
+        # by the runtime because it belongs to the connection, and
+        # handed to the runtime factory beside the events object.
+        self._session_conversations: SessionConversations | None = None
         # And whoever is watching this server right now, attached in the
         # same breath (#342). The attach point is precise because the
         # early events are exactly what an operator opens a tail for: a
@@ -338,35 +348,63 @@ class DeviceSession:
         return int(OUTPUT_AUDIO.sample_rate)
 
     @property
+    def session_conversations(self) -> SessionConversations | None:
+        """This device session's conversations, the object this edge
+        constructed when it normalized the MAC and handed the runtime
+        factory. None before that, and on a connection turned away for
+        its Device-Id.
+
+        Public because it is the seam's own claim that one object
+        crosses rather than a copy: whoever holds a session can ask for
+        the conversations the edge holds and compare them with the ones
+        the runtime was handed."""
+        return self._session_conversations
+
+    @property
     def _mac(self) -> str | None:
-        """The device's MAC, set before anything can reject the
-        connection so a rejection names the device it turned away.
-        Unknown until the handshake headers are read. It lives on the
-        events object because every event carries it."""
-        return self._events.device
+        """The device's MAC, as the device session's conversations hold
+        it. Unknown until the handshake headers are read, and set before
+        anything else can reject the connection, so a rejection names
+        the device it turned away. The conversations are the one
+        authority for it from then on; this edge keeps no copy of its
+        own, and the events object took a one-time snapshot."""
+        owner = self._session_conversations
+        return None if owner is None else owner.device
 
     @_mac.setter
-    def _mac(self, mac: str | None) -> None:
-        self._events.device = mac
+    def _mac(self, mac: str) -> None:
+        """Normalization's one write: construct the device session's
+        conversations for this MAC, and identify the device to the
+        events object from them.
+
+        The events object is identified first because it is what
+        refuses a second write, so a second call raises before anything
+        is replaced and the conversations a runtime may already hold
+        stay the only ones."""
+        self._events.identify(mac)
+        self._session_conversations = SessionConversations(mac)
+
+    def _active(self) -> Active | None:
+        """Who is talking now, on which thread, read where the runtime
+        writes it. This side stamps records (the frame pacer's
+        `speaking_started`, the capture manifest) about a pair the
+        runtime chose, so it reads the pair rather than keeping one,
+        and reads it at the emit site: a handover can land in any await
+        before that. None before the runtime's first activation."""
+        owner = self._session_conversations
+        return None if owner is None else owner.active
 
     @property
     def _agent(self) -> str | None:
-        """The agent talking right now. It lives on the events object
-        because both sides of the split attribute events to it, and
-        they have to see the same activation at the same moment."""
-        return self._events.agent
-
-    @_agent.setter
-    def _agent(self, name: str | None) -> None:
-        self._events.agent = name
+        """The agent talking right now."""
+        active = self._active()
+        return None if active is None else active.agent
 
     @property
     def _conversation(self) -> str | None:
-        """The thread that agent is talking on, which lives beside it on
-        the events object for the same reason: this side stamps records
-        (the frame pacer's `speaking_started`) about a conversation the
-        runtime chose."""
-        return self._events.conversation
+        """The thread that agent is talking on."""
+        active = self._active()
+        return None if active is None else active.conversation
 
     @property
     def _realtime(self) -> bool:
@@ -430,7 +468,7 @@ class DeviceSession:
         self._events.opened_at = self._opened_at
 
         try:
-            mac = self._mac = normalize_mac(device_id)
+            self._mac = normalize_mac(device_id)
         except ValueError:
             # One fixed sentence, carrying neither the header nor the
             # exception's message. That message is a fixed sentence of
@@ -450,6 +488,11 @@ class DeviceSession:
             self._events.emit(lambda: RejectedBadDeviceId())
             await self._close(POLICY_VIOLATION, "Device-Id must be the device MAC")
             return
+        # The device session's conversations exist from the line above,
+        # and every later read of the device is theirs.
+        conversations = self._session_conversations
+        assert conversations is not None
+        mac = conversations.device
 
         # Read from the live view rather than from a captured world, so
         # a device bound while this server runs connects on its next
@@ -502,7 +545,7 @@ class DeviceSession:
         # runtime's constructor does that, and the MCP revive after it,
         # in that order, and spawns nothing.
         self.runtime = self._runtime_factory(
-            self, self._events, agents, generation, attachment.record
+            self, self._events, conversations, agents, generation, attachment.record
         )
         if self._sessions is not None:
             self._sessions.bound(self, generation)

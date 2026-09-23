@@ -24,18 +24,17 @@ audio, and `OUTPUT_FRAME_BYTES` below is a frame of 24 kHz reply audio.
 """
 
 import asyncio
-import uuid
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
-from tests.support.configs import OUTPUT_RATE
+from tests.support.configs import OUTPUT_RATE, POET_MAC
 from vinga_server.device.boundary import DeviceOutput, PlayableAudio
 from vinga_server.events import SessionEvents
 from vinga_server.filler import FallbackClip, FillerClips
 from vinga_server.providers import ToolDef
 from vinga_server.runtime.filler_runner import FillerRunner
+from vinga_server.session_conversations import SessionConversations
 
 OUTPUT_FRAME_BYTES = OUTPUT_RATE * 60 // 1000 * 2
 
@@ -51,13 +50,21 @@ class StubRuntime:
     It has no VAD, no ASR, no model and no voice: it answers whatever it
     is handed with one fixed sentence and a burst of tone. Everything it
     needs to do that, it does through `DeviceOutput`, which is the
-    claim under test."""
+    claim under test. What it knows of the device session's
+    conversations is their interface and nothing of the event
+    subsystem's, which is the other claim: a runtime that is not a
+    pipeline learns the owner, not the emitter."""
 
     def __init__(
-        self, output: DeviceOutput, events: SessionEvents, agents: Sequence[str]
+        self,
+        output: DeviceOutput,
+        events: SessionEvents,
+        conversations: SessionConversations,
+        agents: Sequence[str],
     ) -> None:
         self.output = output
         self.events = events
+        self.conversations = conversations
         self.agents = list(agents)
         # What the real runtime's constructor does, and what makes this
         # a stand-in rather than a different contract: the session emits
@@ -65,11 +72,10 @@ class StubRuntime:
         # names the agent talking and the thread it is talking on. A
         # runtime that activated neither would have the edge announce a
         # conversation with nobody in it, which the event schema refuses
-        # (#155). The thread is minted here for the same reason the real
-        # activation mints one (#190): a stub that reused the session id
-        # would make two different entities one value.
-        self.events.agent = self.agents[0]
-        self.events.conversation = uuid.uuid4().hex
+        # (#155). The activation mints the thread for the reason the real
+        # one does (#190): a stub that reused the session id would make
+        # two different entities one value.
+        self.conversations.activate(self.agents[0])
         self.heard = bytearray()
         self.closed = False
         self.aborts: list[str | None] = []
@@ -195,37 +201,6 @@ class FakeDevice:
 # --- a runner standing alone, and who it says is talking --------------
 
 
-@dataclass(frozen=True)
-class Pair:
-    """The agent talking and the thread it is talking on, as an
-    activation answers them."""
-
-    agent: str
-    conversation: str
-
-
-class EventsPair:
-    """Where the active pair lives today, the events object, behind the
-    one verb a suite moves it with.
-
-    `activate` is the activation's own rule in small: an agent's thread
-    in this session is minted the first time it is activated and
-    continued every later time, in the shape the runtime mints. A suite
-    driving a component that reads the pair (the filler runner) moves it
-    through here rather than by writing two attributes, so what it says
-    is "this agent is talking now" and not where that fact is kept."""
-
-    def __init__(self, events: SessionEvents) -> None:
-        self.events = events
-        self.threads: dict[str, str] = {}
-
-    def activate(self, agent: str) -> Pair:
-        conversation = self.threads.setdefault(agent, uuid.uuid4().hex)
-        self.events.agent = agent
-        self.events.conversation = conversation
-        return Pair(agent, conversation)
-
-
 def filler_runner(
     events: SessionEvents,
     device: DeviceOutput,
@@ -233,17 +208,18 @@ def filler_runner(
     agents: Sequence[str],
     turn: Any,
     fallbacks: Mapping[str, FallbackClip] = MappingProxyType({}),
-) -> tuple[FillerRunner, EventsPair]:
+) -> tuple[FillerRunner, SessionConversations]:
     """A filler runner with no pipeline behind it, its first agent
     activated the way a runtime's constructor activates one, and the
-    handle a suite moves the pair with.
+    device session's conversations it reads who is talking from.
 
     One builder rather than a constructor call in each suite, because
     what a runner is handed beside the events object is the session's
     business rather than the suite's: a suite about the fire or the
-    fallback says which clips and which floor, and learns who is talking
-    from what `activate` answers."""
-    pair = EventsPair(events)
-    pair.activate(agents[0])
-    runner = FillerRunner(events, device, fillers, agents, turn, fallbacks)
-    return runner, pair
+    fallback says which clips and which floor, and moves the pair with
+    the conversations' own `activate`, which answers the pair it
+    left."""
+    conversations = SessionConversations(POET_MAC)
+    conversations.activate(agents[0])
+    runner = FillerRunner(events, conversations, device, fillers, agents, turn, fallbacks)
+    return runner, conversations

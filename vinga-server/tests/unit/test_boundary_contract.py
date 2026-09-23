@@ -32,7 +32,7 @@ from starlette.websockets import WebSocketDisconnect
 from tests.support.boundary import FakeDevice, StubRuntime
 from tests.support.configs import DEVICE_MAC, config_with_agent, world
 from tests.support.providers import built_world
-from tests.support.sessions import device_session, listening_in
+from tests.support.sessions import device_session, listening_in, talking
 from tests.support.stores import memory as lane_memory
 from tests.support.wire import connect, send_pcm, shake_hands, speech_pcm
 from vinga_server import __version__
@@ -51,6 +51,7 @@ from vinga_server.providers import (
     Turn,
 )
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
+from vinga_server.session_conversations import SessionConversations
 from vinga_server.tools.device import DeviceToolClient
 from vinga_server.tools.mcp import McpServers
 
@@ -75,11 +76,12 @@ def client_with_a_stub(
         def factory(
             output: DeviceOutput,
             events: SessionEvents,
+            conversations: SessionConversations,
             agents: Sequence[str],
             generation: Generation,
             device: object = None,
         ) -> SessionInput:
-            runtime = StubRuntime(output, events, agents)
+            runtime = StubRuntime(output, events, conversations, agents)
             built.append(runtime)
             return cast(SessionInput, runtime)
 
@@ -123,8 +125,9 @@ def test_a_stub_runtime_holds_a_turn_over_the_real_wire() -> None:
 
 def test_the_factory_is_handed_the_device_it_speaks_for() -> None:
     """What crosses at construction: the device to speak through, the
-    session's observability with its identity already on it, and the
-    agents this device is bound to. Nothing else."""
+    session's observability, the device session's conversations with
+    the device already on them, and the agents this device is bound to.
+    Nothing else."""
     built: list[StubRuntime] = []
     with client_with_a_stub(built) as client:
         with connect(client) as websocket:
@@ -134,14 +137,31 @@ def test_the_factory_is_handed_the_device_it_speaks_for() -> None:
     assert isinstance(runtime.output, DeviceOutput)
     assert runtime.agents == ["assistant"]
     assert runtime.events.session_id == hello["session_id"]
-    assert runtime.events.device == DEVICE_MAC.lower()
+    # One object crosses, not a copy: the conversations the runtime was
+    # handed are the very ones the edge constructed and reads its own
+    # attributions from.
+    edge = cast(Any, runtime.output)
+    assert runtime.conversations is edge.session_conversations
+    assert runtime.conversations.device == DEVICE_MAC.lower()
     # Activation is the runtime's, and it is part of what the factory
     # answers rather than something the edge does afterwards: the edge
     # emits `session_open` the moment the factory returns, and that
     # record names the agent talking. So the value here is the stub's
     # own choice of first agent, made in its constructor the way the
     # bespoke runtime makes it, and never one the edge wrote.
-    assert runtime.events.agent == runtime.agents[0]
+    active = runtime.conversations.active
+    assert active is not None and active.agent == runtime.agents[0]
+
+
+def test_the_bespoke_runtime_holds_the_conversations_the_edge_built() -> None:
+    """The same claim from the pipeline's side: the factory hands the
+    runtime the edge's own object, so the runtime's writes are what the
+    edge reads when it stamps `speaking_started` and the manifest."""
+    session = device_session(config_with_agent(), DEVICE_MAC)
+
+    runtime = cast(Any, session.runtime)
+    assert runtime.conversations is session.session_conversations
+    assert talking(session) == "assistant"
 
 
 def test_frames_that_arrive_before_a_listen_never_reach_the_runtime() -> None:
@@ -299,6 +319,7 @@ def runtime_for(config: Config, device: FakeDevice, llm: Any = None) -> Any:
     return factory(
         cast(DeviceOutput, device),
         SessionEvents("contract"),
+        SessionConversations(DEVICE_MAC.lower()),
         ["assistant"],
         generations.current(),
     )

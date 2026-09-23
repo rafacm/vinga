@@ -2343,10 +2343,9 @@ async def test_the_handle_the_store_writes_is_the_one_the_trace_is_keyed_by() ->
     session, spy, _ = recording_session(mac=BOTH_MAC, scripts={"poet": poet, "tutor": tutor})
     events = events_of(session)
     events.attach(telemetry.session_tap())
-    # Its OWN identities: the fixed ids in the support module would
-    # rename the agent this live session is talking as, and the pipeline
-    # would then fail to find it.
-    open_session(events, keep_identities=True)
+    # Its OWN device and pair: the fixed ids in the support module are
+    # not the ones this live session is talking as.
+    open_session(events, conversations=session.session_conversations)
 
     start_reply(session, b"\x00\x00" * 320)
     await wait_for_reply(session)

@@ -84,16 +84,25 @@ QUEUE = 4
 # and a mock voice into a recording socket. What would fail it is a
 # reply that WAITED on an export, and an export here waits forever.
 #
-# The healthy number is under a millisecond, measured rather than
-# guessed at: the slowest of twelve replies was 0.7 ms in the case below
-# and 0.4 ms in the one at the foot of this file, over eight runs of
-# each on a development machine (#491). This bound is three orders of
-# magnitude above that, which is not generosity for its own sake. It is
-# what leaves a four-core runner carrying four test workers room to be
-# slow without being wrong, while staying far below anything a waiting
-# reply could cost: the shortest wait on this path is the bounded
-# shutdown's five seconds.
-REPLY_BOUND_S = 0.5
+# The healthy number is a reply that speaks, and a reply that speaks is
+# paced at real time: its two sentences are sixteen frames of 60 ms on
+# the edge's pacer, so it takes about 0.91 s whether the collector
+# answers or not (twelve replies each against a healthy exporter and a
+# wedged one, 0.908 to 0.927 s, on agentpi, #484). This bound sits well
+# above that, which leaves a loaded runner room to be slow without being
+# wrong, and well below anything a waiting reply could cost: the
+# shortest wait on this path is the bounded shutdown's five seconds.
+#
+# It used to be 0.5 s, set against replies measured under a millisecond
+# (#491). Those replies were not speaking. The open below used to write
+# this support module's fixed agent onto the running session's events
+# object, where the pipeline read who was talking, so every reply was
+# answered by an agent the session did not have and failed before its
+# first sentence. #484 moved that pair to the device session's
+# conversations, which no emitter writes, and the replies spoke. Each
+# case now also asserts that every reply it timed sent audio, so a
+# failed reply can never again be the thing this bound certifies.
+REPLY_BOUND_S = 2.5
 
 
 class Blocking:
@@ -133,8 +142,9 @@ def talking(telemetry: Any) -> Any:
     The `session_open` is emitted by hand, because it is the edge's and
     these sessions are built below the edge (`sessions.py` says so): the
     trace has no session span without it, and a turn with no session to
-    link to opens nothing at all. Everything after it is the real reply
-    path.
+    link to opens nothing at all. It names the session's own device and
+    pair, read off its conversations. Everything after it is the real
+    reply path.
     """
     session = session_for(
         base_config(),
@@ -144,8 +154,17 @@ def talking(telemetry: Any) -> Any:
     session.websocket = cast(Any, RecordingSocket())
     events = events_of(session)
     events.attach(telemetry.session_tap())
-    open_session(events)
+    open_session(events, conversations=session.session_conversations)
     return session
+
+
+def spoke(session: Any, before: int) -> int:
+    """How many frames the session has sent, having insisted that the
+    reply just timed sent some: a reply that failed is fast for a reason
+    that has nothing to do with the collector."""
+    sent = cast(RecordingSocket, session.websocket).frames
+    assert sent > before, "the reply spoke nothing, so this timed a failed reply"
+    return sent
 
 
 async def test_a_collector_that_never_answers_costs_no_reply_anything() -> None:
@@ -169,12 +188,14 @@ async def test_a_collector_that_never_answers_costs_no_reply_anything() -> None:
     session = talking(telemetry)
 
     slowest = 0.0
+    sent = 0
     try:
         for _ in range(TURNS):
             began = time.monotonic()
             start_reply(session, UTTERANCE)
             await wait_for_reply(session)
             slowest = max(slowest, time.monotonic() - began)
+            sent = spoke(session, sent)
             # The first turn is what wedges it; every turn after that
             # emits into a queue with a blocked exporter behind it.
             assert collector.entered.wait(1.0), "the exporter never blocked at all"
@@ -500,11 +521,13 @@ async def test_a_collector_that_answers_nothing_costs_no_reply_anything(
         await wait_for_reply(session)
         assert collector.entered.wait(15.0), "the exporter never reached the collector"
 
+        sent = spoke(session, 0)
         for _ in range(TURNS):
             began = time.monotonic()
             start_reply(session, UTTERANCE)
             await wait_for_reply(session)
             slowest = max(slowest, time.monotonic() - began)
+            sent = spoke(session, sent)
 
         assert collector.outstanding >= 1, (
             "the export was not still outstanding, so this measured a healthy path"

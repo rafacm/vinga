@@ -129,7 +129,7 @@ async def test_a_reader_hears_both_the_session_and_the_server_channels(
     channel an event rode."""
     subscription = hub.subscribe()
     session = SessionEvents(SESSION)
-    session.device = MAC
+    session.identify(MAC)
     session.attach(hub)
     attach_server_tap(hub)
     try:

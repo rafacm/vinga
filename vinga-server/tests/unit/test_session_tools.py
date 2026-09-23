@@ -37,11 +37,11 @@ from tests.support.records import only_record, recording_session
 from tests.support.sessions import (
     call,
     drive_reply,
-    events_of,
     history,
     run_reply,
     session_for,
     talking,
+    talking_thread,
 )
 from tests.support.stores import memory as lane_memory
 from tests.support.tools_mcp import Applying, reading
@@ -515,7 +515,7 @@ async def test_the_ledger_is_written_and_cleared_through_its_two_tools() -> None
         ]
     )
     session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
-    thread = events_of(session).conversation
+    thread = talking_thread(session)
     assert thread is not None
 
     await run_reply(session, "we are in a tavern")
@@ -576,7 +576,7 @@ async def test_a_state_tool_asked_with_arguments_it_cannot_use_refuses(
     store = lane_memory()
     script = ScriptedLlm([[call(called, **arguments)], "Let me try that again."])
     session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
-    thread = events_of(session).conversation
+    thread = talking_thread(session)
     assert thread is not None
 
     await run_reply(session, "keep track of this")
@@ -661,7 +661,7 @@ async def test_two_writes_to_one_entry_in_a_round_land_in_the_model_s_order() ->
         ]
     )
     session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
-    thread = events_of(session).conversation
+    thread = talking_thread(session)
     assert thread is not None
 
     async with the_first_write_parked("set_state", "clear_state"):
@@ -685,7 +685,7 @@ async def test_a_write_and_a_clear_of_one_entry_land_in_the_model_s_order() -> N
         ]
     )
     session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
-    thread = events_of(session).conversation
+    thread = talking_thread(session)
     assert thread is not None
 
     async with the_first_write_parked("set_state", "clear_state"):

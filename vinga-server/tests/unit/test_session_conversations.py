@@ -991,7 +991,7 @@ async def test_a_resume_waits_for_the_turn_this_session_just_recorded() -> None:
     # resume, in the same session and with the writer still behind.
     await drive_reply(session, UTTERANCE)
     _offer(session, "poet", GALAXY)
-    session.runtime._acknowledged[GALAXY] = store.handles[0]
+    session.runtime.conversations.acknowledge(GALAXY, store.handles[0])
 
     await drive_reply(session, UTTERANCE)
 

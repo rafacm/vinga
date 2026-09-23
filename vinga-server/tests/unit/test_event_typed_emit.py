@@ -214,7 +214,7 @@ def test_a_session_emission_carries_the_identity_the_emitter_owns(
     under the base's own keys, and the sentence's first `%` position,
     which every conversation sentence opens with."""
     events = SessionEvents("alpha", clock=lambda: 1.0)
-    events.device = "aa:bb:cc:dd:ee:ff"
+    events.identify("aa:bb:cc:dd:ee:ff")
     consumer = Tap()
     events.attach(consumer)
 
@@ -245,6 +245,34 @@ def test_a_session_event_before_the_mac_is_known_names_no_device() -> None:
     assert only(consumer).payload["device"] is None
 
 
+def test_a_session_is_identified_once_and_a_second_try_names_neither_device() -> None:
+    """The device an emitter stamps is a snapshot of the device
+    session's conversations, taken once at normalization. A second
+    identification is a caller that lost track of that, and it is
+    refused rather than obeyed: obeyed, the snapshot would become a
+    second authority that disagrees with the first. The refusal is a
+    fixed sentence, because the value it would otherwise name is a
+    far-side string whatever it looks like."""
+    events = SessionEvents("alpha", clock=lambda: 1.0)
+    consumer = Tap()
+    events.attach(consumer)
+    first = "aa:bb:cc:dd:ee:ff"
+    second = "sk-live-4e2a9c1b-never-a-real-credential"
+
+    events.identify(first)
+    events.emit(lambda: Conversational(stage=Identifier("asr")))
+    with pytest.raises(RuntimeError) as refusal:
+        events.identify(second)
+    events.emit(lambda: Conversational(stage=Identifier("tts")))
+
+    assert str(refusal.value) == "a session's device is identified once"
+    assert refusal.value.args == ("a session's device is identified once",)
+    for said in (first, second):
+        assert said not in str(refusal.value)
+        assert said not in repr(refusal.value.args)
+    assert [one.payload["device"] for one in consumer.seen] == [first, first]
+
+
 def test_a_session_emission_answers_the_reading_it_was_stamped_with() -> None:
     """The one caller that reads the answer is the turn record, whose
     offset has to equal its event's rather than a second reading taken
@@ -266,7 +294,7 @@ def test_an_unusable_identity_is_refused_whole(
     a shape the declaration denies exists, so a lawful device id buys a
     refusing session id nothing and the emission is dropped."""
     events = SessionEvents("has a space", clock=lambda: 1.0)
-    events.device = "aa:bb:cc:dd:ee:ff"
+    events.identify("aa:bb:cc:dd:ee:ff")
     consumer = Tap()
     events.attach(consumer)
 

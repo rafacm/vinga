@@ -57,7 +57,6 @@ from vinga_server.audio.resample import Resampler
 from vinga_server.config import Config
 from vinga_server.config.store import LiveDevice
 from vinga_server.conversations.records import (
-    Acknowledgement,
     MilestoneRecord,
     SessionTurns,
     ToolInvocation,
@@ -122,6 +121,7 @@ from vinga_server.runtime.filler_runner import FillerRunner
 from vinga_server.runtime.speech import _Synthesis, speak_after, withhold_tool_shaped
 from vinga_server.runtime.turns import BUILTIN, MCP, UNKNOWN, TurnUnderway, tool_source
 from vinga_server.runtime.turntaking import Confirmation, TurnTaking, Utterance
+from vinga_server.session_conversations import SessionConversations, mint
 from vinga_server.text import SentenceSplitter
 from vinga_server.tools import builtin, names
 from vinga_server.tools.arguments import with_lossless_coercions
@@ -251,20 +251,6 @@ RECAP_ROUND_TIMEOUT_S = 30.0
 # than lost, and it can never be a summary nobody heard, because nothing
 # is enqueued until the playback finished.
 MILESTONE_ACKNOWLEDGEMENT_S = 2.0
-
-# How long a resume waits for the turn it has just recorded on the
-# target thread to be durably written, before rebuilding that thread's
-# context out of the store.
-#
-# The read-your-writes bound, and it exists for one scenario: switching
-# away from a conversation and back to it inside one session, where the
-# turn that ended the first leg is still in the writer's queue while the
-# resume is already reading the rows. Short, because it is a wait on the
-# device's own turnaround and the writer commits at the marker the turn
-# itself is; and bounded, because a database that is not answering must
-# cost a resumed conversation its last turn rather than cost the user
-# their reply.
-RESUME_ACKNOWLEDGEMENT_S = 2.0
 
 # The abort reasons a device may send that this side knows by name. The
 # firmware's `AbortReason` enum has exactly two members
@@ -635,6 +621,7 @@ class PipelineRuntime:
         generations: Generations,
         generation: Generation,
         events: SessionEvents,
+        conversations: SessionConversations,
         agent_providers: Mapping[str, AgentProviders],
         mcp_servers: McpServers,
         memory: MemoryStore,
@@ -675,6 +662,15 @@ class PipelineRuntime:
         self._server = generations.current().config.server
         self._events = events
         self.session_id = events.session_id
+        # The device session's conversations: which thread each agent is
+        # on, every thread's history, the store's handle for each
+        # thread's last write, and who is talking now. Constructed by
+        # the edge and handed in, never made here, because they belong
+        # to the device session rather than to this runtime, and a
+        # runtime that could make its own would be a second authority.
+        # Public, as the events object's stand-in holds its events: the
+        # edge reads the same object, and a test compares the two.
+        self.conversations = conversations
         self._agent_providers = agent_providers
         self._mcp_servers = mcp_servers
         self._memory = memory
@@ -745,20 +741,6 @@ class PipelineRuntime:
             if threads is not None and section is not None and section.resumption
             else None
         )
-        # The handle the store gave for the last turn recorded on each
-        # thread, so a resume can wait for its own writes before reading
-        # the thread back. Nothing on the audio path ever waits on one:
-        # they are created by the recorder and kept here, and the only
-        # reader is the resume that is about to hydrate.
-        self._acknowledged: dict[str, Acknowledgement] = {}
-        # This session's threads, one per agent it has activated. The
-        # first activation of an agent mints a conversation id and every
-        # later one continues it, which is what makes "Sophia, let me
-        # talk to Nadia, back to Sophia" one session touching two
-        # threads. Minted here rather than by the store, because the
-        # boundary is decided at the activation seam and the id has to
-        # exist before the first turn it stamps.
-        self._conversations: dict[str, str] = {}
         # The utterance the turn being assembled answers, minted at
         # `start_reply` and read by `_fresh_turn`. None until the first
         # one: the turn installed at the activation below belongs to no
@@ -773,8 +755,8 @@ class PipelineRuntime:
         # it carries the pair that activation decides.
         self._turn: TurnUnderway
         # The agents this device may talk to. The one it is talking to
-        # now lives on the events object, because both sides of the
-        # boundary attribute events to it.
+        # now is the device session's conversations' to say, because
+        # both sides of the boundary attribute events to it.
         self._agents: list[str] = []
         self._providers: AgentProviders | None = None
         # The half of the system prompt that belongs to the agent rather
@@ -783,12 +765,6 @@ class PipelineRuntime:
         # here for the life of it. Nothing about it is recomputed per
         # reply; what is, is the memory block appended to it.
         self._know_how: prompt.Assembled | None = None
-        # One history per thread, keyed by the conversation it belongs
-        # to and reached through `_turns` below. A session used to keep
-        # one transcript, which is what carried the whole of it across a
-        # handover; a conversation is a thread now, so what a round is
-        # written against is the thread it is on and nothing else.
-        self._histories: dict[str, list[Turn]] = {}
         # Generation calls in the reply being spoken, counted across its
         # agents rather than per leg, so the one after a handover is a
         # round of its own in the logs.
@@ -831,6 +807,7 @@ class PipelineRuntime:
         # writer and one reader and crosses as a question.
         self._filler = FillerRunner(
             events,
+            conversations,
             output,
             fillers,
             agents,
@@ -889,36 +866,34 @@ class PipelineRuntime:
 
     @property
     def _agent(self) -> str | None:
-        return self._events.agent
-
-    @_agent.setter
-    def _agent(self, name: str | None) -> None:
-        self._events.agent = name
+        """The agent talking now, read off the device session's
+        conversations rather than kept: both sides of the boundary
+        attribute their events to it, so it has one home and this is a
+        read of it. None only before the constructor's first
+        activation."""
+        active = self.conversations.active
+        return None if active is None else active.agent
 
     @property
     def _conversation(self) -> str | None:
-        """The thread the active agent is on. A property over the events
-        object for the reason `_agent` is one: both sides of the
-        boundary attribute their events to it, and the edge's pacer
-        stamps `speaking_started` without ever having activated
-        anything."""
-        return self._events.conversation
-
-    @_conversation.setter
-    def _conversation(self, conversation: str | None) -> None:
-        self._events.conversation = conversation
+        """The thread the active agent is on, read in the same place for
+        the same reason: the edge's pacer stamps `speaking_started`
+        about it without ever having activated anything."""
+        active = self.conversations.active
+        return None if active is None else active.conversation
 
     @property
-    def _device(self) -> str | None:
+    def _device(self) -> str:
         """The board this conversation is happening on, which is what
-        the device scope of memory is addressed by.
+        the device scope of memory is addressed by where no record was
+        resolved.
 
-        A property over the events object beside `_agent` and
-        `_conversation`, and for the same reason: the edge writes the MAC
-        there as soon as it is normalized, so that is where it lives, and
-        a second copy here would be a second answer to one question.
+        Read off the device session's conversations, which the edge
+        built from the MAC it normalized and which are that MAC's one
+        authority: a second copy here would be a second answer to one
+        question.
         """
-        return self._events.device
+        return self.conversations.device
 
     def _remembering_now(self) -> bool:
         """Whether the reply being spoken may reach memory at all.
@@ -999,18 +974,14 @@ class PipelineRuntime:
     def _turns(self) -> list[Turn]:
         """The history of the thread the active agent is on.
 
-        A property over the map for the reason `_conversation` is one
-        over the events object: there is one right answer at any moment
-        and every reader should be unable to reach a stale one. The
-        three append sites and the one read site are unchanged by the
-        split; which list they reach is this line.
-
-        `setdefault` rather than a lookup, because a thread's first
-        history is empty and minting one at the activation seam would be
-        a second place that knows a thread exists.
+        A read of the device session's conversations, which own every
+        thread's history: there is one right answer at any moment and
+        every reader should be unable to reach a stale one. The append
+        sites and the read site are unchanged by that; which list they
+        reach is this line. Kept as a property rather than inlined at
+        its sites because the suites reach it by this name.
         """
-        assert self._conversation is not None
-        return self._histories.setdefault(self._conversation, [])
+        return self.conversations.history()
 
     def _fresh_turn(self) -> TurnUnderway:
         """A turn beginning, stamped with the pair that owns it.
@@ -1122,7 +1093,12 @@ class PipelineRuntime:
         """
         await self.cancel_reply(ReplyOutcome.ABORTED)
         if self._purge is not None:
-            await asyncio.to_thread(self._purge, list(self._conversations.values()))
+            # Each agent's CURRENT thread, as it always was, and not
+            # every thread a move left behind: the conversations' own
+            # method says which in its name.
+            await asyncio.to_thread(
+                self._purge, list(self.conversations.current_threads())
+            )
 
     # --- the device's outgoing audio, arbitrated against the filler ----
 
@@ -1456,12 +1432,12 @@ class PipelineRuntime:
         """
         if name not in self._agents:
             raise _not_allowed(name, self._agents)
-        self._agent = name
-        # The thread this agent is on in this session: minted the first
-        # time it is activated and continued on every later activation,
-        # so switching away and back returns to the same conversation.
-        # A uuid hex, the same shape and role as the session id.
-        self._conversation = self._conversations.setdefault(name, uuid.uuid4().hex)
+        # The thread this agent is on in this device session: minted the
+        # first time it is activated and continued on every later
+        # activation, so switching away and back returns to the same
+        # conversation. The conversations' rule, and one call, so no
+        # reader can see this agent beside the previous one's thread.
+        self.conversations.activate(name)
         self._providers = self._agent_providers[name]
         config = self._world_of(name)
         self._know_how = prompt.know_how(
@@ -1896,7 +1872,7 @@ class PipelineRuntime:
             # double, and any future consumer) leaves nothing to keep.
             landed = self._recorder.record_turn(record)
             if landed is not None:
-                self._acknowledged[record.conversation] = landed
+                self.conversations.acknowledge(record.conversation, landed)
             if self._transcripts is not None:
                 self._transcripts.turn_recorded(
                     self.session_id, record, landed, final=final
@@ -2080,15 +2056,17 @@ class PipelineRuntime:
                 )
             )
             return
-        assert transition.conversation is not None and self._agent is not None
-        self._conversations[self._agent] = transition.conversation
-        self._conversation = transition.conversation
-        # Installed rather than merged: a resume brings the thread's own
-        # history and a fresh conversation brings none, and either way
-        # what the thread held in memory before this line is what the
-        # store has already been told about.
-        self._histories[transition.conversation] = list(transition.history)
+        assert transition.conversation is not None
+        # One call either way, which rebinds the agent's thread, installs
+        # the thread's history and moves the active pair with no await
+        # between them. A resume is the move that found something and
+        # brings the thread's own history; a fresh conversation found
+        # nothing and brings none.
         found = transition.resumed
+        if found is None:
+            self.conversations.start_new(transition.conversation)
+        else:
+            self.conversations.reactivate(transition.conversation, transition.history)
         if found is not None:
             self._events.emit(
                 lambda: ConversationResumed(
@@ -2489,10 +2467,11 @@ class PipelineRuntime:
         if self._resumption is None:
             return builtin.RESUMPTION_UNAVAILABLE
         if call.name == names.NEW_CONVERSATION:
-            # Minted here, exactly as an agent's first thread of a
-            # session is: the boundary is decided at this seam, and the
-            # id has to exist before the first turn it stamps.
-            return _Transition(FRESH_GREETING, conversation=uuid.uuid4().hex)
+            # Minted here, by the same `mint` an agent's first thread of
+            # a device session is minted by: the boundary is decided at
+            # this seam, and the id has to exist before the first turn
+            # it stamps, which is recorded before the move applies.
+            return _Transition(FRESH_GREETING, conversation=mint())
         assert self._agent is not None
         agent = self._agent
         chosen = str(call.arguments["conversation"]).strip()
@@ -2528,7 +2507,7 @@ class PipelineRuntime:
         already asked and answered: the tail is installed and the seed
         says it is a tail.
         """
-        await self._settled(conversation)
+        await self.conversations.settled(conversation)
         found = await flow.resumed(agent, conversation)
         if isinstance(found, str):
             return found
@@ -2564,7 +2543,7 @@ class PipelineRuntime:
         fixed sentence like every other caveat; nothing is stored, so
         the next resume offers the choice again.
         """
-        await self._settled(conversation)
+        await self.conversations.settled(conversation)
         made = await flow.recap(agent, conversation)
         if isinstance(made, str):
             return made
@@ -2798,28 +2777,6 @@ class PipelineRuntime:
         return RECAPPED_GREETING + (
             RESUMED_WITH_GAPS if found.skipped or found.incomplete else ""
         )
-
-    async def _settled(self, conversation: str) -> None:
-        """Wait, briefly, for what this session last wrote to that
-        thread to be durably written.
-
-        Read-your-writes for one case, and it is the case a session
-        produces by itself: leaving a conversation and coming back to it
-        without the connection closing in between. The turn that ended
-        the first leg is on the writer's queue while this line runs, and
-        hydrating without it would rebuild the thread one turn short of
-        what the user just said.
-
-        A wait that expires is not an error and is not reported: the
-        thread is rebuilt from what has landed, which is the same answer
-        a slower database would have given a moment earlier. The wait
-        itself is a blocking one on a handle the writer settles, so it
-        happens off the loop every live conversation shares.
-        """
-        landed = self._acknowledged.get(conversation)
-        if landed is None:
-            return
-        await asyncio.to_thread(landed.wait, RESUME_ACKNOWLEDGEMENT_S)
 
     def _refuse_handover(
         self, call: ToolCall, switches_left: int, order: int
@@ -3529,6 +3486,7 @@ def bespoke_runtime_factory(
     def build(
         output: DeviceOutput,
         events: SessionEvents,
+        session_conversations: SessionConversations,
         agents: Sequence[str],
         generation: Generation,
         device: LiveDevice | None = None,
@@ -3538,6 +3496,7 @@ def bespoke_runtime_factory(
             generations,
             generation,
             events,
+            session_conversations,
             generation.providers.agents,
             mcp_servers,
             memory,

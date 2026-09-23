@@ -420,7 +420,7 @@ REFUSING_CONVERSATIONS = pytest.mark.parametrize(
 def a_session() -> tuple[SessionEvents, Tap, Recording]:
     """One session's emitter with both of its consumers attached."""
     emitter = SessionEvents("alpha", clock=lambda: 1.0)
-    emitter.device = "aa:bb:cc:dd:ee:ff"
+    emitter.identify("aa:bb:cc:dd:ee:ff")
     consumer = Tap()
     emitter.attach(consumer)
     capture = Recording()
@@ -490,7 +490,8 @@ def a_lawful_conversation() -> Variant:
 
 def a_session_of(session: str, device: str | None) -> tuple[SessionEvents, Tap, Recording]:
     emitter = SessionEvents(session, clock=lambda: 1.0)
-    emitter.device = device
+    if device is not None:
+        emitter.identify(device)
     consumer = Tap()
     emitter.attach(consumer)
     capture = Recording()
