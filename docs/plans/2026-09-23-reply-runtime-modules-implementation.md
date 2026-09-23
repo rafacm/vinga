@@ -487,3 +487,26 @@ Run on the Pi, from `vinga-server/`, after M1 was rebased onto M2
 
 Before the rebase, on M1 alone and serially, the same lanes gave 7494
 unit passed and 19 skipped, and 347 integration passed.
+
+### PR review round, PR #558
+
+Automated external review of this PR's diff
+(origin/feature/482-m2-provider-watch...36934dba). Reviewed 2026-09-23
+by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.0, read-only
+sandbox, runtime 13m57s, at commit 36934dba. Verdict: mergeable after
+the listed fixes. Resolutions by anthropic/claude-opus-5-5, thinking
+high (the orchestrating session, since both are documentation).
+
+1. **P2: the completed milestone still records no PR number.**
+   Fixed in "Name PR #558 in M1's tick": the tick links #558.
+2. **P2: the byte-unchanged proof names a pre-rebase commit.** Fixed in
+   "State M1's pin proof without a rewritten hash". Replacing the hash
+   with the rebased one would go stale again at the rebase merge, so
+   the proof is now that the pin file has exactly one commit in its
+   history, which every rewrite preserves; re-confirmed on the tree
+   rebased onto `main` after #557 merged.
+
+The branch was rebased onto `main` after #557 merged, before these
+fixes. The one conflict was this document: #557's review-round section
+and this milestone's section both appended after M2's verification,
+and both are kept, M2's round first.
