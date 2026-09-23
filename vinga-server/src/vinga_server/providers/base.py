@@ -310,8 +310,8 @@ class StreamStarted:
     that round from a request the provider never answered (#68).
 
     Yielded at most once, first, and it carries nothing: it is evidence
-    of liveness, not content. `_watchdog_stream` consumes it and
-    consumes it exclusively, so nothing downstream ever sees one. An
+    of liveness, not content. `ProviderWatch.reply_stream` consumes it
+    and consumes it exclusively, so nothing downstream ever sees one. An
     adapter that yielded a second one, or yielded one after any other
     event, would reach the tool loop's everything-else arm and be
     recorded as a call the model never made."""

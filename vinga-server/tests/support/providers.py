@@ -83,8 +83,8 @@ class ScriptedLlm(LlmProvider):
     the last round repeats if the loop asks for more.
 
     No `StreamStarted`: an adapter yields one first and
-    `_watchdog_stream` consumes it exclusively, so it is not part of
-    what a scripted round can put in front of the tool loop."""
+    `ProviderWatch.reply_stream` consumes it exclusively, so it is not
+    part of what a scripted round can put in front of the tool loop."""
 
     def __init__(self, rounds: Sequence[Step]) -> None:
         self._rounds = list(rounds)

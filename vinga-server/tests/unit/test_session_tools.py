@@ -76,10 +76,11 @@ async def test_a_whitespace_delta_is_not_a_tool_call(
     keep the round loop going after the model had stopped asking for
     anything.
 
-    No `StreamStarted` is scripted: `_watchdog_stream` consumes the one
-    an adapter yields first and consumes it exclusively, so this loop
-    never sees one (`providers/base.py`), and scripting one here would
-    drive a stream shape no adapter is allowed to produce.
+    No `StreamStarted` is scripted: `ProviderWatch.reply_stream`
+    consumes the one an adapter yields first and consumes it
+    exclusively, so this loop never sees one (`providers/base.py`), and
+    scripting one here would drive a stream shape no adapter is allowed
+    to produce.
     """
     script = ScriptedLlm(
         [
