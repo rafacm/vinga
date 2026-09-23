@@ -662,3 +662,30 @@ Verdict: ready after the P2 amendments.
    `test_a_failing_providers_own_words_reach_no_record`
    (`test_event_surface_pins.py` L437) as M2's, both required to stay
    green with their assertions unmodified.
+
+## Plan review round 2
+
+Reviewed 2026-09-23 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.0, read-only sandbox, runtime 4m49s, at commit cc53c513, plan blob 9ef79d23.
+
+A re-review of round 1's amendments, M3's rewrite above all. Verdict:
+ready after the P2 amendments.
+
+1. **P2: `drive_reply` would mint and export an utterance identity.**
+   `ReplyInFlight.__init__` mints the id and `drive_reply` would build
+   one, but today a direct drive bypasses `start_reply`, so
+   `_fresh_turn` reads `_utterance` as None. That is load-bearing:
+   `test_session_record.py` L834 relies on direct drives producing no
+   `turn_started`, a minted id would change `TurnRecord.utterance`, and
+   `TranscriptExport.turn_recorded` (`transcript_export.py` L120) would
+   export a row it ignores today for None. Should say only
+   `start_reply` creates an utterance-bearing value, give `drive_reply`
+   an identity-less one, and pin that a direct drive records
+   `utterance is None` and creates no transcript-export work.
+2. **P2: `ReplyInFlight.cancel()` does not state the exception and
+   cleanup contract.** Today `cancel_reply` suppresses exactly
+   `CancelledError`, awaits, then clears the handle. "Latch, cancel,
+   await" leaves open broader suppression and clearing a replacement
+   value after the await. Should require suppressing exactly
+   `asyncio.CancelledError` and preserving other task exceptions, and
+   `cancel_reply` clearing the owner only if it is still the value it
+   cancelled, with focused tests for both.
