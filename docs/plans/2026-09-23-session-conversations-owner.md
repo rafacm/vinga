@@ -297,6 +297,23 @@ own.
   The same holds for the edge's `speaking_started` and the
   capture manifest's `agent`, and for the filler runner's three emits,
   if not already pinned.
+- **Pair reads across an await, gated.** Two readers take the pair
+  after an await a handover can land in: the edge's `send_audio`
+  awaits `_pacer.transmit()` before `_speaking_started()` reads the pair
+  (`device/session.py` lines 1423-1426 and 1278-1304), and the filler
+  runner, a task of its own, reads it at several points around its
+  output awaits (`runtime/filler_runner.py` lines 196-288 and
+  451-497). Today each read is of the present value at its site. The
+  pins hold that deterministically: the test suspends the pacer's
+  transmit (and, separately, the filler's output) on an
+  `asyncio.Event`, changes the active pair while it is held, releases
+  it, and asserts the exact typed attribution of every emission after
+  the gate, which today is the pair as it stands at the read. Written
+  and green against today's code in the pins commit, byte-unchanged
+  after. Falsified by a mutation that snapshots the pair on entry to
+  `send_audio` (and to the filler's fire) instead of reading it at the
+  emit site: that mutation must fail the pin, one run each, since the
+  gate makes the interleaving deterministic rather than probable.
 - **Falsification.** Each new owner test is watched failing against a
   mutation of the rule it names (continue becomes always-mint; install
   aliases instead of copies; `settled` skips the wait; `reactivate`
@@ -422,6 +439,8 @@ Reviewed 2026-09-23 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.0, 
    *Resolution:* Accepted, by the first of the two remedies offered: one milestone and one PR, no mirror, nothing duplicated on `main` at any point. The reviewer's point that the filler runner selects clips by the mirrored agent is what decides it: the mirror would have been domain state. The separation the two milestones were for is kept as an ordered commit sequence inside the milestone. This also removes one PR round from the wall time.
 
 4. **P2: The pins do not exercise pair reads across existing await boundaries.** Evidence: `DeviceSession.send_audio()` awaits `_pacer.transmit()` before `_speaking_started()` rereads the active pair (`device/session.py:1423-1426`, `1278-1304`). `FillerRunner` also reads the pair at different points around output awaits (`runtime/filler_runner.py:196-288`, `451-497`). A reply can hand over while the separate filler task is suspended. The listed tests cover a handover completed before playback, not a transition while delivery is held. The plan should require deterministic gated tests that change the owner while pacing or filler playback is suspended and assert the exact pre-existing attribution at each emission point. A mutation that snapshots the pair on entry rather than at the present read site must fail.
+
+   *Resolution:* Accepted. The Tests section now requires gated pins for the two readers that cross an await, the pacer and the filler runner, asserting present-read attribution after a pair change while suspended, with the snapshot-on-entry mutation as the falsification. One run each is stated as sufficient because the gate removes the scheduling nondeterminism rather than sampling it.
 
 5. **P2: The acknowledgement test would not catch event-loop blocking.** Evidence: current `_settled()` explicitly uses `asyncio.to_thread(landed.wait, RESUME_ACKNOWLEDGEMENT_S)` (`runtime/pipeline.py:2802-2822`). The proposed recording fake only verifies that `wait(2.0)` was called; a direct blocking call would pass both it and the existing 50 ms `LateStore` case (`test_session_conversations.py:939-999`). The plan should state that `settled()` retains the off-loop wait and add a gated-handle plus heartbeat test proving the loop continues while also asserting the exact timeout argument.
 
