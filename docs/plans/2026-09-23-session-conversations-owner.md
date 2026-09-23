@@ -285,10 +285,10 @@ filler runner selects its clips by the mirrored agent, so the mirror
 is domain state, not an emission stamp. The move is therefore one
 milestone and one PR, with no intermediate state on `main`. What the
 two-milestone cut was for, a reviewer reading the seam change apart
-from the state move, is kept by the commit sequence the milestone
-names instead: pins, the owner module and its tests, the runtime
-move, the seam and edge move, the ADR. Each commit is green on its
-own.
+from the state move, is kept inside the milestone instead: the pins and the owner module
+land as commits of their own, and the move itself is one commit whose
+body walks the seam change before the state move. Each commit is green
+on its own.
 
 ## Module layout
 
@@ -471,20 +471,26 @@ words, together with the instrument disagreement above.
      code.
   2. `session_conversations.py` and its unit tests, falsified as
      "Tests" states.
-  3. The runtime move: `_conversations`, `_histories`, `_acknowledged`
-     and `_settled` leave `PipelineRuntime`; `_activate_agent` calls
+  3. The move, as ONE commit, because no split of it can be green
+     without the fallback owner or the mirror this plan forbids: the
+     runtime cannot read a required owner before the factory passes
+     one, and the factory cannot pass one before the edge constructs
+     it. In that commit: the edge constructs the owner at
+     normalization and passes it to the factory; `RuntimeFactory`,
+     `bespoke_runtime_factory`, `PipelineRuntime` and the stub runtime
+     take it; `_conversations`, `_histories`, `_acknowledged` and
+     `_settled` leave `PipelineRuntime`; `_activate_agent` calls
      `activate`, `_move_to` calls `start_new` or `reactivate`,
      `_select` and activation mint through the module, the recording
      site calls `acknowledge`, the close purge reads
-     `current_threads()`, `_agent`, `_conversation` and `_device` read
-     the owner.
-  4. The seam: the edge constructs the owner at normalization and
-     passes it to the factory; `RuntimeFactory`,
-     `bespoke_runtime_factory` and the stub runtime take it; the edge,
-     the filler runner and the test support read it;
-     `SessionEvents.agent` and `.conversation` are deleted and
-     `.device` becomes write-once.
-  5. The ADR and the 2026-08-10 status-line note; the docstrings in
+     `current_threads()`, and `_agent`, `_conversation` and `_device`
+     read the owner; the edge, the filler runner and the test support
+     read it; `SessionEvents.agent` and `.conversation` are deleted and
+     `.device` becomes write-once. The commit body walks the diff in
+     that order (seam, runtime state, readers, events object) so a
+     reviewer can read the seam change apart from the state move, which
+     is what the earlier two-commit split was for.
+  4. The ADR and the 2026-08-10 status-line note; the docstrings in
      the documentation footprint; the census manifest regenerated;
      #489's count in the implementation doc.
 
@@ -544,6 +550,8 @@ Reviewed 2026-09-23 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.0
 ---
 
 1. **P1: The promised green commit sequence cannot supply the required owner.**
+
+   *Resolution:* Accepted. The runtime move and the seam move are one commit (step 3), with its body ordered seam, runtime state, readers, events object, so the separation a reviewer wanted survives as reading order rather than as commits that could not each be green. The pins and the owner module stay separate commits before it.
 Evidence: Plan “The factory’s new signature” says `SessionConversations` is required in `PipelineRuntime.__init__`, `build`, and the protocol, with no fallback (lines 176-205). But M1 step 3 moves the runtime to read that owner, while step 4 only later changes `DeviceSession`, `RuntimeFactory`, and `bespoke_runtime_factory` to construct and pass it (lines 467-486). Today the factory has no owner parameter and constructs `PipelineRuntime` itself (`vinga-server/src/vinga_server/runtime/pipeline.py:3529`); the edge is the only proposed constructor (`vinga-server/src/vinga_server/device/session.py:504`). Step 3 therefore either fails from a missing required argument or needs exactly the fallback/mirror the plan forbids.
 What the plan should say instead: make the runtime move and seam/edge move one atomic green commit, including factory signature, owner construction, all readers, and deletion of event-pair fields. Retain the preceding owner-module and pin commits as separate green commits.
 
