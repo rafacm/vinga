@@ -116,9 +116,11 @@ class ProviderWatch:
         other conversation record is queried by: no `event`, no
         `session`, no provider, and above all no host, which is the one
         an outbound policy is diagnosed from. The reply still ends the
-        same way, and the traceback is still logged where it was; this
-        adds the structured half the observability ADR says is the
-        surface (#53)."""
+        same way, and its "reply failed" line is still logged, though it
+        now names the exception's class and nothing else, with no
+        traceback, since what a failure from the wire carries is not
+        this server's to print; this is the structured half the
+        observability ADR says is the surface (#53)."""
         started = asyncio.get_running_loop().time()
         try:
             yield
