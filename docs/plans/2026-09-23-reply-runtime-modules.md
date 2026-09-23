@@ -339,13 +339,14 @@ Of the eight fields with a reply lifetime (`_utterance`, `_outcome`,
 ```python
 class ReplyInFlight:
     """One started reply: its task and how it ended."""
-    def __init__(self) -> None: ...          # mints the utterance id
-    utterance: str                           # read-only property
+    def __init__(self, utterance: str | None) -> None: ...
+    utterance: str | None                    # read-only property
     def start(self, body: Coroutine[Any, Any, None]) -> None
     def running(self) -> bool
     def latch(self, outcome: ReplyOutcome) -> None   # first writer wins
     outcome: ReplyOutcome | None             # read-only property
-    async def cancel(self, outcome: ReplyOutcome) -> None  # latch, cancel, await
+    async def cancel(self, outcome: ReplyOutcome) -> None  # latch, cancel, await;
+                                             # suppresses exactly CancelledError
     async def drain(self, grace_s: float) -> bool
     def __await__(self)                      # the task's own result or exception
 
@@ -368,8 +369,25 @@ class SpeakingPass:
   holds the current one as `self._in_flight: ReplyInFlight | None`;
   `replying`, `drain` and `cancel_reply` keep their signatures (they
   are `SessionInput`'s and `TurnTaking`'s) and become a line or two
-  each over it. `start_reply` makes the value, emits `turn_started`
-  from it, installs it, and starts `self._reply(utterance, reply)`.
+  each over it. `start_reply` mints the utterance id (`uuid.uuid4().hex`,
+  as today), makes the value with it, emits `turn_started` from it,
+  installs it, and starts `self._reply(utterance, reply)`. **Only
+  `start_reply` makes a value that bears an utterance.** A value made
+  with None is a reply no floor decision started, which is exactly what
+  a direct drive is today: its turn records `utterance` None, and
+  `TranscriptExport.turn_recorded` ignores it as it does now.
+- **The cancel contract, stated because "latch, cancel, await" leaves
+  it open.** `cancel` latches, cancels the task, awaits it, and
+  suppresses exactly `asyncio.CancelledError`: a task that ended in any
+  other exception raises it out of `cancel`, as awaiting the task inside
+  today's `contextlib.suppress(asyncio.CancelledError)` does.
+  `cancel_reply` then clears `self._in_flight` only if it is still the
+  value it cancelled. Today's clear is unconditional, and the two are
+  the same unless a `start_reply` lands during the cancel's await; the
+  start_reply inventory below says whether that interleaving is
+  reachable, and if it is, the unconditional clear would have dropped
+  the new reply's handle, which the PR reports as a finding rather than
+  as a silent fix.
 - **The body takes its value as an argument**: `_reply(utterance,
   reply)`. Its three latch sites and its `finally`'s outcome read go to
   `reply`, not to `self._in_flight`, so the body never depends on which
@@ -391,10 +409,11 @@ class SpeakingPass:
   `_remembering_now` by a builtin source built once at construction.
   Neither has a lifetime that a value made at one point would own, and
   M1 and M2 already take the turn as an argument.
-- **The test drivers, one by one.** `drive_reply` constructs a
-  `ReplyInFlight` (public constructor, no runtime API) and calls
-  `_reply(utterance, reply)`, still without `turn_started`; its reach-in
-  stays one `_reply` site. `run_reply` and `test_tts_lookahead.py`'s
+- **The test drivers, one by one.** `drive_reply` constructs
+  `ReplyInFlight(None)` (public constructor, no runtime API) and calls
+  `_reply(utterance, reply)`, still without `turn_started` and still
+  recording `utterance` None, which `test_session_record.py` L834
+  relies on; its reach-in stays one `_reply` site. `run_reply` and `test_tts_lookahead.py`'s
   `speak_a_reply` are unchanged. `reply_in_flight(session)` in
   `tests/support/sessions.py` answers `session.runtime._in_flight`, and
   its awaiting callers (`event_baseline.py` nine sites,
@@ -583,7 +602,12 @@ class SpeakingPass:
   interface (latch first writer wins; cancel latches before the task
   sees `CancelledError`, proved by a body that reads the outcome in its
   `finally`; drain never cancels and answers False at the grace;
-  awaiting the value re-raises the body's exception; each watched
+  awaiting the value re-raises the body's exception; `cancel`
+  re-raises a non-cancellation exception the task ended in and
+  suppresses only `CancelledError`; `cancel_reply` leaves a value
+  installed during its await in place; a direct drive records
+  `utterance` None and hands the transcript export no row (a pin,
+  committed before the move); each watched
   failing against a mutation, the cancel ordering run 20 times since it
   is a concurrency claim), then the move with the test drivers migrated
   as listed under M3, then the census regenerated. *Design footprint:*
@@ -689,3 +713,15 @@ ready after the P2 amendments.
    `asyncio.CancelledError` and preserving other task exceptions, and
    `cancel_reply` clearing the owner only if it is still the value it
    cancelled, with focused tests for both.
+
+   *Resolution (both findings):* accepted. `ReplyInFlight` takes its
+   utterance as `str | None`; only `start_reply` mints one, and
+   `drive_reply` builds `ReplyInFlight(None)`, so a direct drive keeps
+   recording `utterance` None and handing the transcript export
+   nothing, pinned before the move. `cancel` suppresses exactly
+   `CancelledError` and re-raises anything else the task ended in;
+   `cancel_reply` clears the owner only if it is still the value it
+   cancelled, and the plan says where that differs from today's
+   unconditional clear (a `start_reply` landing during the await) and
+   that the inventory decides whether that is reachable. Focused tests
+   for each are in M3's milestone item.
