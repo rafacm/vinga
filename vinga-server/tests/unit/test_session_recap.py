@@ -25,6 +25,7 @@ round seeded on the other side of the move.
 
 import asyncio
 import logging
+import re
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
@@ -732,6 +733,168 @@ async def test_the_summarization_round_is_staged_as_a_recap_round() -> None:
     assert recap["invocation"] == invocation
     assert sum(record.rounds or 0 for record in kept.turns) == 2
     await staging.shutdown()
+
+
+# What the summarization round says, to the log
+#
+# Pinned before provider watching moved out of the runtime (#482, M2),
+# as a consumer of the records sees them: the unrendered sentence, its
+# arguments as typed values, and the payload whole, with the timing
+# fields held by type and presence. The reply's own paths are pinned in
+# `test_provider_watch_pins.py`; these are the recap's, here because
+# this is where the offer a recap needs is set up.
+
+
+def _timed(record: logging.LogRecord, *, at: int) -> None:
+    value = record.args[at]  # type: ignore[index]
+    assert type(value) is float and value >= 0
+
+
+def _payload(record: logging.LogRecord, *timing: str) -> dict[str, object]:
+    fields = fields_of(record)
+    for name in timing:
+        value = fields.pop(name)
+        assert type(value) is int and value >= 0, name
+    invocation = fields.pop("invocation")
+    assert isinstance(invocation, str) and re.match(r"^[0-9a-f]{32}$", invocation)
+    return fields
+
+
+def _recap_of(caplog: pytest.LogCaptureFixture, name: str) -> logging.LogRecord:
+    (record,) = [
+        one
+        for one in caplog.records
+        if getattr(one, "event", None) == name and getattr(one, "purpose", None) == "recap"
+    ]
+    return record
+
+
+async def test_a_recap_round_says_llm_round_without_a_round_and_files_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    voice = RecordingTts()
+    kept = Kept().watching(voice)
+    session, _ = consenting(voice, a_long_thread(), kept)
+    thread = talking_thread(session)
+
+    with caplog.at_level(logging.INFO):
+        await drive_reply(session, UTTERANCE)
+
+    recap = _recap_of(caplog, "llm_round")
+    assert recap.levelno == logging.INFO
+    assert recap.msg == "session %s: %s recap took %.2f s over %d turns"
+    assert recap.args is not None and len(recap.args) == 4
+    assert recap.args[:2] == (session.session_id, "poet")
+    _timed(recap, at=2)
+    assert type(recap.args[3]) is int and recap.args[3] == 17
+    assert _payload(recap, "duration_ms", "first_token_ms") == {
+        "event": "llm_round",
+        "session": session.session_id,
+        "device": POET_MAC,
+        "agent": "poet",
+        "conversation": thread,
+        "turns": 17,
+        "stage": "llm",
+        "provider": "mock",
+        "type": "mock",
+        "purpose": "recap",
+    }
+    # The two reply rounds are the whole of what the turns' records
+    # count: the recap is in none of their rounds and none of their
+    # summed durations.
+    replies = [
+        one
+        for one in caplog.records
+        if getattr(one, "event", None) == "llm_round"
+        and getattr(one, "purpose", None) == "reply"
+    ]
+    assert [one.round for one in replies] == [1, 2]
+    assert sum(record.rounds or 0 for record in kept.turns) == 2
+    assert sum(record.llm_ms or 0 for record in kept.turns) == sum(
+        one.duration_ms for one in replies
+    )
+
+
+async def test_a_recap_that_ran_long_says_provider_failed_as_a_timeout(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pipeline_module, "RECAP_ROUND_TIMEOUT_S", 0.01)
+    voice = RecordingTts()
+    poet = _SlowSummarizer(
+        [
+            [call("resume_conversation", conversation=GALAXY, start_from="recap")],
+            RECAP,
+            "Carrying on.",
+        ]
+    )
+    session = speaking_session(cast(Any, poet), voice, a_long_thread(), Kept())
+    _offer(session, "poet", GALAXY)
+    _asked(session, "poet", GALAXY)
+    thread = talking_thread(session)
+
+    with caplog.at_level(logging.INFO):
+        await drive_reply(session, UTTERANCE)
+
+    failed = _recap_of(caplog, "provider_failed")
+    assert failed.levelno == logging.WARNING
+    assert failed.msg == "session %s: %s provider%s %s after %.2f s%s: %s"
+    assert failed.args is not None and len(failed.args) == 7
+    assert failed.args[:4] == (session.session_id, "llm", ' "mock"', "timed out")
+    _timed(failed, at=4)
+    assert failed.args[5:] == ("", "TimeoutError")
+    assert _payload(failed, "duration_ms") == {
+        "event": "provider_failed",
+        "session": session.session_id,
+        "device": POET_MAC,
+        "agent": "poet",
+        "conversation": thread,
+        "error": "TimeoutError",
+        "stage": "llm",
+        "provider": "mock",
+        "type": "mock",
+        "purpose": "recap",
+    }
+
+
+async def test_a_recap_stream_that_failed_says_provider_failed_as_its_class(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    voice = RecordingTts()
+    poet = _FailingSummarizer(
+        [
+            [call("resume_conversation", conversation=GALAXY, start_from="recap")],
+            RECAP,
+            "Carrying on.",
+        ],
+        "sk-live-0RECAP-FAILURE-SENTINEL",
+    )
+    session = speaking_session(cast(Any, poet), voice, a_long_thread(), Kept())
+    _offer(session, "poet", GALAXY)
+    _asked(session, "poet", GALAXY)
+    thread = talking_thread(session)
+
+    with caplog.at_level(logging.INFO):
+        await drive_reply(session, UTTERANCE)
+
+    failed = _recap_of(caplog, "provider_failed")
+    assert failed.levelno == logging.WARNING
+    assert failed.msg == "session %s: %s provider%s %s after %.2f s%s: %s"
+    assert failed.args is not None and len(failed.args) == 7
+    assert failed.args[:4] == (session.session_id, "llm", ' "mock"', "failed")
+    _timed(failed, at=4)
+    assert failed.args[5:] == ("", "RecapCredentialFailure")
+    assert _payload(failed, "duration_ms") == {
+        "event": "provider_failed",
+        "session": session.session_id,
+        "device": POET_MAC,
+        "agent": "poet",
+        "conversation": thread,
+        "error": "RecapCredentialFailure",
+        "stage": "llm",
+        "provider": "mock",
+        "type": "mock",
+        "purpose": "recap",
+    }
 
 
 # The no-leak sentinel
