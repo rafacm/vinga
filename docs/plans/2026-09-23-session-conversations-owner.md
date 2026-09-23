@@ -475,7 +475,7 @@ words, together with the instrument disagreement above.
 ## Milestones
 
 - [x] **[M1: the session's conversations get one owner](2026-09-23-session-conversations-owner-implementation.md#m1-the-sessions-conversations-get-one-owner)**
-  (PR TBD). Commits in
+  (PR [#556](https://github.com/rafacm/vinga/pull/556)). Commits in
   this order, each green on its own:
   1. Pins: the characterization and gated tests under "Tests" that
      the existing suites do not already cover, green against today's
