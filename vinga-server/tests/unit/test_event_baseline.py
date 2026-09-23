@@ -726,7 +726,7 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     "vinga_server.runtime.pipeline:PipelineRuntime._store_recap #1": (
         ("MilestoneRecorded", ("conversation", "device", "event", "session")),
     ),
-    "vinga_server.runtime.pipeline:PipelineRuntime._for_execution #1": (
+    "vinga_server.runtime.tool_execution:ToolExecution.for_execution #1": (
         (
             "ToolArgumentsCoerced",
             (
@@ -741,7 +741,7 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
     ),
-    "vinga_server.runtime.pipeline:PipelineRuntime._run_one #1": (
+    "vinga_server.runtime.tool_execution:ToolExecution._run_one #1": (
         (
             "BuiltinToolCall",
             (
@@ -827,7 +827,7 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
     ),
-    "vinga_server.runtime.pipeline:PipelineRuntime._report_withheld #1": (
+    "vinga_server.runtime.tool_execution:ToolExecution._report_withheld #1": (
         (
             "BuiltinSentenceWithheld",
             (
