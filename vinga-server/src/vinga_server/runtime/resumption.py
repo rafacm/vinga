@@ -32,9 +32,13 @@ layer and half in the reply path:
   that claim against when it finally writes one.
 
 What is deliberately NOT here: minting an id, rebinding an agent to a
-thread, installing a history, speaking a recap and storing one. Those
-are the runtime's, because they are the transition and the reply, and
-both happen at a turn boundary that only the reply path can see.
+thread, installing a history, waiting for this session's own last write
+to a thread before reading it back, speaking a recap and storing one.
+The first four are the device session's conversations'
+([session_conversations.py](../session_conversations.py)), which own
+the transitions and the write handles; the runtime applies them at the
+turn boundary only the reply path can see, and speaks and stores the
+recap, because that is the reply.
 """
 
 import asyncio

@@ -575,22 +575,21 @@ class PipelineRuntime:
       dozen places in the loop, and read by `_record_turn` at the end of
       whichever conversation it belongs to. The pair it is stamped with
       at replacement is the pair the turn is attributed to.
-    - `_conversations`: one thread per agent this session has activated,
-      written by `_activate_agent` alone and read through
-      `self._conversation`, which is a property over the events object
-      for the reason `_agent` is.
-    - `_histories`: one conversation history per thread, appended by the
-      reply path and by each agent leg, read wherever a round is built,
-      and reached through `_turns`, which answers with the history of
-      the thread the active agent is on.
+    - `conversations`: the device session's conversations
+      ([session_conversations.py](../session_conversations.py)), which
+      this runtime is handed and never makes: each agent's current
+      thread, every thread's history, the store's handle for each
+      thread's last write, and who is talking now. Written through its
+      transitions alone (`_activate_agent` activates, `_move_to` starts
+      a new thread or reactivates a stored one, the recording site
+      acknowledges), and read through `_agent`, `_conversation`,
+      `_device` and `_turns`, which are reads of it rather than fields.
+      Public, because the edge holds the same object and reads the pair
+      off it for what it stamps.
     - `_resumption`: this session's offered-candidate state and its way
       into the store, absent where the deployment did not ask for
       resumption, which is what makes both conversation tools answer a
       spoken refusal instead of moving anything.
-    - `_acknowledged`: the store's handle for the last turn recorded on
-      each thread, written where a turn is handed over and read only by
-      a resume about to rebuild that thread. Never waited on anywhere
-      else, which is what keeps the recording path non-blocking.
     - `_llm_round`: reset per reply, counted up per round, read by the
       watchdog's retry line and by `llm_round`, which is what makes the
       generation after a handover a round of its own.
@@ -610,9 +609,10 @@ class PipelineRuntime:
       agent and was wholly withheld on the next would read as empty from
       it, and the withholding itself happens a call away, inside the
       tool loop.
-    - `_agent`: a property over `self._events.agent` rather than a field,
-      because both sides of the boundary attribute events to whoever is
-      talking, so the events object is the one place it can live.
+    - `_agent`: a read of `conversations` rather than a field, because
+      both sides of the boundary attribute events to whoever is talking,
+      so the device session's conversations are the one place it can
+      live.
     """
 
     def __init__(
@@ -668,8 +668,9 @@ class PipelineRuntime:
         # the edge and handed in, never made here, because they belong
         # to the device session rather than to this runtime, and a
         # runtime that could make its own would be a second authority.
-        # Public, as the events object's stand-in holds its events: the
-        # edge reads the same object, and a test compares the two.
+        # Public, because it is part of what this runtime is rather than
+        # a detail of how it works: the edge reads the same object, and a
+        # test holds the two to being one with `is`.
         self.conversations = conversations
         self._agent_providers = agent_providers
         self._mcp_servers = mcp_servers

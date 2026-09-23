@@ -502,7 +502,15 @@ class SessionEvents:
     today: the bad-Device-Id rejection names no device because none was
     understood, the no-agent rejection names one because by then the MAC
     is known, and `session_open` is the first line of the decision track
-    because the capture opens just before it.
+    because the capture opens just before it. The device identity is a
+    snapshot, taken once (`identify`) from the device session's
+    conversations, which are the device's authority.
+
+    It holds no conversation state. Which agent is talking and on which
+    thread belongs to the device session's conversations
+    (`session_conversations.py`), and every emitter reads that pair at
+    its own emit site and hands it over as values, so this object says
+    things and remembers nothing about what they were about.
 
     Observability is orthogonal to the device-facing boundary: both
     sides emit events, and both sides' events have to look the same and
