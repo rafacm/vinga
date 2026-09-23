@@ -1155,3 +1155,26 @@ on this machine:
   moved by two lines (above), regenerated; the command-spellings
   manifest did not move.
 - [x] `python3 scripts/check_doc_links.py .`: 268 files, 0 failures.
+
+### PR review round, PR #560
+
+Automated external review of this PR's diff
+(origin/feature/482-m1-tool-execution...28c2291c). Reviewed 2026-09-23
+by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.0, read-only
+sandbox, runtime 7m55s, at commit 28c2291c. Verdict: mergeable after
+the listed fix.
+Resolutions by anthropic/claude-opus-5-5, thinking high (the
+orchestrating session, since both are documentation).
+
+1. **P2: the completed milestone still names `PR TBD`.** Fixed in
+   "Name PR #560 in M3's tick".
+
+One more fix, not a finding of this round: PR #558's round found M1's
+section proving its pins against a pre-rebase hash, and this section
+did the same twice. Fixed in "State M3's pin proof without a rewritten
+hash", which names the pin commit by title and proves it by the pin
+files receiving additions only since.
+
+The branch was rebased onto M1 after M1 was rebased onto `main` (#557
+merged). The one conflict was this document, where M1's review round
+and this section both append; both are kept, M1's round first.
