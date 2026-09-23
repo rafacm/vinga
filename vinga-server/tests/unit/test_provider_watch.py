@@ -117,6 +117,25 @@ async def test_a_second_stall_gives_up_as_first_token_timeout_and_retries_no_mor
     assert (failed["invocation"], failed["purpose"]) == ("b" * 32, "reply")
 
 
+async def test_a_round_given_up_carries_no_chain_behind_it() -> None:
+    """What gives a round up is the watchdog's own expiry, and the
+    `TimeoutError` asyncio raised for it, with the cancellation behind
+    that, is library machinery rather than anything the provider said.
+    `FirstTokenTimeout` leaves with neither as its cause or its context,
+    so nothing that walks the chain (a traceback, an exception exporter)
+    is handed frames and messages this server did not write."""
+    watch, _, _ = a_watch()
+    provider = Scripted([STALL_S])
+
+    with pytest.raises(FirstTokenTimeout) as raised:
+        await drained(
+            watch.reply_stream(provider, provider.stream(), invocation="b" * 32, round_=1)
+        )
+
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+
+
 async def test_a_providers_own_timeout_before_the_deadline_passes_through() -> None:
     """The `expired()` check: an SDK timeout raised inside the window is
     the provider's failure, reported as its own class and raised as

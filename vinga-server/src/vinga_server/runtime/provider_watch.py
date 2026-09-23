@@ -222,16 +222,27 @@ class ProviderWatch:
                 purpose=LlmPurpose.REPLY,
             )
             started = loop.time()
+            stalled: float | None = None
             try:
                 async with asyncio.timeout(timeout_s) as watchdog:
                     first = await events.__anext__()
             except StopAsyncIteration:
                 return
-            except TimeoutError as exc:
+            except TimeoutError:
                 if not watchdog.expired():
                     raise
-                elapsed = loop.time() - started
+                stalled = loop.time() - started
+            if stalled is not None:
+                elapsed = stalled
                 if attempt == "retry":
+                    # Raised out here rather than in the arm above, and
+                    # without `from`: inside the arm the `TimeoutError`
+                    # asyncio made for the expiry is the active one, and
+                    # the cancellation behind it, so the failure would
+                    # leave carrying both as its context whatever its
+                    # cause said. What gave the round up is the watchdog,
+                    # which the class says; the library's chain is not
+                    # this server's to hand a traceback or an exporter.
                     failure = FirstTokenTimeout(
                         f"no first token within {timeout_s:.0f} s, twice"
                     )
@@ -243,7 +254,7 @@ class ProviderWatch:
                         invocation=invocation,
                         purpose=LlmPurpose.REPLY,
                     )
-                    raise failure from exc
+                    raise failure
                 # The loop variable is read by a thunk the emitter calls
                 # before this iteration ends, so there is no late binding
                 # for B023 to be about.
