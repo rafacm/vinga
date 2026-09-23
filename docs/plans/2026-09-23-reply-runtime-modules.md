@@ -593,7 +593,7 @@ class SpeakingPass:
   `tests/support/providers.py` and the runtime's docstrings.
   Changelog: none.
 - [x] **[M3: the reply in flight in `runtime/reply_in_flight.py`](2026-09-23-reply-runtime-modules-implementation.md#m3-the-reply-in-flight-in-runtimereply_in_flightpy)**
-  (PR TBD). Stacked on M2's branch (it changes the round counter M2 turns into an
+  ([#560](https://github.com/rafacm/vinga/pull/560)). Stacked on M2's branch (it changes the round counter M2 turns into an
   argument); M1 runs beside both, and whichever of M1 and M3 lands
   second rebases. Pins first: the outcome each boundary latches
   (barge-in, device abort, close, failure, completed) as `reply_finished`
