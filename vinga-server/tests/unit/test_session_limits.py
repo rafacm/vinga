@@ -38,6 +38,7 @@ from tests.support.wire import (
 from vinga_server.app import create_app
 from vinga_server.audio.opus import OpusEncoder
 from vinga_server.device.session import GOING_AWAY, NORMAL_CLOSURE, DeviceSession
+from vinga_server.runtime.reply_in_flight import ReplyInFlight
 
 
 def test_an_idle_session_is_closed_when_it_runs_out_of_time() -> None:
@@ -229,8 +230,18 @@ def session_with(
     # behaves: finishes inside the grace, runs past it, raises. Starting
     # a real one produces exactly one of those shapes and needs a model,
     # a voice and a device to do it, so the shapes that matter would be
-    # the ones no test could reach.
-    session.runtime._reply_task = reply
+    # the ones no test could reach. The value is the runtime's own,
+    # started on a body that is the test's task, so whichever of the
+    # three shapes the task has is the shape the reply in flight has.
+    if reply is not None:
+        task = reply
+
+        async def body() -> None:
+            await task
+
+        running = ReplyInFlight(None)
+        running.start(body())
+        session.runtime._in_flight = running
     return session, websocket
 
 

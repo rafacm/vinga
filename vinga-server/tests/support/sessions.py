@@ -57,6 +57,7 @@ from vinga_server.generation import Generations
 from vinga_server.memory.store import MemoryStore
 from vinga_server.providers import ProviderWorld, ToolCall, Turn
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
+from vinga_server.runtime.reply_in_flight import ReplyInFlight
 from vinga_server.runtime.turntaking import Utterance
 from vinga_server.tools.mcp import McpServers
 
@@ -666,10 +667,10 @@ async def history(session: DeviceSession, script: Any) -> list[Any]:
 # different rule and the one thing these tests must not use. What the
 # buffer holds at that instant is what the gates measure, and putting
 # real speech there means a real VAD classifying synthetic tones and
-# ending the utterance at a moment nothing chose. And the reply task is
-# what `replying()` and `drain()` answer about without handing over, so
-# a caller that has to await this one exactly, cancellation included,
-# holds it.
+# ending the utterance at a moment nothing chose. And the reply in
+# flight is what `replying()` and `drain()` answer about without handing
+# over, so a caller that has to await this one exactly, cancellation
+# included, holds it.
 
 
 def turn_taking(session: DeviceSession) -> Any:
@@ -707,10 +708,14 @@ async def end_utterance(session: DeviceSession, endpointed: bool = True) -> None
 
 
 def reply_in_flight(session: DeviceSession) -> Any:
-    """The reply task this session has running, for a caller that has to
+    """The reply this session has running, for a caller that has to
     await or identify this one and not merely wait for it to end.
-    White-box, per the note above."""
-    return session.runtime._reply_task
+    White-box, per the note above.
+
+    What comes back is the runtime's `ReplyInFlight`, one per started
+    reply, so `is` tells two replies apart; awaiting it answers exactly
+    what awaiting its task does, the reply's own exception included."""
+    return session.runtime._in_flight
 
 
 async def drive_reply(session: DeviceSession, pcm: bytes) -> None:
@@ -723,10 +728,15 @@ async def drive_reply(session: DeviceSession, pcm: bytes) -> None:
 
     The reply body rather than `start_reply`, which is why a suite
     driven through here sees no `turn_started`: what the floor decided
-    about this utterance is exactly what these suites are not about.
+    about this utterance is exactly what these suites are not about. The
+    body is handed a value of its own, made through the public
+    constructor with no utterance, which is what a reply no floor
+    decision started is: its records answer no utterance, and nothing
+    it latches is shared with another drive.
     """
     await session.runtime._reply(
-        Utterance(pcm=pcm, ended_at=events_of(session).now(), speech_ms=0, barge_in=False)
+        Utterance(pcm=pcm, ended_at=events_of(session).now(), speech_ms=0, barge_in=False),
+        ReplyInFlight(None),
     )
 
 

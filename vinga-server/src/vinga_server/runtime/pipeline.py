@@ -117,6 +117,7 @@ from vinga_server.providers import (
 from vinga_server.runtime import prompt, resumption
 from vinga_server.runtime.filler_runner import FillerRunner
 from vinga_server.runtime.provider_watch import ProviderWatch
+from vinga_server.runtime.reply_in_flight import ReplyInFlight, SpeakingPass
 from vinga_server.runtime.speech import _Synthesis, speak_after
 from vinga_server.runtime.tool_execution import DEFAULT_TOOL_TIMEOUT_S, Offer, ToolExecution
 from vinga_server.runtime.turns import TurnUnderway
@@ -581,12 +582,6 @@ class PipelineRuntime:
             if threads is not None and section is not None and section.resumption
             else None
         )
-        # The utterance the turn being assembled answers, minted at
-        # `start_reply` and read by `_fresh_turn`. None until the first
-        # one: the turn installed at the activation below belongs to no
-        # utterance yet, and records nothing because nothing was heard
-        # on it.
-        self._utterance: str | None = None
         # The turn being assembled, replaced at the start of every reply
         # and read once at the end of it. Always present rather than
         # optional: the reply path writes into it from half a dozen
@@ -605,10 +600,13 @@ class PipelineRuntime:
         # here for the life of it. Nothing about it is recomputed per
         # reply; what is, is the memory block appended to it.
         self._know_how: prompt.Assembled | None = None
-        # Generation calls in the reply being spoken, counted across its
-        # agents rather than per leg, so the one after a handover is a
-        # round of its own in the logs.
-        self._llm_round = 0
+        # The speaking pass now running, or the last one to have run:
+        # its round count and whether any sentence of it went out or was
+        # withheld ([reply_in_flight.py](reply_in_flight.py)). Replaced
+        # whole at the top of every pass rather than reset field by
+        # field, so a pass starts from nothing by construction. One made
+        # here too, since no pass has run and it has counted nothing.
+        self._pass = SpeakingPass()
         # Whether the agent speaking may reach memory, resolved once per
         # reply where the tool snapshot is taken and read from there by
         # the tools it offers and by every round's injected blocks. One
@@ -618,16 +616,6 @@ class PipelineRuntime:
         # is no honest value before then: an agent is what the policy is
         # about, and nothing asks this outside a reply.
         self._remembering: bool | None = None
-        # The two reply-wide facts the empty-reply check reads, reset at
-        # the start of every reply by the method that reads them. False
-        # before the first reply for the same reason they are reset:
-        # what they describe is one reply, and no reply has run.
-        self._reply_spoke = False
-        self._reply_withheld = False
-        # How the reply now running ended, written once by whichever
-        # boundary ended it and read by the `finally` that reports it.
-        # None means nothing has ended it, which is what `completed` is.
-        self._outcome: ReplyOutcome | None = None
         # The language the ASR provider asked this session to reuse
         # (`AsrResult.lock_language`). Session-scoped on purpose: the
         # provider is shared between sessions and holds no per-session
@@ -638,7 +626,13 @@ class PipelineRuntime:
         # runtime's methods and nothing else, so the reply task and the
         # conversation history stay on this side of the seam.
         self._turntaking = TurnTaking(events, output, self._server, self)
-        self._reply_task: asyncio.Task[None] | None = None
+        # The reply `start_reply` last started: its task, how it ended
+        # and the utterance it answers, in one value made per reply
+        # ([reply_in_flight.py](reply_in_flight.py)). None until the
+        # first utterance, and again once a cancel has seen its reply
+        # through; a reply that finished on its own stays here, done,
+        # until the next one replaces it.
+        self._in_flight: ReplyInFlight | None = None
         # This world's cached speech, bound at construction: this turn's
         # latency mask if any agent this device is bound to has one, and
         # the phrase a failed reply says. It reads the floor with two
@@ -709,7 +703,7 @@ class PipelineRuntime:
         # here: the reply task is created on the first utterance, and
         # discovery belongs to the edge.
         self._activate_agent(self._agents[0])
-        self._turn = self._fresh_turn()
+        self._turn = self._fresh_turn(None)
         # A server that was down at boot, or that dropped since, gets a
         # background reconnect now, so it is picked up by the time this
         # conversation needs it rather than at the next server restart.
@@ -838,8 +832,9 @@ class PipelineRuntime:
         """
         return self.conversations.history()
 
-    def _fresh_turn(self) -> TurnUnderway:
-        """A turn beginning, stamped with the pair that owns it.
+    def _fresh_turn(self, utterance: str | None) -> TurnUnderway:
+        """A turn beginning, stamped with the pair that owns it and the
+        utterance it answers.
 
         The one place that pair is read off the runtime. Everything
         after it reads the snapshot, which is what keeps a handover turn
@@ -851,13 +846,15 @@ class PipelineRuntime:
         beginning without either is a defect here and not a row for the
         store to make sense of.
 
-        The utterance beside them is not asserted, because the turn
-        installed at that first activation precedes every utterance.
-        That turn records nothing, since `record` answers None where
-        nothing was heard, so the absence never reaches a row.
+        The utterance is handed in rather than read, because it belongs
+        to the reply rather than to the runtime, and it is not asserted:
+        the turn installed at that first activation precedes every
+        utterance, and a reply body driven without `start_reply` answers
+        none. The first records nothing, since `record` answers None
+        where nothing was heard, so the absence never reaches a row.
         """
         assert self._conversation is not None and self._agent is not None
-        return TurnUnderway(self._conversation, self._agent, self._utterance)
+        return TurnUnderway(self._conversation, self._agent, utterance)
 
     def _seeded_turn(self) -> TurnUnderway:
         """The first turn of the thread a reply has just moved onto.
@@ -871,9 +868,11 @@ class PipelineRuntime:
 
         Stamped after the rebinding and never before it: the pair this
         reads is the one the move installed, which is the whole reason
-        the record it produces lands on the other thread.
+        the record it produces lands on the other thread. The utterance
+        is the departing turn's, which is what makes the two rows a
+        moved reply records say they answer one thing the user said.
         """
-        turn = self._fresh_turn()
+        turn = self._fresh_turn(self._turn.utterance)
         turn.at = self._events.now()
         return turn
 
@@ -921,19 +920,15 @@ class PipelineRuntime:
         """Whether a reply is streaming right now, which is what both
         halves of the barge-in decision turn on, and what the edge's own
         jobs (the barge-in-off frame guard, the idle watchdog) ask."""
-        return self._reply_task is not None and not self._reply_task.done()
+        return self._in_flight is not None and self._in_flight.running()
 
     async def drain(self, grace_s: float) -> bool:
         """Let a reply in flight finish, whether it is already speaking
         or still generating, and answer whether it did within
-        `grace_s`. Never cancels it."""
-        reply = self._reply_task
-        if reply is None or reply.done():
-            return True
-        # asyncio.wait rather than await: a reply that failed is a reply
-        # that finished, and its exception is not this method's to raise.
-        done, _ = await asyncio.wait([reply], timeout=grace_s)
-        return bool(done)
+        `grace_s`. Never cancels it, and counts a failed reply as a
+        finished one."""
+        reply = self._in_flight
+        return True if reply is None else await reply.drain(grace_s)
 
     async def close(self) -> None:
         """The conversation is over.
@@ -1055,11 +1050,17 @@ class PipelineRuntime:
             )
         )
 
-    async def _reply(self, utterance: Utterance) -> None:
+    async def _reply(self, utterance: Utterance, reply: ReplyInFlight) -> None:
         """Run one utterance through ASR, the LLM, and TTS. Cancelled by
         `abort`; provider failures end the reply but not the session. The
         closing `tts stop` is sent even then, because the device (in auto
         mode) waits for it before listening again.
+
+        `reply` is the value this body runs as, and it is what every
+        outcome below is latched on and what the `finally` reads: handed
+        in rather than read off the runtime, so the body never depends
+        on which reply is current, and the utterance it answers comes
+        with it.
 
         `utterance.transcript` is a transcription that already exists: a
         confirmed barge-in ran ASR to decide the cancel, and reusing its
@@ -1081,7 +1082,7 @@ class PipelineRuntime:
         spoken: list[str] = []
         self._output.reply_started()
         heard_s = round(len(pcm) / 2 / PIPELINE_SAMPLE_RATE, 2)
-        self._turn = self._fresh_turn()
+        self._turn = self._fresh_turn(reply.utterance)
         # Whether this turn owes the user a spoken failure notice.
         # Recorded in the arm below and said outside it, which is the
         # whole of why the body is nested: inside the arm the
@@ -1218,7 +1219,7 @@ class PipelineRuntime:
                     # answer. No text field on it at all, which the type
                     # is what guarantees; a transcription that FAILED is
                     # `provider_failed` and never this.
-                    self._latch(ReplyOutcome.NOTHING_HEARD)
+                    reply.latch(ReplyOutcome.NOTHING_HEARD)
                     self._events.emit(
                         lambda: NothingHeard(
                             agent=Identifier(self._agent),
@@ -1245,7 +1246,7 @@ class PipelineRuntime:
                 # Latched, because this arm RETURNS: an unlatched exit
                 # means the reply finished, and a device that vanished
                 # mid-sentence did not.
-                self._latch(ReplyOutcome.DEVICE_GONE)
+                reply.latch(ReplyOutcome.DEVICE_GONE)
                 return
             except asyncio.CancelledError:
                 # A barge-in or an abort is cancelling this reply, and the
@@ -1271,7 +1272,7 @@ class PipelineRuntime:
                 # is where the outcome is written down: the arm that
                 # catches it is the arm that knows the exception's kind,
                 # and nothing downstream has to read a message to guess.
-                self._latch(ReplyOutcome.FAILED)
+                reply.latch(ReplyOutcome.FAILED)
                 logger.error(
                     "session %s: reply failed: %s", self.session_id, type(exc).__name__
                 )
@@ -1319,7 +1320,7 @@ class PipelineRuntime:
             # barge-in from a shutdown, and every canceller has already
             # said which it is. Nothing latched means nothing ended this
             # reply, which is what `completed` is.
-            outcome = self._outcome or ReplyOutcome.COMPLETED
+            outcome = reply.outcome or ReplyOutcome.COMPLETED
             self._events.emit(
                 lambda: ReplyFinished(
                     agent=Identifier(self._agent),
@@ -1490,20 +1491,19 @@ class PipelineRuntime:
         latch counts: two agents cannot ping-pong, and a model cannot
         resume its way through a user's history inside one answer.
 
-        The two reply-wide facts are reset and read here, and they are
-        here rather than derived from `spoken` because `spoken` is
-        cleared at every leg: a reply where an earlier agent spoke and
-        the final leg was wholly withheld would read as empty from it,
-        and the user would be told the reply said nothing when they had
-        just heard most of it."""
+        The pass begins here, and so does the value that holds what it
+        counts: the rounds, and the two reply-wide facts the empty-reply
+        check reads. Those two are kept rather than derived from
+        `spoken` because `spoken` is cleared at every leg: a reply where
+        an earlier agent spoke and the final leg was wholly withheld
+        would read as empty from it, and the user would be told the
+        reply said nothing when they had just heard most of it."""
         switches_left = 1
-        self._llm_round = 0
-        self._reply_spoke = False
-        self._reply_withheld = False
+        self._pass = SpeakingPass()
         while True:
             transition = await self._tool_loop(spoken, switches_left)
             if transition is None:
-                self._reply_spoke = self._reply_spoke or bool(spoken)
+                self._pass.spoke = self._pass.spoke or bool(spoken)
                 await self._nothing_sayable()
                 return
             if transition.recap is not None:
@@ -1534,7 +1534,7 @@ class PipelineRuntime:
                 )
                 # Before the clear, which is the whole reason the fact
                 # is kept here at all.
-                self._reply_spoke = True
+                self._pass.spoke = True
                 spoken.clear()
             # Closed whether or not this agent spoke: a leg that only
             # asked for the move still spent tokens, and the leg is the
@@ -1600,7 +1600,7 @@ class PipelineRuntime:
         turn instead of the notice; the `finally` in `_reply` settles
         again, idempotently, and still owns the closing `tts stop`.
         """
-        if self._reply_spoke or not self._reply_withheld:
+        if self._pass.spoke or not self._pass.withheld:
             return
         await self._filler.settle()
         await self._filler.speak_fallback(FallbackReason.NOTHING_SAYABLE)
@@ -1710,7 +1710,7 @@ class PipelineRuntime:
             began = loop.time()
             first_token_at: float | None = None
             usage: Usage | None = None
-            self._llm_round += 1
+            self._pass.round += 1
             invocation = uuid.uuid4().hex
             # Resolved before the request is built, and per round rather
             # than per reply, because that is the memory block's clock.
@@ -1738,7 +1738,7 @@ class PipelineRuntime:
                     providers.llm,
                     functools.partial(providers.llm.stream, system, working, offer.tools, choice),
                     invocation=invocation,
-                    round_=self._llm_round,
+                    round_=self._pass.round,
                 ):
                     if self._llm_input is not None:
                         self._llm_input.observe(invocation, event)
@@ -1773,7 +1773,7 @@ class PipelineRuntime:
                 slots = self._tools.reserve(self._turn, calls)
                 self._watch.reply_round_done(
                     self._turn,
-                    self._llm_round,
+                    self._pass.round,
                     providers.llm,
                     working,
                     began,
@@ -2395,7 +2395,7 @@ class PipelineRuntime:
         """
         if not self._tools.withheld(sentence, offer):
             return False
-        self._reply_withheld = True
+        self._pass.withheld = True
         return True
 
     async def _speak_after(
@@ -2536,8 +2536,8 @@ class PipelineRuntime:
     def start_reply(self, utterance: Utterance) -> None:
         """Answer this utterance, from now on.
 
-        The task is created here rather than on the turn-taking side so
-        that `_reply_task`, `replying` and `drain` stay one object's
+        The reply is made here rather than on the turn-taking side so
+        that `_in_flight`, `replying` and `drain` stay one object's
         business: the reply in flight is what the edge's own jobs ask
         about, and a second owner of the field would be a second answer
         to the same question.
@@ -2552,30 +2552,26 @@ class PipelineRuntime:
         is timed from the speech rather than from the confirmation that
         took it seriously.
         """
-        # Cleared here rather than in the reply body, and the difference
-        # is a real window: a cancel latches on the reply it cancelled
-        # and waits it out, so the reply ending is over by the time this
-        # line runs, while a body that cleared its own latch would clear
-        # it whenever the loop got round to starting the task.
-        self._outcome = None
-        # Minted here because here is where the turn begins, and read by
-        # `_fresh_turn` below rather than passed down: the reply task is
-        # created after this emit, so the id has to be somewhere the turn
-        # it opens can find it. It outlives a handover on purpose, which
-        # is what makes the two rows a moved reply records say they
-        # answer one utterance.
-        self._utterance = uuid.uuid4().hex
+        # Minted here because here is where the turn begins, and nowhere
+        # else: a reply this method did not start answers no utterance.
+        # It travels on the value, which the body is handed, so the turn
+        # it opens is stamped with it; and it outlives a handover on
+        # purpose, which is what makes the two rows a moved reply records
+        # say they answer one utterance. The value's latch is fresh
+        # because the value is.
+        reply = ReplyInFlight(uuid.uuid4().hex)
         self._events.emit(
             lambda: TurnStarted(
                 agent=Identifier(self._agent),
                 conversation=ConversationId(self._conversation),
-                utterance=UtteranceId(self._utterance),
+                utterance=UtteranceId(reply.utterance),
                 speech_ms=Whole(utterance.speech_ms),
                 barge_in=Flag(utterance.barge_in),
             ),
             at=utterance.ended_at,
         )
-        self._reply_task = asyncio.create_task(self._reply(utterance))
+        self._in_flight = reply
+        reply.start(self._reply(utterance, reply))
 
     async def cancel_reply(self, outcome: ReplyOutcome) -> None:
         """Cancel a reply in flight and see the cancellation through.
@@ -2584,29 +2580,21 @@ class PipelineRuntime:
 
         `outcome` is what this canceller is: a barge-in, a device that
         gave up, a session closing. It is taken as an argument rather
-        than inferred because `CancelledError` cannot tell those apart,
-        and it is latched before the cancel rather than after, so the
-        reply's own `finally` finds it already there however promptly
-        the cancellation lands.
+        than inferred because `CancelledError` cannot tell those apart;
+        how it is latched and the cancellation seen through is the
+        value's (`ReplyInFlight.cancel`).
+
+        The handle is let go only if it is still the reply this call
+        cancelled. A reply started while the cancel was awaited is the
+        reply in flight now, and clearing the field after the await
+        would drop the one handle anything has on it.
         """
-        if self._reply_task is None:
+        reply = self._in_flight
+        if reply is None:
             return
-        self._latch(outcome)
-        self._reply_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await self._reply_task
-        self._reply_task = None
-
-    def _latch(self, outcome: ReplyOutcome) -> None:
-        """Write down how the reply now running ended, once.
-
-        First writer wins, and that is the precedence rule whole: what
-        ended a reply is whatever acted first, and everything after it
-        is consequence. A barge-in that cancels a reply already inside
-        its failure arm did not fail it.
-        """
-        if self._outcome is None:
-            self._outcome = outcome
+        await reply.cancel(outcome)
+        if self._in_flight is reply:
+            self._in_flight = None
 
     async def confirm_transcript(self, pcm: bytes) -> Confirmation:
         """Transcribe an interruption, so that the gates in front of a
