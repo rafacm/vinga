@@ -13,6 +13,7 @@ import json
 import logging
 import math
 import sys
+from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 import pytest
@@ -48,12 +49,17 @@ from tests.support.tools_mcp import Applying, reading
 from tests.support.wire import connect, say_something, sentences, shake_hands, tone_strength
 from vinga_server.app import create_app
 from vinga_server.config import Config
+from vinga_server.events import SessionEvents
 from vinga_server.memory import store as store_module
 from vinga_server.memory.store import MemoryScope, MemoryStore
-from vinga_server.providers import ToolCall, Turn
+from vinga_server.providers import ToolCall, ToolDef, Turn
+from vinga_server.runtime.tool_execution import DEFAULT_TOOL_TIMEOUT_S, ToolExecution
+from vinga_server.runtime.turns import TurnUnderway
+from vinga_server.session_conversations import SessionConversations
 from vinga_server.tools import builtin
 from vinga_server.tools.builtin import switch_agent_tool
 from vinga_server.tools.mcp import McpServers
+from vinga_server.tools.source import DeviceTools, McpTools, ToolSource
 
 
 async def test_a_reply_with_no_tool_calls_is_one_round() -> None:
@@ -980,6 +986,27 @@ def shadowing_config(*, inner: bool) -> Config:
     )
 
 
+def executing_over(
+    *sources: ToolSource,
+    device_tools: Callable[[], Sequence[ToolDef]] = lambda: (),
+    owner_of: Callable[[str], str | None] = lambda _: None,
+) -> tuple[ToolExecution, TurnUnderway]:
+    """Tool execution over these sources, for a poet talking on a thread
+    of its own, and a turn to file its calls on: what a session builds
+    around its reply, without the session."""
+    conversations = SessionConversations(POET_MAC)
+    active = conversations.activate("poet")
+    execution = ToolExecution(
+        sources,
+        device_tools,
+        owner_of,
+        SessionEvents("executing"),
+        conversations,
+        lambda: True,
+    )
+    return execution, TurnUnderway(active.conversation, active.agent, None)
+
+
 async def test_a_name_that_changes_owner_between_calls_is_refused_not_rerouted(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -992,22 +1019,25 @@ async def test_a_name_that_changes_owner_between_calls_is_refused_not_rerouted(
     call is refused: the registry is told which entry the caller meant
     and answers that the name is no longer served by it. The window is
     driven directly, because it is the window and nothing about the
-    surrounding loop is under test."""
+    surrounding loop is under test.
+
+    Driven through tool execution's own verbs, over the MCP source a
+    session would build over this registry: the window is between a
+    reservation and the run it routes by, and it is only a window
+    because a reload lands inside it. A reply driven around it would put
+    a model round, a synthesis and a device send between the two, so the
+    reload would have to be timed into a gap the test does not control,
+    and what is under test is the routing rather than any of that."""
     name = "home__inside__secret_word"
     servers = McpServers.build(shadowing_config(inner=False))
     await servers.start_all()
-    session = session_for(base_config(), POET_MAC, mcp_servers=servers)
+    execution, turn = executing_over(
+        McpTools(servers, DEFAULT_TOOL_TIMEOUT_S), owner_of=servers.owner_of
+    )
     try:
         assert servers.owner_of(name) == "home"
-        # White-box for the four reads in this test, per the docstring:
-        # the window is between a reservation and the dispatch it routes
-        # by, and it is only a window because a reload lands inside it.
-        # A reply driven around it would put a model round, a synthesis
-        # and a device send between the two, so the reload would have to
-        # be timed into a gap the test does not control, and what is
-        # under test is the routing rather than any of that.
-        (slot,) = session.runtime._reserve_tools([call(name)])
-        assert session.runtime._turn.reserved(slot).entry == "home"
+        (slot,) = execution.reserve(turn, [call(name)])
+        assert turn.reserved(slot).entry == "home"
 
         await Applying(servers, shadowing_config(inner=False)).apply(
             reading(shadowing_config(inner=True))
@@ -1018,7 +1048,7 @@ async def test_a_name_that_changes_owner_between_calls_is_refused_not_rerouted(
         assert servers.owner_of(name) == "home__inside"
 
         with caplog.at_level("INFO"):
-            result = await session.runtime._run_one(call(name), slot)
+            (result,) = await execution.run(turn, [(slot, call(name))])
     finally:
         await servers.stop_all()
 
@@ -1031,8 +1061,7 @@ async def test_a_name_that_changes_owner_between_calls_is_refused_not_rerouted(
         record for record in caplog.records if getattr(record, "event", None) == "tool_call"
     ]
     assert (logged.source, logged.entry, logged.is_error) == ("mcp", "home", True)
-    # White-box, per the note at the reservation above.
-    executed = session.runtime._turn.reserved(slot)
+    executed = turn.reserved(slot)
     assert (executed.source, executed.entry, executed.is_error) == ("mcp", "home", True)
     assert executed.duration_ms is not None
 
@@ -1119,6 +1148,12 @@ async def test_a_hello_without_mcp_gets_no_device_tool_client() -> None:
     assert sentences(texts) == ["POET heard hello."]
 
 
+# How long the entry below may take per call: short, so waiting one out
+# costs a second, and far under the module default, so a result timed
+# out at this bound could not have been bounded by the default.
+ENTRY_TIMEOUT_S = 1.0
+
+
 async def test_a_tool_of_an_entry_whose_name_holds_the_separator_is_dispatched() -> None:
     """The session's own routing, on the name shape that used to break
     it: `home__inside` is a legal entry name, and reading the name by
@@ -1133,7 +1168,7 @@ async def test_a_tool_of_an_entry_whose_name_holds_the_separator_is_dispatched()
                 "transport": "stdio",
                 "command": sys.executable,
                 "args": [str(STDIO_SERVER)],
-                "tool_timeout_s": 7.5,
+                "tool_timeout_s": ENTRY_TIMEOUT_S,
             }
         },
         agents={
@@ -1145,8 +1180,20 @@ async def test_a_tool_of_an_entry_whose_name_holds_the_separator_is_dispatched()
     await servers.start_all()
     script = ScriptedLlm([[call("home__inside__secret_word")], "The word is rhubarb."])
     session = session_for(base_config(), POET_MAC, {"poet": script}, mcp_servers=servers)
+    # The entry's own timeout, taken from the same reservation the
+    # dispatch routes by rather than from a second reading of the name,
+    # and observed by waiting one out: the entry's bound is short and
+    # the module default is long, so a call to a tool that stalls past
+    # both comes back timed out at the entry's bound, and could only
+    # have been bounded by the entry the reservation named.
+    execution, turn = executing_over(
+        McpTools(servers, DEFAULT_TOOL_TIMEOUT_S), owner_of=servers.owner_of
+    )
+    stalled = call("home__inside__slow_answer", seconds=10 * DEFAULT_TOOL_TIMEOUT_S)
     try:
         assert await run_reply(session, "tell me") == ["The word is rhubarb."]
+        (slot,) = execution.reserve(turn, [stalled])
+        (timed_out,) = await execution.run(turn, [(slot, stalled)])
     finally:
         await servers.stop_all()
 
@@ -1157,14 +1204,11 @@ async def test_a_tool_of_an_entry_whose_name_holds_the_separator_is_dispatched()
     ]
     assert not result.is_error
     assert result.content == "rhubarb"
-    # The entry's own timeout, taken from the same reservation the
-    # dispatch routes by rather than from a second reading of the name.
-    # White-box: how long a tool may take is read off the reservation
-    # the dispatch routes by, and nothing outside reports it. A timeout
-    # observed by waiting one out would be a seven-and-a-half second
-    # test that proves the bound fired, not which entry it came from.
-    reserved = session.runtime._classified(call("home__inside__secret_word"), 0)
-    assert session.runtime._timeout_for(reserved) == 7.5
+    assert timed_out.is_error
+    assert "did not answer in time" in timed_out.content
+    took = turn.reserved(slot).duration_ms
+    assert took is not None
+    assert ENTRY_TIMEOUT_S * 1000 <= took < DEFAULT_TOOL_TIMEOUT_S * 1000
 
 
 # The arguments the far side is handed
@@ -1455,14 +1499,19 @@ async def test_a_value_that_is_not_equal_to_itself_is_not_a_coercion(
     # is asserted as one rather than compared to anything.
     assert math.isnan(mixer_call(device)["gain"])
     assert not events(caplog, "tool_arguments_coerced")
-    # And no execution copy was made. Asked of the method directly,
-    # because it is the only way to ask: an unchanged value looks the
-    # same on the wire whether it travelled in the model's own call or
-    # in a copy of it, so the copy is invisible from outside exactly
-    # here, which is the case this test is about.
-    (slot,) = session.runtime._reserve_tools([asked])
-    schemas = {asked.name: MIXER["inputSchema"]}
-    assert session.runtime._for_execution(asked, slot, schemas) is asked
+    # And no execution copy was made. Asked of tool execution directly,
+    # over the board source a session builds on this session, because it
+    # is the only way to ask: an unchanged value looks the same on the
+    # wire whether it travelled in the model's own call or in a copy of
+    # it, so the copy is invisible from outside exactly here, which is
+    # the case this test is about.
+    execution, turn = executing_over(
+        DeviceTools(session, DEFAULT_TOOL_TIMEOUT_S), device_tools=session.device_tools
+    )
+    offer = execution.offer("poet")
+    assert offer.schemas[asked.name] == MIXER["inputSchema"]
+    (slot,) = execution.reserve(turn, [asked])
+    assert execution.for_execution(turn, asked, slot, offer) is asked
 
 
 async def test_a_mixed_call_counts_only_the_argument_that_changed(
