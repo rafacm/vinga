@@ -404,7 +404,7 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ("agent", "conversation", "device", "event", "frames", "session"),
         ),
     ),
-    "vinga_server.runtime.pipeline:PipelineRuntime._watchdog_stream #1": (
+    "vinga_server.runtime.provider_watch:ProviderWatch.reply_stream #1": (
         (
             "LlmRetry",
             (
@@ -435,7 +435,7 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
     ),
-    "vinga_server.runtime.pipeline:PipelineRuntime._llm_round_done #1": (
+    "vinga_server.runtime.provider_watch:ProviderWatch._rounded #1": (
         (
             "LlmRound",
             (
@@ -531,7 +531,7 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
     ),
-    "vinga_server.runtime.pipeline:PipelineRuntime._provider_failed #1": (
+    "vinga_server.runtime.provider_watch:ProviderWatch.failed #1": (
         (
             "ProviderFailed",
             (
