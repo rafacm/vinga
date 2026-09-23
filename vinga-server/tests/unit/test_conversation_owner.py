@@ -187,6 +187,28 @@ async def test_a_thread_nobody_wrote_to_is_not_waited_for() -> None:
     assert handle.timeouts == []
 
 
+async def test_the_wait_is_for_the_last_write_to_a_thread_and_not_an_earlier_one() -> None:
+    """A thread written twice before a resume holds two handles over its
+    life, and only the later one says the thread is complete: waiting on
+    the earlier, already settled, would read the thread back one turn
+    short while the latest turn is still queued. Both handles are open,
+    so which one was waited on is what each recorded, not how long the
+    wait took."""
+    conversations = owner()
+    conversations.activate("poet")
+    earlier = GatedHandle(lambda: 0)
+    latest = GatedHandle(lambda: 0)
+    earlier.release.set()
+    latest.release.set()
+    conversations.acknowledge(GALAXY, cast(Any, earlier))
+    conversations.acknowledge(GALAXY, cast(Any, latest))
+
+    await asyncio.wait_for(conversations.settled(GALAXY), TIMEOUT_S)
+
+    assert earlier.timeouts == []
+    assert latest.timeouts == [RESUME_ACKNOWLEDGEMENT_S]
+
+
 async def test_the_wait_for_a_written_thread_is_bounded_and_off_the_loop() -> None:
     """The handle blocks, so waiting on it on the loop would stall every
     other conversation this process holds. A heartbeat on the loop is
