@@ -502,10 +502,17 @@ class SpeakingPass:
   run once each (straight-line logic); the concurrency of the ordered
   phase is not a new claim and gets no new mutation.
 - **No-leak.** Nothing new reaches a retained surface: the moved
-  sentences and events are the same ones. The existing sentinel tests
-  (`test_event_surface_pins.py` L386's exception-text rule for
-  `_run_one`, and the `provider_failed` class-name-only rule) are the
-  pins, and their identity strings follow the rename.
+  sentences and events are the same ones. Two existing sentinel tests
+  are the pins and stay green unmodified in their assertions: for M1,
+  `test_session_tools.py` L157,
+  `test_a_tool_exception_exports_only_its_class`, which plants a
+  credential-shaped exception message in a tool and holds it out of the
+  `tool_call` event's structured fields and both log renderings, and
+  which is the one test that drives the exception arm `_run_one` moves
+  with; for M2, `test_event_surface_pins.py` L437,
+  `test_a_failing_providers_own_words_reach_no_record`, the
+  provider-failure class-name-only rule. If either has to change beyond
+  a name the move renamed, that is a finding for the PR, not an edit.
 
 ## Risks and mitigations
 
@@ -647,3 +654,11 @@ Verdict: ready after the P2 amendments.
    require the move to preserve the former with its sentinel checks
    against structured fields and both log renderings, and keep the
    latter for M2.
+
+   *Resolution:* accepted; the citation was wrong. The Tests section's
+   no-leak item now names `test_a_tool_exception_exports_only_its_class`
+   (`test_session_tools.py` L157) as M1's pin, with its sentinel checks
+   over structured fields and both log renderings, and
+   `test_a_failing_providers_own_words_reach_no_record`
+   (`test_event_surface_pins.py` L437) as M2's, both required to stay
+   green with their assertions unmodified.
