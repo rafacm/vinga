@@ -608,8 +608,12 @@ the move: removing the three resets at the top of `_speak_reply` fails
 the round pin and both withheld pins; latching `barged_in` in `close()`
 fails the outcome pin while the set test stays green; minting an
 utterance in `_fresh_turn` fails the record pin. The four pins pass
-after the move with `git diff 346fe3d6 HEAD` showing no change to
-them. No pin adds a reach-in.
+after the move unchanged: from the commit titled "Pin what the reply
+in flight says before it moves" to the branch tip, the four files it
+touched receive additions only (zero removed lines), and the one
+addition is the separate cancel pin in `test_turn_lifecycle.py`. The
+commit is named by title rather than hash because the rebase merge
+rewrites hashes. No pin adds a reach-in.
 
 ### The values' own tests, and the mutations
 
@@ -1137,8 +1141,9 @@ sentence or timing bound changed, so no `changelog.d/` fragment.
 
 ### Verification
 
-Run on the tree after the rebase onto M1, at `8758fa93` plus this
-section, on this machine:
+Run on the tree after the rebase onto M1, at the commit titled "Say
+where the reply's lifetimes went in the docstring" plus this section,
+on this machine:
 
 - [x] `uv run ruff check .`: all checks passed.
 - [x] `uv run pytest tests/unit -q -ra -n 4 --dist loadfile`: 7,530
