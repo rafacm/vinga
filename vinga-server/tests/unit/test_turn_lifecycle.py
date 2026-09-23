@@ -35,6 +35,7 @@ which is what the exporter #66 exists for will do.
 """
 
 import asyncio
+import json
 from typing import Any, cast
 
 import pytest
@@ -624,6 +625,68 @@ async def test_a_cancellation_inside_the_filler_settle_reports_once() -> None:
     [(missing_session, utterance)] = transcripts.missing
     assert missing_session == session.session_id
     assert utterance
+
+
+# --- a cancel lets go of its own reply and nothing else ----------------
+
+
+class HoldsTheFirstStop:
+    """A device whose first `tts stop` cannot leave until it is let.
+
+    The stop is the last thing a reply's `finally` sends, so holding it
+    holds a cancelled reply at the very end of its life, which is where
+    the canceller is still waiting for it."""
+
+    def __init__(self) -> None:
+        self.stops = 0
+        self.stopping = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def send_text(self, text: str) -> None:
+        if json.loads(text).get("state") != "stop":
+            return
+        self.stops += 1
+        if self.stops == 1:
+            self.stopping.set()
+            await self.release.wait()
+
+    async def send_bytes(self, data: bytes) -> None:
+        return None
+
+
+async def test_a_reply_started_while_a_cancel_waits_stays_the_reply_in_flight() -> None:
+    """A cancel lets go of the reply it cancelled and of nothing else.
+
+    No path in a served session starts a reply while a cancel is still
+    waiting one out: the floor starts and cancels on one task, in turn.
+    What a cancel may clear is still worth holding, because the answer
+    used to be "whatever is there once the wait is over", and a reply
+    started in that wait would have been running with nothing left
+    holding it: not cancellable, not drained, and not what `replying()`
+    answers about.
+    """
+    device = HoldsTheFirstStop()
+    session = talking(
+        {"poet": cast(Any, StallingLlm([5.0]))}, websocket=cast(Any, device)
+    )
+    tap = watching(session)
+    start_reply(session, UTTERANCE)
+    await asyncio.sleep(0.05)
+
+    cancelling = asyncio.create_task(
+        session.runtime.cancel_reply(ReplyOutcome.BARGED_IN)
+    )
+    await asyncio.wait_for(device.stopping.wait(), timeout=5.0)
+    start_reply(session, UTTERANCE)
+    started = reply_in_flight(session)
+    device.release.set()
+    await cancelling
+
+    assert reply_in_flight(session) is started
+    assert session.runtime.replying()
+    await session.runtime.cancel_reply(ReplyOutcome.ABORTED)
+    assert outcomes(tap) == ["barged_in", "aborted"]
+    assert reply_in_flight(session) is None
 
 
 # --- the window that is never opened -----------------------------------
