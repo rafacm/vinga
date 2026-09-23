@@ -134,7 +134,7 @@ class SessionConversations:
     def reactivate(self, conversation: str, history: Sequence[Turn]) -> None
     def acknowledge(self, conversation: str, handle: Acknowledgement) -> None
     async def settled(self, conversation: str) -> None
-    def threads(self) -> tuple[str, ...]
+    def current_threads(self) -> tuple[str, ...]
 ```
 
 - `activate` is the handover and the connect: the agent's thread in
@@ -165,8 +165,12 @@ class SessionConversations:
   sits between the two by necessity. What the owner does give is one
   home for both halves of the rule, which today are 1,000 lines apart
   in `pipeline.py`.
-- `threads()` answers the close path's purge (`pipeline.py` line
-  1125), which today reads `self._conversations.values()`.
+- `current_threads()` answers the close path's purge (`pipeline.py`
+  line 1125), which today reads `self._conversations.values()`: each
+  agent's CURRENT thread, not every thread the session touched. The
+  name says so, and a test pins that a thread replaced by `start_new`
+  or `reactivate` is excluded. Whether the purge should reach replaced
+  threads is a behavior question and not this issue's.
 - `device` is the session identity half of the issue title. See the
   next decision.
 
@@ -265,8 +269,8 @@ writer and one truth.
   land there; `settled` returns immediately for an unacknowledged
   thread and waits on the handle with `RESUME_ACKNOWLEDGEMENT_S` for an
   acknowledged one (a recording fake handle, which pins the timeout
-  value as the default-construction policy); `threads()` lists every
-  thread minted or installed. No storage: the module takes none, and
+  value as the default-construction policy); `current_threads()` lists each
+  agent's current thread and excludes one a move replaced. No storage: the module takes none, and
   a test needing a database here is a design defect.
 - **Pins before each move**, committed green first and byte-unchanged
   after. The existing suites already drive the transitions end to end
@@ -388,6 +392,8 @@ Reviewed 2026-09-23 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.0, 
 ---
 
 1. **P1: `threads()` changes shutdown behavior by purging historical threads.** Evidence: the plan says `threads()` lists “every thread minted or installed” (`Tests`, lines 231-242), but today `PipelineRuntime.close()` purges only `self._conversations.values()`, the current thread for each agent (`runtime/pipeline.py:1123-1125`). `start_new` and `reactivate` replace that per-agent value (`runtime/pipeline.py:2083-2090`). Returning every historical thread would delete additional memory rows when recording is disabled, contradicting the behavior-preserving and “no stored row changes” claims. The plan should define this as `current_threads()` returning exactly `tuple(current_by_agent.values())`, with a test proving a replaced thread is excluded. Purging all touched threads belongs in a separate behavior-change issue.
+
+   *Resolution:* Accepted. Renamed `current_threads()`, defined as each agent's current thread, with a test that a replaced thread is excluded. Measured while resolving: the divergence is not reachable today, since the purge is wired only where nothing is recorded (`bespoke_runtime_factory` passes `memory.purge_threads` only when `conversations is None`) and the thread reads that enable `start_new`/`reactivate` exist only when something is (`app.py` line 635). The two sets are therefore equal on every deployment that purges, and the rename keeps them so by definition rather than by that coincidence.
 
 2. **P1: The proposed MAC placement still has multiple authorities.** Evidence: the plan stores the MAC in `SessionConversations.device`, a new edge `_mac` field, and `SessionEvents.device` (`The device MAC`, lines 149-169). The issue explicitly rejects duplicated identity state. The rationale that rejection events occur before an owner can exist is false: normalization completes at `device/session.py:433`, while agent rejection occurs at `device/session.py:478-491`, and the proposed owner constructor needs only the normalized device. The plan should construct the owner immediately after successful normalization, use `owner.device` for subsequent edge work and the factory, avoid a persistent edge `_mac` copy, and make the event value a write-once observability snapshot. The invalid-Device-Id path can continue emitting with no owner and no device.
 
