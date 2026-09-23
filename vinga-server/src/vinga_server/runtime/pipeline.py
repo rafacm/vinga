@@ -355,7 +355,7 @@ class PipelineRuntime:
     no codec. Built by `bespoke_runtime_factory` below, which is what
     the composition root hands the device edge.
 
-    Three of the things it used to do are now modules of their own. Who
+    Four of the things it used to do are now modules of their own. Who
     holds the floor is `TurnTaking` ([turntaking.py](turntaking.py)),
     which reaches back into four of this class's methods and nothing
     else; this world's cached speech is `FillerRunner`
@@ -368,8 +368,18 @@ class PipelineRuntime:
     handed the turn it files on at every call and asks this class two
     questions through callables, the memory policy and who owns a tool
     name now, and writes nothing of this class's but that turn. What
-    stays here is the orchestration: the reply task, the conversation
-    history, the tool loop and its moves, and agent handover.
+    stays here is the orchestration: the reply in flight, the
+    conversation history, the tool loop and its moves, and agent
+    handover.
+
+    Two of a reply's three lifetimes are values rather than fields
+    ([reply_in_flight.py](reply_in_flight.py)), each made where its
+    lifetime begins so that being fresh is what making one means: a
+    `ReplyInFlight` per started reply, holding its task, how it ended
+    and the utterance it answers, and a `SpeakingPass` per pass of the
+    speaking loop, holding the round count and whether anything was
+    spoken or withheld. The third, the memory permission per agent leg,
+    is `_remembering` below.
 
     The runner owns two verbs and this class uses both: the reply path
     arms the latency mask at the transcription and settles it at the
@@ -380,17 +390,25 @@ class PipelineRuntime:
     world's cache and the output handle, both of which are the runner's
     already, so a failed turn speaks without this class learning
     anything new to remember (#384). Deciding whether the second arm
-    fires does, and it is the pair of reply-wide facts below, because
-    the question is about the whole reply and nothing the runner holds
-    can see one (#385).
+    fires does, and it is the speaking pass's pair of reply-wide facts,
+    because the question is about the whole reply and nothing the
+    runner holds can see one (#385).
 
     The mutable state that crosses those responsibilities, listed
-    because it is what a reader has to hold in mind at once (#141):
+    because it is what a reader has to hold in mind at once (#141).
+    Three entries this list used to carry are the values' now and are
+    no longer fields here: `_reply_task`, and the outcome latch and
+    utterance id beside it, are `ReplyInFlight`'s; `_llm_round`,
+    `_reply_spoke` and `_reply_withheld` are `SpeakingPass`'s.
 
-    - `_reply_task`: created by `start_reply`, read by `replying` and
-      `drain`, cleared by `cancel_reply`. The turn-taking side and the
-      device edge both ask about the reply in flight, and both ask
-      through those methods, so the field itself keeps one owner.
+    - `_in_flight`: the reply `start_reply` last started, replaced by
+      the next one, read by `replying` and `drain`, and let go by
+      `cancel_reply` only if it is still the reply that cancel ended.
+      The turn-taking side and the device edge both ask about the reply
+      in flight, and both ask through those methods, so the field
+      itself keeps one owner. The reply body is handed its value rather
+      than reading this, so which reply is current never decides what a
+      body latches or reports.
     - `_providers` and `_know_how`: written by `_activate_agent` alone,
       at connect and at a handover, and read by every leg of the reply
       that follows, `confirm_transcript` included. That one reads it
@@ -419,9 +437,14 @@ class PipelineRuntime:
       into the store, absent where the deployment did not ask for
       resumption, which is what makes both conversation tools answer a
       spoken refusal instead of moving anything.
-    - `_llm_round`: reset per reply, counted up per round, and handed
-      to the watch for its retry line and for `llm_round`, which is
-      what makes the generation after a handover a round of its own.
+    - `_pass`: the speaking pass `_speak_reply` made at its top,
+      replaced whole by the next one. The tool loop counts its rounds
+      on it and hands the watch the round for its retry line and for
+      `llm_round`; the loop's two sentence sites mark it withheld
+      through `_withheld`; `_speak_reply` marks it spoken at each
+      leg and at the end, and reads the pair to decide the fallback. A
+      field rather than a local of `_speak_reply` because the
+      withholding is decided a call away, inside the tool loop.
     - `_remembering`: whether the agent speaking may reach memory,
       written by `_tool_loop` alone where it takes the tool offer and
       read through `_remembering_now` by the builtin source's offer and
@@ -429,16 +452,6 @@ class PipelineRuntime:
       by `_system_prompt`. A field rather than an argument
       because those two readers are on two clocks, and one field is what
       makes them one answer.
-    - `_reply_spoke` and `_reply_withheld`: whether any sentence of the
-      reply now ending went out, and whether any was dropped as a leaked
-      tool call. Reset and read by `_speak_reply`, which owns the
-      question the pair answers: the two together are what says a reply
-      is about to hand the user silence it never meant to. Fields rather
-      than locals because they outlive what a leg holds: `spoken` is
-      cleared at every leg boundary, so a reply that spoke through one
-      agent and was wholly withheld on the next would read as empty from
-      it, and the withholding itself happens a call away, inside the
-      tool loop.
     - `_agent`: a read of `conversations` rather than a field, because
       both sides of the boundary attribute events to whoever is talking,
       so the device session's conversations are the one place it can

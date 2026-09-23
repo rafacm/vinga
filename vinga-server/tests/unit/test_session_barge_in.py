@@ -58,7 +58,7 @@ SLOW_REPLY = (
 
 
 def reply_task(session):
-    """The reply task in flight, named here because two of these tests
+    """The reply in flight, named here because two of these tests
     claim the gate did not replace it and `replying()` answers the same
     either way. `sessions.py` carries the justification."""
     return reply_in_flight(session)
