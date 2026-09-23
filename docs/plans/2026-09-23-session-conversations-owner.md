@@ -536,3 +536,19 @@ Reviewed 2026-09-23 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.0, 
    *Resolution:* Accepted. The expected delta is stated: one line removed, none added, because the owner is reached as a public attribute (finding 6's resolution) through public methods. Anything else is recorded as a deviation.
 
 **Verdict: ready after the P1/P2 amendments.**
+
+## Plan review round 2 (re-review of the resolutions)
+
+Reviewed 2026-09-23 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.0, read-only sandbox, runtime 4m24s, at commit e7f3f75b, plan blob 81a4d5d0.
+
+---
+
+1. **P1: The promised green commit sequence cannot supply the required owner.**
+Evidence: Plan “The factory’s new signature” says `SessionConversations` is required in `PipelineRuntime.__init__`, `build`, and the protocol, with no fallback (lines 176-205). But M1 step 3 moves the runtime to read that owner, while step 4 only later changes `DeviceSession`, `RuntimeFactory`, and `bespoke_runtime_factory` to construct and pass it (lines 467-486). Today the factory has no owner parameter and constructs `PipelineRuntime` itself (`vinga-server/src/vinga_server/runtime/pipeline.py:3529`); the edge is the only proposed constructor (`vinga-server/src/vinga_server/device/session.py:504`). Step 3 therefore either fails from a missing required argument or needs exactly the fallback/mirror the plan forbids.
+What the plan should say instead: make the runtime move and seam/edge move one atomic green commit, including factory signature, owner construction, all readers, and deletion of event-pair fields. Retain the preceding owner-module and pin commits as separate green commits.
+
+2. **P2: The write-once event snapshot has no test.**
+Evidence: The MAC decision requires `SessionEvents.identify(device)` to refuse a second call (plan lines 215-230), yet the Tests section specifies owner, transition, and await-boundary tests only (lines 308-375). Existing event tests cover an initially absent device and a single assignment, not that a later write cannot replace it (`vinga-server/tests/unit/test_event_typed_emit.py:209`, `vinga-server/tests/unit/test_event_typed_emit.py:234`). An implementation that accidentally permits a later `identify` to overwrite the event identity would satisfy the named tests.
+What the plan should say instead: add a `SessionEvents` unit test that identifies once, verifies emitted identity, attempts a second identification, verifies the defined refusal and that a subsequent emission still carries the first device. The refusal must use a fixed, value-free message if it raises.
+
+Verdict: ready after the P1/P2 amendments.
