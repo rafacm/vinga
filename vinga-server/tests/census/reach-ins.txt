@@ -169,13 +169,7 @@ tests/unit/test_session_recap.py  _offered  1
 tests/unit/test_session_recap.py  _resumption  2
 tests/unit/test_session_record.py  _device_tools  1
 tests/unit/test_session_reply_failures.py  _speak  2
-tests/unit/test_session_tools.py  _classified  1
 tests/unit/test_session_tools.py  _device_tools  4
-tests/unit/test_session_tools.py  _for_execution  1
-tests/unit/test_session_tools.py  _reserve_tools  2
-tests/unit/test_session_tools.py  _run_one  1
-tests/unit/test_session_tools.py  _timeout_for  1
-tests/unit/test_session_tools.py  _turn  2
 tests/unit/test_session_withheld.py  _device_tools  3
 tests/unit/test_session_withheld.py  _filler  1
 tests/unit/test_session_withheld.py  _mcp_servers  1
