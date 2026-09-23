@@ -535,3 +535,41 @@ Decisions inside it:
   `PipelineRuntime` loses six fields and one method. *Documentation
   footprint:* no page under `docs/`; the runtime's class docstring.
   Changelog: none. Records the #489 count.
+
+## Plan review round
+
+Reviewed 2026-09-23 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.0, read-only sandbox, runtime 15m06s, at commit 3c357043, plan blob a95baf69.
+
+Verdict: ready after the P2 amendments.
+
+1. **P2: M3 omits the migration path for reply test drivers.**
+   `ReplyInFlight.start()` exposes no way to await the task, and tests
+   bypass `start_reply`: `tests/support/sessions.py` calls
+   `_speak_reply` (`run_reply`, L584) and `_reply` (`drive_reply`,
+   L716), `test_tts_lookahead.py` L153 calls `_speak_reply`, and
+   `sessions.py` L709 and `test_session_limits.py` L221 read or replace
+   `_reply_task`. With the construction-time turn removed and all reply
+   state on the value, those paths have no in-flight state. The plan
+   also says six fields move where the source has eight (`_utterance`,
+   `_turn`, `_llm_round`, `_remembering`, `_reply_spoke`,
+   `_reply_withheld`, `_outcome`, `_reply_task`). Should name the
+   migration for each helper and test (start, await, fail, drain)
+   without test-only public runtime API, state the reach-in census
+   change, and correct the count.
+2. **P2: `timeout_for` and the proposed runtime exposure are test-only
+   public interfaces.** `_timeout_for`'s one caller is `_run_one`,
+   which moves into the module, so a public `timeout_for` and a public
+   runtime attribute for `ToolExecution` would be production surface
+   no production caller needs, against the interface-as-test-surface
+   rule. Should keep timeout selection private, keep the collaborator
+   private on the runtime, construct `ToolExecution` directly in unit
+   tests, and verify timeouts through `run`.
+3. **P2: the no-leak verification cites a test that does not exercise
+   `_run_one`'s exceptions.** `test_event_surface_pins.py` L386 covers
+   lossless coercion; the class-only exception pin is
+   `test_session_tools.py` L157,
+   `test_a_tool_exception_exports_only_its_class`, and the
+   provider-failure pin is `test_event_surface_pins.py` L437. Should
+   require the move to preserve the former with its sentinel checks
+   against structured fields and both log renderings, and keep the
+   latter for M2.
