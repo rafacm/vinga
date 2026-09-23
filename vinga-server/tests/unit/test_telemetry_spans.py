@@ -423,7 +423,7 @@ async def test_a_real_tts_failure_keeps_its_event_without_a_span_twin(
     session.websocket = cast(Any, RecordingSocket())
     events = events_of(session)
     events.attach(telemetry.session_tap())
-    open_session(events, providers={}, keep_identities=True)
+    open_session(events, providers={}, conversations=session.session_conversations)
     start_turn(events)
 
     with caplog.at_level("DEBUG"):
@@ -1656,7 +1656,6 @@ def test_a_stage_after_a_handover_carries_the_new_agent_s_providers() -> None:
 
     clock.tick(0.3)
     hand_over(events, to=OTHER_AGENT)
-    events.agent = OTHER_AGENT
     clock.tick(0.6)
     synthesize(events, stream_ms=600, agent=OTHER_AGENT)
     finish_reply(events)
@@ -1827,9 +1826,9 @@ async def test_a_rejected_confirmation_is_a_second_real_asr_operation() -> None:
     session, socket = realtime_session(CUT_IN, cast(Any, ears))
     events = events_of(session)
     events.attach(telemetry.session_tap())
-    # The session's own identities, kept: this module's fixed ones would
-    # rename the agent a running session is talking as.
-    open_session(events, providers={}, keep_identities=True)
+    # The session's own device and pair: this module's fixed ones are
+    # not the ones a running session is talking as.
+    open_session(events, providers={}, conversations=session.session_conversations)
     turn_taking(session).endpointer = ScriptedEndpointer(speech_ms=600)
 
     start_reply(session, speech_pcm(600), speech_ms=600)

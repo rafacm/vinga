@@ -78,6 +78,7 @@ from vinga_server.events.values import (
     UtteranceId,
     Whole,
 )
+from vinga_server.session_conversations import SessionConversations
 from vinga_server.telemetry import Telemetry, build_telemetry
 
 # Two ids of the shapes their value types admit, fixed so a suite can
@@ -252,11 +253,18 @@ def session_events(
     else attached: the log tap is always there, and a suite that wants
     the records reads `caplog`.
 
+    Identified with this module's device at construction, the once an
+    emitter may be: the device is a snapshot a session takes when its
+    MAC is normalized, which for a session this module stands in for is
+    the moment it exists, and a suite that opens the same emitter twice
+    is reopening one session rather than naming a second device.
+
     `session` is the one identity a caller may choose, because the
     retention the exporter keeps per session is a claim about several
     sessions at once and a fixed id could not state it.
     """
     events = SessionEvents(session, clock=clock)
+    events.identify(DEVICE)
     events.opened_at = clock()
     events.attach(telemetry.session_tap())
     return events
@@ -265,7 +273,7 @@ def session_events(
 def open_session(
     events: SessionEvents,
     providers: dict[str, Any] | None = None,
-    keep_identities: bool = False,
+    conversations: SessionConversations | None = None,
     device_name: str | None = None,
 ) -> float:
     """The session's own open. `providers` is what it says the
@@ -273,12 +281,13 @@ def open_session(
     above: an empty one is a session nothing can be asserted about, and
     the suites that are not about provider context ignore what they get.
 
-    `keep_identities` is for an emitter that belongs to a REAL session:
-    the fixed ids below are this module's, and writing them onto a
-    running session renames the agent it is talking as, which the
-    pipeline then cannot find. So a caller with a live session asks for
-    its own identities to be kept and gets a `session_open` about the
-    session it actually has.
+    `conversations` is for an emitter that belongs to a REAL session:
+    the fixed ids below are this module's, and a live session already
+    has a device, an agent talking and a thread it is talking on, all of
+    which its conversations hold. So a caller with a live session hands
+    those in and gets a `session_open` about the session it actually
+    has; without them the open names this module's device and pair, the
+    device being the one `session_events` identified the emitter with.
 
     `device_name` is what an operator called the board, and it defaults
     to the state every deployment's boards are in until somebody runs
@@ -287,13 +296,13 @@ def open_session(
     a device sent.
     """
     entries = PROVIDERS if providers is None else providers
-    if not keep_identities:
-        events.device = DEVICE
-        events.agent = AGENT
-        events.conversation = CONVERSATION
-    agent = events.agent or AGENT
-    conversation = events.conversation or CONVERSATION
-    device = events.device or DEVICE
+    if conversations is None:
+        agent, conversation, device = AGENT, CONVERSATION, DEVICE
+    else:
+        active = conversations.active
+        assert active is not None, "a live session has an agent talking"
+        agent, conversation = active.agent, active.conversation
+        device = conversations.device
     return events.emit(
         lambda: SessionOpen(
             client=ClientId("a-device-uuid"),

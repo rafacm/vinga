@@ -30,6 +30,7 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from vinga_server.events import SessionEvents
+from vinga_server.session_conversations import SessionConversations
 
 if TYPE_CHECKING:
     # The name only, for the one annotation below. `providers/__init__`
@@ -259,12 +260,27 @@ class DeviceOutput(Protocol):
 
 
 # How one conversation runtime is built for one connection: the device
-# to speak through, the session's observability, the agent names the
-# device is bound to, the world to build it from, and the device record
-# the conversation attaches to.
+# to speak through, the session's observability, the device session's
+# conversations, the agent names the device is bound to, the world to
+# build it from, and the device record the conversation attaches to.
 #
-# The record is the fifth argument for the reason the world is the
-# fourth: it is resolved once, at the connect, in the same snapshot the
+# The conversations are the third argument, beside the observability
+# and before everything else, and the edge constructs them rather than
+# the runtime. They are which thread each agent is on, every thread's
+# history, the store's handle for each thread's last write, and which
+# agent is talking now, and all of that belongs to the device session,
+# not to whichever runtime is serving it: a handover may one day cross
+# runtimes (#92), so what the conversations must outlive is the
+# runtime, and the connection is the only object with that lifetime.
+# The edge reads the same object for what it stamps about a pair it
+# never chose (`speaking_started`, the capture manifest), which is the
+# other half of why one object crosses here rather than a copy. It is
+# required: no runtime constructs one of its own, because a runtime
+# that could would be a second authority the moment a caller forgot to
+# pass the first.
+#
+# The record is the sixth argument for the reason the world is the
+# fifth: it is resolved once, at the connect, in the same snapshot the
 # binding came from, and everything the conversation later reads about
 # its device is addressed by the identity in it. A runtime that looked
 # the record up per round by the MAC it is talking to would be asking
@@ -273,7 +289,7 @@ class DeviceOutput(Protocol):
 # another device's name and place. None is a board with no record to
 # attach to, and a conversation that says nothing about its device.
 #
-# The world is the fourth argument rather than something the factory
+# The world is the fifth argument rather than something the factory
 # looks up, and that is the whole of the generational binding (#191): a
 # conversation is built from one generation, speaks through that
 # generation's engines for the rest of its life, and is reported to the
@@ -287,6 +303,13 @@ class DeviceOutput(Protocol):
 # This is the seam a second runtime plugs into, and what selection needs
 # to express is decided when there is a second one.
 RuntimeFactory = Callable[
-    [DeviceOutput, SessionEvents, Sequence[str], "Generation", "LiveDevice | None"],
+    [
+        DeviceOutput,
+        SessionEvents,
+        SessionConversations,
+        Sequence[str],
+        "Generation",
+        "LiveDevice | None",
+    ],
     SessionInput,
 ]

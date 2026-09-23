@@ -156,7 +156,6 @@ tests/unit/test_session_close_reason.py  _cleanly  1
 tests/unit/test_session_close_reason.py  _closed_reason  3
 tests/unit/test_session_close_reason.py  _latch_close  2
 tests/unit/test_session_close_reason.py  _watchdog  1
-tests/unit/test_session_conversations.py  _acknowledged  1
 tests/unit/test_session_conversations.py  _offered  1
 tests/unit/test_session_conversations.py  _resumption  1
 tests/unit/test_session_conversations.py  _speak  3

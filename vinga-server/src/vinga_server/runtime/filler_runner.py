@@ -60,6 +60,7 @@ from vinga_server.events.values import (
     Whole,
 )
 from vinga_server.filler import FallbackClip, FillerClips
+from vinga_server.session_conversations import SessionConversations
 
 if TYPE_CHECKING:
     # Named for the annotation alone: the runner never needs the floor
@@ -113,6 +114,15 @@ class FillerRunner:
     caller that is not about failure phrases and is what a world built
     before anything was synthesized holds.
 
+    `conversations` are the device session's, and what this runner
+    reads there is who is talking: the clip caches are keyed by agent,
+    and every record it writes names the agent and the thread. Read at
+    each site rather than taken once, because this runner is a task of
+    its own and a handover can land in any of its awaits; handed in
+    beside the events object rather than read off it, because the events
+    object only says things and the conversations are where the pair
+    lives.
+
     `turn` is whoever is deciding the floor, and the fire-time
     stand-down asks it two things: how much of what was fed the
     endpointer classified as speech (`speech_ms`), and whether the
@@ -125,6 +135,7 @@ class FillerRunner:
     def __init__(
         self,
         events: SessionEvents,
+        conversations: SessionConversations,
         output: DeviceOutput,
         fillers: Mapping[str, FillerClips],
         agents: Sequence[str],
@@ -133,6 +144,7 @@ class FillerRunner:
     ) -> None:
         self._events = events
         self.session_id = events.session_id
+        self._conversations = conversations
         self._output = output
         self._fillers = fillers
         self._fallbacks = fallbacks
@@ -146,6 +158,18 @@ class FillerRunner:
         self._filler_task: asyncio.Task[None] | None = None
         self._filler_sounding = False
         self._filler_fires = 0
+
+    def _agent(self) -> str | None:
+        """The agent talking at the moment of asking. A method rather
+        than a value kept, for the reason the class gives: every site
+        reads the pair standing when it runs."""
+        active = self._conversations.active
+        return None if active is None else active.agent
+
+    def _conversation(self) -> str | None:
+        """The thread that agent is on at the moment of asking."""
+        active = self._conversations.active
+        return None if active is None else active.conversation
 
     @property
     def armed(self) -> bool:
@@ -193,7 +217,7 @@ class FillerRunner:
         reachable = [self._fillers[name] for name in self._agents if name in self._fillers]
         if not reachable:
             return
-        own = self._fillers.get(self._events.agent or "")
+        own = self._fillers.get(self._agent() or "")
         delay_ms = own.delay_ms if own is not None else min(c.delay_ms for c in reachable)
         self._filler_sounding = False
         armed_at = asyncio.get_running_loop().time()
@@ -239,8 +263,8 @@ class FillerRunner:
         if speech_ms > 0:
             self._events.emit(
                 lambda: FillerSkippedForSpeech(
-                    agent=Identifier(self._events.agent),
-                    conversation=ConversationId(self._events.conversation),
+                    agent=Identifier(self._agent()),
+                    conversation=ConversationId(self._conversation()),
                     speech_ms=Whole(speech_ms),
                 )
             )
@@ -248,12 +272,12 @@ class FillerRunner:
         if self._turn.output_paused:
             self._events.emit(
                 lambda: FillerSkippedForBargeIn(
-                    agent=Identifier(self._events.agent),
-                    conversation=ConversationId(self._events.conversation),
+                    agent=Identifier(self._agent()),
+                    conversation=ConversationId(self._conversation()),
                 )
             )
             return
-        clips = self._fillers.get(self._events.agent or "")
+        clips = self._fillers.get(self._agent() or "")
         if clips is None:
             return
         # Claimed synchronously between the checks above and the first
@@ -265,8 +289,8 @@ class FillerRunner:
         elapsed_ms = round((asyncio.get_running_loop().time() - armed_at) * 1000)
         self._events.emit(
             lambda: FillerPlayed(
-                agent=Identifier(self._events.agent),
-                conversation=ConversationId(self._events.conversation),
+                agent=Identifier(self._agent()),
+                conversation=ConversationId(self._conversation()),
                 delay_ms=Whole(elapsed_ms),
                 phrase_index=Count(index),
             )
@@ -448,7 +472,7 @@ class FillerRunner:
         a cancellation that lands after the display send still leaves
         the fact that the user saw it.
         """
-        cached = self._fallbacks.get(self._events.agent or "")
+        cached = self._fallbacks.get(self._agent() or "")
         if cached is None:
             return
         shown = False
@@ -490,8 +514,8 @@ class FillerRunner:
                 self._events.emit(
                     lambda: _fallback_record(
                         reason,
-                        self._events.agent,
-                        self._events.conversation,
+                        self._agent(),
+                        self._conversation(),
                         played,
                     )
                 )

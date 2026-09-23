@@ -10,10 +10,11 @@ the server calls, and substitutes collaborators through the arguments
 that factory already takes, rather than reaching past it.
 
 The reading is the second part. What a session did is asked of the
-things that received it: the agent talking is read off the events
-object, where both sides of the boundary read it, and the conversation
-it kept is read from the round after, because the history exists so
-that the next round is written against what was said.
+things that received it: the agent talking is read off the device
+session's conversations, where both sides of the boundary read it, and
+the conversation it kept is read from the round after, because the
+history exists so that the next round is written against what was
+said.
 
 Who holds the floor is the third, and the only part of this module that
 is white-box throughout. Its note says why once, for all four of its
@@ -219,17 +220,19 @@ def device_session(
     # off the handshake before anything else can happen, resolves the
     # binding, keeps the agents, captures the world it is going to build
     # from, and calls the factory with the session, the session's events
-    # object, those agents and that world. The MAC is first there and
-    # first here, normalized as the edge normalizes it, which is what
-    # makes a session built by this one that knows which device it is on:
-    # memory's device scope is addressed by it, every event carries it,
-    # and a served session has always had one. Nothing public does that half,
+    # object, its conversations, those agents and that world. The MAC is
+    # first there and first here, normalized as the edge normalizes it,
+    # and writing it is what constructs the device session's
+    # conversations, which is what makes a session built by this one
+    # that knows which device it is on: memory's device scope is
+    # addressed by it, every event carries it, and a served session has
+    # always had one. Nothing public does that half,
     # because the only caller that ever needs to is the edge itself, and
     # reaching it through `run` means a socket, a hello and a live task,
     # which is `open_session` below and a different test. What cannot be
     # established any other way is that a session built here is wired
     # exactly as a served one: the runtime holds the session as its
-    # device, both sides attribute their events to the same object, and
+    # device, both sides read who is talking off the same object, and
     # the world the runtime speaks through is the one the session says
     # it is holding.
     session._mac = normalize_mac(mac)
@@ -243,6 +246,7 @@ def device_session(
     session.runtime = factory(
         session,
         session._events,
+        session.session_conversations,
         session._agents,
         session._generation,
         view.attachment_for(session._mac).record,
@@ -369,16 +373,19 @@ def stamp_with(session: DeviceSession, clock: Any) -> None:
 
 
 def with_device(session: DeviceSession, mac: str) -> DeviceSession:
-    """The MAC the handshake would have read off the Device-Id header.
+    """Which device a session built below the websocket is on, stated
+    by the suite and checked against the one it was built for.
 
-    White-box, and the same construction `device_session` explains: a
-    session built below the websocket never ran `run`, which is where a
-    device identity is read and normalized. Every event and every stored
-    turn carries the device it is about, so a suite about either has to
-    say which device this was, and there is no other way to say it
-    without a socket and a handshake.
+    Every event and every stored turn carries the device it is about, so
+    a suite about either says which device this was. It used to write
+    the MAC here; `device_session` writes it now, the way `run` does,
+    and writing it is what constructs the device session's
+    conversations, which is a thing that happens once. So this is a
+    check, white-box in the read, and a suite that names a device the
+    session was not built for fails here rather than asserting against
+    the wrong one.
     """
-    session._mac = mac
+    assert session._mac == normalize_mac(mac), "the session was built for another device"
     return session
 
 
@@ -604,23 +611,27 @@ async def run_reply(session: DeviceSession, said: str) -> list[str]:
 
 def talking(session: DeviceSession) -> str | None:
     """The agent talking right now, read where both sides of the
-    boundary read it. The events object is where the active agent
-    lives, because every event either side emits is attributed to it,
-    and `agent` on it is public."""
-    return events_of(session).agent
+    boundary read it: the device session's conversations, which the
+    edge constructed and the runtime moves, and whose `active` is
+    public."""
+    conversations = session.session_conversations
+    active = None if conversations is None else conversations.active
+    return None if active is None else active.agent
 
 
 def talking_thread(session: DeviceSession) -> str | None:
     """The conversation that agent is talking on, read in the same
     place and public for the same reason: an event that names the agent
-    names the thread it was speaking in, so both live on the events
-    object and both sides of the boundary read them there.
+    names the thread it was speaking in, and both sides of the boundary
+    read the pair there.
 
     A session's threads are per agent, so this moves with a handover.
     What it answers is the thread the NEXT turn will be recorded on,
     which is what a suite about attribution compares a finished record
     against."""
-    return events_of(session).conversation
+    conversations = session.session_conversations
+    active = None if conversations is None else conversations.active
+    return None if active is None else active.conversation
 
 
 # What one more round is driven with when the point of the round is to

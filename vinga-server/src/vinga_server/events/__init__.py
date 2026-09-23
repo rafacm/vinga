@@ -333,6 +333,13 @@ UNBUILT_LABEL = "an event that could not be built"
 # that says which of the two things went wrong.
 REFUSAL_MESSAGE = "the event schema refused an emission of %s: %s"
 
+# What a second identification of a session's device raises. Fixed and
+# naming neither value, because both are MACs and the defect it reports
+# is a caller's sequencing rather than anything about either device: the
+# edge identifies a session once, at normalization, and a second call is
+# code that lost track of that.
+ALREADY_IDENTIFIED = "a session's device is identified once"
+
 
 # --- the typed path ---------------------------------------------------
 #
@@ -507,22 +514,20 @@ class SessionEvents:
         self, session_id: str, clock: Callable[[], float] = session_clock
     ) -> None:
         self.session_id = session_id
-        # The device's MAC, written by the edge as soon as it is
-        # normalized, so a rejection that follows names the device it
-        # turned away.
-        self.device: str | None = None
-        # The agent currently talking. Written by the runtime when it
-        # activates one, read by events either side emits: the frame
-        # pacer stamps `speaking_started` on the edge but has to name
-        # the agent active at fire time, which a tool-only handover
-        # before the first audio makes a different one.
-        self.agent: str | None = None
-        # The thread that agent is talking on, written by the same
-        # activation and for the same reason: an event that names the
-        # agent names the conversation it was speaking in, and both
-        # sides of the boundary emit such events. A server-minted id and
-        # therefore metadata, never content.
-        self.conversation: str | None = None
+        # The device's MAC as this emitter stamps it: a snapshot, taken
+        # once from the device session's conversations when the edge
+        # normalizes the MAC (`identify`), never written back and never
+        # read by domain code. None until then, which is what the
+        # bad-Device-Id rejection carries.
+        #
+        # The pair an event is about (the agent talking, the thread it
+        # is talking on) is deliberately not here. It used to be, as two
+        # attributes the runtime wrote and both sides read, and nothing
+        # in this package ever read them: every emitter builds its
+        # payload at its own emit site. So they belong to the owner of
+        # the device session's conversations (`session_conversations.py`),
+        # which is where the emit sites read them now.
+        self._device: str | None = None
         # An explicit dependency rather than an assumption, so what
         # stamps an event is visible at construction and swappable in a
         # test.
@@ -544,6 +549,22 @@ class SessionEvents:
         # of the closed set, replaced whenever the second rolls over.
         self._dropped: dict[str, int] = {}
         self._dropped_second = -1
+
+    def identify(self, device: str) -> None:
+        """Stamp every event from here on with this device.
+
+        Called once, by the edge, with the value the device session's
+        conversations were built with, the moment the MAC is normalized:
+        the no-agent rejection that can follow names the device it
+        turned away, and every event after it names the device it is
+        about. Write-once, because this is a snapshot of an authority
+        that lives elsewhere, and a second write would make it a second
+        authority. A second call is a defect in the caller and raises a
+        fixed sentence that names neither value.
+        """
+        if self._device is not None:
+            raise RuntimeError(ALREADY_IDENTIFIED)
+        self._device = device
 
     # --- the consumers ------------------------------------------------
 
@@ -673,13 +694,13 @@ class SessionEvents:
 
         Thunks rather than values, because building one is what has to
         happen inside the guard; read at emit time rather than kept,
-        because both halves move during a session: the device id is
-        written by the edge as soon as the MAC is normalized, and every
-        event before that names none.
+        because the device half arrives during a session: it is
+        identified by the edge as soon as the MAC is normalized, and
+        every event before that names none.
         """
         return {
             "session": lambda: SessionId(self.session_id),
-            "device": lambda: None if self.device is None else DeviceId(self.device),
+            "device": lambda: None if self._device is None else DeviceId(self._device),
         }
 
     # --- the capture's own tracks, which are not events ---------------

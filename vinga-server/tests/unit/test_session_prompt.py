@@ -18,7 +18,7 @@ import pytest
 
 from tests.support.configs import BOTH_MAC, POET_MAC, base_config
 from tests.support.providers import CountingServers, RecordingLlm, ScriptedLlm
-from tests.support.sessions import call, events_of, run_reply, session_with
+from tests.support.sessions import call, run_reply, session_with, talking_thread
 from tests.support.stores import memory as lane_memory
 from vinga_server.config import Config
 from vinga_server.memory.store import MemoryScope, MemoryStore, PromptMemory
@@ -324,7 +324,7 @@ async def test_a_note_set_between_rounds_is_in_the_next_prompt() -> None:
     llm = RecordingLlm()
     servers = CountingServers()
     session = session_with(servers, {"poet": llm}, memory=store)
-    thread = events_of(session).conversation
+    thread = talking_thread(session)
     assert thread is not None
 
     await run_reply(session, "hello")
@@ -350,13 +350,13 @@ async def test_a_fresh_activation_starts_with_an_empty_ledger() -> None:
     conversation" means from the user's side."""
     store = lane_memory()
     first = session_with(CountingServers(), {"poet": RecordingLlm()}, memory=store)
-    thread = events_of(first).conversation
+    thread = talking_thread(first)
     assert thread is not None
     await store.set_state(thread, "scene", "the tavern", agent="poet")
 
     llm = RecordingLlm()
     second = session_with(CountingServers(), {"poet": llm}, memory=store)
-    assert events_of(second).conversation != thread
+    assert talking_thread(second) != thread
     await run_reply(second, "hello")
 
     (system,) = llm.systems

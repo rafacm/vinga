@@ -52,7 +52,7 @@ from fastapi.testclient import TestClient
 
 from tests.support.configs import DEVICE_MAC, POET_MAC, base_config
 from tests.support.events import both_formats
-from tests.support.sessions import events_of, session_for, until
+from tests.support.sessions import session_for, talking_thread, until
 from tests.support.stores import memory, memory_rows
 from vinga_server import db as db_module
 from vinga_server.config.api import build_api
@@ -360,7 +360,7 @@ async def test_two_sessions_closing_take_their_own_memory_with_them() -> None:
     threads: list[str] = []
     for scene in ("the tavern", "the docks"):
         session = session_for(base_config(), POET_MAC, memory=store)
-        conversation = events_of(session).conversation
+        conversation = talking_thread(session)
         assert conversation is not None
         threads.append(conversation)
         await store.set_state(conversation, "scene", scene, agent="poet")
@@ -384,7 +384,7 @@ async def test_a_session_that_records_keeps_its_threads_memory_on_close() -> Non
     session = session_for(
         base_config(), POET_MAC, memory=store, conversations=_NoWriter()
     )
-    conversation = events_of(session).conversation
+    conversation = talking_thread(session)
     assert conversation is not None
     await store.set_state(conversation, "scene", "the tavern", agent="poet")
 

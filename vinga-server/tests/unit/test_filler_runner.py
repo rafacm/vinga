@@ -20,7 +20,7 @@ from typing import cast
 
 import pytest
 
-from tests.support.boundary import FakeDevice
+from tests.support.boundary import FakeDevice, filler_runner
 from tests.support.configs import OUTPUT_RATE
 from tests.support.events import both_formats, events, only
 from vinga_server.device.boundary import DeviceGone, DeviceOutput, PlayableAudio
@@ -29,10 +29,6 @@ from vinga_server.filler import FillerClips
 from vinga_server.runtime.filler_runner import FillerRunner
 
 SESSION = "filler-runner"
-
-# The thread the agent below is talking on, in the shape the runtime
-# mints. Every event a runner emits names it beside the agent.
-THREAD = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
 
 # A credential-shaped value, planted in the message of whatever the
 # playback path fails with.
@@ -122,20 +118,19 @@ def runner_for(
     agent: str = "poet",
     agents: Sequence[str] = ("poet",),
 ) -> tuple[FillerRunner, FakeDevice]:
-    """One runner on a recording device, talking as `agent` on `THREAD`
-    the way an activation leaves the events object: it writes both, and
-    every event the runner emits names both."""
-    session_events = SessionEvents(SESSION)
-    session_events.agent = agent
-    session_events.conversation = THREAD
+    """One runner on a recording device, talking as `agent` on the thread
+    its activation minted, the way a runtime's activation leaves the
+    device session's conversations: every event the runner emits names
+    both."""
     device = device if device is not None else FakeDevice()
-    runner = FillerRunner(
-        session_events,
+    runner, conversations = filler_runner(
+        SessionEvents(SESSION),
         cast(DeviceOutput, device),
         fillers,
         agents,
         turn if turn is not None else FakeTurn(),
     )
+    conversations.activate(agent)
     return runner, device
 
 

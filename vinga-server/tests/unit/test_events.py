@@ -250,7 +250,7 @@ def payload_of(record: logging.LogRecord) -> dict:
 
 def test_a_tap_sees_every_event_until_it_detaches(caplog: pytest.LogCaptureFixture) -> None:
     events = SessionEvents("s1")
-    events.device = "aa:bb:cc:dd:ee:ff"
+    events.identify("aa:bb:cc:dd:ee:ff")
     tap = Recorder()
 
     with caplog.at_level("INFO"):
