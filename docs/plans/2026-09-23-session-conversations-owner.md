@@ -62,7 +62,12 @@ milestones prove with pins committed before each move.
 - **Stays outside:** agent activation (providers, prompt know-how,
   endpointer), the offer protocol `resumption.py` owns, and storage,
   which stays in `conversations/threads.py`.
-- **No user concept.** Keyed per session and per agent.
+- **No user concept.** Keyed per device session and per agent. The
+  issue says a user "can later sit above it without reshaping it", and
+  that is not quite so, stated here rather than inherited: on a shared
+  device the current-thread map's key becomes (speaker, agent), and
+  `activate` gains a speaker. The owner stays one per device session;
+  its key widens. Nothing here models a user now.
 - **#489's bookkeeping** is recorded as the issue asks, count either
   way.
 
@@ -70,11 +75,30 @@ milestones prove with pins committed before each move.
 
 ### Where the owner lives, and who constructs it
 
-`vinga_server/conversations/session.py`, class `SessionConversations`.
-Beside `threads.py`, which owns a conversation's life as rows; this
-module owns its life in one connection. The device edge already
-imports the `conversations` package (`device/session.py` line 73), so
-placing it there adds no dependency direction.
+`vinga_server/session_conversations.py`, class `SessionConversations`:
+the conversations of one **device session**. A session in vinga is one
+connection episode from one device (the glossary's *Session*): powering
+the board off ends it, and the next connect is a new session that
+starts a new conversation with the device's default agent. A past
+conversation comes back only through the conversation tools (#190), so
+this object's lifetime is exactly the connection's. Its docstring says
+"device session" in those words, because vinga has no user concept and
+a bare "session" invites a reader to supply one.
+
+A top-level module, beside `boundary.py` and `generation.py`, rather
+than inside a package, for two measured reasons (raised by Rafael
+before the review round landed). **Not `conversations/`:** that package
+is the conversation store; its `__init__` imports `store.py` and with
+it SQLAlchemy, the database layer and the background writer, so a
+module placed there drags storage into every import of an object that
+takes none. The one type it needs from there, `Acknowledgement`, is
+imported under `TYPE_CHECKING`, since `conversations.records` runs the
+same `__init__`. And `session.py` would be a second module of that name
+beside the edge's `device/session.py`. **Not `runtime/`:** the import
+direction today runs one way, `runtime/` imports `device/boundary.py`
+and nothing under `device/` imports `runtime/`, and the edge constructs
+this owner, so a home under `runtime/` would invert it. At the top
+level both sides import it and neither imports the other.
 
 **The edge constructs it and hands it to the runtime factory** (M2),
 beside the `SessionEvents` it already hands over. Rejected: the runtime
@@ -192,7 +216,11 @@ core takes the owner directly, which is where it belongs.
 
 In-session reactivation rebuilds a thread from the store rather than
 from the in-memory copy, so a thread has two histories kept in step
-only by the bounded wait. The owner makes that visible in one place
+only by the bounded wait. Rebuilding from the store is the general
+case, not the exception: a conversation from an earlier device session
+has no in-memory copy at all, and coming back to one is the ordinary
+way a user resumes. The in-session return is the special case where a
+second copy happens to exist. The owner makes that visible in one place
 and the plan records it there in the module docstring, but it does not
 change it: preferring the in-memory copy is a behavior change (the
 store's copy is budgeted and hydrated; the in-memory one is not) and
@@ -215,7 +243,7 @@ writer and one truth.
 
 ## Module layout
 
-- New: `src/vinga_server/conversations/session.py`
+- New: `src/vinga_server/session_conversations.py`
   (`SessionConversations`, `Active`, `mint`, `RESUME_ACKNOWLEDGEMENT_S`).
 - Changed: `runtime/pipeline.py` (fields, `_activate_agent`,
   `_move_to`, `_select`, `_settled` removed, the recording site, the
@@ -324,7 +352,7 @@ implementation doc says so in those words.
 ## Milestones
 
 - [ ] **M1: the owner, inside the runtime.** Pins first. Then
-  `conversations/session.py` with its unit tests, and `PipelineRuntime`
+  `session_conversations.py` with its unit tests, and `PipelineRuntime`
   moves `_conversations`, `_histories`, `_acknowledged`, `_settled` and
   the pair's writes onto it: `_activate_agent` calls `activate`,
   `_move_to` calls `start_new` or `reactivate`, `_select` and
@@ -359,20 +387,20 @@ Reviewed 2026-09-23 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.0, 
 
 ---
 
-1. **P1 : `threads()` changes shutdown behavior by purging historical threads.** Evidence: the plan says `threads()` lists “every thread minted or installed” (`Tests`, lines 231-242), but today `PipelineRuntime.close()` purges only `self._conversations.values()`, the current thread for each agent (`runtime/pipeline.py:1123-1125`). `start_new` and `reactivate` replace that per-agent value (`runtime/pipeline.py:2083-2090`). Returning every historical thread would delete additional memory rows when recording is disabled, contradicting the behavior-preserving and “no stored row changes” claims. The plan should define this as `current_threads()` returning exactly `tuple(current_by_agent.values())`, with a test proving a replaced thread is excluded. Purging all touched threads belongs in a separate behavior-change issue.
+1. **P1: `threads()` changes shutdown behavior by purging historical threads.** Evidence: the plan says `threads()` lists “every thread minted or installed” (`Tests`, lines 231-242), but today `PipelineRuntime.close()` purges only `self._conversations.values()`, the current thread for each agent (`runtime/pipeline.py:1123-1125`). `start_new` and `reactivate` replace that per-agent value (`runtime/pipeline.py:2083-2090`). Returning every historical thread would delete additional memory rows when recording is disabled, contradicting the behavior-preserving and “no stored row changes” claims. The plan should define this as `current_threads()` returning exactly `tuple(current_by_agent.values())`, with a test proving a replaced thread is excluded. Purging all touched threads belongs in a separate behavior-change issue.
 
-2. **P1 : The proposed MAC placement still has multiple authorities.** Evidence: the plan stores the MAC in `SessionConversations.device`, a new edge `_mac` field, and `SessionEvents.device` (`The device MAC`, lines 149-169). The issue explicitly rejects duplicated identity state. The rationale that rejection events occur before an owner can exist is false: normalization completes at `device/session.py:433`, while agent rejection occurs at `device/session.py:478-491`, and the proposed owner constructor needs only the normalized device. The plan should construct the owner immediately after successful normalization, use `owner.device` for subsequent edge work and the factory, avoid a persistent edge `_mac` copy, and make the event value a write-once observability snapshot. The invalid-Device-Id path can continue emitting with no owner and no device.
+2. **P1: The proposed MAC placement still has multiple authorities.** Evidence: the plan stores the MAC in `SessionConversations.device`, a new edge `_mac` field, and `SessionEvents.device` (`The device MAC`, lines 149-169). The issue explicitly rejects duplicated identity state. The rationale that rejection events occur before an owner can exist is false: normalization completes at `device/session.py:433`, while agent rejection occurs at `device/session.py:478-491`, and the proposed owner constructor needs only the normalized device. The plan should construct the owner immediately after successful normalization, use `owner.device` for subsequent edge work and the factory, avoid a persistent edge `_mac` copy, and make the event value a write-once observability snapshot. The invalid-Device-Id path can continue emitting with no owner and no device.
 
-3. **P2 : M1 lands the duplication the issue says not to introduce.** Evidence: M1 stores the active pair in the owner while mirroring it into mutable `SessionEvents` fields, which the edge and `FillerRunner` continue reading (`Why two milestones`, lines 201-214; M1, lines 326-337). Those reads include clip selection, so this is not merely an immutable emission snapshot. The plan should wire the owner through the factory and remove the event pair atomically in one milestone, or otherwise ensure no independently stored pair is merged to `main`.
+3. **P2: M1 lands the duplication the issue says not to introduce.** Evidence: M1 stores the active pair in the owner while mirroring it into mutable `SessionEvents` fields, which the edge and `FillerRunner` continue reading (`Why two milestones`, lines 201-214; M1, lines 326-337). Those reads include clip selection, so this is not merely an immutable emission snapshot. The plan should wire the owner through the factory and remove the event pair atomically in one milestone, or otherwise ensure no independently stored pair is merged to `main`.
 
-4. **P2 : The pins do not exercise pair reads across existing await boundaries.** Evidence: `DeviceSession.send_audio()` awaits `_pacer.transmit()` before `_speaking_started()` rereads the active pair (`device/session.py:1423-1426`, `1278-1304`). `FillerRunner` also reads the pair at different points around output awaits (`runtime/filler_runner.py:196-288`, `451-497`). A reply can hand over while the separate filler task is suspended. The listed tests cover a handover completed before playback, not a transition while delivery is held. The plan should require deterministic gated tests that change the owner while pacing or filler playback is suspended and assert the exact pre-existing attribution at each emission point. A mutation that snapshots the pair on entry rather than at the present read site must fail.
+4. **P2: The pins do not exercise pair reads across existing await boundaries.** Evidence: `DeviceSession.send_audio()` awaits `_pacer.transmit()` before `_speaking_started()` rereads the active pair (`device/session.py:1423-1426`, `1278-1304`). `FillerRunner` also reads the pair at different points around output awaits (`runtime/filler_runner.py:196-288`, `451-497`). A reply can hand over while the separate filler task is suspended. The listed tests cover a handover completed before playback, not a transition while delivery is held. The plan should require deterministic gated tests that change the owner while pacing or filler playback is suspended and assert the exact pre-existing attribution at each emission point. A mutation that snapshots the pair on entry rather than at the present read site must fail.
 
-5. **P2 : The acknowledgement test would not catch event-loop blocking.** Evidence: current `_settled()` explicitly uses `asyncio.to_thread(landed.wait, RESUME_ACKNOWLEDGEMENT_S)` (`runtime/pipeline.py:2802-2822`). The proposed recording fake only verifies that `wait(2.0)` was called; a direct blocking call would pass both it and the existing 50 ms `LateStore` case (`test_session_conversations.py:939-999`). The plan should state that `settled()` retains the off-loop wait and add a gated-handle plus heartbeat test proving the loop continues while also asserting the exact timeout argument.
+5. **P2: The acknowledgement test would not catch event-loop blocking.** Evidence: current `_settled()` explicitly uses `asyncio.to_thread(landed.wait, RESUME_ACKNOWLEDGEMENT_S)` (`runtime/pipeline.py:2802-2822`). The proposed recording fake only verifies that `wait(2.0)` was called; a direct blocking call would pass both it and the existing 50 ms `LateStore` case (`test_session_conversations.py:939-999`). The plan should state that `settled()` retains the off-loop wait and add a gated-handle plus heartbeat test proving the loop continues while also asserting the exact timeout argument.
 
-6. **P2 : The changed factory contract is not specified concretely enough.** Evidence: `RuntimeFactory` is currently a positional callable with an optional final device argument (`device/boundary.py:261-291`), and direct callers omit that final argument (`test_boundary_contract.py:298-304`). The plan says only that the factory “takes” the owner. It should state the exact signature, with a required `SessionConversations` beside `SessionEvents` and before the optional device argument, and explicitly forbid a default that constructs a fallback owner inside a runtime. The boundary test should assert that the runtime received the identical owner held by the edge.
+6. **P2: The changed factory contract is not specified concretely enough.** Evidence: `RuntimeFactory` is currently a positional callable with an optional final device argument (`device/boundary.py:261-291`), and direct callers omit that final argument (`test_boundary_contract.py:298-304`). The plan says only that the factory “takes” the owner. It should state the exact signature, with a required `SessionConversations` beside `SessionEvents` and before the optional device argument, and explicitly forbid a default that constructs a fallback owner inside a runtime. The boundary test should assert that the runtime received the identical owner held by the edge.
 
-7. **P2 : The required #489 inventory is unavailable from the plan.** Evidence: `#489's bookkeeping`, lines 313-322, refers to “the seven files the #489 comment lists” without naming them or giving a reproducing command. That list is not recorded elsewhere in this checkout, so the milestone cannot be completed or reviewed from the repository alone. The plan should enumerate all seven paths and state the exact before/after classification and counting command.
+7. **P2: The required #489 inventory is unavailable from the plan.** Evidence: `#489's bookkeeping`, lines 313-322, refers to “the seven files the #489 comment lists” without naming them or giving a reproducing command. That list is not recorded elsewhere in this checkout, so the milestone cannot be completed or reviewed from the repository alone. The plan should enumerate all seven paths and state the exact before/after classification and counting command.
 
-8. **P3 : The reach-in census expectation contradicts itself.** Evidence: the plan says M1 leaves `reach-ins.txt` byte-identical (`_turns stays`, lines 182-189; `Tests`, lines 265-269), then says the `_acknowledged` reach-in is removed. Reaching the owner through a private runtime field may also add a replacement reach-in. The plan should state the expected M1 manifest delta and regenerate it, rather than claim byte identity.
+8. **P3: The reach-in census expectation contradicts itself.** Evidence: the plan says M1 leaves `reach-ins.txt` byte-identical (`_turns stays`, lines 182-189; `Tests`, lines 265-269), then says the `_acknowledged` reach-in is removed. Reaching the owner through a private runtime field may also add a replacement reach-in. The plan should state the expected M1 manifest delta and regenerate it, rather than claim byte identity.
 
 **Verdict: ready after the P1/P2 amendments.**
