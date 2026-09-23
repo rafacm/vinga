@@ -188,6 +188,7 @@ def consenting(
     kept: Kept | None = None,
     recap: str = RECAP,
     after: str = "What would you like to pick up?",
+    llm_input: Any = None,
 ) -> tuple[DeviceSession, ScriptedLlm]:
     """A session whose next reply consents to a recap.
 
@@ -202,7 +203,7 @@ def consenting(
             after,
         ]
     )
-    session = speaking_session(poet, voice, store, kept)
+    session = speaking_session(poet, voice, store, kept, llm_input=llm_input)
     _offer(session, "poet", GALAXY)
     _asked(session, "poet", GALAXY)
     return session, poet
@@ -214,10 +215,15 @@ def speaking_session(
     store: StoredThreads,
     kept: Kept | None = None,
     config: Config | None = None,
+    llm_input: Any = None,
 ) -> DeviceSession:
     """A session that really speaks: the reply's own synthesis path is
     what the recap travels on, so nothing about it is stubbed out except
-    the socket at the far end."""
+    the socket at the far end.
+
+    `llm_input` is the export a deployment that asked for one hands the
+    runtime at construction, which is the only moment it is handed
+    over."""
     session = session_for(
         config if config is not None else resuming(),
         POET_MAC,
@@ -225,6 +231,7 @@ def speaking_session(
         conversations=kept,
         threads=store,
         stages={"tts": cast(Any, voice)},
+        llm_input=llm_input,
     )
     with_device(session, POET_MAC)
     session.websocket = cast(Any, _Quiet())
@@ -536,14 +543,14 @@ async def test_a_failed_recap_keeps_one_safe_generation_identity(
         ],
         sentinel,
     )
-    session = speaking_session(cast(Any, poet), voice, a_long_thread(), kept)
     from tests.support.llm_input import exporting as exporting_llm_input
     from vinga_server.llm_input_export import LlmInputExport
 
     telemetry, exported = exporting_llm_input({})
     staging = LlmInputExport(telemetry=telemetry)
-    session.runtime._llm_input = staging
-    session._llm_input = staging
+    session = speaking_session(
+        cast(Any, poet), voice, a_long_thread(), kept, llm_input=staging
+    )
     tap = Tap()
     events_of(session).attach(tap)
     _offer(session, "poet", GALAXY)
@@ -589,14 +596,14 @@ async def test_a_summarization_round_that_ran_long_falls_back(
             "Carrying on.",
         ]
     )
-    session = speaking_session(cast(Any, poet), voice, a_long_thread(), kept)
     from tests.support.llm_input import exporting as exporting_llm_input
     from vinga_server.llm_input_export import LlmInputExport
 
     telemetry, exported = exporting_llm_input({})
     staging = LlmInputExport(telemetry=telemetry)
-    session.runtime._llm_input = staging
-    session._llm_input = staging
+    session = speaking_session(
+        cast(Any, poet), voice, a_long_thread(), kept, llm_input=staging
+    )
     tap = Tap()
     events_of(session).attach(tap)
     _offer(session, "poet", GALAXY)
@@ -710,11 +717,9 @@ async def test_the_summarization_round_is_staged_as_a_recap_round() -> None:
     staging = LlmInputExport(telemetry=telemetry)
     voice = RecordingTts()
     kept = Kept().watching(voice)
-    session, _ = consenting(voice, a_long_thread(), kept)
+    session, _ = consenting(voice, a_long_thread(), kept, llm_input=staging)
     tap = Tap()
     events_of(session).attach(tap)
-    session.runtime._llm_input = staging
-    session._llm_input = staging
 
     await drive_reply(session, UTTERANCE)
 
