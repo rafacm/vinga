@@ -38,11 +38,12 @@ alternative and its numbers are recorded.
 discipline, each to a module of its own whose callers stop having to
 know how it works: executing one round's tool calls, and watching a
 provider call for failure and for a stalled first token. Then the reply
-in flight gets one owner: a value made when a reply starts and dropped
-when the next one does, holding the task, the first-writer-wins outcome
-latch, cancel-and-await, drain, and the reply's own state, so that the
-resets the class docstring asks a reader to hold in mind become true by
-construction.
+in flight gets one owner: a value made when a reply starts, holding the
+task, the first-writer-wins outcome latch, cancel-and-await, drain and
+the utterance id, beside a second value made when a speaking pass
+starts, holding the round counter and the spoke/withheld pair, so that
+two of the resets the class docstring asks a reader to hold in mind
+become true by construction.
 
 Nothing a person running vinga can observe changes: no event, field,
 log line, stored row, spoken sentence or timing bound. Each milestone
@@ -73,11 +74,8 @@ From the issue body and the re-scope comment, not re-litigated here:
   (`start_reply`); round counter and the spoke/withheld pair per
   speaking pass (`_speak_reply`); the memory permission per agent leg
   (`_tool_loop`). The turn record is replaced at every move. M1 and M2
-  touch none of them. M3 keeps the per-leg and per-move clocks and
-  folds the first two into one, on a measured argument (under M3) that
-  a speaking pass is exactly one per reply today; that is the one
-  place this plan refines a statement in the issue thread, and it says
-  so there.
+  touch none of them. M3 gives the first two lifetimes a value each and
+  leaves the per-leg and per-move clocks where they are.
 - **The #489 bookkeeping** is recorded when M3 lands (or when M3 stops),
   since M1 and M2 move no storage into any signature.
 
@@ -315,78 +313,115 @@ Rafael chose that smaller M3 on 2026-09-23. The full extraction is not
 refused; it is left to be argued from what remains after this issue,
 with these numbers as its starting point.
 
-**`runtime/reply_in_flight.py`, class `ReplyInFlight`.** What its
-callers stop having to know: that the outcome latch must be cleared
-before the task starts rather than inside it, that a cancel latches
-before it cancels and waits the task out, that a drain waits without
-cancelling and treats a failed reply as a finished one, and which
-fields reset when. It is a new domain concept (the reply now running,
-distinct from the session that runs replies), so it gets a module
-rather than a class at the bottom of a 2,700-line file.
+**`runtime/reply_in_flight.py`: one value per lifetime.** The
+re-scope's correction measured three lifetimes, and the first shape of
+this plan folded two of them into one reset point on the argument that
+a speaking pass is exactly one per reply. The plan review showed the
+cost of that fold (finding 1): about twenty test files drive
+`_speak_reply` directly through `run_reply`, and about a hundred calls
+drive `_reply` directly through `drive_reply`, neither through
+`start_reply`, so state that exists only once `start_reply` has run
+would be absent on both paths. The amended design follows the
+lifetimes instead of folding them, which is also what the correction
+asked for: each lifetime that today is a set of fields reset by
+discipline becomes a value whose creation is the reset.
+
+Of the eight fields with a reply lifetime (`_utterance`, `_outcome`,
+`_reply_task`, `_llm_round`, `_reply_spoke`, `_reply_withheld`, `_turn`,
+`_remembering`), six move and two stay:
 
 ```python
 class ReplyInFlight:
-    """One started reply: its task, how it ended, and its own state."""
-    utterance: str                   # minted here, read by the turn it opens
-    turn: TurnUnderway               # replaced at each move, by the reply path
-    round: int                       # LLM rounds across every leg
-    spoke: bool
-    withheld: bool
-    remembering: bool | None         # resolved per leg, None before the first
+    """One started reply: its task and how it ended."""
+    def __init__(self) -> None: ...          # mints the utterance id
+    utterance: str                           # read-only property
     def start(self, body: Coroutine[Any, Any, None]) -> None
     def running(self) -> bool
     def latch(self, outcome: ReplyOutcome) -> None   # first writer wins
-    @property
-    def outcome(self) -> ReplyOutcome | None
+    outcome: ReplyOutcome | None             # read-only property
     async def cancel(self, outcome: ReplyOutcome) -> None  # latch, cancel, await
     async def drain(self, grace_s: float) -> bool
+    def __await__(self)                      # the task's own result or exception
+
+@dataclass
+class SpeakingPass:
+    """One pass of `_speak_reply`: rounds across its legs, and whether
+    any sentence went out or was withheld."""
+    round: int = 0
+    spoke: bool = False
+    withheld: bool = False
 ```
 
-Decisions inside it:
-
-- **One reset point, and why it is now safe.** The re-scope's
-  correction said the per-reply fields have three lifetimes and must not
-  be reset at one point. Read again for this plan: `_speak_reply`, which
-  resets `_llm_round`, `_reply_spoke` and `_reply_withheld`, is called
-  from exactly one site (`_reply`, L1658), so it runs at most once per
-  reply, and nothing reads those three fields between `start_reply` and
-  that reset (the ASR leg, the no-transcript path and the failure arm
-  read none of them; the watch cluster reads the round only inside a
-  round). So initializing them when the reply is made gives every read
-  the value it gets today. The implementer re-proves both halves by AST
-  on the rebased tree (one caller of `_speak_reply`; no read of the
-  three before it) and records the output; if either fails, the reset
-  stays where it is and the field is still owned by the value.
-  `remembering` keeps its own clock (assigned per leg in `_tool_loop`)
-  and `turn` its own (replaced at each move); they live on the value
-  because their lifetime ends with the reply, not because they reset
-  with it.
-- **The session holds the current one**, `self._in_flight:
-  ReplyInFlight | None`, and every reply-state read in the runtime goes
-  through it. `replying`, `drain` and `cancel_reply` keep their
-  signatures (they are `SessionInput`'s and `TurnTaking`'s) and become
-  one line each over it. `start_reply` makes the value, emits
-  `turn_started` from it, and starts it.
-- **The turn installed at construction goes.** `__init__` installs a
-  turn today (L858) that "records nothing because nothing was heard on
-  it". With the turn on the value there is no turn outside a reply, and
-  nothing reads one there: the implementer proves it by AST (every read
-  of the turn is inside the reply path or passed into M1's and M2's
-  modules from it) and by a test that closes a session that never
-  replied. If a read outside a reply turns up, the plan's answer is to
-  report it rather than to invent a turn for it.
+- **`ReplyInFlight` owns the started-reply lifetime**: `_reply_task`,
+  `_outcome` and `_utterance`. What its callers stop having to know:
+  that the latch is fresh before the task starts rather than cleared
+  inside it (a new value is fresh by construction, which retires the
+  window `start_reply`'s comment argues about), that a cancel latches
+  before it cancels and waits the task out, and that a drain waits
+  without cancelling and treats a failed reply as finished. The session
+  holds the current one as `self._in_flight: ReplyInFlight | None`;
+  `replying`, `drain` and `cancel_reply` keep their signatures (they
+  are `SessionInput`'s and `TurnTaking`'s) and become a line or two
+  each over it. `start_reply` makes the value, emits `turn_started`
+  from it, installs it, and starts `self._reply(utterance, reply)`.
+- **The body takes its value as an argument**: `_reply(utterance,
+  reply)`. Its three latch sites and its `finally`'s outcome read go to
+  `reply`, not to `self._in_flight`, so the body never depends on which
+  value is current. The utterance id reaches the first turn as an
+  argument too: `_fresh_turn(utterance)` replaces the field read, and
+  `_seeded_turn` carries the departing turn's `utterance`
+  (`TurnUnderway.utterance`), which is exactly the value it reads today
+  since the field outlives a handover on purpose. `_utterance` goes.
+- **`SpeakingPass` owns the speaking-pass lifetime**: `_llm_round`,
+  `_reply_spoke`, `_reply_withheld`. `_speak_reply` creates one where it
+  resets the three fields today and holds it as `self._pass` for the
+  loop, the fallback check and the withheld flag's runtime method; the
+  round passed into M2's module reads it. A pass driven directly by
+  `run_reply` creates its own, as it resets the fields today.
+- **`_turn` and `_remembering` stay runtime fields.** `_turn` is
+  replaced at reply start and at each move, and `run_reply` drives a
+  pass on the turn installed at construction, so that turn stays;
+  `_remembering` is resolved per leg and read through
+  `_remembering_now` by a builtin source built once at construction.
+  Neither has a lifetime that a value made at one point would own, and
+  M1 and M2 already take the turn as an argument.
+- **The test drivers, one by one.** `drive_reply` constructs a
+  `ReplyInFlight` (public constructor, no runtime API) and calls
+  `_reply(utterance, reply)`, still without `turn_started`; its reach-in
+  stays one `_reply` site. `run_reply` and `test_tts_lookahead.py`'s
+  `speak_a_reply` are unchanged. `reply_in_flight(session)` in
+  `tests/support/sessions.py` answers `session.runtime._in_flight`, and
+  its awaiting callers (`event_baseline.py` nine sites,
+  `test_turn_lifecycle.py`, `test_session_barge_in.py`) await the value
+  itself, whose `__await__` answers exactly what awaiting the task did,
+  exception included; the identity checks (`is before`) hold because
+  one value is made per started reply as one task was.
+  `test_session_limits.py`'s `session_with` builds a value, starts it
+  on a coroutine that awaits the test's task (so each of its three
+  shapes, finished inside the grace, running past it, raising, is what
+  the value reports), and installs it. The two `_reply_task` reach-in
+  sites become two `_in_flight` sites; no site is added or removed, and
+  the manifest is regenerated, never edited.
+- **A behavior difference in direct drives, to be checked.** Today
+  `_outcome` is cleared only by `start_reply`, so two `drive_reply`
+  calls in one test share it: a latch in the first is reported by the
+  second's `finally` if nothing clears it. A value per call ends that.
+  The implementer inventories whether any test drives two replies
+  directly and reads the second's `reply_finished`, and reports what it
+  finds; a test that passes only because of the leak is a finding for
+  the PR, not something to preserve.
 - **One reply in flight at a time is inventoried, not asserted.**
-  Reading `self._in_flight` deep in the loop is correct only if a new
-  reply never starts while the previous one still runs. Every caller of
-  `start_reply` (in `TurnTaking`) is listed in the implementation doc
-  with the cancel or the not-replying check that precedes it. No
-  assertion is added: if the inventory finds a path without one, that
-  is today's behavior too (two tasks sharing the fields), and the
-  finding goes to the PR and to Rafael rather than into a silent fix.
+  Every caller of `start_reply` (in `TurnTaking`) is listed in the
+  implementation doc with the cancel or the not-replying check that
+  precedes it. With the body holding its own value the invariant
+  matters less than before (a second start no longer shares a latch
+  with the first), but `self._in_flight` is still what `cancel_reply`
+  reaches, so a path without a cancel is reported to the PR and to
+  Rafael rather than silently fixed.
 - **The #489 bookkeeping** is recorded here: for the eleven files the
   issue lists, whether any storage dependency became explicit in a
-  signature, with the count either way. Expected zero, since the value
-  takes no storage, and reported as measured.
+  signature, with the count either way. Expected zero, since neither
+  value takes storage, and reported as measured.
 
 ## Module layout
 
@@ -396,11 +431,14 @@ Decisions inside it:
   methods deleted, the call sites, the class docstring's inventory and
   the module docstring's paragraph on the tool loop), and the source
   prose named in the documentation footprint.
-- New: `src/vinga_server/runtime/reply_in_flight.py` (M3).
-- M3 also changes `runtime/pipeline.py` (the reply-lifetime fields,
-  `start_reply`, `cancel_reply`, `_latch` removed, `replying`, `drain`,
-  the class docstring's inventory, which loses the entries the value now
-  owns and says where they went).
+- New: `src/vinga_server/runtime/reply_in_flight.py` (M3:
+  `ReplyInFlight`, `SpeakingPass`).
+- M3 also changes `runtime/pipeline.py` (six fields, `start_reply`,
+  `cancel_reply`, `_latch` removed, `replying`, `drain`, `_reply`'s
+  signature, `_fresh_turn`, `_seeded_turn`, the class docstring's
+  inventory, which loses the entries the values now own and says where
+  they went), `tests/support/sessions.py` (`drive_reply`,
+  `reply_in_flight`) and `tests/unit/test_session_limits.py`.
 
 ## Tests
 
@@ -486,10 +524,9 @@ Decisions inside it:
   expected conflicts are the class docstring, the imports and the
   `_tool_loop` lines where M1 passes the turn and M3 changes where it
   lives.
-- **M3 changes when a field resets.** Its safety rests on two facts
-  about today's code (one caller of `_speak_reply`, no early read),
-  which the plan states and the implementer re-proves by AST rather
-  than trusting this paragraph.
+- **M3 changes where the latch lives for a direct drive.** A value per
+  `drive_reply` call stops two direct drives in one test from sharing a
+  latch; the inventory under M3 decides whether any test leaned on it.
 - **Census drift.** M1 changes `tests/`, so the reach-in census moves;
   M1 and M2 both move names that documents quote, so the spellings
   census may move. Both are regenerated on the rebased tree.
@@ -523,16 +560,17 @@ Decisions inside it:
   carries it, the round numbers across a handover, and the spoke/withheld
   fallback both ways; most exist in `test_turn_lifecycle.py`,
   `test_session_withheld.py` and `test_session_barge_in.py`, and the
-  inventory decides. Then the value with unit tests through its
+  inventory decides. Then the values with unit tests through their
   interface (latch first writer wins; cancel latches before the task
   sees `CancelledError`, proved by a body that reads the outcome in its
-  `finally`; drain never cancels and answers False at the grace; each
-  watched failing against a mutation, the cancel ordering run 20 times
-  since it is a concurrency claim), then the move, then the
-  construction-time turn removed with its proof. *Design footprint:*
-  adds `ReplyInFlight`, whose callers stop knowing the latch's
-  ordering, the cancel-and-await rule, and which fields reset when;
-  `PipelineRuntime` loses six fields and one method. *Documentation
+  `finally`; drain never cancels and answers False at the grace;
+  awaiting the value re-raises the body's exception; each watched
+  failing against a mutation, the cancel ordering run 20 times since it
+  is a concurrency claim), then the move with the test drivers migrated
+  as listed under M3, then the census regenerated. *Design footprint:*
+  adds `ReplyInFlight` and `SpeakingPass`, whose callers stop knowing
+  the latch's ordering, the cancel-and-await rule, and which fields
+  reset when; `PipelineRuntime` loses six fields and one method. *Documentation
   footprint:* no page under `docs/`; the runtime's class docstring.
   Changelog: none. Records the #489 count.
 
@@ -556,6 +594,23 @@ Verdict: ready after the P2 amendments.
    migration for each helper and test (start, await, fail, drain)
    without test-only public runtime API, state the reach-in census
    change, and correct the count.
+
+   *Resolution:* accepted, and it changed the design rather than only
+   the test plan. The fold of two lifetimes into one reset point is
+   withdrawn: M3 now makes one value per lifetime, `ReplyInFlight` for
+   the started reply (`_reply_task`, `_outcome`, `_utterance`) and
+   `SpeakingPass` for the speaking pass (`_llm_round`, `_reply_spoke`,
+   `_reply_withheld`), so a pass driven directly by `run_reply` makes
+   its own exactly as it resets the fields today. `_turn` and
+   `_remembering` stay, with the reasons stated, and the construction
+   turn stays because `run_reply` speaks on it. The body takes its
+   value as an argument (`_reply(utterance, reply)`), `drive_reply`
+   builds one through the public constructor, the value is awaitable
+   for the helpers that awaited the task, and `test_session_limits.py`
+   installs one around its task. The count is corrected to eight, six
+   moving. Census: two `_reply_task` sites become two `_in_flight`
+   sites, net zero, regenerated. Named under "M3" and in M3's
+   milestone item.
 2. **P2: `timeout_for` and the proposed runtime exposure are test-only
    public interfaces.** `_timeout_for`'s one caller is `_run_one`,
    which moves into the module, so a public `timeout_for` and a public
