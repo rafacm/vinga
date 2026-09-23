@@ -582,8 +582,8 @@ class SpeakingPass:
   `docs/`; source prose in `events/assembly.py` and the runtime's
   docstrings. Changelog: none (no behavior change), stated in the PR.
 - [x] **[M2: provider watching in `runtime/provider_watch.py`](2026-09-23-reply-runtime-modules-implementation.md#m2-provider-watching-in-runtimeprovider_watchpy)**
-  (PR TBD). Pins first, then the module and its unit tests, then the
-  move.
+  ([#557](https://github.com/rafacm/vinga/pull/557)). Pins first, then
+  the module and its unit tests, then the move.
   *Design footprint:* adds `ProviderWatch`, whose callers stop
   knowing how a failure is reported without being swallowed, how the
   first token is bounded and retried, and what a round reports.
