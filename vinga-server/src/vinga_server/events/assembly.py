@@ -25,9 +25,9 @@ decision 4). The three `tool_call` variants make the decision
 structural for themselves by declaring the fragment type each carries,
 and the three `sentence_withheld` variants beside them do it the same
 way, since a withheld sentence is about a tool and is named by the same
-policy; the one sentence that is not an event has `pipeline.py`'s
-`_tool_fragment` for its single named home. What lives here is the
-rendering, and the grammar bounding each shape of it.
+policy; the one sentence that is not an event has
+`tool_execution.py`'s `_tool_fragment` for its single named home. What
+lives here is the rendering, and the grammar bounding each shape of it.
 
 `tool_arguments_coerced` is the one event whose sentence may render any
 of the three shapes, because it is one variant for all four namespaces:
@@ -184,8 +184,8 @@ def tool_fragment(tool: str | None, entry: str | None) -> Fragment:
     caller's decision and is not checked here: hand this a device
     tool's name as `tool` and it quotes it. The three `tool_call`
     variants settle that question by declaring the fragment type each
-    one carries; `pipeline.py`'s `_tool_fragment` settles it for the
-    one sentence no variant declares, beside the classifier whose
+    one carries; `tool_execution.py`'s `_tool_fragment` settles it for
+    the one sentence no variant declares, beside the classifier whose
     source constants the answer is read from.
 
     The one construction in this module built beside a log call rather
