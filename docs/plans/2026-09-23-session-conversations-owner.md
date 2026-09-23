@@ -281,9 +281,15 @@ own.
   installed history is a copy (mutating the source afterwards changes
   nothing); `history()` answers the active thread's list and appends
   land there; `settled` returns immediately for an unacknowledged
-  thread and waits on the handle with `RESUME_ACKNOWLEDGEMENT_S` for an
-  acknowledged one (a recording fake handle, which pins the timeout
-  value as the default-construction policy); `current_threads()` lists each
+  thread, and for an acknowledged one waits OFF the event loop, as
+  `_settled` does today with `asyncio.to_thread(landed.wait, ...)`. Its
+  test uses a handle whose `wait` blocks on a `threading.Event` the test
+  controls and records its argument, runs a heartbeat task on the loop
+  while `settled` is pending, asserts the heartbeat advanced before the
+  handle is released, then releases it and asserts the recorded
+  argument is exactly `RESUME_ACKNOWLEDGEMENT_S` (which pins the timeout
+  as the default policy). Falsified by a mutation that calls `wait`
+  directly on the loop: the heartbeat stalls and the test fails; `current_threads()` lists each
   agent's current thread and excludes one a move replaced. No storage: the module takes none, and
   a test needing a database here is a design defect.
 - **Pins before each move**, committed green first and byte-unchanged
@@ -316,7 +322,7 @@ own.
   gate makes the interleaving deterministic rather than probable.
 - **Falsification.** Each new owner test is watched failing against a
   mutation of the rule it names (continue becomes always-mint; install
-  aliases instead of copies; `settled` skips the wait; `reactivate`
+  aliases instead of copies; `settled` skips the wait; `settled` waits on the loop; `reactivate`
   rebinds a different agent), one run each since all four are
   straight-line logic, and the commit body says so. A mutation that
   survives is reported as a finding about the test.
@@ -443,6 +449,8 @@ Reviewed 2026-09-23 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.0, 
    *Resolution:* Accepted. The Tests section now requires gated pins for the two readers that cross an await, the pacer and the filler runner, asserting present-read attribution after a pair change while suspended, with the snapshot-on-entry mutation as the falsification. One run each is stated as sufficient because the gate removes the scheduling nondeterminism rather than sampling it.
 
 5. **P2: The acknowledgement test would not catch event-loop blocking.** Evidence: current `_settled()` explicitly uses `asyncio.to_thread(landed.wait, RESUME_ACKNOWLEDGEMENT_S)` (`runtime/pipeline.py:2802-2822`). The proposed recording fake only verifies that `wait(2.0)` was called; a direct blocking call would pass both it and the existing 50 ms `LateStore` case (`test_session_conversations.py:939-999`). The plan should state that `settled()` retains the off-loop wait and add a gated-handle plus heartbeat test proving the loop continues while also asserting the exact timeout argument.
+
+   *Resolution:* Accepted. `settled` keeps the off-loop wait, and its test is now a gated handle plus a loop heartbeat, asserting both that the loop kept running and the exact timeout argument; the on-loop mutation is added to the falsification list.
 
 6. **P2: The changed factory contract is not specified concretely enough.** Evidence: `RuntimeFactory` is currently a positional callable with an optional final device argument (`device/boundary.py:261-291`), and direct callers omit that final argument (`test_boundary_contract.py:298-304`). The plan says only that the factory “takes” the owner. It should state the exact signature, with a required `SessionConversations` beside `SessionEvents` and before the optional device argument, and explicitly forbid a default that constructs a fallback owner inside a runtime. The boundary test should assert that the runtime received the identical owner held by the edge.
 
