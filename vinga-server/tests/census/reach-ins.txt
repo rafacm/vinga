@@ -165,7 +165,6 @@ tests/unit/test_session_filler.py  _filler  1
 tests/unit/test_session_filler.py  _pause_output  1
 tests/unit/test_session_filler.py  _resume_output  1
 tests/unit/test_session_limits.py  _reply_task  1
-tests/unit/test_session_recap.py  _llm_input  6
 tests/unit/test_session_recap.py  _offered  1
 tests/unit/test_session_recap.py  _resumption  2
 tests/unit/test_session_record.py  _device_tools  1
