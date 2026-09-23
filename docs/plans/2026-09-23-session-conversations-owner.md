@@ -26,9 +26,8 @@ the widened owner buys over that is the one thing #482 M3 needs and the
 pair alone does not give: the extracted reply core reaches those 17
 sites, so without this owner it would have to take a temporary protocol
 over four runtime fields, which this issue would then redo. The price
-is one module of roughly 150 lines and its unit tests, and no second
-PR beyond the two the pair alone would already want (see the
-milestones for why the move is two).
+is one module of roughly 150 lines and its unit tests, inside the one
+PR the pair alone would also need.
 
 **Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code
 2.1.280; 2026-09-23.
@@ -47,7 +46,7 @@ the event subsystem's.
 
 Nothing a person running vinga can observe changes: no event, field,
 log line, stored row or spoken sentence. That is a claim the
-milestones prove with pins committed before each move.
+milestone proves with pins committed before the move.
 
 ## The issue's decisions, restated
 
@@ -100,7 +99,7 @@ and nothing under `device/` imports `runtime/`, and the edge constructs
 this owner, so a home under `runtime/` would invert it. At the top
 level both sides import it and neither imports the other.
 
-**The edge constructs it and hands it to the runtime factory** (M2),
+**The edge constructs it and hands it to the runtime factory**,
 beside the `SessionEvents` it already hands over. Rejected: the runtime
 constructing it and exposing it on `SessionInput`. The reason is #92,
 the issue this one gates: a session spans agents, and #92 selects a
@@ -212,14 +211,14 @@ field plus an owner value plus a settable events attribute, which the
 review round showed was three copies resting on a false premise (that
 the rejections precede any possible owner).
 
-### The events object after M2
+### The events object afterwards
 
 `SessionEvents.agent` and `.conversation` are deleted. Nothing inside
 `events/` reads them (its `_identities` stamps session and device
 only; measured, the only reads are outside the package), so the
 object needs no replacement: every emitter already builds its payload
-at the emit site, `Identifier(...)`, `ConversationId(...)`, and after
-M2 it reads the pair from the owner there. The `FillerRunner` is
+at the emit site, `Identifier(...)`, `ConversationId(...)`, and afterwards
+it reads the pair from the owner there. The `FillerRunner` is
 constructed with the owner beside the events object and reads the
 active agent there (its clip lookups by agent and its three emits).
 
@@ -228,8 +227,7 @@ active agent there (its clip lookups by agent and its three emits).
 `PipelineRuntime._turns` becomes `return self._conversations.history()`.
 Kept rather than inlined at its five sites because three tests reach
 it (census: `tests/support/sessions.py` 2, `test_boundary_contract.py`
-1), and M1 is a move that should leave the reach-in manifest
-byte-unchanged. #482 M3 inherits the question of whether the reply
+1), and inlining it would add three reach-in lines for no gain. #482 M3 inherits the question of whether the reply
 core takes the owner directly, which is where it belongs.
 
 ### What does not change, deliberately
@@ -246,20 +244,20 @@ change it: preferring the in-memory copy is a behavior change (the
 store's copy is budgeted and hydrated; the in-memory one is not) and
 belongs to its own issue if anyone wants it.
 
-### Why two milestones
+### One milestone, cut into reviewable commits
 
-M1 moves state that only the runtime reads; M2 changes the
-device/runtime seam (the factory signature, `SessionEvents`' shape,
-the stub runtime that proves the boundary) and supersedes one bullet
-of an ADR. A reviewer of M2 should be reading a seam change and
-nothing else. M1 leaves one explicit transitional line: after each
-transition the runtime copies the owner's pair onto the events object
-in one helper, so the edge and filler runner keep reading what they
-read today. The owner is the single source of truth from M1 on; the
-events object is a mirror written by exactly one call site, and M2
-deletes both the mirror and its fields. This is the one intermediate
-state `main` sees, and it violates no settled decision: there is one
-writer and one truth.
+The plan first proposed two: M1 moving the state inside the runtime
+with a one-helper mirror onto the events object, M2 taking the pair
+off the events object. The review round showed M1 would have merged
+exactly the duplication the issue forbids, and not a harmless one: the
+filler runner selects its clips by the mirrored agent, so the mirror
+is domain state, not an emission stamp. The move is therefore one
+milestone and one PR, with no intermediate state on `main`. What the
+two-milestone cut was for, a reviewer reading the seam change apart
+from the state move, is kept by the commit sequence the milestone
+names instead: pins, the owner module and its tests, the runtime
+move, the seam and edge move, the ADR. Each commit is green on its
+own.
 
 ## Module layout
 
@@ -269,7 +267,7 @@ writer and one truth.
   `_move_to`, `_select`, `_settled` removed, the recording site, the
   close purge, `_device`, the class docstring's field list),
   `runtime/resumption.py` (its "deliberately NOT here" paragraph points
-  at the owner), and in M2 `device/session.py`, `device/boundary.py`
+  at the owner), `device/session.py`, `device/boundary.py`
   (the `RuntimeFactory` protocol), `runtime/filler_runner.py`,
   `events/__init__.py`, `tests/support/boundary.py`,
   `tests/support/telemetry.py`.
@@ -296,7 +294,7 @@ writer and one truth.
   the emitted events across connect, handover, handover back, new and
   resume, and adds one characterization pin where that sequence is not
   already asserted exactly (typed payload values, not rendered text).
-  M2 adds the same pin for the edge's `speaking_started` and the
+  The same holds for the edge's `speaking_started` and the
   capture manifest's `agent`, and for the filler runner's three emits,
   if not already pinned.
 - **Falsification.** Each new owner test is watched failing against a
@@ -306,7 +304,7 @@ writer and one truth.
   straight-line logic, and the commit body says so. A mutation that
   survives is reported as a finding about the test.
 - The stub runtime in `tests/support/boundary.py` activates its first
-  agent through the owner in M2, which is the proof that a runtime
+  agent through the owner, which is the proof that a runtime
   that is not a pipeline learns the owner's interface and nothing of
   the event subsystem's; `test_boundary_contract.py`'s two reads of
   `runtime.events.agent`/`.device` move to the owner.
@@ -323,15 +321,16 @@ writer and one truth.
   this change the owner sets one frozen `Active`, so no reader can see
   a new agent with the old thread. That is strictly tighter; the pins
   confirm nothing depended on the gap.
-- **The mirror outliving M1.** M2 deletes it; the M2 checklist names
-  the grep that proves no `events.agent`/`events.conversation` remains
-  in `src/` or `tests/`, run without truncation.
+- **A reader of the old fields left behind.** The milestone closes
+  on a grep, run without truncation, proving no
+  `events.agent`/`events.conversation`/`events.device` read remains
+  in `src/` or `tests/` outside `events/`.
 - **Hidden readers of the events fields.** The inventory above is a
-  grep over `src` and `tests` at `0fcc5c26`; M2 reruns it on its own
+  grep over `src` and `tests` at `0fcc5c26`; the milestone reruns it on its own
   base and records the count, and deleting the attributes turns any
   missed reader into an `AttributeError` the lanes catch.
 - **The factory signature is a seam other code constructs against.**
-  Two builders exist (`bespoke_runtime_factory`, the stub); M2 greps
+  Two builders exist (`bespoke_runtime_factory`, the stub); the milestone greps
   for every `RuntimeFactory` implementer and call site.
 - **No-leak.** Conversation ids are server-minted metadata and the MAC
   is already an event identity; no new value reaches any surface.
@@ -339,13 +338,13 @@ writer and one truth.
 
 ## Documentation footprint
 
-- **M1:** the `PipelineRuntime` class docstring's field list (in
+- The `PipelineRuntime` class docstring's field list (in
   code), `resumption.py`'s module docstring. No hand-maintained page
   under `docs/` describes where these fields live: the glossary's
   *Handover* entry describes behavior, which is unchanged, and
   `docs/system-overview.md` says nothing about placement. Stated here
   so the footprint is explicit rather than implied.
-- **M2:** a new ADR, `docs/adr/2026-09-23-the-session-owns-its-conversations.md`,
+- A new ADR, `docs/adr/2026-09-23-the-session-owns-its-conversations.md`,
   recording that the active pair left the events object and why the
   2026-08-10 placement's rationale (both sides must see one activation
   at one moment) is kept by the owner rather than by the events
@@ -360,7 +359,7 @@ writer and one truth.
 
 ## #489's bookkeeping
 
-Recorded in M2's implementation-doc section: for each of the seven
+Recorded in the milestone's implementation-doc section: for each of the seven
 files the #489 comment lists, whether it names storage in a signature
 before and after, and the count. The prediction written down now, so
 it can be wrong: **the count does not move.** The owner takes no
@@ -371,35 +370,38 @@ implementation doc says so in those words.
 
 ## Milestones
 
-- [ ] **M1: the owner, inside the runtime.** Pins first. Then
-  `session_conversations.py` with its unit tests, and `PipelineRuntime`
-  moves `_conversations`, `_histories`, `_acknowledged`, `_settled` and
-  the pair's writes onto it: `_activate_agent` calls `activate`,
-  `_move_to` calls `start_new` or `reactivate`, `_select` and
-  activation mint through the module, the recording site calls
-  `acknowledge`, the close purge reads `threads()`, `_agent` and
-  `_conversation` read `active`. One helper copies the pair onto
-  `SessionEvents` after each transition, so the edge and filler runner
-  are untouched. The runtime constructs the owner in M1 (with
-  `device=events.device`, read once at construction, which is after the
-  handshake wrote it). Design footprint: deepens nothing existing; adds
-  one module whose callers stop having to know that a thread has a
-  history, a write handle and an agent binding kept in three maps
-  that must agree, and in what order a move updates them. Documentation
-  footprint as above.
-- [ ] **M2: the pair leaves the events object.** Pins first for the
-  edge's and filler runner's reads. The edge constructs
-  `SessionConversations(device=mac)` and passes it to the runtime
-  factory; `RuntimeFactory`, `bespoke_runtime_factory` and the stub
-  runtime take it; the runtime stops constructing its own; the edge,
-  the filler runner and the test support read the owner;
-  `SessionEvents.agent` and `.conversation` and M1's mirror helper are
-  deleted; the runtime's `_device` reads the owner. The ADR and the
-  status-line note. #489's count. Design footprint: changes one seam
-  (the factory now hands the runtime the session's conversations
-  alongside its events, which is what #92's second runtime learns),
-  and makes `SessionEvents` shallower in the good direction: it stops
-  holding domain state it never read.
+- [ ] **M1: the session's conversations get one owner.** Commits in
+  this order, each green on its own:
+  1. Pins: the characterization and gated tests under "Tests" that
+     the existing suites do not already cover, green against today's
+     code.
+  2. `session_conversations.py` and its unit tests, falsified as
+     "Tests" states.
+  3. The runtime move: `_conversations`, `_histories`, `_acknowledged`
+     and `_settled` leave `PipelineRuntime`; `_activate_agent` calls
+     `activate`, `_move_to` calls `start_new` or `reactivate`,
+     `_select` and activation mint through the module, the recording
+     site calls `acknowledge`, the close purge reads
+     `current_threads()`, `_agent`, `_conversation` and `_device` read
+     the owner.
+  4. The seam: the edge constructs the owner at normalization and
+     passes it to the factory; `RuntimeFactory`,
+     `bespoke_runtime_factory` and the stub runtime take it; the edge,
+     the filler runner and the test support read it;
+     `SessionEvents.agent` and `.conversation` are deleted and
+     `.device` becomes write-once.
+  5. The ADR and the 2026-08-10 status-line note; the docstrings in
+     the documentation footprint; the census manifest regenerated;
+     #489's count in the implementation doc.
+
+  Design footprint: adds one module whose callers stop having to know
+  that a thread has a history, a write handle and an agent binding
+  kept in three maps that must agree, and in what order a move
+  updates them; changes one seam, the factory, which now hands a
+  runtime the device session's conversations beside its events, and
+  which is what #92's second runtime learns; makes `SessionEvents`
+  shallower in the right direction, since it stops holding domain
+  state. Documentation footprint as above.
 
 ## Plan review round
 
@@ -416,6 +418,8 @@ Reviewed 2026-09-23 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.0, 
    *Resolution:* Accepted as proposed. The owner is constructed at normalization, it is the device's one authority after that, the edge keeps no copy, and `SessionEvents` takes the value once through a write-once method in place of a settable attribute. Its `device` is now `str`, not `str | None`: there is no owner before a device.
 
 3. **P2: M1 lands the duplication the issue says not to introduce.** Evidence: M1 stores the active pair in the owner while mirroring it into mutable `SessionEvents` fields, which the edge and `FillerRunner` continue reading (`Why two milestones`, lines 201-214; M1, lines 326-337). Those reads include clip selection, so this is not merely an immutable emission snapshot. The plan should wire the owner through the factory and remove the event pair atomically in one milestone, or otherwise ensure no independently stored pair is merged to `main`.
+
+   *Resolution:* Accepted, by the first of the two remedies offered: one milestone and one PR, no mirror, nothing duplicated on `main` at any point. The reviewer's point that the filler runner selects clips by the mirrored agent is what decides it: the mirror would have been domain state. The separation the two milestones were for is kept as an ordered commit sequence inside the milestone. This also removes one PR round from the wall time.
 
 4. **P2: The pins do not exercise pair reads across existing await boundaries.** Evidence: `DeviceSession.send_audio()` awaits `_pacer.transmit()` before `_speaking_started()` rereads the active pair (`device/session.py:1423-1426`, `1278-1304`). `FillerRunner` also reads the pair at different points around output awaits (`runtime/filler_runner.py:196-288`, `451-497`). A reply can hand over while the separate filler task is suspended. The listed tests cover a handover completed before playback, not a transition while delivery is held. The plan should require deterministic gated tests that change the owner while pacing or filler playback is suspended and assert the exact pre-existing attribution at each emission point. A mutation that snapshots the pair on entry rather than at the present read site must fail.
 
