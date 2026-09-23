@@ -263,6 +263,40 @@ async def test_a_wholly_unsayable_multi_leg_reply_plays_the_fallback(
     assert len(events(caplog, "sentence_withheld")) == 2
 
 
+async def test_a_withholding_does_not_outlive_its_reply(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Both facts are about one reply, so the next one starts without
+    them. A reply that was wholly withheld is followed by an empty
+    answer, which withheld nothing and so is owed no phrase: carried
+    over, the first reply's withholding would make the second say one."""
+    session = await speaking_session(scripts={"poet": ScriptedLlm([LEAK, ""])})
+
+    with caplog.at_level("INFO"):
+        await drive_reply(session, UTTERANCE)
+        await drive_reply(session, UTTERANCE)
+
+    assert len(events(caplog, "reply_fallback")) == 1
+    assert len(events(caplog, "sentence_withheld")) == 1
+
+
+async def test_speech_does_not_outlive_its_reply_either(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other fact, the other way round. A reply that spoke is
+    followed by one that was wholly withheld, which is owed the phrase:
+    carried over, the first reply's speech would read as the second
+    having said something."""
+    session = await speaking_session(scripts={"poet": ScriptedLlm(["Noted.", LEAK])})
+
+    with caplog.at_level("INFO"):
+        await drive_reply(session, UTTERANCE)
+        await drive_reply(session, UTTERANCE)
+
+    assert fields_of(only(caplog, "reply_fallback"))["reason"] == "nothing_sayable"
+    assert wire(session).announced()[0] == "Noted."
+
+
 # --- what a withheld sentence may not reach ---------------------------
 
 

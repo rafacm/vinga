@@ -451,6 +451,26 @@ async def test_the_generation_after_a_handover_is_a_round_of_its_own(
     assert (second.agent, second.round) == ("tutor", 2)
 
 
+async def test_the_next_reply_counts_its_rounds_from_one_again(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other edge of the count: per reply, so it runs on across a
+    handover and starts again at the next reply, whatever the reply
+    before it reached. A count that carried over would number the next
+    reply's first round as the third."""
+    scripts = {
+        "poet": ScriptedLlm([[call("switch_agent", agent="tutor")]]),
+        "tutor": ScriptedLlm(["Tutor here.", "Still me."]),
+    }
+    session = session_for(base_config(), BOTH_MAC, scripts)
+    with caplog.at_level("INFO"):
+        await run_reply(session, "get me the tutor")
+        await run_reply(session, "and again")
+
+    rounds = [(one.agent, one.round) for one in events(caplog, "llm_round")]
+    assert rounds == [("poet", 1), ("tutor", 2), ("tutor", 1)]
+
+
 async def test_the_device_is_told_speech_starts_only_when_it_does() -> None:
     """`tts start` puts the device into its speaking state, which is
     what its display shows and what makes a button press an abort of

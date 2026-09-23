@@ -235,6 +235,67 @@ async def test_every_reply_outcome_has_a_decision_site_that_produces_it() -> Non
     assert set(seen) == {str(one) for one in ReplyOutcome}
 
 
+async def test_each_boundary_reports_the_outcome_it_latched() -> None:
+    """The same decision sites, each held to its own word, and the one
+    canceller the set above has no need to reach.
+
+    The test above is over the set, so two sites that traded words would
+    pass it. What `reply_finished` carries is what the boundary that
+    ended the reply wrote down, so each path is asserted alone: nothing
+    ended it, the ear heard nothing, the ear failed, the device gave up,
+    the session closed under it, the device went away, and the user cut
+    in. The close is the one the set does not need, since it latches
+    the same word a device abort does; it is a boundary of its own all
+    the same, and where the latch lives is exactly what can separate
+    two callers that write the same word.
+    """
+    ordinary = talking()
+    tap = watching(ordinary)
+    start_reply(ordinary, UTTERANCE)
+    await wait_for_reply(ordinary)
+    assert outcomes(tap) == ["completed"]
+
+    silent = talking(stages={"asr": cast(Any, ScriptedEars("   "))})
+    tap = watching(silent)
+    start_reply(silent, UTTERANCE)
+    await wait_for_reply(silent)
+    assert outcomes(tap) == ["nothing_heard"]
+
+    broken = talking(
+        stages={"asr": cast(Any, Unreachable("asr", ConnectionRefusedError("no route")))}
+    )
+    tap = watching(broken)
+    start_reply(broken, UTTERANCE)
+    await wait_for_reply(broken)
+    assert outcomes(tap) == ["failed"]
+
+    aborting = talking({"poet": cast(Any, StallingLlm([5.0]))})
+    tap = watching(aborting)
+    start_reply(aborting, UTTERANCE)
+    await asyncio.sleep(0.05)
+    await aborting.runtime.device_aborted("wake_word_detected")
+    assert outcomes(tap) == ["aborted"]
+
+    closing = talking({"poet": cast(Any, StallingLlm([5.0]))})
+    tap = watching(closing)
+    start_reply(closing, UTTERANCE)
+    await asyncio.sleep(0.05)
+    await closing.runtime.close()
+    assert outcomes(tap) == ["aborted"]
+    assert not closing.runtime.replying()
+
+    gone = talking(websocket=cast(Any, Vanishing()))
+    tap = watching(gone)
+    start_reply(gone, UTTERANCE)
+    await wait_for_reply(gone)
+    assert outcomes(tap) == ["device_gone"]
+
+    # The interrupted reply names the cut. The reply answering the
+    # interruption is still generating when the drain gives up on it,
+    # so the one record is the cut's.
+    assert await _barged_in() == ["barged_in"]
+
+
 async def _barged_in() -> list[str]:
     """One manual stop landing on a reply in flight, which is the
     unconditional cancel in `finish_utterance`: the gate ladder is not

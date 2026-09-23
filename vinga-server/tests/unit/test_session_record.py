@@ -23,6 +23,7 @@ import pytest
 
 from tests.support.configs import (
     BOTH_MAC,
+    POET_MAC,
     POET_TONE,
     TUTOR_TONE,
     base_config,
@@ -41,12 +42,14 @@ from tests.support.sessions import (
     call,
     drive_reply,
     events_of,
+    session_for,
     stamp_with,
     start_reply,
     talking,
     talking_thread,
     wait_for_reply,
 )
+from tests.support.sockets import RecordingSocket
 from tests.support.stores import CONVERSATIONS_MANIFEST as MANIFEST
 from tests.support.stores import rows
 from vinga_server.boundary import Reach
@@ -940,6 +943,56 @@ async def test_a_barge_in_starts_an_utterance_of_its_own() -> None:
     assert interrupted.utterance is not None
     assert interrupting.utterance is not None
     assert interrupted.utterance != interrupting.utterance
+
+
+async def test_a_reply_driven_past_the_door_answers_no_utterance(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The load-bearing half of the note above, pinned rather than
+    relied on.
+
+    A reply body run without `start_reply` is a reply no floor decision
+    started, so nothing names it: no `turn_started`, a record whose
+    utterance is None, and nothing for the transcript export to wait on,
+    whose first line ignores a record that answers no utterance. The
+    suites that drive the body directly rely on all three, and minting
+    a name anywhere below the door would change each of them.
+    """
+
+    class Transcripts:
+        """Where the transcript export stands, keeping what it is
+        handed."""
+
+        def __init__(self) -> None:
+            self.recorded: list[tuple[str | None, bool]] = []
+            self.missing: list[str] = []
+
+        def turn_recorded(
+            self, session: str, record: TurnRecord, landed: Any, *, final: bool
+        ) -> None:
+            self.recorded.append((record.utterance, final))
+
+        def turn_missing(self, session: str, utterance: str) -> None:
+            self.missing.append(utterance)
+
+    spy = SpyStore()
+    transcripts = Transcripts()
+    session = session_for(
+        base_config(),
+        POET_MAC,
+        {"poet": ScriptedLlm(["Two words."])},
+        conversations=spy,
+        transcripts=transcripts,
+    )
+    session.websocket = cast(Any, RecordingSocket())
+
+    with caplog.at_level("INFO"):
+        await drive_reply(session, UTTERANCE)
+
+    assert only_record(spy).utterance is None
+    assert transcripts.recorded == [(None, True)]
+    assert transcripts.missing == []
+    assert [r for r in caplog.records if getattr(r, "event", None) == "turn_started"] == []
 
 
 async def test_a_reply_finishes_before_the_turn_that_interrupted_it_starts(
