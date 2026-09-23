@@ -357,6 +357,16 @@ on its own.
   rebinds a different agent), one run each since all four are
   straight-line logic, and the commit body says so. A mutation that
   survives is reported as a finding about the test.
+- **The device snapshot is write-once**, tested on `SessionEvents`
+  directly: identify a device, emit and assert the typed `device`
+  identity; call `identify` again with a different credential-shaped
+  value and assert the refusal; emit again and assert the identity is
+  still the first device. The refusal is a programming defect, not a
+  runtime condition (only the edge calls it, once), so it raises a
+  `RuntimeError` whose message is a fixed sentence naming neither
+  value, and the test asserts the message exactly and asserts that
+  neither MAC appears in it or in its `args`. Falsified by a mutation
+  that lets the second call overwrite, one run.
 - The stub runtime in `tests/support/boundary.py` activates its first
   agent through the owner, which is the proof that a runtime
   that is not a pipeline learns the owner's interface and nothing of
@@ -556,6 +566,8 @@ Evidence: Plan “The factory’s new signature” says `SessionConversations` i
 What the plan should say instead: make the runtime move and seam/edge move one atomic green commit, including factory signature, owner construction, all readers, and deletion of event-pair fields. Retain the preceding owner-module and pin commits as separate green commits.
 
 2. **P2: The write-once event snapshot has no test.**
+
+   *Resolution:* Accepted. The Tests section adds a write-once test on `SessionEvents`: identify, emit, second identify refused with a fixed value-free `RuntimeError`, emit again still carrying the first device, with the overwrite mutation as falsification and a no-leak assertion over the message and its `args`.
 Evidence: The MAC decision requires `SessionEvents.identify(device)` to refuse a second call (plan lines 215-230), yet the Tests section specifies owner, transition, and await-boundary tests only (lines 308-375). Existing event tests cover an initially absent device and a single assignment, not that a later write cannot replace it (`vinga-server/tests/unit/test_event_typed_emit.py:209`, `vinga-server/tests/unit/test_event_typed_emit.py:234`). An implementation that accidentally permits a later `identify` to overwrite the event identity would satisfy the named tests.
 What the plan should say instead: add a `SessionEvents` unit test that identifies once, verifies emitted identity, attempts a second identification, verifies the defined refusal and that a subsequent emission still carries the first device. The refusal must use a fixed, value-free message if it raises.
 
