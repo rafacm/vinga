@@ -362,11 +362,17 @@ own.
   that is not a pipeline learns the owner's interface and nothing of
   the event subsystem's; `test_boundary_contract.py`'s two reads of
   `runtime.events.agent`/`.device` move to the owner.
-- The reach-in census: M1 should leave `reach-ins.txt` unchanged
-  (`_turns` stays; `_acknowledged`'s one reach in
-  `test_session_conversations.py` line 994 becomes a call to
-  `acknowledge` through the owner, which removes a line). M2 may move
-  lines. Regenerate, never hand-edit.
+- The reach-in census, expected delta stated rather than claimed
+  byte-identical: `tests/unit/test_session_conversations.py
+  _acknowledged 1` is removed, because line 994 becomes
+  `session.runtime.conversations.acknowledge(...)`, a public attribute
+  and a public method, which adds no line. `_turns` stays, so its
+  three lines stay. Any other added or removed line is a deviation the
+  implementation doc explains, most likely a new test that reached a
+  private name, which is a review flag rather than a manifest update.
+  Regenerated with `uv run python -m tests.census.test_reach_ins`,
+  never hand-edited, and the command-spellings manifest checked the
+  same way since the plan adds an ADR.
 
 ## Risks and mitigations
 
@@ -526,5 +532,7 @@ Reviewed 2026-09-23 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.0, 
    *Resolution:* Accepted. The seven paths are enumerated and the counting command is committed with its baseline (0, 1, 12, 0, 1, 2, 1 at 0fcc5c26). Measuring it surfaced a disagreement worth recording: five of the seven already name a storage helper, against the #489 comment's "name no storage at all", so the plan records two columns, the mechanical count and a per-file judgement of whether storage reaches the subject through a visible parameter, which is the one #489's mechanism concerns.
 
 8. **P3: The reach-in census expectation contradicts itself.** Evidence: the plan says M1 leaves `reach-ins.txt` byte-identical (`_turns stays`, lines 182-189; `Tests`, lines 265-269), then says the `_acknowledged` reach-in is removed. Reaching the owner through a private runtime field may also add a replacement reach-in. The plan should state the expected M1 manifest delta and regenerate it, rather than claim byte identity.
+
+   *Resolution:* Accepted. The expected delta is stated: one line removed, none added, because the owner is reached as a public attribute (finding 6's resolution) through public methods. Anything else is recorded as a deviation.
 
 **Verdict: ready after the P1/P2 amendments.**
