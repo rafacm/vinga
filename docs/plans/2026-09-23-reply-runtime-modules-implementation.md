@@ -126,7 +126,7 @@ The recap pins live in `test_session_recap.py` rather than the new file
 because that suite already sets up the offer a recap needs; reaching
 for it from a new file would have added reach-ins. Neither file adds
 one. The pins passed unmodified after the move, and
-`git diff cbfabeb0 HEAD` shows no change to any of them.
+`git diff 83b708e9 HEAD` shows no change to any of them.
 
 **An emit across a handover.** The plan's risk section asks which test
 exercises one of the moved emits across a handover, or for one to be
@@ -208,6 +208,22 @@ needed a 107th driver for a site that says nothing the first does not.
 - **One more `provider_failed` caller path than the plan listed:** a
   recap stream that fails goes through `watched` with `purpose=recap`.
   Pinned (above).
+- **`FirstTokenTimeout` no longer carries a chain**, from the review
+  round below (P1). The watchdog's `raise failure from exc` came across
+  verbatim from the runtime, so the failure left with asyncio's
+  `TimeoutError` as its cause and the `CancelledError` behind it. It is
+  now raised outside the arm that caught the expiry, without `from`, so
+  `__cause__` and `__context__` are both None. That is a behavior
+  change to the exception object, and the one place this milestone's
+  `reply_stream` is not the runtime's body copied over. It reached no
+  retained surface: `_reply`'s generic arm logs the class name with no
+  `exc_info`, `provider_failed` is built from the failure before it is
+  raised and carries its class name only, the reply task catches it so
+  no asyncio handler sees it, and the telemetry export reads event
+  payloads, never exceptions. No test walked it either: the chain
+  walkers in `test_session_reply_failures.py` and `test_turntaking.py`
+  walk exceptions those tests build, and every `exc_info` assertion in
+  the reply path's suites says None.
 - **Nothing else deviates.** The signatures, the round as an argument,
   the two round reports, the constructor-time bound, the pair read at
   emit time and `FirstTokenTimeout` not re-exported are all as planned.
@@ -226,11 +242,14 @@ naming `_watchdog_stream`, and `test_turn_lifecycle.py:410` naming
 historical name.
 
 **Changelog:** none. No event, field, log line, stored row, spoken
-sentence or timing bound changed, so no `changelog.d/` fragment.
+sentence or timing bound changed, so no `changelog.d/` fragment. The
+chain `FirstTokenTimeout` no longer carries (above) reached none of
+those surfaces, so it gets no fragment either.
 
 ### Verification
 
-Run on the tree at `74e6e9b0` plus this section, on this machine,
+Run on the tree at `74e6e9b0` (`8cd335e8` after the rebase onto the
+amended plan branch) plus this section, on this machine,
 with the lanes distributed the way CI runs them (`-n 4 --dist
 loadfile`):
 
@@ -244,3 +263,52 @@ loadfile`):
   moved by one line, `tests/unit/test_session_recap.py  _llm_input  6`
   removed, regenerated; the command-spellings manifest did not move.
 - [x] `python3 scripts/check_doc_links.py .`: 268 files, 0 failures.
+
+### PR review round, PR #557
+
+Automated external review of this PR's diff (origin/main...5ee32be2).
+Reviewed 2026-09-23 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.0, read-only sandbox, runtime 8m36s, at commit 5ee32be2.
+Verdict as received: **mergeable after the listed fixes**. Three
+findings, all adopted.
+
+1. **P1: the watchdog leaked a library timeout chain.**
+   `reply_stream` caught the `TimeoutError` `asyncio.timeout()`
+   synthesizes and raised `FirstTokenTimeout` with `raise failure from
+   exc`, retaining that `TimeoutError` and the `CancelledError` behind
+   it, asyncio's and the provider's frames included, and
+   `test_provider_watch.py` checked only the class and the event.
+
+   *Resolution*: accepted, in `5c5f07f3`. The arm now only records the
+   second expiry; the report and the raise happen after the `try`
+   statement, outside any handler and without `from`.
+   `test_a_round_given_up_carries_no_chain_behind_it` asserts
+   `__cause__` and `__context__` are both None. It was run against the
+   `from exc` code first and failed on `__cause__`; the review's remark
+   that `from None` inside the handler is not enough was measured too,
+   and that variant fails the same test on `__context__`. The
+   `expired()` mutation was re-run against the restructured loop and
+   still fails the passthrough test. The line predates M2, which moved
+   it verbatim; it is recorded as a deviation above, with what the
+   chain reached, which is nothing retained, so no changelog fragment.
+
+2. **P2: the completed milestone still recorded "PR TBD".**
+
+   *Resolution*: accepted, in `054636f4`. The tick names PR
+   [#557](https://github.com/rafacm/vinga/pull/557); the link checker
+   reports 0 failures.
+
+3. **P3: the moved `watching` docstring said a traceback is logged.**
+   It said "the traceback is still logged where it was", while
+   `_reply`'s generic arm logs the class name with no `exc_info`.
+
+   *Resolution*: accepted, in `32c407cc`. The sentence now says the
+   "reply failed" line is still logged, naming the class and nothing
+   else, with no traceback.
+
+After all three: `ruff check .` clean; `tests/census` 66 passed; the
+targeted files (`test_provider_watch.py`, `test_provider_watch_pins.py`,
+`test_session_watchdog.py`, `test_session_reply_failures.py`,
+`test_event_surface_pins.py`, `test_session_filler.py`,
+`test_event_baseline.py`) 76 passed; the full unit lane with `-n 4
+--dist loadfile` 7,505 passed and 19 skipped (the extras not installed
+here), 26m12s, one more than before the round: the new chain test.
