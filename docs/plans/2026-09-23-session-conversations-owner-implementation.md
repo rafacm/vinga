@@ -253,3 +253,39 @@ wheel lanes beyond what the integration lane holds, and the image
 build and smoke conversation. No event, field, configuration key or
 command changed, so none of them should move; the pull request records
 what CI says.
+
+### PR review round, PR #556
+
+Automated external review of this PR's diff (origin/main...b88d7588).
+Reviewed 2026-09-23 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.0, read-only sandbox, runtime 9m08s, at commit b88d7588.
+Verdict as received: **mergeable after the listed fixes**. Two findings,
+both adopted.
+
+1. **P2: the owner's "last write" acknowledgement rule was not
+   pinned.** `acknowledge` promises to replace the handle a thread
+   holds, and this section calls it the handle for each thread's last
+   write, but every owner test acknowledged at most one handle per
+   thread. Keeping the first handle (`setdefault`) passed them all, and
+   a resume would then wait on an earlier, already settled turn and
+   rebuild the thread one turn short while the latest was still queued.
+
+   *Resolution*: accepted, in `3c42680a`.
+   `test_the_wait_is_for_the_last_write_to_a_thread_and_not_an_earlier_one`
+   acknowledges two open handles for one thread, awaits `settled`, and
+   asserts the earlier was never waited on and the later was waited on
+   with exactly `RESUME_ACKNOWLEDGEMENT_S`. The file's `GatedHandle`
+   already records its own waits per instance, so two of them tell
+   which was waited on without reaching into the owner. Falsified in
+   one run: `setdefault` in place of the assignment fails the new test
+   (`assert [2.0] == []` on the earlier handle) and no other.
+
+2. **P3: the completed milestone still recorded "PR TBD".**
+
+   *Resolution*: accepted, in `8f52f731`. The tick names PR
+   [#556](https://github.com/rafacm/vinga/pull/556), linked the way the
+   2026-09-14 plan's ticks link theirs; the link checker reports 0
+   failures.
+
+After both: `tests/unit/test_conversation_owner.py` 11 passed,
+`tests/census` 66 passed, `ruff check .` clean. The full lanes were not
+rerun for a test and two documents; CI runs them on the pull request.
