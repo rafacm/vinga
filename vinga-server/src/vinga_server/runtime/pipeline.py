@@ -16,9 +16,13 @@ provider because only the runtime can change agents between rounds. Per
 reply it snapshots the tools the active agent may use, streams, executes
 whatever the model asked for, feeds the results back, and streams again,
 up to a small cap whose last round forbids calling so a reply always
-ends in speech. History stays text-only: the structured tool turns exist
-in a working copy inside one reply, and what survives is what was
-actually said aloud.
+ends in speech. Executing a round's calls is `ToolExecution`'s
+([tool_execution.py](tool_execution.py)): classifying, reserving,
+coercing, bounding, dispatching and reporting each one. The moves stay
+here, because a move rebinds the conversation and ends the loop.
+History stays text-only: the structured tool turns exist in a working
+copy inside one reply, and what survives is what was actually said
+aloud.
 
 A sentence of that reply is spoken unless it is shaped like a call to
 one of the tools the same snapshot offered, which is a model writing
@@ -49,9 +53,9 @@ import contextlib
 import functools
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from vinga_server.audio.resample import Resampler
 from vinga_server.config import Config
@@ -59,7 +63,6 @@ from vinga_server.config.store import LiveDevice
 from vinga_server.conversations.records import (
     MilestoneRecord,
     SessionTurns,
-    ToolInvocation,
     TurnRecorder,
     TurnStore,
 )
@@ -83,7 +86,6 @@ from vinga_server.events.catalog import (
     ReplyFinished,
     TranscriptionAbandoned,
     TurnStarted,
-    Variant,
 )
 from vinga_server.events.values import (
     ABSENT,
@@ -91,7 +93,6 @@ from vinga_server.events.values import (
     Count,
     FallbackReason,
     Flag,
-    Fragment,
     Identifier,
     LlmPurpose,
     PromptSources,
@@ -108,7 +109,6 @@ from vinga_server.providers import (
     TextDelta,
     ToolCall,
     ToolChoice,
-    ToolDef,
     ToolResult,
     TtsProvider,
     Turn,
@@ -117,21 +117,19 @@ from vinga_server.providers import (
 from vinga_server.runtime import prompt, resumption
 from vinga_server.runtime.filler_runner import FillerRunner
 from vinga_server.runtime.provider_watch import ProviderWatch
-from vinga_server.runtime.speech import _Synthesis, speak_after, withhold_tool_shaped
-from vinga_server.runtime.turns import BUILTIN, MCP, UNKNOWN, TurnUnderway, tool_source
+from vinga_server.runtime.speech import _Synthesis, speak_after
+from vinga_server.runtime.tool_execution import DEFAULT_TOOL_TIMEOUT_S, Offer, ToolExecution
+from vinga_server.runtime.turns import TurnUnderway
 from vinga_server.runtime.turntaking import Confirmation, TurnTaking, Utterance
 from vinga_server.session_conversations import SessionConversations, mint
 from vinga_server.text import SentenceSplitter
 from vinga_server.tools import builtin, names
-from vinga_server.tools.arguments import with_lossless_coercions
 from vinga_server.tools.mcp import McpServers
 from vinga_server.tools.source import (
     BuiltinTools,
     DeviceTools,
     McpTools,
     ToolSource,
-    no_such_tool,
-    withheld,
 )
 
 if TYPE_CHECKING:
@@ -147,11 +145,6 @@ if TYPE_CHECKING:
 # The last permitted round forbids calling, so a reply always ends in
 # speech rather than in a tool nobody hears the result of.
 MAX_TOOL_ROUNDS = 4
-
-# How long a builtin or a device tool may take. Server tools use their
-# own entry's tool_timeout_s. The device hears silence meanwhile, which
-# is why this is not generous.
-DEFAULT_TOOL_TIMEOUT_S = 15.0
 
 # The synthetic user turn a conversation opens on when a reply moves to
 # one, in the three shapes a move has. It exists because both APIs need
@@ -288,155 +281,6 @@ class DeviceRecords(Protocol):
     async def resolve_record(self, attached: LiveDevice) -> LiveDevice | None: ...
 
 
-def _coercions(sent: Mapping[str, Any], executing: Mapping[str, Any]) -> int:
-    """How many of a call's arguments the coercion changed.
-
-    Identity first, and for anything left alone it is the whole answer:
-    `with_lossless_coercions` answers the object it was handed for every
-    value it did not convert, so the same object is the same argument
-    whatever it compares to. `NaN` is why that has to be the first
-    question. It is not equal to itself, and both provider adapters
-    decode with Python's permissive `json.loads`, which accepts one, so
-    asking `!=` first reports an untouched `NaN` as coerced: a copy
-    nobody needed and an event saying something that did not happen.
-
-    The type is asked beside the value for the other half, because
-    `100 == 100.0` and `True == 1` in Python. A float rewritten as the
-    integer the schema declared is a different object AND a different
-    type, and it has to count as a change here or the conversion would
-    never leave this method.
-    """
-    return sum(
-        1
-        for name, held in executing.items()
-        if held is not sent[name]
-        and (type(held) is not type(sent[name]) or held != sent[name])
-    )
-
-
-def _tool_fragment(classified: ToolInvocation) -> Fragment:
-    """The fragment a sentence about one call renders where its name
-    would go, which is nothing at all for the two namespaces this
-    surface may not name.
-
-    One home for that decision. `events/assembly.py` renders whichever
-    name it is handed and refuses nothing, deliberately: deciding is
-    reading the classifier's source constants, which live next door in
-    `runtime/turns.py`. So the decision is here, where those constants
-    are, and it is here ONCE, so the plain line about unparseable
-    arguments and the `tool_call` event beside it cannot come to
-    disagree about which names are this application's to print.
-    """
-    return assembly.tool_fragment(
-        classified.name if classified.source == BUILTIN else None,
-        classified.entry if classified.source == MCP else None,
-    )
-
-
-def _tool_arguments_coerced(
-    classified: ToolInvocation, agent: str, conversation: str, coerced: int
-) -> Variant:
-    """The `tool_arguments_coerced` event for one corrected call.
-
-    The naming policy is `_tool_called`'s, read from the same two
-    constants for the same reason: a builtin's name is this server's own
-    word, an MCP call is named by the entry an operator configured, and
-    a device tool or an invented name is named by nothing. One reading
-    of it rather than a second, so the two events about one call cannot
-    come to disagree about what may be printed.
-    """
-    return assembly.tool_arguments_coerced(
-        agent,
-        conversation,
-        classified.source,
-        classified.name if classified.source == BUILTIN else None,
-        classified.entry if classified.source == MCP else None,
-        coerced,
-    )
-
-
-def _tool_called(
-    classified: ToolInvocation,
-    agent: str,
-    conversation: str,
-    duration_s: float,
-    is_error: bool,
-    error_type: str | None,
-) -> Variant:
-    """Which of the three `tool_call` shapes describes this call.
-
-    The selection is here rather than in `events/assembly.py` because it
-    reads the classifier's own constants, and `runtime/turns.py` spells
-    those locally on purpose: `TOOL_SOURCES` is one structure, and a
-    second home for it in the event vocabulary would be a second
-    structure that has to agree. What each shape is made of is the
-    assembly module's; which one this call is, is the classifier's
-    neighbour's.
-    """
-    if classified.source == BUILTIN:
-        return assembly.builtin_tool_called(
-            agent, conversation, classified.name, duration_s, is_error, error_type
-        )
-    if classified.source == MCP and classified.entry is not None:
-        return assembly.mcp_tool_called(
-            agent, conversation, classified.entry, duration_s, is_error, error_type
-        )
-    return assembly.unnamed_tool_called(
-        agent, conversation, classified.source, duration_s, is_error, error_type
-    )
-
-
-@dataclass(frozen=True)
-class _Origin:
-    """Where one offered tool came from, as this reply may name it.
-
-    The classifier's two answers, kept together because they are one
-    answer: the namespace, and the configured entry for the one
-    namespace that has one. Frozen and built where the offer is taken,
-    so what a withheld sentence is reported as is a fact about the
-    reply rather than a question asked of the registries afterwards.
-
-    Nothing far-side is in it. An MCP tool keeps the entry an operator
-    wrote and never the server's own name for the tool, and a device
-    tool keeps neither, which is the naming policy `tool_call` follows
-    made structural at the point the provenance is captured.
-    """
-
-    source: str
-    entry: str | None
-
-
-# What a withholding that resolved to no single tool is reported as.
-# One instance rather than a construction at each of the two sites that
-# reads it, since it holds nothing about anything.
-_UNKNOWN_ORIGIN = _Origin(UNKNOWN, None)
-
-
-def _sentence_withheld(
-    source: str,
-    entry: str | None,
-    name: str | None,
-    agent: str,
-    conversation: str,
-    characters: int,
-) -> Variant:
-    """Which of the three `sentence_withheld` shapes describes this
-    withholding.
-
-    `_tool_called`'s own selection, read off the same two constants, so
-    the two records about one tool cannot come to disagree about which
-    names this surface may print. A sentence that named no single tool
-    arrives here classified `unknown` with no name, which is the shape
-    that names nothing, and is where an argument-only leak fitting
-    several offered tools lands.
-    """
-    if source == BUILTIN and name is not None:
-        return assembly.builtin_sentence_withheld(agent, conversation, name, characters)
-    if source == MCP and entry is not None:
-        return assembly.mcp_sentence_withheld(agent, conversation, entry, characters)
-    return assembly.unnamed_sentence_withheld(agent, conversation, source, characters)
-
-
 class AgentNotAllowed(ValueError):
     """Something asked a session to become an agent its device is not
     bound to. The switch_agent tool turns this into a spoken refusal,
@@ -515,12 +359,16 @@ class PipelineRuntime:
     which reaches back into four of this class's methods and nothing
     else; this world's cached speech is `FillerRunner`
     ([filler_runner.py](filler_runner.py)), which reads the floor with
-    two questions and never writes it; and how a provider call is
-    watched is `ProviderWatch` ([provider_watch.py](provider_watch.py)),
-    which is handed the round and the turn it reports on rather than
-    reading either off this class. What stays here is the
-    orchestration: the reply task, the conversation history, the tool
-    loop, and agent handover.
+    two questions and never writes it; how a provider call is watched
+    is `ProviderWatch` ([provider_watch.py](provider_watch.py)), which
+    is handed the round and the turn it reports on rather than reading
+    either off this class; and running a round's tool calls is
+    `ToolExecution` ([tool_execution.py](tool_execution.py)), which is
+    handed the turn it files on at every call and asks this class two
+    questions through callables, the memory policy and who owns a tool
+    name now, and writes nothing of this class's but that turn. What
+    stays here is the orchestration: the reply task, the conversation
+    history, the tool loop and its moves, and agent handover.
 
     The runner owns two verbs and this class uses both: the reply path
     arms the latency mask at the transcription and settles it at the
@@ -574,9 +422,10 @@ class PipelineRuntime:
       to the watch for its retry line and for `llm_round`, which is
       what makes the generation after a handover a round of its own.
     - `_remembering`: whether the agent speaking may reach memory,
-      written by `_tool_loop` alone where it takes the tool snapshot and
+      written by `_tool_loop` alone where it takes the tool offer and
       read through `_remembering_now` by the builtin source's offer and
-      dispatch and by `_system_prompt`. A field rather than an argument
+      dispatch, by tool execution before it answers a call at all, and
+      by `_system_prompt`. A field rather than an argument
       because those two readers are on two clocks, and one field is what
       makes them one answer.
     - `_reply_spoke` and `_reply_withheld`: whether any sentence of the
@@ -813,8 +662,8 @@ class PipelineRuntime:
         # groups' names, so no two of these can own one name and the
         # order settles nothing that was in doubt. Each is handed the
         # default bound rather than reading it, so how long a builtin or
-        # a device tool may take stays this module's answer.
-        self._sources: tuple[ToolSource, ...] = (
+        # a device tool may take stays one answer, tool execution's.
+        sources: tuple[ToolSource, ...] = (
             BuiltinTools(
                 self._agents,
                 memory,
@@ -839,6 +688,21 @@ class PipelineRuntime:
             ),
             DeviceTools(output, DEFAULT_TOOL_TIMEOUT_S),
             McpTools(mcp_servers, DEFAULT_TOOL_TIMEOUT_S),
+        )
+        # And what runs a round's calls over them. Built here because the
+        # builtins above are handed this runtime's own state, and private
+        # because nothing outside the reply asks it anything. The two
+        # questions about the registries are asked when they are asked:
+        # a board rediscovers its tools and an apply replaces the MCP
+        # registry between two calls, and the registry is read off this
+        # runtime's field for the same reason every other read of it is.
+        self._tools = ToolExecution(
+            sources,
+            output.device_tools,
+            lambda published: self._mcp_servers.owner_of(published),
+            events,
+            conversations,
+            self._remembering_now,
         )
         # The activation the connect used to do by hand, and the MCP
         # revive that followed it, in that order. No task is spawned
@@ -1815,19 +1679,12 @@ class PipelineRuntime:
         assert self._providers is not None
         providers = self._providers
         self._remembering = self._resolved_memory()
-        tools = self._tool_snapshot()
-        # The declared shapes, taken off the same snapshot the model is
-        # offered, because this is the only place they exist at reply
-        # time and the dispatch below cannot see them. Read by published
-        # name, which is the name a call carries.
-        schemas = {tool.name: tool.input_schema for tool in tools}
-        # And where each of them came from, resolved on the same line
-        # for the same reason and derived from the snapshot rather than
-        # taken beside it. A withheld sentence is named from this
-        # rather than from the registries later on: they move under a
-        # reply, and a name matched against what this reply offered
-        # must be reported as what this reply offered it as (#391).
-        origins = self._offered_origins(tools)
+        assert self._agent is not None
+        # The tools, their declared shapes and where each came from, as
+        # one value taken once: the shapes are what the coercion reads
+        # and the origins are what a withheld sentence is named from, so
+        # all three have to be this leg's offer (`Offer` says why).
+        offer = self._tools.offer(self._agent)
         working = list(self._turns)
         resampler = Resampler(providers.tts.sample_rate, self._output.output_sample_rate)
         self._output.restart_pacing()
@@ -1873,13 +1730,13 @@ class PipelineRuntime:
                     agent=self._agent,
                     system=system,
                     turns=working,
-                    tools=tools,
+                    tools=offer.tools,
                     choice=choice,
                 )
             try:
                 async for event in self._watch.reply_stream(
                     providers.llm,
-                    functools.partial(providers.llm.stream, system, working, tools, choice),
+                    functools.partial(providers.llm.stream, system, working, offer.tools, choice),
                     invocation=invocation,
                     round_=self._llm_round,
                 ):
@@ -1897,7 +1754,7 @@ class PipelineRuntime:
                             if first_token_at is None and text.strip():
                                 first_token_at = loop.time()
                             for sentence in splitter.push(text):
-                                if self._withheld(sentence, tools, origins):
+                                if self._withheld(sentence, offer):
                                     continue
                                 speaking = await self._speak_after(
                                     speaking, sentence, providers.tts, resampler, leg, spoken
@@ -1913,7 +1770,7 @@ class PipelineRuntime:
                 # sentence's synthesis failing, a barge-in cancelling
                 # mid-execution), and a call the model issued belongs on
                 # the record whether or not it ever ran.
-                slots = self._reserve_tools(calls)
+                slots = self._tools.reserve(self._turn, calls)
                 self._watch.reply_round_done(
                     self._turn,
                     self._llm_round,
@@ -1925,7 +1782,7 @@ class PipelineRuntime:
                     invocation=invocation,
                 )
                 tail = splitter.flush()
-                if tail is not None and not self._withheld(tail, tools, origins):
+                if tail is not None and not self._withheld(tail, offer):
                     speaking = await self._speak_after(
                         speaking, tail, providers.tts, resampler, leg, spoken
                     )
@@ -1957,7 +1814,7 @@ class PipelineRuntime:
             # the one point where the record's values and the far side's
             # can part company.
             executing = [
-                self._for_execution(call, slot, schemas)
+                self._tools.for_execution(self._turn, call, slot, offer)
                 for call, slot in zip(calls, slots, strict=True)
             ]
             results, switch_to = await self._run_tools(executing, slots, switches_left)
@@ -1971,89 +1828,13 @@ class PipelineRuntime:
         await self._send_reply_audio(batch)
         return switch_to
 
-    def _tool_snapshot(self) -> list[ToolDef]:
-        """What the active agent may reach this reply: the builtins that
-        apply, the device's tools once discovery has finished, and the
-        tools of the MCP servers it is granted that are up.
-
-        Each source answers for itself, in the fixed order they were
-        built in, so the merged list is the same list it always was and
-        this method holds no rule about any one of them.
-
-        Taken per reply rather than per session, so a server that came
-        back, a device that finished discovering and a reload that
-        landed mid-conversation are all picked up on the next
-        utterance."""
-        assert self._agent is not None
-        tools: list[ToolDef] = []
-        for source in self._sources:
-            tools.extend(source.snapshot(self._agent))
-        return tools
-
-    def _for_execution(
-        self, call: ToolCall, slot: int, schemas: Mapping[str, dict[str, Any]]
-    ) -> ToolCall:
-        """One call as the far side receives it: the model's own, with
-        every argument whose string form converts losslessly to the type
-        the tool declared converted (`tools/arguments.py`).
-
-        A copy, and an execution-only one. The reservation, the
-        conversation record, the API's body and the working history keep
-        the values the model sent, because "what the model passed" is
-        what those surfaces promise and a string where the schema says
-        integer is the fact an operator diagnosing a marginal model
-        needs to see. What the device, the MCP server or the builtin is
-        handed is what its own schema declared, since the far side is
-        entitled to refuse anything else.
-
-        The original object where nothing converted, so a reply that
-        needed none of this allocates none of it, and `is` still holds
-        across the boundary for everything the model got right.
-
-        The event is emitted here and only where something converted,
-        because this is a decision vinga owns and the record cannot
-        stand in for it: the record's `arguments` is null under text-off
-        and it retains no schema, so an original string beside a success
-        does not say a coercion happened. `slot` is where this call was
-        reserved, and the classification is read back from there rather
-        than taken again, exactly as the dispatch reads it.
-        """
-        arguments = with_lossless_coercions(call.arguments, schemas.get(call.name, {}))
-        coerced = _coercions(call.arguments, arguments)
-        if not coerced:
-            return call
-        classified = self._turn.reserved(slot)
-        self._events.emit(
-            lambda: _tool_arguments_coerced(
-                classified, self._agent, self._conversation, coerced
-            )
-        )
-        return replace(call, arguments=arguments)
-
     async def _run_tools(
         self, calls: Sequence[ToolCall], slots: Sequence[int], switches_left: int
     ) -> tuple[list[ToolResult], "_Transition | None"]:
-        """Execute one round of calls. Almost everything that is not a
-        move runs concurrently, since device and server tools are
-        independent; the moves are resolved here instead, because a
-        successful one ends the loop rather than producing a result the
-        model reads.
-
-        The exception is the calls `names.ORDERED_TOOL_NAMES` names,
-        which run first and one at a time, in the order the model issued
-        them. Every one of them writes a memory, and two writes in one
-        round decide each other: by the identity the model gave them, a
-        ledger key or a fact's number, or by the prune a scope at its cap
-        runs on every write. What is true afterwards is whichever ran
-        last, so run concurrently the answer would be decided by which
-        transaction reached the chain's lock first rather than by what
-        the model asked for, and a set followed by a clear could leave
-        the set.
-
-        Before the rest rather than beside them, which costs a round
-        trip nothing was waiting on and buys the simplest cancellation
-        story there is: a barge-in during one of these leaves no
-        dispatch running that nobody is awaiting.
+        """Execute one round of calls. Everything that is not a move is
+        `ToolExecution.run`'s, which says in what order it runs them;
+        the moves are resolved here instead, because a successful one
+        ends the loop rather than producing a result the model reads.
 
         `slots` says where on the turn's record each of these calls was
         already reserved, index for index with `calls`, which is why
@@ -2074,25 +1855,7 @@ class PipelineRuntime:
         moves = [
             (slots[index], call) for index, call in enumerate(calls) if self._moves(call)
         ]
-        answered: dict[int, ToolResult] = {}
-        for slot, call in plain:
-            if call.name in names.ORDERED_TOOL_NAMES:
-                answered[slot] = await self._run_one(call, slot)
-        together = [(slot, call) for slot, call in plain if slot not in answered]
-        answered.update(
-            zip(
-                (slot for slot, _ in together),
-                await asyncio.gather(
-                    *(self._run_one(call, slot) for slot, call in together)
-                ),
-                strict=True,
-            )
-        )
-        # Back into the order the model asked in, whatever order they
-        # ran in: what the model reads next is a list of results, and a
-        # list that reordered them would be this method describing a
-        # round that did not happen.
-        results = [answered[slot] for slot, _ in plain]
+        results = await self._tools.run(self._turn, plain)
 
         transition: _Transition | None = None
         for order, (slot, call) in enumerate(moves):
@@ -2533,163 +2296,6 @@ class PipelineRuntime:
             )
         return None
 
-    async def _run_one(self, call: ToolCall, slot: int) -> ToolResult:
-        """One tool call, bounded and never raising into the loop. Every
-        failure becomes an error result: the model explains it in its
-        own words, where a canned apology would be fixed-language and
-        would throw away whatever the model could still salvage.
-
-        `slot` is where this call was reserved on the turn's record, and
-        it is filled in below only once there is something to say about
-        it. A cancellation on the way through leaves it as reserved,
-        which is what a call the user talked over looks like.
-
-        `call` is the execution copy `_tool_loop` derived, so its
-        arguments are the ones the far side is owed and the reserved
-        claim's are the ones the model sent. The dispatch is routed by
-        the claim and given the copy's arguments, which is the whole of
-        the split: the record and the events keep the originals, and
-        nothing but the source that runs the call sees the conversions.
-        A malformed call carries none either way."""
-        # The classification the reservation already holds, read back
-        # rather than taken again: the `tool_call` event below says
-        # where the name came from, the row at this slot says the same,
-        # and asking twice could answer twice (an MCP reload between the
-        # reservation and now is enough to move a name's owner).
-        classified = self._turn.reserved(slot)
-        dispatched = replace(
-            classified,
-            arguments=None if classified.malformed else dict(call.arguments),
-        )
-        loop = asyncio.get_running_loop()
-        started = loop.time()
-        try:
-            async with asyncio.timeout(self._timeout_for(classified)):
-                content, is_error = await self._dispatch(call, dispatched)
-            error_type = "tool_error" if is_error else None
-        except TimeoutError:
-            content, is_error = f'the tool "{call.name}" did not answer in time', True
-            error_type = "TimeoutError"
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            content, is_error = f'the tool "{call.name}" failed: {exc}', True
-            error_type = type(exc).__name__
-        elapsed = loop.time() - started
-        self._events.emit(
-            lambda: _tool_called(
-                classified,
-                self._agent,
-                self._conversation,
-                elapsed,
-                is_error,
-                error_type,
-            )
-        )
-        self._turn.executed(slot, content, is_error, round(elapsed * 1000))
-        return ToolResult(tool_call_id=call.id, content=content, is_error=is_error)
-
-    def _reserve_tools(self, calls: Sequence[ToolCall]) -> list[int]:
-        """Put every call this round issued on the turn's record, at the
-        position the model issued it, and answer where each one landed."""
-        return [
-            self._turn.reserve(self._classified(call, position))
-            for position, call in enumerate(calls)
-        ]
-
-    def _classified(self, call: ToolCall, position: int) -> ToolInvocation:
-        """The half of a call's record that is known before it runs:
-        where its name came from, and what the model asked with it.
-
-        Classified here rather than at the dispatch, and so before
-        anything can stop the dispatch from happening. That is also what
-        closes the set over the paths the routing hides: a malformed
-        call, whose arguments are the model's own bytes rather than a
-        JSON object, is flagged and carries none of them, and its name
-        is classified anyway, because a model that mangles its arguments
-        still says which tool it meant."""
-        malformed = call.malformed_arguments is not None
-        source, entry = tool_source(
-            call.name,
-            {tool.name for tool in self._output.device_tools()},
-            self._mcp_servers.owner_of(call.name),
-        )
-        return ToolInvocation(
-            position=position,
-            source=source,
-            entry=entry,
-            name=call.name,
-            malformed=malformed,
-            arguments=None if malformed else dict(call.arguments),
-        )
-
-    async def _dispatch(self, call: ToolCall, classified: ToolInvocation) -> tuple[str, bool]:
-        """Hand a call to the source that owns it, or answer it here.
-
-        Three answers are nobody's tool to give and stay: a name this
-        reply withheld, which does not exist for the length of it; a
-        call whose arguments the model never closed, which no source
-        should be asked to run; and a name none of them claims, which is
-        what the model invented one looks like.
-
-        The withheld one is first, and the order is the contract rather
-        than a preference. Everything below it is an answer about a tool
-        that exists: "the arguments were not a JSON object" is what a
-        real tool says to a mangled call, so answering it for a
-        withheld name would tell a model that the name is real and only
-        its arguments were wrong. A withheld memory tool is answered
-        exactly as a name nobody publishes is, whatever the model sent
-        with it, and nothing about the call is logged, because there is
-        no tool here to have been called badly.
-
-        `classified` is the answer `_run_one` already has, passed in
-        rather than recomputed, and it is the whole of what a source is
-        told: the one line here that says anything about the call
-        describes it exactly as its `tool_call` event does, two
-        classifications of one call could disagree, and a source that
-        resolved the name again could route around the reservation."""
-        if withheld(classified.name, self._remembering_now):
-            return no_such_tool(classified.name)
-        if call.malformed_arguments is not None:
-            # A plain line and not an event, and it obeys the same rule
-            # as the event beside it (#120): the size of what the model
-            # streamed rather than the bytes, since those are content,
-            # and a name only where this server authored one. A device's
-            # tool name and a name nobody publishes are the peer's own
-            # bytes on a retained surface whether the line carrying them
-            # is structured or not. The length is what tells a truncated
-            # object from a model that answered in prose, and the record
-            # carries the same fact as its `malformed` flag.
-            named = _tool_fragment(classified).carried()
-            logger.warning(
-                "session %s: %s tool%s got %d characters of unparseable arguments",
-                self.session_id,
-                classified.source,
-                named,
-                len(call.malformed_arguments),
-            )
-            return "the arguments were not a JSON object; call again with valid ones", True
-        assert self._agent is not None
-        for source in self._sources:
-            if source.owns(classified):
-                return await source.dispatch(classified, self._agent)
-        return no_such_tool(call.name)
-
-    def _timeout_for(self, classified: ToolInvocation) -> float:
-        """How long this call may take, answered by the source that owns
-        it: a server tool gets its entry's configured timeout, builtins
-        and device tools the module default above.
-
-        Asked of the same claim the dispatch routes by, so a tool cannot
-        be run against one entry's timeout and dispatched to another.
-        Asking the registry by name here is what used to make that
-        possible: a reload landing between the two answers
-        differently."""
-        for source in self._sources:
-            if source.owns(classified):
-                return source.timeout_for(classified)
-        return DEFAULT_TOOL_TIMEOUT_S
-
     async def _system_prompt(self) -> str:
         """The prompt this round is sent: the half cached at activation,
         plus everything memory holds for it and everything the device
@@ -2776,92 +2382,21 @@ class PipelineRuntime:
             return None
         return await self._devices.resolve_record(self._attached)
 
-    def _offered_origins(self, tools: Sequence[ToolDef]) -> dict[str, _Origin]:
-        """Where each tool this reply offers came from, classified while
-        the offer is being made.
-
-        Derived from the snapshot rather than gathered beside it, so
-        the two cannot come to disagree about which tools this reply
-        has: the names are the snapshot's names, and every one of them
-        gets an answer.
-
-        Read once, here, because the two registries behind it move. A
-        board finishes a discovery and republishes its tools; an apply
-        replaces the MCP registry whole, and an entry that owned a name
-        can stop owning it or be replaced by another entry that does.
-        Asking them at the moment a sentence is withheld would report a
-        name matched against this reply's offer as whatever the world
-        happens to say a round later: `unknown` for a board tool that
-        has since been re-discovered, or somebody else's entry for a
-        name an apply moved (#391). What the record has to say is what
-        this reply offered, so the answer is taken when the offer is.
-
-        Sanitized by construction. What is kept per name is the
-        namespace it came from and, for an MCP tool, the configured
-        entry an operator wrote, which are the two things the naming
-        policy may print; the far side's own name never enters.
-        """
-        published = {one.name for one in self._output.device_tools()}
-        return {
-            tool.name: _Origin(*tool_source(
-                tool.name, published, self._mcp_servers.owner_of(tool.name)
-            ))
-            for tool in tools
-        }
-
-    def _withheld(
-        self, sentence: str, tools: Sequence[ToolDef], origins: Mapping[str, _Origin]
-    ) -> bool:
+    def _withheld(self, sentence: str, offer: Offer) -> bool:
         """Whether this sentence is a leaked tool call, in which case it
-        has already been reported and nothing else happens to it.
+        has already been reported and nothing else happens to it, and
+        remember for this reply that one was.
 
-        The one way into the guard, and both of the loop's sentence
-        sites come through here: the rule and the record are one
-        decision, and a second call site that only asked the predicate
-        would be a sentence dropped with nothing saying so.
-
-        Nothing about the sentence is kept. `withhold_tool_shaped` hands
-        back the tool it identified and a character count, and the
-        emission below closes over those rather than over the text, so
-        the withheld bytes reach no payload, no log line and no list
-        this reply carries (#385).
+        Both of the loop's sentence sites come through here, so neither
+        can drop a sentence without the reply knowing. The question is
+        the leg's, asked of the offer this leg was made; the answer is
+        the reply's, which is why the flag is set here and not by the
+        module that answers: it outlives the leg the offer belongs to.
         """
-        return withhold_tool_shaped(
-            sentence, tools, functools.partial(self._report_withheld, origins)
-        )
-
-    def _report_withheld(
-        self, origins: Mapping[str, _Origin], tool: str | None, characters: int
-    ) -> None:
-        """Say that a sentence was withheld, and remember for this reply
-        that one was.
-
-        The name is named as this reply offered it, read out of the
-        provenance taken with the snapshot the sentence was matched
-        against, so a tool the model leaked into its speech is named on
-        this record the way it would have been named on its `tool_call`
-        and stays named that way however the registries move underneath.
-
-        `unknown` is left for the one thing that genuinely is unknown:
-        an argument-only match whose keys fit more than one offered
-        tool, which names none of them because which one it was is what
-        could not be decided. A name the guard answered is always one of
-        the offered names, so the lookup below always has it; the
-        default is what an unreachable third case would read as rather
-        than a second meaning for the token.
-        """
+        if not self._tools.withheld(sentence, offer):
+            return False
         self._reply_withheld = True
-        origin = _UNKNOWN_ORIGIN if tool is None else origins.get(tool, _UNKNOWN_ORIGIN)
-        self._events.emit(
-            lambda: _sentence_withheld(
-                origin.source,
-                origin.entry,
-                tool,
-                self._agent,
-                self._conversation,
-                characters,
-            )
-        )
+        return True
 
     async def _speak_after(
         self,

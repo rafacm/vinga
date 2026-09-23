@@ -2,6 +2,7 @@
 
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -117,7 +118,7 @@ class LlmInputExport:
         agent: str | None,
         system: str,
         turns: list[Turn],
-        tools: list[ToolDef],
+        tools: Sequence[ToolDef],
         choice: str,
     ) -> None:
         del agent
@@ -143,7 +144,7 @@ class LlmInputExport:
         invocation: str,
         system: str,
         turns: list[Turn],
-        tools: list[ToolDef],
+        tools: Sequence[ToolDef],
         choice: str,
     ) -> None:
         if invocation in self._rounds:

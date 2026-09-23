@@ -439,7 +439,8 @@ def test_the_fragment_renders_whichever_name_it_is_handed() -> None:
     WHICH of a call's names may be printed is not pinned here and is not
     decided here: hand this a device tool's name as the first argument
     and it quotes it, because the decision reads the classifier's source
-    constants and lives beside them, in `pipeline.py`'s `_tool_fragment`.
+    constants and lives beside them, in `tool_execution.py`'s
+    `_tool_fragment`.
     What pins the decision is `test_session_tools.py`, at the sentence
     itself: a builtin's name reaches the warning line and a name no
     namespace publishes does not.
