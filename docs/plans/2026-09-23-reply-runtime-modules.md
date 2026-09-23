@@ -23,7 +23,7 @@ mind while reading the reply, and the public names would widen the
 runtime's interface with verbs no caller but a test needs, which is
 depth going the wrong way. The two modules below take roughly 780 lines
 out of the class (505 for tool execution with its helpers, 277 for
-watching, measured below) behind interfaces of six and six verbs, and
+watching, measured below) behind interfaces of five and six verbs, and
 the tests land on those. For M3 the cheapest alternative was priced
 before this plan and chosen: see "M3: the reply in flight" below, where
 the re-scope's full extraction of the reply core is the rejected
@@ -171,8 +171,14 @@ class ToolExecution:
     def reserve(self, turn: TurnUnderway, calls: Sequence[ToolCall]) -> list[int]
     def for_execution(self, turn, call, slot, offer) -> ToolCall
     async def run(self, turn, calls: Sequence[tuple[int, ToolCall]]) -> list[ToolResult]
-    def timeout_for(self, classified: ToolInvocation) -> float
 ```
+
+Five verbs and no more. How long a call may take is decided inside
+`run` (today's `_timeout_for`, private), because its one caller moves
+with it; a public `timeout_for` would be surface only a test reads. The
+runtime holds the module as a private collaborator, `self._tools`, for
+the same reason: nothing outside the runtime needs it, so it is not on
+the runtime's interface.
 
 Decisions inside it:
 
@@ -469,12 +475,18 @@ class SpeakingPass:
   inventory decides.
 - **Reach-ins move to the interface.** The six manifest sites in
   `test_session_tools.py` are rewritten against `ToolExecution`'s
-  public verbs, with the turn constructed by the test rather than read
-  off the runtime's `_turn`, so the manifest loses those lines and gains
-  none. Whether the test reaches the module through a public attribute
-  on the runtime or constructs its own over the same sources is the
-  implementer's call, recorded; what is refused is a new underscore
-  name. `tests/census/reach-ins.txt` is regenerated, never edited.
+  public verbs, constructing a `ToolExecution` directly over the same
+  sources the session would build (the MCP source over the test's
+  `McpServers`, for the reload-mid-call case) and a turn of its own,
+  rather than reading either off the runtime, so the manifest loses
+  those lines and gains none. No production interface is added to reach
+  them: not a public runtime attribute and not a public `timeout_for`.
+  The timeout test (`test_session_tools.py` L1165, which today asks
+  `_timeout_for` for the entry's 7.5 s) is rewritten through `run`,
+  with the MCP entry's configured timeout set short and a tool that
+  stalls past it while the module default is left long, so the timeout
+  result can only have come from the entry the reservation named.
+  `tests/census/reach-ins.txt` is regenerated, never edited.
 - **The event-baseline identities** for the six moved emit sites are
   renamed to the new qualnames in `tests/tools/event_baseline.py` and in
   `CARRIED`, one to one, and the driver count stays 106.
@@ -619,6 +631,13 @@ Verdict: ready after the P2 amendments.
    rule. Should keep timeout selection private, keep the collaborator
    private on the runtime, construct `ToolExecution` directly in unit
    tests, and verify timeouts through `run`.
+
+   *Resolution:* accepted. `timeout_for` is removed from the interface
+   (five verbs), the runtime keeps the module private as `self._tools`,
+   the reach-in rewrite constructs `ToolExecution` directly, and the
+   timeout test is rewritten through `run` with a short entry timeout
+   against a long default, so it still proves which entry the bound
+   came from. Stated in M1's interface block and the Tests section.
 3. **P2: the no-leak verification cites a test that does not exercise
    `_run_one`'s exceptions.** `test_event_surface_pins.py` L386 covers
    lossless coercion; the class-only exception pin is
