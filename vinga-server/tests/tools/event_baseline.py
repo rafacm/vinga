@@ -1249,6 +1249,7 @@ def drive_frames_dropped(_: Path) -> None:
 
 EDGE = "vinga_server.device.session"
 PIPELINE = "vinga_server.runtime.pipeline"
+PROVIDER_WATCH = "vinga_server.runtime.provider_watch"
 TURNTAKING = "vinga_server.runtime.turntaking"
 FILLER = "vinga_server.runtime.filler_runner"
 EMITTER = "vinga_server.events"
@@ -1267,10 +1268,10 @@ SESSION_DRIVERS: tuple[Driver, ...] = (
         drive_speaking_finished,
         "speaking_finished",
     ),
-    Driver((PIPELINE, "PipelineRuntime._watchdog_stream", 1), drive_llm_retry, "llm_retry"),
-    Driver((PIPELINE, "PipelineRuntime._llm_round_done", 1), drive_llm_round, "llm_round"),
+    Driver((PROVIDER_WATCH, "ProviderWatch.reply_stream", 1), drive_llm_retry, "llm_retry"),
+    Driver((PROVIDER_WATCH, "ProviderWatch._rounded", 1), drive_llm_round, "llm_round"),
     Driver(
-        (PIPELINE, "PipelineRuntime._provider_failed", 1),
+        (PROVIDER_WATCH, "ProviderWatch.failed", 1),
         drive_provider_failed,
         "provider_failed",
     ),
