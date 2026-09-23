@@ -668,3 +668,17 @@ line by #440, whose rows are keyed by day and device and whose shape
 takes a user in the key without moving). It is stated here
 so the later refactor
 has a name rather than being a surprise.
+
+Users do not bring a session of their own, and that is **decided
+direction** too (recorded on this page, 2026-09-23). Three things stay
+three: the **device session**, the connection episode this page calls a
+session, which stays on the device side of the model and is written
+with its qualifier wherever a login or a user could be read into the
+bare word; the **conversation**, owned by a user and an agent together
+once users exist, which is the unit a person finds, resumes, recaps and
+deletes; and **who is speaking**, which on a shared device can change
+inside one device session (a child, then a parent) and is therefore a
+property of a stretch of that session rather than a session in its own
+right. A "user session" would have to mean one of the last two, and
+naming either of them a session would reintroduce the confusion the
+conversation/session split exists to remove.

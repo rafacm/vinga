@@ -506,7 +506,11 @@ transcript (everything said and done from wake to close, across
 every conversation touched plus the meta turns) is a view over the
 turns that name it, the same rows a conversation reads by thread, so
 no dialogue is stored twice. Belongs to the device side of the model
-the way a conversation belongs to an agent. See
+the way a conversation belongs to an agent. Written **device session**
+wherever the bare word could be read as a user's or a login's: vinga
+has no user session and will not gain one when users arrive, since who
+is speaking is a property of a stretch of a device session rather than
+a session of its own. See
 [the concepts page](concepts.md#conversation-and-session).
 
 ### Structured event
