@@ -407,7 +407,7 @@ async def test_a_mid_asr_merge_leaves_both_turns_with_an_asr_outcome() -> None:
     transcription is the one path that cancels an ASR call rather than
     letting it answer: the head of the user's sentence is reconstituted
     in front of the continuation and one reply answers the whole thing.
-    The cancelled call is not a provider failure, and `_watching`
+    The cancelled call is not a provider failure, and `watching`
     catches `Exception`, so nothing used to say anything about that
     turn's ASR stage at all: it opened with `turn_started` and closed
     with `reply_finished` and the stage between them was invisible.

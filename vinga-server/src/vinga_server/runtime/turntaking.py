@@ -402,7 +402,7 @@ class TurnTaking:
         except Exception as exc:
             # The class name, and nothing else: no `exc_info`, no
             # `str(exc)`. The confirmation runs inside the runtime's
-            # `_watching("asr", ...)`, so a failure on the wire has
+            # `watching("asr", ...)`, so a failure on the wire has
             # already been reported as `provider_failed` with the
             # stage, the provider and the host on it, sanitized at
             # that decision site. What is left for this line to add is
