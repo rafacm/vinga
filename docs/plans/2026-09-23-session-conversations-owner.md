@@ -416,14 +416,45 @@ own.
 
 ## #489's bookkeeping
 
-Recorded in the milestone's implementation-doc section: for each of the seven
-files the #489 comment lists, whether it names storage in a signature
-before and after, and the count. The prediction written down now, so
-it can be wrong: **the count does not move.** The owner takes no
-storage, and those tests reach the database through the recorder and
-the resumption flow, neither of which this issue touches. If that
-holds, it is evidence against #489's premise for this seam, and the
-implementation doc says so in those words.
+The seven files the #489 comment (on this issue, 2026-09-20) assigns to
+this issue's territory, all under `vinga-server/tests/unit/`:
+`test_session_events.py`, `test_session_conversations.py`,
+`test_conversations_session.py`, `test_session_close_reason.py`,
+`test_session_recap.py`, `test_session_memory_policy.py`,
+`test_events_live_wiring.py`.
+
+The instrument, fixed here so before and after are measured the same
+way, run from `vinga-server/tests/unit`:
+
+```bash
+RE='support\.stores|support import stores|clean_store|blank_database|throwaway_database|module_database|spare_database|packaged_database|ConversationStore|vinga_server\.db\b|vinga_server\.conversations\.store|\bstore_at\b'
+for f in test_session_events.py test_session_conversations.py \
+         test_conversations_session.py test_session_close_reason.py \
+         test_session_recap.py test_session_memory_policy.py \
+         test_events_live_wiring.py; do
+  printf '%s %s\n' "$(grep -cE "$RE" "$f")" "$f"
+done
+```
+
+Baseline at `0fcc5c26`: 0, 1, 12, 0, 1, 2, 1 matching lines in that
+order, so **five of the seven name a storage helper or import
+somewhere**. That already disagrees with the comment's premise that
+these files "name no storage at all", measured on `10dfb58f` with an
+instrument the comment does not record. The matches are mostly
+`tests.support.stores` imports (`StoredThreads`, the lane's memory
+store), which name storage at the file's top and not in any signature
+of the subject under test. So the milestone records two columns per
+file: (a) the count above, mechanical; and (b) whether storage reaches
+the object under test through a parameter the test visibly passes,
+judged per file with the line cited. Column (b) is the one #489's
+mechanism is about.
+
+The prediction written down now, so it can be wrong: **neither column
+moves.** The owner takes no storage, and these tests reach the
+database through the recorder and the resumption flow, neither of
+which this issue touches. If that holds, it is evidence against #489's
+premise for this seam, and the implementation doc says so in those
+words, together with the instrument disagreement above.
 
 ## Milestones
 
@@ -491,6 +522,8 @@ Reviewed 2026-09-23 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.0, 
    *Resolution:* Accepted. The plan now states the exact signature (owner third, after `SessionEvents`, before the agents; the trailing device record keeps its default), forbids a default or a runtime-constructed fallback owner at every layer, makes the owner a public `conversations` attribute on the runtime, and requires the boundary test to assert identity with `is`.
 
 7. **P2: The required #489 inventory is unavailable from the plan.** Evidence: `#489's bookkeeping`, lines 313-322, refers to “the seven files the #489 comment lists” without naming them or giving a reproducing command. That list is not recorded elsewhere in this checkout, so the milestone cannot be completed or reviewed from the repository alone. The plan should enumerate all seven paths and state the exact before/after classification and counting command.
+
+   *Resolution:* Accepted. The seven paths are enumerated and the counting command is committed with its baseline (0, 1, 12, 0, 1, 2, 1 at 0fcc5c26). Measuring it surfaced a disagreement worth recording: five of the seven already name a storage helper, against the #489 comment's "name no storage at all", so the plan records two columns, the mechanical count and a per-file judgement of whether storage reaches the subject through a visible parameter, which is the one #489's mechanism concerns.
 
 8. **P3: The reach-in census expectation contradicts itself.** Evidence: the plan says M1 leaves `reach-ins.txt` byte-identical (`_turns stays`, lines 182-189; `Tests`, lines 265-269), then says the `_acknowledged` reach-in is removed. Reaching the owner through a private runtime field may also add a replacement reach-in. The plan should state the expected M1 manifest delta and regenerate it, rather than claim byte identity.
 
