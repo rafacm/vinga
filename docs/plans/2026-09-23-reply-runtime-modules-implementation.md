@@ -312,3 +312,176 @@ targeted files (`test_provider_watch.py`, `test_provider_watch_pins.py`,
 `test_event_baseline.py`) 76 passed; the full unit lane with `-n 4
 --dist loadfile` 7,505 passed and 19 skipped (the extras not installed
 here), 26m12s, one more than before the round: the new chain test.
+
+## M1: tool execution in `runtime/tool_execution.py`
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.280; 2026-09-23.
+
+Executing one round's tool calls has its own module,
+`vinga_server/runtime/tool_execution.py`: `ToolExecution` with the five
+verbs the plan named (`offer`, `withheld`, `reserve`, `for_execution`,
+`run`), the frozen `Offer` and `Origin` values, and
+`DEFAULT_TOOL_TIMEOUT_S`. The runtime holds it privately as
+`self._tools`, passes it the turn it files on at every call, and keeps
+the round loop, the moves and the reply-wide withheld flag.
+`runtime/pipeline.py` went from 3,517 lines to 3,053 before M1 was
+stacked on M2, and from M2's 3,233 to 2,768 after; the new module is
+606.
+
+### The commits
+
+| Commit | What it is |
+| --- | --- |
+| `Pin the records a round's tool calls produce` | `tests/unit/test_session_tool_events.py`, green against the code before the move |
+| `Add ToolExecution, which runs one round's calls` | The module and `tests/unit/test_tool_execution.py`, nothing using it yet |
+| `Ask ToolExecution, not the runtime, in tool tests` | The reach-ins in `test_session_tools.py` rewritten against the module's verbs, and the reach-in manifest regenerated |
+| `Move tool execution out of PipelineRuntime` | The move as one commit, with the source prose naming `_tool_fragment`'s home |
+| `Name the moved tool emit paths by their new home` | The three driver identities in `event_baseline.py` and `CARRIED` |
+
+### Deviations from the plan
+
+- **The reach-in rewrite landed before the move, not after it.** The
+  rewritten tests need only the module, which exists from the second
+  commit, so landing them third keeps every commit on the branch green;
+  after the move the old reach-ins would have raised `AttributeError`
+  for one commit. They were run against the pre-move runtime before
+  that commit was made.
+- **No interface renames.** `ToolExecution`, `Offer` and `Origin` and
+  the five verbs are the plan's names. The timeout rule stays private
+  as `_timeout_for`, per the review round's finding 2.
+- **`owner_of` is a lambda over the runtime's field, not the
+  registry's bound method.** The plan says "callables"; which callable
+  turned out to matter. `test_session_withheld.py`'s
+  `test_an_apply_that_moves_an_entry_mid_reply_names_the_entry_that_offered_it`
+  replaces `session.runtime._mcp_servers` mid-reply to stand for an
+  apply, and every read of the registry went through that field before
+  the move. Measured: with a mutation that classifies a withheld
+  sentence's origin at the moment it is withheld rather than at the
+  offer, the test fails with the lambda (`('mcp', 'intruder') !=
+  ('mcp', 'tools')`) and passes with the bound method, so the bound
+  method would have taken that test's teeth out.
+- **`stage_reply` and `_stage` in `llm_input_export.py` take a
+  `Sequence[ToolDef]`.** `Offer.tools` is a tuple; both only iterate it.
+  A one-word annotation change outside the documentation footprint.
+- **Two docstrings split where the responsibility did.**
+  `_report_withheld`'s first sentence ("and remember for this reply
+  that one was") moved to the runtime's `_withheld`, which is now what
+  sets the flag; `_run_tools`'s three paragraphs on the ordered writes
+  moved to `run`, and `_run_tools` points at it. The comments in
+  `_tool_loop` arguing that tools, schemas and origins must be taken on
+  one line became `Offer`'s docstring. Everything else moved verbatim.
+- **`_sources` is a constructor local.** Nothing but the moved methods
+  read it. The `assert self._agent is not None` that `_tool_snapshot`
+  began with now precedes the `offer` call in `_tool_loop`.
+- **The manifest lost eight sites, not six.** The plan counted the six
+  tool-method sites; the same three tests also read `_turn` twice, and
+  a turn of their own replaced both. Six lines removed from
+  `reach-ins.txt`, none added.
+
+### The pins, and what they pinned
+
+The inventory of what existing suites asserted about the moved emit
+sites, at the plan's strength (channel and level, `record.msg`, typed
+`record.args`, payload keys and values, timings by type):
+
+- **The driver suite** (`test_event_baseline.py`) holds each path to
+  its variant, and so to its template and its key set, for all three
+  `tool_call` shapes, `tool_arguments_coerced` and all three
+  `sentence_withheld` shapes. It asserts no value.
+- **`test_session_tools.py`, `test_session_events.py`,
+  `test_event_surface_pins.py` and `test_session_withheld.py`** assert
+  individual fields (`source`, `entry`, `tool`, `error`, `characters`,
+  `coerced`), the key set of one device coercion, and substrings or
+  suffixes of the rendered warning line. None asserts an unrendered
+  sentence or its arguments.
+- **The turn record** is already pinned whole for every branch:
+  `test_every_source_is_classified_and_positioned` (source, name,
+  entry, arguments, malformed flag, result, error flag, duration
+  presence, for builtin, device, MCP, unknown and malformed calls),
+  `test_a_call_cancelled_while_it_ran_is_recorded_unexecuted` (a
+  reservation left as reserved), and the refused and successful moves.
+  Nothing added.
+- **Attribution across a move:** `test_pair_attribution.py` pins a
+  `tool_call` on the thread a `new_conversation` moved to, which holds
+  the conversation half. No test held the agent half, since no tool
+  event there follows a handover.
+
+So one pin file was added, `test_session_tool_events.py`, five tests:
+`tool_call` in its builtin, MCP and unnamed shapes (success and
+failure), `sentence_withheld` in its builtin, MCP and unnamed shapes,
+`tool_arguments_coerced` in its named shape, the unparseable-arguments
+warning in all three name shapes, and every tool record after a
+handover naming the tutor and the tutor's thread. It was watched
+failing against a mutation naming the session's first agent in the
+withheld report's thunk. It is byte-unchanged from its commit
+(`git diff fab578a6 HEAD -- vinga-server/tests/unit/test_session_tool_events.py`
+is empty), and `test_a_tool_exception_exports_only_its_class` is
+unmodified and green.
+
+### The falsification runs
+
+One run each, every mutation applied to a copy-restored file and
+touched after restoring.
+
+| Mutation | Result |
+| --- | --- |
+| The withheld report's thunk names the session's first agent | the handover pin fails |
+| `run` dispatches the concurrent half before the ordered writes | the run-order test fails |
+| `run` answers in completion order | the result-order test fails |
+| `offer` classifies against an empty board | the origins test fails |
+| `offer` asks no registry owner | the origins test fails |
+| Every owned call bounded by the module default | the separator test's rewritten tail fails, the call taking 15013 ms |
+| A withheld origin classified late, with `owner_of` a lambda over the field | the MCP apply-mid-reply test fails |
+| The same, with `owner_of` the registry's bound method | the same test passes, which is the finding above |
+
+The plan's ordered-then-concurrent claim is covered by the first two
+module rows; the concurrency of the concurrent half is not a new claim
+and got no mutation.
+
+### Discoveries
+
+- **The default-timeout monkeypatch still takes effect.**
+  `test_a_tool_that_never_answers_becomes_a_timeout_result` patches
+  `pipeline_module.DEFAULT_TOOL_TIMEOUT_S`. The runtime imports the
+  name back and reads it when it builds the sources, so the patched
+  value still reaches `BuiltinTools`, which is what bounds that test's
+  `remember`. The module's own fallback, for a name no source owns, is
+  not reached by that test. Left unchanged.
+- **The per-entry timeout test now waits one out.** Its old tail asked
+  `_timeout_for` for 7.5 s, and its comment rejected waiting as "a
+  seven-and-a-half second test". Through `run` it waits one second:
+  the entry is configured for 1 s against the 15 s default, a stalled
+  `slow_answer` comes back timed out, and its recorded duration lies
+  between the two, which only the entry's bound can produce.
+- **Two lanes on one Pi.** M2's full unit lane ran beside this
+  milestone's targeted runs on the same compose Postgres, and
+  `DROP DATABASE ... WITH (FORCE)` sat waiting on checkpoints for
+  minutes, which made two short runs look hung. Each lane has its own
+  databases, so nothing was shared but the disk.
+
+### Changelog
+
+None. No event, field, log line, stored row or timing changes, so
+there is no fragment; the PR says so.
+
+### Verification
+
+Run on the Pi, from `vinga-server/`, after M1 was rebased onto M2
+(`feature/482-m2-provider-watch`), on the rebased tree:
+
+- `uv run ruff check .`: all checks passed.
+- `uv run pytest tests/census -q -ra`: 66 passed; both manifests
+  regenerated on the rebased tree and unchanged by their generators.
+- The targeted files (`test_session_tools.py`,
+  `test_session_tool_events.py`, `test_tool_execution.py`,
+  `test_provider_watch.py`, `test_provider_watch_pins.py`,
+  `test_session_recap.py`, `test_event_baseline.py`,
+  `test_session_withheld.py`, `test_tts_lookahead.py`): 131 passed.
+- `uv run pytest tests/unit -q -ra -n 4 --dist loadfile`: 7512 passed,
+  19 skipped (the optional provider extras), in 14m37s.
+- `uv run pytest tests/integration -q -ra`: 347 passed, in 10m06s.
+- `uv run python ../scripts/check_doc_links.py ..`: 268 files, 0
+  failures.
+
+Before the rebase, on M1 alone and serially, the same lanes gave 7494
+unit passed and 19 skipped, and 347 integration passed.
