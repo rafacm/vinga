@@ -572,7 +572,7 @@ class SpeakingPass:
 ## Milestones
 
 - [x] **[M1: tool execution in `runtime/tool_execution.py`](2026-09-23-reply-runtime-modules-implementation.md#m1-tool-execution-in-runtimetool_executionpy)**
-  (PR TBD). Pins for the moved emit sites and record writes first,
+  ([#558](https://github.com/rafacm/vinga/pull/558)). Pins for the moved emit sites and record writes first,
   then the module and its unit tests, then the move (one commit), then
   the reach-ins rewritten against the interface and the census
   regenerated.
