@@ -25,13 +25,17 @@ audio, and `OUTPUT_FRAME_BYTES` below is a frame of 24 kHz reply audio.
 
 import asyncio
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from tests.support.configs import OUTPUT_RATE
 from vinga_server.device.boundary import DeviceOutput, PlayableAudio
 from vinga_server.events import SessionEvents
+from vinga_server.filler import FallbackClip, FillerClips
 from vinga_server.providers import ToolDef
+from vinga_server.runtime.filler_runner import FillerRunner
 
 OUTPUT_FRAME_BYTES = OUTPUT_RATE * 60 // 1000 * 2
 
@@ -186,3 +190,60 @@ class FakeDevice:
 
     async def call_device_tool(self, name: str, arguments: dict[str, Any]) -> tuple[str, bool]:
         raise AssertionError("this device has no tools")
+
+
+# --- a runner standing alone, and who it says is talking --------------
+
+
+@dataclass(frozen=True)
+class Pair:
+    """The agent talking and the thread it is talking on, as an
+    activation answers them."""
+
+    agent: str
+    conversation: str
+
+
+class EventsPair:
+    """Where the active pair lives today, the events object, behind the
+    one verb a suite moves it with.
+
+    `activate` is the activation's own rule in small: an agent's thread
+    in this session is minted the first time it is activated and
+    continued every later time, in the shape the runtime mints. A suite
+    driving a component that reads the pair (the filler runner) moves it
+    through here rather than by writing two attributes, so what it says
+    is "this agent is talking now" and not where that fact is kept."""
+
+    def __init__(self, events: SessionEvents) -> None:
+        self.events = events
+        self.threads: dict[str, str] = {}
+
+    def activate(self, agent: str) -> Pair:
+        conversation = self.threads.setdefault(agent, uuid.uuid4().hex)
+        self.events.agent = agent
+        self.events.conversation = conversation
+        return Pair(agent, conversation)
+
+
+def filler_runner(
+    events: SessionEvents,
+    device: DeviceOutput,
+    fillers: Mapping[str, FillerClips],
+    agents: Sequence[str],
+    turn: Any,
+    fallbacks: Mapping[str, FallbackClip] = MappingProxyType({}),
+) -> tuple[FillerRunner, EventsPair]:
+    """A filler runner with no pipeline behind it, its first agent
+    activated the way a runtime's constructor activates one, and the
+    handle a suite moves the pair with.
+
+    One builder rather than a constructor call in each suite, because
+    what a runner is handed beside the events object is the session's
+    business rather than the suite's: a suite about the fire or the
+    fallback says which clips and which floor, and learns who is talking
+    from what `activate` answers."""
+    pair = EventsPair(events)
+    pair.activate(agents[0])
+    runner = FillerRunner(events, device, fillers, agents, turn, fallbacks)
+    return runner, pair
