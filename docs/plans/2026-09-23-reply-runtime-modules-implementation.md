@@ -413,9 +413,11 @@ failure), `sentence_withheld` in its builtin, MCP and unnamed shapes,
 warning in all three name shapes, and every tool record after a
 handover naming the tutor and the tutor's thread. It was watched
 failing against a mutation naming the session's first agent in the
-withheld report's thunk. It is byte-unchanged from its commit
-(`git diff fab578a6 HEAD -- vinga-server/tests/unit/test_session_tool_events.py`
-is empty), and `test_a_tool_exception_exports_only_its_class` is
+withheld report's thunk. It is byte-unchanged from its commit: the
+file has exactly one commit in its history (`git log --oneline --
+vinga-server/tests/unit/test_session_tool_events.py` lists only "Pin
+the records a round's tool calls produce"), a proof that survives the
+rebase merge rewriting every hash, and `test_a_tool_exception_exports_only_its_class` is
 unmodified and green.
 
 ### The falsification runs
