@@ -3,16 +3,22 @@
 The session owns the handshake, the wire, and the appliance. It accepts
 the socket, checks the device's identity and its agent binding, exchanges
 hellos, decodes mic Opus, encodes and paces reply Opus, frames both,
-carries the device's own MCP tool transport, records the capture,
-enforces the session limits and the idle timeout, and closes politely.
+carries the device's own MCP tool transport, hands its recording the
+facts it needs, enforces the session limits and the idle timeout, and
+closes politely.
 
 Three of those it owns without carrying: reply audio's encoder, cadence
-and per-reply latches are [`pacing`](pacing.py), the recording's own
-decode path is [`capture_audio`](capture_audio.py), and both of the
-deadlines a connection is held to are [`watchdog`](watchdog.py). What
-stays here is what those three would each need a copy of otherwise:
-the protocol version, the manifest, the events object, and the policy
-that decides what a deadline means.
+and per-reply latches are [`pacing`](pacing.py), everything the session
+leaves behind it (the capture and its decode path, the conversation
+store's row, and the surfaces a closed session is handed to) is
+[`recording`](recording.py), and both of the deadlines a connection is
+held to are [`watchdog`](watchdog.py). What stays here is what those
+three would each need a copy of otherwise: the protocol version, the
+manifest, the events object, and the policy that decides what a
+deadline means. So the recording is handed the moment each of its
+steps happens (the open after the hello, a frame as it arrives or is
+sent, the close after `session_closed`) and the facts it cannot know,
+and the order within each step is its own.
 
 What is said in the conversation it does not own. Behind it sits one
 conversation runtime, built for this connection by the factory the
