@@ -117,6 +117,15 @@ Named here so the review can price it; the implementer may rename
 within the plan's intent and records any rename.
 
 ```python
+RecordingFactory = Callable[[str, SessionEvents], "Recording"]
+
+def recordings(
+    captures: CaptureStore | None = None,
+    conversations: ConversationStore | None = None,
+    transcripts: "TranscriptExport | None" = None,
+    llm_input: "LlmInputExport | None" = None,
+) -> RecordingFactory: ...   # closes over the four, answers a builder
+
 class Recording:
     def __init__(
         self,
@@ -141,6 +150,12 @@ class Recording:
     def reply(self, packet: bytes) -> None: ...
     def close(self, duration_s: float, reason: str) -> None: ...
 ```
+
+The issue's "open, attach, close" maps onto this as: `open` opens the
+capture and the row and attaches both taps, since no caller has a
+reason to do one without the other; `close` detaches and closes. The
+two feeds are the frames the session hands over, which the issue's
+list does not name and its "hands recording a seam" does.
 
 - **`open`** is today's `_start_capture` then `_start_recording`, in
   that order, so the capture's tap attaches before the store's and the
@@ -186,25 +201,52 @@ class Recording:
 
 ### Who constructs it
 
-**The session, in `__init__`, from the four optional collaborators it
-already takes.** `DeviceSession`'s constructor signature does not
-change, so `ws.py` and every test construction site stay as they are,
-and the six fields become one, `self._recording`, which is never None:
-a session with no capture store and no conversation store holds an
-owner whose `open` and feeds do nothing.
+**The connection handler, through a factory, and the session learns
+one collaborator.** `device/recording.py` exports `recordings(...)`,
+which closes over the four shared collaborators (the capture store,
+the conversation store, the transcript export, the LLM-input export)
+and answers a `RecordingFactory`: a callable taking the session id and
+the events object and building that session's `Recording`.
+`DeviceSession` takes one argument, `recordings: RecordingFactory |
+None = None`, in place of `captures`, `conversations`, `transcripts`
+and `llm_input`, calls it once in `__init__` with the id it minted and
+the events object it built, and holds the answer as
+`self._recording`, which is never None. `None` is compared `is not
+None` and means `recordings()` with nothing in it, an owner whose
+`open`, feeds and `close` do nothing, which is what every caller that
+passes none of the four gets today.
 
-Rejected: the composition root building a per-session recording
-factory and `DeviceSession` taking that instead of four arguments.
-Measured at `219c8ba2`: `DeviceSession(` is constructed at 9 sites
-(`ws.py`, `tests/support/sessions.py` twice,
-`tests/tools/event_baseline.py`, and five unit test files), all of
-which would change, and the factory would be a second bundle beside
-`Composition` that must agree with it about which surfaces exist. What
-it buys is four fewer constructor arguments; the growth point it
-would also move (a new surface adding an argument to the session) is
-one line in `__init__` on the chosen shape, against a stanza in the
-close tail and a field today. The proportion test prices that as not
-worth nine call sites.
+`ws.py` builds the factory from the `Composition` fields it already
+passes one by one, `recordings(comp.capture, comp.conversations,
+comp.transcripts, comp.llm_input)`, at the one production site.
+`Composition` does not change: its module docstring says it holds the
+declaration and nothing else, and the four fields have readers other
+than the session (the lifespan's shutdown, the API), so the factory is
+derived from them at the call rather than stored beside them as a
+second structure that would have to agree. Nothing else in `ws.py`
+changes.
+
+The price, measured at `219c8ba2`: `DeviceSession(` is constructed at
+9 sites, `ws.py`, `tests/support/sessions.py` twice,
+`tests/tools/event_baseline.py`, and one each in
+`test_capture_session.py`, `test_conversations_session.py`,
+`test_events_live_wiring.py`, `test_generation_binding.py` and
+`test_session_device.py`. Five of them pass `captures` positionally
+(4th) or `conversations`, `transcripts` or `llm_input` by keyword;
+each becomes `recordings=recordings(...)` with the same objects. The
+support helpers keep their own keyword arguments and build the factory
+inside, so the tests that call them do not change. The milestone
+recounts the sites untruncated on its own base and records the number.
+
+What this buys over keeping the four arguments on the session, which
+the plan first proposed: the growth point leaves the session
+entirely. On the first shape a fifth surface still added a
+`DeviceSession` argument and a `ws.py` argument, two of the three
+edits #495 and #502 each made; on this one it adds a parameter to
+`recordings` and a line in the owner, and the session does not
+change. That is the depth the issue settled on (the session learns
+one interface), and a constructor's parameters are interface in the
+design guide's sense.
 
 ### The white-box reads of the old fields
 
@@ -248,7 +290,9 @@ own.
   recording lines become one `close` call; the two feed sites; the
   module docstring's paragraph on what it owns without carrying),
   `device/capture_audio.py` (its class docstring's sentence about the
-  session holding one field for recording's audio now names the owner).
+  session holding one field for recording's audio now names the owner),
+  `ws.py` (the one production construction), and every test
+  construction site named under "Who constructs it".
 - Tests: new `tests/unit/test_recording.py`; the pin changes named
   under "Tests".
 
@@ -434,9 +478,9 @@ storage reaches the object under test through a parameter the test
 visibly passes, judged per file with the line cited.
 
 The prediction written down now, so it can be wrong: **neither column
-moves.** The owner takes the conversation store through the same
-constructor argument the session already takes, so no signature a
-test calls gains or loses storage. The move's own edits to these
+moves.** A test that hands the session a conversation store today
+hands it to `recordings(...)` instead, one call deeper and just as
+visible, so no test gains or loses a storage parameter it can see. The move's own edits to these
 files (a patch target and a white-box line in
 `test_capture_session.py`) name no storage. Where a new pin lands in
 one of the eight and needs a store, column (a) moves for that reason
@@ -509,8 +553,9 @@ implementation doc says so in those words.
      falsified as "Tests" states. Unused by the session in this
      commit.
   3. The move, as one commit: the session constructs the owner and
-     calls `open`, the feeds and `close`; the six fields and three
-     methods leave; the two patch targets move; the three white-box
+     calls `open`, the feeds and `close`; the constructor takes
+     `recordings` in place of the four collaborators, at every
+     construction site; the six fields and three methods leave; the two patch targets move; the three white-box
      lines are deleted. The body walks the diff in that order.
   4. The docstrings in the documentation footprint; the reach-in
      manifest regenerated with the stated delta; the #489 count in the
@@ -521,7 +566,10 @@ implementation doc says so in those words.
   surfaces, in what order they attach and close, that a codec failure
   strands a half-built capture, and which close answers the barrier
   the transcript export waits on. Deepens `device/session.py` by
-  removing a responsibility rather than adding one; no seam changes.
+  removing a responsibility rather than adding one. Adds one seam,
+  `RecordingFactory`, stated as a type: what the connection handler
+  hands the session so the session learns one collaborator instead of
+  four.
   Changelog: none.
 
 ## Plan review round
@@ -535,6 +583,8 @@ Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Evidence:** The plan restates that the session learns one interface at `docs/plans/2026-09-24-session-recording-owner.md:57-68`, but keeps `CaptureStore`, `ConversationStore`, `TranscriptExport`, and `LlmInputExport` in `DeviceSession.__init__` and constructs `Recording` itself (`:119-143`, `:187-207`). The design guide defines constructor types and wiring as part of an interface (`docs/architecture/design-guide.md`, “Interface and implementation”). The proposed API also has `open`, `microphone`, `reply`, and `close`, but no `attach`, despite restating the settled interface as `open, attach, close`. The “no seam changes” claim at `:519-524` further contradicts the issue’s requirement to hand recording a seam.
 
    **The plan should say instead:** The composition root builds a `RecordingFactory` that closes over the four shared collaborators, and `DeviceSession` receives that single abstraction. The factory creates the per-session owner from the session id and events object. Specify the exact factory and owner protocols, map the audio-feed operations explicitly to the issue’s settled interface, and update all nine construction sites. The one-time call-site cost cannot overrule a settled issue decision.
+
+   *Resolution:* Accepted, with the factory built in `ws.py` rather than stored on `Composition`. `device/recording.py` exports `recordings(captures, conversations, transcripts, llm_input) -> RecordingFactory`, where `RecordingFactory = Callable[[str, SessionEvents], Recording]`; `DeviceSession` takes `recordings: RecordingFactory | None` in place of the four and calls it once in `__init__`. `ws.py` derives the factory from the `Composition` fields it already passes, because `composition.py` declares itself a declaration and nothing else, and a stored factory beside the four fields would be a second structure that must agree with them. The nine construction sites change, the support helpers absorb the change for their callers, and the plan now says what that buys over the first shape: a new surface no longer touches the session at all. The issue's "open, attach, close" is mapped explicitly (`open` opens and attaches, `close` detaches and closes, the feeds are the frames), and the design footprint now names the one seam added.
 
 2. **P2: The open-order tests pin final tap order, not the opening order they claim to protect**
 
