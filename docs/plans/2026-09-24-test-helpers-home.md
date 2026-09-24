@@ -120,7 +120,7 @@ from what its item says is reported rather than silently unified.
    rerun afterwards finds no import of `chain` or `_held` from
    `tests.support.config_cli`, and its count is recorded.
 
-   Moving it, the walk is made complete in two ways, so that every
+   Moving it, the walk is made complete in three ways, so that every
    walker it replaces is a subset of it by construction rather than by
    inspection:
 
@@ -135,7 +135,14 @@ from what its item says is reported rather than silently unified.
      that walks the objects (an error reporter, a structured logger)
      does not, and the no-leak lens names both links. Both links are
      followed from every exception, with an identity-keyed seen set,
-     so a cycle terminates.
+     so a cycle terminates. The traversal is its own public operation,
+     `links(exc)`, every exception in the graph in visit order, and
+     `chain` renders over it, so a walker that renders differently
+     (item 1's table keeps two) reuses the traversal instead of
+     spelling a weaker one.
+   - `_held` renders each attribute as `name=value!r`, at both levels,
+     rather than the value alone: `carried` reads names too, and a
+     value can travel as a key as easily as a value.
 
    The other seven exception walkers in the suite are not
    AST-identical to either version. Settled here, each read at
@@ -146,10 +153,10 @@ from what its item says is reported rather than silently unified.
    |---|---|---|
    | `_whole_chain`, `test_providers_boundary.py:678` | `str` of each link and of each argument | Replaced by `leaks.chain`, a superset once it reads `str` of arguments |
    | `_whole_chain`, `test_reach_upgrade.py:404` | the same | Replaced, the same |
-   | `carried`, `test_cli_live.py:411` | `repr`, `str`, and one attribute level deeper | Replaced: `_held` reads the same two levels. Its docstring's claim that `config_cli.chain` reads only `repr` and `str` has been stale since `_held` was added, and goes with it. Its deliberate-leak case (`:3029`, which must find the plant) stays and now proves `leaks.chain` finds it |
+   | `carried`, `test_cli_live.py:411` | `repr`, `str`, and one attribute level deeper | Replaced: `_held` reads the same two levels, names and values, once it renders `name=value!r`. Its docstring's claim that `config_cli.chain` reads only `repr` and `str` has been stale since `_held` was added, and goes with it. Its deliberate-leak case (`:3029`, which must find the plant) stays and now proves `leaks.chain` finds it |
    | `chained`, `test_turntaking.py:120` | type name and `str` of each link | Replaced: `repr` carries the type name |
-   | `chained`, `test_mcp_composed_reference.py:227` | the formatted traceback of each link, and its `repr` | Kept: the traceback is a surface of its own (source lines, frames), which no rendering of the exception reproduces |
-   | `Consumer.rendered`, `test_server_event_pins.py:99` | every emission's payload and arguments, walking the chain of an argument that is an exception | Kept as a renderer of emissions; its exception walk delegates to `leaks.chain` |
+   | `chained`, `test_mcp_composed_reference.py:227` | the formatted traceback of each link, and its `repr` | Kept as a renderer: the traceback is a surface of its own (source lines, frames), which no rendering of the exception reproduces. Its traversal, which follows `__cause__ or __context__` and so has the same missing-context gap, is replaced by `links` |
+   | `Consumer.rendered`, `test_server_event_pins.py:99` | every emission's payload and arguments, walking the chain of an argument that is an exception | Kept as a renderer of emissions; its exception walk delegates to `leaks.chain`, which carries `links` |
    | `chain`, `test_session_reply_failures.py:103` | nothing rendered: returns the exception objects | Kept: its callers assert on the objects, not on text |
 
    The walker gets committed pins in a new
@@ -161,11 +168,14 @@ from what its item says is reported rather than silently unified.
    stronger walk looks. One case per reading the walk promises, each
    planting a sentinel only there: an attribute of the exception; an
    attribute of an object held by an attribute (the PyYAML mark shape,
-   an object whose `buffer` holds the value); an argument whose `str`
+   an object whose `buffer` holds the value); an attribute's name, at
+   each of those two levels; an argument whose `str`
    reveals it and whose `repr` does not; the `__cause__` and the
    `__context__` of a raised exception; an exception carrying both
    links with the sentinel only down the context; and a graph with a
-   cycle through both links, which must terminate. Each is watched
+   cycle through both links, which must terminate. `links` gets its own
+   pin, that it yields every exception of a branching graph exactly
+   once. Each is watched
    failing against the old walk before it is committed (the cycle case
    excepted, which the old walk also survives; it pins termination).
 
@@ -527,11 +537,15 @@ Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
 
    The plan should say instead: make `leaks.chain` render attribute mappings, or both names and values, at each promised depth. Add pins with a sentinel solely in an exception attribute name and solely in a held object’s attribute name. Retain the `carried` replacement only after those cases prove the new walker is a true superset.
 
+   *Resolution:* accepted. `_held` now renders `name=value!r` at both levels, the `carried` row says so, and the pins add a sentinel carried only in an attribute's name at each level, which is what shows the replacement is a true superset.
+
 3. **P1: The retained composed-MCP walker still drops a context branch**
 
    Evidence: Item 1 retains `test_mcp_composed_reference.chained` because formatted tracebacks are its own surface (plan line 130), but its implementation follows `__cause__ or __context__` (`test_mcp_composed_reference.py:227-238`) while claiming both are covered. That file uses the walker in its secret-absence assertion at line 424. A cause plus a context containing the sentinel leaves the context uninspected.
 
    The plan should say instead: retain formatted tracebacks, but traverse both exception edges with an identity-based seen set, and add a composed-MCP no-leak case with both links populated and the sentinel only in the context branch.
+
+   *Resolution:* accepted as to the gap, resolved one level down. The traversal becomes a public `leaks.links(exc)`, pinned once to yield every exception of a branching graph exactly once, and `chain` renders over it; the composed-MCP walker keeps rendering tracebacks but iterates `links` instead of its own `__cause__ or __context__`. The extra composed-MCP no-leak case is not added: the missing-context property belongs to the traversal, which is now one function pinned in one place, and that file's walker is left only rendering.
 
 4. **P2: The migration helper omits required schema and transaction ownership**
 
