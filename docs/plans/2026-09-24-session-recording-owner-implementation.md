@@ -568,3 +568,95 @@ boot, and the drift checks the integration job runs. No event, field,
 configuration key or command changed, and the one log sentence that
 changed (the codec warning's) is in no generated reference, so none of
 them should move; the pull request records what CI says.
+
+### PR review round, PR #563
+
+Automated external review of this PR's diff (origin/main...98ae6c88).
+Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 5m26s, at commit 98ae6c88.
+Verdict as received: **mergeable after the listed fix**. One finding.
+
+1. **P1: the class-free warnings could still leak the caught exception
+   through implicit chaining.** Both the codec arm and `_stopping` made
+   their cleanup and their report inside the `except` suite, and a
+   caught exception is the implicit `__context__` of anything raised
+   there, bound or not. A raising filter on the codec warning left
+   `open` with the codec's exception chained beneath it, since that
+   report was not suppressed at all; and for the close warnings a
+   failing formatter is caught by `StreamHandler.handleError`, which
+   prints the chained traceback to stderr before `contextlib.suppress`
+   can act. The tests exercised only a logger-level filter, which
+   raises before any formatting, and the codec tests no failing
+   reporter at all. The reviewer asked for the failure to be recorded
+   as a boolean, the suite left, and the cleanup and the warning made
+   after it, the codec report suppressed too, with a failing
+   formatter test holding the sentinels out of stderr and out of any
+   exception chain.
+
+   *Resolution*: accepted, in `3f85ea39`. One thing the fix could not
+   be is a boolean inside `_stopping`: a with-statement runs `__exit__`
+   while the exception it is handed is still being handled, so a probe
+   showed `sys.exception()` still holding the planted exception after
+   the generator's own `except` suite had ended. The guard is now a
+   function, `_step(step, work)`, whose `except` suite does nothing and
+   whose report comes after it, through `_report`, one
+   `logger.warning` under `contextlib.suppress`. The close hands each
+   step to it (`functools.partial` for the handoffs). The codec arm
+   notes its failure in a boolean, leaves the suite, releases the
+   capture as a step of its own (a capture whose close raises is then
+   reported as "the capture" and the row still opens) and reports
+   under the same suppression. The "What landed" table above describes
+   `_stopping` as M2 first landed it; `_step` and `_report` replace it.
+
+   Tests added to `test_recording.py`: a `BrokenFormatter` on a real
+   `logging.StreamHandler` writing to a `StringIO`, with
+   `logging.raiseExceptions` on, for the six close failure points and
+   for the codec failure; the broken filter extended to the codec
+   warning; a capture whose close raises after a codec failure. Each
+   broken filter and formatter records `sys.exception()` at the
+   instant the report reaches it, and the tests assert it is None,
+   which is the chain the finding describes, observed directly; the
+   formatter cases also assert that `handleError` did report (`---
+   Logging error ---` on stderr, so the driver reached the condition)
+   and that neither sentinel reached stderr, stdout or the handler's
+   stream. Later close steps still run; the row still opens.
+
+   Red against 98ae6c88: 15 failed, 21 passed. With the
+   `sys.exception()` assertions removed for one run, the seven
+   formatter cases still failed, on stderr alone: both sentinels were
+   printed there.
+
+   Falsified one run each on `3f85ea39`, restored by copy and touched,
+   the file byte-identical to its backup afterwards; none survived:
+
+   | Mutation | Result |
+   | --- | --- |
+   | the close's report back inside the `except` suite | 12 failed: the six broken-filter and six formatter cases |
+   | the codec's release and report back inside the `except` suite | 2 failed: the codec filter and formatter cases |
+   | the codec's report unsuppressed | 1 failed: the codec filter case |
+   | the codec's release unguarded | 1 failed: the release case |
+   | `_report`'s suppression removed | 8 failed, the session-level broken-channel case among them |
+   | each close step's guard removed, in order | 6, 3, 5, 3 and 3 failed |
+   | `except BaseException` in `_step` | 1 failed |
+
+   The same pattern elsewhere in `device/recording.py`: none left. An
+   untruncated `grep -n -A4 '^ *except'` finds two `except` suites
+   (the codec arm's and `_step`'s), and each only notes the failure.
+   The two `finally` clauses, in `_close_record` and `_close_capture`,
+   only assign `None` and cannot raise. Outside this module the
+   pattern is not assessed here: the session's `_cleanly` reports from
+   inside its `except` suite, and its `finally` runs its reports while
+   an exception that is ending the session is being handled, so a
+   failing handler there would print that exception's chain. That
+   belongs with the class-name follow-up already recorded above.
+
+   After the fix: `test_recording.py`, `test_recording_order.py` and
+   `test_capture_session.py` 61 passed; `uv run ruff check .` clean;
+   `uv run mypy` no issues in 5 source files; `tests/census` 66 passed;
+   `python3 scripts/check_doc_links.py .` 272 files, 0 failures; the unit lane,
+   `-n auto --dist loadfile`, 7601 passed, 19 skipped in 878.16s
+   (M2's 7592 and the nine new tests). The integration lane was not rerun,
+   as the orchestrator directed. That leaves one thing unverified
+   locally: the fix reshapes the close's ordinary path too (every step
+   now goes through `_step`), and while the unit lane's session suites
+   drive that path, the integration lane's sessions over the real
+   stores have not run on it; CI runs them on the pull request.
