@@ -189,5 +189,5 @@ tests/unit/test_tools_mcp_prompts.py  _pages  1
 tests/unit/test_tools_mcp_prompts.py  _rendered  1
 tests/unit/test_tts_lookahead.py  _run_tools  1
 tests/unit/test_tts_lookahead.py  _speak_reply  1
-tests/unit/test_turn_lifecycle.py  _filler  1
+tests/unit/test_turn_lifecycle.py  _filler  2
 tests/unit/test_ws_auth.py  _sign  1
