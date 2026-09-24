@@ -116,6 +116,7 @@ from vinga_server.providers import (
 )
 from vinga_server.runtime import prompt, resumption
 from vinga_server.runtime.filler_runner import FillerRunner
+from vinga_server.runtime.outlast import outlast
 from vinga_server.runtime.provider_watch import ProviderWatch
 from vinga_server.runtime.reply_in_flight import ReplyInFlight, SpeakingPass
 from vinga_server.runtime.speech import _Synthesis, speak_after
@@ -403,7 +404,8 @@ class PipelineRuntime:
 
     - `_in_flight`: the reply `start_reply` last started, replaced by
       the next one, read by `replying` and `drain`, and let go by
-      `cancel_reply` only if it is still the reply that cancel ended.
+      `cancel_reply` or `close` only if it is still the reply that call
+      ended.
       The turn-taking side and the device edge both ask about the reply
       in flight, and both ask through those methods, so the field
       itself keeps one owner. The reply body is handed its value rather
@@ -953,15 +955,61 @@ class PipelineRuntime:
         the loop like every other database call and contained by the
         store like every other lifecycle cleanup, which is what keeps a
         process that never restarts from accumulating them.
+
+        A cancellation arriving here is held until both steps are over,
+        and raised after them: the session's close path goes on to
+        close the store and the export behind this call, so a reply
+        still in its tail, or a purge still running, would otherwise be
+        writing past them. The reply is ended through
+        `ReplyInFlight.close`, which passes each cancellation on to it
+        and waits its task out; the purge is a task of this call's own,
+        waited out and never cancelled, since a thread cannot be. Only
+        then is the handle cleared and the first cancellation raised.
+        Hurrying the reply does not bound this: a tail that ignored its
+        cancellation would keep the close waiting, and nothing in
+        today's tail does.
+
+        A reply that failed, whatever it failed with, still reaches the
+        purge, and its exception is raised after it. When the purge
+        fails too, the reply's is the one raised, and the purge's is
+        read and dropped.
         """
-        await self.cancel_reply(ReplyOutcome.ABORTED)
+        held: asyncio.CancelledError | None = None
+        failed: BaseException | None = None
+        reply = self._in_flight
+        if reply is not None:
+            try:
+                await reply.close(ReplyOutcome.ABORTED)
+            except asyncio.CancelledError as cancelled:
+                held = cancelled
+            except BaseException as exc:  # noqa: BLE001 - raised after the purge
+                # Every other outcome, so the purge below is reached on
+                # every path, and raised after it.
+                failed = exc
+            if self._in_flight is reply:
+                self._in_flight = None
         if self._purge is not None:
             # Each agent's CURRENT thread, as it always was, and not
             # every thread a move left behind: the conversations' own
             # method says which in its name.
-            await asyncio.to_thread(
-                self._purge, list(self.conversations.current_threads())
+            purging = asyncio.ensure_future(
+                asyncio.to_thread(self._purge, list(self.conversations.current_threads()))
             )
+            # A thread cannot be cancelled, so there is nothing to hurry:
+            # the purge is outlasted, and a cancellation meanwhile is
+            # held. Awaited unconditionally and merged after, so the
+            # first cancellation wins.
+            later = await outlast(purging)
+            # Read unconditionally, before any choice between failures,
+            # so a failed purge is retrieved even when the reply failed
+            # first.
+            purge_failed = None if purging.cancelled() else purging.exception()
+            held = held or later
+            failed = failed or purge_failed
+        if held is not None:
+            raise held
+        if failed is not None:
+            raise failed
 
     # --- the device's outgoing audio, arbitrated against the filler ----
 
