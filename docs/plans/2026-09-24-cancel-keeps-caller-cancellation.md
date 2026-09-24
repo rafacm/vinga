@@ -517,3 +517,35 @@ Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    wedge and no longer implies today's close is bounded.
 
 Verdict: ready after the P1/P2 amendments.
+
+## Plan review round 3
+
+Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 3m18s, at commit b726c709, plan blob af0a014a.
+
+1. **P1: a reply failure can leave a purge failure unretrieved and
+   leak its text.** `failed = failed or purging.exception()`
+   short-circuits when the reply already failed, so a failed purge
+   task is collected as "Task exception was never retrieved", with its
+   text and chain. Tests 9 and 11 cover each failure alone. Retrieve
+   the purge outcome unconditionally into a local, then pick the first
+   failure; test both failing together, asserting the reply's failure
+   is raised and a loop exception handler receives no unretrieved
+   report after collection.
+2. **P2: the shared `outlast` has no decided home or interface.** The
+   plan defers where the public function lives, the module layout
+   names only two files, and the milestone claims no module is added.
+   In `reply_in_flight.py` it gives a reply module an unrelated
+   responsibility; in `pipeline.py` it makes `ReplyInFlight` depend
+   upward on its owner. Name a small task-lifetime module, the exact
+   signature and cancellation-result contract, test it directly, and
+   update the layout.
+3. **P2: "purge on every path" is contradicted by the exception
+   boundary.** The sketch catches only `Exception` around
+   `reply.close()` while `ReplyInFlight.close` re-raises any
+   non-cancellation outcome, so a `BaseException` outcome bypasses the
+   purge; test 11 covers only an ordinary exception, and the text still
+   speaks of a purge `finally` the sketch does not have. Narrow the
+   guarantee or make the purge reached on every outcome, and test the
+   chosen scope.
+
+Verdict: ready after the P1/P2 amendments.
