@@ -15,9 +15,7 @@ about rather than how the configuration is stored.
 
 import asyncio
 import contextlib
-import math
 import os
-import struct
 import threading
 import time
 from collections.abc import Iterator, Sequence
@@ -30,6 +28,7 @@ import uvicorn
 from xiaozhi_sdk import XiaoZhiWebsocket
 
 from tests.conftest import provision_stores
+from tests.support.wire import speech_pcm
 from vinga_server.app import create_app
 from vinga_server.config import Config, FileConfig, compose_config
 from vinga_server.config.models import (
@@ -262,14 +261,6 @@ async def running(config: Config):
     """A live server on an ephemeral port, yielding just the port."""
     async with running_app(config) as (port, _):
         yield port
-
-
-def speech_pcm(duration_ms: int) -> bytes:
-    samples = SAMPLE_RATE * duration_ms // 1000
-    return b"".join(
-        struct.pack("<h", int(8000 * math.sin(2 * math.pi * 300 * n / SAMPLE_RATE)))
-        for n in range(samples)
-    )
 
 
 def dominant_hz(audio: np.ndarray) -> float:

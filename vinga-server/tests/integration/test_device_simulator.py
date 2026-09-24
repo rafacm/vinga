@@ -11,7 +11,6 @@ server's PyAV codec against an independent one.
 
 import asyncio
 import math
-import struct
 
 import numpy as np
 import pytest
@@ -19,6 +18,7 @@ import uvicorn
 from xiaozhi_sdk import XiaoZhiWebsocket
 
 from tests.integration.conftest import LANE_MS_PER_CHAR, VOICE_MIN_MS, booted, mock_voice
+from tests.support.wire import speech_pcm
 from vinga_server.config import Config
 
 MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "vad")} | {
@@ -60,14 +60,6 @@ async def server_port():
     yield server.servers[0].sockets[0].getsockname()[1]
     server.should_exit = True
     await task
-
-
-def speech_pcm(duration_ms: int) -> bytes:
-    samples = SAMPLE_RATE * duration_ms // 1000
-    return b"".join(
-        struct.pack("<h", int(8000 * math.sin(2 * math.pi * 300 * n / SAMPLE_RATE)))
-        for n in range(samples)
-    )
 
 
 async def speak_an_utterance(client: XiaoZhiWebsocket) -> None:
