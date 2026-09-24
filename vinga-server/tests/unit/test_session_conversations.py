@@ -26,7 +26,7 @@ import pytest
 
 import vinga_server.conversations.threads as threads_module
 from tests.support.configs import BOTH_MAC, POET_MAC, base_config
-from tests.support.providers import ScriptedLlm
+from tests.support.providers import ScriptedLlm, errors_of, results_of
 from tests.support.sessions import (
     call,
     drive_reply,
@@ -94,25 +94,6 @@ def found(*conversations: str, matched: bool = True, agent: str = "poet") -> Sto
             for one in conversations
         },
     )
-
-
-def results_of(script: ScriptedLlm) -> list[str]:
-    """Every tool result this model was handed, in order."""
-    return [
-        result.content
-        for turns, _, _ in script.seen
-        for turn in turns
-        for result in turn.tool_results
-    ]
-
-
-def errors_of(script: ScriptedLlm) -> list[bool]:
-    return [
-        result.is_error
-        for turns, _, _ in script.seen
-        for turn in turns
-        for result in turn.tool_results
-    ]
 
 
 # What a server that cannot resume anything answers

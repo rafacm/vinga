@@ -34,6 +34,7 @@ from vinga_server.providers import (
     ToolCall,
     ToolChoice,
     ToolDef,
+    ToolResult,
     Turn,
     Usage,
     build_world,
@@ -107,6 +108,25 @@ class ScriptedLlm(LlmProvider):
         step = self._rounds[min(len(self.seen) - 1, len(self._rounds) - 1)]
         for item in [step] if isinstance(step, str) else step:
             yield TextDelta(item) if isinstance(item, str) else item
+
+
+def results_of(script: ScriptedLlm) -> list[str]:
+    """Every tool result this model was handed, in order."""
+    return [result.content for result in _tool_results(script)]
+
+
+def errors_of(script: ScriptedLlm) -> list[bool]:
+    """Whether each of those results was a failure, in the same order."""
+    return [result.is_error for result in _tool_results(script)]
+
+
+def _tool_results(script: ScriptedLlm) -> list[ToolResult]:
+    """Every tool result in what `seen` recorded: each round, each turn
+    of it, each result of that turn, in that order. One walk, so the two
+    reads above cannot come to disagree about the shape they read."""
+    return [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
 
 
 # Well past the test-scale timeout the watchdog suites shrink to, and

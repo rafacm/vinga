@@ -33,7 +33,7 @@ import pytest
 
 from tests.support.configs import POET_MAC, base_config
 from tests.support.events import both_formats, fields_of, only
-from tests.support.providers import ScriptedLlm
+from tests.support.providers import ScriptedLlm, errors_of, results_of
 from tests.support.sessions import (
     call,
     drive_reply,
@@ -253,7 +253,7 @@ async def test_a_long_thread_offers_the_choice_and_moves_nothing() -> None:
 
     await drive_reply(session, UTTERANCE)
 
-    assert _results(poet) == [builtin.TOO_LONG_TO_RESUME_WHOLE]
+    assert results_of(poet) == [builtin.TOO_LONG_TO_RESUME_WHOLE]
     assert talking_thread(session) == thread
     assert kept.milestones == []
 
@@ -296,8 +296,8 @@ async def test_a_start_from_nobody_was_offered_is_refused() -> None:
 
     await drive_reply(session, UTTERANCE)
 
-    assert _results(poet) == [builtin.NO_CHOICE_OFFERED]
-    assert _errors(poet) == [False]
+    assert results_of(poet) == [builtin.NO_CHOICE_OFFERED]
+    assert errors_of(poet) == [False]
     assert talking_thread(session) == thread
     assert kept.milestones == []
 
@@ -318,7 +318,7 @@ async def test_a_start_from_naming_no_conversation_is_not_a_selection_at_all() -
 
     await drive_reply(session, UTTERANCE)
 
-    assert _results(poet) == [builtin.RESUME_NEEDS_AN_ARGUMENT]
+    assert results_of(poet) == [builtin.RESUME_NEEDS_AN_ARGUMENT]
     assert talking_thread(session) == thread
     assert kept.milestones == []
 
@@ -336,7 +336,7 @@ async def test_a_start_from_outside_the_two_is_refused() -> None:
 
     await drive_reply(session, UTTERANCE)
 
-    assert _results(poet) == [builtin.UNKNOWN_START]
+    assert results_of(poet) == [builtin.UNKNOWN_START]
 
 
 # The consent, and the ordering it rests on
@@ -499,7 +499,7 @@ async def test_a_barge_in_mid_recap_stores_nothing_and_the_next_resume_re_offers
     _offer(again, "poet", GALAXY)
     await drive_reply(again, UTTERANCE)
 
-    assert _results(asking) == [builtin.TOO_LONG_TO_RESUME_WHOLE]
+    assert results_of(asking) == [builtin.TOO_LONG_TO_RESUME_WHOLE]
 
 
 async def test_a_summarizer_that_failed_falls_back_and_stores_nothing() -> None:
@@ -992,24 +992,6 @@ async def _nothing(*args: object, **kwargs: object) -> None:
 
 async def _gone(*args: object, **kwargs: object) -> None:
     raise DeviceGone("the device went away")
-
-
-def _results(script: ScriptedLlm) -> list[str]:
-    return [
-        result.content
-        for turns, _, _ in script.seen
-        for turn in turns
-        for result in turn.tool_results
-    ]
-
-
-def _errors(script: ScriptedLlm) -> list[bool]:
-    return [
-        result.is_error
-        for turns, _, _ in script.seen
-        for turn in turns
-        for result in turn.tool_results
-    ]
 
 
 def _offer(session: DeviceSession, agent: str, *conversations: str) -> None:
