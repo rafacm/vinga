@@ -254,16 +254,26 @@ rather than silently unified.
 7. **The ordered conversation-row read deepens the one that exists.**
    `stored`/`rows_of`, identical in `test_conversations_erasure.py`,
    `test_conversations_namespace.py` and `test_conversations_retention.py`,
-   reads `record.<table>` ordered by id. `tests/support/stores.py:237`
-   already offers `rows(table, **where)`, which reads the same schema
-   unordered through `open_conversations` where the copies use
-   `read_engine`. `rows` gains `order by id`, deterministic for every
-   caller, and the three copies call it. The implementer confirms the
-   engine difference is immaterial to a read (both reach the same
-   schema; `open_conversations` must not migrate or write on the way),
-   and that no existing `rows` caller depends on the unordered result,
-   by running each caller's file; either failing, the copies stay and
-   the reason is recorded.
+   reads `record.<table>` ordered by id through `read_engine`.
+   `tests/support/stores.py:237` already offers `rows(table, **where)`
+   for the same schema, but opens it through `open_conversations`,
+   which is "open and migrate" and takes the chain's advisory lock
+   before it reads. That is wrong for a function whose docstring says
+   it is "what a reader beside a running writer is": it can migrate
+   while inspecting, and it can queue behind the writer it sits
+   beside. So, in this order and as separate commits: `rows` first
+   moves to `read_engine`, whose contract (`db/__init__.py:358`) is
+   exactly "neither migrates nor takes the lock", and its nine caller
+   files (`test_agent_rename.py`, `test_agent_rename_in_flight.py`,
+   `test_conversations_durable.py`, `test_conversations_store.py`,
+   `test_conversations_threads.py`, `test_device_record_no_leak.py`,
+   `test_device_swap.py`, `test_session_device_name.py`,
+   `test_session_record.py`, inventoried by grep and rerun in full)
+   stay green; then it gains `order by id`, deterministic for every
+   caller, and the files are run again; then the three copies call it.
+   A caller that turns out to depend on `rows` migrating a fresh
+   database stops the item and is reported, since that caller was
+   reading through a writer's path by accident.
 
 8. **The scripted LLM's tool-result read goes beside the fake.**
    `errors_of`/`_errors`, identical in `test_session_conversations.py`
@@ -449,6 +459,8 @@ Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    Evidence: Item 7 says `rows()` can replace readers using `read_engine` if `open_conversations` “must not migrate or write” (plan (`plan:266`)). But `rows()` calls `open_conversations` (stores.py (`tests/support/stores.py:237`)), whose contract is explicitly “Open and migrate” (store.py (`src/vinga_server/conversations/store.py:631`)). This fails the plan’s stated prerequisite and can acquire migration locks or mutate a database while merely inspecting it.
 
    The plan should say instead: first change `rows()` to use `read_engine`, preserving its second-engine purpose, then add `ORDER BY id`; verify all existing `rows` callers and a test that the reader neither invokes migration nor takes the writer path before replacing the three local readers.
+
+   *Resolution:* accepted, confirmed at `conversations/store.py:631` and `db/__init__.py:358`, with one further reason: through `open_conversations`, `rows` also takes the advisory lock, so a reader documented as sitting beside a running writer could queue behind it. Item 7 now moves `rows` to `read_engine` first, as its own commit, with all nine caller files inventoried and rerun, then adds `order by id`, then replaces the copies. The dedicated test that the reader never migrates is not added: that is `read_engine`'s documented contract, and pinning which engine a support helper opens would pin a detail rather than a behavior its callers rely on.
 
 3. **P2: The resolved stdio exception is still contradicted by the plan’s requirements**
 
