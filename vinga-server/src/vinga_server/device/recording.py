@@ -31,6 +31,16 @@ conversation is over, not merely a file), the transcript export with the
 barrier, and the LLM-input export last because it is the widest. None of
 them depends on how far the open got.
 
+And the close always reaches its end. Each of its five steps (the row,
+the capture, and the three handoffs) is guarded on its own, so a step
+that raises is reported as that step not stopping cleanly and the steps
+after it still run: the session calls this from its `finally`, and what
+comes after the call there (the re-raise of a cancellation its close was
+holding) must not be lost to a handoff that failed. A row whose close
+raised answered no barrier, so the transcript export is handed none. The
+report names the session and the step and nothing of the exception, for
+the reason `_stopping` gives.
+
 Not `events.SessionRecording`, which is narrower: that protocol is the
 capture as the events object sees it (what `attach_capture` takes and
 `vad` writes to), and it is one of the things this owner holds.
@@ -215,7 +225,10 @@ class Recording:
 
         The handoffs do not depend on how far `open` got: a close after
         an `open` that raised part way, or after none at all, still
-        hands the session to all three."""
+        hands the session to all three. Nor on how far the close got:
+        each step is guarded on its own, so one that raises an
+        `Exception` is reported and the next still runs, and the close
+        itself does not raise one."""
         # The barrier stays None where the row's step did not finish: a
         # row whose close raised answered nothing, and None is what the
         # transcript export is handed for a session with no row at all.
