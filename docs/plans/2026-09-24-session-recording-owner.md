@@ -445,9 +445,12 @@ Each covers the numbered gaps it names:
   store and a conversation store configured and both export doubles
   attached: no capture files, no session row, and an empty call log.
 - **The codec warning, exactly** (12): the existing codec test gains
-  assertions on the warning's `record.msg` and typed `record.args`
-  (the session id, then the class name), beside its substring and
-  sentinel checks, which stay.
+  assertions on the warning's `record.name` (`events.SESSION_LOGGER`,
+  `vinga_server.session`, which `logs.py` emits as the JSON `logger`
+  field and `events/__init__.py` names a compatibility surface), its
+  `record.levelno` (`logging.WARNING`), its `record.msg` and its typed
+  `record.args` (the session id, then the class name), beside its
+  substring and sentinel checks, which stay.
 
 Patch targets are the one permitted change to a pin across the move,
 because a name is patched where it is looked up and the lookup moves:
@@ -481,8 +484,10 @@ doubles only, no database and no files:
   name, and the renames callable by identity; and builds the codecs
   with the protocol version and reply rate it was given.
 - A codec failure at `open`: the capture's tap is detached before the
-  capture is closed, the warning's `record.msg` and `record.args` are
-  today's, a credential-shaped sentinel in the exception's message is
+  capture is closed, the warning's `record.name` is
+  `SESSION_LOGGER`, its level WARNING, and its `record.msg` and
+  `record.args` are today's (the owner logs through `events.logger`,
+  never a module logger of its own), a credential-shaped sentinel in the exception's message is
   absent from both and from the rendered line, the store's row still
   opens, later feeds are no-ops, and `close` does not close the
   capture a second time and still makes all three handoffs.
@@ -497,7 +502,9 @@ doubles only, no database and no files:
   nothing before `open`, after `close`, or with no capture store.
 - **Falsification**, one run each since every rule here is
   straight-line: the tests are watched failing against a mutation of
-  each rule they name (the row closed before its sink is detached; the
+  each rule they name (the warning logged through
+  `logging.getLogger(__name__)`; the row closed before its sink is
+  detached; the
   row opened before the capture store, with
   the taps still attached capture first; the sink attached before the
   capture; the
@@ -727,6 +734,8 @@ Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Evidence:** The plan promises the warning retains the same JSON `logger` field (`plan:51-55`), while its tests assert only `record.msg`, `record.args`, and sentinel absence (`:338-341`, `:369-374`). `events/__init__.py:102-114` explicitly identifies `SESSION_LOGGER` as a compatibility surface. Using `logging.getLogger(__name__)` in the new module would satisfy every proposed assertion while changing retained records from `vinga_server.session` to `vinga_server.device.recording`.
 
    **The plan should say instead:** The characterization and owner tests must assert `record.name == SESSION_LOGGER`, `record.levelno == logging.WARNING`, and the exact message and arguments. Keep the explicit requirement that the owner imports `events.logger`.
+
+   *Resolution:* Accepted. The session-level pin and the owner's test both assert `record.name == SESSION_LOGGER` and `record.levelno == logging.WARNING` beside the exact message and arguments, the owner's bullet restates that it logs through `events.logger`, and a module-logger mutation is in the falsification list. M2's warning carries the same assertions.
 
 6. **P3: The white-box deletion count confuses four source sites with three manifest rows**
 
