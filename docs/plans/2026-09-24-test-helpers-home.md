@@ -96,29 +96,27 @@ rather than silently unified.
    sites. What callers stop knowing: which parts of an exception can
    carry a value out.
 
-   The walker gets committed pins in a new
-   `tests/unit/test_support_leaks.py`, on the precedent of
-   `test_support_fakes.py` ("what the shared fakes promise, pinned
-   where the fakes live"), because fifteen suites' secret-absence
-   claims now rest on it and none of their own tests can fail if it
-   weakens: no exception in the tree carries a value where only the
-   stronger walk looks. One case per reading the walk promises, each
-   planting a sentinel only there: an attribute of the exception; an
-   attribute of an object held by an attribute (the PyYAML mark shape,
-   an object whose `buffer` holds the value); an argument whose `str`
-   reveals it and whose `repr` does not (item 3's addition); the
-   `__cause__` and the `__context__` of a raised exception; and a
-   cause cycle, which must terminate. Each is watched failing against
-   the old `repr`/`str` walk before it is committed.
+   Moving it, the walk is made complete in two ways, so that every
+   walker it replaces is a subset of it by construction rather than by
+   inspection:
 
-   The walk also gains `str()` of each argument, the one reading
-   `_whole_chain` below makes that it lacks (an argument whose `str`
-   and `repr` differ), so that every walker it replaces is a subset of
-   it by construction rather than by inspection.
+   - It reads `str()` of each argument as well as the `repr` of the
+     tuple: the one reading `_whole_chain` below makes that it lacked,
+     for an argument whose `str` and `repr` differ.
+   - It visits the exception graph rather than a chain. Today's walk,
+     and every copy of it, follows `__cause__ or __context__`, so an
+     exception carrying both is followed down its cause alone and a
+     value that sits only in its context is never read. Python's own
+     traceback printer suppresses that context too, but a handler
+     that walks the objects (an error reporter, a structured logger)
+     does not, and the no-leak lens names both links. Both links are
+     followed from every exception, with an identity-keyed seen set,
+     so a cycle terminates.
 
    The other seven exception walkers in the suite are not
    AST-identical to either version. Settled here, each read at
-   `1bcf3dc4`:
+   `1bcf3dc4`, and binding: a source found to differ from what the
+   table says is reported as a blocker rather than re-decided.
 
    | Walker | Reads | Disposition |
    |---|---|---|
@@ -140,22 +138,12 @@ rather than silently unified.
    planting a sentinel only there: an attribute of the exception; an
    attribute of an object held by an attribute (the PyYAML mark shape,
    an object whose `buffer` holds the value); an argument whose `str`
-   reveals it and whose `repr` does not (item 3's addition); the
-   `__cause__` and the `__context__` of a raised exception; and a
-   cause cycle, which must terminate. Each is watched failing against
-   the old `repr`/`str` walk before it is committed.
-
-   The other seven exception walkers in the suite are not
-   AST-identical to either version (`_whole_chain` in
-   `test_providers_boundary.py` and `test_reach_upgrade.py`, `carried`
-   in `test_cli_live.py`, `chained` in `test_turntaking.py` and
-   `test_mcp_composed_reference.py`, `rendered` nested in
-   `test_server_event_pins.py`, and `chain` in
-   `test_session_reply_failures.py`, which returns the exceptions
-   rather than a rendering). Each gets a one-line disposition in the
-   implementation doc: moved to `leaks.chain` only if it is a
-   secret-absence walker strictly weaker than it, kept with its reason
-   otherwise.
+   reveals it and whose `repr` does not; the `__cause__` and the
+   `__context__` of a raised exception; an exception carrying both
+   links with the sentinel only down the context; and a graph with a
+   cycle through both links, which must terminate. Each is watched
+   failing against the old walk before it is committed (the cycle case
+   excepted, which the old walk also survives; it pins termination).
 
 2. **The migration driver gets a home: new `tests/support/migrations.py`.**
    Four integration tests (`test_device_record_upgrade.py`,
@@ -454,6 +442,8 @@ Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
 
    The plan should say instead: traverse the exception graph, visiting both links independently with an identity-based seen set. Pin a branching case with both links populated, with the sentinel only in the context branch, plus a cyclic graph.
 
+   *Resolution:* accepted. Item 1 now makes the walk visit the exception graph, both links from every exception with an identity-keyed seen set, and the pins add an exception carrying both links with the sentinel only down the context, and a cycle through both links. This goes beyond parity with the copies: every copy had the same blind spot.
+
 2. **P1: The proposed ordered-row home is not read-only**
 
    Evidence: Item 7 says `rows()` can replace readers using `read_engine` if `open_conversations` “must not migrate or write” (plan (`plan:266`)). But `rows()` calls `open_conversations` (stores.py (`tests/support/stores.py:237`)), whose contract is explicitly “Open and migrate” (store.py (`src/vinga_server/conversations/store.py:631`)). This fails the plan’s stated prerequisite and can acquire migration locks or mutate a database while merely inspecting it.
@@ -471,5 +461,7 @@ Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    Evidence: The table gives final dispositions for all seven exception walkers (plan (`plan:119`)), but duplicated stale text immediately afterward says implementation will move each walker only “if” it is weaker (plan (`plan:148`)). That undoes the prior-review resolution and leaves scope to implementer discretion.
 
    The plan should say instead: remove the duplicated conditional disposition text. Retain the table as the binding implementation scope, with only unexpected source divergence reported as a blocker.
+
+   *Resolution:* accepted, and the cause was mine: the round 1 amendment spliced item 1 with its anchors in the wrong order, which duplicated the pins paragraph and left the stale conditional text standing. Item 1 is rewritten once: the completed walk, the table (now stated as binding, with an unexpected divergence reported as a blocker), then the pins.
 
 Verdict: **ready after the P1/P2 amendments.**
