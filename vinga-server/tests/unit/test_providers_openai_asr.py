@@ -16,12 +16,12 @@ from collections.abc import Iterator
 
 import httpx
 import pytest
-from openai import AsyncOpenAI
 
 from tests.support.events import events as emitted
 from tests.support.events import fields_of
 from tests.support.leaks import chain
 from tests.support.llm_sdk import Falsey
+from tests.support.openai_sdk import mock_client
 from vinga_server.boundary import Reach
 from vinga_server.config.models import ProviderConfig
 from vinga_server.config.provider_options import OpenaiAsrOptions
@@ -61,21 +61,6 @@ SENTINEL = "sk-test-4f8b2c9e-never-a-real-credential"
 # any other, which is what makes this the honest stand-in for what a
 # recovered transcript can be.
 RECOVERED = "sk-test-9d3a7b1c-never-a-real-credential"
-
-
-def mock_client(handler: object) -> AsyncOpenAI:
-    """An SDK client that answers from the handler, so nothing leaves the
-    test."""
-    return AsyncOpenAI(
-        api_key="test-key",
-        # As the provider constructs its own: without this the SDK's
-        # default of two retries would triple a deliberately failing
-        # request and hide how many the provider itself sends.
-        max_retries=0,
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(handler),  # type: ignore[arg-type]
-        ),
-    )
 
 
 def provider(handler: object, **overrides: object) -> OpenAiAsr:

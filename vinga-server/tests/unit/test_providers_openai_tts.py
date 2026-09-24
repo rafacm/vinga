@@ -14,10 +14,10 @@ from collections.abc import AsyncIterator
 
 import httpx
 import pytest
-from openai import AsyncOpenAI
 
 from tests.support.leaks import chain
 from tests.support.llm_sdk import Falsey
+from tests.support.openai_sdk import mock_client
 from vinga_server.boundary import Reach
 from vinga_server.config.models import ProviderConfig
 from vinga_server.providers import ProviderCallError, ProviderCallTimeout, build_entry
@@ -46,21 +46,6 @@ INSTRUCTIONS_REFUSAL = (
 # match by accident. It stands in for what an endpoint can echo back
 # into an error body.
 SENTINEL = "sk-test-4f8b2c9e-never-a-real-credential"
-
-
-def mock_client(handler: object) -> AsyncOpenAI:
-    """An SDK client that answers from the handler, so nothing leaves the
-    test."""
-    return AsyncOpenAI(
-        api_key="test-key",
-        # As the provider constructs its own: without this the SDK's
-        # default of two retries would triple a deliberately failing
-        # request, with its backoff, inside a unit test.
-        max_retries=0,
-        http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(handler),  # type: ignore[arg-type]
-        ),
-    )
 
 
 def provider(handler: object, **overrides: object) -> OpenAiTts:
