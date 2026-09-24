@@ -259,10 +259,13 @@ design guide's sense.
 
 ### The white-box reads of the old fields
 
-Three test lines read the fields this plan deletes
-(`test_capture_session.py` `_capture_audio` once,
-`test_conversations_session.py` `_capture_audio` once and `_record`
-twice, per the reach-in manifest at `219c8ba2`). Each sits beside the
+Four test lines read the fields this plan deletes:
+`test_capture_session.py` line 446 (`_capture_audio`) and
+`test_conversations_session.py` lines 791 (`_record`), 793
+(`_capture_audio`) and 848 (`_record`), at `219c8ba2`. The reach-in
+manifest holds them as three rows, because it aggregates per path and
+name: one `_capture_audio 1` row for each file and one `_record 2`.
+Each sits beside the
 behavioral assertions it backs up (no tap left attached, the capture's
 manifest marked complete, the session row closed), and each says in
 its own comment that it is white-box. They are deleted rather than
@@ -271,8 +274,8 @@ private field of a module this plan creates, which is the review flag
 the design guide names. What they protected is held by the owner's
 unit tests below, which assert through doubles that the capture is
 closed once and the sink detached, and by the behavioral assertions
-that stay beside each deleted line. The reach-in manifest therefore
-loses those three lines, and the milestone states that delta.
+that stay beside each deleted line. The four source lines go, the
+manifest loses those three rows, and the milestone states that delta.
 
 Two tests patch a name on `vinga_server.device.session`:
 `test_capture_session.py` line 417 replaces `CaptureAudio` to make the
@@ -487,7 +490,8 @@ doubles only, no database and no files:
   capture is closed, the warning's `record.name` is
   `SESSION_LOGGER`, its level WARNING, and its `record.msg` and
   `record.args` are today's (the owner logs through `events.logger`,
-  never a module logger of its own), a credential-shaped sentinel in the exception's message is
+  never a module logger of its own), a credential-shaped sentinel
+  in the exception's message is
   absent from both and from the rendered line, the store's row still
   opens, later feeds are no-ops, and `close` does not close the
   capture a second time and still makes all three handoffs.
@@ -521,7 +525,7 @@ doubles only, no database and no files:
   codec-failure warning, a log call through `events.logger`, not an
   emission; the capture store's own events are emitted inside
   `capture.py`), so no key moves; the lane confirms it.
-- The reach-in manifest loses exactly the three lines named under
+- The reach-in manifest loses exactly the three rows named under
   "The white-box reads of the old fields" and gains none. Regenerated
   with `uv run python -m tests.census.test_reach_ins`, never by hand,
   and any other line added or removed is a deviation the
@@ -562,7 +566,8 @@ visibly passes, judged per file with the line cited.
 The prediction written down now, so it can be wrong: **neither column
 moves.** A test that hands the session a conversation store today
 hands it to `recordings(...)` instead, one call deeper and just as
-visible, so no test gains or loses a storage parameter it can see. The move's own edits to these
+visible, so no test gains or loses a storage parameter it can see.
+The move's own edits to these
 files (a patch target and a white-box line in
 `test_capture_session.py`) name no storage. Where a new pin lands in
 one of the eight and needs a store, column (a) moves for that reason
@@ -639,8 +644,9 @@ implementation doc says so in those words.
   3. The move, as one commit: the session constructs the owner and
      calls `open`, the feeds and `close`; the constructor takes
      `recordings` in place of the four collaborators, at every
-     construction site; the six fields and three methods leave; the two patch targets move; the three white-box
-     lines are deleted. The body walks the diff in that order.
+     construction site; the six fields and three methods leave; the
+     two patch targets move; the four white-box lines are deleted. The
+     body walks the diff in that order.
   4. The docstrings in the documentation footprint; the reach-in
      manifest regenerated with the stated delta; the #489 count in the
      implementation doc.
@@ -742,5 +748,7 @@ Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Evidence:** There are four current reads: `test_capture_session.py:446`, plus `test_conversations_session.py:791`, `:793`, and `:848`. The plan calls these “three test lines” and later says three white-box lines are deleted (`plan:211-224`, `:511-514`). The reach-in manifest has three distinct path/name rows because the two `_record` reads are aggregated into one row.
 
    **The plan should say instead:** Delete four source sites; regenerate a manifest delta of three rows: one `_capture_audio` row from each test file and the single aggregated `_record 2` row.
+
+   *Resolution:* Accepted. The plan now names the four source lines by file and line and the three manifest rows they aggregate into (`_capture_audio 1` in each file, `_record 2` in `test_conversations_session.py`), and M1's step 3 deletes four lines.
 
 **Verdict: ready after the P1/P2 amendments.**
