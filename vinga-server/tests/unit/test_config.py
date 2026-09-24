@@ -7,6 +7,7 @@ import yaml
 from pydantic import BaseModel
 
 from tests.support.configs import load_config_from_data
+from tests.support.leaks import chain
 from vinga_server.boundary import Reach
 from vinga_server.config import Config, ConfigError, docgen, load_file_config
 from vinga_server.config.cli import input
@@ -1092,12 +1093,7 @@ def test_nothing_of_a_retired_variable_reaches_any_surface(
     with pytest.raises(ConfigError) as excinfo:
         load_file_config()
 
-    walked: list[BaseException] = []
-    cause: BaseException | None = excinfo.value
-    while cause is not None:
-        walked.append(cause)
-        cause = cause.__cause__ or cause.__context__
-    assert all(RETIRED_DIRECTORY not in str(one) for one in walked)
+    assert RETIRED_DIRECTORY not in chain(excinfo.value)
 
 
 @pytest.mark.parametrize("variable", ["VINGA_server__port", "ViNgA_SeRvEr__PoRt"])
