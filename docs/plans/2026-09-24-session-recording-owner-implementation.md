@@ -660,3 +660,35 @@ Verdict as received: **mergeable after the listed fix**. One finding.
    now goes through `_step`), and while the unit lane's session suites
    drive that path, the integration lane's sessions over the real
    stores have not run on it; CI runs them on the pull request.
+
+   CI then ran the integration lane on the fix: green at `b8a21be9`
+   (unit 8m41s, integration 3m45s, docs and all four image variants).
+
+### PR review round 2, PR #563
+
+Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 1m49s, at commit b8a21be9.
+
+A re-review of round 1's fix. Verdict as received: not mergeable.
+
+1. **P1: a broken formatter still prints a library traceback to
+   stderr.** `logging.StreamHandler.emit` catches a formatter's
+   failure itself and calls `handleError`, which prints
+   `--- Logging error ---` and a traceback before `_report`'s
+   suppression can act. The new tests require that line. The
+   reviewer asked for a non-printing failure policy for these
+   reports, and for tests requiring empty stdout and stderr.
+
+   *Resolution* (by the orchestrator, anthropic/claude-opus-5-5,
+   thinking high): rejected on the PR, with reasons
+   (https://github.com/rafacm/vinga/pull/563#issuecomment-5812659423).
+   Two of them. First, what reaches stderr carries nothing untrusted:
+   it is the formatter's own exception and a fixed record (the
+   session id and a step label). No recording exception is chained
+   beneath it, and the tests prove neither sentinel reaches stderr.
+   The `--- Logging error ---` assertion proves the failure path ran;
+   it does not endorse the output. Second, whether `handleError`
+   prints is decided by `logging.raiseExceptions`, a process-wide
+   policy. Nothing in `vinga-server/src` sets it, and every channel
+   behaves the same way. Rafael chose to merge and decide that policy
+   once for every channel, in `logs.py`: filed as #564. No code
+   change. #563 merged on green at 13:06 CEST, closing #483.
