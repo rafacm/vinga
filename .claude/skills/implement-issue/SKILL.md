@@ -53,8 +53,12 @@ named agent rather than of "the session". The shape is one string:
   such setting for that run. It is read from where the tool holds
   it, never guessed:
   - the orchestrating session: the `--effort` flag if one was
-    passed, else `effortLevel` in `~/.claude/settings.json`, else
-    `n/a` (Claude Code's own default applies and is not exposed).
+    passed, else the `CLAUDE_EFFORT` environment variable if set
+    (`env | grep CLAUDE_EFFORT`), else `effortLevel` in
+    `~/.claude/settings.json`, else `n/a` (Claude Code's own default
+    applies and is not exposed). The variable overrides the settings
+    file, and reading only the file is how #559's plan was stamped
+    `high` from a `medium` session.
   - a milestone subagent: the `effort` key of its agent definition,
     `.claude/agents/milestone-implementer.md`, which pins the model
     and the level so the brief states both as facts.

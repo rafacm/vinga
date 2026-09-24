@@ -30,8 +30,13 @@ opens a window of at least one device send in which the session's only
 unconditional bound is lost, and for an auto-mode device the idle
 watchdog does not stand in for it.
 
-**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code
-2.1.281; 2026-09-24.
+**Attribution:** anthropic/claude-opus-5-5, thinking medium; Claude Code
+2.1.281; 2026-09-24. Corrected after merge: this line and the
+`Attribution:` trailers of the plan's nine commits said `thinking
+high`, read from `effortLevel` in the settings file, while the session
+ran at `medium` from `CLAUDE_EFFORT`, which overrides it. The trailers
+are on `main` and stay as written; this line is the record. The M1
+commits, by the milestone implementer, are correctly `thinking high`.
 
 ## Goal
 
