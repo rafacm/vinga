@@ -1,12 +1,20 @@
 """What the shared exception walk promises, pinned where the walk lives.
 
-Every suite that asserts a secret is absent from a refusal asserts it
-against `leaks.chain`, and none of those suites can fail if the walk
+The suites whose exception surface is `leaks.chain` assert a secret
+absent from a refusal against it, and none of them can fail if the walk
 weakens: no exception this server raises carries a value where only the
 stronger walk looks, so a walk that stopped reading attributes, or
 followed one link where there are two, would leave all of them green.
 So each reading the walk promises is pinned here, once, with a sentinel
 planted in that place and nowhere else.
+
+Not every secret-absence assertion about an exception goes through
+`chain`. `test_mcp_composed_reference.py`'s `chained` keeps a renderer
+of its own, each exception's formatted traceback and its `repr`,
+because a traceback's source lines and frames are a surface no
+rendering of the exception reproduces; it reuses only the traversal,
+`links`. What these pins hold for it is that traversal, pinned below,
+and not its rendering.
 """
 
 import os
