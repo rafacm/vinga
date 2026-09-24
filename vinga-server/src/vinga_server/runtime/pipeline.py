@@ -1004,8 +1004,13 @@ class PipelineRuntime:
             # so a failed purge is retrieved even when the reply failed
             # first.
             purge_failed = None if purging.cancelled() else purging.exception()
-            held = held or later
-            failed = failed or purge_failed
+            # Chosen by identity, never by truth: an exception is free to
+            # answer False, or to raise, when asked for its truth, and
+            # which one is raised is decided by which came first.
+            if held is None:
+                held = later
+            if failed is None:
+                failed = purge_failed
         if held is not None:
             raise held
         if failed is not None:
