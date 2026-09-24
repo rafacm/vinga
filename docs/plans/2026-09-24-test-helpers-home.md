@@ -441,3 +441,35 @@ Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    *Resolution:* accepted. Item 5 now puts `mock_client` in a new `tests/support/openai_sdk.py`, with the deletion-test reason written down (inlined back, two suites each hold the retry and transport policy), and the milestone's design footprint names it in place of `llm_sdk.py`.
 
 **Verdict:** ready after the P1/P2 amendments.
+
+## Plan review round 2
+
+Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 3m04s, at commit d722bb9f, plan blob 22196f55.
+
+---
+
+1. **P1: `leaks.chain` still misses a context when a cause also exists**
+
+   Evidence: Plan item 1 promises both `__cause__` and `__context__` coverage, but the inherited walker follows only `current.__cause__ or current.__context__` (config_cli.py (`tests/support/config_cli.py:353`)). A sentinel solely in `__context__` is missed whenever that exception also has a cause. Separate cause and context tests do not catch this.
+
+   The plan should say instead: traverse the exception graph, visiting both links independently with an identity-based seen set. Pin a branching case with both links populated, with the sentinel only in the context branch, plus a cyclic graph.
+
+2. **P1: The proposed ordered-row home is not read-only**
+
+   Evidence: Item 7 says `rows()` can replace readers using `read_engine` if `open_conversations` “must not migrate or write” (plan (`plan:266`)). But `rows()` calls `open_conversations` (stores.py (`tests/support/stores.py:237`)), whose contract is explicitly “Open and migrate” (store.py (`src/vinga_server/conversations/store.py:631`)). This fails the plan’s stated prerequisite and can acquire migration locks or mutate a database while merely inspecting it.
+
+   The plan should say instead: first change `rows()` to use `read_engine`, preserving its second-engine purpose, then add `ORDER BY id`; verify all existing `rows` callers and a test that the reader neither invokes migration nor takes the writer path before replacing the three local readers.
+
+3. **P2: The resolved stdio exception is still contradicted by the plan’s requirements**
+
+   Evidence: The opening rule still requires AST identity for every moved body (plan (`plan:79`)), while item 4 correctly identifies non-identical mappings. It also requires `args` and `env` equality checks for each copy, despite `test_mcp_reload.stdio_entry()` accepting no overrides (test_mcp_reload.py (`tests/integration/test_mcp_reload.py:41`)).
+
+   The plan should say instead: require AST comparison only where AST identity is claimed; require documented behavioral equivalence for the table’s non-identical mappings. Test override cases only for helpers whose public signature accepts overrides, and test the no-argument helper only for its sole supported call.
+
+4. **P2: Item 1 reopens decisions it says are settled**
+
+   Evidence: The table gives final dispositions for all seven exception walkers (plan (`plan:119`)), but duplicated stale text immediately afterward says implementation will move each walker only “if” it is weaker (plan (`plan:148`)). That undoes the prior-review resolution and leaves scope to implementer discretion.
+
+   The plan should say instead: remove the duplicated conditional disposition text. Retain the table as the binding implementation scope, with only unexpected source divergence reported as a blocker.
+
+Verdict: **ready after the P1/P2 amendments.**
