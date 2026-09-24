@@ -22,8 +22,9 @@ import annotated_types
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from tests.support.config_cli import SECRET, chain
+from tests.support.config_cli import SECRET
 from tests.support.isolation import ALLOWED_IMPORTS, imported_alone
+from tests.support.leaks import chain
 from vinga_server.config import cli, docgen, server_reference
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import (

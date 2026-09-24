@@ -59,9 +59,9 @@ from fastapi.testclient import TestClient
 
 from tests.conftest import TEST_API_SECRET
 from tests.support.checkin import SYSTEM_INFO
-from tests.support.config_cli import chain
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID
 from tests.support.events import both_formats, fields_of
+from tests.support.leaks import chain
 from tests.support.stores import rows
 from tests.support.wire import connect, say_something, shake_hands
 from vinga_server.app import create_app

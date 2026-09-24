@@ -36,7 +36,8 @@ import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tests.support.config_cli import chain, document, runner
+from tests.support.config_cli import document, runner
+from tests.support.leaks import chain
 from tests.support.problems import paths
 from tests.support.problems import refused as refusal_body
 from tests.support.stores import body, planted

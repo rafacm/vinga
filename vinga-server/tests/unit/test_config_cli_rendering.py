@@ -37,8 +37,8 @@ import httpx
 import pytest
 
 from tests.support.config_cli import API_SECRET_ENV, SECRET, TOKEN, registered, runner
-from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import showing as _showing
+from tests.support.leaks import chain as _chain
 from vinga_server.config import Config, cli, entities, printing
 from vinga_server.config.cli import (
     acts,

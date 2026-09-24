@@ -43,8 +43,9 @@ from pathlib import Path
 import httpx
 import pytest
 
-from tests.support.config_cli import TOKEN, answering, chain, logged, runner
+from tests.support.config_cli import TOKEN, answering, logged, runner
 from tests.support.events import both_formats
+from tests.support.leaks import chain
 from vinga_server.broken_pipe import BROKEN_PIPE_STATUS
 from vinga_server.config import cli
 from vinga_server.config.cli import events, reach

@@ -32,8 +32,8 @@ import pytest
 import yaml
 
 from tests.support.config_cli import OTHER_SECRET, SECRET, runner
-from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import logged as _logged
+from tests.support.leaks import chain as _chain
 from vinga_server.config.cli import input, invocation
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.secrets import MASK, MASTER_KEY_ENV

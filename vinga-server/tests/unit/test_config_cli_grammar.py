@@ -31,8 +31,9 @@ import pytest
 from typer._click.core import Context
 from typer._click.exceptions import BadArgumentUsage, BadParameter, ClickException, NoSuchOption
 
-from tests.support.config_cli import SECRET, chain, logged, registered, runner
+from tests.support.config_cli import SECRET, logged, registered, runner
 from tests.support.events import both_formats
+from tests.support.leaks import chain
 from vinga_server.config import cli, docgen, entities
 from vinga_server.config.cli import acts, deployment, grammar, input, reach
 from vinga_server.config.loader import ConfigError

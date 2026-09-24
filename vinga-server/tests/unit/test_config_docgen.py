@@ -17,9 +17,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.support.config_cli import SECRET, chain, registered
+from tests.support.config_cli import SECRET, registered
 from tests.support.events import both_formats
 from tests.support.isolation import ALLOWED_IMPORTS, imported_alone
+from tests.support.leaks import chain
 from vinga_server.config import cli, docgen
 from vinga_server.config.cli import grammar, reach
 from vinga_server.config.loader import ConfigError

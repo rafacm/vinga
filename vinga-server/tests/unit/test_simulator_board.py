@@ -28,7 +28,8 @@ from pathlib import Path
 import httpx
 import pytest
 
-from tests.support.config_cli import API_SECRET_ENV, chain, logged, runner
+from tests.support.config_cli import API_SECRET_ENV, logged, runner
+from tests.support.leaks import chain
 from vinga_server import device_endpoint
 from vinga_server.config import cli
 from vinga_server.config.cli import acts, devices, invocation, reach, simulator

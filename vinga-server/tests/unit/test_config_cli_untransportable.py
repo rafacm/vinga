@@ -31,7 +31,8 @@ import httpx
 import pytest
 from cryptography.fernet import Fernet, MultiFernet
 
-from tests.support.config_cli import chain, logged, runner
+from tests.support.config_cli import logged, runner
+from tests.support.leaks import chain
 from vinga_server.config import store as config_store
 from vinga_server.config import transport
 from vinga_server.config.cli import acts, deployment, entities, grammar, invocation, reach

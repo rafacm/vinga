@@ -48,8 +48,9 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 from sqlalchemy import insert
 
-from tests.support.config_cli import chain, document, runner
+from tests.support.config_cli import document, runner
 from tests.support.events import both_formats, fields_of, only
+from tests.support.leaks import chain
 from tests.support.problems import refused as refusal_body
 from tests.support.stores import body, planted
 from vinga_server import logs, serving

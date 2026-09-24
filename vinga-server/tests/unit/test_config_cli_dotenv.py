@@ -21,9 +21,9 @@ from pathlib import Path
 
 import pytest
 
-from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import logged as _logged
 from tests.support.config_cli import runner
+from tests.support.leaks import chain as _chain
 from vinga_server.config import cli
 from vinga_server.config.cli import grammar, reach
 from vinga_server.config.loader import DOTENV_UNREADABLE, ConfigError, load_environment_file
