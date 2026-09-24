@@ -334,12 +334,26 @@ from what its item says is reported rather than silently unified.
    database stops the item and is reported, since that caller was
    reading through a writer's path by accident.
 
-8. **The scripted LLM's tool-result read goes beside the fake.**
-   `errors_of`/`_errors`, identical in `test_session_conversations.py`
-   and `test_session_recap.py`, reads the shape `ScriptedLlm` records
-   in `seen`. `ScriptedLlm` lives in `tests/support/providers.py:79`,
-   so a change to what it records breaks both copies at once; the
-   read joins it there.
+   The read contract gets one lasting pin, in a new
+   `tests/unit/test_support_stores.py` beside `test_support_fakes.py`:
+   with the conversations chain's advisory lock held by
+   `the_lock_held(CONVERSATIONS_CHAIN)` (`tests/support/stores.py:85`),
+   `rows` on an already-migrated database returns within a short bound.
+   That is the caller-visible property (a reader beside a writer does
+   not queue behind it) rather than which engine the helper opens, and
+   it is watched failing, by timing out, against the
+   `open_conversations` version before the switch.
+
+8. **The scripted LLM's tool-result reads go beside the fake.**
+   Two projections of the shape `ScriptedLlm` records in `seen` are
+   each identical in `test_session_conversations.py` and
+   `test_session_recap.py`: `results_of`/`_results` (every tool
+   result's content, in order) and `errors_of`/`_errors` (every tool
+   result's `is_error`). `ScriptedLlm` lives in
+   `tests/support/providers.py:79`, so a change to what it records
+   breaks all four copies at once. Both reads join it there, over one
+   shared walk of the recorded tool results, keeping the names
+   `results_of` and `errors_of`.
 
 ## What stays, and why
 
@@ -429,7 +443,7 @@ fragment, `changelog.d/531-test-helpers-home.md`, under `### Changed`.
   walk joins the record walk), `tests/support/config_cli.py` (the
   capture joins the runner), `tests/support/stores.py` (`rows`
   answers in order) and `tests/support/providers.py` (the scripted
-  fake's read joins it); adds `tests/support/migrations.py` (callers
+  fake's two reads join it); adds `tests/support/migrations.py` (callers
   stop knowing the Alembic environment's three requirements) and
   `tests/support/openai_sdk.py` (callers stop knowing how the SDK is
   kept from retrying and from reaching the network).
@@ -583,10 +597,14 @@ Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
 
    The plan should say instead: add a support-level behavior test that holds the conversations chain’s write lock and proves `rows()` still returns from an already-migrated database. This tests the caller-visible nonblocking read contract, rather than pinning an implementation import.
 
+   *Resolution:* accepted, and cheaper than it looks: `tests/support/stores.py:85` already has `the_lock_held(chain)`. Item 7 now adds `tests/unit/test_support_stores.py` with one pin, that `rows` returns within a short bound while the conversations chain's lock is held, watched failing by timeout against the `open_conversations` version. This supersedes round 2's decline, which rejected a test of the engine choice; this one tests the behavior callers rely on.
+
 6. **P2: Item 8 leaves its identical companion helper unexplained**
 
    Evidence: `errors_of` and `_errors` are identified for relocation (plan lines 284-289), but `results_of` and `_results` immediately beside them are also AST-identical reads of `ScriptedLlm.seen`: `test_session_conversations.py:99-115` and `test_session_recap.py:997-1012`. They are longer than the plan’s three-line cutoff and are absent from the residual-groups table.
 
    The plan should say instead: move both recorded tool-result projections beside `ScriptedLlm`, with appropriately named support operations, or give `results_of`/`_results` a specific semantic reason to remain local. Update the duplicate-census expectation accordingly.
+
+   *Resolution:* accepted. Item 8 now moves both projections, `results_of` and `errors_of`, beside `ScriptedLlm` over one shared walk of the recorded tool results.
 
 Verdict: **ready after the P1/P2 amendments.**
