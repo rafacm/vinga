@@ -39,7 +39,7 @@ from vinga_server.conversations import SessionSink
 from vinga_server.device import recording as recording_home
 from vinga_server.device.boundary import DeviceGone, PlayableAudio
 from vinga_server.device.capture_audio import CaptureAudio
-from vinga_server.events import CaptureTap
+from vinga_server.events import SESSION_LOGGER, CaptureTap
 from vinga_server.protocol import framing
 
 # One frame of silence, which the mock ASR answers with its transcript.
@@ -520,3 +520,84 @@ async def test_a_session_refused_before_its_hello_records_nothing(
     assert recorded.log == []
     assert recorded.files() == []
     assert [r for r in caplog.records if getattr(r, "event", None) == "session_open"] == []
+
+
+# A close step that fails
+#
+# Not characterization, unlike everything above: the session's close
+# path promises it always reaches its end, and a recording step that
+# raised used to leave it through the `finally`, skipping the handoffs
+# behind it and the re-raise of a cancellation the close was holding.
+
+STOPPED = "session %s: %s did not stop cleanly"
+
+
+class BrokenFilter(logging.Filter):
+    """A filter on the session channel that raises on the recording's
+    report, where `Logger.handle` calls it unwrapped."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.raised = 0
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.msg == STOPPED:
+            self.raised += 1
+            raise RuntimeError("the session channel's filter is broken")
+        return True
+
+
+class UploadWouldNotStart(Exception):
+    """What a capture store's handoff raises when its uploader cannot
+    start a worker thread."""
+
+
+@pytest.mark.parametrize("broken", [False, True], ids=["a working channel", "a broken channel"])
+async def test_a_failing_handoff_skips_no_later_one_and_loses_no_held_cancellation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    broken: bool,
+) -> None:
+    """A cleanup step cancelled, which the close holds, and then the
+    capture store's handoff raising. The transcript and LLM-input
+    handoffs are still made, and the task still ends cancelled, with the
+    session channel working and with it broken on the report."""
+    recorded = Recorded(tmp_path, monkeypatch)
+    task = asyncio.create_task(recorded.session.run())
+    await handshaken(recorded.session, recorded.websocket)
+
+    async def cancelled() -> None:
+        raise asyncio.CancelledError
+
+    assert recorded.session.runtime is not None
+    monkeypatch.setattr(recorded.session.runtime, "close", cancelled)
+
+    def would_not_start(session_id: str) -> None:
+        recorded.log.append(("captures.session_closed", session_id))
+        raise UploadWouldNotStart("can't start new thread")
+
+    monkeypatch.setattr(recorded.captures, "session_closed", would_not_start)
+
+    channel = logging.getLogger(SESSION_LOGGER)
+    installed = BrokenFilter()
+    if broken:
+        channel.addFilter(installed)
+    try:
+        with caplog.at_level("INFO"):
+            await recorded.websocket.close(1000, "goodbye")
+            await asyncio.wait([task], timeout=TIMEOUT_S)
+    finally:
+        channel.removeFilter(installed)
+
+    assert task.done(), "the session never ended"
+    assert task.cancelled(), "the held cancellation did not reach the caller"
+    assert recorded.log == recorded.opening() + recorded.closing("client")
+    assert recorded.transcripts.handed is recorded.record.barrier
+    reports = [r for r in caplog.records if r.msg == STOPPED]
+    if broken:
+        assert installed.raised == 1, "the report never reached the broken filter"
+        assert reports == []
+    else:
+        (report,) = reports
+        assert report.args == (recorded.sid, "the capture upload")
