@@ -239,13 +239,20 @@ rather than silently unified.
 
 5. **The OpenAI SDK client for provider tests.** `mock_client`, 13
    lines, identical in `test_providers_openai_asr.py` and
-   `test_providers_openai_tts.py`, goes to `tests/support/llm_sdk.py`,
-   the home #144 made for SDK shapes. Its `max_retries=0` and the
+   `test_providers_openai_tts.py`, goes to a new
+   `tests/support/openai_sdk.py`. Not `llm_sdk.py`: that module's
+   docstring defines it as fake shapes for the two streamed LLM
+   dialects, and this is a real `AsyncOpenAI` client over a mock
+   transport for the speech providers. Its `max_retries=0` and the
    comment explaining it are the reason the two must agree: without
    it the SDK triples a deliberately failing request and hides how
-   many the provider sends. This one is an addition to the comment's
-   list, made because it meets the issue's own test for moving (a
-   reader of one copy would want the other to change with it).
+   many the provider sends. The module passes the deletion test on
+   that reason, since inlining it back means two suites each holding
+   the retry and transport policy. What callers stop knowing: how the
+   SDK is kept from retrying and from reaching the network. This one
+   is an addition to the comment's list, made because it meets the
+   issue's own test for moving (a reader of one copy would want the
+   other to change with it).
 
 6. **CLI invocation capture joins the CLI runner.** `out(run, capsys,
    *argv)`, identical in five CLI suites (`test_config_cli_conversations.py`,
@@ -366,8 +373,9 @@ fragment, `changelog.d/531-test-helpers-home.md`, under `### Changed`.
   capture joins the runner), `tests/support/stores.py` (`rows`
   answers in order) and `tests/support/providers.py` (the scripted
   fake's read joins it); adds `tests/support/migrations.py` (callers
-  stop knowing the Alembic environment's three requirements) and one
-  function to `tests/support/llm_sdk.py`.
+  stop knowing the Alembic environment's three requirements) and
+  `tests/support/openai_sdk.py` (callers stop knowing how the SDK is
+  kept from retrying and from reaching the network).
   Documentation footprint: `leaks.py`'s docstring only. Closes #531.
 
 ## Plan review round
@@ -429,5 +437,7 @@ Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    Evidence: The plan places the shared `AsyncOpenAI` client constructor in `tests/support/llm_sdk.py` and says only `leaks.py` needs documentation changes (plan, lines 157-165 (`plan:157`), lines 221-228 (`plan:221`)). The destination module explicitly defines its responsibility as fake shapes for the two streamed LLM dialects (`llm_sdk.py`, lines 1-17 (`tests/support/llm_sdk.py:1`)); the new helper instead constructs a real SDK client for ASR and TTS mock transports.
 
    The plan should say instead: give the constructor an OpenAI-wide SDK home, such as `tests/support/openai_sdk.py`, or explicitly broaden and update `llm_sdk.py`’s responsibility and documentation footprint. The former passes the deletion test because two suites otherwise duplicate the retry and transport policy.
+
+   *Resolution:* accepted. Item 5 now puts `mock_client` in a new `tests/support/openai_sdk.py`, with the deletion-test reason written down (inlined back, two suites each hold the retry and transport policy), and the milestone's design footprint names it in place of `llm_sdk.py`.
 
 **Verdict:** ready after the P1/P2 amendments.
