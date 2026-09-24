@@ -308,14 +308,28 @@ detachment and the row's close; the capture's detachment and close;
 `llm_input.session_closed`. A step that raises an `Exception` is
 reported and the next step runs:
 
-- **Reported in `_cleanly`'s own sentence**,
-  `"session %s: %s did not stop cleanly (%s)"`, through
-  `events.logger`, with the session id, the step named in the owner's
-  own words (`"the conversation record"`, `"the capture"`, `"the
-  capture upload"`, `"the transcript export"`, `"the LLM-input
-  export"`), and the exception's class name, never its message. One
-  sentence for one situation, so an operator filtering on it finds
-  every cleanup step that failed, the session's and the owner's.
+- **Reported with nothing taken from the exception**,
+  `"session %s: %s did not stop cleanly"`, through `events.logger`,
+  with the session id and the step named in the owner's own words
+  (`"the conversation record"`, `"the capture"`, `"the capture
+  upload"`, `"the transcript export"`, `"the LLM-input export"`), both
+  values this server chose. Not the class name `_cleanly` renders:
+  `events/__init__.py` (the `_offer` comment, lines 255-262) records
+  that `type(name, (Exception,), {})` accepts any string, so an
+  exception raised by a far side's client can carry the far side's
+  bytes in its class name, and the handler does not bind the
+  exception at all, so there is nothing to leak later. The sentence
+  keeps `_cleanly`'s prefix, so an operator filtering on "did not stop
+  cleanly" still finds every cleanup step that failed.
+- **The report cannot raise.** A logging call runs filters and
+  handlers somebody else installed, and `events._report` exists
+  because one of them can raise exactly where the guard has nothing
+  left to catch it with. The owner's report is wrapped the same way
+  (`contextlib.suppress(Exception)` around the one call, with a
+  comment citing `_report`), so a broken handler costs one diagnostic
+  line and never a later step. A local suppress rather than making
+  `_report` public: one line against widening the events module's
+  interface for one caller.
 - **State is released in a `finally`** inside each step, so a step
   that raised part way leaves no sink attached and no capture held.
 - **The barrier degrades to `None`.** A row whose close raised
@@ -665,25 +679,30 @@ implementation doc says so in those words.
   on M1. Commits:
   1. Tests first, watched failing against M1's owner: parametrized
      over each of the five close steps raising a planted exception
-     whose message carries a credential-shaped sentinel, every later
-     step still runs, in order; the step's state is released; the
+     built with `type(<credential-shaped name>, (Exception,), {})` and
+     carrying a second credential-shaped sentinel in its message, every
+     later step still runs, in order; the step's state is released; the
      warning's `record.name` is `SESSION_LOGGER`, its level WARNING,
-     its `record.msg` exactly `_cleanly`'s sentence and its
-     `record.args` the session id, the step's name and the class name;
-     the sentinel is absent from the message, the arguments, the
-     rendered line and both log formats. The row-close case hands the
+     its `record.msg` exactly `"session %s: %s did not stop cleanly"`
+     and its `record.args` exactly the session id and the step's name;
+     neither sentinel appears in the message, the arguments, the plain
+     rendering or the JSON rendering. A second case installs a logger
+     filter that raises on the owner's warning and asserts every later
+     step still runs. The row-close case hands the
      transcript export `None`. One session-level test through a served
      session: a cleanup step cancelled (the `_cleanly` hold) plus a
      raising capture handoff, and the task still ends cancelled with
      the transcript and LLM-input handoffs made, which fails on M1
-     because the raise skips the re-raise.
+     because the raise skips the re-raise; run again with the raising
+     logger filter installed, with the same outcome.
   2. The guard, in the owner only.
   3. The changelog fragment and the owner's docstring.
 
   Falsification, one run each: removing any one guard fails its
-  parametrized case; logging `str(exc)` instead of the class name
-  fails the sentinel check; latching or re-raising fails the
-  session-level test.
+  parametrized case; logging the class name, or `str(exc)`, fails the
+  sentinel checks; removing the report's suppression fails the
+  raising-filter case; latching or re-raising fails the session-level
+  test.
 
   Design footprint: deepens `device/recording.py` (its callers stop
   having to know that a cleanup step can fail part way); no module or
@@ -763,8 +782,12 @@ Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
 Evidence: plan “M2’s guard” and M2 tests require `type(exc).__name__` in retained log arguments ([plan:311-318, 666-674](docs/plans/2026-09-24-session-recording-owner.md:311)). The event subsystem explicitly documents that exception class names can contain arbitrary far-side bytes ([events/__init__.py:255-262](vinga-server/src/vinga_server/events/__init__.py:255)). The proposed sentinel tests poison only exception messages, so this leak passes them.  
 The plan should say instead: M2’s new warning contains only the session id and a fixed, owner-controlled step label, never any exception-derived value. Test with a dynamically created exception class whose name is credential-shaped and assert absence from the record, plain rendering, and JSON rendering.
 
+   *Resolution:* Accepted. M2's warning is now `"session %s: %s did not stop cleanly"` with the session id and a fixed step label only, the handler binds no exception, and the tests plant a credential-shaped class name built with `type(...)` beside a message sentinel and assert both absent from the record, the plain rendering and the JSON rendering. The same class-name rendering exists today in the session's `_cleanly` and in the codec warning M1 moves; M1 moves the codec warning verbatim because it is a behavior-preserving move, and both pre-existing sites are recorded as a follow-up candidate rather than fixed here.
+
 2. **P2: A failing logging handler still breaks M2’s “always reaches its end” guarantee.**  
 Evidence: M2 says every failed close step is reported through `events.logger` and then later cleanup runs ([plan:303-336](docs/plans/2026-09-24-session-recording-owner.md:303)). Logging is not inherently safe: the existing event implementation specifically guards reporting because filters and handlers can raise ([events/__init__.py:215-239](vinga-server/src/vinga_server/events/__init__.py:215)). A direct `logger.warning` in the new exception handler can therefore skip remaining handoffs and the held-cancellation re-raise.  
 The plan should say instead: the owner’s cleanup diagnostic is itself non-throwing, using a small local guarded reporting operation or an appropriate safe public helper. Add a test with a logger filter or handler that raises, and assert all later cleanup and the pending cancellation still occur.
+
+   *Resolution:* Accepted. The owner's report is wrapped in `contextlib.suppress(Exception)` with a comment citing `events._report`, chosen over making `_report` public because one line is cheaper than widening the events module's interface for one caller. M2's tests install a logger filter that raises on the warning, at the owner level and through a served session with a held cancellation, and assert every later step and the cancellation's re-raise still happen; removing the suppression is in the falsification list.
 
 Verdict: ready after the P1/P2 amendments.
