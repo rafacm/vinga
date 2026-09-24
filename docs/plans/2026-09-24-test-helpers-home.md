@@ -195,11 +195,24 @@ rather than silently unified.
 
 3. **`speech_pcm` uses the home it already has.**
    `tests/support/wire.py:94` defines it; `tests/integration/conftest.py`,
-   `test_device_simulator.py` and `test_telemetry_export.py` import it
-   instead of defining it. `tests/smoke/test_smoke.py` keeps its copy:
-   the smoke lane is a black box against a running container and
-   imports nothing but its own conftest, and `wire.py` imports
-   `vinga_server`; that sentence goes beside the copy.
+   `test_device_simulator.py`, `test_telemetry_export.py` and
+   `tests/smoke/test_smoke.py` import it instead of defining it. Every
+   copy computes over a `SAMPLE_RATE` of 16000, the value `wire.py`
+   imports from `tests/support/configs.py:65`; a copy whose local
+   `SAMPLE_RATE` still has other readers keeps that constant.
+
+   The smoke lane is no exception. It is a black box in what it talks
+   to (a running container), not in what it imports: its conftest
+   already imports `vinga_server.auth` and `vinga_server.config.models`,
+   pytest loads `tests/conftest.py` for it, and CI runs it from the
+   checkout with the contributor environment installed. Importing a
+   client-side waveform does not make the server any less external.
+   A separate server-agnostic module for the one function, which the
+   review offered, is not taken: `wire.py` would import it back, and a
+   module whose whole content one other module re-exports fails the
+   deletion test. The smoke lane is opt-in locally, so its import is
+   verified by collecting it (`--collect-only`), and by the `image`
+   job on the pull request.
 
 4. **The stdio MCP entries use the home they already have.**
    `tests/support/tools_mcp.py` defines `entry_data` (a `dict`) and
@@ -408,6 +421,8 @@ Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    Evidence: The plan says the smoke lane imports nothing except its own conftest and therefore must retain `speech_pcm` (lines 138-144 (`plan:138`)). In fact, the smoke conftest imports `vinga_server.auth` and `vinga_server.config.models` (lines 53-67 (`tests/smoke/conftest.py:53`)), and CI installs the full contributor environment before running smoke tests from the checkout (workflow, lines 1237-1252 (`.github/workflows/vinga-server.yml:1237`), lines 1646-1655 (`.github/workflows/vinga-server.yml:1646`)). Importing a client-side waveform generator does not make the server cease to be the external container.
 
    The plan should say instead: move the pure waveform generator to a server-agnostic support module and import it from `wire.py`, integration tests, and smoke tests. If smoke intentionally keeps an independent protocol oracle, state that semantic reason explicitly and verify the two copies separately; do not cite unavailable imports.
+
+   *Resolution:* accepted in substance. The isolation claim was false and is gone: item 3 now moves the smoke copy as well, stating why the lane is a black box in what it talks to rather than what it imports, and verifies it by collection locally and by the `image` job. The server-agnostic module is not taken: `wire.py` would import the one function back, which fails the deletion test, and `wire.py` is importable wherever the smoke lane runs.
 
 7. **P2: `llm_sdk.py` does not own the proposed ASR/TTS helper as documented**
 
