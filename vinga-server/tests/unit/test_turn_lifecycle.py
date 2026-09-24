@@ -35,7 +35,10 @@ which is what the exporter #66 exists for will do.
 """
 
 import asyncio
+import gc
 import json
+import threading
+import weakref
 from typing import Any, cast
 
 import pytest
@@ -51,6 +54,7 @@ from tests.support.providers import (
 )
 from tests.support.records import SpyStore
 from tests.support.sessions import (
+    REPLY_TIMEOUT_S,
     end_utterance,
     events_of,
     plant_utterance,
@@ -62,6 +66,7 @@ from tests.support.sessions import (
     wait_for_reply,
 )
 from tests.support.sockets import OrderedSocket, RecordingSocket
+from tests.support.stores import memory as lane_memory
 from tests.support.wire import speech_pcm
 from vinga_server.device.boundary import PlayableAudio
 from vinga_server.events import Emission
@@ -727,6 +732,324 @@ async def test_a_cancel_cut_short_by_the_session_cap_keeps_the_cap() -> None:
     await session.runtime.close()
     assert reply_in_flight(session) is None
     assert outcomes(tap) == ["barged_in"]
+
+
+# --- a close sees its reply and its purge through ----------------------
+#
+# The close is the one caller of the reply's end that must not let go
+# early: the session's close path goes on to close the store and the
+# export behind it, so a cancellation reaching it is held until the
+# reply is done, the handle is cleared and the purge has run.
+#
+# The reply is held in its tail's `filler.settle` by replacing the
+# runner's method, the precedent the settle test above set: it is the
+# only await between `reply_finished` and the turn record, and nothing
+# the reply is built from reaches it any other way.
+
+
+class TurnLog:
+    """The transcript collaborator, writing down when the reply's last
+    record was made into a log the test also writes the close's end
+    into, so the assertion is over their order."""
+
+    def __init__(self, log: list[str]) -> None:
+        self._log = log
+
+    def turn_recorded(self, session: str, record: Any, landed: Any, *, final: bool) -> None:
+        if final:
+            self._log.append("turn")
+
+    def turn_missing(self, session: str, utterance: str) -> None:
+        self._log.append("turn")
+
+
+class PurgeSpy:
+    """The lane's memory store, with the session-close purge watched.
+
+    The purge is the memory store's own method, handed to a runtime
+    whose deployment records nothing, which is how a session built here
+    gets one at all. Everything else is the lane's store, reached
+    through this. `on_call` runs in the purge's worker thread, first;
+    `blocks` holds the purge there until `release` is set; `fails` is
+    made and raised once the purge has otherwise finished."""
+
+    def __init__(
+        self,
+        *,
+        blocks: bool = False,
+        fails: Any = None,
+        on_call: Any = None,
+    ) -> None:
+        self._store = lane_memory()
+        self.purged: list[list[str]] = []
+        self.finished = 0
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self._blocks = blocks
+        self._fails = fails
+        self.on_call = on_call
+
+    def purge_threads(self, threads: Any) -> None:
+        self.purged.append(list(threads))
+        if self.on_call is not None:
+            self.on_call()
+        self.entered.set()
+        if self._blocks:
+            assert self.release.wait(REPLY_TIMEOUT_S), "the purge was never released"
+        self.finished += 1
+        if self._fails is not None:
+            raise self._fails()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._store, name)
+
+
+def settling_with(session: Any, settle: Any) -> None:
+    """Stand `settle` in for the reply tail's `filler.settle`: the one
+    reach past the runtime these tests make, for the reason above."""
+    session.runtime._filler.settle = settle
+
+
+def held_at_settle(session: Any, *, gives_way: bool = False) -> asyncio.Event:
+    """Hold the reply's tail at `filler.settle` until it is cancelled,
+    and answer the event set when it gets there.
+
+    `gives_way` is a settle that, cancelled, stands its clip down and
+    returns rather than re-raising, so the tail goes on to its closing
+    `tts stop`: a tail a hurry reached and did not end."""
+    settling = asyncio.Event()
+
+    async def settle() -> None:
+        settling.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            if not gives_way:
+                raise
+
+    settling_with(session, settle)
+    return settling
+
+
+def when_closed(closing: asyncio.Task[None], reply: Any, log: list[str]) -> None:
+    """Write the close's end into `log`, saying whether the reply was
+    still running at that moment."""
+    closing.add_done_callback(
+        lambda _: log.append("closed with the reply running" if reply.running() else "closed")
+    )
+
+
+async def let_go(closing: asyncio.Task[None]) -> None:
+    """Wait for a cancelled close to end, bounded, and see that it ended
+    in its caller's cancellation."""
+    done, _ = await asyncio.wait([closing], timeout=REPLY_TIMEOUT_S)
+    assert done, "the close never let its caller go"
+    with pytest.raises(asyncio.CancelledError):
+        await closing
+
+
+async def test_a_cancelled_close_records_the_turn_before_it_lets_go() -> None:
+    """The cancellation arrives while the reply is at its settle, before
+    its turn is recorded. It is passed on, the tail's settle arm records
+    the turn under it, and only then does the close end, cancelled."""
+    log: list[str] = []
+    session = talking(
+        {"poet": cast(Any, StallingLlm([5.0]))},
+        conversations=SpyStore(),
+        transcripts=TurnLog(log),
+    )
+    tap = watching(session)
+    settling = held_at_settle(session)
+    start_reply(session, UTTERANCE)
+    await asyncio.sleep(0)
+    reply = reply_in_flight(session)
+    closing = asyncio.create_task(session.runtime.close())
+    when_closed(closing, reply, log)
+    await asyncio.wait_for(settling.wait(), timeout=5.0)
+
+    closing.cancel()
+
+    await let_go(closing)
+    assert log == ["turn", "closed"]
+    assert reply_in_flight(session) is None
+    assert outcomes(tap) == ["aborted"]
+
+
+async def test_a_cancelled_close_purges_after_the_reply_and_before_it_lets_go() -> None:
+    """The same cancellation on a deployment that records nothing, where
+    the close's second step is the purge: it runs once the reply's task
+    is done and the handle is cleared, with the session's current
+    threads, and the close ends after it.
+
+    A separate session from the test above because the two halves
+    cannot share one: a runtime is handed the purge only where it is
+    handed no store to record turns in."""
+    log: list[str] = []
+    spy = PurgeSpy()
+    session = talking({"poet": cast(Any, StallingLlm([5.0]))}, memory=cast(Any, spy))
+    settling = held_at_settle(session)
+    start_reply(session, UTTERANCE)
+    await asyncio.sleep(0)
+    reply = reply_in_flight(session)
+    spy.on_call = lambda: log.append(
+        "purged with the reply running"
+        if reply.running() or reply_in_flight(session) is not None
+        else "purged"
+    )
+    closing = asyncio.create_task(session.runtime.close())
+    when_closed(closing, reply, log)
+    await asyncio.wait_for(settling.wait(), timeout=5.0)
+
+    closing.cancel()
+
+    await let_go(closing)
+    assert log == ["purged", "closed"]
+    assert spy.purged == [list(session.runtime.conversations.current_threads())]
+
+
+async def test_a_close_cancelled_twice_raises_once_after_the_reply() -> None:
+    """The first cancellation hurries a tail that gives way at its
+    settle and goes on to its closing stop; the second arrives there.
+    The close still waits the reply out, and ends cancelled once."""
+    device = HoldsTheFirstStop()
+    log: list[str] = []
+    session = talking(
+        {"poet": cast(Any, StallingLlm([5.0]))},
+        websocket=cast(Any, device),
+        conversations=SpyStore(),
+        transcripts=TurnLog(log),
+    )
+    settling = held_at_settle(session, gives_way=True)
+    start_reply(session, UTTERANCE)
+    await asyncio.sleep(0)
+    reply = reply_in_flight(session)
+    closing = asyncio.create_task(session.runtime.close())
+    when_closed(closing, reply, log)
+    try:
+        await asyncio.wait_for(settling.wait(), timeout=5.0)
+
+        closing.cancel()
+        await asyncio.wait_for(device.stopping.wait(), timeout=5.0)
+        assert not closing.done()
+        closing.cancel()
+
+        await let_go(closing)
+    finally:
+        # A tail that gives way at its settle takes the loop's own
+        # teardown cancel there too, and would then wait on this stop
+        # for ever: let it go, whatever the test found.
+        device.release.set()
+    assert log == ["turn", "closed"]
+    assert device.stops == 1
+    assert reply_in_flight(session) is None
+
+
+async def test_a_cancellation_during_the_purge_waits_for_the_purge() -> None:
+    """A thread cannot be cancelled, so a close that let a cancellation
+    through here would leave the purge running behind the store's own
+    close. It is waited out instead, and the cancellation raised
+    after."""
+    spy = PurgeSpy(blocks=True)
+    session = talking(memory=cast(Any, spy))
+    closing = asyncio.create_task(session.runtime.close())
+    try:
+        assert await asyncio.to_thread(spy.entered.wait, REPLY_TIMEOUT_S)
+        closing.cancel()
+        # Turns of the loop enough for a cancellation to land and a
+        # task it ended to finish.
+        for _ in range(10):
+            await asyncio.sleep(0)
+        assert not closing.done()
+    finally:
+        spy.release.set()
+
+    await let_go(closing)
+    assert (len(spy.purged), spy.finished) == (1, 1)
+
+
+class Collapse(BaseException):
+    """A failure that is not an `Exception`, which an arm catching only
+    those would let past the purge."""
+
+
+@pytest.mark.parametrize("failure", [RuntimeError, Collapse], ids=["exception", "base-exception"])
+async def test_a_reply_that_failed_still_purges(failure: type[BaseException]) -> None:
+    """A reply whose tail broke raises out of the close, as it always
+    did, and no longer skips the purge on the way."""
+    spy = PurgeSpy()
+    session = talking({"poet": cast(Any, StallingLlm([5.0]))}, memory=cast(Any, spy))
+
+    async def settle() -> None:
+        raise failure("the tail broke")
+
+    settling_with(session, settle)
+    start_reply(session, UTTERANCE)
+    await asyncio.sleep(0)
+
+    with pytest.raises(failure, match="the tail broke"):
+        await session.runtime.close()
+
+    assert len(spy.purged) == 1
+    assert reply_in_flight(session) is None
+
+
+class Witness:
+    """Something only a failed purge's exception holds, so its going is
+    how a test knows that exception was collected rather than kept."""
+
+
+class PurgeBroke(Exception):
+    """The purge's own failure, carrying a witness."""
+
+    def __init__(self) -> None:
+        super().__init__("the purge broke")
+        self.witness: Witness | None = Witness()
+
+
+async def test_when_both_fail_the_reply_is_raised_and_the_purge_is_read() -> None:
+    """The reply's failure is the one raised; the purge's is read and
+    dropped. Read rather than left: a task whose exception nobody
+    retrieved is reported by the loop when it is collected, text and
+    chain included."""
+    loop = asyncio.get_running_loop()
+    reports: list[dict[str, Any]] = []
+    previous = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _, context: reports.append(context))
+    witnesses: list[weakref.ref[Witness]] = []
+
+    def failing() -> PurgeBroke:
+        broke = PurgeBroke()
+        assert broke.witness is not None
+        witnesses.append(weakref.ref(broke.witness))
+        return broke
+
+    try:
+        spy = PurgeSpy(fails=failing)
+        session = talking({"poet": cast(Any, StallingLlm([5.0]))}, memory=cast(Any, spy))
+
+        async def settle() -> None:
+            raise RuntimeError("the reply broke")
+
+        settling_with(session, settle)
+        start_reply(session, UTTERANCE)
+        await asyncio.sleep(0)
+
+        with pytest.raises(RuntimeError, match="the reply broke") as raised:
+            await session.runtime.close()
+
+        del raised
+        # More than one pass, and a turn of the loop between, as
+        # `test_drain.py` does: a task, its coroutine and the traceback
+        # of what it raised reference each other.
+        for _ in range(3):
+            gc.collect()
+            await asyncio.sleep(0)
+        [gone] = witnesses
+        assert gone() is None, "the purge's failure outlived the check, which proves nothing"
+    finally:
+        loop.set_exception_handler(previous)
+
+    assert [context.get("message") for context in reports] == []
 
 
 # --- the window that is never opened -----------------------------------

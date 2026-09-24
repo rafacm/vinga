@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from vinga_server.events.values import ReplyOutcome
+from vinga_server.runtime.outlast import outlast
 
 
 class ReplyInFlight:
@@ -120,6 +121,47 @@ class ReplyInFlight:
         await asyncio.wait([task])
         if not task.cancelled():
             task.result()
+
+    async def close(self, outcome: ReplyOutcome) -> None:
+        """End this reply as `outcome` for an owner that is closing, and
+        let nothing through until the reply's task is done.
+
+        The sibling of `cancel`, and the two differ in exactly one
+        decision: what a cancellation of the caller means. `cancel`'s
+        callers run on the serve loop, where it means the caller is
+        being ended, so it propagates at once and the reply is left to
+        its owner. This one's caller is that owner's last step, where it
+        means the close is being hurried: each cancellation is passed on
+        to the reply as another `cancel()`, which its `finally` is built
+        to take (the turn is recorded under it), and the first is raised
+        only once the task is done, so nothing the reply still writes
+        can land behind whatever the owner closes next.
+
+        Hurried is not bounded. `Task.cancel()` is cooperative, and a
+        tail that ignored it would keep this waiting; nothing in the
+        reply's tail does.
+
+        A reply that ended in anything other than its own cancellation
+        raises it out of this call, as `cancel` does. With a
+        cancellation held, the reply's exception is still read, so the
+        loop never reports it as unretrieved with its text and chain,
+        and it is dropped rather than chained: the caller is owed the
+        cancellation and nothing else.
+        """
+        self.latch(outcome)
+        task = self._reply_task
+        if task is None:
+            return
+        task.cancel()
+        held = await outlast(task, hurry=True)
+        # Read whichever way this ends, before either raise below.
+        failed = None if task.cancelled() else task.exception()
+        # Both raised outside any `except` arm, so neither is chained
+        # to anything.
+        if held is not None:
+            raise held
+        if failed is not None:
+            raise failed
 
     async def drain(self, grace_s: float) -> bool:
         """Let this reply finish, and answer whether it did within

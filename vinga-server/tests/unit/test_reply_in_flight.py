@@ -12,6 +12,9 @@ what it saw on the way out.
 """
 
 import asyncio
+import gc
+import weakref
+from typing import Any
 
 import pytest
 
@@ -225,6 +228,114 @@ async def test_a_reply_that_finished_before_its_cancel_raises_nothing() -> None:
     assert finished == ["the whole reply"]
     assert reply.outcome is ReplyOutcome.ABORTED
     assert not reply.running()
+
+
+async def test_a_cancelled_close_hurries_the_reply_and_raises_after_it() -> None:
+    """A close is an owner's last step, so a cancellation of its caller
+    means hurry rather than leave: it is passed on to the reply, and it
+    reaches the caller only once the reply's task is done."""
+    tail = HeldTail()
+    reply = await held(tail)
+    closing = asyncio.create_task(reply.close(ReplyOutcome.ABORTED))
+    await asyncio.wait_for(tail.holding.wait(), timeout=5.0)
+    running_when_closed: list[bool] = []
+    closing.add_done_callback(lambda _: running_when_closed.append(reply.running()))
+
+    closing.cancel()
+
+    done, _ = await asyncio.wait([closing], timeout=5.0)
+    assert done, "the close never let its caller go"
+    with pytest.raises(asyncio.CancelledError):
+        await closing
+    assert tail.tail == ["interrupted"]
+    assert running_when_closed == [False]
+    assert reply.outcome is ReplyOutcome.ABORTED
+
+
+async def test_a_close_raises_what_the_reply_ended_in_otherwise() -> None:
+    """The same contract `cancel` keeps, with no cancellation of the
+    caller in the way."""
+    reply = ReplyInFlight(None)
+
+    async def body() -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            raise RuntimeError("the tail broke")
+
+    reply.start(body())
+    await asyncio.sleep(0)
+
+    with pytest.raises(RuntimeError, match="the tail broke"):
+        await reply.close(ReplyOutcome.ABORTED)
+
+
+class Witness:
+    """Something only a reply's own frame holds, so its going is how a
+    test knows the reply's task was collected rather than kept."""
+
+
+async def collected() -> None:
+    """Collect, more than once and with a turn of the loop between, as
+    `test_drain.py` does: a task, its coroutine and the traceback of what
+    it raised reference each other, and one pass can leave them for the
+    next."""
+    for _ in range(3):
+        gc.collect()
+        await asyncio.sleep(0)
+
+
+async def test_a_held_cancellation_reads_the_reply_failure_and_drops_it() -> None:
+    """A reply whose tail broke under the second cancel ended in
+    something other than its cancellation, and the caller is owed the
+    cancellation alone. The failure is still read, though: a task whose
+    exception nobody retrieved is reported by the loop when it is
+    collected, text and chain included, and that is a retained surface
+    this server keeps exception text off."""
+    loop = asyncio.get_running_loop()
+    reports: list[dict[str, Any]] = []
+    previous = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _, context: reports.append(context))
+    try:
+        holding = asyncio.Event()
+
+        async def body(witness: Witness) -> None:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                holding.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    raise RuntimeError("the tail broke")
+
+        witness = Witness()
+        gone = weakref.ref(witness)
+        reply = ReplyInFlight(None)
+        reply.start(body(witness))
+        del witness
+        await asyncio.sleep(0)
+        closing = asyncio.create_task(reply.close(ReplyOutcome.ABORTED))
+        await asyncio.wait_for(holding.wait(), timeout=5.0)
+
+        closing.cancel()
+
+        done, _ = await asyncio.wait([closing], timeout=5.0)
+        assert done, "the close never let its caller go"
+        with pytest.raises(asyncio.CancelledError) as raised:
+            await closing
+        assert raised.value.__context__ is None
+        assert raised.value.__cause__ is None
+        assert not reply.running()
+        # Everything here that could still hold the reply's task, let
+        # go, so collecting it is what would report it.
+        del raised, closing, done, reply
+        await collected()
+        assert gone() is None, "the reply outlived the check, which proves nothing"
+    finally:
+        loop.set_exception_handler(previous)
+
+    assert [context.get("message") for context in reports] == []
 
 
 async def test_cancelling_a_reply_never_started_only_latches() -> None:
