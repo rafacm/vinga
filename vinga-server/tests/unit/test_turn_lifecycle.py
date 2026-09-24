@@ -689,6 +689,46 @@ async def test_a_reply_started_while_a_cancel_waits_stays_the_reply_in_flight() 
     assert reply_in_flight(session) is None
 
 
+async def test_a_cancel_cut_short_by_the_session_cap_keeps_the_cap() -> None:
+    """The session cap's own shape: a barge-in's cancel waiting out a
+    reply's closing `tts stop` when `max_session_s` runs out.
+
+    The cap is `asyncio.timeout` around the serve loop, and it raises
+    only if the cancellation it delivered comes back out of the wait. A
+    cancel that swallowed it let the session run on with nothing left
+    to end it. Nor is the reply let go: the runtime still holds it, so
+    it finishes its stop undisturbed and the close sees it through."""
+    device = HoldsTheFirstStop()
+    session = talking(
+        {"poet": cast(Any, StallingLlm([5.0]))}, websocket=cast(Any, device)
+    )
+    tap = watching(session)
+    start_reply(session, UTTERANCE)
+    await asyncio.sleep(0)
+    cancelled = reply_in_flight(session)
+
+    async def capped() -> None:
+        async with asyncio.timeout(0.05):
+            await session.runtime.cancel_reply(ReplyOutcome.BARGED_IN)
+
+    serving = asyncio.create_task(capped())
+    await asyncio.wait_for(device.stopping.wait(), timeout=5.0)
+
+    with pytest.raises(TimeoutError):
+        await serving
+    assert reply_in_flight(session) is cancelled
+    assert session.runtime.replying()
+
+    device.release.set()
+    assert await session.runtime.drain(5.0)
+    assert device.stops == 1
+    assert outcomes(tap) == ["barged_in"]
+
+    await session.runtime.close()
+    assert reply_in_flight(session) is None
+    assert outcomes(tap) == ["barged_in"]
+
+
 # --- the window that is never opened -----------------------------------
 
 

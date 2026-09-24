@@ -114,6 +114,119 @@ async def test_a_cancel_raises_what_the_reply_ended_in_otherwise() -> None:
         await reply.cancel(ReplyOutcome.BARGED_IN)
 
 
+class HeldTail:
+    """A reply body whose `finally` waits for the test to let it go,
+    and writes down how its tail ended.
+
+    What the tail can be told apart by is the whole of the claims below:
+    a tail let go by the test finishes, and a tail cancelled a second
+    time on its caller's behalf is interrupted."""
+
+    def __init__(self) -> None:
+        self.holding = asyncio.Event()
+        self.release = asyncio.Event()
+        self.tail: list[str] = []
+
+    async def body(self) -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            self.holding.set()
+            try:
+                await self.release.wait()
+            except asyncio.CancelledError:
+                self.tail.append("interrupted")
+                raise
+            self.tail.append("finished")
+
+
+async def held(tail: HeldTail) -> ReplyInFlight:
+    """A reply running `tail`'s body, let as far as its first await, so
+    a cancel from here lands inside the `try` and the `finally` holds."""
+    reply = ReplyInFlight(None)
+    reply.start(tail.body())
+    await asyncio.sleep(0)
+    return reply
+
+
+async def test_a_caller_cancelled_while_it_waits_sees_its_own_cancellation() -> None:
+    """The reply's own cancellation is what a cancel swallows, and only
+    that: the caller being cancelled is a different fact, and a caller
+    that went on as though it were not is how a session outlived its
+    cap."""
+    tail = HeldTail()
+    reply = await held(tail)
+    caller = asyncio.create_task(reply.cancel(ReplyOutcome.BARGED_IN))
+    await asyncio.wait_for(tail.holding.wait(), timeout=5.0)
+
+    caller.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await caller
+    tail.release.set()
+    assert await reply.drain(5.0)
+
+
+async def test_a_caller_under_a_timeout_gets_its_timeout() -> None:
+    """The shape of the session cap, one level down: `asyncio.timeout`
+    raises only when the cancellation it delivered comes back out."""
+    tail = HeldTail()
+    reply = await held(tail)
+
+    async def capped() -> None:
+        async with asyncio.timeout(0.05):
+            await reply.cancel(ReplyOutcome.BARGED_IN)
+
+    caller = asyncio.create_task(capped())
+    await asyncio.wait_for(tail.holding.wait(), timeout=5.0)
+
+    with pytest.raises(TimeoutError):
+        await caller
+    tail.release.set()
+    assert await reply.drain(5.0)
+
+
+async def test_the_callers_cancellation_leaves_the_reply_tail_alone() -> None:
+    """Propagating the caller's cancellation is not forwarding it: the
+    reply is cancelled once, by the cancel, and its `finally` is where
+    the closing `tts stop` and the turn record are, so a second cancel
+    on the caller's behalf would cut those short."""
+    tail = HeldTail()
+    reply = await held(tail)
+    caller = asyncio.create_task(reply.cancel(ReplyOutcome.BARGED_IN))
+    await asyncio.wait_for(tail.holding.wait(), timeout=5.0)
+    caller.cancel()
+    # Waited on rather than awaited: how the caller ended is the test
+    # above's claim, and this one is about the reply alone.
+    await asyncio.wait([caller])
+
+    tail.release.set()
+    assert await reply.drain(5.0)
+
+    assert tail.tail == ["finished"]
+    assert reply.outcome is ReplyOutcome.BARGED_IN
+
+
+async def test_a_reply_that_finished_before_its_cancel_raises_nothing() -> None:
+    """The quiet half of what a cancel raises: a reply whose body
+    returned before the cancel landed ended well, and the cancel only
+    writes its word down."""
+    finished: list[str] = []
+
+    async def body() -> None:
+        finished.append("the whole reply")
+
+    reply = ReplyInFlight(None)
+    reply.start(body())
+    assert await reply.drain(5.0)
+
+    await reply.cancel(ReplyOutcome.ABORTED)
+
+    assert finished == ["the whole reply"]
+    assert reply.outcome is ReplyOutcome.ABORTED
+    assert not reply.running()
+
+
 async def test_cancelling_a_reply_never_started_only_latches() -> None:
     """A body run on the caller's own task has no task here to cancel;
     what a cancel can still do is write the word down."""
