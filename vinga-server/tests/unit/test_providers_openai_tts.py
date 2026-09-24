@@ -16,6 +16,7 @@ import httpx
 import pytest
 from openai import AsyncOpenAI
 
+from tests.support.leaks import chain
 from tests.support.llm_sdk import Falsey
 from vinga_server.boundary import Reach
 from vinga_server.config.models import ProviderConfig
@@ -81,19 +82,6 @@ async def collect(tts: OpenAiTts, text: str = "Hej") -> bytes:
 
 async def build_tts(**options: object) -> object:
     return await build_entry("tts", "voice", ProviderConfig.model_validate(options))
-
-
-def chain(exc: BaseException) -> str:
-    """Everything a renderer of this exception could reach: the error
-    itself and every cause and context behind it."""
-    parts: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        parts += [repr(current), str(current)]
-        current = current.__cause__ or current.__context__
-    return "\n".join(parts)
 
 
 # --- options ---------------------------------------------------------

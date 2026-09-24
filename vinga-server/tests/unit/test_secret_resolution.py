@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 from cryptography.fernet import Fernet, MultiFernet
 
+from tests.support.leaks import chain
 from vinga_server.config import ConfigError
 from vinga_server.config.models import McpServerConfig, ProviderConfig
 from vinga_server.config.secrets import (
@@ -38,17 +39,6 @@ ENV_ECHO_SERVER = Path(__file__).parents[1] / "support" / "mcp_env_echo_server.p
 SECRET = "sk-test-4f8b2c9e-never-a-real-credential"
 
 CLAUDE = SecretLocation.provider("llm", "claude", "api_key")
-
-
-def _chain(exc: BaseException) -> str:
-    parts: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        parts += [repr(current), str(current)]
-        current = current.__cause__ or current.__context__
-    return "\n".join(parts)
 
 
 def _store(*locations: SecretLocation, keys: MultiFernet | None = None) -> SecretStore:
@@ -178,7 +168,7 @@ async def test_an_unset_reference_is_refused_without_repeating_what_was_written(
         await build_entry("llm", "claude", config)
 
     assert "providers.llm.claude" in str(caught.value)
-    assert written not in _chain(caught.value)
+    assert written not in chain(caught.value)
 
     print(caught.value, file=sys.stderr)
     assert written not in capsys.readouterr().err
@@ -194,7 +184,7 @@ async def test_a_credential_that_cannot_be_opened_names_the_slot_and_not_the_val
         await build_entry("llm", "claude", config, secrets=store)
 
     assert CLAUDE.describe() in str(caught.value)
-    assert SECRET not in _chain(caught.value)
+    assert SECRET not in chain(caught.value)
 
 
 async def test_a_stored_secret_reaches_a_real_mcp_child_process() -> None:

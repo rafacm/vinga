@@ -39,6 +39,7 @@ import pytest
 from fastapi import FastAPI, Request, Response
 from fastapi.testclient import TestClient
 
+from tests.support.leaks import chain
 from vinga_server import __version__, doctor
 from vinga_server.app import create_app
 from vinga_server.config import Config
@@ -81,19 +82,6 @@ def _config_file(tmp_path: Path, body: str) -> str:
     path = tmp_path / "config.yaml"
     path.write_text(body, encoding="utf-8")
     return str(path)
-
-
-def _chain(exc: BaseException) -> str:
-    """Everything an exception carries, including what a chain walker
-    would find behind it."""
-    parts: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        parts += [repr(current), str(current)]
-        current = current.__cause__ or current.__context__
-    return "\n".join(parts)
 
 
 # What answers on it
@@ -483,7 +471,7 @@ def test_the_url_refusals_carry_no_library_exception() -> None:
     with pytest.raises(doctor.ConfigError) as caught:
         doctor._device_url(f"https://voice.example/x/AB\n{PASTED}/", "the URL given to doctor")  # noqa: SLF001
 
-    assert PASTED not in _chain(caught.value)
+    assert PASTED not in chain(caught.value)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
 
@@ -950,7 +938,7 @@ def test_the_close_refusal_carries_no_library_exception(
     with pytest.raises(doctor.ConfigError) as caught:
         doctor._probed("https://voice.example/x/ABCDEFGH/", doctor.SUPPLIED_ENDPOINT)  # noqa: SLF001
 
-    assert PASTED not in _chain(caught.value)
+    assert PASTED not in chain(caught.value)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
 

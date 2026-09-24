@@ -20,6 +20,7 @@ from openai import AsyncOpenAI
 
 from tests.support.events import events as emitted
 from tests.support.events import fields_of
+from tests.support.leaks import chain
 from tests.support.llm_sdk import Falsey
 from vinga_server.boundary import Reach
 from vinga_server.config.models import ProviderConfig
@@ -141,19 +142,6 @@ AGENT = "household"
 
 async def build_asr(**options: object) -> object:
     return await build_entry("asr", "ears", ProviderConfig.model_validate(options))
-
-
-def chain(exc: BaseException) -> str:
-    """Everything a renderer of this exception could reach: the error
-    itself and every cause and context behind it."""
-    parts: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        parts += [repr(current), str(current)]
-        current = current.__cause__ or current.__context__
-    return "\n".join(parts)
 
 
 class Tap:

@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from tests.support.configs import load_config_from_data
+from tests.support.leaks import chain
 from vinga_server.config import Config, ConfigError
 from vinga_server.config.cli import main
 from vinga_server.config.models import ONBOARDING_MOUNT_PATH
@@ -27,19 +28,6 @@ from vinga_server.config.models import ONBOARDING_MOUNT_PATH
 # Not a real credential, and shaped so a substring check for it cannot
 # match by accident.
 PASTED = "hunter2-never-a-real-password-9c3f"
-
-
-def _chain(exc: BaseException) -> str:
-    """A refusal plus everything it is chained to, which is where
-    pydantic's own quoting of the rejected input would show up."""
-    parts: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        parts += [repr(current), str(current)]
-        current = current.__cause__ or current.__context__
-    return "\n".join(parts)
 
 
 def test_onboarding_is_on_by_default_with_no_pinned_key() -> None:
@@ -77,7 +65,7 @@ def test_the_refused_key_is_not_quoted_back(caplog: pytest.LogCaptureFixture) ->
         load_config_from_data({"server": {"onboarding": {"key": PASTED}}})
 
     assert PASTED not in str(caught.value)
-    assert PASTED not in _chain(caught.value)
+    assert PASTED not in chain(caught.value)
     assert all(PASTED not in record.getMessage() for record in caplog.records)
 
 
@@ -97,7 +85,7 @@ def test_a_websocket_url_carrying_credentials_is_refused(
     assert "not a usable websocket URL" in message
     assert "user:password" in message
     assert PASTED not in message
-    assert PASTED not in _chain(caught.value)
+    assert PASTED not in chain(caught.value)
     assert all(PASTED not in record.getMessage() for record in caplog.records)
 
 
@@ -145,7 +133,7 @@ def test_a_websocket_url_the_banner_could_not_read_is_refused_at_load(
     message = str(caught.value)
     assert expected in message
     assert PASTED not in message
-    assert PASTED not in _chain(caught.value)
+    assert PASTED not in chain(caught.value)
     assert all(PASTED not in record.getMessage() for record in caplog.records)
 
 
@@ -215,7 +203,7 @@ def test_a_public_url_with_an_unreadable_host_or_port_is_refused(
     message = str(caught.value)
     assert expected in message
     assert PASTED not in message
-    assert PASTED not in _chain(caught.value)
+    assert PASTED not in chain(caught.value)
     assert all(PASTED not in record.getMessage() for record in caplog.records)
 
 
@@ -244,7 +232,7 @@ def test_userinfo_a_query_and_a_fragment_are_refused_without_the_value(
     message = str(caught.value)
     assert "not a usable public URL" in message
     assert PASTED not in message
-    assert PASTED not in _chain(caught.value)
+    assert PASTED not in chain(caught.value)
     assert all(PASTED not in record.getMessage() for record in caplog.records)
 
 
@@ -289,7 +277,7 @@ def test_an_ota_path_under_the_onboarding_prefix_is_refused(
     # to a secret, the same posture the /api/ refusal holds.
     if segment is not None:
         assert segment not in message
-        assert segment not in _chain(caught.value)
+        assert segment not in chain(caught.value)
 
 
 def test_a_path_that_merely_starts_with_x_is_still_allowed() -> None:

@@ -30,6 +30,7 @@ import pytest
 from pydantic import BaseModel
 from sqlalchemy import insert, update
 
+from tests.support.leaks import chain
 from tests.support.stores import body, planted
 from vinga_server.config import entities
 from vinga_server.config.entities import EntityDescriptor
@@ -475,7 +476,7 @@ def test_a_refusal_about_a_body_names_the_entity_and_never_the_body(
     with pytest.raises(StorageError) as caught:
         store.load()
 
-    rendered = _chain(caught.value)
+    rendered = chain(caught.value)
     assert "providers.llm.planted" in str(caught.value)
     assert "cannot be read as configuration" in str(caught.value)
     assert SECRET not in rendered
@@ -513,7 +514,7 @@ def test_a_stored_option_a_type_no_longer_accepts_names_the_entry_and_a_way_out(
     # is the entry, the field and the rule, and nothing of the value.
     assert "providers.asr.planted" in str(caught.value)
     assert "beam_size" in str(caught.value)
-    assert SECRET not in _chain(caught.value)
+    assert SECRET not in chain(caught.value)
 
     store.delete_provider(*identity)
 
@@ -537,15 +538,4 @@ def test_a_body_that_is_not_json_at_all_refuses_without_quoting_it(
         store.load()
 
     assert "prompt_fragments.planted" in str(caught.value)
-    assert SECRET not in _chain(caught.value)
-
-
-def _chain(exc: BaseException) -> str:
-    parts: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        parts += [repr(current), str(current)]
-        current = current.__cause__ or current.__context__
-    return "\n".join(parts)
+    assert SECRET not in chain(caught.value)

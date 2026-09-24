@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 from cryptography.fernet import Fernet, MultiFernet
 
+from tests.support.leaks import chain
 from tests.support.stores import bindings
 from vinga_server.config import ConfigError
 from vinga_server.config.models import DOMAIN_KEYS, DatabaseConfig
@@ -341,7 +342,7 @@ def test_an_applied_mcp_url_credential_is_refused_and_writes_nothing(
         store.apply(document)
 
     assert "mcp_servers.weather.url" in str(caught.value)
-    assert SECRET not in _chain(caught.value)
+    assert SECRET not in chain(caught.value)
     assert SECRET not in str(caught.value.problems)
     assert store.load().domain.mcp_servers == {}
 
@@ -415,7 +416,7 @@ def test_a_refused_document_never_quotes_what_it_was_sent(store: ConfigStore) ->
     with pytest.raises(ConfigError) as caught:
         store.apply(document)
 
-    assert SECRET not in _chain(caught.value)
+    assert SECRET not in chain(caught.value)
     assert SECRET not in str(caught.value.problems)
 
 
@@ -654,19 +655,6 @@ def test_a_single_write_is_refused_before_what_it_references_exists(
     write(store)
 
 
-def _chain(exc: BaseException) -> str:
-    """Everything an exception carries, including what a chain walker
-    would find behind it."""
-    parts: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        parts += [repr(current), str(current)]
-        current = current.__cause__ or current.__context__
-    return "\n".join(parts)
-
-
 def test_a_secret_stored_on_an_entity_survives_applying_it_again(
     store: ConfigStore,
 ) -> None:
@@ -737,7 +725,7 @@ def test_an_unresolved_reference_never_quotes_the_name(
     message = str(caught.value)
     assert "names no" in message
     assert "not quoted back" in message
-    assert SECRET not in _chain(caught.value)
+    assert SECRET not in chain(caught.value)
     assert SECRET not in str(caught.value.problems)
 
 
@@ -822,7 +810,7 @@ def test_a_refused_validator_names_the_rule_and_not_the_value(
         populated.apply(document)
 
     assert rule in str(caught.value)
-    assert SECRET not in _chain(caught.value)
+    assert SECRET not in chain(caught.value)
     assert SECRET not in str(caught.value.problems)
 
 
@@ -835,7 +823,7 @@ def test_a_binding_naming_one_agent_twice_never_prints_it(
         populated.apply({"devices": {"aa:bb:cc:dd:ee:ff": [SECRET, SECRET]}})
 
     assert "more than one position (1, 2)" in str(caught.value)
-    assert SECRET not in _chain(caught.value)
+    assert SECRET not in chain(caught.value)
 
 
 def test_a_binding_naming_one_agent_twice_with_different_spacing_is_still_twice(
