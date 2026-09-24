@@ -441,7 +441,7 @@ docstring for the risk above, and the changelog fragment.
 ## Milestones
 
 - [x] **[M1: a reply's cancel keeps its caller's cancellation](2026-09-24-cancel-keeps-caller-cancellation-implementation.md#m1-a-replys-cancel-keeps-its-callers-cancellation)**
-  (PR TBD). Commits in this order:
+  (PR [#561](https://github.com/rafacm/vinga/pull/561)). Commits in this order:
   1. The value-level tests 1-4 and the runtime-level test 5, with the
      fix: one commit, since tests 1-3 and 5 cannot be green without
      it. The body records each test's failing run against today's

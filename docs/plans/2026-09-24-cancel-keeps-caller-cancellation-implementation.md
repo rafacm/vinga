@@ -181,3 +181,37 @@ documentation footprint are the plan's.
   written that way hangs exactly when it is needed. Tests 6 to 10
   bound the wait with `asyncio.wait(..., timeout=...)` and assert the
   task is done.
+
+### PR review round, PR #561
+
+Automated external review of this PR's diff (origin/main...e5d14b84).
+Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 5m53s, at commit e5d14b84.
+Verdict as received: **mergeable after the listed fix**. One finding,
+adopted.
+
+1. **P2: failure precedence depended on an exception's truth.**
+   `PipelineRuntime.close` chose between the reply's failure and the
+   purge's with `failed = failed or purge_failed`. A `BaseException`
+   subclass may be falsy or raise from `__bool__`, so with both
+   failing the purge's failure could replace the reply's, or the merge
+   could raise a third exception, against the settled rule that the
+   reply's failure wins whatever it failed with. The tests used only
+   truthy failures.
+
+   *Resolution*: accepted, in `51fec09a`. Both merges in `close` now
+   select by identity (`if failed is None: failed = purge_failed`, and
+   the same for `held` and `later`). An untruncated grep of the lines
+   this diff added to Python files for the word `or` found eight;
+   those two were the only merges of exceptions, and the other six are
+   prose in docstrings and comments plus one boolean test in a test
+   helper. `test_the_reply_failure_wins_whatever_its_truth` is
+   parametrized over a falsy `BaseException` and one whose `__bool__`
+   raises, each as the reply's failure beside a failing purge.
+   Falsified in one run against the `or` form: the falsy case raised
+   the purge's `PurgeBroke`, the raising case raised `RuntimeError:
+   asked for its truth`. No falsy case exists for the cancellation
+   merge, because none is reachable: `held` and `later` are only ever
+   the plain `CancelledError` asyncio makes and throws into the waiter,
+   and a `CancelledError` raised by the reply's own body marks its task
+   cancelled rather than being re-raised. That merge takes the identity
+   form anyway, so the two read alike.
