@@ -144,9 +144,10 @@ class Recording:
         best-effort, and it is the promise `CaptureAudio` keeps about a
         capture too (a frame it cannot read is not a reason to stop
         capturing); a household that cannot record is not a household
-        that cannot talk. Reported by class, for the reason the
-        session's `_cleanly` gives about exception prose on a retained
-        surface."""
+        that cannot talk. Reported with the session id and nothing taken
+        from the exception, not even its class, for the reason `close`'s
+        guard gives: a class name can be any string, a far side's bytes
+        included."""
         if self._captures is None:
             return
         capture = self._captures.open(self._session_id, opened_at, manifest)
@@ -155,17 +156,14 @@ class Recording:
         self._events.attach_capture(capture)
         try:
             self._audio = CaptureAudio(capture, protocol_version, reply_sample_rate)
-        except Exception as exc:  # noqa: BLE001 - a recording is best-effort
+        except Exception:  # noqa: BLE001 - a recording is best-effort
             # Detached before closed, so a close that fails in its own
             # right still leaves no consumer writing into a capture that
-            # is on its way out.
+            # is on its way out. The exception is not bound: what is never
+            # looked at cannot reach the warning below.
             self._events.detach_capture()
             capture.close()
-            logger.warning(
-                "session %s: recording could not start (%s)",
-                self._session_id,
-                type(exc).__name__,
-            )
+            logger.warning("session %s: recording could not start", self._session_id)
 
     def _open_record(
         self,

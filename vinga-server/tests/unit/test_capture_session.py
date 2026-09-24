@@ -368,14 +368,18 @@ def test_the_two_channels_share_one_timeline(tmp_path: Path, frames: int) -> Non
 # and planted on both links of an exception chain: what must not reach a
 # retained surface is the whole chain, not only its outermost message.
 CODEC_SENTINEL = "sk-live-3f9a21c7-never-a-real-credential"
+# The same shape as a class name, which `type` accepts for any string:
+# a library wrapping a far side's answer can raise an exception whose
+# NAME is that answer (the correction `events/__init__.py` records
+# beside `_offer`).
+CODEC_CLASS_SENTINEL = "sk-live-8e0c4d12-planted-as-a-class-name"
 
 UTTERANCE = b"\x00\x00" * 320
 
 
-class CodecUnavailable(RuntimeError):
-    """Stands in for what a media library raises when it cannot open a
-    codec: a class name worth logging, wrapped around a message that is
-    not."""
+# What a media library raises when it cannot open a codec, where neither
+# its name nor its message is anything this server chose.
+CodecUnavailable: type[Exception] = type(CODEC_CLASS_SENTINEL, (RuntimeError,), {})
 
 
 def unopenable_codecs(*args: object, **kwargs: object) -> object:
@@ -480,8 +484,8 @@ async def test_a_capture_whose_codecs_will_not_open_is_released_and_the_session_
 
     # The warning exactly, as a record: the channel it goes out on (the
     # JSON `logger` field, which a collector filters on), its level, its
-    # unrendered sentence and its typed arguments, the class name and
-    # never the message.
+    # unrendered sentence and its typed arguments, the session id and
+    # nothing from the exception, neither its message nor its class.
     (warning,) = [
         record
         for record in caplog.records
@@ -489,12 +493,14 @@ async def test_a_capture_whose_codecs_will_not_open_is_released_and_the_session_
     ]
     assert warning.name == SESSION_LOGGER
     assert warning.levelno == logging.WARNING
-    assert warning.msg == "session %s: recording could not start (%s)"
-    assert warning.args == (session.session_id, "CodecUnavailable")
+    assert warning.msg == "session %s: recording could not start"
+    assert warning.args == (session.session_id,)
 
     written = both_formats(caplog)
-    assert "recording could not start (CodecUnavailable)" in written
+    assert f"session {session.session_id}: recording could not start" in written
     assert CODEC_SENTINEL not in written
+    assert CODEC_CLASS_SENTINEL not in written
     assert "Traceback" not in written
     printed = capsys.readouterr()
     assert CODEC_SENTINEL not in printed.out + printed.err
+    assert CODEC_CLASS_SENTINEL not in printed.out + printed.err
