@@ -27,8 +27,9 @@ retargeting discipline under "Merging".
   scratchpad, never in the main checkout: another session may hold
   it, and worktrees are what let milestones proceed in parallel.
 - Read in full before planning: the issue (its decisions are
-  settled and not re-litigated; its open questions are the plan's
-  to resolve), AGENTS.md, `docs/architecture/product-promises.md`
+  settled and not re-litigated unless Step 0 finds their premise
+  has moved; its open questions are the plan's to resolve),
+  AGENTS.md, `docs/architecture/product-promises.md`
   and `docs/architecture/guidelines.md`, the plans and
   implementation docs of the work this builds on, and the code the
   issue touches.
@@ -91,11 +92,61 @@ the orchestrator's. The #547 run got exactly this
 wrong, twelve Opus commits signed as Fable, because the brief said
 "the Claude trailer" and the trailer at hand was the orchestrator's.
 
+## Step 0: is it still worth building
+
+An issue is a claim about the tree on the day it was filed, and the
+tree moves under it. The issues filed from the 2026-09-12
+architecture review showed how far: #489's lane split measured 7.3s
+against 7.4s for a ten-line change and was deleted before it was
+built, #487 was re-cut from four milestones to one when one of its
+settled decisions was withdrawn, and two of #492's four findings
+were stale on arrival. Each was caught by hand, by a session that
+happened to ask. This step asks every time, before any plan work is
+paid for. It scales with drift: an issue filed against the current
+head needs a line saying so, and one filed a hundred commits ago
+needs its measurements taken again.
+
+1. **Re-verify the premise at `main`'s head.** Measure again every
+   file, line, count and quoted behavior the issue's problem
+   statement relies on, with the untruncated commands the
+   inventories lens below requires, and record each as holding,
+   drifted (with the new value), or gone. Then check what landed
+   since the issue was filed: merged PRs and closed issues that
+   absorbed it, contradicted one of its decisions, or removed a gate
+   it was waiting on. The premise is the problem the issue states,
+   not the remedy it proposes; the remedy is the next question's.
+2. **Price the null option, then the shape.** Say what leaving the
+   problem alone costs, concretely: who meets it, how often, and
+   what it does to them. Name the cheapest change that removes that
+   cost. Only then ask whether the issue's proposed shape earns
+   itself over that change, where the thing being priced is
+   accidental complexity: a module, seam, lane, flag, config key or
+   vocabulary member the problem does not need, or a second
+   structure that must agree with one that exists. The design
+   guide's deletion test and the proportion test apply to the
+   issue's proposal exactly as they later apply to the plan's, and
+   the answer carries into the plan's "Cheapest alternative" line,
+   where leaving the problem alone is a candidate like any other.
+3. **Record, then route.** Post the findings as one comment on the
+   issue, even when everything holds (then it is short), so the
+   verdict and the head it was measured at outlive the session.
+   Then one of three:
+   - **Proceed**: the premise holds and the shape earns itself.
+     Step 1 restates the decisions as the issue has them.
+   - **Re-scope or close**: the premise is gone or smaller, or the
+     null option or a cheaper shape wins. Stop and ask before
+     editing the issue's scope or closing it; the comment carries
+     the evidence either way.
+   - **Conflict**: the issue contradicts a recorded decision (an
+     ADR, a promise, another issue's settled decision). Stop and
+     ask; the plan does not pick a side silently.
+
 ## Step 1: the plan
 
 `docs/plans/YYYY-MM-DD-<slug>.md` (today's date) on a
 `feature/<slug>` branch, in the house style of the existing plans:
-goal; the issue's decisions restated, not re-litigated; the issue's
+goal; the issue's decisions restated as Step 0 confirmed or amended
+them, not re-litigated; the issue's
 open questions resolved, each with its reasons; the smaller design
 decisions the issue leaves open, decided with reasons; module
 layout; tests (reuse existing test assets, do not restate them);
