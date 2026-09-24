@@ -7,17 +7,14 @@ a key, a model, or a network. The mock LLM's tool calling is scripted,
 which is what makes a conversation about tools deterministic.
 """
 
-import sys
-from pathlib import Path
 
 import pytest
 
 from tests.integration.conftest import dominant_hz, mock_voice, spoken
+from tests.support.tools_mcp import entry_data
 from vinga_server.config import Config
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.memory.store import open_memory
-
-STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 
 DEVICE_MAC = "aa:bb:cc:dd:ee:21"
 SWITCHER_MAC = "aa:bb:cc:dd:ee:22"
@@ -25,14 +22,6 @@ SHARED_MAC = "aa:bb:cc:dd:ee:23"
 
 POET_TONE = 440.0
 TUTOR_TONE = 880.0
-
-
-def stdio_server(**overrides: object) -> dict[str, object]:
-    return {
-        "transport": "stdio",
-        "command": sys.executable,
-        "args": [str(STDIO_SERVER)],
-    } | overrides
 
 
 def one_agent(llm: dict[str, object], **extra: object) -> Config:
@@ -69,7 +58,7 @@ async def test_a_conversation_triggers_an_mcp_tool_and_the_reply_reflects_it(
             "tool_when": "secret",
             "tool_name": "tools__secret_word",
         },
-        mcp_servers={"tools": stdio_server()},
+        mcp_servers={"tools": entry_data()},
         agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
         | {"mcp": ["tools"]},
     )
@@ -262,7 +251,7 @@ async def test_a_dead_mcp_server_still_boots_and_still_talks(serve, simulate) ->
     # Configuration errors fail the boot; being unreachable does not.
     config = one_agent(
         {"type": "mock", "reply": "Talking anyway."},
-        mcp_servers={"tools": stdio_server(command="/nonexistent/mcp-server", args=[])},
+        mcp_servers={"tools": entry_data(command="/nonexistent/mcp-server", args=[])},
         agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
         | {"mcp": ["tools"]},
     )
@@ -282,7 +271,7 @@ async def test_a_tool_that_runs_long_is_cut_off_and_still_answered(serve, simula
             "tool_name": "tools__slow_answer",
             "tool_arguments": {"seconds": 30},
         },
-        mcp_servers={"tools": stdio_server(tool_timeout_s=0.5)},
+        mcp_servers={"tools": entry_data(tool_timeout_s=0.5)},
         agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
         | {"mcp": ["tools"]},
     )
@@ -299,7 +288,7 @@ async def test_a_tool_that_runs_long_is_cut_off_and_still_answered(serve, simula
 @pytest.mark.parametrize("entry", ["self", "remember"])
 async def test_a_reserved_server_name_fails_the_boot(entry: str) -> None:
     with pytest.raises(Exception, match=r"must match \[A-Za-z0-9_-\]\+"):
-        one_agent({"type": "mock"}, mcp_servers={entry: stdio_server()})
+        one_agent({"type": "mock"}, mcp_servers={entry: entry_data()})
 
 
 async def test_a_server_tool_the_apis_would_refuse_is_still_reachable(
@@ -316,7 +305,7 @@ async def test_a_server_tool_the_apis_would_refuse_is_still_reachable(
             "tool_when": "secret",
             "tool_name": "tools__weather_today_v2",
         },
-        mcp_servers={"tools": stdio_server()},
+        mcp_servers={"tools": entry_data()},
         agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
         | {"mcp": ["tools"]},
     )
@@ -344,7 +333,7 @@ def granting_config(kids_grant: object) -> Config:
             "tts": {"mock": mock_voice()},
             "vad": {"mock": {"type": "mock"}},
         },
-        mcp_servers={"tools": stdio_server()},
+        mcp_servers={"tools": entry_data()},
         agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
         agents={
             "house": {"prompt": "HOUSE", "mcp": ["tools"]},

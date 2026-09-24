@@ -16,7 +16,6 @@ never changed.
 
 import asyncio
 import os
-import sys
 from pathlib import Path
 
 import httpx
@@ -25,11 +24,10 @@ from xiaozhi_sdk import XiaoZhiWebsocket
 from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, mock_voice, spoken
 from tests.support.notices import RELOAD, boundaries
 from tests.support.problems import refused as refusal_body
+from tests.support.tools_mcp import entry_data
 from tests.support.wire import speech_pcm
 from vinga_server.config import Config
 from vinga_server.config.models import API_MOUNT_PATH
-
-STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 
 DEVICE_MAC = "aa:bb:cc:dd:ee:31"
 
@@ -37,14 +35,6 @@ DEVICE_MAC = "aa:bb:cc:dd:ee:31"
 ENTRY = "weather"
 
 TOOL = f"{ENTRY}__secret_word"
-
-
-def stdio_entry() -> dict[str, object]:
-    return {
-        "transport": "stdio",
-        "command": sys.executable,
-        "args": [str(STDIO_SERVER)],
-    }
 
 
 def one_agent(**extra: object) -> Config:
@@ -153,7 +143,7 @@ async def test_a_written_and_granted_server_is_usable_without_a_restart(
 
             # The operator's two writes and the reload, with the device
             # connected and the session alive throughout.
-            written = await control.put(f"/mcp-servers/{ENTRY}", json=stdio_entry())
+            written = await control.put(f"/mcp-servers/{ENTRY}", json=entry_data())
             assert written.status_code == 200, written.text
             # And the write said how to apply it, which is what this
             # test then does.
@@ -209,7 +199,7 @@ async def test_a_refused_reload_leaves_the_running_servers_alone(
     that between them leave a snapshot no boot would accept.
     """
     granted = one_agent(
-        mcp_servers={ENTRY: stdio_entry()},
+        mcp_servers={ENTRY: entry_data()},
         agents={"assistant": {"prompt": "ASSISTANT", "mcp": [ENTRY]}},
     )
     async with serve_app(granted) as (port, app), control_client(
