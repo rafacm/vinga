@@ -44,7 +44,8 @@ from tests.support.wire import (
 from vinga_server.app import create_app
 from vinga_server.audio.opus import OpusEncoder
 from vinga_server.capture import CAPTURE_RATE, CaptureStore
-from vinga_server.device import session as session_module
+from vinga_server.device import recording as recording_module
+from vinga_server.device.recording import recordings
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import SESSION_LOGGER
 from vinga_server.protocol import framing
@@ -405,7 +406,7 @@ def capturing_session(tmp_path: Path) -> tuple[DeviceSession, LoopingSocket]:
     generations = world(config, providers=built_world(config))
     factory = bespoke_runtime_factory(generations, McpServers({}), lane_memory(), None)
     websocket = LoopingSocket()
-    session = DeviceSession(cast(Any, websocket), generations, factory, captures)
+    session = DeviceSession(cast(Any, websocket), generations, factory, recordings(captures))
     return session, websocket
 
 
@@ -440,7 +441,7 @@ async def test_a_capture_whose_codecs_will_not_open_is_released_and_the_session_
     than a recording of it").
     """
     session, websocket = capturing_session(tmp_path)
-    monkeypatch.setattr(session_module, "CaptureAudio", unopenable_codecs)
+    monkeypatch.setattr(recording_module, "CaptureAudio", unopenable_codecs)
 
     with caplog.at_level("INFO"):
         task = asyncio.create_task(session.run())
@@ -469,7 +470,6 @@ async def test_a_capture_whose_codecs_will_not_open_is_released_and_the_session_
     # White-box for both reads, per the note on `attached_capture`: what
     # a released collaborator looks like is that there is nothing left to
     # ask about it.
-    assert session._capture_audio is None
     assert attached_capture(session) is None, "the events capture was left attached"
 
     manifest = manifest_of(tmp_path)

@@ -36,7 +36,7 @@ from tests.support.sessions import (
 from tests.support.sockets import LoopingSocket
 from vinga_server.capture import CaptureStore
 from vinga_server.conversations import SessionSink
-from vinga_server.device import session as recording_home
+from vinga_server.device import recording as recording_home
 from vinga_server.device.boundary import DeviceGone, PlayableAudio
 from vinga_server.device.capture_audio import CaptureAudio
 from vinga_server.events import CaptureTap

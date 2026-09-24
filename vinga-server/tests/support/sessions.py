@@ -50,6 +50,7 @@ from vinga_server.config import Config
 from vinga_server.config.models import normalize_mac
 from vinga_server.conversations.store import Half
 from vinga_server.device.bindings import DeviceBindings
+from vinga_server.device.recording import recordings
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import SessionEvents
 from vinga_server.filler import build_agent_fillers
@@ -180,9 +181,10 @@ def device_session(
     `llm_input` is the post-close surface each assembled request is
     staged into (#502), and it goes to BOTH halves the way `app.py`
     passes it: the factory closes over it because the rounds are staged
-    while the conversation runs, and the session holds it because the
-    close is where the stage is let go. None is a deployment that did
-    not ask for the export, which is every suite but the one about it.
+    while the conversation runs, and the session's recording holds it
+    because the close is where the stage is let go. None is a deployment
+    that did not ask for the export, which is every suite but the one
+    about it.
 
     `device_access` is the other direction through those rows, what the
     location tool writes through, and None is what `app.py` composes for
@@ -213,8 +215,7 @@ def device_session(
         cast(Any, websocket),
         generations,
         factory,
-        transcripts=transcripts,
-        llm_input=llm_input,
+        recordings=recordings(transcripts=transcripts, llm_input=llm_input),
     )
     # White-box, deliberately, and the only four sites in this file that
     # are. These lines are `run`'s own, transcribed: it reads the device
@@ -399,8 +400,8 @@ def served(
     """A session built the way `ws.py` builds one, so `run` is what the
     test drives rather than a hand-assembled close path. `conversations`
     is the store, which reaches a session twice over: through the factory
-    that binds its turn recorder, and as the collaborator the session
-    opens and closes.
+    that binds its turn recorder, and as the collaborator the session's
+    recording opens and closes.
 
     `generations` is the holder, for the one kind of test that has to
     publish something to it: a world hears about an agent rename, and a
@@ -414,7 +415,10 @@ def served(
         generations, McpServers({}), lane_memory(), conversations
     )
     return DeviceSession(
-        cast(Any, websocket), generations, factory, conversations=conversations
+        cast(Any, websocket),
+        generations,
+        factory,
+        recordings=recordings(conversations=conversations),
     )
 
 
@@ -443,10 +447,7 @@ def recording_session(
         cast(Any, websocket),
         generations,
         factory,
-        captures,
-        conversations=conversations,
-        transcripts=transcripts,
-        llm_input=llm_input,
+        recordings(captures, conversations, transcripts, llm_input),
     )
 
 

@@ -23,6 +23,7 @@ from vinga_server.auth import DeviceAuth
 from vinga_server.composition import Composition
 from vinga_server.config.models import normalize_mac
 from vinga_server.device.boundary import WEBSOCKET_PATH
+from vinga_server.device.recording import recordings
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import (
@@ -144,15 +145,12 @@ async def conversation(websocket: WebSocket) -> None:
         websocket,
         comp.generations,
         comp.runtime_factory,
-        comp.capture,
+        recordings(comp.capture, comp.conversations, comp.transcripts, comp.llm_input),
         comp.device_facts,
         comp.bindings,
-        comp.conversations,
         comp.sessions,
         comp.live,
         comp.telemetry,
-        comp.transcripts,
-        comp.llm_input,
     )
     # Admission is decided after the token, so a full server still answers
     # a bad token with a refusal about the token.

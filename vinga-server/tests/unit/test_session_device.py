@@ -65,6 +65,7 @@ from vinga_server.config import Config
 from vinga_server.config.models import DatabaseConfig, normalize_mac
 from vinga_server.db import read_engine
 from vinga_server.device.bindings import DeviceBindings
+from vinga_server.device.recording import recordings
 from vinga_server.device.session import DeviceSession
 from vinga_server.memory.store import MemoryScope, MemoryStore
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
@@ -537,7 +538,7 @@ async def test_the_capture_manifest_names_neither_field(tmp_path: Path) -> None:
     )
     websocket = LoopingSocket()
     captures = CaptureStore(tmp_path / "captures", 900.0, 2000.0, 0.0)
-    session = DeviceSession(cast(Any, websocket), generations, factory, captures)
+    session = DeviceSession(cast(Any, websocket), generations, factory, recordings(captures))
 
     task = asyncio.create_task(session.run())
     try:
