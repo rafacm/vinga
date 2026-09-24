@@ -60,7 +60,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from vinga_server import __version__
 from vinga_server.audio.opus import OpusDecoder
 from vinga_server.build_info import revision
-from vinga_server.capture import CAPTURE_RATE, CaptureStore, DeviceFacts
+from vinga_server.capture import CAPTURE_RATE, DeviceFacts
 from vinga_server.config.models import (
     CLIENT_ID_LIMIT,
     DEVICE_NAME_LIMIT,
@@ -70,9 +70,7 @@ from vinga_server.config.models import (
     without_url_credential,
 )
 from vinga_server.config.store import LiveDevice
-from vinga_server.conversations import ConversationStore, SessionSink
-from vinga_server.conversations.records import Acknowledgement
-from vinga_server.device import watchdog
+from vinga_server.device import recording, watchdog
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.device.boundary import (
     PIPELINE_SAMPLE_RATE,
@@ -81,8 +79,8 @@ from vinga_server.device.boundary import (
     RuntimeFactory,
     SessionInput,
 )
-from vinga_server.device.capture_audio import CaptureAudio
 from vinga_server.device.pacing import ReplyPacer
+from vinga_server.device.recording import RecordingFactory
 from vinga_server.events import SessionEvents, logger
 from vinga_server.events.catalog import (
     RejectedAgentNotLoaded,
@@ -119,13 +117,7 @@ from vinga_server.telemetry import Telemetry
 from vinga_server.tools.device import DeviceToolClient
 
 if TYPE_CHECKING:  # the registry names this class the same way
-    # And the two post-close surfaces this hands a closed session to,
-    # named rather than imported: each imports `telemetry.py`, which
-    # nothing here does, and a runtime import would make this edge pay
-    # for a module it only ever holds.
-    from vinga_server.llm_input_export import LlmInputExport
     from vinga_server.registry import SessionRegistry
-    from vinga_server.transcript_export import TranscriptExport
 
 # What the server speaks: TTS output is resampled to this rate, encoded
 # in 60 ms Opus frames, and announced in the server hello.
@@ -182,15 +174,12 @@ class DeviceSession:
         websocket: WebSocket,
         generations: Generations,
         runtime_factory: RuntimeFactory,
-        captures: CaptureStore | None = None,
+        recordings: RecordingFactory | None = None,
         device_facts: DeviceFacts | None = None,
         bindings: DeviceBindings | None = None,
-        conversations: ConversationStore | None = None,
         sessions: "SessionRegistry | None" = None,
         live: LiveEvents | None = None,
         telemetry: "Telemetry | None" = None,
-        transcripts: "TranscriptExport | None" = None,
-        llm_input: "LlmInputExport | None" = None,
     ) -> None:
         self.websocket = websocket
         # The world this server is serving, asked rather than kept: a
@@ -214,19 +203,6 @@ class DeviceSession:
         self._bindings = (
             bindings if bindings is not None else DeviceBindings.snapshot_only(generations)
         )
-        self._captures = captures
-        # And where a closed session's turns go afterwards, when a
-        # deployment asked for that (#495). An optional collaborator
-        # like the captures above, compared `is not None`, and handed
-        # the one thing it cannot get for itself: the handle the store
-        # returns when this session's record is closed.
-        self._transcripts = transcripts
-        # And the third post-close surface beside it (#502), which is
-        # handed nothing but the fact that this session ended: what it
-        # exports it has been holding since the rounds were assembled,
-        # so the close is where it lets go rather than where it learns
-        # anything.
-        self._llm_input = llm_input
         # Where this connection reports which world it ended up talking
         # through, and where the slot it took goes back. Optional for
         # the caller with no server around it, which is a test driving a
@@ -238,12 +214,6 @@ class DeviceSession:
         # with: a connection turned away for its Device-Id never built a
         # conversation and never held a generation.
         self._generation: Generation | None = None
-        # The conversation record, an optional collaborator exactly like
-        # the captures above: absent unless the deployment asked for one,
-        # compared `is not None`, and never something this class reaches
-        # for on a path that has to work without it.
-        self._conversations = conversations
-        self._record: SessionSink | None = None
         # The device record this conversation attached to, from the
         # same snapshot as the binding (#449 M2). Kept here because two
         # things written at the open read it: the session row's name
@@ -252,16 +222,20 @@ class DeviceSession:
         # it stood when somebody started talking.
         self._device_record: LiveDevice | None = None
         self._device_facts = device_facts if device_facts is not None else DeviceFacts()
-        # The recording's own decode path, built only when a capture
-        # starts, so a server that is not recording pays for none of it.
-        # It is what closes the capture it was built around.
-        self._capture_audio: CaptureAudio | None = None
         self.session_id = uuid.uuid4().hex
         # Created at construction with the session id and no device
         # identity yet, so the bad-Device-Id rejection carries
         # `device: None` the way it does today; the edge identifies the
         # device to it as soon as the MAC is understood.
         self._events = SessionEvents(self.session_id)
+        # Everything this session leaves behind it: the capture, the
+        # conversation store's row, and the surfaces a closed session is
+        # handed to. Built here, once, from the factory the composition
+        # root handed in, because it needs the id and the events object
+        # above; None is a deployment recording nothing, whose owner
+        # opens, feeds and closes nothing.
+        build = recordings if recordings is not None else recording.recordings()
+        self._recording = build(self.session_id, self._events)
         # The device session's conversations: which thread each agent is
         # on, their histories, the store's handles, and who is talking
         # now. None until the MAC is normalized, which is the line that
@@ -573,12 +547,39 @@ class DeviceSession:
             #
             # One manifest, two consumers: the capture writes it beside
             # the audio and the store's session row is built from it,
-            # which is what "manifest-shaped" means concretely. The
-            # store attaches after the capture, so the dispatch order
-            # stays capture first, store second, log last.
+            # which is what "manifest-shaped" means concretely. Which of
+            # them opens first, and why, is the recording's to know.
             manifest = self._manifest(client_id)
-            self._start_capture(manifest)
-            self._start_recording(manifest)
+            opened_at = self._opened_at
+            assert opened_at is not None  # stamped at the accept, above
+            # What this conversation's world has not heard, handed over
+            # as a thunk the store calls at the instant it registers this
+            # session.
+            #
+            # The generation is the anchor rather than this moment, and
+            # the difference is a window with two ends. This session
+            # bound its world before the hello it has just awaited, and
+            # it will go on speaking that world's names until it ends; a
+            # rename published in between, or one published before this
+            # device connected and still waiting for its apply, moved
+            # rows this session is about to write onto. Neither reaches a
+            # store that only marks the sessions it already has. A thunk
+            # rather than a list because reading it here and passing the
+            # answer would leave a third, smaller window between the two
+            # statements.
+            pinned = self._generation
+            self._recording.open(
+                opened_at,
+                manifest,
+                protocol_version=self.protocol_version,
+                reply_sample_rate=OUTPUT_AUDIO.sample_rate,
+                renames=(
+                    None
+                    if pinned is None
+                    else lambda: self._generations.renames_for(pinned)
+                ),
+                device_name=self._device_name(),
+            )
             # What the event says about the client id, which is not what
             # the manifest above says about it. The header is the device
             # UUID, unbounded and unvalidated: with device auth off
@@ -702,44 +703,11 @@ class DeviceSession:
                     mac=DeviceId(mac),
                 )
             )
-            # Both after session_closed, so that event is the last line
-            # of the decision track, the last row of the record, and the
+            # After session_closed, so that event is the last line of
+            # the decision track, the last row of the record, and the
             # WAV header is patched with a length covering everything.
-            #
-            # What comes back is the store's barrier for this session,
-            # kept for the transcript export below: the close is the
-            # last thing this session puts on the writer's queue, so an
-            # acknowledgement of it is what says the session's turns are
-            # readable (#495).
-            recorded = self._stop_recording()
-            if self._capture_audio is not None:
-                self._events.detach_capture()
-                self._capture_audio.close()
-                self._capture_audio = None
-            # And last of all, the one signal that means the
-            # conversation is over rather than that a recording's files
-            # are final (#67). The store's own `finished()` fires
-            # mid-conversation for a capture that ended at its duration
-            # limit or after a write failure, so a recording queued
-            # there would be attached to a session still talking. Here
-            # the WAV header is patched, the manifest is written, and
-            # this session is done.
-            if self._captures is not None:
-                self._captures.session_closed(self.session_id)
-            # And beside it, the other post-close surface, handed the
-            # barrier the store just returned. It does no work here: a
-            # read of a retained context and a put on a bounded queue,
-            # and everything else happens on a worker of its own (#495).
-            if self._transcripts is not None:
-                self._transcripts.session_closed(self.session_id, recorded)
-            # And the third, which needs no barrier and no handle: what
-            # it exports was staged as the conversation went, so this
-            # is a dictionary pop, a read of a map and a put on a
-            # bounded queue. Last of the three because it is the widest,
-            # and a close that failed part way through should have let
-            # the narrower surfaces go first.
-            if self._llm_input is not None:
-                self._llm_input.session_closed(self.session_id)
+            # The row's duration and reason are read here, at the call.
+            self._recording.close(self._open_duration_s(), self._closed_reason())
             if self._cancelled is not None:
                 # A cleanup step was cancelled, and now that the record
                 # is complete the cancellation goes on its way: the
@@ -846,98 +814,6 @@ class DeviceSession:
             return 0.0
         return round(asyncio.get_running_loop().time() - self._opened_at, 2)
 
-    def _start_capture(self, manifest: dict[str, Any]) -> None:
-        """Begin recording this session, when a directory is configured.
-
-        The decision track is attached before the audio owner is built,
-        and from the raw capture: which events a session emits is this
-        class's business, through the events object it owns, while the
-        audio is the one thing recording needs codecs of its own for.
-
-        Building it is also the one step here that runs a media library,
-        and a library that cannot open a codec raises. That is released
-        on the spot rather than left to the close path, because the
-        close path releases the field, and the field is only assigned
-        once the construction has returned: a capture stranded at this
-        line would be an open file and an attached consumer that nothing
-        ever closes.
-
-        The session then carries on without a recording. Recording is
-        best-effort, and it is the promise the rest of this module keeps
-        about a capture too (a frame it cannot read is not a reason to
-        stop capturing); a household that cannot record is not a
-        household that cannot talk. Reported by class, for the reason
-        `_cleanly` gives about exception prose on a retained surface.
-        """
-        if self._captures is None or self._opened_at is None:
-            return
-        capture = self._captures.open(self.session_id, self._opened_at, manifest)
-        if capture is None:
-            return
-        self._events.attach_capture(capture)
-        try:
-            self._capture_audio = CaptureAudio(
-                capture, self.protocol_version, OUTPUT_AUDIO.sample_rate
-            )
-        except Exception as exc:  # noqa: BLE001 - a recording is best-effort
-            # Detached before closed, so a close that fails in its own
-            # right still leaves no consumer writing into a capture that
-            # is on its way out.
-            self._events.detach_capture()
-            capture.close()
-            logger.warning(
-                "session %s: recording could not start (%s)",
-                self.session_id,
-                type(exc).__name__,
-            )
-
-    def _start_recording(self, manifest: dict[str, Any]) -> None:
-        """Begin this session's row in the conversation store, when one
-        is configured.
-
-        Opened with the same reading the capture was, so a `t_ms` in the
-        database and a `t_ms` in the capture's decision track index into
-        the same timeline, and with the same manifest, which is where the
-        session row's device, agents, protocol and providers come from.
-
-        The tap attaches after the capture's, so the store sees exactly
-        what the capture's decision track sees, in the same order and
-        from the same first event: this record is the decision track,
-        `session_open` through `session_closed`. What the initial agent
-        activation emitted before the hello is outside both, because no
-        consumer can be attached before a session has a manifest to be
-        opened with.
-        """
-        if self._conversations is None or self._opened_at is None:
-            return
-        # What this conversation's world has not heard, handed over as a
-        # thunk the store calls at the instant it registers this session.
-        #
-        # The generation is the anchor rather than this moment, and the
-        # difference is a window with two ends. This session bound its
-        # world before the hello it has just awaited, and it will go on
-        # speaking that world's names until it ends; a rename published
-        # in between, or one published before this device connected and
-        # still waiting for its apply, moved rows this session is about
-        # to write onto. Neither reaches a store that only marks the
-        # sessions it already has. A thunk rather than a list because
-        # reading it here and passing the answer would leave a third,
-        # smaller window between the two statements.
-        generation = self._generation
-        self._conversations.open_session(
-            self.session_id,
-            self._opened_at,
-            manifest,
-            renames=(
-                None
-                if generation is None
-                else lambda: self._generations.renames_for(generation)
-            ),
-            device_name=self._device_name(),
-        )
-        self._record = SessionSink(self._conversations, self.session_id)
-        self._events.attach(self._record)
-
     def _device_name(self) -> str | None:
         """What this session's device is called, or None where no name
         is recorded for it.
@@ -958,26 +834,6 @@ class DeviceSession:
         """
         record = self._device_record
         return record.name if record is not None and record.named else None
-
-    def _stop_recording(self) -> "Acknowledgement | None":
-        """Close this session's row: its duration, what ended it, and
-        what it lost. Called after `session_closed` is emitted, so that
-        event is the last row of the record as it is the last line of the
-        decision track.
-
-        What it answers is the store's barrier for this session, or
-        nothing where there was no record to close. Nothing on this path
-        waits on it: it is handed straight to the transcript export,
-        which is the one surface that must not read the store past its
-        own writes (#495).
-        """
-        if self._record is None or self._conversations is None:
-            return None
-        self._events.detach(self._record)
-        self._record = None
-        return self._conversations.close_session(
-            self.session_id, self._open_duration_s(), self._closed_reason()
-        )
 
     def _manifest(self, client_id: str) -> dict[str, Any]:
         """What this session was held against.
@@ -1194,8 +1050,7 @@ class DeviceSession:
         # mid-reply, and those are precisely the frames that explain a
         # misfire, so a capture taken after them would be missing the
         # evidence it exists for (#42).
-        if self._capture_audio is not None:
-            self._capture_audio.microphone(data)
+        self._recording.microphone(data)
         if not self.listening:
             self._note_dropped("not_listening")
             return
@@ -1460,8 +1315,7 @@ class DeviceSession:
             the recording, so what a capture holds is what the device
             was actually sent."""
             await self._send_frame(framing.wrap(self.protocol_version, packet))
-            if self._capture_audio is not None:
-                self._capture_audio.reply(packet)
+            self._recording.reply(packet)
 
         for packet in batch.packets:
             first = await self._pacer.transmit(packet, deliver)

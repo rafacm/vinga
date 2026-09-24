@@ -46,7 +46,8 @@ from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import store as store_module
 from vinga_server.conversations.store import ConversationStore, Half, SessionSink
 from vinga_server.db import read_engine
-from vinga_server.device import session as session_module
+from vinga_server.device import recording as recording_module
+from vinga_server.device.recording import recordings
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import Emission
 from vinga_server.events.catalog import carried_values, catalog
@@ -127,7 +128,7 @@ class SpyingSink(SessionSink):
 @pytest.fixture
 def spy(monkeypatch: pytest.MonkeyPatch) -> list[Emission]:
     SpyingSink.seen = []
-    monkeypatch.setattr(session_module, "SessionSink", SpyingSink)
+    monkeypatch.setattr(recording_module, "SessionSink", SpyingSink)
     return SpyingSink.seen
 
 
@@ -709,7 +710,7 @@ def _guarded(tmp_path: Path, store: ConversationStore) -> tuple[Any, Any]:
     factory = bespoke_runtime_factory(generations, McpServers({}), lane_memory(), store)
     websocket = LoopingSocket()
     session = DeviceSession(
-        cast(Any, websocket), generations, factory, captures, conversations=store
+        cast(Any, websocket), generations, factory, recordings(captures, store)
     )
     return session, websocket
 
@@ -788,9 +789,7 @@ async def test_a_failure_after_the_open_still_finishes_the_record(
     # which is the point of releasing it. A record still open is a row
     # nobody closes and a capture still open is a manifest that never
     # says it finished, both of which show up in another process.
-    assert session._record is None
     assert attached_taps(session) == [], "a consumer was left attached"
-    assert session._capture_audio is None
     manifest = _capture_manifest(tmp_path)
     # The manifest's capture block is rewritten by the close, so its
     # `complete` is what says the capture was finished rather than left
@@ -845,7 +844,6 @@ async def test_a_cancelled_cleanup_step_still_finishes_the_record(
     (row,) = read("select * from record.sessions")
     assert row["closed_at"] is not None
     # White-box, per the note at the same pair above.
-    assert session._record is None
     assert attached_taps(session) == []
     manifest = _capture_manifest(tmp_path)
     assert manifest is not None and manifest["capture"]["complete"] is True

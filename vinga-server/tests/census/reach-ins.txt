@@ -64,7 +64,6 @@ tests/unit/test_boundary_contract.py  _turns  1
 tests/unit/test_boundary_contract.py  _watchdog  4
 tests/unit/test_capture.py  _events  1
 tests/unit/test_capture.py  _wav  2
-tests/unit/test_capture_session.py  _capture_audio  1
 tests/unit/test_capture_session.py  _handle_audio  1
 tests/unit/test_capture_upload.py  _max_total_mb  1
 tests/unit/test_capture_upload.py  _queue  1
@@ -107,10 +106,8 @@ tests/unit/test_config_store.py  _read_domain  1
 tests/unit/test_conversations_boot.py  _stopped  1
 tests/unit/test_conversations_boot.py  _thread  5
 tests/unit/test_conversations_durable.py  _engine  2
-tests/unit/test_conversations_session.py  _capture_audio  1
 tests/unit/test_conversations_session.py  _engine  2
 tests/unit/test_conversations_session.py  _opened_at  1
-tests/unit/test_conversations_session.py  _record  2
 tests/unit/test_conversations_session.py  _watchdog  1
 tests/unit/test_conversations_store.py  _batches  1
 tests/unit/test_conversations_store.py  _engine  6
