@@ -437,7 +437,9 @@ fragment, `changelog.d/531-test-helpers-home.md`, under `### Changed`.
 
 ## Milestones
 
-- [ ] **M1: the helpers go home** (#531 M2). Items 1 to 8 above, one
+- [ ] **[M1: the helpers go home](2026-09-24-test-helpers-home-implementation.md#m1-the-helpers-go-home)**
+  (#531 M2; PR TBD; left unticked because item 7 stopped under its own
+  rule, see the implementation doc). Items 1 to 8 above, one
   commit per item, the verification above, the changelog fragment.
   Design footprint: deepens `tests/support/leaks.py` (the exception
   walk joins the record walk), `tests/support/config_cli.py` (the
