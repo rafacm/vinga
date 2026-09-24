@@ -33,6 +33,7 @@ from typing import Any, cast
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
+from tests.support import leaks
 from tests.support.configs import POET_MAC, base_config
 from tests.support.events import events, only
 from tests.support.providers import (
@@ -98,16 +99,6 @@ def reply_failure(caplog: pytest.LogCaptureFixture) -> logging.LogRecord:
     matching = [record for record in caplog.records if REPORTED in record.getMessage()]
     assert len(matching) == 1, f"expected one reply failure, got {len(matching)}"
     return matching[0]
-
-
-def chain(raised: BaseException | None) -> list[BaseException]:
-    """One exception and everything reachable behind it, which is what a
-    caller catching it can print."""
-    walked: list[BaseException] = []
-    while raised is not None and raised not in walked:
-        walked.append(raised)
-        raised = raised.__cause__ or raised.__context__
-    return walked
 
 
 def rendered(record: logging.LogRecord) -> str:
@@ -551,7 +542,7 @@ async def test_a_cancellation_mid_phrase_still_attempts_the_closing_stop_once(
         try:
             await drive_reply(session, UTTERANCE)
         except asyncio.CancelledError as cancelled:
-            raised: BaseException | None = cancelled
+            raised: BaseException = cancelled
         else:  # pragma: no cover - the socket cancels the send
             raise AssertionError("the cancellation never left the reply")
 
@@ -561,11 +552,10 @@ async def test_a_cancellation_mid_phrase_still_attempts_the_closing_stop_once(
                                  "log has the details."]
     assert "fallback playback failed" not in caplog.text
     assert socket.stops == 1
-    # And nothing rode out on it. The whole chain is walked rather than
-    # the first link, since `__context__` and `__cause__` each hold one
-    # and a wrapped vendor error has both.
-    for link in chain(raised):
-        assert SENTINEL not in str(link), link
+    # And nothing rode out on it: not in the cancellation, and not in
+    # anything reachable behind it through either link, read every way
+    # `leaks.chain` reads an exception.
+    assert SENTINEL not in leaks.chain(raised)
     assert SENTINEL not in caplog.text
     assert all(SENTINEL not in rendered(record) for record in caplog.records)
 
