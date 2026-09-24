@@ -235,8 +235,23 @@ def plant_event(connection: Any, session: str, t_ms: int, name: str) -> None:
 
 
 def rows(table: str, **where: Any) -> list[dict[str, Any]]:
-    """Read through a second engine, which is what a reader beside a
-    running writer is."""
+    """Read `record.<table>` through a second engine, opened with
+    `open_conversations`.
+
+    That opener migrates and takes the conversations chain's advisory
+    lock before it reads, so this read waits for a writer holding that
+    lock to commit what it has in flight. It is not a reader that sits
+    beside a running writer without queueing behind it, and two tests
+    rely on the wait: `test_a_rename_between_the_world_and_the_open_reaches_the_session`
+    and `test_a_session_opened_before_the_apply_still_writes_the_new_name`
+    in `tests/unit/test_agent_rename_in_flight.py` read the record while
+    the conversation store's writer is still committing a finished
+    session's last batch, and see it only because this waits for the
+    lock. Moved to `read_engine`, both fail intermittently with the
+    record still empty (measured under #531 M2, which kept this as it
+    is). A suite that wants a read that never waits for a writer opens
+    `read_engine` itself.
+    """
     engine = open_conversations(DatabaseConfig())
     try:
         clause = " and ".join(f"{name} = :{name}" for name in where)
