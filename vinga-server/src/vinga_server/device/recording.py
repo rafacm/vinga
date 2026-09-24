@@ -1,5 +1,40 @@
-"""One device session's recording: the capture, the conversation
-store's session row, and the close that finishes both."""
+"""One device session's recording: everything the session leaves
+behind it, and the order it is opened and closed in.
+
+A recording is four surfaces, each optional and each asked for by the
+deployment: the capture (a decision track written from the session's
+events and two audio channels written through `CaptureAudio`'s codecs),
+the conversation store's session row and the sink that feeds it, and
+the two exports a closed session is handed to. The session decides when
+each step happens and knows none of this: it opens its recording after
+the hello, feeds it every frame that arrived and every packet that was
+sent, and closes it after `session_closed`. What this module holds is
+what the session used to keep true in comments.
+
+The open, capture first. The capture store opens, the capture attaches
+to the events object, its codecs are built, and only then does the row
+open and its sink attach, so the dispatch order is capture first, store
+second, log last, and the row is the capture's decision track, from the
+same first event. A codec that will not open is the one step here that
+can fail for a reason nothing on this side chose, and it strands a half
+built capture: attached, open, and not yet assigned anywhere the close
+would find it. So it is released where it failed, detached before it is
+closed, and the session goes on unrecorded.
+
+The close, narrow to wide. The sink is detached before the row closes,
+so nothing reaches the row after its close record is queued; the row's
+close answers the store's barrier for this session. The capture's tap
+is detached before the capture closes, so the last line of its track is
+the session's last emission and its WAV header covers everything. Then
+the three handoffs, in order: the capture store (the one signal that the
+conversation is over, not merely a file), the transcript export with the
+barrier, and the LLM-input export last because it is the widest. None of
+them depends on how far the open got.
+
+Not `events.SessionRecording`, which is narrower: that protocol is the
+capture as the events object sees it (what `attach_capture` takes and
+`vad` writes to), and it is one of the things this owner holds.
+"""
 
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any

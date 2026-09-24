@@ -38,9 +38,9 @@ class CaptureAudio:
     event emissions. This side never sees an event; that side never sees
     a codec.
 
-    It is handed a `SessionCapture` and closes it, so the session holds
-    one field for the whole of recording's audio rather than a capture
-    and three codecs beside it.
+    It is handed a `SessionCapture` and closes it, so a session's
+    recording (`recording.Recording`) holds one field for the whole of
+    its audio rather than a capture and three codecs beside it.
     """
 
     def __init__(

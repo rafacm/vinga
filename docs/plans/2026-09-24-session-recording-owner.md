@@ -647,8 +647,8 @@ implementation doc says so in those words.
 
 ## Milestones
 
-- [ ] **M1: a session's recording gets one owner**. No behavior
-  change. Commits in this
+- [x] **[M1: a session's recording gets one owner](2026-09-24-session-recording-owner-implementation.md#m1-a-sessions-recording-gets-one-owner)**
+  (PR TBD). No behavior change. Commits in this
   order, each green on its own:
   1. Pins: the characterization tests under "Tests" that the existing
      suites do not already cover, green against today's code.
