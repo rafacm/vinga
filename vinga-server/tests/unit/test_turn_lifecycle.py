@@ -1052,6 +1052,43 @@ async def test_when_both_fail_the_reply_is_raised_and_the_purge_is_read() -> Non
     assert [context.get("message") for context in reports] == []
 
 
+class Hollow(BaseException):
+    """A failure that answers False when asked its truth, which any
+    `BaseException` subclass is free to do."""
+
+    def __bool__(self) -> bool:
+        return False
+
+
+class Unasked(BaseException):
+    """A failure whose truth cannot be asked at all."""
+
+    def __bool__(self) -> bool:
+        raise RuntimeError("asked for its truth")
+
+
+@pytest.mark.parametrize("failure", [Hollow, Unasked], ids=["falsy", "raising-bool"])
+async def test_the_reply_failure_wins_whatever_its_truth(failure: type[BaseException]) -> None:
+    """Which failure is raised is decided by which came first, so it
+    is chosen by identity: a precedence read off the exception's truth
+    would pass over a falsy reply failure for the purge's, and raise a
+    third exception for one whose truth cannot be asked."""
+    spy = PurgeSpy(fails=PurgeBroke)
+    session = talking({"poet": cast(Any, StallingLlm([5.0]))}, memory=cast(Any, spy))
+
+    async def settle() -> None:
+        raise failure("the reply broke")
+
+    settling_with(session, settle)
+    start_reply(session, UTTERANCE)
+    await asyncio.sleep(0)
+
+    with pytest.raises(failure, match="the reply broke"):
+        await session.runtime.close()
+
+    assert len(spy.purged) == 1
+
+
 # --- the window that is never opened -----------------------------------
 
 
