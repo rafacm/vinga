@@ -243,3 +243,32 @@ docstring for the risk above, and the changelog fragment.
   know that waiting out a cancelled reply could swallow their own
   cancellation), adds no module or seam. Documentation footprint as
   above.
+
+## Plan review round
+
+Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 5m37s, at commit 339c1744, plan blob 554b6ebf.
+
+1. **P1: a cancelled close abandons the reply before session
+   finalization.** The Goal promises `runtime.close()` sees the reply
+   through, while Risks accepts that nothing awaits it after a
+   cancelled close. With only the purge in a `finally`, `close()`
+   exits while the reply is still in its tail, which can be blocked in
+   `filler.settle` before the turn is recorded, not merely at the final
+   device send. `_cleanly` then holds the cancellation and runs on
+   through `session_closed`, the store's close, the capture's close and
+   the export barrier, so the background reply can enqueue its turn
+   after the session row has closed. Test 6 hides this by holding
+   `HoldsTheFirstStop`, after `_record_turn`, and expects `close()` to
+   raise with the reply still running. It contradicts the close path's
+   contract that a cancellation is held until the record is complete
+   (`test_a_cancelled_cleanup_step_still_finishes_the_record`). The
+   plan should say `close()` preserves the caller's cancellation but
+   delays it until the reply has finished, without a second
+   `task.cancel()`, and until the purge has run; test cancellation at
+   the filler-settle await, assert close stays pending, release, and
+   assert the turn lands before session closure, `_in_flight` is
+   cleared, the purge runs, no reply task remains, and only then does
+   `CancelledError` reach the caller. Remove the risk acceptance and
+   test 6.
+
+Verdict: ready after the amendment.
