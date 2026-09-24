@@ -328,3 +328,76 @@ says. Everything else ran on the tree this section is committed with.
   `274 passed in 17.41s`, parallel. The unit lane still collects 7,630.
 - `python3 scripts/fold_changelog.py check .` from the checkout root:
   `checked 1 fragments, 0 failures`.
+
+### PR review round, PR #566
+
+Automated external review of this PR's diff (origin/main...1ecf6403). Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 7m03s, at commit 1ecf6403. Posted verbatim by the review run itself; resolutions follow as replies.
+
+Verdict as received: **mergeable after the listed fixes**. Three
+findings, all fixed here, each in a commit of its own.
+
+1. **P1: three of the walk's readings had no pin of their own.**
+   `leaks.chain` reads each exception's `repr`, its `str` and the
+   `repr` of its arguments tuple, while `test_support_leaks.py` claimed
+   every reading was pinned with the sentinel visible only there.
+   Removing all three expressions left the ten pins green, because the
+   link cases also show their sentinel through each argument's `str`
+   and the rest plant it in attributes. The reviewer asked for an
+   isolated case per reading, each watched failing under its own
+   mutation.
+
+   *Resolution*: accepted, in `05152aa7`. Three pins, each planting the
+   sentinel where only one rendering reaches it: an exception whose
+   `repr` alone carries it, one whose `str` alone does, and a `Refusal`
+   (fixed `repr` and `str`) holding an argument whose `repr` carries it
+   and whose `str` does not. None needed a compromise, since a custom
+   `__str__` and `__repr__` keep the first two apart. Each mutation run
+   once: without `repr(current)` only the `repr` pin failed; without
+   `str(current)` only the `str` pin; without `repr(current.args)` only
+   the arguments-tuple pin; with all three removed, those three failed
+   and the other ten passed.
+
+2. **P2: the cycle pin could hang a worker.** The cycle case called
+   the walk in-process with no deadline, and the suite has no per-test
+   timeout, so a walk that lost its seen set would wedge an xdist
+   worker rather than fail; this document's own falsification needed an
+   outside `timeout` to end it.
+
+   *Resolution*: accepted, in `196f94cc`, without a timeout plugin,
+   which would be a dependency for one test. The cyclic walk runs in a
+   child process that must exit 0 within `CYCLE_BOUND_S`, ten seconds;
+   on timeout the child is terminated and reaped and the case fails
+   saying so. Idle, the case takes about half a second. The bound is
+   ten seconds rather than more for a reason measured here: a walk
+   without its seen set also grows its pending list, by about 40 MB a
+   second (229 MB of resident memory at 5 s, 839 MB at 20 s), and the
+   bound caps that too. The `links` pin had the same exposure, since its
+   graph had a link back to the top; that link is gone, so without its
+   seen set the walk still ends there, visiting the shared exception
+   three times, and fails the exactly-once assertion at once.
+   Termination is the cycle case's alone. With the seen check removed:
+   the cycle case failed at the bound (`10.02s call`, `did not return
+   within 10.0 s`), the `links` pin failed at once, the file finished
+   in 11.21 s, and no child process was left.
+
+3. **P3: the pins' scope statement overclaimed.** The docstring said
+   every suite asserting a secret absent from a refusal asserts it
+   against `leaks.chain`, while `test_mcp_composed_reference.py`'s
+   `chained` keeps its own traceback renderer, as the plan decided.
+
+   *Resolution*: accepted, in `f9a4a104`. The opening statement now
+   covers the suites whose exception surface is `leaks.chain`, and a
+   paragraph names the composed-MCP `chained` as the renderer that
+   reuses only `links`, so what the pins hold for it is the traversal.
+
+The unit lane now collects 7,633: the 7,630 above plus these three
+pins, thirteen in the file.
+
+Verification after the round, from `vinga-server/`:
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit/test_support_leaks.py -q -ra`, on its own:
+  `13 passed in 1.61s`.
+- The same file with `-n auto --dist loadfile`: `13 passed in 4.75s`.
+- `uv run pytest tests/census -q -ra`: `66 passed in 26.62s`.
+- `python3 ../scripts/check_doc_links.py ..`: `checked 274 files, 0 failures`.
