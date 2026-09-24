@@ -111,6 +111,40 @@ rather than silently unified.
    cause cycle, which must terminate. Each is watched failing against
    the old `repr`/`str` walk before it is committed.
 
+   The walk also gains `str()` of each argument, the one reading
+   `_whole_chain` below makes that it lacks (an argument whose `str`
+   and `repr` differ), so that every walker it replaces is a subset of
+   it by construction rather than by inspection.
+
+   The other seven exception walkers in the suite are not
+   AST-identical to either version. Settled here, each read at
+   `1bcf3dc4`:
+
+   | Walker | Reads | Disposition |
+   |---|---|---|
+   | `_whole_chain`, `test_providers_boundary.py:678` | `str` of each link and of each argument | Replaced by `leaks.chain`, a superset once it reads `str` of arguments |
+   | `_whole_chain`, `test_reach_upgrade.py:404` | the same | Replaced, the same |
+   | `carried`, `test_cli_live.py:411` | `repr`, `str`, and one attribute level deeper | Replaced: `_held` reads the same two levels. Its docstring's claim that `config_cli.chain` reads only `repr` and `str` has been stale since `_held` was added, and goes with it. Its deliberate-leak case (`:3029`, which must find the plant) stays and now proves `leaks.chain` finds it |
+   | `chained`, `test_turntaking.py:120` | type name and `str` of each link | Replaced: `repr` carries the type name |
+   | `chained`, `test_mcp_composed_reference.py:227` | the formatted traceback of each link, and its `repr` | Kept: the traceback is a surface of its own (source lines, frames), which no rendering of the exception reproduces |
+   | `Consumer.rendered`, `test_server_event_pins.py:99` | every emission's payload and arguments, walking the chain of an argument that is an exception | Kept as a renderer of emissions; its exception walk delegates to `leaks.chain` |
+   | `chain`, `test_session_reply_failures.py:103` | nothing rendered: returns the exception objects | Kept: its callers assert on the objects, not on text |
+
+   The walker gets committed pins in a new
+   `tests/unit/test_support_leaks.py`, on the precedent of
+   `test_support_fakes.py` ("what the shared fakes promise, pinned
+   where the fakes live"), because fifteen suites' secret-absence
+   claims now rest on it and none of their own tests can fail if it
+   weakens: no exception in the tree carries a value where only the
+   stronger walk looks. One case per reading the walk promises, each
+   planting a sentinel only there: an attribute of the exception; an
+   attribute of an object held by an attribute (the PyYAML mark shape,
+   an object whose `buffer` holds the value); an argument whose `str`
+   reveals it and whose `repr` does not (item 3's addition); the
+   `__cause__` and the `__context__` of a raised exception; and a
+   cause cycle, which must terminate. Each is watched failing against
+   the old `repr`/`str` walk before it is committed.
+
    The other seven exception walkers in the suite are not
    AST-identical to either version (`_whole_chain` in
    `test_providers_boundary.py` and `test_reach_upgrade.py`, `carried`
@@ -291,6 +325,8 @@ Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    Evidence: The plan leaves seven walkers to conditional disposition in the implementation document (lines 99-109 (`plan:99`)). The current tree already resolves most of them: both `_whole_chain` implementations inspect only text and arguments (provider boundary, lines 678-689 (`tests/unit/test_providers_boundary.py:678`), reach upgrade, lines 404-416 (`tests/integration/test_reach_upgrade.py:404`)); `carried` performs the same attribute walk less completely (CLI live, lines 411-438 (`tests/integration/test_cli_live.py:411`)); and `turntaking.chained` is another weaker secret-absence walk (lines 120-130 (`tests/unit/test_turntaking.py:120`)). `Consumer.rendered` cannot be replaced wholesale, but its exception traversal can delegate to `leaks.chain` (server event pins, lines 99-114 (`tests/unit/test_server_event_pins.py:99`)).
 
    The plan should say instead: name which four weak walkers are replaced, which composite renderer delegates exception handling to `chain`, and which walkers remain because they preserve traceback formatting or return exception objects.
+
+   *Resolution:* accepted, with the reviewer's reading confirmed at each site. Item 1 now carries a table: both `_whole_chain`s, `carried` and `turntaking.chained` are replaced; `Consumer.rendered` delegates its exception walk; the composed-reference `chained` (formatted tracebacks) and `test_session_reply_failures.chain` (returns objects) are kept with their reasons. To make "superset" true by construction, `leaks.chain` also gains `str()` of each argument, the one reading `_whole_chain` makes that it lacked, and item 1's pins cover it.
 
 4. **P2: The residual duplicate inventory omits meaningful multi-file groups**
 
