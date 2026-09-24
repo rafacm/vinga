@@ -135,18 +135,27 @@ rather than silently unified.
    files (`test_conversations_schema.py`, `test_memory_schema.py`)
    carry an identical `_version(engine, schema_name)`.
 
-   The module offers the driver (a blank database, a chain and a
-   revision in; the settings out) and the stamped-version read (by
-   engine and schema, with a settings-and-chain form over it). The
-   fixtures stay in their files as one-line calls, per the scope the
-   issue comment settled. What callers stop knowing: the three things
-   the packaged Alembic environment refuses to run without.
+   The module owns every Alembic invocation the tests make, through
+   one private builder of the Alembic config (the script location, the
+   open connection and the chain, the three things the packaged
+   environment refuses to run without). On it sit three operations: an
+   upgrade to a named revision on a blank database (a database name,
+   a chain and a revision in; the settings out), a downgrade to a
+   named revision on an open connection, and the stamped-version read
+   (by engine and schema, with a settings-and-chain form over it).
+   `test_metrics_views_upgrade.py`'s `_alembic` is deleted and its two
+   downgrades (`:417`, `:512`) and its `_stamped` route through the
+   module. The fixtures stay in their files as one-line calls, per the
+   scope the issue comment settled. What callers stop knowing: the
+   config the packaged environment needs, in either direction.
 
-   Before writing it, the implementer checks whether `vinga_server.db`
-   already exposes a revision-parameterized upgrade; if it does, the
-   tests use that instead and the support module shrinks to the
-   version read, because the interface is the test surface. The
-   differing `_version`s in `test_db_open.py` and
+   `vinga_server.db` exposes no revision-parameterized operation:
+   `upgrade_to_head` (`db/__init__.py:452`) builds its own config
+   privately at `:511` and targets head only. Widening the production
+   interface for tests is out of this tests-only plan, so the support
+   builder is the one test-side mirror of that private one, and says
+   so in its docstring, naming `upgrade_to_head` as what it mirrors.
+   The differing `_version`s in `test_db_open.py` and
    `test_conversations_boot.py` (one returns a single string) and the
    per-file `_rows` readers stay.
 
@@ -214,9 +223,11 @@ rather than silently unified.
   attach the planted secret to the raised exception as an attribute.
   With `leaks.chain`, that file's secret-absence test goes red; with
   the old walker restored locally, it stays green.
-- **Falsify the driver move.** Break the support driver (target head
-  instead of the revision) and watch all five upgrade files go red,
-  which proves each one now goes through it.
+- **Falsify the driver move.** Break the support upgrade (target head
+  instead of the revision) and watch all five upgrade files go red;
+  break the support downgrade (make it a no-op) and watch the two
+  metrics downgrade cases go red. Together they prove every Alembic
+  invocation in the tests goes through the module.
 - **Inventory by tooling.** The duplicate census and the walker
   inventory rerun after the change, untruncated, with the before and
   after counts in the implementation doc: the fifteen weak walkers
@@ -272,6 +283,8 @@ Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    Evidence: The proposed interface exposes only blank-database upgrade and version reads (plan, lines 111-136 (`plan:111`)). However, `test_metrics_views_upgrade.py` builds the same Alembic configuration in `_alembic` (lines 103-113 (`tests/integration/test_metrics_views_upgrade.py:103`)) and still needs it for two downgrades (lines 407-420 (`tests/integration/test_metrics_views_upgrade.py:407`), lines 509-515 (`tests/integration/test_metrics_views_upgrade.py:509`)). Deleting `_alembic` breaks those tests; retaining it leaves the three Alembic requirements in two places, contradicting the module’s stated locality benefit.
 
    The plan should say instead: make `tests/support/migrations.py` own both upgrade-to-revision and downgrade-to-revision operations through one private Alembic-config builder. Route both downgrade cases through it and extend verification to cover that route.
+
+   *Resolution:* accepted. Item 2's module now owns every Alembic invocation the tests make through one private config builder, with upgrade-to-revision, downgrade-to-revision and the version read on it; `_alembic` is deleted and both metrics downgrades route through the module, and Verification breaks the downgrade as well as the upgrade. Checked while amending: `vinga_server.db` exposes no revision-parameterized operation (`upgrade_to_head` builds its config privately at `db/__init__.py:511`), so the support builder is the one test-side mirror of it.
 
 3. **P2: The plan defers resolvable exception-walker decisions to implementation**
 
