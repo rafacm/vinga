@@ -115,16 +115,10 @@ async def close(self, outcome: ReplyOutcome) -> None:
     if task is None:
         return
     task.cancel()
-    held: asyncio.CancelledError | None = None
-    while not task.done():
-        try:
-            await asyncio.wait([task])
-        except asyncio.CancelledError as cancelled:
-            # Hurried, not released: passed on to the reply, whose
-            # finally is built to take a second cancel, and held
-            # until the task is done.
-            held = held or cancelled
-            task.cancel()
+    # Hurried, not released: each cancellation of the caller is passed
+    # on to the reply, whose finally is built to take a second cancel,
+    # and the first is held until the task is done.
+    held = await outlast(task, hurry=True)
     # Retrieved whichever way this ends: a reply whose tail ended in
     # something other than its cancellation still has that exception
     # observed here, so asyncio never reports it as unretrieved, with
@@ -158,7 +152,9 @@ async def close(self) -> None:
             await reply.close(ReplyOutcome.ABORTED)
         except asyncio.CancelledError as cancelled:
             held = cancelled
-        except Exception as exc:
+        except BaseException as exc:
+            # Every other outcome, so the purge below is reached on
+            # every path, and raised after it.
             failed = exc
         if self._in_flight is reply:
             self._in_flight = None
@@ -171,8 +167,11 @@ async def close(self) -> None:
         # outlast answers the cancellation it held, or None. Awaited
         # unconditionally and merged after, so the first one wins.
         later = await outlast(purging)
+        # Read unconditionally, before any choice between failures, so
+        # a failed purge is retrieved even when the reply failed first.
+        purge_failed = None if purging.cancelled() else purging.exception()
         held = held or later
-        failed = failed or purging.exception()
+        failed = failed or purge_failed
     if held is not None:
         raise held
     if failed is not None:
@@ -183,16 +182,50 @@ The shape to hold to, rather than the exact lines: the purge is a
 task `close` owns and waits out, never an await a cancellation can walk
 away from, and the first cancellation `close` received is raised only
 once the reply's task is done, the handle is cleared and the purge has
-completed. The hold-until-done loop is written once, as one public
-function both sites reach (`ReplyInFlight.close` is "cancel, then
-outlast, passing each cancellation on"; the purge is "outlast"), which
-answers the deletion test by having two callers that must agree on how
-a held cancellation is kept; the implementer names where it lives in
-the implementation doc. A reply that failed no longer skips the purge
-either: today `close`'s `cancel_reply` raising a reply's exception
-left the purge unrun, which is the same leak by another road, and the
-plan closes it in passing because the new shape reaches the purge on
-every path.
+completed. A reply that failed, whatever it failed with, no longer
+skips the purge either: today `close`'s `cancel_reply` raising a
+reply's exception left the purge unrun, which is the same leak by
+another road, and the plan closes it in passing because every outcome
+of `reply.close` other than a cancellation is caught as a
+`BaseException`, held, and raised after the purge. When both fail, the
+reply's failure is the one raised and the purge's is retrieved and
+dropped, as a held cancellation drops a reply's.
+
+### The hold-until-done loop gets a module: `runtime/outlast.py`
+
+Both owners wait a task out through any number of cancellations of
+their own caller and raise the first only afterwards; they differ only
+in whether each cancellation is passed on. Written twice, that is two
+loops that must agree on which cancellation wins and on never reading
+the task's outcome, so it is written once, in a module of its own,
+because it belongs to neither owner: in `reply_in_flight.py` a reply
+module would own a purge's lifetime, and in `pipeline.py`
+`ReplyInFlight` would import its own owner. The interface is one
+function:
+
+```python
+async def outlast(
+    task: asyncio.Future[Any], *, hurry: bool = False
+) -> asyncio.CancelledError | None:
+    """Wait until `task` is done, however many times the caller is
+    cancelled meanwhile, and answer the first of those cancellations,
+    or None. With `hurry`, each one is passed on to the task as a
+    `cancel()`; without it, the task is never cancelled from here.
+    Never raises and never reads the task's outcome: retrieving it,
+    and raising the answered cancellation once whatever it waited for
+    is done, are the caller's."""
+```
+
+What its callers stop having to know: that `asyncio.wait` rather than
+`await` is what keeps a cancellation of the waiter from reaching the
+task, that a cancellation can arrive more than once, and which one
+wins. It passes the deletion test on having two owners that would
+otherwise each carry the loop; it is not a pass-through, since neither
+caller's body would be simpler with it inlined. `hurry` is a keyword
+rather than two functions because the loop is identical and the one
+difference is a single call inside it. `ReplyInFlight.cancel` does not
+use it: its caller's cancellation is meant to propagate at once, which
+a single `asyncio.wait` already is.
 
 Nothing above `close` changes: `_cleanly` already holds and re-raises
 a `CancelledError` from it.
@@ -241,12 +274,16 @@ ownerless.
 
 ## Module layout
 
+- `vinga-server/src/vinga_server/runtime/outlast.py` (new): `outlast`.
 - `vinga-server/src/vinga_server/runtime/reply_in_flight.py`:
-  `cancel`'s body and docstring, and the new `close`.
+  `cancel`'s body and docstring, and the new `close` built on
+  `outlast`.
 - `vinga-server/src/vinga_server/runtime/pipeline.py`: `close` ends
-  the reply through `ReplyInFlight.close` and purges in a `finally`;
+  the reply through `ReplyInFlight.close` and outlasts the purge as a
+  task it owns;
   `cancel_reply`'s docstring gains one sentence saying a cancelled
   caller leaves the handle in place.
+- `vinga-server/tests/unit/test_outlast.py` (new): `outlast` directly.
 - `vinga-server/tests/unit/test_reply_in_flight.py`: value-level tests.
 - `vinga-server/tests/unit/test_turn_lifecycle.py`: runtime-level
   tests, beside `HoldsTheFirstStop`, which already holds a cancelled
@@ -305,8 +342,8 @@ name the session's callers reach:
    awaiting `close()`'s task raises `CancelledError`. With `close`
    built on the fixed `cancel` alone it fails (the purge is skipped and
    the reply is still running when the cancellation arrives), and with
-   the `finally` around the purge removed it fails on the spy; the
-   implementer records both runs.
+   the purge skipped whenever a cancellation is held it fails on the
+   spy; the implementer records both runs.
 7. **A close cancelled twice still raises once, after the reply.** The
    same shape, with a second cancel delivered while the reply's
    (already hurried) tail is held on a later await; `close()`'s task
@@ -334,9 +371,24 @@ name the session's callers reach:
     not done; the event is set; the task then ends cancelled and the
     spy ran to completion exactly once. With the purge as a plain
     `await asyncio.to_thread(...)` it fails at "still not done".
-11. **A reply that failed still purges.** A reply whose body raises is
+11. **A reply that failed still purges, whatever it failed with.**
+    Parametrized over a `RuntimeError` and a `BaseException` subclass
+    that is not an `Exception`: a reply whose body raises it is
     closed; `close()` raises that exception and the purge spy was
-    called. Fails against today's `close`.
+    called. Fails against today's `close`, and the `BaseException` case
+    fails with an `except Exception` arm.
+12. **Both failing: the reply's is raised, the purge's retrieved.** A
+    reply and a purge that each raise a distinctive exception.
+    `close()` raises the reply's, and a loop exception handler sees no
+    unretrieved-task report after a `gc.collect()`. Fails with
+    `failed = failed or purging.exception()`.
+13. **`outlast` directly** (`test_outlast.py`): cancelled twice while
+    the task is held, it answers the first cancellation (by identity)
+    only once the task is done; without `hurry` the task is never
+    cancelled and finishes normally; with `hurry` the task receives
+    one `cancel()` per held cancellation; a task already done answers
+    None at once; and it raises nothing when the task failed, leaving
+    the exception to be read.
 
 Existing suites that must stay green unchanged: every
 `test_session_*` file, `test_turn_lifecycle.py`, `test_turntaking.py`
@@ -394,18 +446,21 @@ docstring for the risk above, and the changelog fragment.
      fix: one commit, since tests 1-3 and 5 cannot be green without
      it. The body records each test's failing run against today's
      `cancel`.
-  2. The shared outlast function, `ReplyInFlight.close`,
-     `PipelineRuntime.close` built on both with the purge as an owned
-     task, and tests 6-11, with the mutation runs recorded.
-  3. The changelog fragment, this plan's tick, and the implementation
+  2. `runtime/outlast.py` and test 13.
+  3. `ReplyInFlight.close`, `PipelineRuntime.close` built on both
+     with the purge as an owned task, and tests 6-12, with the
+     mutation runs recorded.
+  4. The changelog fragment, this plan's tick, and the implementation
      doc's M1 section; the census manifests regenerated if either went
      stale.
 
   Design footprint: deepens `ReplyInFlight` (callers stop having to
   know that waiting out a cancelled reply could swallow their own
   cancellation, or that a close must outlast its reply before letting
-  a cancellation through), adds no module or seam. Documentation footprint as
-  above.
+  a cancellation through); adds one module, `runtime/outlast.py`,
+  whose callers stop having to know how a task is waited out through
+  their own cancellation and which cancellation wins; adds no seam.
+  Documentation footprint as above.
 
 ## Plan review round
 
@@ -531,6 +586,10 @@ Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    failure; test both failing together, asserting the reply's failure
    is raised and a loop exception handler receives no unretrieved
    report after collection.
+
+   *Resolution:* accepted as written. The purge's outcome is read
+   into `purge_failed` unconditionally before the first failure is
+   chosen, and test 12 pins both failing together.
 2. **P2: the shared `outlast` has no decided home or interface.** The
    plan defers where the public function lives, the module layout
    names only two files, and the milestone claims no module is added.
@@ -539,6 +598,11 @@ Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    upward on its owner. Name a small task-lifetime module, the exact
    signature and cancellation-result contract, test it directly, and
    update the layout.
+
+   *Resolution:* accepted. `runtime/outlast.py` is decided, with the
+   signature and contract written out ("The hold-until-done loop gets
+   a module"), the reasons neither owner's module fits, a direct test
+   (13), and the layout and design footprint updated.
 3. **P2: "purge on every path" is contradicted by the exception
    boundary.** The sketch catches only `Exception` around
    `reply.close()` while `ReplyInFlight.close` re-raises any
@@ -547,5 +611,12 @@ Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    speaks of a purge `finally` the sketch does not have. Narrow the
    guarantee or make the purge reached on every outcome, and test the
    chosen scope.
+
+   *Resolution:* accepted, choosing every outcome. The arm around
+   `reply.close` catches `BaseException` after `CancelledError`, holds
+   it, and raises it after the purge; test 11 is parametrized over an
+   `Exception` and a non-`Exception` `BaseException`. The stale
+   references to a purge `finally` are gone from the Tests and the
+   layout.
 
 Verdict: ready after the P1/P2 amendments.
