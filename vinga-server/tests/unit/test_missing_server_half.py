@@ -47,7 +47,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.support.config_cli import chain, logged
+from tests.support.config_cli import logged
+from tests.support.leaks import chain
 from vinga_server import doctor
 from vinga_server import main as entrypoint
 from vinga_server.config import cli, docgen, loader

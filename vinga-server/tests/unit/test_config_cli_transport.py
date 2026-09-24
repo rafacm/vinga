@@ -32,8 +32,8 @@ from fastapi.testclient import TestClient
 
 import vinga_server.tools.mcp as mcp_module
 from tests.support.config_cli import API_SECRET_ENV, OTHER_SECRET, SECRET, TOKEN, runner
-from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import logged as _logged
+from tests.support.leaks import chain as _chain
 from tests.support.stores import holding_the_write_lock, the_lock_held
 from vinga_server.config import cli
 from vinga_server.config.api import MOUNT_PATH, build_api

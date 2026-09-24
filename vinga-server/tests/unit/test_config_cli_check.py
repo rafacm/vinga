@@ -54,7 +54,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import insert
 
-from tests.support.config_cli import chain, logged
+from tests.support.config_cli import logged
+from tests.support.leaks import chain
 from vinga_server import logs
 from vinga_server.config import cli
 from vinga_server.config.cli import invocation, local, reach

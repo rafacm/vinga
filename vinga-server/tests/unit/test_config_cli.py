@@ -41,10 +41,10 @@ from tests.support.config_cli import (
     SECRET,
     runner,
 )
-from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import document as _document
 from tests.support.config_cli import logged as _logged
 from tests.support.config_cli import showing as _showing
+from tests.support.leaks import chain as _chain
 from tests.support.notices import CHECK_IN, RELOAD, boundaries
 from vinga_server.config.cli import input, output
 from vinga_server.config.loader import ConfigError

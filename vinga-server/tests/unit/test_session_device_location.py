@@ -43,9 +43,9 @@ from typing import Any, cast
 
 import pytest
 
-from tests.support.config_cli import chain
 from tests.support.configs import POET_MAC, base_config, world
 from tests.support.events import both_formats
+from tests.support.leaks import chain
 from tests.support.providers import ScriptedLlm
 from tests.support.registry import AGENT, STAGES, store_at
 from tests.support.sessions import agent_providers, call, run_reply, session_for

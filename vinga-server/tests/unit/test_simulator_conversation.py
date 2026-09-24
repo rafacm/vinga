@@ -32,7 +32,8 @@ from collections.abc import Iterator
 
 import pytest
 
-from tests.support.config_cli import chain, logged
+from tests.support.config_cli import logged
+from tests.support.leaks import chain
 from tests.support.peer import SESSION, Recorded, conversing, greet, peer, read_until_listen_stop
 from vinga_server.config.loader import ConfigError
 from vinga_server.logs import quieted

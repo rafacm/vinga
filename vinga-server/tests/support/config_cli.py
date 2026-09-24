@@ -350,37 +350,6 @@ def logged(caplog: pytest.LogCaptureFixture) -> str:
     )
 
 
-def chain(exc: BaseException) -> str:
-    """Everything an exception carries, including what a chain walker
-    would find behind it: its text, its arguments, what its own
-    attributes hold, and the same again for every cause and context."""
-    parts: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        parts += [repr(current), str(current), repr(current.args), _held(current)]
-        current = current.__cause__ or current.__context__
-    return "\n".join(parts)
-
-
-def _held(exc: BaseException) -> str:
-    """What one exception's attributes hold, and what theirs hold.
-
-    Two levels rather than one, because the lesson that made this
-    necessary is a PyYAML mark: the exception's repr says nothing, its
-    `problem_mark` attribute is an object, and that object's `buffer` is
-    the whole source being parsed. A walk that stopped at the repr would
-    miss exactly what it is looking for.
-    """
-    parts: list[str] = []
-    for value in vars(exc).values():
-        parts.append(repr(value))
-        if hasattr(value, "__dict__"):
-            parts += [repr(inner) for inner in vars(value).values()]
-    return "\n".join(parts)
-
-
 def document(out: str) -> object:
     """A `show` document without the secret notes underneath it."""
     return yaml.safe_load("\n".join(line for line in out.splitlines() if not line.startswith("#")))

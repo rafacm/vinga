@@ -33,7 +33,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from tests.support.config_cli import chain
+from tests.support.leaks import chain
 from tests.support.stores import bindings, stored_row
 from vinga_server.config import ConfigError, views
 from vinga_server.config.api import build_api

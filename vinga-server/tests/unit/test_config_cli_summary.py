@@ -30,8 +30,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tests.support.config_cli import chain, logged, runner
+from tests.support.config_cli import logged, runner
 from tests.support.events import both_formats
+from tests.support.leaks import chain
 from vinga_server.config.cli import acts, deployment
 from vinga_server.config.loader import ConfigError
 
