@@ -176,9 +176,11 @@ list does not name and its "hands recording a seam" does.
   arrived" and "what the device was sent" mean at the socket), and the
   comments saying so stay at the sites.
 - **`close`** is today's `_stop_recording`, the capture's detach and
-  close, and the three handoffs, in today's order: the store row closed
-  with the duration and reason the session passes, the barrier it
-  answers held; the capture's tap detached, then the capture closed;
+  close, and the three handoffs, in today's order: the sink detached
+  from the events object and released, and only then the store row
+  closed with the duration and reason the session passes, the barrier
+  it answers held (so no emission can reach the row after its close
+  record is queued); the capture's tap detached, then the capture closed;
   then `captures.session_closed`, `transcripts.session_closed` with
   that barrier, and `llm_input.session_closed`. The handoffs do not
   depend on how far `open` got, as today: a finally reached after an
@@ -366,7 +368,10 @@ Each covers the numbered gaps it names:
   conversation store, a transcript export and an LLM-input export,
   each wrapping or standing in for the real one and appending to one
   log, driven through a served session that ends by the device
-  closing. The log must read exactly: store `close_session`; the
+  closing. The log must read exactly: the `SessionSink` detached (the
+  store double's `close_session` records whether the sink is still in
+  `attached_taps` at that instant, and it must not be); store
+  `close_session`; the
   capture's tap detached (the capture double's `close` records
   whether `attached_capture(session)` is None at that instant); the
   capture closed; `captures.session_closed`;
@@ -433,8 +438,10 @@ doubles only, no database and no files:
   absent from both and from the rendered line, the store's row still
   opens, later feeds are no-ops, and `close` does not close the
   capture a second time and still makes all three handoffs.
-- `close` runs the store close, the detach, the capture close and the
-  three handoffs in that order, handing the transcript export the
+- `close` detaches the sink, then closes the row (the store double
+  checks `events.taps()` at the instant `close_session` runs), then
+  detaches and closes the capture, then makes the three handoffs, in
+  that order, handing the transcript export the
   barrier by identity; with `open` never called it still makes the
   three handoffs and closes nothing else; each absent collaborator is
   skipped without raising.
@@ -442,7 +449,8 @@ doubles only, no database and no files:
   nothing before `open`, after `close`, or with no capture store.
 - **Falsification**, one run each since every rule here is
   straight-line: the tests are watched failing against a mutation of
-  each rule they name (the row opened before the capture store, with
+  each rule they name (the row closed before its sink is detached; the
+  row opened before the capture store, with
   the taps still attached capture first; the sink attached before the
   capture; the
   handoffs reordered; `None` handed to the transcript export; the
@@ -618,6 +626,8 @@ Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Evidence:** `_stop_recording` currently detaches and clears `SessionSink` before calling `ConversationStore.close_session` (`device/session.py:974-980`). The proposed sequence starts with `close_session` and mentions only capture detachment afterward (`plan:163-172`, `:309-319`). The owner test requires the sink to be detached eventually (`:375-379`), so moving its detachment after `close_session` would pass all listed tests.
 
    **The plan should say instead:** Spell out the exact close sequence beginning with `events.detach(sink)`, clearing the sink, and only then calling `close_session`. Have the store double inspect `events.taps()` at the instant `close_session` runs, and add the reverse-order mutation to falsification.
+
+   *Resolution:* Accepted. The `close` bullet now begins with the sink's detachment and release and says why it precedes `close_session`. The session-level close pin and the owner's test both have the store double record whether the sink is still attached when `close_session` runs, and the reverse-order mutation is in the falsification list.
 
 4. **P2: The unguarded close-tail rationale is false and leaves later cleanup vulnerable during drains**
 
