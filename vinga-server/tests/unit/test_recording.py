@@ -26,8 +26,13 @@ REPLY_RATE = 24000
 DEVICE_NAME = "Kitchen"
 
 # Shaped like something an operator would be horrified to find in a
-# log, and planted in a failing codec's message.
-SENTINEL = "sk-live-0a7e33b1-never-a-real-credential"
+# log, and planted twice in every exception these tests raise: once in
+# its message and once as its CLASS NAME, which `type` accepts for any
+# string (the correction `events/__init__.py` records beside `_offer`).
+# Either one reaching a retained rendering is a leak.
+CLASS_SENTINEL = "sk-live-5d2e91c4-planted-as-a-class-name"
+MESSAGE_SENTINEL = "sk-live-7b40f6a8-planted-in-a-message"
+Planted: type[Exception] = type(CLASS_SENTINEL, (Exception,), {})
 
 
 def renames() -> list[tuple[str, str]]:
@@ -168,12 +173,10 @@ class Codecs:
         self.capture.close()
 
 
-class CodecUnavailable(RuntimeError):
-    """What a media library raises when it cannot open a codec."""
-
-
 def unopenable(*args: object, **kwargs: object) -> Any:
-    raise CodecUnavailable(f"could not build the capture codecs for {SENTINEL}")
+    """What a media library raises when it cannot open a codec, named
+    and worded by whatever it wrapped."""
+    raise Planted(f"could not build the capture codecs for {MESSAGE_SENTINEL}")
 
 
 class Built:
@@ -283,7 +286,7 @@ def test_a_capture_store_that_declines_still_opens_the_row(
     ]
 
 
-def test_codecs_that_will_not_open_release_the_capture_and_say_so_by_class(
+def test_codecs_that_will_not_open_release_the_capture_and_say_nothing_of_why(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     built = Built(monkeypatch, codecs=unopenable)
@@ -302,9 +305,12 @@ def test_codecs_that_will_not_open_release_the_capture_and_say_so_by_class(
     (warning,) = [r for r in caplog.records if "could not start" in r.getMessage()]
     assert warning.name == SESSION_LOGGER
     assert warning.levelno == logging.WARNING
-    assert warning.msg == "session %s: recording could not start (%s)"
-    assert warning.args == (SID, "CodecUnavailable")
-    assert SENTINEL not in both_formats(caplog)
+    assert warning.msg == "session %s: recording could not start"
+    assert warning.args == (SID,)
+    assert warning.exc_info is None
+    rendered = both_formats(caplog)
+    assert CLASS_SENTINEL not in rendered
+    assert MESSAGE_SENTINEL not in rendered
 
     # Nothing is left to feed, and the close neither closes the capture
     # a second time nor skips a handoff.
@@ -458,15 +464,7 @@ def test_the_factory_builds_each_session_an_owner_over_the_shared_collaborators(
 # The close always reaches its end: each of its five steps is guarded on
 # its own, a step that raises is reported and the next one runs, and the
 # report is made of the session id and the step's own name and nothing
-# the exception carried. The exception planted here carries a
-# credential-shaped string twice over, once in its message and once as
-# its CLASS NAME, which `type` accepts for any string: the correction
-# `events/__init__.py` records beside `_offer`. Either one reaching a
-# retained rendering is a leak.
-
-CLASS_SENTINEL = "sk-live-5d2e91c4-planted-as-a-class-name"
-MESSAGE_SENTINEL = "sk-live-7b40f6a8-planted-in-a-message"
-Planted: type[Exception] = type(CLASS_SENTINEL, (Exception,), {})
+# the exception carried, the planted class above included.
 
 STOPPED = "session %s: %s did not stop cleanly"
 
