@@ -29,6 +29,7 @@ import psycopg
 import pytest
 
 from tests.support.events import both_formats, events, only
+from tests.support.leaks import chain
 from tests.support.stores import (
     STORED,
     a_planted_credential,
@@ -1441,12 +1442,7 @@ async def test_a_purge_that_the_database_refuses_quotes_nothing_of_it(
     # quoted the statement is on no chain a caller can walk.
     assert refusal.value.__cause__ is None
     assert refusal.value.__context__ is None
-    walked: list[BaseException] = []
-    cause: BaseException | None = refusal.value
-    while cause is not None:
-        walked.append(cause)
-        cause = cause.__cause__ or cause.__context__
-    for surface in (str(refusal.value), both_formats(caplog), *map(str, walked)):
+    for surface in (str(refusal.value), both_formats(caplog), chain(refusal.value)):
         assert PURGED not in surface
     # And the rows are where they were: the caller's transaction rolled
     # back around a refusal it could act on.
@@ -2292,12 +2288,7 @@ async def test_nothing_of_a_connection_reaches_a_surface_a_model_or_an_operator_
         assert STORED not in repr(record.__dict__)
         assert record.exc_info is None
     for refusal in (booting.value, writing.value):
-        walked: list[BaseException] = []
-        cause: BaseException | None = refusal
-        while cause is not None:
-            walked.append(cause)
-            cause = cause.__cause__ or cause.__context__
-        assert all(STORED not in str(one) for one in walked)
+        assert STORED not in chain(refusal)
 
 
 # A fact is content, and a refusal is read out loud
