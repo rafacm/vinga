@@ -418,6 +418,38 @@ def served(
     )
 
 
+def recording_session(
+    config: Config,
+    websocket: Any,
+    *,
+    captures: Any = None,
+    conversations: Any = None,
+    transcripts: Any = None,
+    llm_input: Any = None,
+) -> DeviceSession:
+    """A session built the way `ws.py` builds one, holding the four
+    collaborators a session's recording answers to, with a runtime that
+    holds none of them.
+
+    For the suites about what a session leaves behind it: which of the
+    four it opens, feeds and closes, and in what order. What the runtime
+    does with the store and the exports while a conversation runs (a
+    turn's record, a staged round) is not what those suites are about,
+    so the factory is built without them, and a double handed in here
+    sees only what the session does with it."""
+    generations = world(config, providers=built_world(config))
+    factory = bespoke_runtime_factory(generations, McpServers({}), lane_memory())
+    return DeviceSession(
+        cast(Any, websocket),
+        generations,
+        factory,
+        captures,
+        conversations=conversations,
+        transcripts=transcripts,
+        llm_input=llm_input,
+    )
+
+
 async def open_session(
     config: Config,
     conversations: Any = None,

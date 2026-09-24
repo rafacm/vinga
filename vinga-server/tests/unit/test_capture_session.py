@@ -10,6 +10,7 @@ audio, and that the manifest says what the capture was made against.
 
 import asyncio
 import json
+import logging
 import struct
 import wave
 from pathlib import Path
@@ -45,6 +46,7 @@ from vinga_server.audio.opus import OpusEncoder
 from vinga_server.capture import CAPTURE_RATE, CaptureStore
 from vinga_server.device import session as session_module
 from vinga_server.device.session import DeviceSession
+from vinga_server.events import SESSION_LOGGER
 from vinga_server.protocol import framing
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
 from vinga_server.tools.mcp import McpServers
@@ -176,6 +178,30 @@ def test_the_microphone_is_recorded_even_when_the_guards_drop_it(tmp_path: Path)
     assert loud_ms > (asked_ms + over_ms) * 0.7, (
         f"only {loud_ms:.0f} ms of microphone audio was recorded out of "
         f"{asked_ms + over_ms} ms spoken; the frames the guard dropped are missing"
+    )
+
+
+def test_the_microphone_is_recorded_before_the_device_asked_to_be_heard(
+    tmp_path: Path,
+) -> None:
+    # The other guard the capture sits in front of. Frames arriving
+    # before any `listen start` are dropped as `not_listening`, and the
+    # capture holds them anyway.
+    spoken_ms = 600
+    with TestClient(create_app(capturing_config(tmp_path))) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            send_pcm(websocket, speech_pcm(spoken_ms), OpusEncoder())
+
+    wav, jsonl, _ = only_capture(tmp_path)
+    mic, _ = channels(wav)
+    dropped = [e for e in events(jsonl) if e["event"] == "frames_dropped"]
+    unheard = [e for e in dropped if "not_listening" in e["reasons"]]
+    assert unheard, f"nothing was dropped as not listening; seen: {dropped}"
+    loud_ms = sum(1 for sample in mic if abs(sample) > 100) / CAPTURE_RATE * 1000
+    assert loud_ms > spoken_ms * 0.7, (
+        f"only {loud_ms:.0f} ms of microphone audio was recorded out of "
+        f"{spoken_ms} ms spoken; the frames nobody was listening to are missing"
     )
 
 
@@ -451,6 +477,20 @@ async def test_a_capture_whose_codecs_will_not_open_is_released_and_the_session_
     # The half that says the file was closed rather than abandoned: a
     # capture stranded at the failure keeps the `False` its start wrote.
     assert manifest["capture"]["complete"] is True
+
+    # The warning exactly, as a record: the channel it goes out on (the
+    # JSON `logger` field, which a collector filters on), its level, its
+    # unrendered sentence and its typed arguments, the class name and
+    # never the message.
+    (warning,) = [
+        record
+        for record in caplog.records
+        if "recording could not start" in record.getMessage()
+    ]
+    assert warning.name == SESSION_LOGGER
+    assert warning.levelno == logging.WARNING
+    assert warning.msg == "session %s: recording could not start (%s)"
+    assert warning.args == (session.session_id, "CodecUnavailable")
 
     written = both_formats(caplog)
     assert "recording could not start (CodecUnavailable)" in written
