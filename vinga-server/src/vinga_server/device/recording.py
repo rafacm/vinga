@@ -36,7 +36,8 @@ capture as the events object sees it (what `attach_capture` takes and
 `vad` writes to), and it is one of the things this owner holds.
 """
 
-from collections.abc import Callable, Sequence
+import contextlib
+from collections.abc import Callable, Iterator, Sequence
 from typing import TYPE_CHECKING, Any
 
 from vinga_server.capture import CaptureStore
@@ -217,11 +218,14 @@ class Recording:
         The handoffs do not depend on how far `open` got: a close after
         an `open` that raised part way, or after none at all, still
         hands the session to all three."""
-        recorded = self._close_record(duration_s, reason)
-        if self._audio is not None:
-            self._events.detach_capture()
-            self._audio.close()
-            self._audio = None
+        # The barrier stays None where the row's step did not finish: a
+        # row whose close raised answered nothing, and None is what the
+        # transcript export is handed for a session with no row at all.
+        recorded: Acknowledgement | None = None
+        with self._stopping("the conversation record"):
+            recorded = self._close_record(duration_s, reason)
+        with self._stopping("the capture"):
+            self._close_capture()
         # And last of all, the one signal that means the conversation is
         # over rather than that a recording's files are final (#67). The
         # capture store's own `finished()` fires mid-conversation for a
@@ -230,7 +234,8 @@ class Recording:
         # session still talking. Here the WAV header is patched, the
         # manifest is written, and this session is done.
         if self._captures is not None:
-            self._captures.session_closed(self._session_id)
+            with self._stopping("the capture upload"):
+                self._captures.session_closed(self._session_id)
         # And beside it, the other post-close surface, handed the barrier
         # the store just returned: the close is the last thing this
         # session puts on the writer's queue, so an acknowledgement of it
@@ -239,7 +244,8 @@ class Recording:
         # bounded queue, and everything else happens on a worker of its
         # own.
         if self._transcripts is not None:
-            self._transcripts.session_closed(self._session_id, recorded)
+            with self._stopping("the transcript export"):
+                self._transcripts.session_closed(self._session_id, recorded)
         # And the third (#502), which needs no barrier and no handle:
         # what it exports was staged as the conversation went, so this is
         # a dictionary pop, a read of a map and a put on a bounded queue.
@@ -247,21 +253,74 @@ class Recording:
         # failed part way through should have let the narrower surfaces
         # go first.
         if self._llm_input is not None:
-            self._llm_input.session_closed(self._session_id)
+            with self._stopping("the LLM-input export"):
+                self._llm_input.session_closed(self._session_id)
+
+    @contextlib.contextmanager
+    def _stopping(self, step: str) -> Iterator[None]:
+        """One close step, guarded on its own: an `Exception` raised
+        inside it is reported and the step after it runs.
+
+        Reported with the session id and the step named in this module's
+        own words, both values this server chose, and nothing taken from
+        the exception, not even its class: `type(name, (Exception,), {})`
+        accepts any string as a name, so a far side's client can raise
+        an exception whose class name is the far side's bytes (the
+        correction recorded beside `events._offer`). The handler does not
+        bind the exception at all, so there is nothing to leak later. The
+        sentence keeps the session's `_cleanly` prefix, so filtering on
+        "did not stop cleanly" still finds every cleanup step that failed.
+
+        Nothing is latched: these steps run after `session_closed` has
+        rendered the close reason, and the row was handed its reason
+        before any of them could fail. The log line is the record. And
+        only `Exception`: the steps are synchronous, so no cancellation
+        arrives inside one, and a `KeyboardInterrupt` or a `SystemExit`
+        keeps going the way it goes through `_cleanly`."""
+        try:
+            yield
+        except Exception:  # noqa: BLE001 - a close always reaches its end
+            # The report cannot raise either. A logging call runs filters
+            # and handlers somebody else installed, and `events._report`
+            # exists because one of them can raise exactly where a guard
+            # has nothing left to catch it with; this is the same trade in
+            # one line, a lost diagnostic line rather than a lost step.
+            with contextlib.suppress(Exception):
+                logger.warning("session %s: %s did not stop cleanly", self._session_id, step)
 
     def _close_record(self, duration_s: float, reason: str) -> Acknowledgement | None:
         """Close this session's row: its duration, what ended it, and
         what it lost.
 
         The sink is detached before the row is closed, so no emission
-        can reach the row after its close record is queued. What comes
-        back is the store's barrier for this session, or nothing where
-        there was no row to close; nothing here waits on it."""
+        can reach the row after its close record is queued, and released
+        whether or not the detachment finished, so a close that failed
+        part way leaves no sink held here. What comes back is the store's
+        barrier for this session, or nothing where there was no row to
+        close; nothing here waits on it."""
         if self._sink is None or self._conversations is None:
             return None
-        self._events.detach(self._sink)
-        self._sink = None
+        try:
+            self._events.detach(self._sink)
+        finally:
+            self._sink = None
         return self._conversations.close_session(self._session_id, duration_s, reason)
+
+    def _close_capture(self) -> None:
+        """Finish the capture, where one is open.
+
+        Its tap is detached before it closes, so the last line of its
+        track is the session's last emission and its WAV header covers
+        everything; and the codecs are released whether or not either
+        finished, so a close that failed part way leaves nothing here to
+        feed and nothing a second close would close again."""
+        if self._audio is None:
+            return
+        try:
+            self._events.detach_capture()
+            self._audio.close()
+        finally:
+            self._audio = None
 
 
 RecordingFactory = Callable[[str, SessionEvents], Recording]

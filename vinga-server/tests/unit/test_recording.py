@@ -451,3 +451,177 @@ def test_the_factory_builds_each_session_an_owner_over_the_shared_collaborators(
         ("transcripts.session_closed", "another"),
         ("llm_input.session_closed", "another"),
     ]
+
+
+# a close step that fails
+#
+# The close always reaches its end: each of its five steps is guarded on
+# its own, a step that raises is reported and the next one runs, and the
+# report is made of the session id and the step's own name and nothing
+# the exception carried. The exception planted here carries a
+# credential-shaped string twice over, once in its message and once as
+# its CLASS NAME, which `type` accepts for any string: the correction
+# `events/__init__.py` records beside `_offer`. Either one reaching a
+# retained rendering is a leak.
+
+CLASS_SENTINEL = "sk-live-5d2e91c4-planted-as-a-class-name"
+MESSAGE_SENTINEL = "sk-live-7b40f6a8-planted-in-a-message"
+Planted: type[Exception] = type(CLASS_SENTINEL, (Exception,), {})
+
+STOPPED = "session %s: %s did not stop cleanly"
+
+
+def plant(built: Built, where: str, raised: BaseException | None = None) -> None:
+    """Make one of the close's calls fail after it has been logged, so
+    the log shows the call was reached and everything after it shows
+    what the failure cost."""
+    owner, name = {
+        "detach": (built.events, "detach"),
+        "close_session": (built.store, "close_session"),
+        "capture.close": (built.capture, "close"),
+        "captures.session_closed": (built.captures, "session_closed"),
+        "transcripts.session_closed": (built.transcripts, "session_closed"),
+        "llm_input.session_closed": (built.llm_input, "session_closed"),
+    }[where]
+    original = getattr(owner, name)
+
+    def failing(*args: Any, **kwargs: Any) -> Any:
+        original(*args, **kwargs)
+        raise raised if raised is not None else Planted(f"the far side said {MESSAGE_SENTINEL}")
+
+    setattr(owner, name, failing)
+
+
+CLOSING = [
+    ("detach", "SessionSink"),
+    ("close_session", SID, 2.0, "client", False),
+    ("detach_capture",),
+    ("capture.close", True),
+    *HANDOFFS,
+]
+
+# Each close step, by the call planted to fail inside it and the name the
+# owner reports it by. The row's step fails at either of its two calls.
+FAILURES = [
+    pytest.param("detach", "the conversation record", id="the sink's detachment"),
+    pytest.param("close_session", "the conversation record", id="the row's close"),
+    pytest.param("capture.close", "the capture", id="the capture"),
+    pytest.param("captures.session_closed", "the capture upload", id="the capture upload"),
+    pytest.param("transcripts.session_closed", "the transcript export", id="the transcript export"),
+    pytest.param("llm_input.session_closed", "the LLM-input export", id="the LLM-input export"),
+]
+
+
+def closing_after(where: str) -> list[tuple[Any, ...]]:
+    """The close as it runs with `where` failing: every call, since each
+    step's failure leaves the steps after it to run, except the row's
+    close when its sink's detachment is what failed."""
+    if where == "detach":
+        return [entry for entry in CLOSING if entry[0] != "close_session"]
+    return CLOSING
+
+
+class BrokenFilter(logging.Filter):
+    """A filter somebody else installed on the session channel, which
+    raises on the owner's report. `Logger.handle` calls a filter
+    unwrapped, so this raises out of the logging call itself."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.raised = 0
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.msg == STOPPED:
+            self.raised += 1
+            raise RuntimeError("the session channel's filter is broken")
+        return True
+
+
+@pytest.fixture
+def broken_filter() -> Any:
+    channel = logging.getLogger(SESSION_LOGGER)
+    installed = BrokenFilter()
+    channel.addFilter(installed)
+    try:
+        yield installed
+    finally:
+        channel.removeFilter(installed)
+
+
+@pytest.mark.parametrize(("where", "step"), FAILURES)
+def test_a_close_step_that_raises_is_reported_and_every_later_step_still_runs(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    where: str,
+    step: str,
+) -> None:
+    built = Built(monkeypatch)
+    built.open()
+    del built.log[:]
+    plant(built, where)
+
+    with caplog.at_level(logging.INFO):
+        built.recording.close(2.0, "client")
+
+    assert readable(built.log, built.capture) == closing_after(where)
+    # A row whose close did not finish answered no barrier, and the
+    # transcript export is handed what a session with no row hands it.
+    if where in {"detach", "close_session"}:
+        assert built.transcripts.handed is None
+    else:
+        assert built.transcripts.handed is built.store.barrier
+
+    (warning,) = [r for r in caplog.records if r.msg == STOPPED]
+    assert warning.name == SESSION_LOGGER
+    assert warning.levelno == logging.WARNING
+    assert warning.args == (SID, step)
+    assert warning.exc_info is None
+    rendered = both_formats(caplog)
+    assert CLASS_SENTINEL not in rendered
+    assert MESSAGE_SENTINEL not in rendered
+
+    # Nothing is left held: no tap, no capture, no codecs to feed, and a
+    # second close finds only the three handoffs to make.
+    assert built.events.taps() == ()
+    assert built.events.capture is None
+    del built.log[:]
+    built.recording.microphone(b"after")
+    built.recording.reply(b"after")
+    built.recording.close(2.0, "client")
+    assert built.log == HANDOFFS
+    assert built.capture.closes == 1
+
+
+@pytest.mark.parametrize(("where", "step"), FAILURES)
+def test_a_report_that_raises_costs_no_later_step(
+    monkeypatch: pytest.MonkeyPatch,
+    broken_filter: BrokenFilter,
+    where: str,
+    step: str,
+) -> None:
+    built = Built(monkeypatch)
+    built.open()
+    del built.log[:]
+    plant(built, where)
+
+    built.recording.close(2.0, "client")
+
+    assert broken_filter.raised == 1, "the report never reached the broken filter"
+    assert readable(built.log, built.capture) == closing_after(where)
+
+
+class Interrupted(BaseException):
+    """Not an `Exception`: what a `KeyboardInterrupt` or a `SystemExit`
+    is to the guard."""
+
+
+def test_what_is_not_an_exception_still_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    built = Built(monkeypatch)
+    built.open()
+    del built.log[:]
+    plant(built, "captures.session_closed", Interrupted())
+
+    with pytest.raises(Interrupted):
+        built.recording.close(2.0, "client")
+
+    assert readable(built.log, built.capture) == CLOSING[:5]
