@@ -347,9 +347,21 @@ Session-level, through the tests' existing support
 call log, so an order is asserted as a list rather than inferred.
 Each covers the numbered gaps it names:
 
-- **The open's order** (1): after the hello, the capture's
-  `CaptureTap` precedes the `SessionSink` in `attached_taps`,
-  comparing positions by type, with any observer taps ignored.
+- **The open's order** (1): the whole opening sequence, recorded in
+  the shared log rather than read off the final tap list, must read
+  exactly: `captures.open`; the capture attached to the events object;
+  `CaptureAudio` constructed; `conversations.open_session`; the
+  `SessionSink` attached. And, as the consequence a reader checks
+  first, the capture's `CaptureTap` precedes the `SessionSink` in
+  `attached_taps`, with any observer taps ignored. Two failure
+  injections pin what a failure at each opening step leaves behind
+  today. The capture store declining (`open` answering None): no
+  capture files, the row still opens, the session converses and closes
+  normally. The conversation store's `open_session` raising: the
+  capture is already open and attached, the session ends through the
+  `BaseException` arm with `error` latched, and its `finally` still
+  detaches and closes the capture (manifest complete) and makes all
+  three handoffs, in the close's order, with `None` as the barrier.
 - **The close's order** (2, 3, 4, 5, 6, 7): a capture store, a
   conversation store, a transcript export and an LLM-input export,
   each wrapping or standing in for the real one and appending to one
@@ -406,8 +418,13 @@ the owner's `close` has no branch on the path.
 `tests/unit/test_recording.py`, through the owner's interface and
 doubles only, no database and no files:
 
-- `open` attaches the capture before the sink (`events.taps()` order);
-  hands the store the manifest, the opened-at reading, the device
+- `open` runs the opening sequence in today's order, asserted as one
+  logged list (store open, capture attached, codecs built, row opened,
+  sink attached), and so attaches the capture before the sink; when
+  the row's opening raises, the exception leaves `open` with the
+  capture still attached and a later `close` releases it and makes the
+  three handoffs; when the capture store declines, the row still
+  opens. It hands the store the manifest, the opened-at reading, the device
   name, and the renames callable by identity; and builds the codecs
   with the protocol version and reply rate it was given.
 - A codec failure at `open`: the capture's tap is detached before the
@@ -425,7 +442,9 @@ doubles only, no database and no files:
   nothing before `open`, after `close`, or with no capture store.
 - **Falsification**, one run each since every rule here is
   straight-line: the tests are watched failing against a mutation of
-  each rule they name (the sink attached before the capture; the
+  each rule they name (the row opened before the capture store, with
+  the taps still attached capture first; the sink attached before the
+  capture; the
   handoffs reordered; `None` handed to the transcript export; the
   capture closed before its tap is detached; the release dropped from
   the codec-failure arm; a feed after `close` reaching the codecs).
@@ -591,6 +610,8 @@ Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Evidence:** Current behavior is `CaptureStore.open`, capture attachment, codec construction, `ConversationStore.open_session`, then sink attachment (`device/session.py:579-581`, `:872-881`, `:927-939`). The proposed session and owner tests inspect only the eventual `events.taps()` order (`plan:306-308`, `:365-368`). An implementation that opens the conversation row first, then attaches the capture before the sink, passes every named assertion while changing failure behavior if either store or codec construction raises.
 
    **The plan should say instead:** Record the complete opening sequence in one shared log and assert `captures.open`, `attach_capture`, codec construction, `conversations.open_session`, then sink attachment. Add failure injections at capture opening and conversation opening to prove the same artifacts are opened and released as today. Include mutations that reorder store opening, not merely tap attachment.
+
+   *Resolution:* Accepted. Both the session-level pin and the owner's test now record the whole opening sequence in one log (`captures.open`, capture attached, codecs built, `open_session`, sink attached) and assert the list. Two failure injections pin today's outcomes: the capture store declining leaves the row opening normally, and `open_session` raising ends the session through the error arm with the capture still released and all three handoffs made. The falsification list gains the mutation this finding describes, the row opened first with the taps still attached in the right order.
 
 3. **P2: Sink detachment before row closure is missing from both the specification and the proof**
 
