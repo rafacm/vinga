@@ -96,6 +96,21 @@ rather than silently unified.
    sites. What callers stop knowing: which parts of an exception can
    carry a value out.
 
+   The walker gets committed pins in a new
+   `tests/unit/test_support_leaks.py`, on the precedent of
+   `test_support_fakes.py` ("what the shared fakes promise, pinned
+   where the fakes live"), because fifteen suites' secret-absence
+   claims now rest on it and none of their own tests can fail if it
+   weakens: no exception in the tree carries a value where only the
+   stronger walk looks. One case per reading the walk promises, each
+   planting a sentinel only there: an attribute of the exception; an
+   attribute of an object held by an attribute (the PyYAML mark shape,
+   an object whose `buffer` holds the value); an argument whose `str`
+   reveals it and whose `repr` does not (item 3's addition); the
+   `__cause__` and the `__context__` of a raised exception; and a
+   cause cycle, which must terminate. Each is watched failing against
+   the old `repr`/`str` walk before it is committed.
+
    The other seven exception walkers in the suite are not
    AST-identical to either version (`_whole_chain` in
    `test_providers_boundary.py` and `test_reach_upgrade.py`, `carried`
@@ -191,13 +206,14 @@ rather than silently unified.
   (`--collect-only -q`, the summary line, untruncated) recorded before
   the first move and unchanged after; unit and integration lanes green
   with `-n auto --dist loadfile`; `ruff check .` clean.
-- **Falsify the walker's reach.** One mutation per family, run both
-  ways and recorded: in one provider error path and one config error
-  path, attach the planted secret to the raised exception as an
-  attribute. With `leaks.chain`, that file's secret-absence test goes
-  red; with the old walker restored locally, it stays green. That is
-  the claim this plan makes (the moved walker sees what the copies
-  could not), so it is shown failing rather than asserted.
+- **Falsify the walker's reach.** The committed pins in
+  `test_support_leaks.py` are the lasting protection, each watched
+  failing against the old walk. As supplementary evidence that the
+  callers now reach it, one mutation per family, run both ways and
+  recorded: in one provider error path and one config error path,
+  attach the planted secret to the raised exception as an attribute.
+  With `leaks.chain`, that file's secret-absence test goes red; with
+  the old walker restored locally, it stays green.
 - **Falsify the driver move.** Break the support driver (target head
   instead of the revision) and watch all five upgrade files go red,
   which proves each one now goes through it.
@@ -248,6 +264,8 @@ Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    Evidence: The plan admits the existing tests remain green with the weak walker because no current exception carries the sentinel through an attribute (plan, lines 59-62 (`plan:59`)). Verification proposes only a temporary mutation (lines 194-200 (`plan:194`)). Consequently, reverting `chain` later to the old `repr`/`str` walk would leave the committed suite green. The behavior that matters, including the PyYAML-like second-level attribute described by `config_cli.py`, lines 367-381 (`tests/support/config_cli.py:367`), is not pinned.
 
    The plan should say instead: add committed tests for `leaks.chain` using an exception with a direct secret attribute, an attribute object whose hidden `buffer` contains the secret, chained exceptions, and a cycle. Keep the mutation as supplementary evidence, not the only protection.
+
+   *Resolution:* accepted. Item 1 now commits `tests/unit/test_support_leaks.py`, one pin per reading the walk promises (a held attribute, the PyYAML-mark second level, a revealing `str` argument, cause, context, a cycle), each watched failing against the old walk; the mutation stays under Verification as supplementary evidence that the callers reach the walker.
 
 2. **P1: The migration module leaves Alembic configuration duplicated and would strand downgrade callers**
 
