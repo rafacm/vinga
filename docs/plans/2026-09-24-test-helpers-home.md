@@ -485,3 +485,47 @@ Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    *Resolution:* accepted, and the cause was mine: the round 1 amendment spliced item 1 with its anchors in the wrong order, which duplicated the pins paragraph and left the stale conditional text standing. Item 1 is rewritten once: the completed walk, the table (now stated as binding, with an unexpected divergence reported as a blocker), then the pins.
 
 Verdict: **ready after the P1/P2 amendments.**
+
+## Plan review round 3
+
+Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 4m06s, at commit 8175050c, plan blob 4739d491.
+
+---
+
+1. **P1: Removing `config_cli.chain` leaves existing imports broken**
+
+   Evidence: Item 1 requires no re-export but names only the fifteen local-walker files (plan lines 88-100). At least 24 other unit modules directly import `chain` from `tests.support.config_cli`, for example `test_config_cli_check.py:57`, `test_config_cli_events.py:46`, `test_config_cli_rendering.py:40`, `test_device_record.py:36`, and `test_device_record_no_leak.py:62`.
+
+   The plan should say instead: inventory and update every existing `tests.support.config_cli.chain` import to `tests.support.leaks.chain`, including aliases, before deleting the old definition; verify no imports from the old home remain.
+
+2. **P1: The proposed replacement is not a superset of `carried`**
+
+   Evidence: Item 1 says `_held` reads the same two attribute levels as `test_cli_live.carried` (plan line 128). `_held` renders only attribute values at `tests/support/config_cli.py:377-380`; `carried` renders `f"{name}={value!r}"` and therefore includes attribute names (`test_cli_live.py:431-436`). A secret can be an exception attribute key, or an inner object attribute key, and the new walker would miss it.
+
+   The plan should say instead: make `leaks.chain` render attribute mappings, or both names and values, at each promised depth. Add pins with a sentinel solely in an exception attribute name and solely in a held object’s attribute name. Retain the `carried` replacement only after those cases prove the new walker is a true superset.
+
+3. **P1: The retained composed-MCP walker still drops a context branch**
+
+   Evidence: Item 1 retains `test_mcp_composed_reference.chained` because formatted tracebacks are its own surface (plan line 130), but its implementation follows `__cause__ or __context__` (`test_mcp_composed_reference.py:227-238`) while claiming both are covered. That file uses the walker in its secret-absence assertion at line 424. A cause plus a context containing the sentinel leaves the context uninspected.
+
+   The plan should say instead: retain formatted tracebacks, but traverse both exception edges with an identity-based seen set, and add a composed-MCP no-leak case with both links populated and the sentinel only in the context branch.
+
+4. **P2: The migration helper omits required schema and transaction ownership**
+
+   Evidence: Item 2 says the new helper upgrades a blank database but specifies only the Alembic config builder (plan lines 163-175). Every current baseline fixture explicitly creates the chain schema before invoking Alembic, for example `test_device_record_upgrade.py:70-82`; `upgrade_to_head` explains why Alembic needs the schema first at `db/__init__.py:452-519`. The plan also does not say whether the new upgrade and downgrade operations commit, roll back on failure, or leave that responsibility to the caller.
+
+   The plan should say instead: define each operation’s transaction boundary. The blank-database upgrade operation must create the chain schema, run the named revision, commit, and dispose its engine. The open-connection downgrade operation must state that it leaves commit or rollback to its caller, or own that transaction itself. Test both success and failure cleanup semantics.
+
+5. **P2: The `rows` read-only guarantee has no lasting behavioral test**
+
+   Evidence: Item 7 changes `rows` to avoid migration and advisory-lock contention (plan lines 264-282), but explicitly declines a test (review-round-2 resolution, line 469). Existing `rows` calls occur beside active writers, such as `test_conversations_store.py:142-166` and `test_agent_rename_in_flight.py:341-381`; `read_engine` promises neither migration nor writer locking at `db/__init__.py:358-366`.
+
+   The plan should say instead: add a support-level behavior test that holds the conversations chain’s write lock and proves `rows()` still returns from an already-migrated database. This tests the caller-visible nonblocking read contract, rather than pinning an implementation import.
+
+6. **P2: Item 8 leaves its identical companion helper unexplained**
+
+   Evidence: `errors_of` and `_errors` are identified for relocation (plan lines 284-289), but `results_of` and `_results` immediately beside them are also AST-identical reads of `ScriptedLlm.seen`: `test_session_conversations.py:99-115` and `test_session_recap.py:997-1012`. They are longer than the plan’s three-line cutoff and are absent from the residual-groups table.
+
+   The plan should say instead: move both recorded tool-result projections beside `ScriptedLlm`, with appropriately named support operations, or give `results_of`/`_results` a specific semantic reason to remain local. Update the duplicate-census expectation accordingly.
+
+Verdict: **ready after the P1/P2 amendments.**
