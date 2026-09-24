@@ -13,7 +13,8 @@ import time
 import pytest
 import websockets
 
-from tests.integration.conftest import VOICE_MIN_MS, mock_voice, running_app, speech_pcm
+from tests.integration.conftest import VOICE_MIN_MS, mock_voice, running_app
+from tests.support.wire import speech_pcm
 from vinga_server.audio.opus import OpusEncoder
 from vinga_server.auth import build_device_auth
 from vinga_server.config import Config

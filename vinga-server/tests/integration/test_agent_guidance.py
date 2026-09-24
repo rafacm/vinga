@@ -28,9 +28,10 @@ from pathlib import Path
 import httpx
 from xiaozhi_sdk import XiaoZhiWebsocket
 
-from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, mock_voice, speech_pcm, spoken
+from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, mock_voice, spoken
 from tests.support.mcp_stdio_server import SHIPPED_ENV, SHIPPED_INSTRUCTIONS
 from tests.support.notices import RELOAD, boundaries
+from tests.support.wire import speech_pcm
 from vinga_server.config import Config
 from vinga_server.config.models import API_MOUNT_PATH
 from vinga_server.memory.store import MemoryScope

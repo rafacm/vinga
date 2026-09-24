@@ -12,9 +12,7 @@ persist what OTA gave it, send it as a bearer token on the handshake.
 
 import asyncio
 import json
-import math
 import os
-import struct
 import urllib.error
 import urllib.request
 
@@ -23,6 +21,7 @@ import pytest
 from xiaozhi_sdk import XiaoZhiWebsocket
 
 from tests.smoke.conftest import DEVICE_MAC
+from tests.support.wire import speech_pcm
 
 SAMPLE_RATE = 16000
 FRAME_MS = 60
@@ -54,14 +53,6 @@ def check_version(ota_url: str) -> dict:
     with urllib.request.urlopen(request, timeout=15) as response:
         assert response.status == 200
         return json.loads(response.read())
-
-
-def speech_pcm(duration_ms: int) -> bytes:
-    samples = SAMPLE_RATE * duration_ms // 1000
-    return b"".join(
-        struct.pack("<h", int(8000 * math.sin(2 * math.pi * 300 * n / SAMPLE_RATE)))
-        for n in range(samples)
-    )
 
 
 def test_the_server_is_alive(wait_for_server, base_url: str) -> None:

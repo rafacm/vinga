@@ -22,8 +22,6 @@ deadline, and none of them is a bare `while True`.
 import asyncio
 import contextlib
 import json
-import math
-import struct
 import subprocess
 import time
 import urllib.parse
@@ -49,6 +47,7 @@ from tests.support.telemetry import (
     session_events,
     start_turn,
 )
+from tests.support.wire import speech_pcm
 from vinga_server.config import Config
 from vinga_server.config.models import TelemetryConfig
 from vinga_server.events.values import ReplyOutcome
@@ -207,14 +206,6 @@ async def _exporting_server(endpoint: str, monkeypatch: pytest.MonkeyPatch):
         if not task.done():
             server.should_exit = True
             await asyncio.wait_for(task, SHUTDOWN_DEADLINE_S)
-
-
-def speech_pcm(duration_ms: int) -> bytes:
-    samples = SAMPLE_RATE * duration_ms // 1000
-    return b"".join(
-        struct.pack("<h", int(8000 * math.sin(2 * math.pi * 300 * n / SAMPLE_RATE)))
-        for n in range(samples)
-    )
 
 
 async def one_turn(port: int) -> None:
