@@ -7,7 +7,9 @@ codecs: what is under test is the order, and what each collaborator is
 handed.
 """
 
+import io
 import logging
+import sys
 from typing import Any, cast
 
 import pytest
@@ -228,6 +230,17 @@ OPENING = [
     ("attach", "SessionSink"),
 ]
 
+# A codec that will not open: its capture released, detached before it
+# is closed, and the row opened anyway.
+CODEC_FAILURE = [
+    ("captures.open", SID, OPENED_AT, True),
+    ("attach_capture", "the capture"),
+    ("detach_capture",),
+    ("capture.close", True),
+    ("open_session", SID, OPENED_AT, True, DEVICE_NAME),
+    ("attach", "SessionSink"),
+]
+
 HANDOFFS = [
     ("captures.session_closed", SID),
     ("transcripts.session_closed", SID),
@@ -293,14 +306,7 @@ def test_codecs_that_will_not_open_release_the_capture_and_say_nothing_of_why(
     with caplog.at_level(logging.INFO):
         built.open()
 
-    assert readable(built.log, built.capture) == [
-        ("captures.open", SID, OPENED_AT, True),
-        ("attach_capture", "the capture"),
-        ("detach_capture",),
-        ("capture.close", True),
-        ("open_session", SID, OPENED_AT, True, DEVICE_NAME),
-        ("attach", "SessionSink"),
-    ]
+    assert readable(built.log, built.capture) == CODEC_FAILURE
 
     (warning,) = [r for r in caplog.records if "could not start" in r.getMessage()]
     assert warning.name == SESSION_LOGGER
@@ -467,6 +473,7 @@ def test_the_factory_builds_each_session_an_owner_over_the_shared_collaborators(
 # the exception carried, the planted class above included.
 
 STOPPED = "session %s: %s did not stop cleanly"
+NOT_STARTED = "session %s: recording could not start"
 
 
 def plant(built: Built, where: str, raised: BaseException | None = None) -> None:
@@ -521,16 +528,23 @@ def closing_after(where: str) -> list[tuple[Any, ...]]:
 
 class BrokenFilter(logging.Filter):
     """A filter somebody else installed on the session channel, which
-    raises on the owner's report. `Logger.handle` calls a filter
-    unwrapped, so this raises out of the logging call itself."""
+    raises on the owner's reports. `Logger.handle` calls a filter
+    unwrapped, so this raises out of the logging call itself.
+
+    It keeps the exception being handled at the instant it was called:
+    whatever that is becomes the `__context__` of what it raises, and a
+    report made while the planted exception was still being handled
+    would chain that exception beneath its own failure."""
 
     def __init__(self) -> None:
         super().__init__()
         self.raised = 0
+        self.handling: list[BaseException | None] = []
 
     def filter(self, record: logging.LogRecord) -> bool:
-        if record.msg == STOPPED:
+        if record.msg in {STOPPED, NOT_STARTED}:
             self.raised += 1
+            self.handling.append(sys.exception())
             raise RuntimeError("the session channel's filter is broken")
         return True
 
@@ -605,6 +619,7 @@ def test_a_report_that_raises_costs_no_later_step(
     built.recording.close(2.0, "client")
 
     assert broken_filter.raised == 1, "the report never reached the broken filter"
+    assert broken_filter.handling == [None], "the report chained the step's exception"
     assert readable(built.log, built.capture) == closing_after(where)
 
 
@@ -623,3 +638,142 @@ def test_what_is_not_an_exception_still_propagates(monkeypatch: pytest.MonkeyPat
         built.recording.close(2.0, "client")
 
     assert readable(built.log, built.capture) == CLOSING[:5]
+
+
+# a report whose handler fails
+#
+# A handler formats a record inside its own `emit`, and a formatter that
+# raises there is not the caller's to see: `Handler.handleError` catches
+# it and prints the traceback to stderr, chain and all, before anything
+# around the logging call can act. So the report must not be made while
+# the exception it is about is still being handled, or that traceback
+# ends "During handling of the above exception" with the far side's
+# bytes above it.
+
+
+class BrokenFormatter(logging.Formatter):
+    """A formatter on a real handler that raises on the owner's reports,
+    keeping the exception being handled at that instant."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.raised = 0
+        self.handling: list[BaseException | None] = []
+
+    def format(self, record: logging.LogRecord) -> str:
+        if record.msg in {STOPPED, NOT_STARTED}:
+            self.raised += 1
+            self.handling.append(sys.exception())
+            raise RuntimeError("the session channel's formatter is broken")
+        return super().format(record)
+
+
+class Written:
+    """A real `StreamHandler` on the session channel, and what it wrote."""
+
+    def __init__(self) -> None:
+        self.stream = io.StringIO()
+        self.formatter = BrokenFormatter()
+        self.handler = logging.StreamHandler(self.stream)
+        self.handler.setFormatter(self.formatter)
+
+
+@pytest.fixture
+def broken_formatter(monkeypatch: pytest.MonkeyPatch) -> Any:
+    # What a deployment runs with: `handleError` prints only while this
+    # is on, and it is on unless somebody turned it off.
+    monkeypatch.setattr(logging, "raiseExceptions", True)
+    channel = logging.getLogger(SESSION_LOGGER)
+    written = Written()
+    channel.addHandler(written.handler)
+    try:
+        yield written
+    finally:
+        channel.removeHandler(written.handler)
+
+
+def leaked(text: str) -> list[str]:
+    return [sentinel for sentinel in (CLASS_SENTINEL, MESSAGE_SENTINEL) if sentinel in text]
+
+
+@pytest.mark.parametrize(("where", "step"), FAILURES)
+def test_a_report_whose_formatter_fails_prints_nothing_of_the_step_and_costs_no_later_step(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    broken_formatter: Written,
+    where: str,
+    step: str,
+) -> None:
+    built = Built(monkeypatch)
+    built.open()
+    del built.log[:]
+    plant(built, where)
+
+    built.recording.close(2.0, "client")
+
+    assert readable(built.log, built.capture) == closing_after(where)
+    assert broken_formatter.formatter.raised == 1, "the report never reached the formatter"
+    assert broken_formatter.formatter.handling == [None], "the report chained the step's exception"
+    printed = capsys.readouterr()
+    assert "--- Logging error ---" in printed.err, "the handler never reported its failure"
+    assert leaked(printed.out + printed.err + broken_formatter.stream.getvalue()) == []
+
+
+def test_a_codec_failure_whose_report_raises_still_opens_the_row(
+    monkeypatch: pytest.MonkeyPatch, broken_filter: BrokenFilter
+) -> None:
+    """Recording is best-effort all the way down: a codec that will not
+    open is released and reported, and a report that raises costs the
+    session its row no more than the codec did."""
+    built = Built(monkeypatch, codecs=unopenable)
+    built.open()
+
+    assert readable(built.log, built.capture) == CODEC_FAILURE
+    assert broken_filter.raised == 1, "the report never reached the broken filter"
+    assert broken_filter.handling == [None], "the report chained the codec's exception"
+
+
+def test_a_codec_failure_whose_formatter_fails_prints_nothing_of_it(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    broken_formatter: Written,
+) -> None:
+    built = Built(monkeypatch, codecs=unopenable)
+    built.open()
+
+    assert readable(built.log, built.capture) == CODEC_FAILURE
+    assert broken_formatter.formatter.raised == 1, "the report never reached the formatter"
+    assert broken_formatter.formatter.handling == [None], "the report chained the codec's exception"
+    printed = capsys.readouterr()
+    assert "--- Logging error ---" in printed.err, "the handler never reported its failure"
+    assert leaked(printed.out + printed.err + broken_formatter.stream.getvalue()) == []
+
+
+class Unclosable(Capture):
+    """A capture whose close raises, carrying the sentinels."""
+
+    def close(self) -> None:
+        super().close()
+        raise Planted(f"the disk said {MESSAGE_SENTINEL}")
+
+
+def test_a_codec_failure_whose_release_raises_still_opens_the_row(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The release after a codec failure is cleanup, and cleanup that
+    raises is a step that did not stop cleanly, not a reason for the
+    session to lose its row, and never a second exception with the
+    codec's chained beneath it."""
+    built = Built(monkeypatch, codecs=unopenable)
+    built.capture = Unclosable(built.log, built.events)
+    built.captures.capture = built.capture
+    with caplog.at_level(logging.INFO):
+        built.open()
+
+    assert readable(built.log, built.capture) == CODEC_FAILURE
+    reports = [(r.msg, r.args) for r in caplog.records if r.msg in {STOPPED, NOT_STARTED}]
+    assert reports == [(STOPPED, (SID, "the capture")), (NOT_STARTED, (SID,))]
+    printed = capsys.readouterr()
+    assert leaked(both_formats(caplog) + printed.out + printed.err) == []
