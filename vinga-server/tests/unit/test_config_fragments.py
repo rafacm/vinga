@@ -16,6 +16,7 @@ import pytest
 from pydantic import ValidationError
 
 from tests.support.configs import config_with
+from tests.support.leaks import chain
 from vinga_server.config import Config
 from vinga_server.config.loader import ConfigError, StorageError, compose_config
 from vinga_server.config.models import (
@@ -53,19 +54,6 @@ SHORT_UNUSABLE = f"{SHORT_SENTINEL}.pasted"
 # blank line and a trailing newline, all of which a stripping type would
 # quietly take away.
 VERBATIM = "  The kitchen radio is called Bosse.\n\n    The bins go out on Tuesday.\n"
-
-
-def chain(exc: BaseException) -> str:
-    """Everything reachable from one exception: its own text, and every
-    cause and context behind it."""
-    parts: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        parts += [repr(current), str(current)]
-        current = current.__cause__ or current.__context__
-    return "\n".join(parts)
 
 
 class Snapshot:

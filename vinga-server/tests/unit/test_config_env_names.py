@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.leaks import chain
 from vinga_server.config import Config, ConfigError, load_file_config
 from vinga_server.config.cli import main
 
@@ -27,17 +28,6 @@ from vinga_server.config.cli import main
 PASTED = "sk-ant-api03-never-a-real-credential-3f9c"
 
 SECRET_ENV_KEYS = ("auth", "api")
-
-
-def _chain(exc: BaseException) -> str:
-    parts: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        parts += [repr(current), str(current)]
-        current = current.__cause__ or current.__context__
-    return "\n".join(parts)
 
 
 def _config_file(tmp_path: Path, section: str, value: str) -> Path:
@@ -78,7 +68,7 @@ def test_a_pasted_value_is_refused_without_being_quoted(
     assert PASTED not in message
     # pydantic's own str() quotes the rejected input back, so the chain
     # is the place this leaks if the cause is left attached.
-    assert PASTED not in _chain(caught.value)
+    assert PASTED not in chain(caught.value)
     assert all(PASTED not in record.getMessage() for record in caplog.records)
 
 

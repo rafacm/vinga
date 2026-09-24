@@ -31,6 +31,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from tests.support.boundary import FakeDevice, StubRuntime
 from tests.support.configs import DEVICE_MAC, config_with_agent, world
+from tests.support.leaks import chain
 from tests.support.providers import built_world
 from tests.support.sessions import device_session, listening_in, talking
 from tests.support.stores import memory as lane_memory
@@ -189,19 +190,6 @@ def test_frames_that_arrive_before_a_listen_never_reach_the_runtime() -> None:
 # Planted in the close reason, which the far end writes and this end
 # has no reason to trust.
 SENTINEL = "sk-test-9b3e5c02-never-a-real-credential"
-
-
-def chain(exc: BaseException) -> str:
-    """Everything a renderer of this exception could reach: the error
-    itself and every cause and context behind it."""
-    parts: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        parts += [repr(current), str(current)]
-        current = current.__cause__ or current.__context__
-    return "\n".join(parts)
 
 
 class VanishedSocket:

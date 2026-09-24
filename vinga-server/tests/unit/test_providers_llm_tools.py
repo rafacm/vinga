@@ -19,6 +19,7 @@ import httpx
 import openai
 import pytest
 
+from tests.support.leaks import chain
 from tests.support.llm_sdk import (
     FakeBlock,
     FakeChoice,
@@ -407,19 +408,6 @@ def status_error(sdk: Any, status: int, message: str) -> Exception:
         response=httpx.Response(status, request=REQUEST, json={"error": {"message": message}}),
         body=None,
     )
-
-
-def chain(exc: BaseException) -> str:
-    """Everything a renderer of this exception could reach: the error
-    itself and every cause and context behind it."""
-    parts: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        parts += [repr(current), str(current)]
-        current = current.__cause__ or current.__context__
-    return "\n".join(parts)
 
 
 def anthropic_failing(

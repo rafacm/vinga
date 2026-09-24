@@ -16,6 +16,7 @@ import pytest
 from cryptography.fernet import Fernet, MultiFernet
 from sqlalchemy import insert, select, update
 
+from tests.support.leaks import chain
 from tests.support.stores import bindings, planted, stored_row, stored_rows
 from vinga_server.boundary import Reach
 from vinga_server.config import ConfigError, entities
@@ -51,17 +52,6 @@ inf = float("inf")
 
 CLAUDE = SecretLocation.provider("llm", "claude", "api_key")
 WEATHER = SecretLocation.mcp_server("weather", "headers.Authorization")
-
-
-def _chain(exc: BaseException) -> str:
-    parts: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        parts += [repr(current), str(current)]
-        current = current.__cause__ or current.__context__
-    return "\n".join(parts)
 
 
 @pytest.fixture
@@ -286,7 +276,7 @@ def test_a_fragment_that_is_not_there_is_named_by_its_section_only(
             call()
 
         assert str(caught.value).startswith("prompt_fragments:")
-        assert SECRET not in _chain(caught.value)
+        assert SECRET not in chain(caught.value)
 
 
 # Every body a write of an unusable name can carry, because the name is
@@ -320,7 +310,7 @@ def test_an_unusable_fragment_name_is_refused_without_being_quoted(
     with pytest.raises(ConfigError) as caught:
         store.set_prompt_fragment(f"{SECRET}.pasted", body)
 
-    rendered = _chain(caught.value)
+    rendered = chain(caught.value)
     assert "prompt_fragments" in rendered
     assert "[A-Za-z0-9_-]+" in rendered
     assert SECRET not in rendered
@@ -424,7 +414,7 @@ def test_an_unknown_include_is_refused_by_position_and_never_by_value(
     with pytest.raises(ConfigError) as caught:
         write()
 
-    rendered = _chain(caught.value)
+    rendered = chain(caught.value)
     assert "prompt_includes: entry 1" in rendered
     assert SECRET not in rendered
 
@@ -476,7 +466,7 @@ def test_a_malformed_grant_is_refused_with_nothing_of_it_in_the_chain(
         store.set_agent("poet", {"prompt": "P", "mcp": [grant]})
 
     assert "entry 1" in str(caught.value)
-    assert SECRET not in _chain(caught.value)
+    assert SECRET not in chain(caught.value)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
 
@@ -657,7 +647,7 @@ def test_an_invalid_fragment_is_refused_without_quoting_it(store: ConfigStore) -
     message = str(caught.value)
     assert "providers.llm.claude" in message
     assert "api_key" in message
-    assert SECRET not in _chain(caught.value)
+    assert SECRET not in chain(caught.value)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
 
@@ -683,7 +673,7 @@ def test_a_secret_nested_inside_an_option_is_refused_too(store: ConfigStore) -> 
         assert f'a key containing "{fragment_matched}"' in message
         for key in ("connection", "backends", "auth"):
             assert key not in message
-        assert SECRET not in _chain(caught.value)
+        assert SECRET not in chain(caught.value)
         assert caught.value.__cause__ is None
         assert caught.value.__context__ is None
 
@@ -697,7 +687,7 @@ def test_a_nested_reference_key_must_still_name_a_variable(store: ConfigStore) -
     message = str(caught.value)
     assert "a key ending in _env must hold the name of an environment variable" in message
     assert "connection" not in message
-    assert SECRET not in _chain(caught.value)
+    assert SECRET not in chain(caught.value)
 
 
 def test_an_unknown_stage_and_an_empty_name_are_refused(store: ConfigStore) -> None:
@@ -783,7 +773,7 @@ def test_a_provider_url_carrying_a_credential_is_refused(store: ConfigStore) -> 
         # The rule and the option, never the value: what fails this
         # check is a credential.
         assert SECRET not in message
-        assert SECRET not in _chain(caught.value)
+        assert SECRET not in chain(caught.value)
     assert store.load().domain.providers.llm == {}
 
 
@@ -850,7 +840,7 @@ def test_an_mcp_url_carrying_a_credential_is_refused(store: ConfigStore) -> None
         # The rule and the field, never the value: what fails this check
         # is a credential.
         assert SECRET not in message
-        assert SECRET not in _chain(caught.value)
+        assert SECRET not in chain(caught.value)
     assert store.load().domain.mcp_servers == {}
 
 
@@ -1237,7 +1227,7 @@ def test_a_secret_for_an_unknown_entity_or_slot_is_refused(store: ConfigStore) -
     ):
         with pytest.raises(ConfigError) as caught:
             store.set_secret(location, SECRET)
-        assert SECRET not in _chain(caught.value)
+        assert SECRET not in chain(caught.value)
 
 
 # The holder that is not there when the write lands
@@ -1351,9 +1341,9 @@ def test_a_holder_that_is_not_there_at_the_write_says_which_kind_it_was(
     # And nothing of what the caller supplied on the way out, here or on
     # the chain an exception raised inside a handler would carry:
     # neither the credential nor the name the holder was addressed by.
-    chain = _chain(caught.value)
-    assert SECRET not in chain
-    assert addressed not in chain
+    carried = chain(caught.value)
+    assert SECRET not in carried
+    assert addressed not in carried
 
 
 def test_the_exempted_option_is_not_a_credential_slot(store: ConfigStore) -> None:
@@ -1376,7 +1366,7 @@ def test_the_exempted_option_is_not_a_credential_slot(store: ConfigStore) -> Non
         store.set_secret(SecretLocation.provider("llm", "claude", "model"), SECRET)
 
     assert str(withdrawn.value) == str(ordinary.value)
-    assert SECRET not in _chain(withdrawn.value)
+    assert SECRET not in chain(withdrawn.value)
     assert store.load().secrets.locations() == []
 
     # And `api_key`, which the sentence names as the example, still
@@ -1396,7 +1386,7 @@ def test_a_secret_that_is_not_a_non_empty_string_is_refused(store: ConfigStore) 
         with pytest.raises(ConfigError) as caught:
             store.set_secret(CLAUDE, value)  # type: ignore[arg-type]
         assert "non-empty string" in str(caught.value)
-        assert SECRET not in _chain(caught.value)
+        assert SECRET not in chain(caught.value)
 
     assert store.load().secrets.locations() == []
 
@@ -1414,7 +1404,7 @@ def test_storing_a_secret_without_a_key_is_refused(tmp_path: Path) -> None:
             keyless.set_secret(CLAUDE, SECRET)
 
         assert CLAUDE.describe() in str(caught.value)
-        assert SECRET not in _chain(caught.value)
+        assert SECRET not in chain(caught.value)
     finally:
         engine.dispose()
 
@@ -1441,7 +1431,7 @@ def test_verify_secrets_names_the_entity_and_slot_it_cannot_open(
             with pytest.raises(ConfigError) as caught:
                 verify_secrets(ConfigStore(engine, wrong).load().secrets)
             assert CLAUDE.describe() in str(caught.value)
-            assert SECRET not in _chain(caught.value)
+            assert SECRET not in chain(caught.value)
 
         # And a token that is not a token, which is what a hand-edited
         # or half-restored database looks like.
@@ -1625,7 +1615,7 @@ def test_an_openai_asr_row_the_model_refuses_is_refused_on_read(
 
     assert "providers.asr.ears" in str(caught.value)
     assert says in str(caught.value)
-    assert SECRET not in _chain(caught.value)
+    assert SECRET not in chain(caught.value)
     # And the key an operator invented is never in it, whichever rule
     # reached the row: the two cases that carry one write it as
     # `beam_size` and as the sentinel, and neither is this repository's
@@ -1798,7 +1788,7 @@ def test_an_openai_asr_entry_that_misdescribes_its_language_is_refused_at_the_wr
             logging.Formatter(TEXT_FORMAT).format(record),
             JsonFormatter().format(record),
             *(f"{problem.path} {problem.message}" for problem in caught.value.problems),
-            _chain(caught.value),
+            chain(caught.value),
         ]
     )
     assert SECRET not in rendered

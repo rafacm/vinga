@@ -10,6 +10,7 @@ message, and not in the exception chain either.
 import pytest
 from cryptography.fernet import Fernet, MultiFernet
 
+from tests.support.leaks import chain
 from vinga_server.config import ConfigError
 from vinga_server.config.secrets import (
     MASK,
@@ -34,19 +35,6 @@ SECRET = "sk-test-4f8b2c9e-never-a-real-credential"
 
 CLAUDE = SecretLocation.provider("llm", "claude", "api_key")
 WEATHER = SecretLocation.mcp_server("weather", "headers.Authorization")
-
-
-def _chain(exc: BaseException) -> str:
-    """Every exception behind the one that was raised, rendered the way
-    a traceback or a logged exc_info would render it."""
-    parts: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        parts += [repr(current), str(current)]
-        current = current.__cause__ or current.__context__
-    return "\n".join(parts)
 
 
 def test_a_secret_round_trips_through_its_envelope() -> None:
@@ -85,7 +73,7 @@ def test_a_wrong_key_is_refused_without_leaking_the_secret() -> None:
 
     assert CLAUDE.describe() in str(caught.value)
     assert MASTER_KEY_ENV in str(caught.value)
-    assert SECRET not in _chain(caught.value)
+    assert SECRET not in chain(caught.value)
     assert caught.value.__cause__ is None
 
 
@@ -97,7 +85,7 @@ def test_a_missing_key_is_refused_naming_the_location() -> None:
 
     assert CLAUDE.describe() in str(caught.value)
     assert MASTER_KEY_ENV in str(caught.value)
-    assert SECRET not in _chain(caught.value)
+    assert SECRET not in chain(caught.value)
 
 
 def test_storing_a_secret_without_a_key_is_refused() -> None:
@@ -105,7 +93,7 @@ def test_storing_a_secret_without_a_key_is_refused() -> None:
         encrypt(CLAUDE, SECRET, None)
 
     assert CLAUDE.describe() in str(caught.value)
-    assert SECRET not in _chain(caught.value)
+    assert SECRET not in chain(caught.value)
 
 
 def test_a_token_moved_to_another_slot_is_refused() -> None:
@@ -120,7 +108,7 @@ def test_a_token_moved_to_another_slot_is_refused() -> None:
     message = str(caught.value)
     assert WEATHER.describe() in message
     assert CLAUDE.describe() in message
-    assert SECRET not in _chain(caught.value)
+    assert SECRET not in chain(caught.value)
 
 
 def test_the_same_slot_on_another_entity_is_still_another_slot() -> None:
@@ -220,7 +208,7 @@ def test_a_store_that_cannot_open_a_slot_refuses_naming_the_location() -> None:
         with pytest.raises(ConfigError) as caught:
             SecretStore({CLAUDE: written}, keys).secret(CLAUDE)
         assert CLAUDE.describe() in str(caught.value)
-        assert SECRET not in _chain(caught.value)
+        assert SECRET not in chain(caught.value)
 
 
 def test_a_provider_credential_is_bound_to_its_stage_and_name() -> None:
@@ -299,7 +287,7 @@ def test_an_unusable_key_names_its_position_and_not_its_material() -> None:
     assert MASTER_KEY_ENV in message
     assert "entry 2 of 2" in message
     assert rubbish not in message
-    assert good not in _chain(caught.value)
+    assert good not in chain(caught.value)
 
 
 # The per-entity fingerprint

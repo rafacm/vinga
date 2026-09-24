@@ -4,6 +4,7 @@ import struct
 
 import pytest
 
+from tests.support.leaks import chain
 from tests.support.providers import built_world
 from vinga_server.audio import rms
 from vinga_server.config import Config
@@ -108,20 +109,7 @@ async def test_a_provider_that_fails_to_construct_names_the_entry(
     # anything it was holding is reachable from what travels out.
     assert excinfo.value.__cause__ is None
     assert excinfo.value.__context__ is None
-    assert sentinel not in _chain(excinfo.value)
-
-
-def _chain(exc: BaseException) -> str:
-    """Everything reachable from one exception, as text: the message,
-    the repr, and the same of every link of the chain behind it."""
-    parts: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        parts += [repr(current), str(current)]
-        current = current.__cause__ or current.__context__
-    return "\n".join(parts)
+    assert sentinel not in chain(excinfo.value)
 
 
 async def test_a_provider_error_raised_by_a_factory_is_left_exactly_as_it_is(
