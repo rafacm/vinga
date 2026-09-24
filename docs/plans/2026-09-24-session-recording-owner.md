@@ -752,3 +752,19 @@ Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    *Resolution:* Accepted. The plan now names the four source lines by file and line and the three manifest rows they aggregate into (`_capture_audio 1` in each file, `_record 2` in `test_conversations_session.py`), and M1's step 3 deletes four lines.
 
 **Verdict: ready after the P1/P2 amendments.**
+
+## Plan review round 2 (re-review of the resolutions)
+
+Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 3m24s, at commit 086cd4b1, plan blob 51f5d54e.
+
+---
+
+1. **P1: M2 logs an untrusted exception class name, violating no-leak.**  
+Evidence: plan “M2’s guard” and M2 tests require `type(exc).__name__` in retained log arguments ([plan:311-318, 666-674](docs/plans/2026-09-24-session-recording-owner.md:311)). The event subsystem explicitly documents that exception class names can contain arbitrary far-side bytes ([events/__init__.py:255-262](vinga-server/src/vinga_server/events/__init__.py:255)). The proposed sentinel tests poison only exception messages, so this leak passes them.  
+The plan should say instead: M2’s new warning contains only the session id and a fixed, owner-controlled step label, never any exception-derived value. Test with a dynamically created exception class whose name is credential-shaped and assert absence from the record, plain rendering, and JSON rendering.
+
+2. **P2: A failing logging handler still breaks M2’s “always reaches its end” guarantee.**  
+Evidence: M2 says every failed close step is reported through `events.logger` and then later cleanup runs ([plan:303-336](docs/plans/2026-09-24-session-recording-owner.md:303)). Logging is not inherently safe: the existing event implementation specifically guards reporting because filters and handlers can raise ([events/__init__.py:215-239](vinga-server/src/vinga_server/events/__init__.py:215)). A direct `logger.warning` in the new exception handler can therefore skip remaining handoffs and the held-cancellation re-raise.  
+The plan should say instead: the owner’s cleanup diagnostic is itself non-throwing, using a small local guarded reporting operation or an appropriate safe public helper. Add a test with a logger filter or handler that raises, and assert all later cleanup and the pending cancellation still occur.
+
+Verdict: ready after the P1/P2 amendments.
