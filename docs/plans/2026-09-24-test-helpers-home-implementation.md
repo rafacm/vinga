@@ -268,6 +268,19 @@ All by AST over the tracked files, untruncated.
   The table keeps it because it returns objects, and that is right; it
   could iterate `links` without changing what it returns, which the
   table did not ask for.
+
+  *Correction, 2026-09-24.* The table's reason, "its callers assert
+  on the objects, not on text", was wrong, and so was agreeing with
+  it here. The walker's one caller,
+  `test_a_cancellation_mid_phrase_still_attempts_the_closing_stop_once`,
+  asserted the sentinel absent from `str` of each link, a
+  secret-absence check like the fifteen item 1 retired, and its
+  comment claimed a walk of both links that the one-link traversal
+  does not make. On branch `fix/one-link-walker` the check is one
+  assertion against `leaks.chain` and the local walker is gone, so the
+  one-link traversals counted above are now 0. A mutation that leaves
+  the sentinel only on the context of a failure that also has a cause
+  turns the new assertion red and left the old loop green.
 - **The census had to be reproduced before it could be rerun.** The
   plan's 71/213/105 is a key of the arguments and the body with the
   docstring; including the return annotation gives 70/209/103, and the
