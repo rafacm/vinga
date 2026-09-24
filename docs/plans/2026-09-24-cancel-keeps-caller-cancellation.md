@@ -365,3 +365,46 @@ Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    in full.
 
 Verdict: ready after the amendment.
+
+## Plan review round 2 (re-review of the resolution)
+
+Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 3m18s, at commit 1d868fde, plan blob 50d1bd17.
+
+1. **P1: a second cancellation can skip the purge after the reply is
+   finished.** `ReplyInFlight.close()` re-raises the held cancellation
+   before `PipelineRuntime.close()` enters its purge `finally`, and a
+   later cancellation while that `finally` awaits
+   `asyncio.to_thread(self._purge, ...)` interrupts the await, so
+   `_cleanly` proceeds to `session_closed`, the store's close and the
+   export without waiting for the purge. Tests 6 and 7 cancel only
+   while the reply tail is blocked. The plan should say
+   `PipelineRuntime.close()` retains a cancellation across both the
+   reply's completion and the purge's, with the purge as owned,
+   waitable work not abandoned when its waiter is cancelled, the first
+   held cancellation re-raised only after `_in_flight` is cleared and
+   the purge has completed; and add an event-driven test that blocks
+   the purge, cancels `close()` there, verifies it stays pending,
+   releases, and verifies the cancellation propagates afterwards.
+2. **P1: `ReplyInFlight.close()` can leak an unobserved reply
+   exception.** The sketch raises `held` before `task.result()`, and
+   `asyncio.wait()` does not retrieve a task's exception. A reply whose
+   cancellation path ends in another exception (the `filler.settle`
+   guard re-raises any `BaseException`) then has it never retrieved
+   before the handle is cleared, and asyncio's unretrieved-exception
+   report can render exception text and chains, against the no-leak
+   rules. Test 8 covers only an uncancelled caller. Retrieve the
+   outcome even when a cancellation is held: with none held, keep
+   `task.result()` propagation; with one held, mark a non-cancelled
+   exception retrieved and re-raise the held cancellation without
+   chaining the task's error into it. Test it with a cancelled
+   `close()` caller and a `finally` raising a distinctive exception,
+   asserting `CancelledError` and no unretrieved-task report at a loop
+   exception handler.
+3. **P2: the rationale describes the second cancel as a bound.**
+   `Task.cancel()` is cooperative and cannot bound the wait, which the
+   Risks section itself admits; describe it as an attempt to expedite a
+   cooperative tail, relying on the `filler.settle` arm to record the
+   turn, keep the wedge risk, and drop the claim of equivalence to a
+   bounded close today.
+
+Verdict: ready after the P1/P2 amendments.
