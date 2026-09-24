@@ -35,6 +35,39 @@ class Mark:
         return "<Mark>"
 
 
+class SaysOnlyInRepr(Exception):
+    """An exception whose `repr` alone carries the value: no arguments,
+    no attributes, and a `str` that says nothing."""
+
+    def __str__(self) -> str:
+        return "a refusal that quotes nothing"
+
+    def __repr__(self) -> str:
+        return f"SaysOnlyInRepr({SENTINEL!r})"
+
+
+class SaysOnlyInStr(Exception):
+    """The other way round: its `str` carries the value and its `repr`
+    does not."""
+
+    def __str__(self) -> str:
+        return SENTINEL
+
+    def __repr__(self) -> str:
+        return "SaysOnlyInStr()"
+
+
+class Masked:
+    """An argument whose `repr` says what its `str` does not, the mirror
+    of `Revealing` below."""
+
+    def __str__(self) -> str:
+        return "masked"
+
+    def __repr__(self) -> str:
+        return f"Masked({SENTINEL!r})"
+
+
 class Revealing:
     """An argument whose `str` says what its `repr` does not."""
 
@@ -86,6 +119,25 @@ def test_an_argument_whose_str_reveals_what_its_repr_hides_is_read() -> None:
     # Two arguments, so the exception's own str is the tuple's repr and
     # the only place the value shows is the argument's own str.
     refusal = ValueError("a sentence", Revealing())
+
+    assert SENTINEL not in repr(refusal)
+    assert SENTINEL not in str(refusal)
+    assert SENTINEL in chain(refusal)
+
+
+def test_the_repr_of_the_exception_is_read() -> None:
+    assert SENTINEL in chain(SaysOnlyInRepr())
+
+
+def test_the_str_of_the_exception_is_read() -> None:
+    assert SENTINEL in chain(SaysOnlyInStr())
+
+
+def test_an_argument_whose_repr_reveals_what_its_str_hides_is_read() -> None:
+    # Raised on a `Refusal`, whose own repr and str are fixed, so the
+    # only rendering that reaches the argument's repr is the arguments
+    # tuple's.
+    refusal = Refusal("a sentence", Masked())
 
     assert SENTINEL not in repr(refusal)
     assert SENTINEL not in str(refusal)
