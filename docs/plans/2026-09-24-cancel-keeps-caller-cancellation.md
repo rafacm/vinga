@@ -125,11 +125,25 @@ async def close(self, outcome: ReplyOutcome) -> None:
             # until the task is done.
             held = held or cancelled
             task.cancel()
+    # Retrieved whichever way this ends: a reply whose tail ended in
+    # something other than its cancellation still has that exception
+    # observed here, so asyncio never reports it as unretrieved, with
+    # its text and chain, after the handle is gone.
+    failed = None if task.cancelled() else task.exception()
     if held is not None:
         raise held
-    if not task.cancelled():
-        task.result()
+    if failed is not None:
+        raise failed
 ```
+
+With a cancellation held, the reply's own exception is retrieved and
+dropped rather than chained: `raise held` sits outside any `except`
+arm, so nothing is attached as its `__context__`, and the only thing
+that reaches `close`'s caller is the cancellation it was already owed.
+`cancel` has the same exposure in a narrower form (a caller cancelled
+mid-wait leaves the task's outcome unread), and it is covered by the
+handle surviving: the runtime still holds the reply, and the owner's
+`close` is what reads its outcome.
 
 and `PipelineRuntime.close` reaches it through a sibling of
 `cancel_reply` that clears the handle whether or not `close` raised,
@@ -256,6 +270,15 @@ name the session's callers reach:
    task is done before the caller's `CancelledError` is observed, and a
    body ending in another exception with no caller cancellation still
    raises it, as `cancel` does.
+9. **A held cancellation retrieves the reply's exception without
+   chaining it.** The caller of `ReplyInFlight.close` is cancelled
+   mid-wait, and the body's `finally` then raises a distinctive
+   exception (`RuntimeError("the tail broke")`). Awaiting the caller
+   raises `CancelledError` whose `__context__` and `__cause__` are
+   None, and a loop exception handler installed for the test sees no
+   "exception was never retrieved" report after a `gc.collect()`. A
+   mutation raising `held` before reading `task.exception()` fails on
+   the handler.
 
 Existing suites that must stay green unchanged: every
 `test_session_*` file, `test_turn_lifecycle.py`, `test_turntaking.py`
@@ -400,6 +423,12 @@ Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    `close()` caller and a `finally` raising a distinctive exception,
    asserting `CancelledError` and no unretrieved-task report at a loop
    exception handler.
+
+   *Resolution:* accepted as written. The sketch reads
+   `task.exception()` for a non-cancelled task before either raise, a
+   held cancellation is raised outside any `except` arm so nothing is
+   chained, and test 9 pins it with a loop exception handler and a
+   distinctive exception.
 3. **P2: the rationale describes the second cancel as a bound.**
    `Task.cancel()` is cooperative and cannot bound the wait, which the
    Risks section itself admits; describe it as an attempt to expedite a
