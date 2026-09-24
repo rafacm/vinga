@@ -451,7 +451,7 @@ fragment, `changelog.d/531-test-helpers-home.md`, under `### Changed`.
 ## Milestones
 
 - [x] **[M1: the helpers go home](2026-09-24-test-helpers-home-implementation.md#m1-the-helpers-go-home)**
-  (#531 M2; PR TBD; item 7 dropped at implementation, see its note).
+  (#531 M2; PR #566; item 7 dropped at implementation, see its note).
   Items 1 to 8 above, one
   commit per item, the verification above, the changelog fragment.
   Design footprint: deepens `tests/support/leaks.py` (the exception
