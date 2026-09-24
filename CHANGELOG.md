@@ -11,6 +11,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 - **The session time limit can no longer be lost to a barge-in** (#559). Ending a reply in flight (a barge-in, a device abort, a manual stop) waits for the reply to finish its last steps, and a cancellation of that wait was swallowed along with the reply's own. When `max_session_s` ran out in that window, the limit's cancellation was the one swallowed, so the session went on past its limit, and on an auto-mode device, which the idle watchdog leaves alone, nothing on the server's side was left to end it. The wait now lets its own cancellation through, so the limit closes the session as it should, and the reply it was ending is no longer cut short on the way: its closing `tts stop` and its turn record still go out. The session's close keeps the stricter rule it needs: a cancellation arriving there is held until the reply has finished and the session's thread memory has been purged, and only then passed on. A reply that failed no longer skips that purge either.
 
+- **A failure in one of a closing session's recording steps no longer skips the ones after it** (#483). A session's close ends its conversation record, finishes its capture, and then tells the capture upload, the transcript export and the LLM-input export that the session ended. A step that raised used to skip every step behind it, and a cancellation the close was holding with them. Each step now fails on its own: it is logged as `session <id>: <step> did not stop cleanly`, naming the step and nothing about the error, and the steps after it still run. So a capture upload that cannot start its worker still leaves the transcript and LLM-input exports told the session ended, and a session that was being cancelled still ends cancelled.
+
+### Security
+
+- **The warning for a recording that could not start no longer names the exception's class** (#483). When a capture's codecs would not open, the log line was `session <id>: recording could not start (<ClassName>)`, and a class name can be any string, including bytes a remote service answered with. The line is now `session <id>: recording could not start`, with nothing taken from the exception.
+
 ## 2026-09-22
 
 ### Changed
