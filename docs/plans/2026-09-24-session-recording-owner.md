@@ -523,3 +523,47 @@ implementation doc says so in those words.
   the transcript export waits on. Deepens `device/session.py` by
   removing a responsibility rather than adding one; no seam changes.
   Changelog: none.
+
+## Plan review round
+
+Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 7m06s, at commit 5c4760a9, plan blob 78c35feb.
+
+---
+
+1. **P1: The session still knows four recording collaborators, contrary to the settled one-interface decision**
+
+   **Evidence:** The plan restates that the session learns one interface at `docs/plans/2026-09-24-session-recording-owner.md:57-68`, but keeps `CaptureStore`, `ConversationStore`, `TranscriptExport`, and `LlmInputExport` in `DeviceSession.__init__` and constructs `Recording` itself (`:119-143`, `:187-207`). The design guide defines constructor types and wiring as part of an interface (`docs/architecture/design-guide.md`, “Interface and implementation”). The proposed API also has `open`, `microphone`, `reply`, and `close`, but no `attach`, despite restating the settled interface as `open, attach, close`. The “no seam changes” claim at `:519-524` further contradicts the issue’s requirement to hand recording a seam.
+
+   **The plan should say instead:** The composition root builds a `RecordingFactory` that closes over the four shared collaborators, and `DeviceSession` receives that single abstraction. The factory creates the per-session owner from the session id and events object. Specify the exact factory and owner protocols, map the audio-feed operations explicitly to the issue’s settled interface, and update all nine construction sites. The one-time call-site cost cannot overrule a settled issue decision.
+
+2. **P2: The open-order tests pin final tap order, not the opening order they claim to protect**
+
+   **Evidence:** Current behavior is `CaptureStore.open`, capture attachment, codec construction, `ConversationStore.open_session`, then sink attachment (`device/session.py:579-581`, `:872-881`, `:927-939`). The proposed session and owner tests inspect only the eventual `events.taps()` order (`plan:306-308`, `:365-368`). An implementation that opens the conversation row first, then attaches the capture before the sink, passes every named assertion while changing failure behavior if either store or codec construction raises.
+
+   **The plan should say instead:** Record the complete opening sequence in one shared log and assert `captures.open`, `attach_capture`, codec construction, `conversations.open_session`, then sink attachment. Add failure injections at capture opening and conversation opening to prove the same artifacts are opened and released as today. Include mutations that reorder store opening, not merely tap attachment.
+
+3. **P2: Sink detachment before row closure is missing from both the specification and the proof**
+
+   **Evidence:** `_stop_recording` currently detaches and clears `SessionSink` before calling `ConversationStore.close_session` (`device/session.py:974-980`). The proposed sequence starts with `close_session` and mentions only capture detachment afterward (`plan:163-172`, `:309-319`). The owner test requires the sink to be detached eventually (`:375-379`), so moving its detachment after `close_session` would pass all listed tests.
+
+   **The plan should say instead:** Spell out the exact close sequence beginning with `events.detach(sink)`, clearing the sink, and only then calling `close_session`. Have the store double inspect `events.taps()` at the instant `close_session` runs, and add the reverse-order mutation to falsification.
+
+4. **P2: The unguarded close-tail rationale is false and leaves later cleanup vulnerable during drains**
+
+   **Evidence:** The plan says every close callee is written not to raise (`plan:178-185`). `CaptureStore.session_closed` calls `CaptureUpload.session_closed` (`capture.py:622-632`), which can call `_start()` and an uncaught `threading.Thread.start()` (`capture_upload.py:629-659`, `:704-719`). Transcript cleanup also reaches telemetry operations without a blanket suppression (`transcript_export.py:147-157`). Any such exception skips later handoffs and the pending cancellation re-raise at `device/session.py:727-748`, contradicting the close path’s stated “always reaches the end” contract at `:682-685`. A redeploy draining many sessions is precisely when uploader startup and simultaneous post-close handoffs occur.
+
+   **The plan should say instead:** Give each synchronous close step its own sanitized guard, clear owned state in `finally`, and continue through every later handoff and the pending cancellation. Tests should make each step raise in turn, assert later cleanup still runs, and verify that no exception text or chained value reaches logs. If fail-fast preservation is intentionally retained, the plan must accurately document and pin which cleanup is skipped instead of claiming the calls cannot raise.
+
+5. **P2: The compatibility-sensitive logger name is promised but not tested**
+
+   **Evidence:** The plan promises the warning retains the same JSON `logger` field (`plan:51-55`), while its tests assert only `record.msg`, `record.args`, and sentinel absence (`:338-341`, `:369-374`). `events/__init__.py:102-114` explicitly identifies `SESSION_LOGGER` as a compatibility surface. Using `logging.getLogger(__name__)` in the new module would satisfy every proposed assertion while changing retained records from `vinga_server.session` to `vinga_server.device.recording`.
+
+   **The plan should say instead:** The characterization and owner tests must assert `record.name == SESSION_LOGGER`, `record.levelno == logging.WARNING`, and the exact message and arguments. Keep the explicit requirement that the owner imports `events.logger`.
+
+6. **P3: The white-box deletion count confuses four source sites with three manifest rows**
+
+   **Evidence:** There are four current reads: `test_capture_session.py:446`, plus `test_conversations_session.py:791`, `:793`, and `:848`. The plan calls these “three test lines” and later says three white-box lines are deleted (`plan:211-224`, `:511-514`). The reach-in manifest has three distinct path/name rows because the two `_record` reads are aggregated into one row.
+
+   **The plan should say instead:** Delete four source sites; regenerate a manifest delta of three rows: one `_capture_audio` row from each test file and the single aggregated `_record 2` row.
+
+**Verdict: ready after the P1/P2 amendments.**
