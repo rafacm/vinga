@@ -18,10 +18,8 @@ server half, and the assertions would be about that instead.
 import asyncio
 import json
 import logging
-import sys
 import time
 from collections.abc import Sequence
-from pathlib import Path
 
 import mcp.types
 import pytest
@@ -33,7 +31,7 @@ from tests.support.mcp_stdio_server import (
     SECOND_VOICE,
     SHIPPED_INSTRUCTIONS,
 )
-from tests.support.tools_mcp import Applying, reading
+from tests.support.tools_mcp import Applying, reading, stdio_entry
 from vinga_server import logs
 from vinga_server.config import Config, McpServerConfig
 from vinga_server.config.cli.deployment import APPLY_READ_TIMEOUT_S
@@ -61,16 +59,7 @@ from vinga_server.tools.mcp import (
     prompts,
 )
 
-STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
-
 MANAGER_LOGGER = "vinga_server.tools.mcp"
-
-
-def stdio_entry(**overrides: object) -> McpServerConfig:
-    return McpServerConfig.model_validate(
-        {"transport": "stdio", "command": sys.executable, "args": [str(STDIO_SERVER)]}
-        | overrides
-    )
 
 
 async def running(config: McpServerConfig, name: str = "tools") -> McpServerManager:

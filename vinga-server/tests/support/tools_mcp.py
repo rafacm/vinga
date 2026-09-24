@@ -63,19 +63,20 @@ MANAGER_LOGGER = "vinga_server.tools.mcp"
 # --- the entry a configuration names a server with --------------------
 
 
-def stdio_entry(**overrides: object) -> McpServerConfig:
-    return McpServerConfig.model_validate(
-        {"transport": "stdio", "command": sys.executable, "args": [str(STDIO_SERVER)]}
-        | overrides
-    )
-
-
 def entry_data(**overrides: object) -> dict[str, object]:
+    """One stdio entry naming this suite's own server, as the dictionary
+    a configuration holds."""
     return {
         "transport": "stdio",
         "command": sys.executable,
         "args": [str(STDIO_SERVER)],
     } | overrides
+
+
+def stdio_entry(**overrides: object) -> McpServerConfig:
+    """The same entry as a model, for the tests that build a manager by
+    hand rather than through a configuration."""
+    return McpServerConfig.model_validate(entry_data(**overrides))
 
 
 def command_arrives(command: Path) -> None:

@@ -16,7 +16,6 @@ preparation can fail.
 
 import asyncio
 import logging
-import sys
 import threading
 import time
 import traceback
@@ -34,8 +33,10 @@ from tests.support.tools_mcp import (
     MANAGER_LOGGER,
     Applying,
     command_arrives,
+    entry_data,
     reading,
     started,
+    stdio_entry,
 )
 from tests.support.tools_mcp import reload_config as config_with
 from vinga_server.boundary import Reach
@@ -46,7 +47,6 @@ from vinga_server.config.loader import (
     ReloadInProgressError,
     StorageError,
 )
-from vinga_server.config.models import McpServerConfig
 from vinga_server.config.secrets import (
     SecretLocation,
     SecretStore,
@@ -75,23 +75,7 @@ from vinga_server.tools.mcp import (
 )
 from vinga_server.tools.mcp import manager as manager_module
 
-STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
-
 SECRET = "sk-test-4f8b2c9e-never-a-real-credential"
-
-
-def entry_data(**overrides: object) -> dict[str, object]:
-    return {
-        "transport": "stdio",
-        "command": sys.executable,
-        "args": [str(STDIO_SERVER)],
-    } | overrides
-
-
-def stdio_entry(**overrides: object) -> McpServerConfig:
-    """One entry as a model, for the tests that build a manager by hand
-    rather than through a configuration."""
-    return McpServerConfig.model_validate(entry_data(**overrides))
 
 
 def managers_in(servers: McpServers) -> dict[str, object]:

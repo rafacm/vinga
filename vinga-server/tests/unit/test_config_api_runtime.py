@@ -15,10 +15,8 @@ the `no-store` on the way back are its behavior rather than its
 surroundings.
 """
 
-import sys
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,6 +25,7 @@ from tests.support.apps import entered_client
 from tests.support.configs import world
 from tests.support.problems import PROBLEM_KEYS, problem, refused
 from tests.support.providers import built_world
+from tests.support.tools_mcp import entry_data
 from vinga_server.app import config_reloader
 from vinga_server.config import Config
 from vinga_server.config.api import (
@@ -101,17 +100,6 @@ RELOAD_PATH = "/runtime/config/reload"
 ONBOARDING_URL = "https://vinga.test.invalid/x/4f8b2c9e-never-a-real-key/"
 
 ONBOARDING_PROVENANCE = "from server.public_url"
-
-STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
-
-
-def entry_data(**overrides: object) -> dict[str, object]:
-    return {
-        "transport": "stdio",
-        "command": sys.executable,
-        "args": [str(STDIO_SERVER)],
-    } | overrides
-
 
 def config_with(
     servers: dict[str, object], granted: list[str], database: DatabaseConfig | None = None

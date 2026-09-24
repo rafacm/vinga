@@ -22,7 +22,6 @@ and an agent switch.
 import asyncio
 import os
 import re
-import sys
 from pathlib import Path
 
 import httpx
@@ -31,12 +30,11 @@ from xiaozhi_sdk import XiaoZhiWebsocket
 from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, mock_voice, spoken
 from tests.support.mcp_stdio_server import SHIPPED_ENV, SHIPPED_INSTRUCTIONS
 from tests.support.notices import RELOAD, boundaries
+from tests.support.tools_mcp import entry_data
 from tests.support.wire import speech_pcm
 from vinga_server.config import Config
 from vinga_server.config.models import API_MOUNT_PATH
 from vinga_server.memory.store import MemoryScope
-
-STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 
 ENTRY = "home"
 
@@ -60,14 +58,6 @@ HOUSE_MAC = "aa:bb:cc:dd:ee:41"
 KIDS_MAC = "aa:bb:cc:dd:ee:42"
 QUIET_MAC = "aa:bb:cc:dd:ee:43"
 HELD_MAC = "aa:bb:cc:dd:ee:44"
-
-
-def stdio_entry(**overrides: object) -> dict[str, object]:
-    return {
-        "transport": "stdio",
-        "command": sys.executable,
-        "args": [str(STDIO_SERVER)],
-    } | overrides
 
 
 def speaks_its_prompt() -> dict[str, object]:
@@ -169,7 +159,7 @@ def granting_config() -> Config:
             "tts": {"mock": mock_voice()},
             "vad": {"mock": {"type": "mock"}},
         },
-        mcp_servers={ENTRY: stdio_entry(instructions=GUIDANCE)},
+        mcp_servers={ENTRY: entry_data(instructions=GUIDANCE)},
         agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
         agents={
             "house": {"prompt": "HOUSE", "mcp": [ENTRY]},
@@ -261,8 +251,8 @@ def opting_in_config() -> Config:
             "vad": {"mock": {"type": "mock"}},
         },
         mcp_servers={
-            "trusted": stdio_entry(use_server_instructions=True),
-            "plain": stdio_entry(),
+            "trusted": entry_data(use_server_instructions=True),
+            "plain": entry_data(),
         },
         agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
         agents={"house": {"prompt": "HOUSE", "mcp": ["trusted", "plain"]}},
@@ -432,7 +422,7 @@ def held_config() -> Config:
             "vad": {"mock": {"type": "mock"}},
         },
         mcp_servers={
-            ENTRY: stdio_entry(
+            ENTRY: entry_data(
                 instructions=GUIDANCE,
                 use_server_instructions=True,
                 # The child reads this at startup, and a reconnect
@@ -463,7 +453,7 @@ async def rewrite_guidance(control: httpx.AsyncClient, text: str) -> None:
     """
     written = await control.put(
         f"/mcp-servers/{ENTRY}",
-        json=stdio_entry(
+        json=entry_data(
             instructions=text,
             use_server_instructions=True,
             env={SHIPPED_ENV: f"${SHIPPED_TEXT_ENV}"},
