@@ -194,16 +194,38 @@ from what its item says is reported rather than silently unified.
    The module owns every Alembic invocation the tests make, through
    one private builder of the Alembic config (the script location, the
    open connection and the chain, the three things the packaged
-   environment refuses to run without). On it sit three operations: an
-   upgrade to a named revision on a blank database (a database name,
-   a chain and a revision in; the settings out), a downgrade to a
-   named revision on an open connection, and the stamped-version read
-   (by engine and schema, with a settings-and-chain form over it).
+   environment refuses to run without). On it sit three operations,
+   each owning its whole transaction, which is the shape every copy
+   has today:
+
+   - **Upgrade to a revision** (a database name, a chain and a
+     revision in; the settings out): opens a write engine for the
+     chain, creates the chain's schema (Alembic's version table lives
+     in it, which is why `upgrade_to_head` creates it first), upgrades,
+     commits, and disposes the engine in a `finally`.
+   - **Downgrade to a revision** (settings, a chain and a revision in):
+     the same shape without the schema creation. Both metrics
+     downgrade sites (`:417`, `:512`) already open their own engine,
+     downgrade, commit and dispose, so taking settings rather than a
+     connection moves them whole.
+   - **The stamped-version read** (by engine and schema, with a
+     settings-and-chain form over it that opens and disposes a read
+     engine).
+
+   On failure each propagates the exception, the connection's context
+   exit discards the uncommitted work, and the engine is disposed:
+   what every copy does now. No test is added for that failure path.
+   These are behavior-preserving moves of test fixtures, and what they
+   preserve is the success path the five upgrade files drive;
+   pinning a support helper's cleanup would pin a detail no caller
+   relies on.
+
    `test_metrics_views_upgrade.py`'s `_alembic` is deleted and its two
-   downgrades (`:417`, `:512`) and its `_stamped` route through the
-   module. The fixtures stay in their files as one-line calls, per the
-   scope the issue comment settled. What callers stop knowing: the
-   config the packaged environment needs, in either direction.
+   downgrades and its `_stamped` route through the module. The
+   fixtures stay in their files as one-line calls, per the scope the
+   issue comment settled. What callers stop knowing: the config the
+   packaged environment needs, and the schema it needs first, in
+   either direction.
 
    `vinga_server.db` exposes no revision-parameterized operation:
    `upgrade_to_head` (`db/__init__.py:452`) builds its own config
@@ -552,6 +574,8 @@ Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    Evidence: Item 2 says the new helper upgrades a blank database but specifies only the Alembic config builder (plan lines 163-175). Every current baseline fixture explicitly creates the chain schema before invoking Alembic, for example `test_device_record_upgrade.py:70-82`; `upgrade_to_head` explains why Alembic needs the schema first at `db/__init__.py:452-519`. The plan also does not say whether the new upgrade and downgrade operations commit, roll back on failure, or leave that responsibility to the caller.
 
    The plan should say instead: define each operation’s transaction boundary. The blank-database upgrade operation must create the chain schema, run the named revision, commit, and dispose its engine. The open-connection downgrade operation must state that it leaves commit or rollback to its caller, or own that transaction itself. Test both success and failure cleanup semantics.
+
+   *Resolution:* accepted as to the boundaries. Item 2 now states each operation's transaction: the upgrade opens, creates the chain's schema, upgrades, commits and disposes; the downgrade takes settings rather than a connection and owns the same shape, which is what both metrics sites already do; failure propagates with the uncommitted work discarded and the engine disposed. The failure-cleanup tests are not added: these are behavior-preserving fixture moves whose callers drive only the success path, and pinning a support helper's cleanup would pin a detail no caller relies on.
 
 5. **P2: The `rows` read-only guarantee has no lasting behavioral test**
 
