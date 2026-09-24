@@ -263,3 +263,64 @@ Not run here: the image build, the smoke conversation and the compose
 boot, the tier-closure and wheel lanes beyond what the integration lane
 holds. No event, field, configuration key or command changed, so none
 of them should move; the pull request records what CI says.
+
+### PR review round, PR #562
+
+Automated external review of this PR's diff (origin/main...4926a5f6).
+Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 7m11s, at commit 4926a5f6.
+Verdict as received: **mergeable after the listed fixes**. Three
+findings: two fixed here, and one deferred to M2.
+
+1. **P1: the codec-start warning renders an untrusted exception class
+   name.** `recording.py` logs `type(exc).__name__` to the retained
+   session logger, and `events/__init__.py` (the `_offer` comment)
+   records that a dynamically created exception class can carry
+   far-side bytes in its name. The owner's test poisons only the
+   message and pins the class name, so it misses that leak. The
+   reviewer asked for an owner-chosen label only, tested with a
+   dynamically named, credential-shaped exception whose name and
+   message are absent from the record's arguments, both renderings,
+   stdout and stderr.
+
+   *Resolution*: deferred to M2 by the orchestrator: M1 is a
+   behavior-preserving move and its pins record today's warning
+   verbatim; M2, the PR that already makes the close warnings
+   class-name free, changes this warning to render nothing from the
+   exception, with a dynamically named credential-shaped exception
+   test, and its PR carries the fix. The warning and its tests are
+   unchanged in M1.
+
+2. **P2: the close-order pin did not pin the capture's detach after
+   the row's close.** The pin instrumented `attach_capture` but not
+   `detach_capture`, and its "whole close sequence" left the detach
+   out, so moving the capture's detach before `close_session` still
+   logged `("capture.close", True)` and passed.
+
+   *Resolution*: accepted, in `fee7de09`. `watch_attachments` logs
+   `detach_capture` while a capture is attached (the clearing inside
+   `attach_capture` detaches nothing and is not logged), and
+   `("detach_capture",)` sits between `close_session` and
+   `capture.close` in the close sequence and in the row-refusal pin.
+   Checked one run each: green against the pre-move session (a
+   temporary worktree at `575655c8`, the file's patch target pointed
+   back at the session module), green at HEAD, and failing at HEAD
+   with the owner's capture detach moved before `close_session` (index
+   5, `('detach_capture',)` where the sink's detach was expected). The
+   same mutation passed the pin as it stood before the fix, which
+   confirms the finding. These are pin lines changed after the move,
+   by this round; the statement above that the move changed only the
+   patch targets is about `3b3c2897` and stays true.
+
+3. **P3: the record carried a stale link-check result.** The
+   discoveries and the verification table claimed four broken links in
+   the plan's review record, which `9dbadf53` had since unlinked; the
+   checker reports 272 files, 0 failures.
+
+   *Resolution*: accepted, in `3fcc8fae`. The discovery is removed and
+   the verification row records the zero-failure run.
+
+After the fixes: `tests/unit/test_recording_order.py` and
+`tests/unit/test_recording.py` 23 passed, `tests/census` 66 passed,
+`python3 scripts/check_doc_links.py .` 0 failures. The full lanes were
+not rerun for a test-only and a doc-only change; CI runs them on the
+pull request.
