@@ -186,13 +186,6 @@ warning are the plan's.
   collaborator at all, so the owner does nothing there; the lease is
   the exporter's. It was not run at the plan base, so this records a
   load-dependent teardown race in that file rather than a cause.
-- **The plan's review record has four broken links.**
-  `scripts/check_doc_links.py` reports four "missing target" failures
-  at lines 782 and 788 of the plan: the second review round's
-  `docs/plans/...md:311` and `:303` link targets, as the reviewer wrote
-  them. They predate this milestone and are left as recorded; the
-  documentation workflow will report them on any pull request that
-  touches `docs/`.
 
 ### The closing greps
 
@@ -264,7 +257,7 @@ From `vinga-server/`, on agentpi.
 | this commit | `tests/integration/test_telemetry_hardening.py` alone | 4 passed, three runs |
 | this commit | `uv run pytest tests/census -q`; `uv run ruff check .`; `uv run mypy` | 66 passed; clean; no issues in 5 source files |
 | this commit | the eight drift checks the integration job runs (domain, server, conversations schema, metrics views, events, OpenAPI, CLI reference, CLI recipes) | no difference in any |
-| this commit | `scripts/check_doc_links.py` | 272 files, 4 failures, all the plan's pre-existing review-record links (see the discoveries) |
+| `4926a5f6` (after the plan's round-2 citations were unlinked) | `python3 scripts/check_doc_links.py .` | 272 files, 0 failures |
 
 Not run here: the image build, the smoke conversation and the compose
 boot, the tier-closure and wheel lanes beyond what the integration lane
