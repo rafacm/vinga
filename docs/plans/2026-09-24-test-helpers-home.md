@@ -99,6 +99,27 @@ from what its item says is reported rather than silently unified.
    sites. What callers stop knowing: which parts of an exception can
    carry a value out.
 
+   The strong walker already has callers at its old home: 23 unit
+   modules import `chain` from `tests.support.config_cli`, six of them
+   aliased `_chain` (found by an AST walk of every `ImportFrom`, not by
+   grep, at `1bcf3dc4`: `test_config_cli.py`,
+   `test_config_cli_check.py`, `test_config_cli_confirmation.py`,
+   `test_config_cli_dotenv.py`, `test_config_cli_events.py`,
+   `test_config_cli_grammar.py`, `test_config_cli_info.py`,
+   `test_config_cli_rendering.py`, `test_config_cli_secrets.py`,
+   `test_config_cli_summary.py`, `test_config_cli_transport.py`,
+   `test_config_cli_untransportable.py`,
+   `test_config_control_character_identities.py`,
+   `test_config_docgen.py`, `test_config_round_trip.py`,
+   `test_config_url_credential_display.py`, `test_device_record.py`,
+   `test_device_record_no_leak.py`, `test_missing_server_half.py`,
+   `test_server_reference.py`, `test_session_device_location.py`,
+   `test_simulator_board.py`, `test_simulator_conversation.py`). Each
+   moves its import to `tests.support.leaks`, keeping its alias, in the
+   same commit that deletes the old definition; the same AST walk
+   rerun afterwards finds no import of `chain` or `_held` from
+   `tests.support.config_cli`, and its count is recorded.
+
    Moving it, the walk is made complete in two ways, so that every
    walker it replaces is a subset of it by construction rather than by
    inspection:
@@ -497,6 +518,8 @@ Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    Evidence: Item 1 requires no re-export but names only the fifteen local-walker files (plan lines 88-100). At least 24 other unit modules directly import `chain` from `tests.support.config_cli`, for example `test_config_cli_check.py:57`, `test_config_cli_events.py:46`, `test_config_cli_rendering.py:40`, `test_device_record.py:36`, and `test_device_record_no_leak.py:62`.
 
    The plan should say instead: inventory and update every existing `tests.support.config_cli.chain` import to `tests.support.leaks.chain`, including aliases, before deleting the old definition; verify no imports from the old home remain.
+
+   *Resolution:* accepted, and the count confirmed by an AST walk of every `ImportFrom`: 23 modules, six aliasing it `_chain`. Item 1 now lists them, moves each import in the commit that deletes the old definition, and reruns the walk to show none remain.
 
 2. **P1: The proposed replacement is not a superset of `carried`**
 
