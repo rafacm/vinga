@@ -77,10 +77,13 @@ plan's.
 ## What moves
 
 Each item names its home, what its callers stop having to know, and
-the files it touches. The implementer confirms each body is identical
-to its destination's before replacing it (an AST comparison, recorded
-in the implementation doc), and a copy found to differ is reported
-rather than silently unified.
+the files it touches. Where an item claims a copy is identical to its
+destination, the implementer confirms it by AST comparison before
+replacing it, recorded in the implementation doc. Where an item maps a
+copy that is not identical (item 4's table, item 1's walkers, item 7's
+readers), it states the equivalence it relies on and how that is
+checked, and the implementer records the check. A copy that differs
+from what its item says is reported rather than silently unified.
 
 1. **The secret walker goes to `tests/support/leaks.py`.** `chain`
    and `_held` move there from `tests/support/config_cli.py`, whose
@@ -222,8 +225,11 @@ rather than silently unified.
    defined over `entry_data`, so the support module stops holding the
    literal twice. Each file's own `STDIO_SERVER` is checked to be the
    same path as `tests/support/configs.STDIO_SERVER` before its copy
-   goes, and the equalities are checked for no overrides, an `args`
-   override and an `env` override, recorded in the implementation doc.
+   goes. Equality is checked per public signature and recorded in the
+   implementation doc: for a helper that accepts overrides, with none,
+   with an `args` override and with an `env` override; for
+   `test_mcp_reload.py`'s `stdio_entry()`, which accepts none, for the
+   no-argument call alone.
 
 5. **The OpenAI SDK client for provider tests.** `mock_client`, 13
    lines, identical in `test_providers_openai_asr.py` and
@@ -467,6 +473,8 @@ Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    Evidence: The opening rule still requires AST identity for every moved body (plan (`plan:79`)), while item 4 correctly identifies non-identical mappings. It also requires `args` and `env` equality checks for each copy, despite `test_mcp_reload.stdio_entry()` accepting no overrides (test_mcp_reload.py (`tests/integration/test_mcp_reload.py:41`)).
 
    The plan should say instead: require AST comparison only where AST identity is claimed; require documented behavioral equivalence for the table’s non-identical mappings. Test override cases only for helpers whose public signature accepts overrides, and test the no-argument helper only for its sole supported call.
+
+   *Resolution:* accepted. The opening rule now requires AST comparison only where an item claims identity, and a stated, checked equivalence where it maps a copy that is not identical; item 4 checks overrides only for helpers whose signature accepts them, and `test_mcp_reload.stdio_entry()` for its no-argument call alone.
 
 4. **P2: Item 1 reopens decisions it says are settled**
 
