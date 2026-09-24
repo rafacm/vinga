@@ -2600,7 +2600,10 @@ class PipelineRuntime:
         The handle is let go only if it is still the reply this call
         cancelled. A reply started while the cancel was awaited is the
         reply in flight now, and clearing the field after the await
-        would drop the one handle anything has on it.
+        would drop the one handle anything has on it. A caller cancelled
+        while it waits lets go of nothing: its cancellation propagates,
+        the reply finishes its tail still held here, and `close` sees
+        it through.
         """
         reply = self._in_flight
         if reply is None:

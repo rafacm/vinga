@@ -19,7 +19,6 @@ reads and writes its three fields.
 """
 
 import asyncio
-import contextlib
 from collections.abc import Coroutine, Generator
 from dataclasses import dataclass
 from typing import Any
@@ -100,17 +99,27 @@ class ReplyInFlight:
         task not yet done, and an utterance finishing in that window
         would be dropped.
 
-        Exactly `CancelledError` is suppressed, which is how the reply
-        ending as asked looks from here. A reply whose task ended in any
-        other exception raises it out of this call, as awaiting the task
-        always did.
+        The reply's own cancellation is suppressed, which is how the
+        reply ending as asked looks from here; a cancellation of the
+        caller is not. A caller cancelled while it waits (the session
+        cap running out on a barge-in, say) sees its own
+        `CancelledError`, and the reply goes on through its `finally`
+        undisturbed, still held by whoever holds this value. A reply
+        whose task ended in any other exception raises it out of this
+        call, as awaiting the task always did.
         """
         self.latch(outcome)
-        if self._reply_task is None:
+        task = self._reply_task
+        if task is None:
             return
-        self._reply_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await self._reply_task
+        task.cancel()
+        # asyncio.wait rather than await: a caller cancelled while it
+        # waits sees its own CancelledError here, and the reply is not
+        # cancelled a second time on its behalf, which would cut its
+        # finally short.
+        await asyncio.wait([task])
+        if not task.cancelled():
+            task.result()
 
     async def drain(self, grace_s: float) -> bool:
         """Let this reply finish, and answer whether it did within
