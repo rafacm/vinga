@@ -48,11 +48,12 @@ protocol, the manifest's content and the moment each step happens; it
 hands the owner the facts it needs at `open` and at `close`, and feeds
 it frames.
 
-Nothing a person running vinga can observe changes: no event, field,
-log line (the owner logs through the same `events.logger`, so the
+M1 changes nothing a person running vinga can observe: no event,
+field, log line (the owner logs through the same `events.logger`, so the
 `logger` field of every JSON record is unchanged), stored row, capture
-file, or upload. The milestone proves that with pins committed before
-the move.
+file, or upload, and proves it with pins committed before the move.
+M2 changes one thing, on a failure path only: a close step that
+raises is logged and the steps after it still run.
 
 ## The issue's decisions, restated
 
@@ -192,14 +193,20 @@ list does not name and its "hands recording a seam" does.
   attached, emitting `session_closed`, then `close` with
   `self._open_duration_s()` and `self._closed_reason()` read at the
   call, which is the instant `_stop_recording` reads them today.
-- **No guard is added.** Today none of the close tail's recording steps
-  runs under `_cleanly`, and the owner keeps that exactly; wrapping
-  them is a behavior change (a step that raises today propagates out
-  of the `finally`) and belongs to its own issue if anyone wants it.
-  Every one of those callees is written not to raise
-  (`SessionCapture.close` suppresses, the store's close is a queue put
-  that answers a settled refusal when stopped), which is why the
-  question has never been forced.
+- **No guard in M1; one per step in M2.** Today none of the close
+  tail's recording steps runs under `_cleanly`, so a step that raises
+  propagates out of the `finally` and skips every step after it: the
+  later handoffs, and the session's re-raise of a cancellation it was
+  holding. That contradicts the close path's own stated contract ("it
+  always reaches the end", `device/session.py` lines 682-685). The
+  callees are not all written not to raise: `CaptureStore.session_closed`
+  reaches `CaptureUpload._start`, whose `threading.Thread.start` raises
+  `RuntimeError` when no thread can be started, and the transcript
+  export's `_omit` reaches telemetry without a blanket suppression; a
+  redeploy draining many sessions at once is when the uploader starts
+  and the handoffs pile up. M1 moves the steps exactly as they are, so
+  the move is proven by pins alone, and M2 then gives each step its own
+  guard, a behavior change that sits alone in its own review. See M2.
 
 ### Who constructs it
 
@@ -276,13 +283,54 @@ owner, so both targets become the owner's module. Those are one-line
 changes to pins, stated here so the review reads them as the move and
 not as weakened tests.
 
-### One milestone, cut into reviewable commits
+### Two milestones: the move, then the guard
 
 The move cannot be split across PRs without an intermediate `main`
 where half the lifecycle is in the owner and half in the session, two
 homes for one ordering, which is the state the issue exists to end. So
-one milestone, with the cut inside it as commits, each green on its
-own.
+M1 is the whole move, with the cut inside it as commits, each green on
+its own, and it changes no behavior.
+
+M2 is the one behavior change, stacked on M1: the owner's `close`
+reaches its end whatever one of its steps raises. Its own PR, because
+a reviewer checking that a move preserved behavior and a reviewer
+checking that a failure is now contained are reading for opposite
+things.
+
+### M2's guard
+
+Each of the owner's close steps runs under its own guard: the sink's
+detachment and the row's close; the capture's detachment and close;
+`captures.session_closed`; `transcripts.session_closed`;
+`llm_input.session_closed`. A step that raises an `Exception` is
+reported and the next step runs:
+
+- **Reported in `_cleanly`'s own sentence**,
+  `"session %s: %s did not stop cleanly (%s)"`, through
+  `events.logger`, with the session id, the step named in the owner's
+  own words (`"the conversation record"`, `"the capture"`, `"the
+  capture upload"`, `"the transcript export"`, `"the LLM-input
+  export"`), and the exception's class name, never its message. One
+  sentence for one situation, so an operator filtering on it finds
+  every cleanup step that failed, the session's and the owner's.
+- **State is released in a `finally`** inside each step, so a step
+  that raised part way leaves no sink attached and no capture held.
+- **The barrier degrades to `None`.** A row whose close raised
+  answered nothing, so the transcript export is handed `None`, which
+  its signature already accepts and which is what it is handed today
+  for a session with no record.
+- **No close reason is latched.** `_cleanly` latches `error` because
+  its steps run before `session_closed` renders the reason; the
+  owner's run after it, and the row's reason was passed in before any
+  of them could fail. The log line is the record.
+- **Only `Exception`.** The steps are synchronous, so no cancellation
+  can arrive inside one, and a `BaseException` that is not an
+  `Exception` (a `KeyboardInterrupt`, a `SystemExit`) keeps
+  propagating, as it does through `_cleanly`.
+
+The session needs no change for M2: its `finally` already calls
+`close` and then re-raises a held cancellation, and `close` no longer
+raises.
 
 ## Module layout
 
@@ -567,12 +615,14 @@ implementation doc says so in those words.
   `SessionEvents`, and they stay there; the owner calls them.
 - No generated reference changes, since no event, field or
   configuration key changes.
-- **Changelog:** none. Nothing a person running vinga can observe
-  changes.
+- **Changelog:** none for M1, since nothing a person running vinga
+  can observe changes; M2 carries one `### Fixed` fragment, stated
+  under its milestone.
 
 ## Milestones
 
-- [ ] **M1: a session's recording gets one owner**. Commits in this
+- [ ] **M1: a session's recording gets one owner**. No behavior
+  change. Commits in this
   order, each green on its own:
   1. Pins: the characterization tests under "Tests" that the existing
      suites do not already cover, green against today's code.
@@ -598,6 +648,41 @@ implementation doc says so in those words.
   hands the session so the session learns one collaborator instead of
   four.
   Changelog: none.
+- [ ] **M2: the recording's close always reaches its end**. Stacked
+  on M1. Commits:
+  1. Tests first, watched failing against M1's owner: parametrized
+     over each of the five close steps raising a planted exception
+     whose message carries a credential-shaped sentinel, every later
+     step still runs, in order; the step's state is released; the
+     warning's `record.name` is `SESSION_LOGGER`, its level WARNING,
+     its `record.msg` exactly `_cleanly`'s sentence and its
+     `record.args` the session id, the step's name and the class name;
+     the sentinel is absent from the message, the arguments, the
+     rendered line and both log formats. The row-close case hands the
+     transcript export `None`. One session-level test through a served
+     session: a cleanup step cancelled (the `_cleanly` hold) plus a
+     raising capture handoff, and the task still ends cancelled with
+     the transcript and LLM-input handoffs made, which fails on M1
+     because the raise skips the re-raise.
+  2. The guard, in the owner only.
+  3. The changelog fragment and the owner's docstring.
+
+  Falsification, one run each: removing any one guard fails its
+  parametrized case; logging `str(exc)` instead of the class name
+  fails the sentinel check; latching or re-raising fails the
+  session-level test.
+
+  Design footprint: deepens `device/recording.py` (its callers stop
+  having to know that a cleanup step can fail part way); no module or
+  seam added. Documentation footprint: the owner's docstring; no page
+  under `docs/` describes what a failing close step does, and the one
+  new log line reuses an existing sentence, so no catalog or
+  generated reference changes. Changelog: a
+  `changelog.d/483-recording-close.md` fragment under `### Fixed`: a
+  failure in one of a closing session's recording steps no longer
+  skips the ones after it, so a capture upload that cannot start its
+  worker still leaves the transcript and LLM-input exports told the
+  session ended.
 
 ## Plan review round
 
@@ -634,6 +719,8 @@ Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Evidence:** The plan says every close callee is written not to raise (`plan:178-185`). `CaptureStore.session_closed` calls `CaptureUpload.session_closed` (`capture.py:622-632`), which can call `_start()` and an uncaught `threading.Thread.start()` (`capture_upload.py:629-659`, `:704-719`). Transcript cleanup also reaches telemetry operations without a blanket suppression (`transcript_export.py:147-157`). Any such exception skips later handoffs and the pending cancellation re-raise at `device/session.py:727-748`, contradicting the close path’s stated “always reaches the end” contract at `:682-685`. A redeploy draining many sessions is precisely when uploader startup and simultaneous post-close handoffs occur.
 
    **The plan should say instead:** Give each synchronous close step its own sanitized guard, clear owned state in `finally`, and continue through every later handoff and the pending cancellation. Tests should make each step raise in turn, assert later cleanup still runs, and verify that no exception text or chained value reaches logs. If fail-fast preservation is intentionally retained, the plan must accurately document and pin which cleanup is skipped instead of claiming the calls cannot raise.
+
+   *Resolution:* Accepted, as a second milestone rather than inside the move. The rationale is corrected (the callees can raise; `Thread.start` in the uploader's first job is the concrete case) and M1 still moves the steps unguarded, so the move is proven by pins alone. M2, stacked on M1 and in its own PR, gives each of the five close steps its own guard: `_cleanly`'s sentence through `events.logger` with the class name only, state released in a `finally`, the barrier degrading to `None`, no latch (the reason was rendered before these steps run), `Exception` only. Its tests make each step raise in turn with a planted sentinel, assert every later step runs and nothing of the message reaches the log, and drive a served session with a held cancellation to prove the re-raise now survives a failing handoff. It carries a `### Fixed` changelog fragment.
 
 5. **P2: The compatibility-sensitive logger name is promised but not tested**
 
