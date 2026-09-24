@@ -344,6 +344,18 @@ from what its item says is reported rather than silently unified.
    it is watched failing, by timing out, against the
    `open_conversations` version before the switch.
 
+   *Dropped at implementation, under this item's own stop rule.*
+   Moving `rows` to `read_engine` made two tests in
+   `test_agent_rename_in_flight.py` fail intermittently: they read the
+   record while the conversation store's writer is still committing, and
+   see it only because `rows` waits on the chain's advisory lock. That
+   wait is load-bearing, so the three `read_engine` copies are a
+   different reader rather than a duplicate of `rows`, and merging them
+   would have meant adding drains to those tests. `rows` keeps its
+   engine, its docstring now says what it waits for and who relies on
+   it, and `test_support_stores.py` is not added. The implementation
+   doc's M1 section has the measurements.
+
 8. **The scripted LLM's tool-result reads go beside the fake.**
    Two projections of the shape `ScriptedLlm` records in `seen` are
    each identical in `test_session_conversations.py` and
@@ -389,6 +401,7 @@ from what its item says is reported rather than silently unified.
   | `_config_file` | 2 | Writes one file under `tmp_path` |
   | `_get`, `erase_thread` | 3, 2 | One request plus the status each suite asserts about its own route |
   | `running` | 2 | Constructs and starts a manager, two statements |
+  | `stored`, `rows_of` | 3 | A reader that never waits for a writer, where `stores.rows` waits on the chain's lock and two tests rely on that; item 7 was dropped for this reason |
 
 ## Verification
 
@@ -437,19 +450,19 @@ fragment, `changelog.d/531-test-helpers-home.md`, under `### Changed`.
 
 ## Milestones
 
-- [ ] **[M1: the helpers go home](2026-09-24-test-helpers-home-implementation.md#m1-the-helpers-go-home)**
-  (#531 M2; PR TBD; left unticked because item 7 stopped under its own
-  rule, see the implementation doc). Items 1 to 8 above, one
+- [x] **[M1: the helpers go home](2026-09-24-test-helpers-home-implementation.md#m1-the-helpers-go-home)**
+  (#531 M2; PR TBD; item 7 dropped at implementation, see its note).
+  Items 1 to 8 above, one
   commit per item, the verification above, the changelog fragment.
   Design footprint: deepens `tests/support/leaks.py` (the exception
   walk joins the record walk), `tests/support/config_cli.py` (the
-  capture joins the runner), `tests/support/stores.py` (`rows`
-  answers in order) and `tests/support/providers.py` (the scripted
+  capture joins the runner) and `tests/support/providers.py` (the scripted
   fake's two reads join it); adds `tests/support/migrations.py` (callers
   stop knowing the Alembic environment's three requirements) and
   `tests/support/openai_sdk.py` (callers stop knowing how the SDK is
   kept from retrying and from reaching the network).
-  Documentation footprint: `leaks.py`'s docstring only. Closes #531.
+  Documentation footprint: `leaks.py`'s docstring, and `stores.rows`'
+  docstring corrected when item 7 was dropped. Closes #531.
 
 ## Plan review round
 
