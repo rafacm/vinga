@@ -324,3 +324,247 @@ After the fixes: `tests/unit/test_recording_order.py` and
 `python3 scripts/check_doc_links.py .` 0 failures. The full lanes were
 not rerun for a test-only and a doc-only change; CI runs them on the
 pull request.
+
+## M2: the recording's close always reaches its end
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.281; 2026-09-24.
+
+The owner's `close` gives each of its five steps its own guard: the
+sink's detachment and the row's close; the capture's detachment and
+close; the capture store's handoff; the transcript export's; the
+LLM-input export's. A step that raises an `Exception` is reported as
+`"session %s: %s did not stop cleanly"` through `events.logger`, with
+the session id and the step's fixed name and nothing from the
+exception, and the next step runs. The session did not change: its
+`finally` already called `close` and then re-raised a held
+cancellation, and `close` no longer raises one of its steps' failures
+past that re-raise. A scope addition from PR #562's review rides
+along: the codec-failure warning M1 moved verbatim no longer names the
+exception's class.
+
+### The commits
+
+| Commit | What it is |
+| --- | --- |
+| `1626faf7` Guard each step of a recording's close on its own | The guard and its tests in one commit, the body recording the tests' red runs against M1's owner |
+| `d2011820` Stop the codec warning naming the exception's class | The scope addition from PR #562's review, with its two pins |
+| `e8deb81e` Record the recording close's fix for operators | The changelog fragment and the owner's docstrings |
+| Record M2 of the recording owner | This section and the tick |
+
+### What landed
+
+| Piece | Where |
+| --- | --- |
+| The guard | `device/recording.py`: `_stopping(step)`, a context manager around each step. `except Exception:` binds nothing; the report is one `logger.warning` inside `contextlib.suppress(Exception)`, its comment citing `events._report` |
+| The labels | `"the conversation record"`, `"the capture"`, `"the capture upload"`, `"the transcript export"`, `"the LLM-input export"`, each written once, at its step |
+| The state | `_close_record` releases the sink in a `finally` around its detachment; the capture's detach and close moved into `_close_capture`, which releases the codecs in a `finally` |
+| The barrier | `recorded` starts as `None` and is assigned inside the row's guard, so a row whose close raised hands the transcript export `None` |
+| The codec warning | `"session %s: recording could not start"`, the session id alone; the `except` arm no longer binds the exception |
+| The docstrings | the module's gains a paragraph on the close always reaching its end; `close`'s says the close does not raise; `_stopping`'s says why nothing of the exception is rendered, why nothing is latched, and why only `Exception` |
+| The fragment | `changelog.d/483-recording-close.md`: `### Fixed` for the close, `### Security` for the codec warning |
+
+### The tests
+
+In `tests/unit/test_recording.py`, through the owner's doubles:
+
+- `test_a_close_step_that_raises_is_reported_and_every_later_step_still_runs`,
+  parametrized over six failure points. The planted exception's class
+  is `type(CLASS_SENTINEL, (Exception,), {})` with a credential-shaped
+  name, and its message carries a second sentinel. Each case asserts
+  the whole close log (every later step ran, in order), the barrier
+  (`None` for the row's two cases, the store's own otherwise), one
+  warning with `record.name == SESSION_LOGGER`, level WARNING, exact
+  `record.msg` and `record.args == (SID, step)`, no `exc_info`, neither
+  sentinel in `both_formats` (the text and JSON renderings through
+  `logs.py`'s own formatters, the arguments and the exception info),
+  no tap or capture left attached, and a second close that finds only
+  the three handoffs to make and closes the capture no second time.
+- `test_a_report_that_raises_costs_no_later_step`, the same six cases
+  with a logger filter on the session channel that raises on the
+  owner's sentence; it asserts the filter was reached, once, before
+  asserting the close log.
+- `test_what_is_not_an_exception_still_propagates`: a `BaseException`
+  subclass planted in the capture store's handoff leaves `close`, and
+  the handoffs behind it are not made.
+- `test_codecs_that_will_not_open_release_the_capture_and_say_nothing_of_why`,
+  renamed from `..._say_so_by_class`: the codec failure raises the same
+  planted class, and the warning's message is exact, its arguments the
+  session id alone, both sentinels absent.
+
+In `tests/unit/test_recording_order.py`, through a served session:
+`test_a_failing_handoff_skips_no_later_one_and_loses_no_held_cancellation`,
+parametrized over a working and a broken session channel. The
+runtime's close raises `CancelledError` (the `_cleanly` hold) and the
+capture store's handoff raises; the task ends cancelled, the close log
+is the whole of M1's close sequence, the transcript export is handed
+the store's barrier, and the warning names the capture upload (or,
+with the broken channel, the filter was reached once and nothing was
+logged).
+
+In `tests/unit/test_capture_session.py`, the session-level codec pin:
+its `CodecUnavailable` is now built with `type()` and a
+credential-shaped name, and it asserts the new message, the session id
+as the only argument, and neither sentinel in the renderings or the
+process's output.
+
+### The red runs
+
+| Tests | Against | Result |
+| --- | --- | --- |
+| `test_recording.py` | M1's owner, `4926a5f6` | 12 failed, 15 passed: the six step cases and the six broken-filter cases; the `BaseException` case passed, since M1 lets everything through |
+| `test_recording_order.py` | M1's owner, `4926a5f6` | 2 failed, 9 passed: the task ended with the planted exception, not cancelled |
+| `test_recording.py`, `test_capture_session.py` | the guard commit's owner | 2 failed, 39 passed: both codec cases |
+
+### The falsification runs
+
+One run each, every mutation applied to a copy of `recording.py`,
+restored by copy and touched after, and the file's hash compared with
+the backup's once the set was done. Tests run:
+`test_recording.py` and the session-level test.
+
+Run twice: once at the guard commit before the rebase onto M1's review
+fixes, and again on the final tree after it, since the rebase changed
+the session-level test's expected close sequence (M1's `fee7de09` added
+the capture's detach to it). Every mutation failed both times, none
+survived; the counts below are the final tree's.
+
+| Mutation | Result |
+| --- | --- |
+| the row's guard removed | 4 failed: both row cases, in both the step and the broken-filter tests |
+| the capture's guard removed | 2 failed: the capture case in both |
+| the capture upload's guard removed | 4 failed: its case in both, and both session-level cases |
+| the transcript export's guard removed | 2 failed: its case in both |
+| the LLM-input export's guard removed | 2 failed: its case in both |
+| the class name in the message | 14 failed |
+| the class name as an extra field | 6 failed: every step case, on the sentinel check alone, since the message and arguments are unchanged |
+| `str(exc)` in the message | 14 failed |
+| `str(exc)` as an extra field | 6 failed, on the sentinel check alone |
+| the traceback attached (`exc_info=True`) | 6 failed |
+| the report's suppression removed | 7 failed: the six broken-filter cases and the session-level broken-channel case |
+| re-raising after the report | 14 failed, both session-level cases among them |
+| the first failure latched and raised after the last step | 14 failed, both session-level cases among them |
+| `except BaseException` | 1 failed: the `BaseException` case |
+| the report through `logging.getLogger(__name__)` | 13 failed |
+| the report at INFO | 12 failed |
+| the codecs released only after a clean close | 1 failed: the capture case |
+| the sink released only after a clean detach | 1 failed: the sink's detachment case |
+
+On the final tree, `catching BaseException` first matched two lines,
+since the codec arm now spells its `except` the same way, and the
+runner's uniqueness check refused it rather than mutating either; it
+was rerun against the close's own line, with the result above.
+
+For the codec warning, against `test_recording.py`'s and
+`test_capture_session.py`'s codec cases:
+
+| Mutation | Result |
+| --- | --- |
+| the class name back in the message | both fail |
+| the class name as an extra field | both fail, on the sentinel check alone |
+| `str(exc)` as an extra field | both fail, on the sentinel check alone |
+| the traceback attached | both fail |
+
+### The scope addition from PR #562's review
+
+Finding 1 of M1's review round (P1, above) was deferred here by the
+orchestrator: the codec-failure warning rendered `type(exc).__name__`,
+which `type(...)` lets carry a far side's bytes, the same leak round 2
+of the plan review found in M2's own warning. It landed as its own
+commit, `d2011820`, with the two pins that asserted the old message and
+arguments changed to the new ones and a dynamically named
+credential-shaped exception planted in both. The changelog fragment
+records it under `### Security`, since what changed is what a retained
+log line can carry.
+
+### Deviations from the plan
+
+- **The tests and the guard are one commit, not two.** The plan lists
+  "Tests first, watched failing" and "The guard" as commits 1 and 2;
+  a tests-only commit would be red on its own, and each commit here is
+  green. The tests were written and run against M1's owner before the
+  guard existed, and the commit body records those runs; the table
+  above repeats them.
+- **Six failure cases, not five.** The row's step can fail at either
+  of its two calls, and the case where the sink's detachment raises is
+  the only one that proves the sink is released in the `finally` (the
+  row's close raising happens after the release either way); the
+  mutation that drops that `finally` fails that case and no other.
+- **The broken-filter case is parametrized over the same six** rather
+  than being one case, and a `BaseException` case was added, since
+  "only `Exception`" was a stated rule with no test holding it.
+- **"Latching" was run as the owner keeping its first failure and
+  raising it after the last step.** The owner has no access to the
+  session's close-reason latch, so that is the one latch it could grow;
+  it fails the session-level test, as re-raising does.
+- **The session-level test sits in `test_recording_order.py`**, whose
+  module docstring calls its contents characterization, under a
+  section comment saying this one is not. Its doubles are that file's,
+  and `tests/unit/test_support_boundaries.py` refuses an import from one
+  test module into another. For the same reason the raising filter is
+  defined in both files, as `test_event_typed_emit.py` defines its own
+  broken handler.
+- **A second changelog heading.** The plan's fragment is `### Fixed`
+  only; the scope addition adds `### Security`.
+
+Otherwise none: the five labels, the sentence, the suppression and its
+comment, the release in a `finally`, the barrier degrading to `None`,
+no latch, `Exception` only, and the session left unchanged are the
+plan's.
+
+### Discoveries
+
+- **The session needed no change**, as the plan predicted:
+  `git diff d2b0d879 HEAD -- vinga-server/src/vinga_server/device/session.py`
+  is empty.
+- **Other retained lines still render an exception's class name.**
+  Beside the session's `_cleanly`, which the plan's round 2 already
+  records as a follow-up candidate, `capture.py`'s `_disable` (the PR
+  #153 review's "class name and never the exception") and
+  `device/bindings.py` (its module docstring and line 485) do too.
+  Whether any of those can meet an exception built by a far side was
+  not assessed here; they are recorded so the follow-up can weigh all
+  of them together.
+
+### The reach-in census
+
+No delta: `git diff d2b0d879 HEAD -- vinga-server/tests/census` is
+empty. The new tests read the doubles' public attributes, and the
+session-level test reaches the session only through `handshaken`,
+`monkeypatch.setattr` on its runtime's `close`, and the doubles.
+
+### #489's bookkeeping
+
+Of the eight files, M2 touches only `test_capture_session.py`, and the
+plan's count there is 1 at `d2b0d879` and 1 at `e8deb81e`: the codec
+pin's edit names no storage.
+
+### Verification
+
+From `vinga-server/`, on agentpi. The lanes ran at `e8deb81e`, whose
+code is this commit's: what this commit adds is the section and the
+tick.
+
+| Where | What ran | Result |
+| --- | --- | --- |
+| before the guard | `test_recording.py`; `test_recording_order.py`, against M1's owner | 12 failed, 15 passed; 2 failed, 9 passed (the red runs above) |
+| the guard commit | `test_recording.py`, `test_recording_order.py`; `uv run ruff check .`; `uv run mypy` | 38 passed; clean; no issues in 5 source files |
+| the guard commit | the two recording suites, `test_capture_session.py`, `test_conversations_session.py`, `test_session_device.py`, `test_event_baseline.py`, `test_transcript_export.py`, `-n auto` | 133 passed |
+| the guard commit | the census lane | 66 passed |
+| the codec commit | `test_recording.py`, `test_capture_session.py` against the guard commit's owner, then its own | 2 failed, 39 passed; 41 passed |
+| the codec commit | `uv run ruff check .`; the census lane | clean; 66 passed |
+| after the rebase onto `d2b0d879` | the two recording suites, `test_capture_session.py`, `test_conversations_session.py`, `-n 4` | 75 passed |
+| the fragment commit | `python3 scripts/fold_changelog.py check .`; `uv run ruff check .` | 1 fragment, 0 failures; clean |
+| `e8deb81e` | unit lane, `-n auto --dist loadfile` | 7592 passed, 19 skipped in 852.81s |
+| `e8deb81e` | integration lane, `-n auto --dist loadfile` | 347 passed in 213.48s |
+| the final tree | both mutation sets | 22 mutations, 22 failing runs, none survived |
+| this commit | `uv run pytest tests/census -q`; `uv run ruff check .`; `python3 scripts/check_doc_links.py .` | 66 passed; clean; 272 files, 0 failures |
+
+The unit lane's 7592 is M1's 7577 and the fifteen new tests: six step
+cases, six broken-filter cases and the `BaseException` case in the
+owner's file, and the two session-level cases.
+
+Not run here: the image build, the smoke conversation, the compose
+boot, and the drift checks the integration job runs. No event, field,
+configuration key or command changed, and the one log sentence that
+changed (the codec warning's) is in no generated reference, so none of
+them should move; the pull request records what CI says.

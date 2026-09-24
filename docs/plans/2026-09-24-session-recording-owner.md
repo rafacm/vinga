@@ -675,8 +675,8 @@ implementation doc says so in those words.
   hands the session so the session learns one collaborator instead of
   four.
   Changelog: none.
-- [ ] **M2: the recording's close always reaches its end**. Stacked
-  on M1. Commits:
+- [x] **[M2: the recording's close always reaches its end](2026-09-24-session-recording-owner-implementation.md#m2-the-recordings-close-always-reaches-its-end)**
+  (PR TBD). Stacked on M1. Commits:
   1. Tests first, watched failing against M1's owner: parametrized
      over each of the five close steps raising a planted exception
      built with `type(<credential-shaped name>, (Exception,), {})` and
