@@ -184,12 +184,17 @@ def logged_codecs(witness: Witness) -> type[CaptureAudio]:
 
 
 def watch_attachments(session: Any, witness: Witness, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Put the events object's capture attachment and the store sink's
-    attach and detach on the log. Observer taps are attached at
-    construction, before this, and the capture's own tap goes through
-    `attach_capture`, so the sink is the one plain tap logged."""
+    """Put the events object's capture attachment and detachment and the
+    store sink's attach and detach on the log. Observer taps are attached
+    at construction, before this, and the capture's own tap goes through
+    `attach_capture`, so the sink is the one plain tap logged.
+
+    A capture's detachment is logged only when a capture is attached:
+    `attach_capture` clears whatever was there before attaching, through
+    the same method, and that clearing detaches nothing."""
     events = events_of(session)
-    attach, detach, attach_capture = events.attach, events.detach, events.attach_capture
+    attach, detach = events.attach, events.detach
+    attach_capture, detach_capture = events.attach_capture, events.detach_capture
 
     def logged_attach(tap: Any) -> None:
         if isinstance(tap, SessionSink):
@@ -205,7 +210,13 @@ def watch_attachments(session: Any, witness: Witness, monkeypatch: pytest.Monkey
         witness.log.append(("attach_capture",))
         attach_capture(capture)
 
+    def logged_detach_capture() -> None:
+        if attached_capture(session) is not None:
+            witness.log.append(("detach_capture",))
+        detach_capture()
+
     monkeypatch.setattr(events, "attach", logged_attach)
+    monkeypatch.setattr(events, "detach_capture", logged_detach_capture)
     monkeypatch.setattr(events, "detach", logged_detach)
     monkeypatch.setattr(events, "attach_capture", logged_attach_capture)
 
@@ -275,6 +286,7 @@ class Recorded:
         return [
             ("detach", "SessionSink"),
             ("close_session", self.sid, False, reason),
+            ("detach_capture",),
             ("capture.close", True),
             ("captures.session_closed", self.sid),
             ("transcripts.session_closed", self.sid),
@@ -367,6 +379,7 @@ async def test_a_store_that_will_not_open_still_leaves_the_capture_released(
         ("attach_capture",),
         ("CaptureAudio", 1, 24000),
         ("open_session", sid),
+        ("detach_capture",),
         ("capture.close", True),
         ("captures.session_closed", sid),
         ("transcripts.session_closed", sid),
