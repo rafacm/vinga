@@ -212,12 +212,15 @@ passes the cancellation on instead, for two reasons. The reply's
 `reply_finished` and the turn record is `filler.settle`, and its
 `except BaseException` arm records the turn before re-raising, so a
 hurried reply still records its turn before `close` returns, which is
-the property the review is protecting. And holding the cancellation
-without passing it on makes `close` unbounded if the tail wedges (a
-paced send that cannot complete, a settle that never returns), where
-today it is bounded by exactly this second cancel. Test 6 checks the
-turn lands before `close` returns with the cancel arriving at the
-settle.
+the property the review is protecting. And a close that is being
+cancelled is being asked to hurry: the second `task.cancel()` is an
+attempt to expedite a tail that cooperates, which today's tail does at
+every await, so the reply reaches its turn record and ends sooner than
+it would if left to finish its sends to a closing device. It is not a
+bound. `Task.cancel()` is cooperative, and a tail that ignored it
+would wedge `close` either way; that risk is stated under "Risks" and
+kept. Test 6 checks the turn lands before `close` returns with the
+cancel arriving at the settle.
 
 Nothing else needs a guard. Every other caller of `cancel_reply` runs
 on the serve loop's task (the device abort, the manual stop, the three
@@ -357,10 +360,15 @@ and `test_reply_in_flight.py`, both lanes, and `tests/census`.
 
 - **A reply wedged in its tail wedges a close.** With `close` passing
   a cancellation on, a tail that ignores it (an `except BaseException`
-  that loops, say) keeps `close` waiting. Nothing in today's tail does
-  that: every await in it is cancellable and its guard arms re-raise.
-  This is also today's behavior, since today's `close` waits the task
-  out whatever it does.
+  that loops, say) keeps `close` waiting, and so does one blocked on
+  something that does not observe cancellation. Nothing in today's
+  tail does either: every await in it is cancellable and its guard
+  arms re-raise. The wedge is not introduced here, since today's
+  `close` also waits the task out, but the second cancel does not
+  remove it, and nothing in this plan claims it does. Mitigation:
+  accept; a bound on the close path is a separate question, and it
+  would belong to the session's close sequence rather than to one
+  step of it.
 - **A caller that relied on `cancel_reply` never raising
   `CancelledError`.** The inventory shows none outside `close`.
   `turntaking.finish_utterance` propagates it, which is correct: its
@@ -501,5 +509,11 @@ Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    cooperative tail, relying on the `filler.settle` arm to record the
    turn, keep the wedge risk, and drop the claim of equivalence to a
    bounded close today.
+
+   *Resolution:* accepted as written. The deviation paragraph now
+   calls the second cancel an attempt to expedite a cooperative tail,
+   relying on the `filler.settle` arm to record the turn, says in so
+   many words that it is not a bound, and the Risks entry keeps the
+   wedge and no longer implies today's close is bounded.
 
 Verdict: ready after the P1/P2 amendments.
