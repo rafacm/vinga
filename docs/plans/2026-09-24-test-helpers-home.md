@@ -222,6 +222,36 @@ rather than silently unified.
    list, made because it meets the issue's own test for moving (a
    reader of one copy would want the other to change with it).
 
+6. **CLI invocation capture joins the CLI runner.** `out(run, capsys,
+   *argv)`, identical in five CLI suites (`test_config_cli_conversations.py`,
+   `test_config_cli_memory.py`, `test_config_cli_metrics.py`,
+   `test_config_cli_rename.py`, `test_config_cli_sessions.py`), clears
+   the capture, runs one command and returns its code and both
+   streams. It goes to `tests/support/config_cli.py` beside `runner`,
+   whose output it is the reading of. What callers stop knowing: that
+   a stale capture has to be drained first.
+
+7. **The ordered conversation-row read deepens the one that exists.**
+   `stored`/`rows_of`, identical in `test_conversations_erasure.py`,
+   `test_conversations_namespace.py` and `test_conversations_retention.py`,
+   reads `record.<table>` ordered by id. `tests/support/stores.py:237`
+   already offers `rows(table, **where)`, which reads the same schema
+   unordered through `open_conversations` where the copies use
+   `read_engine`. `rows` gains `order by id`, deterministic for every
+   caller, and the three copies call it. The implementer confirms the
+   engine difference is immaterial to a read (both reach the same
+   schema; `open_conversations` must not migrate or write on the way),
+   and that no existing `rows` caller depends on the unordered result,
+   by running each caller's file; either failing, the copies stay and
+   the reason is recorded.
+
+8. **The scripted LLM's tool-result read goes beside the fake.**
+   `errors_of`/`_errors`, identical in `test_session_conversations.py`
+   and `test_session_recap.py`, reads the shape `ScriptedLlm` records
+   in `seen`. `ScriptedLlm` lives in `tests/support/providers.py:79`,
+   so a change to what it records breaks both copies at once; the
+   read joins it there.
+
 ## What stays, and why
 
 - **Every fixture**, including the two-line `api`, `run`, `client`
@@ -239,9 +269,23 @@ rather than silently unified.
   `detach_server_tap`; moving four lines of protocol while the
   per-file class stays buys nothing the deletion test would keep.
 - **The log renderers**, for the reason measured above.
-- **Everything else in the census**: groups of three lines or fewer,
-  and two-file pairs with no reason to agree (test data such as
-  `manifest`, `a_turn`, `envelope_of`).
+- **Every other group of four lines or more**, each for its own
+  reason. Groups of three lines or fewer that are not fixtures stay
+  as a class: at that size the import costs what the copy does.
+
+  | Group | Files | Why it stays |
+  |---|---|---|
+  | `leaked`, `_leaked`, `logged`/`written` | 11 | The log renderers, measured above |
+  | `envelope_of` | 2 | Its predicate names the slot each file's own setup plants (`llm`/`mock`); it moves if that setup does |
+  | `manifest`, `bound_config`/`drain_config`, `banner_config` | 2 each | Test data: literals of the world each file builds, `banner_config` over a per-file `PINNED_KEY` |
+  | `_pull` | 2 | One subprocess call over a per-file deadline constant |
+  | `run` (`test_upstream_watch.py`, `test_wire_latency.py`) | 2 | Identical syntax over a per-file `SCRIPT` naming different scripts: identical by accident |
+  | `_captured` | 2 | Builds each file's own `_Stream` class |
+  | `failing` | 2 | A two-statement closure standing in for a boot read |
+  | `_entries`, `entries` (the two census modules) | 2 | Each strips its own module's `MANIFEST_HEADER` |
+  | `_config_file` | 2 | Writes one file under `tmp_path` |
+  | `_get`, `erase_thread` | 3, 2 | One request plus the status each suite asserts about its own route |
+  | `running` | 2 | Constructs and starts a manager, two statements |
 
 ## Verification
 
@@ -290,12 +334,15 @@ fragment, `changelog.d/531-test-helpers-home.md`, under `### Changed`.
 
 ## Milestones
 
-- [ ] **M1: the helpers go home** (#531 M2). Items 1 to 5 above, one
+- [ ] **M1: the helpers go home** (#531 M2). Items 1 to 8 above, one
   commit per item, the verification above, the changelog fragment.
   Design footprint: deepens `tests/support/leaks.py` (the exception
-  walk joins the record walk), adds `tests/support/migrations.py`
-  (callers stop knowing the Alembic environment's three
-  requirements), and adds one function to `tests/support/llm_sdk.py`.
+  walk joins the record walk), `tests/support/config_cli.py` (the
+  capture joins the runner), `tests/support/stores.py` (`rows`
+  answers in order) and `tests/support/providers.py` (the scripted
+  fake's read joins it); adds `tests/support/migrations.py` (callers
+  stop knowing the Alembic environment's three requirements) and one
+  function to `tests/support/llm_sdk.py`.
   Documentation footprint: `leaks.py`'s docstring only. Closes #531.
 
 ## Plan review round
@@ -333,6 +380,8 @@ Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    Evidence: The plan characterizes everything else as three lines or fewer or unrelated two-file pairs (lines 184-186 (`plan:184`)). That does not cover the identical five-file `out(run, capsys, ...)` helper, for example `test_config_cli_sessions.py`, lines 145-149 (`tests/unit/test_config_cli_sessions.py:145`), nor the identical ordered conversation-row reader in three files (namespace, lines 191-202 (`tests/unit/test_conversations_namespace.py:191`), retention, lines 202-213 (`tests/unit/test_conversations_retention.py:202`), erasure, lines 194-205 (`tests/unit/test_conversations_erasure.py:194`)). Both groups share domain meaning, not merely syntax.
 
    The plan should say instead: move CLI invocation capture into `tests/support/config_cli.py`, deepen `tests/support/stores.py` to own the ordered conversation-row read, or provide explicit per-group reasons for keeping them. A blanket line-count disposition does not satisfy #531’s semantic test.
+
+   *Resolution:* accepted. Three items added: `out` joins `runner` in `tests/support/config_cli.py` (item 6); the ordered row reader turns out to have a home already, `tests/support/stores.py:237` `rows`, which gains `order by id` (item 7, with the engine difference checked rather than assumed); and `errors_of`, which the same semantic test catches, joins `ScriptedLlm` in `tests/support/providers.py` (item 8). The blanket line is replaced by a table giving each remaining group of four lines or more its own reason.
 
 5. **P2: The stdio helpers cannot pass the plan’s required AST-identity check**
 
