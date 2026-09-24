@@ -27,6 +27,7 @@ import pytest
 from sqlalchemy import inspect, text
 
 import vinga_server
+from tests.support.migrations import version
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations.store import CONVERSATIONS_CHAIN, open_conversations
 from vinga_server.db import DOMAIN_CHAIN, advisory_key, open_database, read_engine, write_engine
@@ -69,16 +70,6 @@ def _columns(engine, table: str) -> set[str]:
     }
 
 
-def _version(engine, schema_name: str) -> list[str]:
-    with engine.connect() as connection:
-        return [
-            row[0]
-            for row in connection.execute(
-                text(f"select * from {schema_name}.alembic_version")
-            )
-        ]
-
-
 def _fact_row(owner: str, fact: str) -> dict:
     return {
         "scope": "agent",
@@ -115,7 +106,7 @@ def test_a_blank_database_gains_a_migrated_memory_schema(blank_database: str) ->
     engine = read_engine(settings)
     try:
         assert EXPECTED_TABLES <= _tables(engine, SCHEMA)
-        assert _version(engine, SCHEMA) == [HEAD]
+        assert version(engine, SCHEMA) == [HEAD]
         assert _columns(engine, "facts") == EXPECTED_COLUMNS
         assert _columns(engine, "state") == EXPECTED_STATE_COLUMNS
     finally:
@@ -140,9 +131,9 @@ def test_it_is_a_third_schema_beside_the_other_two(blank_database: str) -> None:
         # And the version tables really are three, each inside its own
         # schema, which is the whole of what keeps the chains apart.
         stamps = [
-            _version(domain, DOMAIN_CHAIN.schema),
-            _version(record, CONVERSATIONS_CHAIN.schema),
-            _version(reader, SCHEMA),
+            version(domain, DOMAIN_CHAIN.schema),
+            version(record, CONVERSATIONS_CHAIN.schema),
+            version(reader, SCHEMA),
         ]
         assert len({tuple(stamp) for stamp in stamps}) == 3
     finally:
@@ -155,14 +146,14 @@ def test_an_already_migrated_memory_schema_reopens() -> None:
     settings = DatabaseConfig()
     open_memory(settings).close()
     first = read_engine(settings)
-    version = _version(first, SCHEMA)
+    stamped = version(first, SCHEMA)
     first.dispose()
 
     open_memory(settings).close()
     second = read_engine(settings)
     try:
         assert EXPECTED_TABLES <= _tables(second, SCHEMA)
-        assert _version(second, SCHEMA) == version
+        assert version(second, SCHEMA) == stamped
     finally:
         second.dispose()
 

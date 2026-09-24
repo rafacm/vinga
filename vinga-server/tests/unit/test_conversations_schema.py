@@ -22,6 +22,7 @@ from pathlib import Path
 from sqlalchemy import inspect, text
 
 import vinga_server
+from tests.support.migrations import version
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import schema
 from vinga_server.conversations.store import CONVERSATIONS_CHAIN, open_conversations
@@ -69,16 +70,6 @@ def _tables(engine, schema_name: str) -> set[str]:
     return set(inspect(engine).get_table_names(schema=schema_name))
 
 
-def _version(engine, schema_name: str) -> list[str]:
-    with engine.connect() as connection:
-        return [
-            row[0]
-            for row in connection.execute(
-                text(f"select * from {schema_name}.alembic_version")
-            )
-        ]
-
-
 # The thread every planted turn below belongs to, in the shape the
 # runtime mints.
 CONVERSATION = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
@@ -114,7 +105,7 @@ def test_a_blank_database_gains_a_migrated_conversation_schema(
     engine = open_conversations(DatabaseConfig(name=blank_database))
     try:
         assert EXPECTED_TABLES <= _tables(engine, schema.SCHEMA)
-        assert _version(engine, schema.SCHEMA) == [HEAD]
+        assert version(engine, schema.SCHEMA) == [HEAD]
     finally:
         engine.dispose()
 
@@ -132,7 +123,7 @@ def test_it_is_a_second_schema_beside_the_domain_one(blank_database: str) -> Non
         assert "sessions" not in _tables(domain, DOMAIN_CHAIN.schema)
         # And the version tables really are two, each inside its own
         # schema, which is the whole of what keeps the chains apart.
-        assert _version(domain, DOMAIN_CHAIN.schema) != _version(
+        assert version(domain, DOMAIN_CHAIN.schema) != version(
             store, CONVERSATIONS_CHAIN.schema
         )
     finally:
@@ -142,13 +133,13 @@ def test_it_is_a_second_schema_beside_the_domain_one(blank_database: str) -> Non
 
 def test_an_already_migrated_conversation_schema_reopens() -> None:
     first = open_conversations(DatabaseConfig())
-    version = _version(first, schema.SCHEMA)
+    stamped = version(first, schema.SCHEMA)
     first.dispose()
 
     second = open_conversations(DatabaseConfig())
     try:
         assert EXPECTED_TABLES <= _tables(second, schema.SCHEMA)
-        assert _version(second, schema.SCHEMA) == version
+        assert version(second, schema.SCHEMA) == stamped
     finally:
         second.dispose()
 

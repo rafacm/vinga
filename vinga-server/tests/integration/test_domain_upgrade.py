@@ -29,12 +29,11 @@ import json
 from collections.abc import Iterator
 
 import pytest
-from alembic import command
-from alembic.config import Config as AlembicConfig
 from cryptography.fernet import MultiFernet
 from sqlalchemy import text
 
 from tests.support.config_cli import runner
+from tests.support.migrations import upgrade_to, version_of
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.secrets import (
     MASTER_KEY_ENV,
@@ -102,27 +101,12 @@ def at_the_baseline(blank_database: str) -> DatabaseConfig:
     """A database with the domain chain at `3001_postgres_domain` and
     nothing beyond it.
 
-    Alembic is driven the way `db.upgrade_to_head` drives it, with the
-    schema created first and the connection and the chain handed over on
-    the config's attributes, because the packaged environment refuses to
-    run without both. The one difference is the target: a named revision
-    rather than head, which is the whole of what makes this a database
-    from before the release.
+    `tests.support.migrations` drives Alembic the way `db.upgrade_to_head`
+    does. The one difference is the target: a named revision rather
+    than head, which is the whole of what makes this a database from
+    before the release.
     """
-    settings = DatabaseConfig(name=blank_database)
-    engine = write_engine(settings, DOMAIN_CHAIN)
-    try:
-        with engine.connect() as connection:
-            connection.execute(text(f'create schema if not exists "{DOMAIN_CHAIN.schema}"'))
-            config = AlembicConfig()
-            config.set_main_option("script_location", str(DOMAIN_CHAIN.migrations))
-            config.attributes["connection"] = connection
-            config.attributes["chain"] = DOMAIN_CHAIN
-            command.upgrade(config, BASELINE)
-            connection.commit()
-    finally:
-        engine.dispose()
-    return settings
+    return upgrade_to(blank_database, DOMAIN_CHAIN, BASELINE)
 
 
 @pytest.fixture
@@ -187,20 +171,6 @@ def _slots(settings: DatabaseConfig) -> set[str]:
     return set(held if isinstance(held, dict) else json.loads(held))
 
 
-def _version(settings: DatabaseConfig) -> list[str]:
-    engine = read_engine(settings)
-    try:
-        with engine.connect() as connection:
-            return [
-                row[0]
-                for row in connection.execute(
-                    text(f"select * from {DOMAIN_CHAIN.schema}.alembic_version")
-                )
-            ]
-    finally:
-        engine.dispose()
-
-
 @pytest.fixture
 def upgraded(seeded: DatabaseConfig, keys: MultiFernet) -> Iterator[ConfigStore]:
     """The same database after a boot, which is what runs the migration:
@@ -219,7 +189,7 @@ def test_the_seeded_row_really_carries_the_slot_the_release_withdraws(
     """Without this every assertion below would be vacuously true of a
     row that never held the slot, which is exactly what a seed written
     through a repository that now refuses the slot would produce."""
-    assert _version(seeded) == [BASELINE]
+    assert version_of(seeded, DOMAIN_CHAIN) == [BASELINE]
     assert _slots(seeded) == {KEPT.slot, WITHDRAWN.slot}
 
 
@@ -234,7 +204,7 @@ def test_the_upgrade_takes_the_withdrawn_slot_and_leaves_its_sibling(
     in a state a start would refuse fails here rather than on a
     deployment.
     """
-    assert _version(seeded) == [HEAD]
+    assert version_of(seeded, DOMAIN_CHAIN) == [HEAD]
     assert _slots(seeded) == {KEPT.slot}
 
     snapshot = upgraded.load()
