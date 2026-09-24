@@ -34,12 +34,11 @@ migrated template cannot be stamped backwards.
 import json
 
 import pytest
-from alembic import command
-from alembic.config import Config as AlembicConfig
 from cryptography.fernet import Fernet, MultiFernet
 from sqlalchemy import text
 
 from tests.support.leaks import chain
+from tests.support.migrations import upgrade_to, version_of
 from vinga_server.boundary import Reach
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import DatabaseConfig
@@ -103,27 +102,12 @@ def at_the_baseline(blank_database: str) -> DatabaseConfig:
     """A database with the domain chain at `3003_device_record` and
     nothing beyond it.
 
-    Alembic is driven the way `db.upgrade_to_head` drives it, with the
-    schema created first and the connection and the chain handed over on
-    the config's attributes, because the packaged environment refuses to
-    run without both. The one difference is the target: a named revision
-    rather than head, which is the whole of what makes this a database
-    from before the release.
+    `tests.support.migrations` drives Alembic the way `db.upgrade_to_head`
+    does. The one difference is the target: a named revision rather
+    than head, which is the whole of what makes this a database from
+    before the release.
     """
-    settings = DatabaseConfig(name=blank_database)
-    engine = write_engine(settings, DOMAIN_CHAIN)
-    try:
-        with engine.connect() as connection:
-            connection.execute(text(f'create schema if not exists "{DOMAIN_CHAIN.schema}"'))
-            config = AlembicConfig()
-            config.set_main_option("script_location", str(DOMAIN_CHAIN.migrations))
-            config.attributes["connection"] = connection
-            config.attributes["chain"] = DOMAIN_CHAIN
-            command.upgrade(config, BASELINE)
-            connection.commit()
-    finally:
-        engine.dispose()
-    return settings
+    return upgrade_to(blank_database, DOMAIN_CHAIN, BASELINE)
 
 
 @pytest.fixture
@@ -220,20 +204,6 @@ def _bodies(settings: DatabaseConfig, table: str) -> dict[str, dict]:
     return {name: json.loads(body) for name, body in rows}
 
 
-def _version(settings: DatabaseConfig) -> list[str]:
-    engine = read_engine(settings)
-    try:
-        with engine.connect() as connection:
-            return [
-                row[0]
-                for row in connection.execute(
-                    text(f"select * from {DOMAIN_CHAIN.schema}.alembic_version")
-                )
-            ]
-    finally:
-        engine.dispose()
-
-
 def _upgrade(settings: DatabaseConfig) -> None:
     """The boot's own step, which is what runs the migration."""
     open_database(settings).dispose()
@@ -245,7 +215,7 @@ def test_the_seeded_rows_really_carry_the_key_the_release_withdraws(
     """Without this every assertion below would be vacuously true of
     rows that never held the key, which is exactly what a seed written
     through a repository that now refuses it would produce."""
-    assert _version(seeded) == [BASELINE]
+    assert version_of(seeded, DOMAIN_CHAIN) == [BASELINE]
     providers = _bodies(seeded, "providers")
     assert {name for name, body in providers.items() if "egress" in body} == {
         "kept",
@@ -267,7 +237,7 @@ def test_the_upgrade_translates_every_legacy_shape(seeded: DatabaseConfig) -> No
     with no key at all, which is the state absence already is."""
     _upgrade(seeded)
 
-    assert _version(seeded) == [HEAD]
+    assert version_of(seeded, DOMAIN_CHAIN) == [HEAD]
     for table, expected in (("providers", PROVIDERS), ("mcp_servers", MCP_SERVERS)):
         bodies = _bodies(seeded, table)
         for name, (_, reach) in expected.items():

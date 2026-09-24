@@ -63,10 +63,9 @@ import datetime as dt
 from collections.abc import Iterator
 
 import pytest
-from alembic import command
-from alembic.config import Config as AlembicConfig
 from sqlalchemy import text
 
+from tests.support.migrations import downgrade_to, upgrade_to, version_of
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations.store import CONVERSATIONS_CHAIN, open_conversations
 from vinga_server.conversations.views import BY_DEVICE_VIEWS, VIEWS
@@ -100,41 +99,11 @@ RECORDED_NAME = "device_name"
 SHIPPED_NULL = "NULL::text"
 
 
-def _alembic(connection) -> AlembicConfig:
-    """Alembic driven the way `db.upgrade_to_head` drives it: the chain
-    and the open connection handed over on the config's attributes,
-    because the packaged environment refuses to run without both. The
-    one difference is the target, which is a named revision rather than
-    head."""
-    config = AlembicConfig()
-    config.set_main_option("script_location", str(CONVERSATIONS_CHAIN.migrations))
-    config.attributes["connection"] = connection
-    config.attributes["chain"] = CONVERSATIONS_CHAIN
-    return config
-
-
-def _stamped(blank_database: str, revision: str) -> DatabaseConfig:
-    """A database with the conversations chain at exactly one revision
-    and nothing beyond it."""
-    settings = DatabaseConfig(name=blank_database)
-    engine = write_engine(settings, CONVERSATIONS_CHAIN)
-    try:
-        with engine.connect() as connection:
-            connection.execute(
-                text(f'create schema if not exists "{CONVERSATIONS_CHAIN.schema}"')
-            )
-            command.upgrade(_alembic(connection), revision)
-            connection.commit()
-    finally:
-        engine.dispose()
-    return settings
-
-
 @pytest.fixture
 def at_the_baseline(blank_database: str) -> DatabaseConfig:
     """A database with the conversations chain at `1006` and nothing
     beyond it: the four views, and no sibling anywhere."""
-    return _stamped(blank_database, BASELINE)
+    return upgrade_to(blank_database, CONVERSATIONS_CHAIN, BASELINE)
 
 
 @pytest.fixture
@@ -146,7 +115,7 @@ def at_the_siblings(blank_database: str) -> DatabaseConfig:
     the only state from which "replaced rather than rebuilt" is a
     question that can be asked at all.
     """
-    return _stamped(blank_database, SIBLING_BASELINE)
+    return upgrade_to(blank_database, CONVERSATIONS_CHAIN, SIBLING_BASELINE)
 
 
 def _relations(
@@ -193,20 +162,6 @@ def _plant_dependent(settings: DatabaseConfig, name: str, columns: str, on: str)
             connection.execute(
                 text(f"create view record.{name} as select {columns} from record.{on}")
             )
-    finally:
-        engine.dispose()
-
-
-def _version(settings: DatabaseConfig) -> list[str]:
-    engine = read_engine(settings)
-    try:
-        with engine.connect() as connection:
-            return [
-                row[0]
-                for row in connection.execute(
-                    text(f"select * from {CONVERSATIONS_CHAIN.schema}.alembic_version")
-                )
-            ]
     finally:
         engine.dispose()
 
@@ -333,7 +288,7 @@ def test_the_baseline_really_is_the_state_this_release_upgrades_from(
     had quietly migrated to head would make "the four survived" true by
     never having exercised the migration at all, and the siblings would
     be there to prove it and nobody would be looking."""
-    assert _version(at_the_baseline) == [BASELINE]
+    assert version_of(at_the_baseline, CONVERSATIONS_CHAIN) == [BASELINE]
     assert all(found is not None for found in before.values()), before
     assert _relations(at_the_baseline, [view.name for view in BY_DEVICE_VIEWS]) == {
         view.name: None for view in BY_DEVICE_VIEWS
@@ -352,7 +307,7 @@ def test_the_four_views_survive_the_upgrade_unmoved(
     SQL, which is the shape a definition check alone reads as
     untouched.
     """
-    assert _version(upgraded) == [HEAD]
+    assert version_of(upgraded, CONVERSATIONS_CHAIN) == [HEAD]
     assert _relations(upgraded, list(before)) == before
 
 
@@ -411,15 +366,9 @@ def test_the_downgrade_takes_what_it_added_and_leaves_what_it_found(
     dropping one loses nothing that was not derived from the tables
     underneath it, and the four this migration found are not its to
     drop."""
-    engine = write_engine(upgraded, CONVERSATIONS_CHAIN)
-    try:
-        with engine.connect() as connection:
-            command.downgrade(_alembic(connection), BASELINE)
-            connection.commit()
-    finally:
-        engine.dispose()
+    downgrade_to(upgraded, CONVERSATIONS_CHAIN, BASELINE)
 
-    assert _version(upgraded) == [BASELINE]
+    assert version_of(upgraded, CONVERSATIONS_CHAIN) == [BASELINE]
     assert _relations(upgraded, list(before)) == before
     assert _relations(upgraded, [view.name for view in BY_DEVICE_VIEWS]) == {
         view.name: None for view in BY_DEVICE_VIEWS
@@ -438,7 +387,7 @@ def test_the_sibling_baseline_really_is_the_state_1009_replaces(
     and they select the literal null the label shipped as. A fixture
     that had quietly migrated to head would fail here rather than make
     "replaced in place" true by comparing a view with itself."""
-    assert _version(at_the_siblings) == [SIBLING_BASELINE]
+    assert version_of(at_the_siblings, CONVERSATIONS_CHAIN) == [SIBLING_BASELINE]
     assert all(found is not None for found in siblings_before.values()), siblings_before
     for name, found in siblings_before.items():
         assert found is not None
@@ -460,7 +409,7 @@ def test_the_four_siblings_are_replaced_where_they_stand(
     definition that must have changed and a comment that must have
     changed with it: same relation, new answer.
     """
-    assert _version(replaced) == [HEAD]
+    assert version_of(replaced, CONVERSATIONS_CHAIN) == [HEAD]
 
     after = _relations(replaced, list(siblings_before))
     for name, was in siblings_before.items():
@@ -506,15 +455,9 @@ def test_the_downgrade_restores_the_definitions_1008_shipped(
     reason they are in the upgrade's: a downgrade that dropped and
     recreated would restore the definition and lose the dependents.
     """
-    engine = write_engine(replaced, CONVERSATIONS_CHAIN)
-    try:
-        with engine.connect() as connection:
-            command.downgrade(_alembic(connection), SIBLING_BASELINE)
-            connection.commit()
-    finally:
-        engine.dispose()
+    downgrade_to(replaced, CONVERSATIONS_CHAIN, SIBLING_BASELINE)
 
-    assert _version(replaced) == [SIBLING_BASELINE]
+    assert version_of(replaced, CONVERSATIONS_CHAIN) == [SIBLING_BASELINE]
     assert _relations(replaced, list(siblings_before)) == siblings_before
 
     # And the relation still answers, with the label back to the null

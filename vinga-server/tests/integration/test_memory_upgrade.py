@@ -27,10 +27,9 @@ backwards.
 from typing import Any
 
 import pytest
-from alembic import command
-from alembic.config import Config as AlembicConfig
 from sqlalchemy import text
 
+from tests.support.migrations import upgrade_to, version_of
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.db import read_engine, write_engine
 from vinga_server.memory.store import MEMORY_CHAIN, MemoryScope, open_memory
@@ -57,27 +56,12 @@ def at_the_baseline(blank_database: str) -> DatabaseConfig:
     """A database with the memory chain at `2001_agent_memory` and
     nothing beyond it.
 
-    Alembic is driven the way `db.upgrade_to_head` drives it, with the
-    schema created first and the connection and the chain handed over on
-    the config's attributes, because the packaged environment refuses to
-    run without both. The one difference is the target: a named revision
-    rather than head, which is the whole of what makes this a database
-    from before the release.
+    `tests.support.migrations` drives Alembic the way `db.upgrade_to_head`
+    does. The one difference is the target: a named revision rather
+    than head, which is the whole of what makes this a database from
+    before the release.
     """
-    settings = DatabaseConfig(name=blank_database)
-    engine = write_engine(settings, MEMORY_CHAIN)
-    try:
-        with engine.connect() as connection:
-            connection.execute(text(f'create schema if not exists "{MEMORY_CHAIN.schema}"'))
-            config = AlembicConfig()
-            config.set_main_option("script_location", str(MEMORY_CHAIN.migrations))
-            config.attributes["connection"] = connection
-            config.attributes["chain"] = MEMORY_CHAIN
-            command.upgrade(config, BASELINE)
-            connection.commit()
-    finally:
-        engine.dispose()
-    return settings
+    return upgrade_to(blank_database, MEMORY_CHAIN, BASELINE)
 
 
 def _seeded(settings: DatabaseConfig) -> list[int]:
@@ -122,20 +106,6 @@ def _rows(settings: DatabaseConfig) -> list[dict[str, Any]]:
         engine.dispose()
 
 
-def _version(settings: DatabaseConfig) -> list[str]:
-    engine = read_engine(settings)
-    try:
-        with engine.connect() as connection:
-            return [
-                row[0]
-                for row in connection.execute(
-                    text(f"select * from {MEMORY_CHAIN.schema}.alembic_version")
-                )
-            ]
-    finally:
-        engine.dispose()
-
-
 def test_a_seeded_baseline_upgrades_with_every_fact_it_held(
     at_the_baseline: DatabaseConfig,
 ) -> None:
@@ -146,7 +116,7 @@ def test_a_seeded_baseline_upgrades_with_every_fact_it_held(
 
     open_memory(settings).close()
 
-    assert _version(settings) == [HEAD]
+    assert version_of(settings, MEMORY_CHAIN) == [HEAD]
     carried = _rows(settings)
     assert [(row["id"], row["owner"], row["at"], row["fact"]) for row in carried] == [
         (row_id, agent, at, fact)

@@ -33,10 +33,9 @@ migrated template cannot be stamped backwards.
 from collections.abc import Iterator
 
 import pytest
-from alembic import command
-from alembic.config import Config as AlembicConfig
 from sqlalchemy import text
 
+from tests.support.migrations import upgrade_to, version_of
 from vinga_server.config.models import DatabaseConfig, fold_device_name, is_device_id
 from vinga_server.config.store import ConfigStore, read_live_binding
 from vinga_server.db import DOMAIN_CHAIN, open_database, read_engine, write_engine
@@ -60,27 +59,12 @@ AGENT = "sam"
 def at_the_baseline(blank_database: str) -> DatabaseConfig:
     """A database with the domain chain at `3002` and nothing beyond it.
 
-    Alembic is driven the way `db.upgrade_to_head` drives it, with the
-    schema created first and the connection and the chain handed over on
-    the config's attributes, because the packaged environment refuses to
-    run without both. The one difference is the target: a named revision
-    rather than head, which is the whole of what makes this a database
-    from before the release.
+    `tests.support.migrations` drives Alembic the way `db.upgrade_to_head`
+    does. The one difference is the target: a named revision rather
+    than head, which is the whole of what makes this a database from
+    before the release.
     """
-    settings = DatabaseConfig(name=blank_database)
-    engine = write_engine(settings, DOMAIN_CHAIN)
-    try:
-        with engine.connect() as connection:
-            connection.execute(text(f'create schema if not exists "{DOMAIN_CHAIN.schema}"'))
-            config = AlembicConfig()
-            config.set_main_option("script_location", str(DOMAIN_CHAIN.migrations))
-            config.attributes["connection"] = connection
-            config.attributes["chain"] = DOMAIN_CHAIN
-            command.upgrade(config, BASELINE)
-            connection.commit()
-    finally:
-        engine.dispose()
-    return settings
+    return upgrade_to(blank_database, DOMAIN_CHAIN, BASELINE)
 
 
 @pytest.fixture
@@ -136,20 +120,6 @@ def _rows(settings: DatabaseConfig) -> list[dict[str, object]]:
         engine.dispose()
 
 
-def _version(settings: DatabaseConfig) -> list[str]:
-    engine = read_engine(settings)
-    try:
-        with engine.connect() as connection:
-            return [
-                row[0]
-                for row in connection.execute(
-                    text(f"select * from {DOMAIN_CHAIN.schema}.alembic_version")
-                )
-            ]
-    finally:
-        engine.dispose()
-
-
 def test_the_seeded_rows_really_are_the_old_shape(seeded: DatabaseConfig) -> None:
     """The control the three claims below rest on: without it, a seed
     that quietly wrote the new columns would make every one of them
@@ -169,7 +139,7 @@ def test_the_seeded_rows_really_are_the_old_shape(seeded: DatabaseConfig) -> Non
     finally:
         engine.dispose()
     assert columns == {"mac", "agents"}
-    assert _version(seeded) == [BASELINE]
+    assert version_of(seeded, DOMAIN_CHAIN) == [BASELINE]
 
 
 def test_every_row_is_minted_an_identity_of_its_own(upgraded: DatabaseConfig) -> None:
@@ -178,7 +148,7 @@ def test_every_row_is_minted_an_identity_of_its_own(upgraded: DatabaseConfig) ->
     assert [row["mac"] for row in rows] == list(FLEET)
     assert all(is_device_id(row["id"]) for row in rows), rows
     assert len({row["id"] for row in rows}) == len(FLEET)
-    assert _version(upgraded) == [HEAD]
+    assert version_of(upgraded, DOMAIN_CHAIN) == [HEAD]
 
 
 def test_every_row_is_backfilled_a_name_that_does_not_collide(
