@@ -24,6 +24,7 @@ import pytest
 from cryptography.fernet import Fernet, MultiFernet
 from sqlalchemy import insert
 
+from tests.support.leaks import chain
 from tests.support.providers import built_world
 from tests.support.stores import planted
 from vinga_server.boundary import BoundaryRefusal, Reach, check_mcp_server, check_provider
@@ -541,7 +542,7 @@ def _nothing_leaked(error: BaseException, streams) -> None:
     here fails inside pydantic, which keeps its input on the exception
     it raises.
     """
-    surfaces = (streams.out, streams.err, _whole_chain(error))
+    surfaces = (streams.out, streams.err, chain(error))
     for surface in surfaces:
         assert CREDENTIAL_SHAPED_LEGACY not in surface
         assert "sk-test" not in surface
@@ -605,7 +606,7 @@ def test_the_boundary_field_leaks_nothing_through_the_real_file_load(
     streams = capsys.readouterr()
     assert CREDENTIAL_SHAPED_VALUE not in streams.out
     assert CREDENTIAL_SHAPED_VALUE not in streams.err
-    assert CREDENTIAL_SHAPED_VALUE not in _whole_chain(excinfo.value)
+    assert CREDENTIAL_SHAPED_VALUE not in chain(excinfo.value)
 
 
 @pytest.fixture
@@ -671,22 +672,8 @@ def test_a_reach_field_leaks_nothing_through_the_write_or_the_stored_read(
     streams = capsys.readouterr()
     assert CREDENTIAL_SHAPED_VALUE not in streams.out
     assert CREDENTIAL_SHAPED_VALUE not in streams.err
-    assert CREDENTIAL_SHAPED_VALUE not in _whole_chain(written.value)
-    assert CREDENTIAL_SHAPED_VALUE not in _whole_chain(read_back.value)
-
-
-def _whole_chain(error: BaseException) -> str:
-    """Every sentence reachable from a refusal, cause and context
-    included: a value that leaked one link down is a value a traceback
-    renderer prints."""
-    said = []
-    seen: set[int] = set()
-    while error is not None and id(error) not in seen:
-        seen.add(id(error))
-        said.append(str(error))
-        said.extend(str(argument) for argument in error.args)
-        error = error.__cause__ or error.__context__  # type: ignore[assignment]
-    return "\n".join(said)
+    assert CREDENTIAL_SHAPED_VALUE not in chain(written.value)
+    assert CREDENTIAL_SHAPED_VALUE not in chain(read_back.value)
 
 
 # --- the composition root ----------------------------------------------

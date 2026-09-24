@@ -39,6 +39,7 @@ from alembic.config import Config as AlembicConfig
 from cryptography.fernet import Fernet, MultiFernet
 from sqlalchemy import text
 
+from tests.support.leaks import chain
 from vinga_server.boundary import Reach
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import DatabaseConfig
@@ -396,21 +397,6 @@ def test_the_upgraded_store_still_refuses_a_malformed_legacy_value(
         engine.dispose()
 
     for refused in (provider, server, snapshot):
-        said = _whole_chain(refused.value)
+        said = chain(refused.value)
         assert CREDENTIAL_SHAPED not in said
         assert "sk-test" not in said
-
-
-def _whole_chain(error: BaseException) -> str:
-    """Every sentence reachable from a refusal, cause and context
-    included: a value that leaked one link down is a value a traceback
-    renderer prints."""
-    said: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = error
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        said.append(str(current))
-        said.extend(str(argument) for argument in current.args)
-        current = current.__cause__ or current.__context__
-    return "\n".join(said)

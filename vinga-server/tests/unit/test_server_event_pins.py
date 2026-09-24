@@ -57,6 +57,7 @@ from tests.support.configs import (
     masked_config,
 )
 from tests.support.events import only
+from tests.support.leaks import chain
 from tests.support.providers import built_world
 from tests.support.stores import CAPTURE_MANIFEST as MANIFEST
 from tests.support.stores import store
@@ -98,19 +99,16 @@ class Consumer:
 
     def rendered(self) -> str:
         """Everything a consumer could read off what it was handed:
-        every payload and every argument, including what an exception
-        renders as and what its chain renders as."""
+        every payload and every argument, and for an argument that is an
+        exception, everything `leaks.chain` reads off it and the graph
+        behind it."""
         parts = []
         for emission in self.seen:
             parts.append(str(emission.payload))
             for argument in emission.args:
                 parts += [str(argument), repr(argument)]
-                cause = getattr(argument, "__cause__", None) or getattr(
-                    argument, "__context__", None
-                )
-                while cause is not None:
-                    parts += [str(cause), repr(cause)]
-                    cause = cause.__cause__ or cause.__context__
+                if isinstance(argument, BaseException):
+                    parts.append(chain(argument))
         return "\n".join(parts)
 
 
