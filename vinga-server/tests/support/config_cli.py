@@ -198,6 +198,19 @@ def runner(monkeypatch: pytest.MonkeyPatch, database: str | None = None):
     return _run
 
 
+def out(run, capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, str, str]:
+    """One command through a `runner`, and what it wrote: its exit code
+    and both streams.
+
+    The capture is drained first, so what comes back is this command's
+    alone and not whatever an earlier step of the test left in it.
+    """
+    capsys.readouterr()
+    code = run(*argv)
+    captured = capsys.readouterr()
+    return code, captured.out, captured.err
+
+
 def answering(run, handler: Any) -> None:
     """Answer this runner's requests from a handler of the test's own,
     rather than from an application built per request.

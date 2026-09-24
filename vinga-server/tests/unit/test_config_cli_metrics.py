@@ -41,7 +41,7 @@ from typing import Any
 import httpx
 import pytest
 
-from tests.support.config_cli import answering, runner
+from tests.support.config_cli import answering, out, runner
 from tests.support.stores import plant_event, plant_session, plant_turn
 from vinga_server import logs
 from vinga_server.config.cli import acts, grammar, invocation, output, records
@@ -207,13 +207,6 @@ def said(printed: str) -> str:
     are there, not where they broke.
     """
     return " ".join(printed.split())
-
-
-def out(run, capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, str, str]:
-    capsys.readouterr()
-    code = run(*argv)
-    captured = capsys.readouterr()
-    return code, captured.out, captured.err
 
 
 def leaf(words: tuple[str, ...]) -> Any:

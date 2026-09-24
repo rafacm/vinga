@@ -31,7 +31,7 @@ from typing import Any
 import httpx
 import pytest
 
-from tests.support.config_cli import answering, runner
+from tests.support.config_cli import answering, out, runner
 from tests.support.configs import DEVICE_MAC
 from vinga_server import logs
 from vinga_server.config.models import DatabaseConfig
@@ -140,13 +140,6 @@ def _leaked(caplog: pytest.LogCaptureFixture) -> str:
         for record in caplog.records
         if record.name.startswith("vinga_server")
     )
-
-
-def out(run, capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, str, str]:
-    capsys.readouterr()
-    code = run(*argv)
-    captured = capsys.readouterr()
-    return code, captured.out, captured.err
 
 
 # The reads

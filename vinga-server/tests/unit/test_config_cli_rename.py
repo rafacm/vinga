@@ -32,7 +32,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from tests.support.config_cli import answering, runner
+from tests.support.config_cli import answering, out, runner
 from tests.support.leaks import renderings
 from tests.support.notices import CHECK_IN, RELOAD, STORE_BOOT, boundaries
 from vinga_server.config import entities
@@ -53,13 +53,6 @@ BOARD = "aa:bb:cc:dd:ee:ff"
 @pytest.fixture
 def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return runner(monkeypatch)
-
-
-def out(run, capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, str, str]:
-    capsys.readouterr()
-    code = run(*argv)
-    captured = capsys.readouterr()
-    return code, captured.out, captured.err
 
 
 def pipeline(run) -> None:
