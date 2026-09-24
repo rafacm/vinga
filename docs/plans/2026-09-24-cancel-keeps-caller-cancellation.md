@@ -145,12 +145,57 @@ mid-wait leaves the task's outcome unread), and it is covered by the
 handle surviving: the runtime still holds the reply, and the owner's
 `close` is what reads its outcome.
 
-and `PipelineRuntime.close` reaches it through a sibling of
-`cancel_reply` that clears the handle whether or not `close` raised,
-then purges in a `finally`, so the held cancellation reaches the
-session's `_cleanly` after the reply's task is done, `_in_flight` is
-None and the purge has run. Nothing above `close` changes: `_cleanly`
-already holds and re-raises a `CancelledError` from it.
+and `PipelineRuntime.close` holds a cancellation across both of its
+steps, not only the reply's:
+
+```python
+async def close(self) -> None:
+    held: asyncio.CancelledError | None = None
+    failed: BaseException | None = None
+    reply = self._in_flight
+    if reply is not None:
+        try:
+            await reply.close(ReplyOutcome.ABORTED)
+        except asyncio.CancelledError as cancelled:
+            held = cancelled
+        except Exception as exc:
+            failed = exc
+        if self._in_flight is reply:
+            self._in_flight = None
+    if self._purge is not None:
+        purging = asyncio.ensure_future(
+            asyncio.to_thread(self._purge, list(self.conversations.current_threads()))
+        )
+        # A thread cannot be cancelled, so there is nothing to hurry:
+        # the purge is outlasted, and a cancellation meanwhile is held.
+        # outlast answers the cancellation it held, or None. Awaited
+        # unconditionally and merged after, so the first one wins.
+        later = await outlast(purging)
+        held = held or later
+        failed = failed or purging.exception()
+    if held is not None:
+        raise held
+    if failed is not None:
+        raise failed
+```
+
+The shape to hold to, rather than the exact lines: the purge is a
+task `close` owns and waits out, never an await a cancellation can walk
+away from, and the first cancellation `close` received is raised only
+once the reply's task is done, the handle is cleared and the purge has
+completed. The hold-until-done loop is written once, as one public
+function both sites reach (`ReplyInFlight.close` is "cancel, then
+outlast, passing each cancellation on"; the purge is "outlast"), which
+answers the deletion test by having two callers that must agree on how
+a held cancellation is kept; the implementer names where it lives in
+the implementation doc. A reply that failed no longer skips the purge
+either: today `close`'s `cancel_reply` raising a reply's exception
+left the purge unrun, which is the same leak by another road, and the
+plan closes it in passing because the new shape reaches the purge on
+every path.
+
+Nothing above `close` changes: `_cleanly` already holds and re-raises
+a `CancelledError` from it.
 
 The two methods differ in exactly one decision, what a cancellation of
 the caller means, and that is why they are two names rather than a
@@ -279,6 +324,16 @@ name the session's callers reach:
    "exception was never retrieved" report after a `gc.collect()`. A
    mutation raising `held` before reading `task.exception()` fails on
    the handler.
+10. **A cancellation during the purge waits for the purge.** A
+    runtime with no reply in flight and a purge spy that blocks on a
+    `threading.Event`. The task running `close()` is cancelled while
+    the purge is blocked; after the loop has run, that task is still
+    not done; the event is set; the task then ends cancelled and the
+    spy ran to completion exactly once. With the purge as a plain
+    `await asyncio.to_thread(...)` it fails at "still not done".
+11. **A reply that failed still purges.** A reply whose body raises is
+    closed; `close()` raises that exception and the purge spy was
+    called. Fails against today's `close`.
 
 Existing suites that must stay green unchanged: every
 `test_session_*` file, `test_turn_lifecycle.py`, `test_turntaking.py`
@@ -331,9 +386,9 @@ docstring for the risk above, and the changelog fragment.
      fix: one commit, since tests 1-3 and 5 cannot be green without
      it. The body records each test's failing run against today's
      `cancel`.
-  2. `ReplyInFlight.close`, `PipelineRuntime.close` built on it with
-     the purge in a `finally`, and tests 6-8, with the mutation runs
-     recorded.
+  2. The shared outlast function, `ReplyInFlight.close`,
+     `PipelineRuntime.close` built on both with the purge as an owned
+     task, and tests 6-11, with the mutation runs recorded.
   3. The changelog fragment, this plan's tick, and the implementation
      doc's M1 section; the census manifests regenerated if either went
      stale.
@@ -408,6 +463,17 @@ Reviewed 2026-09-24 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    the purge has completed; and add an event-driven test that blocks
    the purge, cancels `close()` there, verifies it stays pending,
    releases, and verifies the cancellation propagates afterwards.
+
+   *Resolution:* accepted. `PipelineRuntime.close` now runs the purge
+   as a task it owns and outlasts, holding a cancellation across both
+   steps and raising the first only after the reply's task is done,
+   the handle is cleared and the purge has completed; the
+   hold-until-done loop is one public function both `ReplyInFlight`
+   and the purge use. Test 10 blocks the purge on a `threading.Event`,
+   cancels there, and asserts `close` stays pending until release.
+   Found while amending: a reply that failed skipped the purge today
+   as well, since `cancel_reply` raised before it; the new shape
+   reaches the purge on every path, and test 11 pins that.
 2. **P1: `ReplyInFlight.close()` can leak an unobserved reply
    exception.** The sketch raises `held` before `task.result()`, and
    `asyncio.wait()` does not retrieve a task's exception. A reply whose
