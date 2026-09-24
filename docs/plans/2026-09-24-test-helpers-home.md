@@ -202,15 +202,27 @@ rather than silently unified.
    `vinga_server`; that sentence goes beside the copy.
 
 4. **The stdio MCP entries use the home they already have.**
-   `tests/support/tools_mcp.py` defines `stdio_entry` and `entry_data`;
-   the identical copies (`stdio_entry` in `test_agent_guidance.py`,
-   `test_mcp_reload.py`, `test_tools_mcp_prompts.py`,
-   `test_tools_mcp_reload.py`; `stdio_server` in `test_tools.py`;
-   `entry_data` in `test_config_api_runtime.py` and
-   `test_tools_mcp_reload.py`) import from it, confirmed identical
-   first. Note the two return shapes, a `dict` and an
-   `McpServerConfig`: a copy goes only to the support function with
-   the same body and return.
+   `tests/support/tools_mcp.py` defines `entry_data` (a `dict`) and
+   `stdio_entry` (an `McpServerConfig`). Not every copy is
+   AST-identical to its destination, so each is mapped by return shape
+   and proven equal rather than assumed:
+
+   | Copy | Returns | Becomes | Identity |
+   |---|---|---|---|
+   | `stdio_entry`, `test_agent_guidance.py:64` | `dict` | `entry_data` | AST-identical but for the name |
+   | `stdio_server`, `test_tools.py:30` | `dict` | `entry_data` | AST-identical but for the name |
+   | `entry_data`, `test_config_api_runtime.py:108` | `dict` | `entry_data` | AST-identical |
+   | `entry_data`, `test_tools_mcp_reload.py:83` | `dict` | `entry_data` | AST-identical |
+   | `stdio_entry()`, `test_mcp_reload.py:41` | `dict` | `entry_data()` | No overrides parameter; equal for the no-argument call, which is every call it has |
+   | `stdio_entry`, `test_tools_mcp_prompts.py:69` | model | `stdio_entry` | AST-identical |
+   | `stdio_entry`, `test_tools_mcp_reload.py:91` | model | `stdio_entry` | `model_validate(entry_data(...))`: equal, and the better spelling |
+
+   The last row's spelling becomes the support one: `stdio_entry` is
+   defined over `entry_data`, so the support module stops holding the
+   literal twice. Each file's own `STDIO_SERVER` is checked to be the
+   same path as `tests/support/configs.STDIO_SERVER` before its copy
+   goes, and the equalities are checked for no overrides, an `args`
+   override and an `env` override, recorded in the implementation doc.
 
 5. **The OpenAI SDK client for provider tests.** `mock_client`, 13
    lines, identical in `test_providers_openai_asr.py` and
@@ -388,6 +400,8 @@ Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    Evidence: The plan requires every moved body to be AST-identical to its destination and says divergent copies are not silently unified (lines 79-83 (`plan:79`)), then calls all listed stdio helpers identical (lines 146-155 (`plan:146`)). `test_mcp_reload.stdio_entry` has no override parameter or dictionary union (lines 41-46 (`tests/integration/test_mcp_reload.py:41`)), while `test_tools_mcp_reload.stdio_entry` calls its local `entry_data` and carries a docstring (lines 83-94 (`tests/unit/test_tools_mcp_reload.py:83`)). Neither body is AST-identical to the support destination.
 
    The plan should say instead: record explicit behavior-preserving mappings by return shape, including `test_mcp_reload.stdio_entry()` to `entry_data()` and both local helpers in `test_tools_mcp_reload` to the corresponding support functions. Verify equality for representative overrides rather than promising AST identity where it does not exist.
+
+   *Resolution:* accepted, confirmed at each site. Item 4 is now a mapping by return shape with the identity each copy actually has: five `dict` copies to `entry_data` (one, `test_mcp_reload.stdio_entry()`, has no overrides and is equal for the only call it takes), two model copies to `stdio_entry`. Equality is checked for representative overrides and each file's `STDIO_SERVER` against the support one, rather than AST identity promised. The support `stdio_entry` is redefined over `entry_data`, which `test_tools_mcp_reload.py` already did, so the literal lives once.
 
 6. **P2: The smoke-copy exception rests on a false isolation claim**
 
