@@ -42,6 +42,10 @@ reply out sees its own `CancelledError`, so `asyncio.timeout` around
 holds. The reply it cancelled still finishes its `finally` undisturbed,
 and it still has an owner: the runtime keeps its handle, and
 `runtime.close()` sees it through as it already does on every close.
+`close()` itself is the one caller that must not let go early: a
+cancellation reaching it is passed on to the reply and held, and it
+reaches `close()`'s caller only once the reply's task is done, the
+handle is cleared and the purge has run.
 
 ## The issue's decisions, restated
 
@@ -85,18 +89,76 @@ if not task.cancelled():
   `CancelledError` is suppressed" to what is now true: the reply's own
   cancellation is suppressed, and the caller's is not.
 
-### `runtime.close()` purges even when its wait is cancelled
+### `runtime.close()` sees the reply through, then re-raises
 
 `PipelineRuntime.close` awaits `cancel_reply(ABORTED)` and then purges
-the session's unrecorded threads. Today a cancellation of the session
-task landing in that wait is swallowed, so the purge runs. After the
-fix it propagates, which would skip the purge and leave the
-unrecorded threads' ledgers in a process that never restarts. That is
-the exact leak `close`'s docstring says it exists to prevent. So the
-purge moves into a `finally` around the cancel. The session's
-`_cleanly` already holds a `CancelledError` from `runtime.close()` and
-re-raises it after the remaining close steps
-(`device/session.py` `_cleanly`), so nothing above `close` changes.
+the session's unrecorded threads, and it runs inside the session's
+close path, whose contract is that a cancellation arriving there is
+held until the record is finished (`_cleanly`, pinned by
+`test_a_cancelled_cleanup_step_still_finishes_the_record`). Today a
+cancellation of the session task landing in `close`'s wait is
+forwarded into the reply by the direct await and then swallowed, so the
+reply ends, the purge runs and `close` returns. Were `close` to use the
+fixed `cancel` alone, the cancellation would propagate with the reply
+still in its tail (possibly at `filler.settle`, before its turn is
+recorded) and the purge skipped, and `_cleanly` would go on to
+`session_closed`, the store's close and the export barrier while the
+reply could still enqueue its turn behind them.
+
+So `ReplyInFlight` gets a second way to end, beside `cancel`, named for
+the caller whose situation it is:
+
+```python
+async def close(self, outcome: ReplyOutcome) -> None:
+    self.latch(outcome)
+    task = self._reply_task
+    if task is None:
+        return
+    task.cancel()
+    held: asyncio.CancelledError | None = None
+    while not task.done():
+        try:
+            await asyncio.wait([task])
+        except asyncio.CancelledError as cancelled:
+            # Hurried, not released: passed on to the reply, whose
+            # finally is built to take a second cancel, and held
+            # until the task is done.
+            held = held or cancelled
+            task.cancel()
+    if held is not None:
+        raise held
+    if not task.cancelled():
+        task.result()
+```
+
+and `PipelineRuntime.close` reaches it through a sibling of
+`cancel_reply` that clears the handle whether or not `close` raised,
+then purges in a `finally`, so the held cancellation reaches the
+session's `_cleanly` after the reply's task is done, `_in_flight` is
+None and the purge has run. Nothing above `close` changes: `_cleanly`
+already holds and re-raises a `CancelledError` from it.
+
+The two methods differ in exactly one decision, what a cancellation of
+the caller means, and that is why they are two names rather than a
+flag. For `cancel`, whose callers run on the serve loop, it means the
+caller is being ended, so it propagates now and the reply is left to
+its owner. For `close`, whose caller is the owner's last step, it means
+the close is being hurried, so the reply is cancelled again and waited
+out.
+
+**Deviation from the review's wording:** the review asked for the
+reply to be waited out *without* a second `task.cancel()`. The plan
+passes the cancellation on instead, for two reasons. The reply's
+`finally` is built for a second cancel: the only await between
+`reply_finished` and the turn record is `filler.settle`, and its
+`except BaseException` arm records the turn before re-raising, so a
+hurried reply still records its turn before `close` returns, which is
+the property the review is protecting. And holding the cancellation
+without passing it on makes `close` unbounded if the tail wedges (a
+paced send that cannot complete, a settle that never returns), where
+today it is bounded by exactly this second cancel. Test 6 checks the
+turn lands before `close` returns with the cancel arriving at the
+settle.
 
 Nothing else needs a guard. Every other caller of `cancel_reply` runs
 on the serve loop's task (the device abort, the manual stop, the three
@@ -118,10 +180,11 @@ ownerless.
 ## Module layout
 
 - `vinga-server/src/vinga_server/runtime/reply_in_flight.py`:
-  `cancel`'s body and docstring.
-- `vinga-server/src/vinga_server/runtime/pipeline.py`: `close` puts
-  the purge in a `finally`; `cancel_reply`'s docstring gains one
-  sentence saying a cancelled caller leaves the handle in place.
+  `cancel`'s body and docstring, and the new `close`.
+- `vinga-server/src/vinga_server/runtime/pipeline.py`: `close` ends
+  the reply through `ReplyInFlight.close` and purges in a `finally`;
+  `cancel_reply`'s docstring gains one sentence saying a cancelled
+  caller leaves the handle in place.
 - `vinga-server/tests/unit/test_reply_in_flight.py`: value-level tests.
 - `vinga-server/tests/unit/test_turn_lifecycle.py`: runtime-level
   tests, beside `HoldsTheFirstStop`, which already holds a cancelled
@@ -168,15 +231,31 @@ name the session's callers reach:
    recorded outcome is `barged_in`. Then `runtime.close()` returns with
    nothing in flight and no second outcome recorded. Fails today at
    the `TimeoutError` assertion.
-6. **A cancelled close still purges.** A runtime built with a purge spy
-   and a reply held at its stop: the task running `close()` is
-   cancelled during the wait. It raises `CancelledError`, and the spy
-   was called with the session's current threads. Fails with the fix
-   applied but the `finally` removed, which is the mutation that
-   proves the guard; the implementer records that run. How the spy
-   reaches the runtime is the implementer's to find through the
-   existing constructor argument (`purge=`) and test support, not
-   through a new seam.
+6. **A cancelled close sees the reply through, then raises.** A
+   runtime built with a purge spy, and a reply held at its tail's
+   `filler.settle` (the stub `settle` the lifecycle suite already uses
+   for this point, blocking on an event). The task running
+   `runtime.close()` is cancelled while the reply is held there. Then:
+   the reply's turn record has landed (the transcript collaborator or
+   the store double the suite already uses) before `close()`'s task is
+   done; `reply_in_flight(session)` is None; the purge spy was called
+   with the session's current threads; the reply's task is done; and
+   awaiting `close()`'s task raises `CancelledError`. With `close`
+   built on the fixed `cancel` alone it fails (the purge is skipped and
+   the reply is still running when the cancellation arrives), and with
+   the `finally` around the purge removed it fails on the spy; the
+   implementer records both runs.
+7. **A close cancelled twice still raises once, after the reply.** The
+   same shape, with a second cancel delivered while the reply's
+   (already hurried) tail is held on a later await; `close()`'s task
+   still ends cancelled only after the reply's task is done. This pins
+   the `while` loop: a mutation that waits once fails it.
+8. **`ReplyInFlight.close` at value level**: a body whose `finally`
+   notes the second `CancelledError` it receives. The caller of
+   `close` is cancelled mid-wait; the body saw the second cancel, the
+   task is done before the caller's `CancelledError` is observed, and a
+   body ending in another exception with no caller cancellation still
+   raises it, as `cancel` does.
 
 Existing suites that must stay green unchanged: every
 `test_session_*` file, `test_turn_lifecycle.py`, `test_turntaking.py`
@@ -198,17 +277,12 @@ and `test_reply_in_flight.py`, both lanes, and `tests/census`.
 
 ## Risks and mitigations
 
-- **A reply left running after a cancelled `close()`.** If the session
-  task is cancelled during `close`'s wait, the reply's own cancellation
-  has already been delivered and its `finally` is running; with the
-  wait shape, it finishes on its own instead of being interrupted.
-  Nothing awaits it afterwards. Today it is interrupted and awaited.
-  The reply ends within the time its `finally` takes (one device send
-  to a closing socket, one record), and it is referenced from its
-  pending send until it does. Mitigation: accept, and say so in
-  `close`'s docstring. The alternative (forwarding the cancel into the
-  reply from `close` only) brings back the interrupted tail, the thing
-  this plan removes.
+- **A reply wedged in its tail wedges a close.** With `close` passing
+  a cancellation on, a tail that ignores it (an `except BaseException`
+  that loops, say) keeps `close` waiting. Nothing in today's tail does
+  that: every await in it is cancellable and its guard arms re-raise.
+  This is also today's behavior, since today's `close` waits the task
+  out whatever it does.
 - **A caller that relied on `cancel_reply` never raising
   `CancelledError`.** The inventory shows none outside `close`.
   `turntaking.finish_utterance` propagates it, which is correct: its
@@ -234,14 +308,17 @@ docstring for the risk above, and the changelog fragment.
      fix: one commit, since tests 1-3 and 5 cannot be green without
      it. The body records each test's failing run against today's
      `cancel`.
-  2. `close()`'s `finally` and test 6, with the mutation run recorded.
+  2. `ReplyInFlight.close`, `PipelineRuntime.close` built on it with
+     the purge in a `finally`, and tests 6-8, with the mutation runs
+     recorded.
   3. The changelog fragment, this plan's tick, and the implementation
      doc's M1 section; the census manifests regenerated if either went
      stale.
 
   Design footprint: deepens `ReplyInFlight` (callers stop having to
   know that waiting out a cancelled reply could swallow their own
-  cancellation), adds no module or seam. Documentation footprint as
+  cancellation, or that a close must outlast its reply before letting
+  a cancellation through), adds no module or seam. Documentation footprint as
   above.
 
 ## Plan review round
@@ -270,5 +347,21 @@ Reviewed 2026-09-24 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    cleared, the purge runs, no reply task remains, and only then does
    `CancelledError` reach the caller. Remove the risk acceptance and
    test 6.
+
+   *Resolution:* accepted, with one deviation stated. `ReplyInFlight`
+   gains `close(outcome)`, which waits the reply's task out through
+   any number of caller cancellations, holds the first, and raises it
+   only once the task is done; `PipelineRuntime.close` is built on it
+   and purges in a `finally`, so the held cancellation reaches
+   `_cleanly` after the turn is recorded, the handle is cleared and the
+   purge has run ("`runtime.close()` sees the reply through, then
+   re-raises"). The Goal now says so, the risk acceptance is gone, and
+   test 6 is replaced by tests 6-8, with the cancel arriving at
+   `filler.settle`. The deviation: a cancellation reaching `close` is
+   passed on to the reply as a second cancel rather than held back
+   from it, because the tail's `settle` arm already records the turn
+   under a second cancel and holding it would make `close` unbounded
+   where today it is bounded; the design section gives the reasoning
+   in full.
 
 Verdict: ready after the amendment.
