@@ -35,6 +35,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 from tests.support.config_cli import runner
 from tests.support.events import every_format
+from tests.support.leaks import links
 from tests.support.tools_mcp import serving
 from vinga_server.config import Config
 from vinga_server.config.boot import load_boot_config
@@ -228,14 +229,17 @@ def chained(exc: BaseException) -> str:
     """One failure and everything behind it, rendered the way a
     traceback would be. `__cause__` and `__context__` both, since a
     value quoted by a wrapped exception is in the log of anything that
-    prints the chain."""
-    seen: list[str] = []
-    current: BaseException | None = exc
-    while current is not None:
-        seen.append("".join(traceback.format_exception(current)))
-        seen.append(repr(current))
-        current = current.__cause__ or current.__context__
-    return "\n".join(seen)
+    prints the chain.
+
+    A renderer of its own rather than `leaks.chain`, because the
+    formatted traceback is a surface of its own (source lines, frames)
+    that no rendering of the exception reproduces; the traversal is the
+    shared one, which follows both links from every exception."""
+    return "\n".join(
+        rendering
+        for current in links(exc)
+        for rendering in ("".join(traceback.format_exception(current)), repr(current))
+    )
 
 
 async def fingerprint(config: Config, name: str = "authorization") -> str:

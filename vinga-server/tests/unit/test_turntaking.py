@@ -23,6 +23,7 @@ import pytest
 import vinga_server.runtime.turntaking as turntaking_module
 from tests.support.boundary import FakeDevice
 from tests.support.events import both_formats, events, only
+from tests.support.leaks import chain
 from tests.support.providers import ScriptedEndpointer
 from vinga_server.config import ServerConfig
 from vinga_server.device.boundary import PIPELINE_SAMPLE_RATE, DeviceOutput, PlayableAudio
@@ -115,19 +116,6 @@ class SpeechAt(ScriptedEndpointer):
 
     def speech_start(self) -> int | None:
         return self._speech_start
-
-
-def chained(exc: BaseException) -> str:
-    """Every exception reachable from one, rendered. A `raise` inside an
-    active `except` suite attaches the exception being handled as
-    `__context__`, so this is what an escaping failure hands to whoever
-    catches it, whatever the line that failed chose to print."""
-    seen: list[str] = []
-    current: BaseException | None = exc
-    while current is not None and len(seen) < 20:
-        seen.append(f"{type(current).__name__}: {current}")
-        current = current.__cause__ or current.__context__
-    return "\n".join(seen)
 
 
 def turn_taking(
@@ -384,7 +372,7 @@ async def test_a_failure_during_the_cleanup_carries_nothing_of_the_first(
         with pytest.raises(RuntimeError) as caught:
             await taking.finish_utterance(endpointed=True)
 
-    assert SENTINEL not in chained(caught.value)
+    assert SENTINEL not in chain(caught.value)
     assert SENTINEL not in both_formats(caplog)
 
 

@@ -85,6 +85,7 @@ from tests.support.deployment import (
     check_in,
     serving,
 )
+from tests.support.leaks import chain
 from vinga_server.build_info import revision
 from vinga_server.config import ConfigError, cli, docgen, entities, server_reference
 from vinga_server.config.cli import deployment, grammar, input, local, output, reach
@@ -408,36 +409,6 @@ def leaked(sentinel: str, **surfaces: str) -> list[str]:
     return sorted(name for name, text in surfaces.items() if sentinel in text)
 
 
-def carried(exc: BaseException) -> str:
-    """Everything an exception chain holds, one attribute deeper than
-    the exceptions themselves.
-
-    `tests.support.config_cli.chain` renders each exception's repr and
-    its str, which is what the unit lane's no-leak cases need. It is not
-    enough here, and the reason is worth stating rather than inheriting:
-    PyYAML's marked errors keep the WHOLE buffer they were parsing on a
-    mark object hung off the exception, and neither the exception's repr
-    nor its str renders that buffer. A refusal raised inside the handler
-    for one of those would carry the submitted document behind it and
-    read as clean to a shallower walk. This goes one attribute deeper,
-    which is where a chain walker would find it, and the deliberate-leak
-    run that proved it is in the M3 record.
-    """
-    parts: list[str] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        parts += [repr(current), str(current)]
-        for name, value in vars(current).items():
-            parts.append(f"{name}={value!r}")
-            held = getattr(value, "__dict__", None)
-            if held:
-                parts.append(repr(held))
-        current = current.__cause__ or current.__context__
-    return "\n".join(parts)
-
-
 def chain_of(argv: Sequence[str]) -> str:
     """What the refusal for this command line carries, including what a
     chain walker would find behind it.
@@ -452,7 +423,7 @@ def chain_of(argv: Sequence[str]) -> str:
     """
     with pytest.raises(ConfigError) as caught:
         cli._parsed(list(argv), cli.DISPATCHED)
-    return carried(caught.value)
+    return chain(caught.value)
 
 
 KNOWN_MAC = "aa:bb:cc:dd:ee:ff"
@@ -3026,7 +2997,7 @@ def test_the_leak_check_notices_a_value_on_every_surface(
     # that says nothing itself but carries something that does.
     refusal = ConfigError("a sentence that quotes nothing")
     refusal.__context__ = ValueError(PLANTED)
-    assert leaked(PLANTED, chain=carried(refusal)) == ["chain"]
+    assert leaked(PLANTED, chain=chain(refusal)) == ["chain"]
 
     # The value was planted here on purpose, so the three records above
     # are this case's own and belong to no server.
