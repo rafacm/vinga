@@ -226,11 +226,45 @@ and the model is stated in the record.
 - **Cached fraction per round across a session**: at least eight
   turns, `cache_read_input_tokens / input_tokens` per `llm_round`,
   tabulated in the implementation doc.
-- **One session that writes memory mid-conversation and one that
-  does not**, same questions, same prompt, the writing session asked
-  to remember something at turn three. Whether the fraction drops at
-  the write and stays down is the number M2 is gated on. A drop that
-  both sessions show is TTL or provider behavior, not the write.
+- **Whether a memory write voids the cache, as a controlled
+  comparison.** Two arms, identical agent, prompt and questions: a
+  control arm that never writes, and a treatment arm asked to remember
+  something at turns three and six.
+  - *Isolation.* Every arm starts from memory verified empty (the
+    agent's memory listed through the CLI before the first turn and
+    the listing recorded), and memory is cleared after every arm, so
+    no arm inherits another's facts through `remember`'s persistence
+    across conversations. With memory empty the assembled system
+    prompt is byte-identical at the start of every arm.
+  - *Counterbalancing.* Four sessions in the order control,
+    treatment, treatment, control, so neither arm always runs on the
+    warmer cache and a TTL or eviction effect shows up in both arms
+    rather than posing as the treatment.
+  - *The intervention is verified, not assumed.* A treatment turn
+    counts only when the round carried a non-error `tool_call` for
+    `remember` or `set_state`, read off the events, and the next
+    round's system instructions (the `llm` span's
+    `gen_ai.system_instructions`, telemetry text on) are shown to
+    contain the new fact. A turn where the model declined is re-asked
+    once and otherwise recorded as a failed intervention, not a data
+    point.
+  - *What is expected, stated before the run.* A provider prompt cache
+    matches the longest common prefix, so a write should make the
+    NEXT round miss everything after the start of the memory block,
+    and the round after that should cache again against the new
+    prefix. The expected signature is therefore one near-uncached
+    round per write, not a fraction that stays down; the per-round
+    table shows which it is.
+  - *The gate.* M2's gate opens when, at every verified intervention
+    in both treatment sessions (four in all), the round after the
+    write reports cached tokens no larger than the prompt ahead of the
+    memory block, while the control sessions' same-numbered rounds
+    cache at least half their input. Anything less, including a
+    signature that holds at some interventions and not others, is
+    recorded as not reproduced and M2 stays closed. The record also
+    states what the gate does not measure: how often real sessions
+    write memory, which is what turns one uncached round per write
+    into a cost.
 - **The endpoint reports the field**: OpenAI's does or does not,
   recorded. A self-hosted compatible endpoint cannot be checked on
   this machine (no local runner installed), so that box stays
@@ -335,6 +369,8 @@ Reviewed 2026-09-25 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
 3. **P2: The live A/B cannot attribute a cache drop to memory as written.**
    **Evidence:** The plan uses one agent for two sessions, merely “asks” one session to remember, and treats a difference as causal (`docs/plans/...`, lines 192-209). `remember` explicitly persists facts across conversations (`tools/builtin.py:199-224,770-792`), so whichever session runs second can inherit the treatment. A model may also decline or fail to call the tool, and two sequential runs do not control for TTL or cache eviction despite the plan claiming they do. No repeatability threshold defines when M2’s gate opens.
    **Plan should say instead:** Start both arms from verified empty memory and isolate their namespaces or databases while keeping byte-identical prompts; interleave or counterbalance their turns; require a successful non-error `tool_call` for `remember` or `set_state`; verify that the next assembled request actually changed; repeat the intervention; and define the gate as a reproducible treatment-only drop of a stated magnitude, not any single observed drop.
+
+   *Resolution:* accepted, and it exposed a second error in the plan: prefix caching predicts one uncached round per write, not a fraction that "stays down", so the old wording would have misread a correct result. The measurement is now two arms from verified-empty memory cleared after each, counterbalanced as control, treatment, treatment, control, with two verified interventions per treatment session (a non-error `remember`/`set_state` call and the fact visible in the next round's system instructions), the expected signature stated in advance, and a gate defined over all four interventions against the control arms. Isolation is by clearing rather than by separate namespaces, since a second agent or database would change the prompt the arms are meant to share.
 
 4. **P2: The promised cached-subset invariant is not enforced.**
    **Evidence:** Decisions 1 and 5 rely on cached tokens always being a subset because the backend subtracts them from input (`docs/plans/...`, lines 75-80 and 109-113). The malformed-input handling only checks that the value is a non-negative integer (`lines 231-238`). `Count` validates only `int >= 0` (`events/values.py:840-852`), so a compatible endpoint reporting 1,500 cached tokens with 1,000 prompt tokens would be exported and could create negative uncached input or invalid pricing.
