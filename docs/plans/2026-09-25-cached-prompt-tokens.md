@@ -275,3 +275,31 @@ and the model is stated in the record.
   the live measurement recorded in the implementation doc with the
   per-round table and the two-session comparison. One pull request;
   it does not close #536, and its body says whether M2's gate opened.
+
+## Plan review round
+
+Reviewed 2026-09-25 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 6m21s, at commit 550a2530, plan blob 88033235.
+
+---
+
+1. **P2: Anthropic normalization does change stored turn accounting.**
+   **Evidence:** The plan says turn accounting is “untouched” (`docs/plans/2026-09-25-cached-prompt-tokens.md`, Decisions 3 and 6, lines 91-118). In reality, `ProviderWatch.reply_round_done` passes normalized `prompt_tokens` into `TurnUnderway.round_done` (`runtime/provider_watch.py:295-309`), which accumulates it into turn and leg totals (`runtime/turns.py:156-177`) that are persisted (`conversations/store.py:1909,1927`) and summed by the metrics views. Existing rows are not rewritten, so Anthropic token time series change semantics at the upgrade boundary once caching is active.
+   **Plan should say instead:** No schema migration or cached-token column is needed, but normalized Anthropic totals deliberately change `turns.input_tokens`, `turns.legs[*].input_tokens`, API reads, and token metrics. Name that historical discontinuity, cover it with a turn-accounting/storage assertion, and include it in the changelog and PR compatibility notes.
+
+2. **P2: The generated GenAI correspondence reference is missing from the documentation footprint.**
+   **Evidence:** `conversations/docgen.py:74-88,385-395` owns the table mapping project event fields to OpenTelemetry attributes; it already includes event-only mappings such as `model`, `type`, and `host`. The proposed `cache_read_input_tokens` mapping belongs there, but the plan’s documentation footprint (`docs/plans/...`, lines 257-269) names only the README, observability page, and `events.md`. Leaving the generator unchanged produces a green drift check while the generated correspondence table remains incomplete.
+   **Plan should say instead:** Add `cache_read_input_tokens → gen_ai.usage.cache_read.input_tokens`, located on `llm_round`, to `conversations/docgen.py`, then regenerate `docs/reference/conversations-schema.md`.
+
+3. **P2: The live A/B cannot attribute a cache drop to memory as written.**
+   **Evidence:** The plan uses one agent for two sessions, merely “asks” one session to remember, and treats a difference as causal (`docs/plans/...`, lines 192-209). `remember` explicitly persists facts across conversations (`tools/builtin.py:199-224,770-792`), so whichever session runs second can inherit the treatment. A model may also decline or fail to call the tool, and two sequential runs do not control for TTL or cache eviction despite the plan claiming they do. No repeatability threshold defines when M2’s gate opens.
+   **Plan should say instead:** Start both arms from verified empty memory and isolate their namespaces or databases while keeping byte-identical prompts; interleave or counterbalance their turns; require a successful non-error `tool_call` for `remember` or `set_state`; verify that the next assembled request actually changed; repeat the intervention; and define the gate as a reproducible treatment-only drop of a stated magnitude, not any single observed drop.
+
+4. **P2: The promised cached-subset invariant is not enforced.**
+   **Evidence:** Decisions 1 and 5 rely on cached tokens always being a subset because the backend subtracts them from input (`docs/plans/...`, lines 75-80 and 109-113). The malformed-input handling only checks that the value is a non-negative integer (`lines 231-238`). `Count` validates only `int >= 0` (`events/values.py:840-852`), so a compatible endpoint reporting 1,500 cached tokens with 1,000 prompt tokens would be exported and could create negative uncached input or invalid pricing.
+   **Plan should say instead:** At the OpenAI-compatible adapter, retain the cached count only when both counts are valid integers and `0 <= cached_tokens <= prompt_tokens`; otherwise report the cached count as absent. Add an over-total test in addition to the null, negative/non-integer, and boolean cases.
+
+5. **P2: The event-path inventory will not exercise the new optional field.**
+   **Evidence:** `tests/tools/event_baseline.py:663-672` drives the production `llm_round` path with a `Usage` that has only input and output counts. `tests/unit/test_event_baseline.py:333-344,438-533` explains that its exact carried-key inventory exists specifically to catch optional usage plumbing silently disappearing. The plan names assembly and provider-watch tests but not this driver or its `CARRIED` declaration.
+   **Plan should say instead:** Give `drive_llm_round` a non-zero `cached_prompt_tokens`, add `cache_read_input_tokens` to the corresponding exact `LlmRound` carried-key set, and verify that the production session path, not only direct builder calls, emits it.
+
+**Verdict:** ready after the P2 amendments.
