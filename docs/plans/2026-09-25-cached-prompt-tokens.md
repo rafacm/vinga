@@ -113,9 +113,21 @@ The issue's M1 decisions, as Step 0 confirmed or amended them.
    so stays and gains the cached case.
 6. **`_reported` returns three counts,** and `ProviderWatch`'s round
    method passes the third to `llm_rounded`. What `rounded` returns to
-   its caller does not change: the turn's accounting (`input_tokens`,
-   `output_tokens` on `turns` and `turns.legs`) is untouched, so no
-   migration, no store column and no view moves.
+   its caller does not change shape, so no migration, no store column
+   and no view moves. Its input count is the adapter's `prompt_tokens`,
+   though, which `reply_round_done` files on the turn
+   (`turn.round_done`, summed in `runtime/turns.py` into `turns` and
+   `turns.legs`, stored, and summed by the metrics views). So decision
+   3's fold DOES reach stored accounting: once an Anthropic entry
+   caches, its turns' `input_tokens`, the API reads of them and the
+   token metrics count the cached and created input they omitted
+   before. Rows already stored are not rewritten, so an Anthropic token
+   series has a discontinuity at the upgrade the day caching becomes
+   active; today, with no breakpoints set, nothing moves. It is named
+   in the changelog fragment and the PR's compatibility note, and a
+   turn-accounting test pins that the turn's input total is the
+   normalized `prompt_tokens`, the cached share neither added a second
+   time nor subtracted.
 
 ## Out of scope, with reasons
 
@@ -266,7 +278,8 @@ and the model is stated in the record.
   alone because the backend maps it.
 - `docs/reference/events.md`: regenerated, never hand-edited.
 - A `changelog.d/536-cached-prompt-tokens.md` fragment under
-  `### Added` (the count) and `### Fixed` (the Anthropic input total).
+  `### Added` (the count) and `### Fixed` (the Anthropic input total,
+  with the stored-accounting discontinuity from decision 6).
 
 ## Milestones
 
@@ -285,6 +298,8 @@ Reviewed 2026-09-25 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
 1. **P2: Anthropic normalization does change stored turn accounting.**
    **Evidence:** The plan says turn accounting is “untouched” (`docs/plans/2026-09-25-cached-prompt-tokens.md`, Decisions 3 and 6, lines 91-118). In reality, `ProviderWatch.reply_round_done` passes normalized `prompt_tokens` into `TurnUnderway.round_done` (`runtime/provider_watch.py:295-309`), which accumulates it into turn and leg totals (`runtime/turns.py:156-177`) that are persisted (`conversations/store.py:1909,1927`) and summed by the metrics views. Existing rows are not rewritten, so Anthropic token time series change semantics at the upgrade boundary once caching is active.
    **Plan should say instead:** No schema migration or cached-token column is needed, but normalized Anthropic totals deliberately change `turns.input_tokens`, `turns.legs[*].input_tokens`, API reads, and token metrics. Name that historical discontinuity, cover it with a turn-accounting/storage assertion, and include it in the changelog and PR compatibility notes.
+
+   *Resolution:* accepted. Decision 6 now says the fold reaches `turns`, `turns.legs`, the API reads and the metrics views through `reply_round_done`, names the discontinuity at the upgrade (inert until an Anthropic entry caches), and adds a turn-accounting test pinning the turn's input total to the normalized `prompt_tokens`. The changelog fragment and the PR carry the compatibility note.
 
 2. **P2: The generated GenAI correspondence reference is missing from the documentation footprint.**
    **Evidence:** `conversations/docgen.py:74-88,385-395` owns the table mapping project event fields to OpenTelemetry attributes; it already includes event-only mappings such as `model`, `type`, and `host`. The proposed `cache_read_input_tokens` mapping belongs there, but the plan’s documentation footprint (`docs/plans/...`, lines 257-269) names only the README, observability page, and `events.md`. Leaving the generator unchanged produces a green drift check while the generated correspondence table remains incomplete.
