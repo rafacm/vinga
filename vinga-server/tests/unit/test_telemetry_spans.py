@@ -535,6 +535,7 @@ def test_one_round_is_one_span_with_the_settled_gen_ai_keys() -> None:
         input_tokens=420,
         output_tokens=37,
         round_=1,
+        cache_read_input_tokens=256,
     )
     finish_reply(events)
     close_session(events)
@@ -548,6 +549,7 @@ def test_one_round_is_one_span_with_the_settled_gen_ai_keys() -> None:
     assert llm.attributes["server.address"] == "api.openai.com"
     assert llm.attributes["gen_ai.usage.input_tokens"] == 420
     assert llm.attributes["gen_ai.usage.output_tokens"] == 37
+    assert llm.attributes["gen_ai.usage.cache_read.input_tokens"] == 256
     # The entry's name under the SAME attribute the retained provider
     # context uses for it, rather than a second spelling of one fact:
     # the session and turn spans say what the session opened against and
@@ -569,6 +571,7 @@ def test_one_round_is_one_span_with_the_settled_gen_ai_keys() -> None:
         "gen_ai.request.model",
         "server.address",
         "gen_ai.usage.input_tokens",
+        "gen_ai.usage.cache_read.input_tokens",
         "gen_ai.usage.output_tokens",
         *GROUPING,
     }
@@ -1219,13 +1222,48 @@ def test_a_round_is_not_given_a_second_usage_spelling() -> None:
     events = a_turn(clock, telemetry)
 
     clock.tick(0.8)
-    round_done(events, input_tokens=420, output_tokens=37)
+    round_done(events, input_tokens=420, output_tokens=37, cache_read_input_tokens=256)
     finish_reply(events)
     close_session(events)
 
     llm = named(finished(telemetry, memory), LLM_SPAN).attributes
     assert llm["gen_ai.usage.input_tokens"] == 420
+    # The cached count included (#536): the backend maps the
+    # conventions' key itself, subtracts it from the input and prices
+    # it at the cached rate, while a `usage_details` string would
+    # REPLACE that mapping rather than add to it, which is a second
+    # structure that must agree with the first and a wrong price when
+    # it does not.
+    assert llm["gen_ai.usage.cache_read.input_tokens"] == 256
     assert USAGE_DETAILS not in llm
+
+
+def test_a_round_carries_its_cached_input_beside_the_input_it_is_part_of() -> None:
+    """`gen_ai.usage.cache_read.input_tokens`, the conventions' own name,
+    carried as the subset of `gen_ai.usage.input_tokens` it is and never
+    subtracted from it here: the backend does that subtraction, and the
+    Step 0 gate for #536 showed it pricing the result at the cached rate.
+    A round whose endpoint did not say carries no key, rather than a `0`
+    that would claim nothing was cached."""
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.8)
+    round_done(events, input_tokens=2000, output_tokens=10, cache_read_input_tokens=1536)
+    clock.tick(0.8)
+    round_done(events, input_tokens=2000, output_tokens=10, round_=2)
+    finish_reply(events)
+    close_session(events)
+
+    cached, unsaid = sorted(
+        (span for span in finished(telemetry, memory) if span.name == LLM_SPAN),
+        key=lambda span: span.attributes["vinga.llm.round"],
+    )
+    assert cached.attributes["gen_ai.usage.input_tokens"] == 2000
+    assert cached.attributes["gen_ai.usage.cache_read.input_tokens"] == 1536
+    assert unsaid.attributes["gen_ai.usage.input_tokens"] == 2000
+    assert "gen_ai.usage.cache_read.input_tokens" not in unsaid.attributes
 
 
 def test_a_stage_with_no_usage_gets_no_priced_spelling_either() -> None:

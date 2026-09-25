@@ -493,6 +493,7 @@ def round_done(
     agent: str = AGENT,
     invocation: str = "11111111111111111111111111111111",
     purpose: str = "reply",
+    cache_read_input_tokens: int | None = None,
 ) -> float:
     """One `llm_round`, built through the events' own assembly so the
     quartet's absence rules are the real ones.
@@ -516,6 +517,7 @@ def round_done(
             first_token_ms,
             invocation,
             purpose,
+            cache_read_input_tokens=cache_read_input_tokens,
         )
     )
 
