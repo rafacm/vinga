@@ -2948,7 +2948,7 @@ unit that stage is actually billed in:
 | Stage | Span | What it reports |
 | --- | --- | --- |
 | Transcription | `asr` | `gen_ai.usage.input_milliseconds`, how much audio the ear was actually sent |
-| Generation | `llm` | `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens`, as the endpoint reported them |
+| Generation | `llm` | `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens`, as the endpoint reported them, and `gen_ai.usage.cache_read.input_tokens` where the endpoint reported what its prompt cache served |
 | Synthesis | `tts_stream` | `gen_ai.usage.input_characters`, the length of the sentence the voice was handed |
 
 The milliseconds and the characters are both INPUT, read from the
@@ -2959,6 +2959,15 @@ counts and nothing else, so the two units they have no word for state
 that unit in the attribute name rather than being reported as tokens
 they are not. Every value is a whole number, because a backend drops a
 usage value that is not.
+
+The cached count is part of the input count, never beside it: of the
+`gen_ai.usage.input_tokens` a round reports, that many were served from
+the provider's prompt cache. A backend that knows the key takes it out
+of the input and prices it at the model's cached rate, which is
+usually a fraction of the full one, so the round's cost is what the
+provider actually charged rather than an upper bound on it. An endpoint
+that does not say what it cached reports no cached count at all, rather
+than a zero that would claim nothing was.
 
 **The transcription number is what was SENT, not how long you spoke.**
 The two come apart in both directions on a real endpoint: a clip under
