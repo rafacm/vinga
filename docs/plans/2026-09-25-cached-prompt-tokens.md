@@ -186,6 +186,16 @@ provider-watch tests beside them.
   `gen_ai.usage.cache_read.input_tokens` beside `input_tokens`, carries
   no key for it when the event had none (not `0`), and still carries
   no `usage_details`.
+- **The event-path inventory:** `tests/tools/event_baseline.py`'s
+  `drive_llm_round` gives its `Usage` a non-zero
+  `cached_prompt_tokens` (below its `prompt_tokens`), and
+  `cache_read_input_tokens` joins the exact `LlmRound` carried-key set
+  in `tests/unit/test_event_baseline.py`'s `CARRIED`. That driver runs
+  the production session path, so this is what proves the field
+  survives the reply loop rather than only the builder; the table
+  exists to catch exactly optional usage plumbing going missing.
+  Whether the recap driver there reaches a `Usage` is checked, and if
+  it does, its `LlmRecap` set gains the field too.
 - The catalog reference (`docs/reference/events.md`) regenerates
   through its generator; the drift check is the test.
 
@@ -335,5 +345,7 @@ Reviewed 2026-09-25 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
 5. **P2: The event-path inventory will not exercise the new optional field.**
    **Evidence:** `tests/tools/event_baseline.py:663-672` drives the production `llm_round` path with a `Usage` that has only input and output counts. `tests/unit/test_event_baseline.py:333-344,438-533` explains that its exact carried-key inventory exists specifically to catch optional usage plumbing silently disappearing. The plan names assembly and provider-watch tests but not this driver or its `CARRIED` declaration.
    **Plan should say instead:** Give `drive_llm_round` a non-zero `cached_prompt_tokens`, add `cache_read_input_tokens` to the corresponding exact `LlmRound` carried-key set, and verify that the production session path, not only direct builder calls, emits it.
+
+   *Resolution:* accepted. The tests section gains the event-path inventory item: the driver's `Usage` carries a cached count, the `LlmRound` carried set gains the field, and the recap driver is checked for the same.
 
 **Verdict:** ready after the P2 amendments.
