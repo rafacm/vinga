@@ -76,9 +76,10 @@ SOFTWARE.
 **default** one (unsuffixed tags) bundles vinga-server with both of its
 optional local engines, so that one `docker run` serves a conversation
 without a cloud account. Everything in this section describes that
-variant. The **slim** one (`-slim` tags) installs no optional extra, and
-so contains neither of the copyleft components below except PyAV, which
-is a core dependency.
+variant. The **slim** one (`-slim` tags) installs neither local engine
+(only the `otel` and `langfuse` extras beside the `serve` tier every
+image carries), and so contains neither of the copyleft components below
+except PyAV, which the `serve` tier brings in.
 
 Two of the default variant's contents carry copyleft terms:
 
@@ -100,6 +101,6 @@ voices download at first start into the mounted `/data` volume, under
 their own licenses.
 
 An image without the GPL engine is a reasonable thing to want, and the
-`slim` variant is it: no optional extras, so no piper-tts and no
-GPL-3.0 component. PyAV and its bundled FFmpeg remain, being a core
-dependency of the server itself.
+`slim` variant is it: no local engine extras, so no piper-tts and no
+GPL-3.0 component. PyAV and its bundled FFmpeg remain, being a
+dependency of the `serve` tier that every image installs.
