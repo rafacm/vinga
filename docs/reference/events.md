@@ -1074,6 +1074,7 @@ session %s: %s round %d took %.2f s over %d turns
 | `host` | `IDENTIFIER` | no | no |  |  |
 | `model` | `IDENTIFIER` | no | no |  | Present where the configured entry names one. The GenAI conventions' `gen_ai.request.model`. |
 | `input_tokens` | `COUNT` | no | no |  | Present where the provider reported usage; their absence is a fact about the endpoint. |
+| `cache_read_input_tokens` | `COUNT` | no | no |  | The part of `input_tokens` the provider served from its prompt cache, so never larger than it and never to be added to it. The GenAI conventions' `gen_ai.usage.cache_read.input_tokens`. Absent where the endpoint did not say, which is a fact about the endpoint rather than a zero. |
 | `output_tokens` | `COUNT` | no | no |  |  |
 | `first_token_ms` | `INT` | no | no |  | Times the first spoken token, so a round that only asked for a tool carries none. |
 | `purpose` | `TOKEN` | yes | no | one of: `reply` |  |
@@ -1110,6 +1111,7 @@ session %s: %s recap took %.2f s over %d turns
 | `host` | `IDENTIFIER` | no | no |  |  |
 | `model` | `IDENTIFIER` | no | no |  |  |
 | `input_tokens` | `COUNT` | no | no |  |  |
+| `cache_read_input_tokens` | `COUNT` | no | no |  | The part of `input_tokens` served from the provider's prompt cache. |
 | `output_tokens` | `COUNT` | no | no |  |  |
 | `first_token_ms` | `INT` | no | no |  |  |
 | `purpose` | `TOKEN` | yes | no | one of: `recap` |  |

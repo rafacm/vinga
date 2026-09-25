@@ -50,18 +50,19 @@ class FirstTokenTimeout(TimeoutError):
     whose own SDK timed out."""
 
 
-def _reported(usage: Usage | None) -> tuple[int | None, int | None]:
-    """What a round says about its size.
+def _reported(usage: Usage | None) -> tuple[int | None, int | None, int | None]:
+    """What a round says about its size: input, output, and the cached
+    part of the input.
 
     Token counts appear where the provider reported them; their absence
     is a fact about the endpoint rather than a zero. Plain numbers,
-    because the same two answers are read twice over: the event wraps
-    them in its own value types, and the turn's record counts them.
+    because the first two answers are read twice over: the event wraps
+    them in its own value types, and the turn's record counts them. The
+    third reaches the event alone; nothing stored counts it (#536).
     """
-    return (
-        usage.prompt_tokens if usage is not None else None,
-        usage.completion_tokens if usage is not None else None,
-    )
+    if usage is None:
+        return None, None, None
+    return usage.prompt_tokens, usage.completion_tokens, usage.cached_prompt_tokens
 
 
 class ProviderWatch:
@@ -383,7 +384,7 @@ class ProviderWatch:
         first_token_ms = (
             None if first_token_at is None else round((first_token_at - began) * 1000)
         )
-        inputs, outputs = _reported(usage)
+        inputs, outputs, cached = _reported(usage)
         if self._llm_input is not None:
             self._llm_input.finish(invocation)
         self._events.emit(
@@ -400,6 +401,7 @@ class ProviderWatch:
                 first_token_ms,
                 invocation,
                 purpose,
+                cache_read_input_tokens=cached,
             )
         )
         return elapsed, first_token_ms, inputs, outputs
