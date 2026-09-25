@@ -14,6 +14,7 @@ from pathlib import Path
 
 from vinga_server.conversations import docgen
 from vinga_server.conversations.schema import TABLES
+from vinga_server.telemetry import LLM_ATTRIBUTES
 
 COMMITTED = (
     Path(__file__).resolve().parents[3] / "docs" / "reference" / "conversations-schema.md"
@@ -235,6 +236,21 @@ def test_the_reference_maps_the_gen_ai_vocabulary() -> None:
     assert "gen_ai.request.model" in rendered
     assert "gen_ai.provider.name" in rendered
     assert "server.address" in rendered
+
+
+def test_every_convention_the_llm_span_speaks_has_its_row() -> None:
+    """The table is the generator's input, so the drift check stays
+    green when a mapping the span carries was never added here: the
+    reference is then current and incomplete. So the table is held to
+    the span's own mapping, the one place a field meets its conventions'
+    name on the way out. Every foreign-prefixed key the `llm` span maps
+    a field to has a row naming that field (#536)."""
+    spoken = {
+        (field, attribute)
+        for field, attribute in LLM_ATTRIBUTES.items()
+        if attribute.startswith("gen_ai.") or attribute == "server.address"
+    }
+    assert spoken <= {(name, attribute) for name, attribute, _ in docgen.GEN_AI}
 
 
 def test_the_reference_explains_both_storage_switches() -> None:
