@@ -133,8 +133,8 @@ was 2,456 input tokens, clear of OpenAI's 1,024-token floor from round
 one.
 
 **Isolation.** Each session ran on its own board MAC, against a fresh
-database created for the run. Before every session `vinga memory list
-agent` and `vinga memory list device` both answered "nothing is
+database created for the run. Before every session
+`vinga memory list agent` and `vinga memory list device` both answered "nothing is
 remembered under that scope"; after every session the agent's and the
 board's memory were listed, deleted with `--all`, and listed empty
 again. The treatment sessions left exactly their two facts
