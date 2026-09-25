@@ -95,11 +95,16 @@ env:
   # after the build and which keeps `UV_COMPILE_BYTECODE=1` on purpose.
   PYTHONDONTWRITEBYTECODE: "1"
 
-  # One compute thread per library, because the unit lane now runs four
-  # worker processes on a four-core runner and every one of them imports
-  # onnxruntime: pysilero-vad is a core dependency, not an extra, so the
-  # VAD is present in every worker whichever providers a test builds.
-  # These pools size themselves to the machine's core count by default,
+  # One compute thread per library, because the unit lane runs four
+  # worker processes on a four-core runner. The reason first written
+  # here was that every worker imports onnxruntime through pysilero-vad,
+  # and that was never so: pysilero-vad runs Silero on ggml inside its
+  # own wheel, and the lane's environment installs no onnxruntime (only
+  # the faster-whisper and piper extras bring it, and neither is in the
+  # dev group). numpy does arrive, through the dev group's xiaozhi-sdk.
+  # Whether these settings still change the lane's timing has not been
+  # measured since; they are kept because they cost nothing.
+  # Thread pools size themselves to the machine's core count by default,
   # which means four workers asking for roughly sixteen threads on four
   # cores. That oversubscription is descheduling, and descheduling is
   # exactly what the lane's timing margins cannot absorb (the 20/60/80ms
@@ -110,7 +115,7 @@ env:
   # and the local runs stay green either way.
   #
   # Three names for the same intent, since the pools that matter read
-  # different ones: OpenMP's is what onnxruntime and numpy honor
+  # different ones: OpenMP's is what onnxruntime and numpy's BLAS honor
   # generally, and the other two are named explicitly so a build that
   # reads only its own is covered too.
   OMP_NUM_THREADS: "1"

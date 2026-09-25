@@ -39,8 +39,10 @@
 #
 # Measured on arm64: 883 MB default against 494 MB slim. Most of the
 # difference is not piper but faster-whisper, which brings its own
-# inference stack rather than reusing the onnxruntime pysilero-vad
-# already pulls in.
+# inference stack (CTranslate2, plus the onnxruntime piper also uses).
+# Nothing in slim carries either: pysilero-vad, the one VAD every image
+# has, runs Silero on ggml inside its own wheel and pulls in no
+# inference runtime at all.
 #
 # piper-tts is GPL-3.0, which is why it is an optional extra and why
 # only the default variant carries it. Shipping it alongside an MIT

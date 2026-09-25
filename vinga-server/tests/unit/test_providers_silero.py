@@ -38,8 +38,8 @@ def scripted_endpointer(
     wrote down.
 
     White-box, deliberately, and the only reach-in in this file. The
-    ONNX model is loaded inside the endpointer, from a file the test
-    lane does not ship, and the state machine under test is the one that
+    Silero model is loaded inside the endpointer, from the ggml weights
+    the pysilero-vad wheel carries, and the state machine under test is the one that
     reads its probabilities: what a window was scored is the input, and
     an endpointer takes audio rather than scores. Handed back rather
     than read off again, so the one test that asks the model what it was
