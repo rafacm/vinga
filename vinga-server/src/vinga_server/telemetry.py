@@ -1014,11 +1014,19 @@ ASR_LENGTH = {
 
 # The LLM round span, and the settled correspondence table shipped
 # exactly (the conversation-store plan's, adopted by this issue's plan
-# review): four GenAI keys, one `server.address`, and `provider`, the
+# review): the GenAI keys, one `server.address`, and `provider`, the
 # CONFIGURED ENTRY NAME, which is the one fact in the row that is
 # vinga's own word rather than the conventions'. A backend that knows
-# nothing about this project reads the five; an operator who has to find
-# the entry in a configuration file reads the sixth.
+# nothing about this project reads the conventions' keys; an operator
+# who has to find the entry in a configuration file reads the entry.
+#
+# `cache_read_input_tokens` is the fifth GenAI key and the one priced
+# fact here that has no second spelling (#536). It is carried as the
+# conventions define it, a subset of `gen_ai.usage.input_tokens`, and
+# never subtracted here: the tracing backend maps the key itself,
+# takes it out of the input and prices it at the cached rate. A
+# `usage_details` string beside it would replace that mapping rather
+# than add to it (measured in #536's Step 0), so this span sends none.
 #
 # `round` and `turns` are beside them and vinga's, because neither is a
 # GenAI fact: a round counts this reply's generations, including the one
@@ -1039,6 +1047,7 @@ LLM_ATTRIBUTES = {
     "model": "gen_ai.request.model",
     "host": "server.address",
     "input_tokens": "gen_ai.usage.input_tokens",
+    "cache_read_input_tokens": "gen_ai.usage.cache_read.input_tokens",
     "output_tokens": "gen_ai.usage.output_tokens",
     "provider": _entry_name(LLM_STAGE),
     "agent": "vinga.agent",
