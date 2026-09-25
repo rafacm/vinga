@@ -1806,6 +1806,18 @@ class LlmRetry(Variant):
     )
 
 
+# One note for the field on both generation variants: a recap reports
+# the count for the reason a reply round does, and means the same thing
+# by it, so the reference says the same thing on both (#536).
+CACHE_READ_INPUT_TOKENS_NOTE = (
+    "The part of `input_tokens` the provider served from its prompt "
+    "cache, so never larger than it and never to be added to it. The "
+    "GenAI conventions' `gen_ai.usage.cache_read.input_tokens`. Absent "
+    "where the endpoint did not say, which is a fact about the endpoint "
+    "rather than a zero."
+)
+
+
 @dataclass(frozen=True)
 class LlmRound(Variant):
     """A generation call finishes."""
@@ -1864,15 +1876,7 @@ class LlmRound(Variant):
         ),
     )
     cache_read_input_tokens: Count | Absent = value(
-        default=ABSENT,
-        note=(
-            "The part of `input_tokens` the provider served from its "
-            "prompt cache, so never larger than it and never to be added "
-            "to it. The GenAI conventions' "
-            "`gen_ai.usage.cache_read.input_tokens`. Absent where the "
-            "endpoint did not say, which is a fact about the endpoint "
-            "rather than a zero."
-        ),
+        default=ABSENT, note=CACHE_READ_INPUT_TOKENS_NOTE
     )
     output_tokens: Count | Absent = value(default=ABSENT)
     first_token_ms: Whole | Absent = value(
@@ -1911,8 +1915,7 @@ class LlmRecap(Variant):
     model: Identifier | Absent = value(default=ABSENT)
     input_tokens: Count | Absent = value(default=ABSENT)
     cache_read_input_tokens: Count | Absent = value(
-        default=ABSENT,
-        note="The part of `input_tokens` served from the provider's prompt cache.",
+        default=ABSENT, note=CACHE_READ_INPUT_TOKENS_NOTE
     )
     output_tokens: Count | Absent = value(default=ABSENT)
     first_token_ms: Whole | Absent = value(default=ABSENT)
