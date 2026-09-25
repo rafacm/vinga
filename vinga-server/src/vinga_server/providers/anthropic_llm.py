@@ -31,6 +31,7 @@ from vinga_server.providers.kit import (
     MAX_RETRIES,
     call_failure,
     resolve_api_key,
+    token_count,
 )
 from vinga_server.providers.registry import OptionsReader
 
@@ -196,10 +197,31 @@ class AnthropicLlm(LlmProvider):
         # Last, so a round's event carries what the round cost. This
         # API reports usage on every streamed message without being
         # asked, which the OpenAI dialect does not.
-        yield Usage(
-            prompt_tokens=message.usage.input_tokens,
-            completion_tokens=message.usage.output_tokens,
-        )
+        yield usage_from(message.usage)
+
+
+def usage_from(reported: Any) -> Usage:
+    """This API's usage in `Usage`'s reading, which is OpenAI's.
+
+    Here `input_tokens` counts only the input after the last cache
+    breakpoint: the tokens read from the prompt cache and the tokens
+    written to it are reported beside it, not inside it. Both are input
+    the model read, so both fold into `prompt_tokens`, and the read
+    count is then the cached share of that total, a subset by
+    construction. The write count stops at the fold; nothing exports it
+    as a count of its own.
+
+    This adapter sets no cache breakpoint, and caching on this API is
+    opt-in by breakpoint, so today both counts read as absent or zero
+    and the total is `input_tokens` unchanged. The fold is what keeps
+    the total right the day they do not (#536)."""
+    read = token_count(getattr(reported, "cache_read_input_tokens", None))
+    written = token_count(getattr(reported, "cache_creation_input_tokens", None))
+    return Usage(
+        prompt_tokens=reported.input_tokens + (read or 0) + (written or 0),
+        completion_tokens=reported.output_tokens,
+        cached_prompt_tokens=read,
+    )
 
 
 def build(label: str, config: ProviderConfig) -> AnthropicLlm:

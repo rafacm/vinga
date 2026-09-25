@@ -126,6 +126,20 @@ def _status_code(exc: BaseException) -> int | None:
     return status if isinstance(status, int) else None
 
 
+def token_count(value: object) -> int | None:
+    """A token count a vendor reported, or None where it is not one.
+
+    A count is a non-negative `int`. A `bool` is an `int` to Python and
+    never a count, and a compatible server can send a float, a string or
+    a negative where the API it imitates sends a count; the event's
+    `Count` would refuse each of them at emission, far from the adapter
+    that read them. So an adapter reads an optional count through this
+    and reports what it cannot believe as absent (#536)."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
 def resolve_api_key(label: str, api_key_env: str | None) -> str | None:
     """The credential for the `api_key` slot of the provider being
     built, or None to leave resolution to the SDK.

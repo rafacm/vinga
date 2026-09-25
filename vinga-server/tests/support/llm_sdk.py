@@ -34,8 +34,14 @@ class FakeBlock:
 
 @dataclass
 class FakeUsage:
+    """`input_tokens` excludes both cache counts on this API, which is
+    why the adapter adds them back. Both default to `None`, what the SDK
+    reports for a request that set no cache breakpoint."""
+
     input_tokens: int = 11
     output_tokens: int = 7
+    cache_read_input_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
 
 
 @dataclass
@@ -142,9 +148,19 @@ class FakeChoice:
 
 
 @dataclass
+class FakePromptDetails:
+    cached_tokens: Any = None
+
+
+@dataclass
 class FakeChunkUsage:
-    prompt_tokens: int
+    """`prompt_tokens_details` is `Any` because what a compatible server
+    sends there is the subject of the tests that set it: absent, an
+    object without the attribute, or a count of any type at all."""
+
+    prompt_tokens: Any
     completion_tokens: int
+    prompt_tokens_details: Any = None
 
 
 @dataclass
