@@ -336,10 +336,24 @@ class Usage:
 
     Counts, never content: tokens are a size, and the ADR on logging
     keeps the text of a conversation out of everything but the events
-    that exist to carry it."""
+    that exist to carry it.
+
+    The counts read the way OpenAI's API reads them, whichever vendor
+    sent them (#536). `prompt_tokens` is the whole input the model read,
+    including any prefix served from the provider's prompt cache, and
+    `cached_prompt_tokens` is that served part: always a subset of
+    `prompt_tokens`, never a sibling to add to it. Everything downstream
+    relies on the subset, the tracing backend included, which subtracts
+    the cached count from the input before pricing it. An adapter whose
+    vendor counts differently (Anthropic's input excludes its cache)
+    normalizes before it yields, and one that cannot vouch for the
+    subset reports no cached count at all. `None` there means the
+    endpoint did not say, which is a different fact from `0`, the
+    endpoint saying nothing was cached."""
 
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    cached_prompt_tokens: int | None = None
 
 
 # What an LLM stream yields: proof the wire is live, speech, a request

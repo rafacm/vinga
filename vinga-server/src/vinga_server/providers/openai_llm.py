@@ -44,6 +44,7 @@ from vinga_server.providers.kit import (
     OPENAI_FAILURES,
     call_failure,
     resolve_api_key,
+    token_count,
 )
 from vinga_server.providers.openai_endpoint import (
     OPENAI_HOST,
@@ -270,10 +271,7 @@ class OpenAiCompatibleLlm(LlmProvider):
                 # choices, which is why the guard below would otherwise
                 # skip it.
                 if chunk.usage is not None:
-                    usage = Usage(
-                        prompt_tokens=chunk.usage.prompt_tokens,
-                        completion_tokens=chunk.usage.completion_tokens,
-                    )
+                    usage = usage_from(chunk.usage)
                 # Some servers interleave role-only chunks.
                 if not chunk.choices or not chunk.choices[0].delta:
                     continue
@@ -307,6 +305,31 @@ class OpenAiCompatibleLlm(LlmProvider):
         # failure.
         if usage is not None:
             yield usage
+
+
+def usage_from(reported: Any) -> Usage:
+    """A usage chunk's counts, with the cached prefix where the endpoint
+    reported one it can vouch for.
+
+    OpenAI's `prompt_tokens` already includes the prefix it served from
+    its prompt cache, and names that prefix in
+    `prompt_tokens_details.cached_tokens`, which is `Usage`'s own
+    reading, so neither count is adjusted. A compatible server may send
+    no details object, one without the attribute, or a null count, and
+    each is an endpoint that did not say rather than one saying zero.
+    The count is kept only as a subset of a believable total: the
+    backend subtracts it from the input before pricing, so a count above
+    the total it is part of would price a negative input (#536)."""
+    details = getattr(reported, "prompt_tokens_details", None)
+    cached = token_count(getattr(details, "cached_tokens", None))
+    prompt = token_count(reported.prompt_tokens)
+    if cached is not None and (prompt is None or cached > prompt):
+        cached = None
+    return Usage(
+        prompt_tokens=reported.prompt_tokens,
+        completion_tokens=reported.completion_tokens,
+        cached_prompt_tokens=cached,
+    )
 
 
 def build(
