@@ -1,8 +1,8 @@
 """End-of-utterance detection on Silero VAD.
 
-pysilero-vad compiles the Silero model and its ONNX runtime into one
-small wheel with no Python dependencies, which is why this is a core
-dependency rather than an extra. The endpointer keeps the M3 feed/reset
+pysilero-vad compiles the Silero model's ggml weights and the engine
+that runs them into one small wheel with no Python dependencies, which
+is why this is a core dependency rather than an extra. The endpointer keeps the M3 feed/reset
 shape and bookkeeping (trailing-silence window after speech, utterance
 cap), but decides speech per 512-sample window by Silero probability
 instead of signal energy.
