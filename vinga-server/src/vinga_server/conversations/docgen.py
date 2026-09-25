@@ -77,6 +77,7 @@ CONCEPTS = "../concepts.md"
 # column says where the field is found.
 GEN_AI: tuple[tuple[str, str, str], ...] = (
     ("input_tokens", "gen_ai.usage.input_tokens", "`turns`, `turns.legs`, the `llm_round` event"),
+    ("cache_read_input_tokens", "gen_ai.usage.cache_read.input_tokens", "the `llm_round` event"),
     (
         "output_tokens",
         "gen_ai.usage.output_tokens",

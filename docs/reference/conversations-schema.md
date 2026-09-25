@@ -232,6 +232,7 @@ guessing.
 | This project | OpenTelemetry | Where |
 | --- | --- | --- |
 | `input_tokens` | `gen_ai.usage.input_tokens` | `turns`, `turns.legs`, the `llm_round` event |
+| `cache_read_input_tokens` | `gen_ai.usage.cache_read.input_tokens` | the `llm_round` event |
 | `output_tokens` | `gen_ai.usage.output_tokens` | `turns`, `turns.legs`, the `llm_round` event |
 | `model` | `gen_ai.request.model` | the `llm_round`, `llm_retry` and `provider_failed` events |
 | `type` | `gen_ai.provider.name` | the provider-bearing events, and `sessions.providers` |
