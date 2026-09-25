@@ -171,7 +171,9 @@ provider-watch tests beside them.
 - **Adapters, OpenAI-compatible:** a usage chunk with
   `prompt_tokens_details.cached_tokens` yields it; one with no
   details, and one with details but `cached_tokens: None`, yield
-  `None`, never `0`; `prompt_tokens` is what the chunk said.
+  `None`, never `0`; `prompt_tokens` is what the chunk said; a
+  cached count above `prompt_tokens`, a negative, a `bool` and a
+  non-integer each yield `None` (the subset invariant, see Risks).
 - **Adapters, Anthropic:** cache read and creation fold into
   `prompt_tokens` and the read count is `cached_prompt_tokens`; both
   fields `None` leaves `prompt_tokens` equal to `input_tokens` and
@@ -242,12 +244,19 @@ and the model is stated in the record.
   regression; it goes in the PR description and the changelog entry.
 - **A compatible server that sends malformed details** (a
   `prompt_tokens_details` object without the attribute, or a
-  non-integer). Read with `getattr(..., None)` and accepted only as a
-  non-negative `int` (not a `bool`), else `None`, because the event's
-  `Count` raises on anything else and the adapter is where a vendor's
-  malformed value should stop. Tested with one case. The existing two
-  counts have no such guard today; that asymmetry is recorded, not
-  fixed here.
+  non-integer, or a cached count larger than the prompt it is part
+  of). Read with `getattr(..., None)` and kept only when both
+  `prompt_tokens` and `cached_tokens` are non-negative `int`s (not
+  `bool`s) and `cached_tokens <= prompt_tokens`; otherwise the cached
+  count is `None`. Two reasons: the event's `Count` raises on a
+  negative or a non-integer, and decisions 1 and 5 rest on the count
+  being a subset, since the backend subtracts it from input, so an
+  over-total count would export a negative uncached input and a wrong
+  price. The adapter is where a vendor's malformed value stops. Tested
+  case by case: `None`, negative, `bool`, non-integer, and over-total.
+  The Anthropic count is a subset by construction after the fold, so
+  it needs only the type guard. The existing two counts have no such
+  guard today; that asymmetry is recorded, not fixed here.
 - **No-leak.** Counts only; nothing string-valued is added to any
   surface.
 
@@ -320,6 +329,8 @@ Reviewed 2026-09-25 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
 4. **P2: The promised cached-subset invariant is not enforced.**
    **Evidence:** Decisions 1 and 5 rely on cached tokens always being a subset because the backend subtracts them from input (`docs/plans/...`, lines 75-80 and 109-113). The malformed-input handling only checks that the value is a non-negative integer (`lines 231-238`). `Count` validates only `int >= 0` (`events/values.py:840-852`), so a compatible endpoint reporting 1,500 cached tokens with 1,000 prompt tokens would be exported and could create negative uncached input or invalid pricing.
    **Plan should say instead:** At the OpenAI-compatible adapter, retain the cached count only when both counts are valid integers and `0 <= cached_tokens <= prompt_tokens`; otherwise report the cached count as absent. Add an over-total test in addition to the null, negative/non-integer, and boolean cases.
+
+   *Resolution:* accepted as written. The malformed-input risk now keeps the cached count only when both counts are valid and `0 <= cached <= prompt`, states why the subset is load-bearing for the price, and the adapter tests list the over-total case beside the null, negative, boolean and non-integer ones.
 
 5. **P2: The event-path inventory will not exercise the new optional field.**
    **Evidence:** `tests/tools/event_baseline.py:663-672` drives the production `llm_round` path with a `Usage` that has only input and output counts. `tests/unit/test_event_baseline.py:333-344,438-533` explains that its exact carried-key inventory exists specifically to catch optional usage plumbing silently disappearing. The plan names assembly and provider-watch tests but not this driver or its `CARRIED` declaration.
