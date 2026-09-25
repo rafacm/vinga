@@ -232,6 +232,7 @@ historical  vinga memory delete device
 historical  vinga memory list agent
 historical  vinga memory list agent poet
 historical  vinga memory list conversation
+historical  vinga memory list device
 historical  vinga memory set agent poet
 historical  vinga metric latency
 historical  vinga metric list
