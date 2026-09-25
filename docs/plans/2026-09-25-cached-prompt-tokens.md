@@ -277,6 +277,12 @@ and the model is stated in the record.
   generation's cached count, and that it is the conventions' name
   alone because the backend maps it.
 - `docs/reference/events.md`: regenerated, never hand-edited.
+- `conversations/docgen.py`'s `GEN_AI` table, which owns the
+  project-field-to-OTel-attribute correspondence: one row,
+  `cache_read_input_tokens` to `gen_ai.usage.cache_read.input_tokens`,
+  found on the `llm_round` event; then `docs/reference/conversations-schema.md`
+  regenerated through its generator. The drift check alone would stay
+  green without this, since the table is the generator's input.
 - A `changelog.d/536-cached-prompt-tokens.md` fragment under
   `### Added` (the count) and `### Fixed` (the Anthropic input total,
   with the stored-accounting discontinuity from decision 6).
@@ -304,6 +310,8 @@ Reviewed 2026-09-25 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
 2. **P2: The generated GenAI correspondence reference is missing from the documentation footprint.**
    **Evidence:** `conversations/docgen.py:74-88,385-395` owns the table mapping project event fields to OpenTelemetry attributes; it already includes event-only mappings such as `model`, `type`, and `host`. The proposed `cache_read_input_tokens` mapping belongs there, but the plan’s documentation footprint (`docs/plans/...`, lines 257-269) names only the README, observability page, and `events.md`. Leaving the generator unchanged produces a green drift check while the generated correspondence table remains incomplete.
    **Plan should say instead:** Add `cache_read_input_tokens → gen_ai.usage.cache_read.input_tokens`, located on `llm_round`, to `conversations/docgen.py`, then regenerate `docs/reference/conversations-schema.md`.
+
+   *Resolution:* accepted. The documentation footprint names the `GEN_AI` row and the regenerated `conversations-schema.md`, with the reason the drift check cannot catch the omission.
 
 3. **P2: The live A/B cannot attribute a cache drop to memory as written.**
    **Evidence:** The plan uses one agent for two sessions, merely “asks” one session to remember, and treats a difference as causal (`docs/plans/...`, lines 192-209). `remember` explicitly persists facts across conversations (`tools/builtin.py:199-224,770-792`), so whichever session runs second can inherit the treatment. A model may also decline or fail to call the tool, and two sequential runs do not control for TTL or cache eviction despite the plan claiming they do. No repeatability threshold defines when M2’s gate opens.
