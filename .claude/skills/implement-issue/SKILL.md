@@ -363,6 +363,17 @@ The subagent's brief states, verbatim where possible:
   regenerate the manifest the failure names, with
   `uv run python -m tests.census.test_command_spellings` or
   `uv run python -m tests.census.test_reach_ins`, never by hand.
+- **Run `tests/census` last, after the final prose edit.** The
+  implementation-doc section, the changelog fragment and any
+  footprint page are written late in a milestone, and each can quote
+  a command spelling; a census run before them certifies an earlier
+  tree. This is how #536 M1 reached CI red: the lane ran green, the
+  implementation doc then quoted two `memory list` spellings (one of
+  them a code span broken across a line), and both workflows failed
+  on the stale manifest. The same holds for a PR fix round: the
+  review-round section it appends is prose too. The full unit and
+  integration lanes need not rerun for a docs-only tail; the census
+  lane (seconds) always does.
 
 If a subagent dies mid-run (machine sleep), resume it with a status
 recap verified from `git log`, not from memory; its commits
