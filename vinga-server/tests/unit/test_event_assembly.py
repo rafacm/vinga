@@ -292,8 +292,92 @@ def test_a_round_that_reported_nothing_carries_no_zeroes() -> None:
     )
 
     assert "input_tokens" not in payload
+    assert "cache_read_input_tokens" not in payload
     assert "output_tokens" not in payload
     assert "first_token_ms" not in payload
+
+
+def test_a_round_carries_the_cached_share_of_its_input() -> None:
+    """The count a prompt cache served, beside the input it is part of
+    (#536), on a reply round and on a recap alike: a recap is a
+    generation that cost something too."""
+    reply = carried(
+        assembly.llm_rounded(
+            "poet",
+            THREAD,
+            "llm",
+            CLOUD,
+            2,
+            3,
+            0.5,
+            2000,
+            12,
+            220,
+            INVOCATION,
+            cache_read_input_tokens=1536,
+        )
+    )
+    recap = carried(
+        assembly.llm_rounded(
+            "poet",
+            THREAD,
+            "llm",
+            CLOUD,
+            None,
+            3,
+            0.5,
+            2000,
+            12,
+            220,
+            INVOCATION,
+            "recap",
+            cache_read_input_tokens=1536,
+        )
+    )
+
+    assert (reply["input_tokens"], reply["cache_read_input_tokens"]) == (2000, 1536)
+    assert (recap["input_tokens"], recap["cache_read_input_tokens"]) == (2000, 1536)
+    assert recap["purpose"] == "recap"
+
+
+def test_nothing_cached_is_a_count_and_an_unsaid_cache_is_absent() -> None:
+    """`0` is the endpoint saying nothing was served from its cache;
+    `None` is the endpoint not saying. Two facts, two records."""
+    zero = carried(
+        assembly.llm_rounded(
+            "poet",
+            THREAD,
+            "llm",
+            CLOUD,
+            1,
+            1,
+            0.5,
+            2000,
+            12,
+            220,
+            INVOCATION,
+            cache_read_input_tokens=0,
+        )
+    )
+    unsaid = carried(
+        assembly.llm_rounded(
+            "poet",
+            THREAD,
+            "llm",
+            CLOUD,
+            1,
+            1,
+            0.5,
+            2000,
+            12,
+            220,
+            INVOCATION,
+            cache_read_input_tokens=None,
+        )
+    )
+
+    assert zero["cache_read_input_tokens"] == 0
+    assert "cache_read_input_tokens" not in unsaid
 
 
 def test_a_failure_names_the_entry_and_the_host_it_reached() -> None:

@@ -424,6 +424,8 @@ def llm_rounded(
     first_token_ms: int | None,
     invocation: str,
     purpose: str = "reply",
+    *,
+    cache_read_input_tokens: int | None = None,
 ) -> Variant:
     """The `llm_round` event for this generation.
 
@@ -431,9 +433,14 @@ def llm_rounded(
     numbers a provider reported, or as None where it reported none:
     their absence is a fact about the endpoint rather than a zero, and
     a round that only asked for a tool timed no spoken token.
+    `cache_read_input_tokens` is the part of `input_tokens` the
+    provider's prompt cache served, already a subset when it arrives.
     """
     entry, type_, host, model = _entry_fields(provider)
     declared_input = Count(input_tokens) if input_tokens is not None else ABSENT
+    declared_cached = (
+        Count(cache_read_input_tokens) if cache_read_input_tokens is not None else ABSENT
+    )
     declared_output = Count(output_tokens) if output_tokens is not None else ABSENT
     declared_first_token = (
         Whole(first_token_ms) if first_token_ms is not None else ABSENT
@@ -455,6 +462,7 @@ def llm_rounded(
             host=host,
             model=model,
             input_tokens=declared_input,
+            cache_read_input_tokens=declared_cached,
             output_tokens=declared_output,
             first_token_ms=declared_first_token,
         )
@@ -474,6 +482,7 @@ def llm_rounded(
         host=host,
         model=model,
         input_tokens=declared_input,
+        cache_read_input_tokens=declared_cached,
         output_tokens=declared_output,
         first_token_ms=declared_first_token,
     )

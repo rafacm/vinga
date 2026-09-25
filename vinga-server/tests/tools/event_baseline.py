@@ -661,7 +661,17 @@ async def drive_llm_retry(_: Path) -> None:
 
 
 async def drive_llm_round(_: Path) -> None:
-    script = ScriptedLlm([["Two words.", Usage(prompt_tokens=140, completion_tokens=12)]])
+    # A cached count below the prompt it is part of, so the optional
+    # field is carried through the production reply path rather than
+    # only through the builder (#536).
+    script = ScriptedLlm(
+        [
+            [
+                "Two words.",
+                Usage(prompt_tokens=140, completion_tokens=12, cached_prompt_tokens=96),
+            ]
+        ]
+    )
     session = speaking_session({"poet": script})
     script.identity = replace(script.identity, model=MODEL)  # type: ignore[attr-defined]
     await drive_reply(session, UTTERANCE)

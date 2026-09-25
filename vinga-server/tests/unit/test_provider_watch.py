@@ -18,9 +18,11 @@ from typing import Any
 
 import pytest
 
+from tests.support.llm_sdk import FakeBlock, FakeMessage, FakeMessages, FakeStream, FakeUsage
 from vinga_server.events import Emission, SessionEvents
 from vinga_server.events.values import LlmPurpose
-from vinga_server.providers import LlmEvent, StreamStarted, TextDelta, Usage
+from vinga_server.providers import LlmEvent, StreamStarted, TextDelta, Turn, Usage
+from vinga_server.providers.anthropic_llm import AnthropicLlm
 from vinga_server.runtime.provider_watch import FirstTokenTimeout, ProviderWatch
 from vinga_server.runtime.turns import TurnUnderway
 from vinga_server.session_conversations import SessionConversations
@@ -214,3 +216,82 @@ async def test_a_reply_round_is_filed_on_its_turn_and_a_recap_round_is_not() -> 
     reply, recap = heard.of("llm_round")
     assert (reply["round"], reply["purpose"]) == (2, "reply")
     assert "round" not in recap and recap["purpose"] == "recap"
+
+
+async def test_a_round_reports_the_cached_share_and_files_the_whole_input() -> None:
+    """The cached count rides the event beside the input it is part of,
+    and the turn's input total is the provider's `prompt_tokens` as
+    given: the cached share is neither added to it a second time nor
+    subtracted from it (#536)."""
+    watch, heard, conversations = a_watch()
+    active = conversations.active
+    assert active is not None
+    turn = TurnUnderway(active.conversation, active.agent, "e" * 32)
+    began = asyncio.get_running_loop().time()
+    usage = Usage(prompt_tokens=2000, completion_tokens=4, cached_prompt_tokens=1536)
+
+    watch.reply_round_done(turn, 1, object(), [], began, None, usage, invocation="f" * 32)
+    watch.recap_round_done(object(), [], began, None, usage, invocation="0" * 32)
+
+    assert (turn.input_tokens, turn.output_tokens) == (2000, 4)
+    reply, recap = heard.of("llm_round")
+    assert (reply["input_tokens"], reply["cache_read_input_tokens"]) == (2000, 1536)
+    assert (recap["input_tokens"], recap["cache_read_input_tokens"]) == (2000, 1536)
+
+
+async def test_a_round_that_reported_no_usage_reports_no_cached_share() -> None:
+    watch, heard, conversations = a_watch()
+    active = conversations.active
+    assert active is not None
+    turn = TurnUnderway(active.conversation, active.agent, "e" * 32)
+    began = asyncio.get_running_loop().time()
+
+    watch.reply_round_done(turn, 1, object(), [], began, None, None, invocation="f" * 32)
+
+    (reply,) = heard.of("llm_round")
+    assert "input_tokens" not in reply
+    assert "cache_read_input_tokens" not in reply
+
+
+async def test_an_anthropic_round_files_its_cache_reads_on_the_turn() -> None:
+    """The one place the Anthropic fold reaches stored accounting.
+
+    That API's `input_tokens` excludes what it read from and wrote to its
+    prompt cache; the adapter folds both back in, and the turn's input
+    total, which is stored and summed by the metrics views, is that
+    normalized count. Driven from the adapter's own stream so the pin is
+    on what a real round files, not on a `Usage` written by hand."""
+    messages = FakeMessages(
+        FakeStream(
+            ["Said."],
+            FakeMessage(
+                [FakeBlock(type="text")],
+                FakeUsage(
+                    input_tokens=10,
+                    output_tokens=7,
+                    cache_read_input_tokens=1800,
+                    cache_creation_input_tokens=200,
+                ),
+            ),
+        )
+    )
+    llm = AnthropicLlm(
+        model="claude-sonnet-5",
+        max_tokens=64,
+        api_key="sk-test",
+        client=type("Client", (), {"messages": messages})(),  # type: ignore[arg-type]
+    )
+    (usage,) = [
+        event async for event in llm.stream("", [Turn("user", "hi")]) if isinstance(event, Usage)
+    ]
+    watch, heard, conversations = a_watch()
+    active = conversations.active
+    assert active is not None
+    turn = TurnUnderway(active.conversation, active.agent, "e" * 32)
+    began = asyncio.get_running_loop().time()
+
+    watch.reply_round_done(turn, 1, object(), [], began, None, usage, invocation="f" * 32)
+
+    assert turn.input_tokens == 2010
+    (reply,) = heard.of("llm_round")
+    assert (reply["input_tokens"], reply["cache_read_input_tokens"]) == (2010, 1800)

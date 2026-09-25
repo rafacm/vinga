@@ -1863,6 +1863,17 @@ class LlmRound(Variant):
             "absence is a fact about the endpoint."
         ),
     )
+    cache_read_input_tokens: Count | Absent = value(
+        default=ABSENT,
+        note=(
+            "The part of `input_tokens` the provider served from its "
+            "prompt cache, so never larger than it and never to be added "
+            "to it. The GenAI conventions' "
+            "`gen_ai.usage.cache_read.input_tokens`. Absent where the "
+            "endpoint did not say, which is a fact about the endpoint "
+            "rather than a zero."
+        ),
+    )
     output_tokens: Count | Absent = value(default=ABSENT)
     first_token_ms: Whole | Absent = value(
         default=ABSENT,
@@ -1899,6 +1910,10 @@ class LlmRecap(Variant):
     host: Identifier | Absent = value(default=ABSENT)
     model: Identifier | Absent = value(default=ABSENT)
     input_tokens: Count | Absent = value(default=ABSENT)
+    cache_read_input_tokens: Count | Absent = value(
+        default=ABSENT,
+        note="The part of `input_tokens` served from the provider's prompt cache.",
+    )
     output_tokens: Count | Absent = value(default=ABSENT)
     first_token_ms: Whole | Absent = value(default=ABSENT)
     purpose: LlmPurpose = value(fixed=LlmPurpose.RECAP)

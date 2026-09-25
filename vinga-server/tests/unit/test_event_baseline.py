@@ -440,6 +440,7 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             "LlmRound",
             (
                 "agent",
+                "cache_read_input_tokens",
                 "conversation",
                 "device",
                 "duration_ms",
