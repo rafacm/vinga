@@ -343,7 +343,7 @@ and the model is stated in the record.
 ## Milestones
 
 - [x] **[M1: the cached share of a prompt is reported](2026-09-25-cached-prompt-tokens-implementation.md#m1-the-cached-share-of-a-prompt-is-reported)**
-  (PR TBD; M2's gate not opened as written, see the measurement). Decisions 1 to
+  ([PR #570](https://github.com/rafacm/vinga/pull/570); M2's gate not opened as written, see the measurement). Decisions 1 to
   6, the tests and mutations above, the documentation footprint, and
   the live measurement recorded in the implementation doc with the
   per-round table and the two-session comparison. One pull request;
