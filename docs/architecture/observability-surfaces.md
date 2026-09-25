@@ -216,7 +216,13 @@ synthesis, all three under `gen_ai.usage.*` and all three sizes rather
 than content. The transcription number is what the ear was actually SENT
 rather than how long the user spoke, which is a separate attribute,
 because a clip under an endpoint's floor is never sent and a clip an
-echo retry hears twice is sent twice. The two the conventions have no
+echo retry hears twice is sent twice. A generation also carries the part
+of its input the provider served from its prompt cache, under the
+conventions' `gen_ai.usage.cache_read.input_tokens` and as a subset of the
+input count, where the endpoint reported one. That count is the
+conventions' name alone: the backend maps it, takes it out of the input
+and prices it at the cached rate, and a second spelling would replace
+that mapping rather than add to it. The two the conventions have no
 vocabulary for also carry the backend's own usage spelling beside the
 conventions' name, which is what a model definition can price. What
 those numbers cost is the backend's own definitions to say, and this
