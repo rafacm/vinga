@@ -333,9 +333,75 @@ All from `vinga-server/`.
   CLI reference check was not run; nothing it renders changed.
 - Census lane, `uv run pytest tests/census -q`: 66 passed, before and
   after this document; neither manifest moved.
+
+  *Correction, 2026-09-25.* The "after" run was on a draft, before the
+  measurement's memory-listing spellings were written into this
+  section, and the commit that added them staled the spellings
+  manifest. CI caught it; see the PR review round below.
 - `python3 scripts/check_doc_links.py .` from the checkout root: 275
   files, 0 failures. `python3 scripts/fold_changelog.py check .`: one
   fragment, no failures.
 - Not verified here: the image build and its smoke lane, which run in
   CI only; and a self-hosted compatible endpoint's report, for the
   reason above.
+
+### PR review round, PR #570
+
+Automated external review of this PR's diff (origin/main...47760de2). Reviewed 2026-09-25 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 5m45s, at commit 47760de2. Posted verbatim by the review run itself; resolutions follow as replies.
+
+Verdict as received: **mergeable after the listed fix**. There was one
+finding, fixed here in a commit of its own, and one CI failure on the
+same commit, fixed in another.
+
+1. **P2: the recap schema omitted the absent-versus-zero contract.**
+   `LlmRecap.cache_read_input_tokens` carried only "the part of
+   `input_tokens` served from the provider's prompt cache", so the
+   generated recap row in `docs/reference/events.md` did not say that
+   an absent count means the endpoint did not report one rather than
+   zero, nor name the conventions' attribute. The plan (decision 4)
+   asks for that note on both variants.
+
+   *Resolution*: accepted, in `54d1fd98`. The note is one constant,
+   `CACHE_READ_INPUT_TOKENS_NOTE`, declared once in `events/catalog.py`
+   and named by both fields, so the two rows cannot drift apart again;
+   `docs/reference/events.md` is regenerated through
+   `vinga-server events reference`, and only the recap row moves. A new
+   test, `test_both_generations_say_the_same_about_their_cached_count`
+   in `test_event_docs.py`, reads the generated reference and holds the
+   two rows' notes equal, with the absence sentence and the
+   conventions' name in them. Run once with the old recap note restored,
+   it failed; with the shared note it passes.
+
+**CI fix: the command-spellings census.** The `docs` workflow failed on
+`47760de2` at `test_the_manifest_is_the_census`. This section's
+measurement quotes the memory-listing commands, and it was written
+after the census had last been run, so the hand-back's "neither
+manifest moved" described an earlier tree (corrected in place above).
+Of the two new spellings, one was wrong: the code span
+`vinga memory list agent` had been wrapped across a line break, and
+the census read its first line as the listing command with no scope at
+all, which the CLI refuses: its help says `SCOPE` is required. The
+spelling is not quoted here, since quoting it would record it again.
+The span is
+now on one line. The other, `vinga memory list device`, is a spelling
+the CLI accepts (a scope with no owner lists who is remembering
+anything in it). Resolved in `24705e09`: the doc's span unwrapped and
+`tests/census/command-spellings.txt` regenerated with
+`uv run python -m tests.census.test_command_spellings`, which adds
+exactly that one line, classified `historical` since it sits in a dated
+plan record.
+
+Verification after the round, from `vinga-server/`:
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run mypy`: no issues in 5 source files.
+- `uv run pytest tests/unit/test_event_docs.py tests/unit/test_event_assembly.py tests/unit/test_event_baseline.py tests/unit/test_provider_watch.py -q -ra -n 4`:
+  `64 passed in 64.82s`.
+- The events-reference drift check (`vinga-server events reference`
+  against the committed file): current.
+- `uv run pytest tests/census -q -ra`: `66 passed`, rerun on the tree
+  this section is committed with.
+- `python3 scripts/check_doc_links.py .` from the checkout root:
+  `checked 276 files, 0 failures`.
+- The full unit and integration lanes were not rerun: the change is
+  one note's text, one generated row, one test and one manifest line.
