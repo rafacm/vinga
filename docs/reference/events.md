@@ -1111,7 +1111,7 @@ session %s: %s recap took %.2f s over %d turns
 | `host` | `IDENTIFIER` | no | no |  |  |
 | `model` | `IDENTIFIER` | no | no |  |  |
 | `input_tokens` | `COUNT` | no | no |  |  |
-| `cache_read_input_tokens` | `COUNT` | no | no |  | The part of `input_tokens` served from the provider's prompt cache. |
+| `cache_read_input_tokens` | `COUNT` | no | no |  | The part of `input_tokens` the provider served from its prompt cache, so never larger than it and never to be added to it. The GenAI conventions' `gen_ai.usage.cache_read.input_tokens`. Absent where the endpoint did not say, which is a fact about the endpoint rather than a zero. |
 | `output_tokens` | `COUNT` | no | no |  |  |
 | `first_token_ms` | `INT` | no | no |  |  |
 | `purpose` | `TOKEN` | yes | no | one of: `recap` |  |

@@ -485,6 +485,23 @@ def test_every_field_row_matches_its_declaration() -> None:
                 check_constraint(constraint, declared, kind_name, f"{where} {field}")
 
 
+def test_both_generations_say_the_same_about_their_cached_count() -> None:
+    """A reply round and a recap carry `cache_read_input_tokens` for one
+    reason and mean one thing by it (#536), so the reference says the
+    same thing on both, absence included: a reader of the recap row alone
+    must not take a missing count for a zero."""
+    notes = [
+        row[5]
+        for _, body in variant_sections()["llm_round"]
+        for row in table(body, FIELD_HEADER)
+        if row[0] == "`cache_read_input_tokens`"
+    ]
+    assert len(notes) == 2
+    assert notes[0] == notes[1]
+    assert "Absent where the endpoint did not say" in notes[0]
+    assert "`gen_ai.usage.cache_read.input_tokens`" in notes[0]
+
+
 def test_the_reference_renders_every_declared_prose_note() -> None:
     """The event and variant notes, which are paragraphs rather than
     cells: the field and argument notes are asserted by the two row
