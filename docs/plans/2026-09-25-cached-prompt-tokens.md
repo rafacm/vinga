@@ -1,0 +1,277 @@
+# The cached share of a prompt is reported
+
+Plan for [#536](https://github.com/rafacm/vinga/issues/536) M1 only,
+as scoped by its Step 0
+([comment](https://github.com/rafacm/vinga/issues/536#issuecomment-5827438060)).
+Its companion is
+`docs/plans/2026-09-25-cached-prompt-tokens-implementation.md`, one
+section per milestone, appended in the same change that ticks the
+milestone. M2, moving the volatile memory blocks out of the
+system-prompt head, stays gated on the number this milestone produces
+and is not planned here; the pull request for M1 does not close #536.
+
+**Local baseline:** not applicable. The change reports a count the
+provider already sends; no conversational capability moves.
+
+**Cheapest alternative:** the issue's own M1 minus its second spelling,
+which is what this plan is. The issue proposed carrying the cached
+count twice, once under the conventions' name and once in the
+backend's `usage_details`, on the grounds that the backend would lift
+the conventions' key verbatim and never price it. Step 0 measured that
+against the live backend and it does not hold: the conventions' key
+alone is mapped, subtracted from `input` and priced at the cached rate,
+while a `usage_details` string replaces the mapping wholesale. So the
+second spelling buys nothing and costs a second structure that must
+agree with the first. Leaving the problem alone was priced there too:
+an LLM cost that is an upper bound on every deployment, overstated by
+the cached share times the rate gap (three quarters of the cached
+tokens' price on `gpt-4.1`), and no way to tell a working cache from
+none.
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.282; 2026-09-25.
+
+## Where this starts from
+
+Measured at `ca0e24c2` (`main`'s head on 2026-09-25).
+
+- `Usage` carries `prompt_tokens` and `completion_tokens` only
+  (`providers/base.py:341-342`).
+- The OpenAI-compatible adapter builds it from `chunk.usage`
+  (`providers/openai_llm.py:273-276`) and never reads
+  `prompt_tokens_details`. It asks for usage only when the host is
+  OpenAI's (`_ask_for_usage`, line 197), and reads usage a compatible
+  server volunteers unasked.
+- The Anthropic adapter builds it from `message.usage.input_tokens`
+  and `output_tokens` (`providers/anthropic_llm.py:199-202`). Anthropic's
+  `input_tokens` excludes both `cache_read_input_tokens` and
+  `cache_creation_input_tokens`. The adapter sets no `cache_control`
+  anywhere, and caching on that API is opt-in by breakpoint, so its
+  read count is expected to be zero today; that is inferred from the
+  API's documented behavior, not measured, since this machine holds no
+  Anthropic key.
+- The counts reach the event through one function,
+  `runtime/provider_watch._reported` (line 53), into
+  `events/assembly.llm_rounded` (line 414), which builds `LlmRound` or
+  `LlmRecap` (`events/catalog.py`, the two variants' `input_tokens` and
+  `output_tokens` fields).
+- `telemetry.LLM_ATTRIBUTES` (line 1037) maps the event's fields onto
+  the `llm` span. The span carries no `usage_details`, and
+  `test_a_round_is_not_given_a_second_usage_spelling`
+  (`tests/unit/test_telemetry_spans.py:1210`) already pins that.
+
+**The backend gate (Step 0, five spans, `gpt-4.1`, input 2000, output
+10).** With `gen_ai.usage.cache_read.input_tokens: 1500` alone the
+backend stored `input 500, input_cached_tokens 1500, output 10` and
+priced it at $0.00183; the same with no cache attribute cost $0.00408.
+A `usage_details` of `{"input":2000,"input_cached_tokens":1500,...}`
+double counted ($0.00483), and one of `{"input_cached_tokens":1500}`
+dropped `input` and `output` entirely. The table is in the Step 0
+comment.
+
+## Decisions
+
+The issue's M1 decisions, as Step 0 confirmed or amended them.
+
+1. **`Usage` gains `cached_prompt_tokens: int | None = None`.** The
+   SDK-shaped name, like its siblings, because `Usage` is not surface
+   (`provider_watch`'s docstring says so). Its meaning is fixed in the
+   docstring: the part of `prompt_tokens` the provider served from its
+   prompt cache, so always a subset of `prompt_tokens`, never a
+   sibling. `None` means the endpoint did not say, which is a
+   different fact from `0`, the endpoint saying nothing was cached.
+2. **The OpenAI-compatible adapter** reads
+   `chunk.usage.prompt_tokens_details.cached_tokens`, where either
+   level may be absent: `prompt_tokens_details` is `None` from many
+   compatible servers, and `cached_tokens` inside it may be `None`
+   too. Either absence yields `None`. `prompt_tokens` is untouched,
+   since OpenAI's already includes the cached prefix. Nothing changes
+   in what is asked for: `stream_options` stays OpenAI-host-only, and
+   a compatible server that does not volunteer usage yields no
+   `Usage` at all, exactly as today.
+3. **The Anthropic adapter normalizes on the OpenAI reading.**
+   `prompt_tokens` becomes `input_tokens + (cache_read_input_tokens or
+   0) + (cache_creation_input_tokens or 0)`, and `cached_prompt_tokens`
+   is `cache_read_input_tokens` as reported (`None` when the SDK field
+   is `None`). Creation tokens join the input total because they are
+   input the model read; they are not exported as a count of their own
+   (see "Out of scope"). While the adapter sets no breakpoints both
+   cache fields read zero or absent and the reported input is
+   unchanged; the fold is what keeps it correct the day they do not.
+4. **The event field is `cache_read_input_tokens`,** on both
+   `LlmRound` and `LlmRecap`, `Count | Absent`, default `ABSENT`,
+   declared right after `input_tokens`. The name is the conventions'
+   `gen_ai.usage.cache_read.input_tokens` adapted to the field style
+   the siblings already use (`input_tokens` from
+   `gen_ai.usage.input_tokens`), and its note says it is a subset of
+   `input_tokens` and that absence is a fact about the endpoint. A
+   recap reports it for the same reason it reports the other two: it
+   is a generation that cost something.
+5. **The `llm` span carries it as
+   `gen_ai.usage.cache_read.input_tokens`,** one more entry in
+   `LLM_ATTRIBUTES`, and nothing else. No `usage_details` on the `llm`
+   span, for the reason the gate gives, and the existing pin that says
+   so stays and gains the cached case.
+6. **`_reported` returns three counts,** and `ProviderWatch`'s round
+   method passes the third to `llm_rounded`. What `rounded` returns to
+   its caller does not change: the turn's accounting (`input_tokens`,
+   `output_tokens` on `turns` and `turns.legs`) is untouched, so no
+   migration, no store column and no view moves.
+
+## Out of scope, with reasons
+
+- **A cached column on the stored turn or in the metrics views.** The
+  issue's M1 names `llm_round` and the span; a stored total is a
+  migration and a generated-reference change for a number whose worth
+  M1 exists to find out.
+- **A cache-write count** (`gen_ai.usage.cache_write.input_tokens`,
+  Anthropic's `cache_creation_input_tokens`). No adapter can produce a
+  non-zero one today, since nothing sets a breakpoint, and the backend
+  mapping for it was not gated. It is folded into input (decision 3)
+  and stops there.
+- **Setting Anthropic `cache_control` breakpoints.** A behavior change
+  of its own, and only worth an issue if M1's OpenAI number says
+  caching matters.
+- **M2**, as the issue says.
+
+## Module layout and design footprint
+
+No new module, seam or config key. Deepened, each by one field and
+one read:
+
+- `providers/base.py`: `Usage` gains the field and its meaning.
+- `providers/openai_llm.py`, `providers/anthropic_llm.py`: each
+  adapter reads its provider's cached count and, for Anthropic,
+  normalizes input to include it. What callers stop having to know
+  stays what it was: which vendor's usage shape they are reading.
+- `events/catalog.py`, `events/assembly.py`: one field on two variants
+  and one argument to `llm_rounded`.
+- `runtime/provider_watch.py`: `_reported` grows by one count.
+- `telemetry.py`: one `LLM_ATTRIBUTES` entry.
+
+## Tests
+
+Reuse the existing assets: `tests/support/llm_sdk.py`'s fake SDK
+chunks and usage objects (extended with the details fields, defaulting
+to what they produce today), the `round_done`/`finish_reply` span
+drivers in `tests/unit/test_telemetry_spans.py`, and the assembly and
+provider-watch tests beside them.
+
+- **Adapters, OpenAI-compatible:** a usage chunk with
+  `prompt_tokens_details.cached_tokens` yields it; one with no
+  details, and one with details but `cached_tokens: None`, yield
+  `None`, never `0`; `prompt_tokens` is what the chunk said.
+- **Adapters, Anthropic:** cache read and creation fold into
+  `prompt_tokens` and the read count is `cached_prompt_tokens`; both
+  fields `None` leaves `prompt_tokens` equal to `input_tokens` and
+  `cached_prompt_tokens` `None`.
+- **Event:** `llm_rounded` carries the count on a reply round and on a
+  recap; `None` is `ABSENT`, `0` is `Count(0)`.
+- **Provider watch:** a round whose `Usage` carries a cached count
+  emits it; one with no `Usage` emits none.
+- **Span:** the `llm` span carries
+  `gen_ai.usage.cache_read.input_tokens` beside `input_tokens`, carries
+  no key for it when the event had none (not `0`), and still carries
+  no `usage_details`.
+- The catalog reference (`docs/reference/events.md`) regenerates
+  through its generator; the drift check is the test.
+
+**Falsification, per the lens.** Each new test is watched failing
+before the code that satisfies it, and three mutations are run once
+each (straight-line logic, so one run proves it) and reported: the
+Anthropic fold removed (the `prompt_tokens` assertion must fail), the
+OpenAI `None` collapsed to `0` (the absence test must fail), and the
+`LLM_ATTRIBUTES` entry removed (the span test must fail).
+
+## The live measurement
+
+M1 is a measurement milestone with a code deliverable; the issue's
+verification list is the milestone's, less the question Step 0
+already answered. Run on agentpi against OpenAI, with the Langfuse
+export on, from a scratch driver that is not committed.
+
+**The rig.** A server on the implementer's worktree with OpenAI ASR,
+LLM and TTS, one agent with the builtin memory tools, telemetry on.
+The driver follows `tests/local/test_real_conversation.py`: questions
+synthesized to 16 kHz PCM once (OpenAI TTS), sent through the
+xiaozhi-sdk client one per turn, the `llm_round` events read off the
+server's event stream. OpenAI caches only a prompt of 1024 tokens or
+more, so the agent's prompt is sized to clear that from round one
+(the observed deployment session was already 6363 tokens by turn 20),
+and the model is stated in the record.
+
+- **Cached fraction per round across a session**: at least eight
+  turns, `cache_read_input_tokens / input_tokens` per `llm_round`,
+  tabulated in the implementation doc.
+- **One session that writes memory mid-conversation and one that
+  does not**, same questions, same prompt, the writing session asked
+  to remember something at turn three. Whether the fraction drops at
+  the write and stays down is the number M2 is gated on. A drop that
+  both sessions show is TTL or provider behavior, not the write.
+- **The endpoint reports the field**: OpenAI's does or does not,
+  recorded. A self-hosted compatible endpoint cannot be checked on
+  this machine (no local runner installed), so that box stays
+  unchecked with the reason; "no number available" is the expected
+  honest answer there and the tests already pin that it renders as
+  absence rather than zero.
+- **The price is right on a real span**: one `llm` observation from
+  the run read back from the backend, its `usageDetails` showing
+  `input` net of `input_cached_tokens` and its cost at the cached
+  rate, confirming the Step 0 gate on a span the server wrote rather
+  than one a script did.
+
+## Risks
+
+- **Double counting.** The one way this change can make the reported
+  cost worse than today. Mitigated by decisions 1 and 5 (subset
+  semantics, no second spelling), the pinned absence of
+  `usage_details`, and the live readback above.
+- **The Anthropic input figure moves** once breakpoints exist, upward
+  by the cached and created share. A correction rather than a
+  regression; it goes in the PR description and the changelog entry.
+- **A compatible server that sends malformed details** (a
+  `prompt_tokens_details` object without the attribute, or a
+  non-integer). Read with `getattr(..., None)` and accepted only as a
+  non-negative `int` (not a `bool`), else `None`, because the event's
+  `Count` raises on anything else and the adapter is where a vendor's
+  malformed value should stop. Tested with one case. The existing two
+  counts have no such guard today; that asymmetry is recorded, not
+  fixed here.
+- **No-leak.** Counts only; nothing string-valued is added to any
+  surface.
+
+## Standing lenses
+
+- *No-leak*: nothing new is a string; no test needed beyond the
+  existing surfaces'.
+- *Pin before reshaping*: nothing is moved; `_reported`'s widening is
+  covered by the provider-watch tests that exist plus the new one.
+- *Closed sets*: none added.
+- *Honest seams*: the details reads compare `is not None`, never
+  truthiness, which is exactly the `0` versus `None` distinction.
+- *Inventories by tooling*: the `LLM_ATTRIBUTES` consumers and every
+  `Usage(` construction site are listed by `git grep -n` in the
+  implementation doc, untruncated.
+- *Proportion*: the cheapest-alternative line above, measured.
+- *Falsify before claiming*: the three mutations above.
+
+## Documentation footprint
+
+- `vinga-server/README.md`, "What a conversation cost": the
+  Generation row gains the cached count and one sentence that it is
+  part of the input count, which the backend prices at its cached
+  rate.
+- `docs/architecture/observability-surfaces.md`, the paragraph that
+  lists what each provider stage carries (around line 211): the
+  generation's cached count, and that it is the conventions' name
+  alone because the backend maps it.
+- `docs/reference/events.md`: regenerated, never hand-edited.
+- A `changelog.d/536-cached-prompt-tokens.md` fragment under
+  `### Added` (the count) and `### Fixed` (the Anthropic input total).
+
+## Milestones
+
+- [ ] **M1: the cached share of a prompt is reported.** Decisions 1 to
+  6, the tests and mutations above, the documentation footprint, and
+  the live measurement recorded in the implementation doc with the
+  per-round table and the two-session comparison. One pull request;
+  it does not close #536, and its body says whether M2's gate opened.
