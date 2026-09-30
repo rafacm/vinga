@@ -190,10 +190,11 @@ actually ran on, and says so.
 **Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.286; 2026-09-30.
 
 A capture keeps, beside a session's three files, a
-`<session>.turns/` directory with two mono 16 kHz clips per started
-turn: `<utterance>.heard.wav`, the exact bytes the turn's ASR was
-handed, and `<utterance>.reply.wav`, channel 1 of the WAV over the
-turn's reply window. The manifest written at close lists them under
+`<session>.turns/` directory with mono 16 kHz clips per started turn: a
+heard clip, `<utterance>.heard.wav`, the exact bytes the turn's ASR was
+handed, and, when reply audio was paced, a reply clip,
+`<utterance>.reply.wav`, channel 1 of the WAV over the turn's reply
+window. The manifest written at close lists them under
 `capture.turns` with each reply clip's span. The budget counts every
 regular file under the capture directory once per inode, upload staging
 included, and the prune takes a capture's turns directory with it.
@@ -204,16 +205,19 @@ uploaded.
 
 | Commit | What it is |
 | --- | --- |
-| `301479ec` Record the send_audio inventory for M2 | This file's header and the inventory below, before anything relied on it |
-| `f90eb95f` Test each turn's two clips in the capture | The tests, watched failing against the unchanged capture: every new case failed, on the missing `utterance_audio` (AttributeError) or the missing `capture.turns` (KeyError) |
-| `26e5b055` Give the capture's name rule one home | `capture_upload.safe_name`, which the uploader's `_named` now calls and the capture reads |
-| `2c30ba11` Keep each turn's heard and reply clips in a capture | `capture.py`: the clip directory, the heard write, the reply window and its incremental file, the manifest's `turns`, the refusal, the inode-counted budget, the prune, `_wav_header` taking a channel count |
-| `5927e98f` Carry a turn's audio from the session to its capture | `SessionEvents.utterance_audio` and the `SessionRecording` protocol method |
-| `08cc021d` Hand each turn's audio to the capture at its start | `start_reply`'s one call after `turn_started` |
-| `ba258b6e` Document the per-turn clips and the staged budget | The documentation footprint, and the regenerated `server-config.md` |
-| `ee38cb95` Announce the turn clips and the staged-budget fix | `changelog.d/496-turn-clips.md`, `### Changed` and `### Fixed` |
-| `c783a615` Test the reply cut where arrival and placement part | Two schedule entries a surviving mutation showed were missing (below) |
-| Record M2 of the turn audio plan | This section and the tick |
+| `ac7e40be` Record the send_audio inventory for M2 | This file's header and the inventory below, before anything relied on it |
+| `b07422bd` Test each turn's two clips in the capture | The tests, watched failing against the unchanged capture: every new case failed, on the missing `utterance_audio` (AttributeError) or the missing `capture.turns` (KeyError) |
+| `eec2b75d` Give the capture's name rule one home | `capture_upload.safe_name`, which the uploader's `_named` now calls and the capture reads |
+| `38ee72d4` Keep each turn's heard and reply clips in a capture | `capture.py`: the clip directory, the heard write, the reply window and its incremental file, the manifest's `turns`, the refusal, the inode-counted budget, the prune, `_wav_header` taking a channel count |
+| `07abd451` Carry a turn's audio from the session to its capture | `SessionEvents.utterance_audio` and the `SessionRecording` protocol method |
+| `ea4783e3` Hand each turn's audio to the capture at its start | `start_reply`'s one call after `turn_started` |
+| `019d7ced` Document the per-turn clips and the staged budget | The documentation footprint, and the regenerated `server-config.md` |
+| `0303d40c` Announce the turn clips and the staged-budget fix | `changelog.d/496-turn-clips.md`, `### Changed` and `### Fixed` |
+| `4f37d935` Test the reply cut where arrival and placement part | Two schedule entries a surviving mutation showed were missing (below) |
+| `e2cdd5e9` Record M2 of the turn audio plan | This section and the tick |
+| `9e12b758` Treat a reply clip that cannot be finished as a failure | PR review round, finding 1 |
+| `049df6de` Say a turn's reply clip exists only when it spoke | PR review round, finding 3 |
+| Record PR #572's review round for M2 | Finding 2: the PR link in the tick, this table's rebased hashes, and the round below |
 
 ### The `send_audio` inventory
 
@@ -221,7 +225,9 @@ The plan's window rule (a reply clip's window opens at
 `utterance_audio(U)` and closes at the next one) is only right if no
 audio reaches the device outside a reply that answers an utterance.
 The inventory the plan asks for, taken before anything relied on it,
-at the branch's base (`a72e8f75`), untruncated:
+at the branch's base (`a72e8f75`, the plan branch's tip before the
+rebase onto `main`; the same command gives the same eight lines at
+`origin/main` after it), untruncated:
 
 ```
 $ git grep -n "send_audio(" -- vinga-server/src
@@ -364,7 +370,7 @@ overrule this; the M2 pull request and #496 repeat it.
   unless a chunk arrives before the one ahead of it has finished, and
   across windows they part when a turn begins while the previous
   reply's last chunk is still playing. The driver never reached either.
-  `c783a615` adds both to the schedule, and the mutation now fails on
+  `4f37d935` adds both to the schedule, and the mutation now fails on
   `u3`'s `reply_from_ms` (1765.625 against the derived 1775.0).
 - **A sentence is spoken only once something follows its full stop.**
   The barge-in cases need a reply that is audibly speaking and then
@@ -399,7 +405,7 @@ One run each, against the finished code, each restored from a copy
 | --- | --- | --- |
 | The heard clip written at the transcribe call site in `_reply` instead of in `start_reply` (the plan's) | `test_a_confirmed_barge_in_keeps_the_gates_bytes_as_its_one_clip` | Killed: the interrupting turn has no clip, one manifest entry where two turns started. `test_each_turns_heard_clip_is_what_its_asr_was_handed` passes under it, as it should: on the ordinary path the two sites hand over the same bytes |
 | Reply audio appended to the clip in arrival order, no silence for gaps (the plan's) | `test_a_reply_clip_is_channel_one_over_the_span_its_turn_paced` | Killed: the clip differs at the first gap |
-| Reply audio placed at its arrival frame, never before the clip's own last end, rather than at the channel's placement | the same | **Survived the first version of the test**; killed after `c783a615` (Discoveries above) |
+| Reply audio placed at its arrival frame, never before the clip's own last end, rather than at the channel's placement | the same | **Survived the first version of the test**; killed after `4f37d935` (Discoveries above) |
 | The prune skipping the `.turns` removal (the plan's) | `test_a_pruned_capture_takes_its_turns_with_it` | Killed: `s0.turns` left behind |
 | The budget counting per name rather than per inode (the plan's) | `test_staged_audio_stays_inside_the_capture_budget` | Killed at the first measurement, which double-counts the staged pair |
 | The budget walk skipping `upload-staging/` (the plan's) | the same | Killed at the second measurement, which loses the pruned capture's staged pair |
@@ -407,8 +413,12 @@ One run each, against the finished code, each restored from a copy
 
 ### Verification
 
-On agentpi, from `vinga-server/`, at the milestone's last code commit
-(`c783a615`):
+On agentpi, from `vinga-server/`, at `c783a615`, the milestone's last
+code commit before the rebase onto `main` after M1 merged (this record
+adds prose only). That rebase moved only commits beneath M2 (the plan
+and M1), and the same commit is `4f37d935` after it; the lanes were not
+rerun on the rebased tree. What the review round below changed was
+verified on its own, and says so there.
 
 - `uv run ruff check .`: `All checks passed!`
 - `uv run mypy`: `Success: no issues found in 5 source files`
@@ -421,7 +431,7 @@ On agentpi, from `vinga-server/`, at the milestone's last code commit
   generator (`config reference server`, `config reference`, `events
   reference`, `config openapi`, `conversations schema`, `conversations
   views`, the CLI region), and only `server-config.md` moved, in
-  `ba258b6e`; `scripts/check_doc_links.py` and
+  `019d7ced`; `scripts/check_doc_links.py` and
   `scripts/fold_changelog.py check` pass
 - `uv run pytest tests/census -q`, run last, on this section as
   committed: `66 passed in 25.92s`, neither manifest needing
@@ -433,3 +443,87 @@ a real microphone and speaker was not listened to: the served-session
 tests run the mock providers through the real session, codecs and
 pacer, and the byte-identity claims are pinned there, but the first
 real capture with clips is M3's live gate.
+
+### PR review round, PR #572
+
+Automated external review of this PR's diff (origin/main...e2cdd5e9).
+Reviewed 2026-09-30 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 6m04s, at commit e2cdd5e9.
+Verdict as received: **mergeable after the listed fixes**. Three
+findings, all fixed here.
+
+1. **P2: a reply header that could not be patched was published as a
+   complete capture.** `close()` finished the open reply window under
+   `contextlib.suppress`, so a failed header patch or file close left
+   `_stopped` false and the manifest said `complete: true` while
+   listing a clip with a stale header, against the class's own
+   write-failure contract.
+
+   *Resolution*: fixed in `9e12b758`. The close catches that failure,
+   reports it once the except suite is left as a capture write failure
+   (`CaptureWrite.AUDIO`, `capture_failed`, `_stopped` set), and goes
+   on closing, so the manifest says `complete: false`; a capture an
+   earlier failure already stopped says nothing more. `_disable` is
+   split into `_failed` (say it, stop) and the close, so the close can
+   report without re-entering itself. Going further than the finding,
+   and for the reason its no-leak half gave: `capture_failed` now names
+   the nearest class in the failure's ancestry that is Python's own
+   builtin of that name (checked by identity against `builtins`), never
+   the raised class, whose name `type` lets anyone choose; this covers
+   every capture write failure, since they share the one report. The
+   other places the clip code closes a file were checked: the window
+   close and the heard write in `utterance_audio`, and the reply clip's
+   first open and its writes in `_add`, all already disabled the
+   capture. Two tests, watched failing first: the header patch failing
+   at close (no `capture_failed` at all before the fix), with a
+   credential-shaped string planted in the exception's message and in
+   its class name and asserted absent from every record in both log
+   formats, along with any traceback; and a clip that fails on its
+   first write and again at close, said once. Mutations: `ClassName.of`
+   in place of the builtin ancestor fails the first (the planted class
+   is named); dropping the already-stopped guard fails the second (two
+   events). Not changed, and noted: the session WAV's own header patch
+   in `close()` is still under a blanket suppress, which predates this
+   milestone and is outside the clip code the finding named; and
+   `capture_directory_unusable` and `capture_files_unopenable` still
+   name the raised class through `ClassName.of`.
+
+2. **P2: the milestone record was not finalized after the rebase and
+   the PR.** The tick still said `PR TBD`, and the commit table listed
+   the pre-rebase hashes.
+
+   *Resolution*: fixed in the commit that adds this round. The tick
+   links PR [#572](https://github.com/rafacm/vinga/pull/572); the
+   commit table and every other hash in this section are the rebased
+   ones; the verification section keeps `c783a615`, the tree the lanes
+   actually ran on, and says it is `4f37d935` after the rebase. The
+   inventory's base `a72e8f75` is kept too, as the commit it was taken
+   at, with a note that the same command gives the same lines at
+   `origin/main`, which was checked.
+
+3. **P3: the operator documentation promised a reply clip for turns
+   that spoke nothing.** The capture prose, `observability-surfaces.md`
+   and the regression suite said two clips per turn, while a turn that
+   paced no reply audio has no reply file and a `reply: null` entry.
+
+   *Resolution*: fixed in `049df6de`. Each now says a heard clip and,
+   when reply audio was paced, a reply clip: the `enabled` prose in
+   `config/models.py` (and `server-config.md`, regenerated from it),
+   `config.example.yaml`, `observability-surfaces.md`, the regression
+   suite, the capture module's docstring, and the changelog fragment's
+   opening sentence, which stated the exception later but opened with
+   the same phrase. This section's own summary was reworded to match in
+   the commit that adds this round.
+
+Verified for the round, on agentpi from `vinga-server/`, at `049df6de`
+plus this record: `uv run ruff check .` (`All checks passed!`),
+`uv run mypy` (`Success: no issues found in 5 source files`), the files
+the fixes touch (`test_capture.py`, `test_capture_session.py`,
+`test_capture_upload.py` in both lanes, `test_recording.py`,
+`test_recording_order.py`, `test_config.py`, with `-n auto --dist
+loadfile`: `337 passed in 42.09s`), the two suites that pin
+`capture_failed`'s declaration (`test_event_baseline.py`,
+`test_server_event_pins.py`: `17 passed in 68.02s (0:01:08)`), the
+server, OpenAPI and events references against their generators (all
+current), `scripts/check_doc_links.py` and `scripts/fold_changelog.py
+check`, and last the census lane. The full unit and integration lanes
+were not rerun for the round.
