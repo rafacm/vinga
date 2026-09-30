@@ -255,30 +255,51 @@ implementation doc records the finding.
 
 ### How the clips are uploaded
 
-`CaptureStore.finished()` hands `stage()` the session's `.turns`
-directory beside the pair; `stage()` hardlinks its files into the
-job's own `turns/` directory inside the same one-rename commit, so a
-job still appears whole or not at all. The job's manifest lists the
-clips, and the worker reads the list from the staged manifest rather
-than from a directory listing, so what is uploaded is what the capture
-said it wrote.
+`SessionCapture.close()` hands the store the capture's own in-memory
+clip list (the list it writes into the manifest), and
+`CaptureStore.finished()` passes it to `stage()` beside the pair.
+`stage()` hardlinks exactly those files into the job's own `turns/`
+directory inside the same one-rename commit, so a job still appears
+whole or not at all.
 
-**The staged manifest is untrusted input.** A hardlink is not a
-snapshot, so what the worker reads is whatever the file holds by then,
-and nothing in it may choose a path. The worker takes from
-`capture.turns` only the utterance ids, each validated by the
-`SAFE_NAME` rule, requires every entry's `heard` and `reply` to equal
-exactly the fixed names derived from its id (`<id>.heard.wav`,
-`<id>.reply.wav`, or `null` for the reply), and refuses the whole
-clip list on any other shape: a missing or non-list `turns`, an
-entry that is not an object, a duplicate id, a name that is not the
-derived one. The file it opens is always `job/turns/<derived name>`,
-built from the validated id and never from a manifest string, opened
-without following a symlink (`os.open(..., O_NOFOLLOW)`, then
-`fstat` requiring a regular file) so a planted link or device reads
-nothing. A refused list or a refused file counts toward the
-incomplete-filing warning (finding 3's resolution) under a closed
-reason, and no refused value is ever rendered.
+**What the worker reads is decided in process, never from disk.** A
+hardlink is not a snapshot, and a staged job is modelled as input
+somebody else may have changed. So:
+
+- **A trusted inventory.** At staging, after linking, `stage()`
+  `lstat`s every staged file (the pair and each clip) and records its
+  `(st_dev, st_ino, st_size)` beside the utterance id and clip kind in
+  the in-process `_staged` entry, which becomes the queued `_Job`.
+  Nothing on disk is consulted for WHICH files to send: not the
+  staged manifest (which is uploaded as an artifact and never parsed
+  for this), not a directory listing. A clip the manifest names and
+  the inventory does not is never read. The boot sweep already
+  deletes rather than resumes a previous process's jobs, so an
+  inventory never has to outlive its process.
+- **Descriptor-relative opens.** The worker opens the job directory
+  and then `turns/` with `O_DIRECTORY | O_NOFOLLOW`, each relative to
+  the last through `dir_fd`, and each leaf relative to its directory
+  with `O_NOFOLLOW`, so a substituted `turns/` symlink, a leaf symlink
+  and a directory all fail to open. Leaf names are built from the
+  validated utterance id and the fixed suffix, never from a string
+  read off disk.
+- **Identity before bytes.** The opened descriptor's `fstat` must be
+  a regular file whose `(st_dev, st_ino, st_size)` equals the
+  inventory's, which refuses a hard link to an unrelated file (another
+  inode), a replaced file (another inode) and a grown or truncated
+  one (another size). The bytes are read through that descriptor and
+  only it, so a rename between the check and the read reads the
+  checked file.
+- **One reading path for all of a job.** The same helper reads the
+  pair, whose failures map onto the pair's existing `staging_lost`
+  (no new pair reason), so the pair gains the same protection rather
+  than keeping the path-based read beside a safer one.
+
+A clip refused by any of these counts failed under a closed
+`ClipFilingFailure` member, `staging_altered`, which replaces the
+round-1 `untrusted_manifest` (the manifest is no longer read for this,
+so it can no longer be the cause). A missing file is `staging_lost`.
+No refused path or value is ever rendered.
 
 The worker uploads the pair first, exactly as today. Then, per listed
 turn, in order:
@@ -335,7 +356,7 @@ warning as every other upload failure is:
   closed value type `ClipFilingFailure` whose members are the causes
   that can actually be decided on the clip path (`unreachable`,
   `refused`, `too_large`, `staging_lost`, `unreferenced`, and
-  `untrusted_manifest` for a refused clip list), and absent where
+  `staging_altered` for a staged file that is not the one staged), and absent where
   nothing failed (every missing clip was unfiled or skipped). A
   separate type rather than new `CaptureUploadFailure` members,
   because that type is the pair's reason set and `incomplete`,
@@ -529,17 +550,24 @@ and `test_telemetry_spans.py` (spans, span events, the
 - The wire tests' "no request carries the decision track" assertion
   kept, and extended: no request carries anything the manifest does
   not list.
-- **Hostile staged manifest**: with the job's manifest rewritten after
-  staging, entries naming `../../<file>`, an absolute path, a name
-  that is not the derived one, a duplicate id, a non-object entry, and
-  a `turns` that is not a list; and with a clip replaced by a symlink
-  to a file outside the job, and by a directory. Each case: the
-  planted outside file's bytes (a credential-shaped sentinel) are
-  never read into any request (asserted on the fake media API's
-  received bodies), no request is made for it, the sentinel and the
-  hostile string appear in no log record, event field or either log
-  format, and the outcome is the incomplete-filing warning with its
-  closed reason.
+- **Altered staging**, each with a credential-shaped sentinel in a
+  file outside the job: `turns/` replaced by a symlink to a directory
+  holding a same-named file; a clip replaced by a leaf symlink to the
+  outside file; a clip replaced by a hard link to the outside file
+  (another inode); a clip replaced by a directory; a clip grown after
+  staging (another size); the staged manifest rewritten to list an
+  extra utterance, a `../../` name and an absolute path; and a rename
+  of the clip after the identity check and before the read (driven
+  through a seam that runs between the two, so the case reaches the
+  window it claims). Each case: the sentinel's bytes reach no request
+  body on the fake media API, no request is made for any file the
+  inventory does not hold, the sentinel and the hostile strings
+  appear in no log record, event field or either log format, and the
+  outcome is `capture_clips_incomplete` with `staging_altered` (or the
+  extra entry simply never read). The same altered-pair cases fail
+  the pair with `staging_lost`. Falsified: reading by path after the
+  check fails the rename case; dropping the inode comparison fails the
+  hard-link case; following the directory symlink fails its case.
 - Staging: the one-rename commit carries the clips; a sweep of a
   leftover job removes its clips with it.
 - Trace outcome: through the exporter's post-close path (the shape of
@@ -646,8 +674,10 @@ change only through their generators.
   suite's "What a session yields". No egress documentation moves: with
   M2 alone, `export_audio` still sends exactly the pair. Part of #496.
 - [ ] **M3: `export_audio` files the clips on their turns**. Stacked
-  on M2. Commits: tests watched failing; staging; the worker's per-turn
-  filing; the event fields and regenerated reference; the egress
+  on M2. Commits: tests watched failing; the capture's close handing
+  the store its in-memory clip list; staging with its trusted
+  inventory and the descriptor-relative reading helper (pair
+  included); the worker's per-turn filing; the event fields and regenerated reference; the egress
   documentation; the changelog fragment
   `changelog.d/496-turn-clips-export.md` under `### Changed`, worded as
   the class-widening announcement (with `export_audio` on, each turn's
@@ -765,6 +795,8 @@ Reviewed 2026-09-30 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    **Evidence:** The plan’s defense is a derived leaf name plus `os.open(..., O_NOFOLLOW)` and `fstat` regular-file check ([plan, lines 266-281] (`docs/plans/2026-09-30-turn-audio.md`:266)). `O_NOFOLLOW` protects only the final path component: a replaced `job/turns` directory symlink is still traversed. A regular-file check also accepts a hard link to an unrelated readable file. This is material because staging deliberately uses hard links ([capture_upload.py, lines 611-622] (`vinga-server/src/vinga_server/capture_upload.py`:611)), while the plan expressly models a staged job as mutable hostile input. The tests cover only a leaf symlink and a directory ([plan, lines 530-540] (`docs/plans/2026-09-30-turn-audio.md`:530)).
 
    **The plan should say instead:** At staging, retain an in-process trusted inventory of the expected clip IDs and each staged file’s `(st_dev, st_ino, size)` in the queued job; startup already sweeps rather than resumes jobs. Require the manifest’s validated clip set to match that inventory exactly. Open `job` and `turns` through non-following directory descriptors, open the leaf relative to that descriptor, and verify the opened descriptor’s identity and size before reading it. Read only through that verified descriptor. Add credential-sentinel tests for a substituted `turns/` symlink, a regular hard link to an outside file, a valid-looking manifest omission, an oversized regular file, and a rename between validation and read.
+
+   *Resolution:* Taken, and it supersedes round 1's manifest validation rather than adding to it. What the worker sends is now decided in process: the capture's close hands the store its in-memory clip list, `stage()` records each staged file's `(st_dev, st_ino, st_size)` in the queued job, and the manifest is never parsed to choose a file. The worker opens the job and `turns/` directories with `O_DIRECTORY | O_NOFOLLOW` relative to each other, each leaf relative to its directory with `O_NOFOLLOW`, requires the descriptor's identity and size to equal the inventory's, and reads only through that descriptor. The same helper reads the pair (failures stay `staging_lost`), so there is one reading path. `ClipFilingFailure` gains `staging_altered` in place of `untrusted_manifest`. M3's tests cover a substituted `turns/` symlink, a leaf symlink, a hard link to an outside file, a directory, a size change, a rewritten manifest and a rename between check and read (driven through a seam that reaches that window), each with a credential-shaped sentinel.
 
 3. **P2: Pair failure has incompatible clip-warning semantics**
 
