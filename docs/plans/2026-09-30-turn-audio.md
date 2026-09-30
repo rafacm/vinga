@@ -745,3 +745,27 @@ Reviewed 2026-09-30 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    *Resolution:* Taken. The goal now says `export_audio` alone sends audio and metadata, and that the no-joining (audio, transcript, model) item also needs `server.conversations` with text stored and `export_transcripts`; M3 states it in the flag's prose. M3 adds a flag-independence test in both directions, and the live gate enables both exports and verifies clips, transcript and model attribution on the same turn root.
 
 **Verdict:** Ready after the P1/P2 amendments.
+
+## Plan review round 2 (re-review of the resolutions)
+
+Reviewed 2026-09-30 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 5m30s, at commit 20a52684, plan blob 4319938c.
+
+---
+
+1. **P1: The reply mechanism still contradicts a binding decision**
+
+   **Evidence:** The decision requires a per-turn channel-1 cut “taken at close from the finished WAV” using decision-track `t_ms` boundaries ([issue comment, lines 63-66] (`.review-context/issue-496-comments.md`:63)). The plan explicitly rejects that and writes a second incremental recording based on an `utterance_audio` window ([plan, lines 200-235] (`docs/plans/2026-09-30-turn-audio.md`:200)). The first-review resolution is therefore wrong: it treats a settled “taken at close” mechanism as discretionary. Its amended test proves the incremental window, not the decision-track cut.
+
+   **The plan should say instead:** Record the explicit decision-track boundary events and their frame offsets, then cut channel 1 from the finalized WAV at close. Name the opening and closing events, including the event that closes an interrupted reply, rather than approximating them with consecutive `turn_started` stamps. Test the resulting clip and manifest offsets against those recorded `t_ms` boundaries, including confirmed barge-in and handover.
+
+2. **P1: The hostile-staging fix still permits local-file exfiltration**
+
+   **Evidence:** The plan’s defense is a derived leaf name plus `os.open(..., O_NOFOLLOW)` and `fstat` regular-file check ([plan, lines 266-281] (`docs/plans/2026-09-30-turn-audio.md`:266)). `O_NOFOLLOW` protects only the final path component: a replaced `job/turns` directory symlink is still traversed. A regular-file check also accepts a hard link to an unrelated readable file. This is material because staging deliberately uses hard links ([capture_upload.py, lines 611-622] (`vinga-server/src/vinga_server/capture_upload.py`:611)), while the plan expressly models a staged job as mutable hostile input. The tests cover only a leaf symlink and a directory ([plan, lines 530-540] (`docs/plans/2026-09-30-turn-audio.md`:530)).
+
+   **The plan should say instead:** At staging, retain an in-process trusted inventory of the expected clip IDs and each staged file’s `(st_dev, st_ino, size)` in the queued job; startup already sweeps rather than resumes jobs. Require the manifest’s validated clip set to match that inventory exactly. Open `job` and `turns` through non-following directory descriptors, open the leaf relative to that descriptor, and verify the opened descriptor’s identity and size before reading it. Read only through that verified descriptor. Add credential-sentinel tests for a substituted `turns/` symlink, a regular hard link to an outside file, a valid-looking manifest omission, an oversized regular file, and a rename between validation and read.
+
+3. **P2: Pair failure has incompatible clip-warning semantics**
+
+   **Evidence:** The new warning is specified for every job with any listed clip not attached ([plan, lines 325-346] (`docs/plans/2026-09-30-turn-audio.md`:325)), but a pair failure is specified to try no clips ([lines 313-323] (`docs/plans/2026-09-30-turn-audio.md`:313)). The M3 test then expects only the existing pair failure and no successful outcome ([lines 521-522] (`docs/plans/2026-09-30-turn-audio.md`:521)). There is no defined count or lawful `ClipFilingFailure` reason for clips never attempted because the pair failed, especially `no_trace`, `incomplete`, or `dropped`, which the plan explicitly excludes from that type.
+
+   **The plan should say instead:** State that `capture_clips_incomplete` applies only after the existing WAV-and-manifest pair has attached successfully; a pair failure remains fully accounted for by `capture_upload_failed`, with no clip warning. Add an assertion that the pair-failure case emits exactly that existing warning and no incomplete-clips event.
