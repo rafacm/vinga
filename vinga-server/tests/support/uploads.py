@@ -11,13 +11,16 @@ Nothing here asserts. A helper returns a seam, a recorder or a staged
 pair, and the suite says what it expects.
 
 The recorder is the point rather than the fake. What the plan requires
-proving is that exactly two attachments go out, with their MIME types,
-a finalized WAV header and a manifest that says it is complete, and that
-no request ever carries the decision track; all four are questions about
-what was ASKED FOR, so what a fake has to do is write down every call.
+proving is that the pair goes out, with its MIME types, a finalized WAV
+header and a manifest that says it is complete, that each turn's clips
+go out against that turn's own trace (#496), and that no request ever
+carries the decision track or a file the staging did not put there; all
+of those are questions about what was ASKED FOR, so what a fake has to
+do is write down every call.
 """
 
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -124,6 +127,15 @@ class _Media:
             )
         if client.asking is not None:
             raise client.asking
+        if client.answering is not None:
+            # One request's own answer, for the cases about which of a
+            # job's several files fails: a raise is that request
+            # failing, and a string is the presigned URL it answers
+            # with (None, as ever, is bytes already held).
+            answer = client.answering(client.recorder.asked[-1])
+            if isinstance(answer, BaseException):
+                raise answer
+            return _Answer(f"media-{len(client.recorder.asked)}", answer)
         media_id = f"media-{len(client.recorder.asked)}"
         return _Answer(media_id, None if client.deduplicates else client.upload_url)
 
@@ -166,9 +178,11 @@ class FakeClient:
         building: BaseException | None = None,
         deduplicates: bool = True,
         upload_url: str | None = None,
+        answering: "Answering | None" = None,
     ) -> None:
         self.recorder = recorder
         self.asking = asking
+        self.answering = answering
         self.deduplicates = deduplicates
         self.upload_url = upload_url
         with recorder._lock:
@@ -185,6 +199,12 @@ class FakeClient:
         self.media = _Media(self)
 
 
+# What one request for an upload URL is answered with, decided per
+# request: an exception to raise, a presigned URL to PUT to, or None for
+# bytes the backend already holds.
+Answering = Callable[[Asked], BaseException | str | None]
+
+
 def fake_sdk(
     recorder: Recorder | None = None,
     *,
@@ -192,6 +212,7 @@ def fake_sdk(
     building: BaseException | None = None,
     deduplicates: bool = True,
     upload_url: str | None = None,
+    answering: Answering | None = None,
 ) -> tuple[Sdk, Recorder]:
     """One seam and the recorder behind it.
 
@@ -199,6 +220,11 @@ def fake_sdk(
     already held: it answers with no upload URL and there is nothing to
     PUT, which is what makes a retry free. A case that wants the PUT
     itself passes `upload_url` and turns it off.
+
+    `answering` decides each request on its own, which is what a case
+    about one clip among several needs: the pair lands and the third
+    request is refused, say. It is handed the request as the recorder
+    kept it, and it runs after `asking`, which fails every request.
     """
     kept = recorder if recorder is not None else Recorder()
 
@@ -209,6 +235,7 @@ def fake_sdk(
             building=building,
             deduplicates=deduplicates,
             upload_url=upload_url,
+            answering=answering,
             **options,
         )
 
@@ -226,6 +253,15 @@ class Pin:
     """
 
     session: str
+
+
+@dataclass(frozen=True)
+class TurnPin:
+    """A turn's pinned context under a session's, as `turn_context`
+    answers it: the utterance it answered, beside the session."""
+
+    session: str
+    utterance: str
 
 
 class Traced:
@@ -249,24 +285,54 @@ class Traced:
     to have written onto each session's trace, which is the claim that
     an attachment is playable rather than merely stored. `refusing` makes
     the write fail, which is the state an exporter shutting down leaves.
+
+    `turns` is the fourth question, since #496: each turn's own trace by
+    the utterance it answered, which is where that turn's clips go. A
+    turn this double does not hold answers None, which is the exporter's
+    answer for a turn it never opened. `turn_referenced` is what was
+    written onto each turn, `turn_asked` every write that was asked for
+    whatever it answered, and `refusing_turns` makes one turn's write
+    fail while the session's still lands.
     """
 
     def __init__(
-        self, traces: dict[str, str] | None = None, *, refusing: bool = False
+        self,
+        traces: dict[str, str] | None = None,
+        *,
+        refusing: bool = False,
+        turns: dict[str, str] | None = None,
+        refusing_turns: frozenset[str] = frozenset(),
     ) -> None:
         self.traces = dict(traces or {})
         self.refusing = refusing
+        self.turns = dict(turns or {})
+        self.refusing_turns = refusing_turns
         self.referenced: list[tuple[str, dict[str, str]]] = []
+        self.turn_referenced: list[tuple[str, dict[str, str]]] = []
+        self.turn_asked: list[tuple[str, dict[str, str]]] = []
 
     def retained_context(self, session: str) -> Any | None:
         return Pin(session) if session in self.traces else None
 
     def trace_of(self, context: Any) -> str | None:
+        if isinstance(context, TurnPin):
+            return self.turns.get(context.utterance)
         if not isinstance(context, Pin):
             return None
         return self.traces.get(context.session)
 
+    def turn_context(self, context: Any, utterance: str | None) -> Any | None:
+        if not isinstance(context, Pin) or utterance not in self.turns:
+            return None
+        return TurnPin(context.session, utterance)
+
     def reference_media(self, context: Any, references: dict[str, str]) -> bool:
+        if isinstance(context, TurnPin):
+            self.turn_asked.append((context.utterance, dict(references)))
+            if self.refusing or context.utterance in self.refusing_turns:
+                return False
+            self.turn_referenced.append((context.utterance, dict(references)))
+            return True
         if self.refusing or not isinstance(context, Pin):
             return False
         if context.session not in self.traces:
@@ -276,7 +342,10 @@ class Traced:
 
 
 def exporting(
-    traces: dict[str, str] | None = None, *, refusing: bool = False
+    traces: dict[str, str] | None = None,
+    *,
+    refusing: bool = False,
+    turns: dict[str, str] | None = None,
 ) -> Telemetry:
     """`Traced` under the type the uploader declares."""
-    return Traced(traces, refusing=refusing)  # type: ignore[return-value]
+    return Traced(traces, refusing=refusing, turns=turns)  # type: ignore[return-value]
