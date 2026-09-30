@@ -589,3 +589,274 @@ declaration (`17 passed in 59.02s`), the events reference against its
 generator (current), `scripts/check_doc_links.py` and
 `scripts/fold_changelog.py check`, and last the census lane. The full
 unit and integration lanes were not rerun for the round.
+
+## M3: `export_audio` files the clips on their turns
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.286; 2026-10-01.
+
+With `server.telemetry.export_audio` on, the upload after a session
+closes sends the pair to the session's trace as before and then, turn
+by turn, each turn's heard clip and (when reply audio was paced) reply
+clip against that turn's own trace, referenced there by one `capture`
+span under the turn span. What the worker reads is decided in process:
+the capture's close hands the store its in-memory clip list, the
+staging records every staged file's `(st_dev, st_ino, st_size)`, and
+one reading helper opens the job, `turns/` and each leaf descriptor
+relative without following a link, checks the identity, and reads
+through the checked descriptor. `capture_uploaded` gains `clips`, a new
+WARNING `capture_clips_incomplete` carries the four counts and a
+`ClipFilingFailure` reason, and both reach the session's trace.
+
+### The commits
+
+| Commit | What it is |
+| --- | --- |
+| `26456452` Test each turn's clips filed on its own trace | The unit, telemetry and integration cases, and the doubles they need, watched failing (below) |
+| `f4975113` Hand the store a capture's clips at its close | `TurnClips`; `SessionCapture.close()` passes its clip list to `on_close`, and `CaptureStore.finished()` to `stage()` |
+| `01625d75` Declare what the clip filing says | `ClipFilingFailure`, `clips` on `CaptureUploaded`, `CaptureClipsIncomplete`, the README index row and the regenerated events reference |
+| `787f8e29` Stage the clips with an inventory, read by descriptor | Staging with the trusted inventory, `_read_staged` for the pair and the clips, the `_identity_checked` seam |
+| `c2463a61` File each turn's clips on its own turn | `_file_turns`, `_file_clip`, `_retrying`, the outcomes, and the event baseline's driver |
+| `1c7705ae` Put the clip outcomes on the session's trace | `capture_clips_incomplete` in `AFTER_THE_CLOSE`, five rows in `AFTER_THE_CLOSE_ATTRIBUTES` |
+| `a6f7004f` Document what export_audio now sends | The egress documentation footprint and the regenerated `server-config.md` |
+| `3d0b08c5` Announce the turn clips leaving with export_audio | `changelog.d/496-turn-clips-export.md` under `### Changed` |
+| Record M3 of the turn audio plan | This section and the tick |
+
+### The tests, and how they were watched failing
+
+Against the unchanged uploader (M2's tip), the unit run of
+`test_capture_upload.py` and `test_telemetry.py` ended
+`34 failed, 163 passed, 5 errors in 24.96s` (the errors are teardown
+failures on the refused emission of a `capture_uploaded` carrying a
+`clips` field that did not exist yet), and the integration file
+`4 failed, 3 passed in 109.95s`, each integration failure
+`only 2 attachment(s) were asked for`. The cases that passed there and
+were meant to are claims about kept behavior: an altered pair replaced
+by a directory (a path read already refused one), a failed pair trying
+no clip, and the transcripts-only flag case staging nothing.
+
+- Unit (`tests/unit/test_capture_upload.py`, a new section): the pair
+  and four clips, every request's digest and trace id in order, one
+  reference per turn with `heard_audio` and `reply_audio`, `clips=4`
+  and no warning; a heard clip alone for a turn that spoke nothing; a
+  recording with no turns (`clips=0`, no warning); a turn with no
+  retained context counted unfiled and never referenced on the session;
+  a refused reply clip, a refused first clip (not retried, stops
+  nothing), a 413, a retry-exhausted 503 skipping every later clip, an
+  unreferenced turn (one reference asked for, with both tokens), a
+  vanished staged clip, each asserting the `capture_clips_incomplete`
+  record exactly (WARNING, four counts, `reason` or its absence); a
+  failed pair, refused and lost, trying no clip and saying only
+  `capture_upload_failed`; through the real exporter, one `capture`
+  span per turn in the turn's trace and under the turn span beside the
+  session's own, and #517's sequence leaving the second turn unfiled
+  with no reference anywhere; the clips inside the one-rename commit
+  and the sweep taking them; seven altered stagings of a clip and four
+  of the pair with an outside sentinel padded to the clip's size (every
+  request's digest one of the capture's own files, the sentinel's
+  digest in none, the sentinel and its path in no record or field); a
+  same-size in-place rewrite of the staged manifest naming a traversal,
+  an absolute path and an unstaged utterance, after which the clips
+  asked for are exactly the inventory's; the rename between check and
+  read; and a clip's presigned URL with a credential-shaped query string
+  failing to connect, hunted in both formats, every field and both
+  streams.
+- Telemetry (`tests/unit/test_telemetry.py`): `vinga.export.clips` on
+  `capture_uploaded`, the new outcome's span on the session's retained
+  trace under the session span with its four counts and
+  `vinga.export.reason`, and no reason attribute where nothing failed.
+- Integration (`tests/integration/test_capture_upload.py`): the whole
+  path now expects the pair and the turn's two clips, the clips against
+  a trace that is not the session's, the PUT bodies exactly the pair and
+  the clips the manifest lists (the "nothing the manifest does not list"
+  extension beside the decision-track assertion), the turn's `capture`
+  span under the turn span with tokens naming the minted ids, and
+  `vinga.export.clips == 2`; two new cases hold the flags apart (audio
+  alone: four requests and no transcript on the turn or anywhere on the
+  wire; transcripts alone: the transcript on the turn, no media request,
+  nothing staged, no `capture` span).
+- Doubles: `Traced` answers `turn_context` and records per-turn
+  references (and every reference asked for); the fake client answers
+  each request on its own (`answering`).
+
+### Deviations from the plan
+
+- **Commit order.** The plan lists the event fields after the worker's
+  filing. The vocabulary was declared before the staging instead,
+  because the staging's reading helper already chooses between two
+  `ClipFilingFailure` members; the baseline's every-variant case was red
+  on the new event between that commit and the filing's, the order the
+  transcript export's vocabulary took. The telemetry mapping is its own
+  commit after the filing.
+- **The plan's live gate reads back "with the Langfuse MCP"; the brief
+  asked for the public REST API.** Both were done: the REST read-back
+  covers every turn, and the MCP read of turn 1's `capture` and `turn`
+  observations agrees with it (below).
+
+### Resolutions and decisions made here
+
+- **The seam for the rename case** is a module-level no-op in
+  `capture_upload.py`, `_identity_checked(leaf)`, called by
+  `_read_staged` after the identity check and before the read. The case
+  replaces it with `monkeypatch.setattr` and, from inside that window,
+  renames the staged clip away and links the sentinel in its place.
+- **A clip whose link fails at staging** stays in the inventory with no
+  identity, the pair still goes, and the worker reports that clip
+  `staging_lost` without opening anything, rather than failing the
+  whole job. A failed PAIR link still fails the staging, as before. The
+  staging now also refuses a pair link that is not a regular file.
+- **Leaves are opened `O_NONBLOCK`** as well as `O_NOFOLLOW`, so a FIFO
+  planted in a clip's place cannot wedge the worker on its open; its
+  `fstat` then refuses it as `staging_altered`.
+- **Exactly the staged number of bytes is read**, so a file grown after
+  its check cannot send more than was checked, and one cut short after
+  its check is `staging_altered`. A read error is `staging_lost`.
+- **Reasons**: `ENOENT` anywhere on the way is `staging_lost`; any other
+  open failure (`ELOOP` on a link, `ENOTDIR` on a file where `turns/`
+  was) and any identity mismatch is `staging_altered`. For the pair,
+  both stay `staging_lost`. An upload's classification maps to the
+  clip's set by name (`_clip_reason`: `refused`, `too_large`, otherwise
+  `unreachable`), never raising, since a raise there would fail a job
+  whose pair had landed.
+- **`capture_clips_incomplete` has one variant** with `reason` declared
+  `ClipFilingFailure | Absent`; the sentence renders the four counts,
+  and the reason rides the payload and the span. Skipped clips always
+  follow a failed one, so an absent reason means every missing clip was
+  unfiled.
+- **`elapsed_ms` on `capture_uploaded`** now covers the clips as well as
+  the pair, since the event is said after them; the note ("how long the
+  whole attachment took") was left as written, since it still reads
+  true.
+- **Staging holds the clips too**, so M2's budget case now counts them
+  among what a pruned capture leaves on the disk.
+- **The two integration hostile-backend cases** stage through `stage()`
+  rather than writing the uploader's private map, which removes two
+  reach-ins (`_staged`) from the census.
+- **Prose** follows the plan as amended during M2's review: every turn
+  has a heard clip, and a reply clip when reply audio was paced.
+
+### Discoveries
+
+- **The regular-file check on the opened leaf is not independently
+  reachable** (the one surviving mutation, below). An inode's file type
+  is fixed for its life and the staging records only regular files, so
+  a descriptor whose device and inode equal the inventory's is a
+  regular file; a directory in a clip's place is refused by its inode
+  and size. The check is kept because the plan states it and it costs
+  one comparison, and recorded here rather than claimed as tested.
+- **During the work M2's review tip briefly failed**
+  `test_a_failed_capture_write_refuses_carrying_nothing` (the
+  builtin-ancestor class naming meant the planted class no longer
+  reached construction); the second review round's revert fixed it, and
+  the full unit lane below, on the merged M2, passes it.
+- **M2's changelog fragment** says `export_audio` still sends only the
+  pair; it was folded into `CHANGELOG.md` before this milestone, true
+  of M2 alone, and this milestone's fragment supersedes it.
+
+### Mutations
+
+One run each, against the finished code, each restored from a copy
+(not `git checkout`) and touched afterwards, with
+`PYTHONDONTWRITEBYTECODE=1`, each running only the named cases:
+
+| Mutation | Outcome |
+| --- | --- |
+| A clip filed under the session's trace (plan) | Killed: the first case's trace ids |
+| Clips tried after a retry-exhausted failure (plan) | Killed: the skip case |
+| Stopping after a refusal (plan) | Killed: both refusal cases |
+| Referencing per clip rather than per turn (plan) | Killed: the unreferenced case and the first case |
+| Counting a clip attached before its reference answered (plan) | Killed: the unreferenced case |
+| Reading by path after the check (plan) | Killed: the rename case |
+| Dropping the inode comparison (plan) | Killed: the hard-link case |
+| Following the directory symlink (plan) | Killed: the `turns/`-to-the-real-clips case |
+| Dropping `clips` from the outcome table (plan) | Killed |
+| Dropping `skipped` from the outcome table (added) | Killed |
+| Following a leaf symlink (added) | Killed: the leaf-link-to-its-own-inode case |
+| Dropping the size from the identity (added) | Killed: the grown case |
+| Dropping the regular-file check (added) | **Survived**: not independently reachable (Discoveries) |
+| The pair read by path again (added) | Killed: all four altered-pair cases |
+| Every clip failure called `unreachable` (added) | Killed: the refused-first-clip case |
+| An unfiled turn filed on the session instead (added) | Killed: both unfiled cases |
+| Clips tried after the pair failed (added) | Killed: the refused-pair case |
+
+### The live gates
+
+Run on agentpi at `3d0b08c5` (this record adds prose only) with a
+scratch driver copied from #536's: a real server in process, OpenAI
+ASR (`gpt-transcribe`, `language: en`), LLM (`gpt-4.1-mini`) and TTS,
+silero VAD, capture into a scratch directory, `server.conversations`
+with text, `server.telemetry` with `export_audio` and
+`export_transcripts`, OTLP to the Langfuse project in `.env`, and
+`LANGFUSE_HOST` set from its `LANGFUSE_BASE_URL`. One session, two
+spoken turns. Its database was dropped afterwards.
+
+- Session `7077676e9dcb49e2920c7fa8395814a5`, session trace
+  `6c95faddf82f07e4f8d60a61b6e09e7d`.
+- Turn 1, utterance `7c6f547da26c403899fca0105b1c4c17`, trace
+  `8fb3e48ab9a500b1995160a9c0d18cb6`; turn 2, utterance
+  `71893f609e754d8da1b5ddf555c9188a`, trace
+  `7bf3c6e79505ba43f937be4ed2890698`.
+- Events: `capture_uploaded` with `clips=4` (and the pair's sizes), two
+  `transcripts_exported`, and no `capture_clips_incomplete` and no
+  `capture_upload_failed`.
+
+**Gate 1, passed.** Read back through the public REST API
+(`/api/public/traces/<id>`, `/api/public/media/<id>`) for both turns:
+each turn's trace holds `turn`, `asr`, `llm`, `tts_stream`,
+`playback` and `capture`; the `capture` observation's parent is the
+turn observation, its metadata holds `heard_audio` and `reply_audio`
+media tokens, and each media record exists with content type
+`audio/wav`, marked uploaded, its length equal to the local clip's
+(turn 1: 117132 and 112076 bytes; turn 2: 97836 and 144406); the turn
+observation's input is the transcript ("What time does the garden open
+on Saturdays?", "Is there a cafe in the garden?"); and the `asr`
+observation under the same turn root carries model `gpt-transcribe`
+and provider `openai`. The Langfuse MCP read of turn 1's `capture`
+observation (`bfe6460e5b3ad88d`, parent `1e40ce255f247a1a`) and its
+`turn` observation (input the same transcript) agrees. The session's
+own `capture` span is under the session span in the session trace, as
+before.
+
+**Gate 2, passed.** Turn 1's persisted
+`7c6f547da26c403899fca0105b1c4c17.heard.wav` (117132 bytes, a 44-byte
+header whose data length matches) had its PCM re-wrapped by the
+provider's own `wav_bytes` and sent to `gpt-transcribe` with
+`response_format: json` and `language: en`, the options the server
+used. It returned "What time does the garden open on Saturdays?",
+identical to the transcript recorded on the turn's trace and to what
+the device was told it said.
+
+### Verification
+
+On agentpi, from `vinga-server/`, at `3d0b08c5` (the milestone's last
+code and prose commit before this record, on `origin/main` after M2's
+merge):
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run mypy`: `Success: no issues found in 5 source files`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`:
+  `7694 passed, 19 skipped in 908.98s (0:15:08)`; the skips are the
+  `piper` and `faster-whisper` extras, not installed here
+- `uv run pytest tests/integration -q -n auto --dist loadfile`:
+  `349 passed in 236.02s (0:03:56)`
+- The drift checks: every generated reference regenerated through its
+  generator (`config reference server`, `config reference`, `events
+  reference`, `config openapi`, `conversations schema`, `conversations
+  views`, `config cli-reference`); `events.md` moved with the
+  vocabulary and `server-config.md` with the prose, and nothing else;
+  `scripts/check_doc_links.py .` and `scripts/fold_changelog.py check .`
+  pass
+- `uv run pytest tests/census -q`, run last, after this section was
+  written: `66 passed`. The reach-in manifest was regenerated with its
+  generator first: it lost `tests/integration/test_capture_upload.py
+  _staged 2`, the two reach-ins the hostile-backend cases no longer
+  make; the rename seam is set through `monkeypatch.setattr` on the
+  module and adds none
+
+Not verified here: the image build and its smoke conversation, which
+run only in CI, and anything on a board.
+
+Rebases during the work: onto M2's review tips `63c9c85d` and then
+`f3985469` (both clean), and finally `git rebase --onto origin/main
+f3985469` after PR #572 merged (clean; `git log origin/main..HEAD`
+lists only this milestone's commits). The mutation runs were made
+before the last rebase, which moved only M2's commits beneath them.

@@ -15,7 +15,6 @@
 # and #488 M1.
 tests/conftest.py  _undo  1
 tests/integration/test_capture_upload.py  _lock  2
-tests/integration/test_capture_upload.py  _staged  2
 tests/integration/test_cli_live.py  _parsed  1
 tests/support/records.py  _speak  1
 tests/support/sessions.py  _activate_agent  1
