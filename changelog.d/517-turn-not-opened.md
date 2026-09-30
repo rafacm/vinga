@@ -1,3 +1,0 @@
-### Fixed
-
-- **A turn span the telemetry exporter declines to open is now reported instead of lost in silence** (#517). When a turn starts while the previous turn's span is still open, the exporter keeps the open turn and gives the new one no span, so its stages are filed under the turn before it. The runtime never produces that order today, since a reply finishes before the turn that interrupted it starts, and nothing about the behavior changes. What changes is that a broken ordering now says so: the server logs `session <id>: a turn started while another was open, so its span was not opened` as a warning, once per session, the first time it happens. Nothing is added to the trace, whose every span event comes from the event catalog.
