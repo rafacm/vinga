@@ -693,7 +693,7 @@ change only through their generators.
   `observability-surfaces.md` only if it describes turn span
   completeness (the implementer checks and says). Closes #517.
 - [x] **[M2: the capture keeps each turn's two clips](2026-09-30-turn-audio-implementation.md#m2-the-capture-keeps-each-turns-two-clips)**
-  (PR TBD). Off
+  (PR [#572](https://github.com/rafacm/vinga/pull/572)). Off
   `feature/turn-audio-plan`, in parallel with M1. Commits: the
   `send_audio` inventory recorded; tests watched failing;
   `SessionEvents.utterance_audio` and the protocol; `start_reply`'s
