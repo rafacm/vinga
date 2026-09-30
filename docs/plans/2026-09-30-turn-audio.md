@@ -734,7 +734,8 @@ change only through their generators.
   `config.example.yaml`'s telemetry comment, the uploader docstring,
   observability-surfaces' "Exported capture media" and the Audio row.
   Part of #496.
-- [ ] **M4: which loop answers which ASR question**. Stacked on M3.
+- [x] **[M4: which loop answers which ASR question](2026-09-30-turn-audio-implementation.md#m4-which-loop-answers-which-asr-question)**
+  (PR TBD). Stacked on M3.
   Documentation only: a section in
   `docs/conversational-quality-regression-suite.md` per the
   2026-09-20 comment on #496 (the two loops as supplier and consumer;
