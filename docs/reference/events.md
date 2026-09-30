@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 79 events in 109 variants. What
+This document is that surface written down: 80 events in 110 variants. What
 was said in a conversation is in the conversation store instead, keyed by the
 same `session` ([its reference](conversations-schema.md)).
 
@@ -274,6 +274,7 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `capture_pruned` | `vinga_server.capture` | INFO | 1 |
 | `capture_over_budget` | `vinga_server.capture` | WARNING | 1 |
 | `capture_uploaded` | `vinga_server.capture_upload` | INFO | 1 |
+| `capture_clips_incomplete` | `vinga_server.capture_upload` | WARNING | 1 |
 | `capture_upload_failed` | `vinga_server.capture`, `vinga_server.capture_upload` | WARNING | 2 |
 | `transcripts_exported` | `vinga_server.transcript_export` | INFO | 1 |
 | `transcript_export_failed` | `vinga_server.transcript_export` | WARNING | 1 |
@@ -2572,6 +2573,41 @@ session %s: capture attached to its trace, %.1f MB in %d ms
 | `audio_bytes` | `COUNT` | yes | no |  | The WAV as it left, exactly, which is what a reader compares against what the backend holds. |
 | `manifest_bytes` | `COUNT` | yes | no |  | And the manifest beside it. |
 | `elapsed_ms` | `INT` | yes | no |  | How long the whole attachment took, measured off the audio path: this happens on a worker of its own after the session closed, so it is a fact about the backend and the link to it rather than about any reply's latency. |
+| `clips` | `COUNT` | yes | no |  | How many of the turns' clips were attached to their turns and referenced there (#496): at most two per turn, the heard clip and, where the turn spoke, the reply clip. Any clip the capture kept and this count does not include is said by `capture_clips_incomplete`. |
+
+### `capture_clips_incomplete`
+
+A session's recording is beside its trace and some of its turns' clips are not
+on their turns (#496): how many were attached, how many had no turn to be
+filed on, how many failed and how many were never tried, with the first
+failure's reason from a closed set. Said once per job and only after the pair
+attached, since a job whose pair failed is accounted for by
+`capture_upload_failed`. A job whose clips all attached, or that kept none,
+says nothing.
+
+#### Variant 1: `vinga_server.capture_upload` at WARNING
+
+```text
+session %s: turn clips not all attached to their turns, %d attached, %d unfiled, %d failed, %d skipped
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `attached` (`COUNT`) | no |  |  |
+| 3 | `unfiled` (`COUNT`) | no |  |  |
+| 4 | `failed` (`COUNT`) | no |  |  |
+| 5 | `skipped` (`COUNT`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `attached` | `COUNT` | yes | no |  | The clips attached to their turns and referenced there. |
+| `unfiled` | `COUNT` | yes | no |  | The clips whose turn this server holds no trace for: a turn whose span was never opened, or one past the retained turns. Never attached to the session's trace instead, since a clip under the wrong observation is worse than one that says it could not be filed. |
+| `failed` | `COUNT` | yes | no |  | The clips an upload was attempted for and did not land, or landed with nothing on the trace pointing at them. |
+| `skipped` | `COUNT` | yes | no |  | The clips never tried, because an earlier clip of the same job found the backend unreachable after all its retries: trying them would only have been more timeouts on a worker other sessions wait behind. |
+| `reason` | `TOKEN` | no | no | one of: `refused`, `staging_altered`, `staging_lost`, `too_large`, `unreachable`, `unreferenced` | Why the first failed clip failed. Absent where nothing failed, which is every missing clip unfiled. Never the far side's words. |
 
 ### `capture_upload_failed`
 

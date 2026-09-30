@@ -72,6 +72,7 @@ from vinga_server.events.values import (
     ClassName,
     ClassNames,
     ClientId,
+    ClipFilingFailure,
     CloseReason,
     ConfiguredPath,
     ConversationId,
@@ -3706,10 +3707,12 @@ class CaptureOverBudget(Variant):
 #
 # The vocabulary of the attachment surface (#67): a closed session's WAV
 # and manifest going out to the telemetry backend the traces already go
-# to, behind a flag of its own. Two events, and between them the whole
-# ledger, because a recording that silently failed to attach would
-# recreate the gap the attachment exists to close: a trace whose reader
-# has no audio and no way to learn that any was meant to be there.
+# to, behind a flag of its own, and since #496 each turn's two clips
+# going to that turn's own trace after them. Three events, and between
+# them the whole ledger, because a recording that silently failed to
+# attach would recreate the gap the attachment exists to close: a trace
+# whose reader has no audio and no way to learn that any was meant to be
+# there.
 #
 # What neither of them may carry is as much of the declaration as what
 # they do. No URL: the upload's destination is transport configuration
@@ -3750,6 +3753,67 @@ class CaptureUploaded(Variant):
     # log wants the order of magnitude, and the exact halves are the
     # payload's.
     megabytes: Real = value(carried=False)
+    clips: Count = value(
+        note=(
+            "How many of the turns' clips were attached to their turns and "
+            "referenced there (#496): at most two per turn, the heard clip "
+            "and, where the turn spoke, the reply clip. Any clip the capture "
+            "kept and this count does not include is said by "
+            "`capture_clips_incomplete`."
+        )
+    )
+
+
+@dataclass(frozen=True)
+class CaptureClipsIncomplete(Variant):
+    """Some of a session's turn clips are not on their turns."""
+
+    CHANNEL: ClassVar[str] = CAPTURE_UPLOAD_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "session %s: turn clips not all attached to their turns, %d attached, "
+        "%d unfiled, %d failed, %d skipped"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = (
+        "session",
+        "attached",
+        "unfiled",
+        "failed",
+        "skipped",
+    )
+
+    session: SessionId = value()
+    attached: Count = value(
+        note="The clips attached to their turns and referenced there."
+    )
+    unfiled: Count = value(
+        note=(
+            "The clips whose turn this server holds no trace for: a turn "
+            "whose span was never opened, or one past the retained turns. "
+            "Never attached to the session's trace instead, since a clip "
+            "under the wrong observation is worse than one that says it "
+            "could not be filed."
+        )
+    )
+    failed: Count = value(
+        note="The clips an upload was attempted for and did not land, or landed "
+        "with nothing on the trace pointing at them."
+    )
+    skipped: Count = value(
+        note=(
+            "The clips never tried, because an earlier clip of the same job "
+            "found the backend unreachable after all its retries: trying "
+            "them would only have been more timeouts on a worker other "
+            "sessions wait behind."
+        )
+    )
+    reason: ClipFilingFailure | Absent = value(
+        default=ABSENT,
+        note=(
+            "Why the first failed clip failed. Absent where nothing failed, "
+            "which is every missing clip unfiled. Never the far side's words."
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -4351,6 +4415,20 @@ CAPTURE_UPLOADED = declare(
     variants=(CaptureUploaded,),
 )
 
+CAPTURE_CLIPS_INCOMPLETE = declare(
+    "capture_clips_incomplete",
+    note=(
+        "A session's recording is beside its trace and some of its turns' "
+        "clips are not on their turns (#496): how many were attached, how "
+        "many had no turn to be filed on, how many failed and how many were "
+        "never tried, with the first failure's reason from a closed set. "
+        "Said once per job and only after the pair attached, since a job "
+        "whose pair failed is accounted for by `capture_upload_failed`. A "
+        "job whose clips all attached, or that kept none, says nothing."
+    ),
+    variants=(CaptureClipsIncomplete,),
+)
+
 CAPTURE_UPLOAD_FAILED = declare(
     "capture_upload_failed",
     note=(
@@ -4501,6 +4579,7 @@ __all__ = [
     "BuiltinSentenceWithheld",
     "BuiltinToolCall",
     "CAPTURE_CHANNEL",
+    "CAPTURE_CLIPS_INCOMPLETE",
     "CAPTURE_DECLINED",
     "CAPTURE_DISABLED",
     "CAPTURE_ENABLED",
@@ -4521,6 +4600,7 @@ __all__ = [
     "CONVERSATIONS_PRUNED",
     "CONVERSATION_RESUMED",
     "CaptureBelowFloor",
+    "CaptureClipsIncomplete",
     "CaptureDirectoryUnusable",
     "CaptureDisabled",
     "CaptureEnabled",

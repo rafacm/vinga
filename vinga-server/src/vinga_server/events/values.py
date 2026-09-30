@@ -1580,6 +1580,38 @@ AttemptedUpload = Literal[
 ]
 
 
+class ClipFilingFailure(StrEnum):
+    """Why a turn's clip is not on its turn, where the upload itself is
+    the reason (#496).
+
+    The whole of what `capture_clips_incomplete` may say about a clip
+    that failed, and a set of its own rather than more members of
+    `CaptureUploadFailure`: that type is the pair's, and three of its
+    members (`incomplete`, `no_trace`, `dropped`) are about a job and
+    can never be a clip's cause. Each member is chosen at the site that
+    decides it, never from a message. A clip with no turn to be filed on
+    is not here: it counts `unfiled`, which is a fact about the trace
+    rather than a failure of the upload.
+    """
+
+    # The request never got an answer: no route, no listener, or the
+    # request's own ceiling reached.
+    UNREACHABLE = "unreachable"
+    # The far side answered, and said no.
+    REFUSED = "refused"
+    # The far side's ceiling, or this server's own before it asks.
+    TOO_LARGE = "too_large"
+    # The staged clip was gone when the worker reached for it.
+    STAGING_LOST = "staging_lost"
+    # The staged clip is not the file that was staged: a link, a
+    # directory, a special file, another inode, or another size. Nothing
+    # of what is there is read.
+    STAGING_ALTERED = "staging_altered"
+    # The clip landed and its turn's reference was not written, so
+    # nothing on the trace points at it.
+    UNREFERENCED = "unreferenced"
+
+
 class TranscriptExportFailure(StrEnum):
     """Why acknowledged turn content was omitted from its telemetry root.
 
@@ -1898,6 +1930,7 @@ __all__ = [
     "ClassName",
     "ClassNames",
     "ClientId",
+    "ClipFilingFailure",
     "CloseReason",
     "ConfiguredPath",
     "ConversationId",

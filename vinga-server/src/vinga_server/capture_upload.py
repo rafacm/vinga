@@ -837,6 +837,7 @@ class CaptureUpload:
                 manifest_bytes=Count(len(manifest)),
                 elapsed_ms=Whole(elapsed),
                 megabytes=Real((len(audio) + len(manifest)) / MB),
+                clips=Count(0),
             )
         )
         return None
