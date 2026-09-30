@@ -211,16 +211,18 @@ TURN_STARTED = "turn_started"
 REPLY_FINISHED = "reply_finished"
 CAPTURE_STARTED = "capture_started"
 
-# And the six that arrive after it closed: a recording's trip to the
+# And the seven that arrive after it closed: a recording's trip to the
 # backend happens on a worker of its own, off the session's loop and
-# after the span map has let the session go (#67); a transcript export
-# reads the store on a worker of its own for the same reason (#495); and
-# the assembled requests a session staged are delivered on a third
-# (#502). All three pairs reach the trace through one mechanism, which
-# is what "the machinery generalizes and the sentences do not" means
-# here.
+# after the span map has let the session go (#67), and since #496 that
+# trip carries each turn's clips too, with a third outcome for the ones
+# that did not reach their turns; a transcript export reads the store on
+# a worker of its own for the same reason (#495); and the assembled
+# requests a session staged are delivered on a third (#502). All of them
+# reach the session's trace through one mechanism, which is what "the
+# machinery generalizes and the sentences do not" means here.
 CAPTURE_UPLOADED = "capture_uploaded"
 CAPTURE_UPLOAD_FAILED = "capture_upload_failed"
+CAPTURE_CLIPS_INCOMPLETE = "capture_clips_incomplete"
 TRANSCRIPTS_EXPORTED = "transcripts_exported"
 TRANSCRIPT_EXPORT_FAILED = "transcript_export_failed"
 LLM_INPUT_EXPORTED = "llm_input_exported"
@@ -229,6 +231,7 @@ AFTER_THE_CLOSE = frozenset(
     {
         CAPTURE_UPLOADED,
         CAPTURE_UPLOAD_FAILED,
+        CAPTURE_CLIPS_INCOMPLETE,
         TRANSCRIPTS_EXPORTED,
         TRANSCRIPT_EXPORT_FAILED,
         LLM_INPUT_EXPORTED,
@@ -1187,6 +1190,10 @@ PLAYBACK_ATTRIBUTES = {
 # named, because this fold iterates the TABLE: a key left out of it is
 # not exported at all, and dropping the failure's reason would cost the
 # one fact a failed export's reader is there for.
+#
+# The turn clips' five counts are here for the same reason (#496):
+# `clips` on the recording's success, and the four
+# `capture_clips_incomplete` carries, whose `reason` is the row above.
 AFTER_THE_CLOSE_ATTRIBUTES = {
     "elapsed_ms": "vinga.export.elapsed_ms",
     "audio_bytes": "vinga.export.audio_bytes",
@@ -1194,6 +1201,11 @@ AFTER_THE_CLOSE_ATTRIBUTES = {
     "turns": "vinga.export.turns",
     "rounds": "vinga.export.rounds",
     "reason": "vinga.export.reason",
+    "clips": "vinga.export.clips",
+    "attached": "vinga.export.attached",
+    "unfiled": "vinga.export.unfiled",
+    "failed": "vinga.export.failed",
+    "skipped": "vinga.export.skipped",
 }
 
 # How many sessions may have a `capture_started` waiting for their
@@ -2092,7 +2104,11 @@ class Telemetry:
         makes a backend RENDER it is a reference token placed in a
         trace's or an observation's own field, which #67's M1 walkthrough
         established and M3's confirmed. So this writes one span in that
-        trace carrying the tokens, as a child of the session span.
+        trace carrying the tokens, as a child of the span the context
+        names: the session span for a session's pin, and the turn span,
+        in the turn's own trace, for a turn's (#496). The span is named
+        `capture` either way, which is what keeps it off the
+        Collector's Jaeger branch.
 
         A span rather than a request, and that is forced rather than
         chosen: the backend's ingestion route refuses a trace upsert
@@ -2452,11 +2468,11 @@ class Telemetry:
         """One server-scoped event, folded where it belongs.
 
         Only the events that name a session have a destination in a
-        trace, and seven do. `capture_started` arrives BEFORE its
+        trace, and eight do. `capture_started` arrives BEFORE its
         session's span exists, because a capture opens during the
         handshake and the handshake is ahead of `session_open`, so one
         that finds no span is held rather than dropped: the ordering is
-        the ordinary case rather than a race. The six export outcomes
+        the ordinary case rather than a race. The seven export outcomes
         may arrive AFTER the span has ended, because their work finishes
         independently of the event loop, so those find the retention
         instead.
