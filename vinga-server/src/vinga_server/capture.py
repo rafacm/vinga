@@ -30,8 +30,9 @@ tests be written against reality. Three files per session:
   because a capture outlives the code that made it.
 
 And beside them, one directory of per-turn clips (#496),
-`<session>.turns/`, holding two mono 16 kHz files for every turn the
-session started:
+`<session>.turns/`, holding mono 16 kHz clips for every turn the
+session started: a heard clip, and, when reply audio was paced, a reply
+clip.
 
 - `<utterance>.heard.wav`, the exact bytes the turn's ASR was handed,
   written in one piece when the turn starts. Not a cut of channel 0:
@@ -522,7 +523,7 @@ class SessionCapture:
 
     def _turn_entries(self) -> list[dict[str, Any]]:
         """The manifest's `capture.turns`: one entry per turn in start
-        order, its two clips named inside `<session>.turns/`, and the
+        order, its clips named inside `<session>.turns/`, and the
         reply clip's span on the WAV's `t_ms` timeline, from its first
         frame to just past its last, so cutting channel 1 at those two
         offsets reproduces it. A turn that spoke nothing has nulls."""

@@ -137,9 +137,10 @@ cost and per-user attribution are not among them and still await users.
 
 **Carries.** Raw audio plus the decision track, three files per session
 sharing one timeline, and beside them a `<session>.turns/` directory
-with two mono clips per turn: `<utterance>.heard.wav`, the exact bytes
-the turn's ASR was handed, and `<utterance>.reply.wav`, channel 1 of the
-WAV over the stretch that turn's reply was paced out. The manifest lists
+with mono clips per turn: a heard clip, `<utterance>.heard.wav`, the
+exact bytes the turn's ASR was handed, and, when reply audio was paced,
+a reply clip, `<utterance>.reply.wav`, channel 1 of the WAV over the
+stretch that turn's reply was paced out. The manifest lists
 the turns in start order, keyed by the utterance id `turn_started`
 carries, with each reply clip's span as `reply_from_ms` and
 `reply_to_ms` on the WAV's `t_ms` timeline, so the cut can be checked

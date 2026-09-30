@@ -116,8 +116,9 @@ clips cut for the analyses that need a turn's audio on its own:
   makes a recording comparable months later, because it answers
   "what exactly produced this" without asking anyone. At close it
   also lists the session's turns.
-- **`<session>.turns/`**: two mono 16 kHz clips per turn, named by
-  the utterance id its `turn_started` event carries.
+- **`<session>.turns/`**: mono 16 kHz clips per turn, named by the
+  utterance id its `turn_started` event carries: a heard clip, and,
+  when reply audio was paced, a reply clip.
   `<utterance>.heard.wav` is the exact audio the turn's ASR was
   handed, which is what a word error rate has to be measured on: not
   a slice of channel 0, which holds the frames the guards dropped and

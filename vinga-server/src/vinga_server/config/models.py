@@ -498,11 +498,12 @@ class CaptureConfig(BaseModel):
             "decision track whose offsets index into it, and a JSON manifest of "
             "what the capture was made against), a warning says so at startup, and "
             "each recorded session names its file. Beside them, a "
-            "`<session>.turns/` directory keeps two mono 16 kHz clips for every "
-            "turn the session started: `<utterance>.heard.wav`, the exact audio "
-            "the turn's speech recognition was handed, and `<utterance>.reply.wav`, "
-            "channel 1 of the WAV over the stretch that turn's reply was paced "
-            "out, which the manifest lists with its offsets on the WAV's timeline."
+            "`<session>.turns/` directory keeps mono 16 kHz clips for every turn "
+            "the session started: a heard clip, `<utterance>.heard.wav`, the exact "
+            "audio the turn's speech recognition was handed, and, when reply audio "
+            "was paced, a reply clip, `<utterance>.reply.wav`, channel 1 of the WAV "
+            "over the stretch that turn's reply was paced out, which the manifest "
+            "lists with its offsets on the WAV's timeline."
         ),
     )
 
