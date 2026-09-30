@@ -167,7 +167,8 @@ The budget and the prune follow the files:
 
 The manifest lists the clips at close, under `capture.turns`: one
 entry per turn in start order, `{"utterance": id, "heard": name,
-"reply": name or null}`. The manifest written at open says nothing
+"reply": name or null, "reply_from_ms": offset or null, "reply_to_ms":
+offset or null}`, the two offsets on the WAV's `t_ms` timeline. The manifest written at open says nothing
 about turns, as it says nothing about duration; a pod stopped
 mid-session leaves clips on disk that the manifest does not list, and
 `complete: false` already tells the analysis side to trust the files
@@ -194,6 +195,39 @@ over the manifest.
   clip. Since #517's invariant is pinned
   (`test_a_reply_finishes_before_the_turn_that_interrupted_it_starts`),
   a reply's last packet goes out before the next turn begins.
+- **The span is recorded.** Each manifest entry carries the reply
+  clip's first and last frame as `reply_from_ms` and `reply_to_ms` on
+  the WAV's own timeline (the `t_ms` scale the decision track uses), so
+  the cut is checkable against the WAV by anyone holding the three
+  files, without trusting the clip.
+
+**Why not cut at close, as the 2026-09-30 decision comment said.** That
+comment described the reply clip as cut from the finished WAV at the
+turn's `t_ms` boundaries. This plan keeps the artifact (channel 1,
+16 kHz, as paced out, per turn) and changes how and where the cut is
+made, for two reasons, and the deviation is recorded here and in the
+implementation doc:
+
+- **Attribution.** `turn_started` is stamped with `utterance.ended_at`,
+  the instant the user stopped speaking, which on a barge-in is
+  earlier than the moment the interrupted reply stopped being paced.
+  A cut between consecutive `turn_started` stamps would file the
+  interrupted reply's last frames under the interrupting turn. The
+  window opens where the turn's reply can first be paced, so every
+  frame is filed under the reply that sent it.
+- **Loop time.** A cut at close reads the reply spans back out of the
+  WAV on the session loop, up to the whole reply duration of a
+  fifteen-minute session, while other sessions share that loop. Written
+  as it goes, the cut costs the writes the channel already makes.
+
+The M2 test does not take the span from the implementation (Sol's
+point): it paces reply audio for known turns at known frames through
+the session, derives each turn's expected span from what it paced and
+when it started each turn, and asserts the clip equals channel 1 of the
+finished WAV over that independently derived span, and the manifest's
+`reply_from_ms` and `reply_to_ms` equal it. A confirmed barge-in case
+paces the interrupted reply up to the cancel and asserts those frames
+are in the interrupted turn's clip and not the interrupting one's.
 
 **M2 owes an inventory before relying on the window rule**: every
 caller of `DeviceOutput.send_audio` (at `5493e335`:
@@ -346,8 +380,11 @@ and `test_telemetry_spans.py` (spans, span events, the
   bytes the gate's confirmation was handed, and there is one clip for
   that turn. A gate-rejected case: no clip.
 - **Byte identity, reply**: the `.reply.wav` data equals channel 1 of
-  the finished WAV over the clip's span, including a gap padded with
-  silence and a barge-in truncation.
+  the finished WAV over a span the test derives from what it paced
+  (not from the clip or the manifest), including a gap padded with
+  silence, a barge-in truncation, and the interrupted reply's last
+  frames filed under the interrupted turn; the manifest's
+  `reply_from_ms` and `reply_to_ms` equal the derived span.
 - **Window**: reply audio before any turn belongs to no clip; the
   window closes at the next turn, at the limit and at close.
 - **Directory and budget**: a pruned capture takes its `.turns`
@@ -508,6 +545,8 @@ Reviewed 2026-09-30 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Evidence:** `.review-context/issue-496-comments.md`, lines 61-66, requires a cut of the finished channel 1 WAV at close using decision-track `t_ms` boundaries. The plan instead creates an incremental second recording with a window opened at the current `utterance_audio` call and closed by later calls (`docs/plans/2026-09-30-turn-audio.md`, lines 185-206). This is observably different because `turn_started` is stamped with `utterance.ended_at` (`runtime/pipeline.py`, lines 2629-2638), while `utterance_audio` would sample the later current clock, especially after barge-in confirmation. The proposed equality test uses “the clip’s span” as defined by the implementation, so it would not catch shifted boundaries.
 
    **The plan should say instead:** Record the exact decision-track boundary events and their frame offsets, then cut channel 1 from the finalized WAV at close as decided. Name the start and end events explicitly and test against their recorded `t_ms`, including a confirmed barge-in whose confirmation delays `start_reply`. Resolve the loop-time cost without replacing the settled artifact definition.
+
+   *Resolution:* Taken in part. The test half is taken whole: M2's reply test now derives each turn's span from what it paced and when it started each turn, never from the clip or the manifest, and adds a confirmed barge-in case asserting the interrupted reply's last frames are filed under the interrupted turn. The manifest now records each reply clip's span as `reply_from_ms` and `reply_to_ms` on the WAV's `t_ms` timeline, so the cut is checkable against the WAV. The mechanism is kept, and the deviation from the decision comment is stated in the plan under "Why not cut at close": cutting between `turn_started` stamps is the attribution error this finding describes (the stamp is `utterance.ended_at`, earlier than the moment an interrupted reply stops being paced), and a close-time cut reads the reply spans back on the shared session loop. The artifact the comment settled (channel 1, as paced out, per turn) is unchanged; how and where the cut is made is the plan's to decide, and the implementation doc and the M2 PR repeat the deviation.
 
 2. **P1: Manifest-controlled clip paths create a local-file exfiltration path**
 
