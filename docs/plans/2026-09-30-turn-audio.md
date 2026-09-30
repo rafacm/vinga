@@ -331,6 +331,15 @@ warning as every other upload failure is:
   message. A job whose clips all attached, and a job that listed
   none, emits no warning.
 
+Both outcomes reach the session's trace, as the pair's outcomes do.
+`capture_clips_incomplete` joins the post-close outcome set
+(`AFTER_THE_CLOSE` and the approved names in `telemetry.py`), and
+`AFTER_THE_CLOSE_ATTRIBUTES` gains `vinga.export.clips`,
+`vinga.export.attached`, `vinga.export.unfiled`,
+`vinga.export.failed` and `vinga.export.skipped`; `reason` is already
+mapped. That table is iterated rather than searched, so a field left
+out of it is not exported at all, which is the gap this closes.
+
 The byte ceiling (`MAX_ATTACHMENT_BYTES`) applies to each clip on its
 own as it does to the pair.
 
@@ -393,9 +402,11 @@ turn) is unchanged.
 - `events/catalog.py` and `events/values.py`: `clips` on
   `CaptureUploaded`, the new `CaptureClipsIncomplete` and
   `ClipFilingFailure` (M3).
-- `telemetry.py`: `_open_turn`'s report (M1). No change for M3: the
-  existing `turn_context`, `trace_of` and `reference_media` are the
-  whole interface M3 needs.
+- `telemetry.py`: `_open_turn`'s report (M1). For M3, the new
+  outcome joins the post-close set and its counts join
+  `AFTER_THE_CLOSE_ATTRIBUTES`; the existing `turn_context`,
+  `trace_of` and `reference_media` are otherwise the whole interface
+  M3 needs.
 
 ## Tests
 
@@ -505,6 +516,13 @@ and `test_telemetry_spans.py` (spans, span events, the
   closed reason.
 - Staging: the one-rename commit carries the clips; a sweep of a
   leftover job removes its clips with it.
+- Trace outcome: through the exporter's post-close path (the shape of
+  the existing `test_telemetry.py` outcome-span cases), a
+  `capture_uploaded` span carries `vinga.export.clips` and a
+  `capture_clips_incomplete` span carries the four counts and
+  `vinga.export.reason`, on the session's retained trace; the event
+  reference is regenerated. Falsified: dropping one key from the table
+  fails its assertion.
 - Falsified: filing a clip under the session's trace fails the first
   case; trying clips after a retry-exhausted failure fails the skip
   case; stopping after a refusal fails the refusal case; referencing
@@ -596,8 +614,9 @@ change only through their generators.
   flag); the live gates recorded.
   Design footprint: deepens `capture_upload.py` (its callers still
   call `stage` and `session_closed` and stop having to know that a job
-  has parts filed on different traces); no new seam, since the
-  telemetry interface it needs exists. Documentation footprint:
+  has parts filed on different traces); widens `telemetry.py`'s
+  post-close outcome table by one event and five attributes; no new
+  seam. Documentation footprint:
   `export_audio`'s prose and generated reference,
   `config.example.yaml`'s telemetry comment, the uploader docstring,
   observability-surfaces' "Exported capture media" and the Audio row.
@@ -670,6 +689,8 @@ Reviewed 2026-09-30 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Evidence:** The plan adds three fields to `CaptureUploaded` but explicitly says telemetry needs no M3 change (`docs/plans/2026-09-30-turn-audio.md`, lines 295-311). Post-close outcome spans copy only fields present in `AFTER_THE_CLOSE_ATTRIBUTES` (`telemetry.py`, lines 1180-1187 and 2474-2522), which currently has no clip counts. Existing tests explicitly assert that the outcome span carries the declaration’s relevant fields (`tests/unit/test_telemetry.py`, lines 878-908). Without a mapping change, a backend reader sees neither unfiled nor failed clip counts.
 
    **The plan should say instead:** Add canonical `vinga.export.*` mappings for all new counts, name `telemetry.py` in M3’s footprint, regenerate the event reference, and test the post-close span attributes as well as the structured log record.
+
+   *Resolution:* Taken. `capture_clips_incomplete` joins the post-close outcome set, and `AFTER_THE_CLOSE_ATTRIBUTES` gains `vinga.export.clips`, `.attached`, `.unfiled`, `.failed` and `.skipped` (`reason` is already mapped). M3's module layout and design footprint now name `telemetry.py`, and its tests assert the outcome spans' attributes on the retained trace beside the structured records, with a mutation dropping a key.
 
 8. **P2: The no-joining dataset claim omits the independent transcript export prerequisite**
 
