@@ -970,7 +970,12 @@ specify it, since this milestone merges after M3.
 | Commit | What it is |
 | --- | --- |
 | `5d580622` Say which loop answers which ASR question | The section, the split row, and one sentence in the working procedure below the table |
-| Record M4 of the turn audio plan | This section and the plan's tick |
+| `330e704a` Record M4 of the turn audio plan | This section and the plan's tick |
+| `aaab4b57` Say a turn row holds its transcript only with text on | PR review round, finding 2 |
+| `15877e66` Say only a retained turn gets its clips on its trace | PR review round, finding 1 |
+| `b5b5adf0` Tell an item's retained sources from the item | PR review round, finding 3 |
+| `873a7b6b` Link M4's tick to its pull request | PR review round, finding 4 |
+| Record PR #573's review round for M4 | The round below |
 
 ### Deviations, resolutions and decisions
 
@@ -1060,3 +1065,68 @@ From the worktree, after the final prose edit:
 
 The unit and integration lanes were not run: nothing they exercise
 changed.
+
+### PR review round, PR #573
+
+Automated external review of this PR's diff (origin/main...330e704a).
+Reviewed 2026-09-30 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 3m03s, at commit 330e704a.
+Verdict as received: **mergeable after the listed fixes**. Four
+findings, all fixed here, each in its own commit.
+
+1. **P2: `export_audio` was documented as filing every turn.** The
+   section said the flag sends each turn's clips to its trace, while
+   M3 files a clip only where the exporter still holds the turn's
+   context and reports the rest unfiled, with no session-trace
+   fallback.
+
+   *Resolution*: fixed in `15877e66`. The sentence is qualified to
+   every turn whose trace the exporter still holds, names the turns it
+   does not (past the retained count, a span never opened, a turn it
+   never saw), says their clips are left unfiled and counted in the
+   `capture_clips_incomplete` warning rather than attached to the
+   session's trace or anywhere else, and that such a turn's item has
+   to come from the host.
+
+2. **P2: the host-side recipe promised a transcript on every turn
+   row.** The stored turn's `heard` is null under text-off, and the
+   store may be off altogether.
+
+   *Resolution*: fixed in `aaab4b57`. The recipe now says the row
+   holds the transcript only with `server.conversations` on and
+   storing text, that otherwise no row holds the production
+   transcript, and that a round meant to feed the dataset either turns
+   text storage on for its duration or has the operator keep the
+   transcript some other way. The backend recipe moved to a paragraph
+   of its own so the two read apart.
+
+3. **P2: the retention paragraph called the retained artifacts
+   "copies of an item".** Neither the capture nor the backend holds
+   the hand-corrected expected text, which the same paragraph named
+   as part of the item.
+
+   *Resolution*: fixed in `b5b5adf0`. The section now separates the
+   item's sources, which vinga retains under retentions the dataset
+   does not control (the heard clip and the manifest in the capture
+   directory, the production transcript in the conversation store
+   where text was stored and in the backend where it was exported),
+   from the curated item, whose corrected text none of them holds. The
+   conversation store's `retention_days` is named beside the other two
+   retentions, since the production transcript is now one of the
+   sources. The operator assembles the item in storage of their own:
+   the sources copied out before their retentions remove them, the
+   corrected text stored beside them.
+
+4. **P2: the completed milestone still said `PR TBD`.**
+
+   *Resolution*: fixed in `873a7b6b`. The tick links PR
+   [#573](https://github.com/rafacm/vinga/pull/573). This section's
+   commit table now carries the hashes of the commits after the push,
+   which were not rebased.
+
+Verified for the round, from the worktree after the last prose edit:
+`python3 scripts/check_doc_links.py .` (`checked 278 files, 0
+failures`), and last the census lane from `vinga-server/`
+(`uv run pytest tests/census -q`): `66 passed in 28.58s` on this
+record with only this figure still to fill in, neither manifest
+needing regeneration, and rerun after the record was committed, as the
+last step, with the same count.
