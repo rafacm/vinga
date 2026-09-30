@@ -496,3 +496,59 @@ change only through their generators.
   of both retentions; the closed list of what the dataset loop may
   never claim; who hand-corrects the expected text). No changelog
   fragment. Closes #496 and #501.
+
+## Plan review round
+
+Reviewed 2026-09-30 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 8m31s, at commit fa46912c, plan blob 543a02f8.
+
+---
+
+1. **P1: The reply clip contradicts the settled close-time slicing decision**
+
+   **Evidence:** `.review-context/issue-496-comments.md`, lines 61-66, requires a cut of the finished channel 1 WAV at close using decision-track `t_ms` boundaries. The plan instead creates an incremental second recording with a window opened at the current `utterance_audio` call and closed by later calls (`docs/plans/2026-09-30-turn-audio.md`, lines 185-206). This is observably different because `turn_started` is stamped with `utterance.ended_at` (`runtime/pipeline.py`, lines 2629-2638), while `utterance_audio` would sample the later current clock, especially after barge-in confirmation. The proposed equality test uses “the clip’s span” as defined by the implementation, so it would not catch shifted boundaries.
+
+   **The plan should say instead:** Record the exact decision-track boundary events and their frame offsets, then cut channel 1 from the finalized WAV at close as decided. Name the start and end events explicitly and test against their recorded `t_ms`, including a confirmed barge-in whose confirmation delays `start_reply`. Resolve the loop-time cost without replacing the settled artifact definition.
+
+2. **P1: Manifest-controlled clip paths create a local-file exfiltration path**
+
+   **Evidence:** The worker is to read clip names from the staged manifest (`docs/plans/2026-09-30-turn-audio.md`, lines 210-216), but the only stated validation occurs when the capture initially writes the utterance (`lines 148-157`). Staging hard-links the manifest and the worker reads it later (`capture_upload.py`, lines 609-627 and 776-779); a hard link is not an immutable snapshot. A modified `heard` or `reply` value such as an absolute path or `../../secret` could therefore make the uploader read and send an unrelated local file. The proposed no-leak test covers only presigned URLs (`plan`, lines 384-390), not hostile staged manifests.
+
+   **The plan should say instead:** Treat every staged manifest field as untrusted. Revalidate the manifest’s closed shape, validate each utterance ID, require filenames to equal the fixed names derived from that ID, reject absolute paths, separators, symlinks, non-regular files, duplicates, and missing files, and never join an unchecked manifest string to a filesystem path. Add traversal, absolute-path, symlink, and credential-sentinel tests proving no unrelated bytes are read or requested and no hostile value is logged.
+
+3. **P1: Clip delivery failures are neither warnings nor actionable**
+
+   **Evidence:** The binding decision requires every upload failure to be a warning (`.review-context/issue-496-comments.md`, line 55). The plan instead records clip failures only as fields on `capture_uploaded` and explicitly adds no failure event (`docs/plans/2026-09-30-turn-audio.md`, lines 237-250). `CaptureUploaded` is currently INFO, while `CaptureUploadFailed` is WARNING (`events/catalog.py`, lines 3724-3762). The assertion that `clips_failed` has a fixed cause is false: existing classification distinguishes `unreachable`, `refused`, `too_large`, `staging_lost`, and `unreferenced` (`capture_upload.py`, lines 916-949; `events/values.py`, lines 1519 onward).
+
+   **The plan should say instead:** Add a warning-level catalog outcome for incomplete clip filing, carrying sanitized counts and a closed failure reason or reason-count mapping. Preserve the existing successful pair outcome, never carry exception or far-side prose, export the warning outcome to the retained session trace, and test each materially different classification.
+
+4. **P1: Staged clips can escape the capture budget after pruning**
+
+   **Evidence:** The settled decision says the capture budget counts the clips (`.review-context/issue-496-comments.md`, lines 46-50). The plan deliberately excludes upload staging because its entries are hard links “already counted” (`docs/plans/2026-09-30-turn-audio.md`, lines 159-164). However, current ordering stages first and then prunes (`capture.py`, lines 597-620). Once prune unlinks the capture’s `.turns` directory, the staging hard links retain the blocks while `_total_mb` can no longer see them. A slow backend can therefore retain up to a queue of enlarged jobs outside `max_total_mb`, particularly dangerous for deployments that already have `export_audio` enabled when upgrading.
+
+   **The plan should say instead:** Count unique file inodes across capture storage and staging so hard links count once while both names exist and remain counted after pruning removes one name, or introduce a separately documented and enforced staging-byte budget. Test a blocked worker, several staged captures, pruning of their source paths, and the resulting actual disk and reported budget totals.
+
+5. **P2: Stop-on-first-failure misreports unattempted clips and can orphan successful media**
+
+   **Evidence:** The plan declares every later clip “failed” without trying it because any clip failure supposedly means the backend disappeared (`docs/plans/2026-09-30-turn-audio.md`, lines 237-242). That premise is false for per-file size refusal, missing staging files, credentials or project refusal, and reference failure. It also does not define what happens when the heard upload succeeds but the reply upload fails before the one per-turn `reference_media` call. The successful heard media can be left uploaded but unreferenced. No M3 test covers a `reply: null` entry or failure of the second clip (`lines 369-394`).
+
+   **The plan should say instead:** Stop later attempts only after a retry-exhausted transport failure if that policy is retained. Distinguish failed from skipped. Accumulate successful tokens per turn and reference the successful subset, including heard-only turns; account an upload as successful only when its reference was enqueued. Add tests for `reply: null`, second-clip failure, non-retryable first-clip refusal, missing staged media, and `reference_media` returning false.
+
+6. **P2: The proposed `turn_not_opened` span event bypasses the declared telemetry vocabulary**
+
+   **Evidence:** The plan deliberately creates a span event that is not a catalog event (`docs/plans/2026-09-30-turn-audio.md`, lines 257-274). The observability contract says every exported span event is derived from the structured-event catalog and telemetry can say nothing undeclared (`docs/architecture/observability-surfaces.md`, lines 200-202 and 266-272). The implementation enforces that rule twice (`telemetry.py`, lines 2413-2435 and 3112-3137). A direct `span.add_event` would bypass both guards. Issue #517 option 1 requires a log line or a span event, not both (`.review-context/issue-517.md`, lines 40-46).
+
+   **The plan should say instead:** Keep the early return and emit only the once-per-session sanitized warning, which fully implements option 1 without introducing undeclared trace vocabulary. Remove the span-event assertions and test the warning, unchanged span count, missing second turn context, and ordinary-order silence.
+
+7. **P2: The new upload counts would disappear from the trace outcome**
+
+   **Evidence:** The plan adds three fields to `CaptureUploaded` but explicitly says telemetry needs no M3 change (`docs/plans/2026-09-30-turn-audio.md`, lines 295-311). Post-close outcome spans copy only fields present in `AFTER_THE_CLOSE_ATTRIBUTES` (`telemetry.py`, lines 1180-1187 and 2474-2522), which currently has no clip counts. Existing tests explicitly assert that the outcome span carries the declaration’s relevant fields (`tests/unit/test_telemetry.py`, lines 878-908). Without a mapping change, a backend reader sees neither unfiled nor failed clip counts.
+
+   **The plan should say instead:** Add canonical `vinga.export.*` mappings for all new counts, name `telemetry.py` in M3’s footprint, regenerate the event reference, and test the post-close span attributes as well as the structured log record.
+
+8. **P2: The no-joining dataset claim omits the independent transcript export prerequisite**
+
+   **Evidence:** The plan says each clip lands beside the production transcript and that the dataset item requires no joining (`docs/plans/2026-09-30-turn-audio.md`, lines 39-47), but its live gate enables only capture and `export_audio` (`lines 396-407`). Transcripts leave only under the independent, default-off `export_transcripts` flag, which additionally requires stored conversation text (`config/models.py`, lines 980-1016; `observability-surfaces.md`, lines 347-390). The export ladder expressly says sibling flags imply nothing about each other (`observability-surfaces.md`, lines 494-516; ADR lines 214-234).
+
+   **The plan should say instead:** State that `export_audio` alone produces audio plus metadata, while the no-joining `(audio, transcript, model)` dataset requires `server.conversations.enabled`, text storage, and `server.telemetry.export_transcripts`. Test audio-only behavior to preserve flag independence, and make the live dataset gate enable both exports and verify the transcript, model attribution, and clips on the same turn root.
+
+**Verdict:** Ready after the P1/P2 amendments.
