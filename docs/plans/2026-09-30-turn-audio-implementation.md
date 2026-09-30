@@ -184,3 +184,63 @@ in the commit table above were rewritten to the rebased ones
 (`b05a4bfd`, `b99ddd17`, `4c7cf701`) in the same change that added this
 round. The verification section keeps `fdaab781`, the tree the lanes
 actually ran on, and says so.
+
+## M2: the capture keeps each turn's two clips
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.286; 2026-09-30.
+
+### The `send_audio` inventory
+
+The plan's window rule (a reply clip's window opens at
+`utterance_audio(U)` and closes at the next one) is only right if no
+audio reaches the device outside a reply that answers an utterance.
+The inventory the plan asks for, taken before anything relied on it,
+at the branch's base (`a72e8f75`), untruncated:
+
+```
+$ git grep -n "send_audio(" -- vinga-server/src
+vinga-server/src/vinga_server/device/boundary.py:103:    `send_audio(pcm)`. The encoder buffers partial frames, so a chunk of
+vinga-server/src/vinga_server/device/boundary.py:212:    async def send_audio(self, batch: PlayableAudio) -> None:
+vinga-server/src/vinga_server/device/session.py:1312:    async def send_audio(self, batch: PlayableAudio) -> None:
+vinga-server/src/vinga_server/runtime/filler_runner.py:312:            await self._output.send_audio(batch)
+vinga-server/src/vinga_server/runtime/filler_runner.py:496:                await self._output.send_audio(batch)
+vinga-server/src/vinga_server/runtime/pipeline.py:1034:        await self._output.send_audio(batch)
+vinga-server/src/vinga_server/simulator/conversation.py:420:        _send_audio(socket, framing.wrap(version, packet))
+vinga-server/src/vinga_server/simulator/conversation.py:599:def _send_audio(socket, frame: bytes) -> None:
+```
+
+Three of those are not callers: `boundary.py:103` is prose,
+`boundary.py:212` the protocol's declaration and `session.py:1312` the
+one implementation, whose `deliver` is the only place a paced packet
+reaches `Recording.reply` and so channel 1. The two `simulator` lines
+are the device simulator's own microphone, the far side of the wire,
+and never reach a server capture. The three callers:
+
+- **`pipeline.py:1034`, `_send_reply_audio`.** Its three callers are
+  `_speak` (one sentence, `:2574`), the round loop's tail flush
+  (`:1894`) and `_speak_text` (a handover's recap, `:2246`), and all
+  three are reached only from `_speak_reply`, whose one caller is the
+  reply body (`_reply`, `:1303`). Every frame it sends is the reply of
+  the `ReplyInFlight` that `start_reply` minted. Cannot pace outside a
+  reply.
+- **`filler_runner.py:312`, `_fire`.** The latency mask's task is
+  created by `arm()`, whose one caller is `_reply` (`pipeline.py`,
+  after the transcript), and it is either stood down or seen through
+  by `settle()` in the reply's own `finally`, or cancelled by
+  `abandon()` in the reply's cancellation arm, which that `finally`
+  then awaits through. So a clip still sounding when the reply's body
+  ends is waited out inside the reply, before `reply_finished`'s
+  successor can begin: a barge-in's `cancel_reply` awaits the task
+  whole. Cannot pace outside a reply.
+- **`filler_runner.py:496`, `speak_fallback`.** Called from two sites,
+  both inside `_reply`: the failure arm's notice (`pipeline.py:1374`)
+  and the nothing-sayable notice (`pipeline.py:1672`, reached from the
+  reply's rounds). Cannot pace outside a reply.
+
+No caller paces audio outside a reply that answers an utterance, so
+the plan's fallback (closing the window from the reply's `finally`
+through a second `SessionEvents` call) is not needed and was not
+built. The one reply body that answers no utterance is a body driven
+without `start_reply` (`tests/support/sessions.py`'s `drive_reply`),
+which only the test suites do; its audio lands in whatever window is
+open, or in none, and no production path reaches it.
