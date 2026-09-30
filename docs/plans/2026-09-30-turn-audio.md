@@ -234,6 +234,24 @@ implementation doc:
   fifteen-minute session, while other sessions share that loop. Written
   as it goes, the cut costs the writes the channel already makes.
 
+**What the settled decision fixed, and what it did not.** The
+artifact is the same either way, byte for byte: the reply clip IS
+channel 1 of the finished WAV between two offsets on its `t_ms`
+timeline, and those offsets are written into the manifest, so anyone
+holding the three files reproduces the clip by cutting the WAV at
+close, which is exactly the check M2's test makes. What differs is only
+when the bytes reach the clip file (as they are placed, rather than read
+back afterwards) and which instants bound it. The bounding instants are
+named here rather than approximated by consecutive `turn_started`
+stamps: the window opens at `utterance_audio(U)`, called from
+`start_reply` in the same breath as `turn_started(U)` is emitted, and
+closes at the next `utterance_audio`, the capture limit, a write
+failure or the close, whichever comes first. The recorded offsets are
+the first and last reply frame placed inside that window. The
+decision comment's wording ("at the turn's boundaries on the decision
+track's `t_ms`") was written before these instants were examined, and
+following it literally reproduces the attribution error below.
+
 The M2 test does not take the span from the implementation (Sol's
 point): it paces reply audio for known turns at known frames through
 the session, derives each turn's expected span from what it paced and
@@ -487,7 +505,12 @@ and `test_telemetry_spans.py` (spans, span events, the
   (not from the clip or the manifest), including a gap padded with
   silence, a barge-in truncation, and the interrupted reply's last
   frames filed under the interrupted turn; the manifest's
-  `reply_from_ms` and `reply_to_ms` equal the derived span.
+  `reply_from_ms` and `reply_to_ms` equal the derived span; and
+  cutting the finished WAV's channel 1 at those two offsets reproduces
+  the clip byte for byte.
+- **Handover**: a reply handed to a second agent mid-turn (two replies,
+  one utterance, the 2:1 case #502 M4a measured) yields one reply clip
+  holding both agents' audio in order, and one manifest entry.
 - **Window**: reply audio before any turn belongs to no clip; the
   window closes at the next turn, at the limit and at close.
 - **Directory and budget**: a pruned capture takes its `.turns`
@@ -789,6 +812,8 @@ Reviewed 2026-09-30 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    **Evidence:** The decision requires a per-turn channel-1 cut “taken at close from the finished WAV” using decision-track `t_ms` boundaries ([issue comment, lines 63-66] (`.review-context/issue-496-comments.md`:63)). The plan explicitly rejects that and writes a second incremental recording based on an `utterance_audio` window ([plan, lines 200-235] (`docs/plans/2026-09-30-turn-audio.md`:200)). The first-review resolution is therefore wrong: it treats a settled “taken at close” mechanism as discretionary. Its amended test proves the incremental window, not the decision-track cut.
 
    **The plan should say instead:** Record the explicit decision-track boundary events and their frame offsets, then cut channel 1 from the finalized WAV at close. Name the opening and closing events, including the event that closes an interrupted reply, rather than approximating them with consecutive `turn_started` stamps. Test the resulting clip and manifest offsets against those recorded `t_ms` boundaries, including confirmed barge-in and handover.
+
+   *Resolution:* Rejected, with the parts that improve the plan taken. The decision the comment settled is the artifact: a per-turn cut of channel 1 of the finished WAV, as paced out, attached to the turn. The plan delivers exactly that artifact: the clip equals channel 1 of the finished WAV between two `t_ms` offsets that the manifest records, and M2's test now also cuts the finished WAV at those offsets and requires the result to equal the clip byte for byte. What the plan changes is when the bytes are written (as placed, not read back on the shared loop at close) and which instants bound the cut, and on the second point the comment's literal wording is the defect: bounding by consecutive `turn_started` stamps files an interrupted reply's last frames under the interrupting turn, because that stamp is `utterance.ended_at`. The reviewer's own "should say instead" asks for explicit boundaries rather than `turn_started` stamps; the plan now names them (opens at `utterance_audio(U)`, emitted from `start_reply` with `turn_started(U)`; closes at the next `utterance_audio`, the limit, a write failure or the close), records them, and tests them with confirmed barge-in and a new handover case. This is the plan deciding a mechanism the comment described before the instants were examined, recorded as a deviation in the implementation doc and to be stated on the M2 pull request and on #496 so the issue's record matches; Rafael may overrule it.
 
 2. **P1: The hostile-staging fix still permits local-file exfiltration**
 
