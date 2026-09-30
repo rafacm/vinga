@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.support.events import both_formats, fields_of
+from tests.support.events import both_formats, every_format, fields_of
 from tests.support.stores import CAPTURE_MANIFEST as MANIFEST
 from tests.support.stores import (
     a_capture_with_a_turn,
@@ -29,6 +29,7 @@ from tests.support.stores import (
     store,
     tone,
 )
+from vinga_server import capture as capture_module
 from vinga_server.capture import (
     CAPTURE_RATE,
     FRAME_BYTES,
@@ -860,6 +861,87 @@ def test_a_capture_stopped_by_a_write_failure_writes_no_more_clips(
     assert manifest["capture"]["complete"] is False
     assert manifest["capture"]["turns"] == []
     assert capture.turns_path.read_bytes() == b"in the way"
+
+
+# Shaped like a credential, and planted on both halves of a failure a
+# capture might be tempted to render: the message, and the class name,
+# which `type` accepts as any identifier at all.
+HEADER_SENTINEL = "sk_live_0REPLYHEADER_SENTINEL"
+HeaderUnwritable: type[OSError] = type(HEADER_SENTINEL, (OSError,), {})
+
+
+def test_a_reply_clip_that_cannot_be_finished_marks_the_capture_incomplete(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Closing a reply window patches the clip's header, and that write
+    can fail like any other. It is a capture write failure: said once,
+    as `capture_failed` naming nothing the failure carried, and the
+    capture closes the rest of the way with a manifest that says it is
+    not complete, rather than listing a clip with a stale header under
+    `complete: true`."""
+    capture, emitter, now = a_turn_recorder(tmp_path)
+    now[0] = 0.5
+    emitter.utterance_audio("u1", tone(20, 7))
+    capture.reply(tone(100, 900), 0.625)
+    header = capture_module._wav_header
+
+    def unwritable(data_bytes: int, channels: int) -> bytes:
+        # White-box, deliberately: a disk that fails on exactly the
+        # header patch is the failure under test, and nothing public
+        # makes one. The session WAV's own header is left alone, so what
+        # fails is the clip's and nothing else.
+        if channels == 1:
+            raise HeaderUnwritable(f"no space left writing {HEADER_SENTINEL}")
+        return header(data_bytes, channels)
+
+    monkeypatch.setattr(capture_module, "_wav_header", unwritable)
+    with caplog.at_level(logging.DEBUG):
+        capture.close()
+
+    failed = [r for r in caplog.records if getattr(r, "event", None) == "capture_failed"]
+    assert len(failed) == 1, "the failure was not said, or said more than once"
+    assert fields_of(failed[0])["reason"] == "write audio"
+    # The nearest class Python itself defines, never the one raised.
+    assert fields_of(failed[0])["failure"] == "OSError"
+    manifest = json.loads(capture.manifest_path.read_text())
+    assert manifest["capture"]["complete"] is False
+    # The close went the rest of the way: the WAV is finished and the
+    # turn is listed, for a reader the manifest has told to trust the
+    # files over it.
+    assert [turn["utterance"] for turn in manifest["capture"]["turns"]] == ["u1"]
+    assert wav_parts(capture.wav_path)[0] == 2
+    rendered = both_formats(caplog) + every_format(caplog)
+    assert HEADER_SENTINEL not in rendered
+    assert "no space left" not in rendered
+    assert "Traceback" not in rendered
+
+
+def test_a_capture_already_stopped_says_its_failure_once(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reply clip whose first write fails stops the capture, and the
+    close that follows cannot finish that clip either. That is one
+    failure of one capture, and it is said once."""
+    capture, emitter, now = a_turn_recorder(tmp_path)
+    now[0] = 0.5
+    emitter.utterance_audio("u1", tone(20, 7))
+    header = capture_module._wav_header
+
+    def unwritable(data_bytes: int, channels: int) -> bytes:
+        # White-box, for the reason the case above gives.
+        if channels == 1:
+            raise HeaderUnwritable(f"no space left writing {HEADER_SENTINEL}")
+        return header(data_bytes, channels)
+
+    monkeypatch.setattr(capture_module, "_wav_header", unwritable)
+    with caplog.at_level(logging.DEBUG):
+        capture.reply(tone(100, 900), 0.625)
+        capture.close()
+
+    failed = [r for r in caplog.records if getattr(r, "event", None) == "capture_failed"]
+    assert len(failed) == 1
+    assert json.loads(capture.manifest_path.read_text())["capture"]["complete"] is False
+    assert HEADER_SENTINEL not in both_formats(caplog) + every_format(caplog)
 
 
 def test_no_capture_attached_keeps_no_clip(tmp_path: Path) -> None:
