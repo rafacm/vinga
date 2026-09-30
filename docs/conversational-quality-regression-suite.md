@@ -265,15 +265,21 @@ calibration, valid for the stack and the room that produced it.
 
 On the host the parts meet by utterance id: the clip is
 `<session>.turns/<utterance>.heard.wav`, the conversation store's turn
-row carries the same id in its `utterance` column with the transcript
-beside it, and the manifest names the model. In the telemetry backend
-they can meet on the turn's own trace with no joining at all, but only
-with two exports on, and neither implies the other.
-`server.telemetry.export_audio` sends each turn's clips to its trace
-and the manifest to the session's trace, audio and metadata only. The
-transcript reaches the turn only with `server.conversations` on and
-storing text and `server.telemetry.export_transcripts` on. What each
-export carries, and on what terms, is in
+row carries the same id in its `utterance` column, and the manifest
+names the model. The row holds the transcript only with
+`server.conversations` on and storing text. With the store off, or
+storing no text, no row holds the production transcript, so a round
+meant to feed the dataset either turns text storage on for its
+duration or has the operator keep the transcript some other way.
+
+In the telemetry backend the parts can meet on the turn's own trace
+with no joining at all, but only with two exports on, and neither
+implies the other. `server.telemetry.export_audio` sends the manifest
+to the session's trace and each turn's clips to its trace, audio and
+metadata only. The transcript reaches the turn only with
+`server.conversations` on and storing text and
+`server.telemetry.export_transcripts` on. What each export carries,
+and on what terms, is in
 [Exported capture media](architecture/observability-surfaces.md#exported-capture-media)
 and
 [Exported transcripts](architecture/observability-surfaces.md#exported-transcripts).
