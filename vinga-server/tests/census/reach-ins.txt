@@ -64,6 +64,7 @@ tests/unit/test_boundary_contract.py  _turns  1
 tests/unit/test_boundary_contract.py  _watchdog  4
 tests/unit/test_capture.py  _events  1
 tests/unit/test_capture.py  _wav  2
+tests/unit/test_capture.py  _wav_header  2
 tests/unit/test_capture_session.py  _handle_audio  1
 tests/unit/test_capture_upload.py  _max_total_mb  1
 tests/unit/test_capture_upload.py  _queue  1
