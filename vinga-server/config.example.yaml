@@ -286,10 +286,11 @@ server:
   # channel 1 the reply, so one sample index is one instant in both), a
   # JSONL decision track whose offsets index into it, and a JSON
   # manifest recording what the capture was made against. Beside them,
-  # `<session>.turns/` keeps two mono clips for every turn: the exact
-  # audio its speech recognition was handed, and channel 1 over the
-  # stretch its reply was paced out, which the manifest lists with its
-  # offsets on the WAV's timeline.
+  # `<session>.turns/` keeps mono clips for every turn: a heard clip,
+  # the exact audio its speech recognition was handed, and, when reply
+  # audio was paced, a reply clip, channel 1 over the stretch its reply
+  # was paced out, which the manifest lists with its offsets on the
+  # WAV's timeline.
   #
   # The flag is the switch, rather than the presence of this section, so
   # that turning capture off again after a recording does not mean
