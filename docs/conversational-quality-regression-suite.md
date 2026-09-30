@@ -209,12 +209,148 @@ utterance speech_ms on fired versus suppressed barge-ins, ASR retry
 outcomes) are exactly the data those constants should be tuned
 against, per stack, not in general.
 
+## Which loop answers which ASR question
+
+Since a capture keeps each turn's heard clip, the exact audio its ASR
+was handed, two loops answer questions about the ASR. The **field
+round** is the one this page is about. The **dataset loop** takes
+heard clips harvested from field rounds, pairs each with a
+hand-corrected expected text, and scores ASR candidates against them
+offline, in minutes. The failure this section exists to prevent is
+not that anyone picks one loop over the other. It is that the cheap
+loop quietly absorbs questions belonging to the expensive one,
+because a scoring run costs minutes and a field round costs a person,
+a room and a day.
+
+### Supplier and consumer, not rivals
+
+The field round is the only source of dataset items: a clip exists
+because a session ran in a real room, on a real device, with a real
+person talking, and nothing else produces one. The dataset is what
+keeps later field rounds short: questions about model quality are
+settled offline before anyone goes into the room, so the room is
+spent on what only the room can test.
+
+### The decision rule, by example
+
+The dataset answers questions about what a model does with the audio
+it was handed, because the heard clip is exactly that audio:
+
+- Which ASR model transcribes this better.
+- Does a prompt hint change the result.
+- Does pinning the household's languages beat auto-detect.
+
+The field round alone answers these, because every one of them
+happens where no turn exists (before a clip's first sample, between
+two clips, or across the exchange as a person lived it), and
+therefore where no dataset item can:
+
+- Did the VAD miss speech.
+- Was an onset clipped.
+- Did barge-in fire when it should have, and only then.
+- Is the assistant's own voice bleeding back into the microphone.
+- Did the endpointer chop a dictation pause into two turns.
+- Does it feel right.
+
+### How an item is born
+
+An item is harvested from a field session: one turn's heard clip, the
+transcript the production ASR made of it, and the model that made it.
+It is attributed to that session's manifest, whose resolved provider
+entries are the stack verbatim, and to the round it came from, so a
+word error rate is never quoted without the room it was measured in.
+In the layers above, the clips are instrument (they are what measures
+the next ASR change) and every number derived from them is
+calibration, valid for the stack and the room that produced it.
+
+On the host the parts meet by utterance id: the clip is
+`<session>.turns/<utterance>.heard.wav`, the conversation store's turn
+row carries the same id in its `utterance` column with the transcript
+beside it, and the manifest names the model. In the telemetry backend
+they can meet on the turn's own trace with no joining at all, but only
+with two exports on, and neither implies the other.
+`server.telemetry.export_audio` sends each turn's clips to its trace
+and the manifest to the session's trace, audio and metadata only. The
+transcript reaches the turn only with `server.conversations` on and
+storing text and `server.telemetry.export_transcripts` on. What each
+export carries, and on what terms, is in
+[Exported capture media](architecture/observability-surfaces.md#exported-capture-media)
+and
+[Exported transcripts](architecture/observability-surfaces.md#exported-transcripts).
+
+An item's audio is what one device, microphone, VAD and endpointer
+produced. It survives an ASR change, which is what it is for. After a
+device change or an input-pipeline redesign it still compares models
+on the audio the old input produced, which is no longer what the ASR
+is handed, so the new input's ASR questions wait for a harvest of its
+own.
+
+A turn whose transcript came back empty keeps its heard clip too,
+because the capture writes it when the turn starts, before the ASR
+runs. So a lost clip can be harvested and corrected like any other,
+and the dataset can say how a candidate does on it. It cannot say how
+many clips the pipeline loses; that is the loss rate, and it is the
+field round's (see the table below).
+
+### Who corrects the expected text
+
+The production transcript is the thing being measured, so it cannot
+also be the answer. A person listens to each heard clip and writes
+down what it holds, best done by whoever ran the round, who knows what
+was said and in which language. The text is what is audible in the
+clip, not what the speaker meant: a word cut off before the clip's
+first sample is a clipped onset, a field finding, and scoring a model
+against it would charge the model for the pipeline.
+
+This is the dataset loop's real human cost, and it is paid once per
+item, when the item is harvested, not once per comparison: every later
+comparison, whichever model or option it tries, scores against the
+same corrected text.
+
+### Where the durable copy lives
+
+Nowhere, until an operator copies it out. Both copies of an item are
+under a retention the dataset does not control. The capture directory
+prunes its oldest sessions whole, clips included, to stay inside
+`server.capture.max_total_mb`. The telemetry backend keeps media for
+as long as its own retention policy says, which is configured there
+and which vinga neither sets nor sees. A curated item (the heard clip,
+its corrected text, and its session's manifest) has to be copied to
+storage the operator keeps before either retention removes it.
+
+### What the dataset loop may never claim
+
+The list is closed: these are the between-turn failure classes and the
+one number counted over them, and a failure class found later that
+happens where no turn exists joins it in the change that finds it.
+
+- **That the VAD caught all the speech.** Speech it missed never
+  became an utterance, so it has no clip.
+- **That onsets are intact.** What was cut off before a clip's first
+  sample is in channel 0 of the session WAV and in no item.
+- **That barge-in fires when it should, and only then.** A candidate
+  the gate rejected never starts a turn and has no clip, and whether
+  one should have fired depends on the reply it spoke over, which a
+  heard clip does not hold.
+- **That the assistant's voice does not bleed into the microphone.**
+  Echo is measured where the assistant plays and the user is silent,
+  which are exactly the stretches no utterance covers.
+- **That the endpointer leaves a dictation pause alone.** A chopped
+  pause yields two turns whose clips each look complete, and the
+  silence it was chopped at lies between them, in neither.
+- **That it feels right.** Feel is timing, voice and interruption as a
+  person in the room lived them, and a clip holds none of it.
+- **That the pipeline loses fewer short clips.** The loss rate is
+  counted over every utterance spoken in the room, including those
+  that never became a turn, and the dataset holds only turns.
+
 ## What a change invalidates
 
 | Change | Re-measure | Still valid |
 | --- | --- | --- |
 | LLM provider or model | First-token distribution, watchdog default | Everything else |
-| ASR provider or model | Prompt behaviour, language pinning, short-clip loss rate | Interaction layer, instrument |
+| ASR provider or model, answered by the dataset loop | Which model transcribes the harvested items better (word error rate), prompt behaviour, language pinning against auto-detect | Interaction layer, instrument, the dataset's items and their corrected text |
+| ASR provider or model, answered by the field round | Short-clip loss rate, which is not word error rate on short clips: loss rate counts clips that produced no usable transcript at all, including speech the VAD never segmented and transcripts the echo retry discarded. The first never has a dataset item and the second has no transcript to score, so word error rate measured on the survivors improves exactly as the pipeline loses more clips | Interaction layer, instrument |
 | TTS provider or voice | Reply pacing feel; echo only if the device lacks AEC | Interaction layer, instrument |
 | Device or firmware | Echo leakage, VAD and barge-in thresholds, listening-mode behaviour | Instrument, most of the interaction layer |
 | Input-pipeline redesign | Endpointing findings, barge-in ladder behaviour | Instrument |
@@ -222,6 +358,8 @@ against, per stack, not in general.
 The working procedure for any such change: re-run the relevant
 subset (the quiet baseline, the acknowledgement test, one noisy
 session; the echo measurement when the device changed) and compare
-against the recorded baseline. The manifests make every past
-recording attributable to its exact stack, so the comparison is
-always available.
+against the recorded baseline. For an ASR change, the dataset
+loop's row runs first, offline, and the field round that follows
+carries only its own row. The manifests make every past recording
+attributable to its exact stack, so the comparison is always
+available.
