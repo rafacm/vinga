@@ -682,7 +682,7 @@ change only through their generators.
 
 ## Milestones
 
-- [x] **[M1: a turn that is not opened is reported](2026-09-30-turn-audio-implementation.md#m1-a-turn-that-is-not-opened-is-reported)** (#517, PR TBD). Off
+- [x] **[M1: a turn that is not opened is reported](2026-09-30-turn-audio-implementation.md#m1-a-turn-that-is-not-opened-is-reported)** (#517, PR [#571](https://github.com/rafacm/vinga/pull/571)). Off
   `feature/turn-audio-plan`, in parallel with M2. Commits: the tests,
   watched failing; the report in `_open_turn`; the changelog
   fragment `changelog.d/517-turn-not-opened.md` under `### Fixed` (a
