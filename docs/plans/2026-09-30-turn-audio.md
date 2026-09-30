@@ -308,13 +308,31 @@ more timeouts on a worker other sessions are queued behind. A refusal
 nothing. The pair failing fails the job exactly as today, and no clip
 is tried.
 
-What is said: `capture_uploaded` gains three counts, `clips`
-(attached and referenced), `clips_unfiled` and `clips_failed`. Counts,
-not reasons, because each count's cause is fixed by its name and the
-job already carries the one session id. No new event and no new
-`CaptureUploadFailure` member. The byte ceiling
-(`MAX_ATTACHMENT_BYTES`) applies to each clip on its own as it does to
-the pair.
+What is said, in two outcomes, so a clip that did not land is a
+warning as every other upload failure is:
+
+- `capture_uploaded` (INFO, unchanged in meaning: the pair landed)
+  gains one count, `clips`, the clips attached and referenced.
+- A new WARNING event, `capture_clips_incomplete`, emitted once per
+  job whenever any listed clip was not attached, carrying the session
+  id and four counts, `attached`, `unfiled` (no retained turn to file
+  it on), `failed` and `skipped` (the resolution of finding 5), plus
+  `reason`: the classification of the first failed clip, from a new
+  closed value type `ClipFilingFailure` whose members are the causes
+  that can actually be decided on the clip path (`unreachable`,
+  `refused`, `too_large`, `staging_lost`, `unreferenced`, and
+  `untrusted_manifest` for a refused clip list), and absent where
+  nothing failed (every missing clip was unfiled or skipped). A
+  separate type rather than new `CaptureUploadFailure` members,
+  because that type is the pair's reason set and `incomplete`,
+  `no_trace` and `dropped` cannot be a clip's cause. Each member is
+  chosen at the site that classifies it (`_classify`, the staging
+  read, the manifest check, the reference answer), never from a
+  message. A job whose clips all attached, and a job that listed
+  none, emits no warning.
+
+The byte ceiling (`MAX_ATTACHMENT_BYTES`) applies to each clip on its
+own as it does to the pair.
 
 A clip upload is still content leaving the host, under the same
 quieting (`_QUIETING`), the same presigned-URL rule (no URL, no body
@@ -372,7 +390,9 @@ turn) is unchanged.
   and prunes `.turns`, and hands the directory to `stage()`.
 - `capture_upload.py`: staging links the clips; the worker files
   them on their turns; `capture_uploaded` fields.
-- `events/catalog.py`: the three counts on `CaptureUploaded` (M3).
+- `events/catalog.py` and `events/values.py`: `clips` on
+  `CaptureUploaded`, the new `CaptureClipsIncomplete` and
+  `ClipFilingFailure` (M3).
 - `telemetry.py`: `_open_turn`'s report (M1). No change for M3: the
   existing `turn_context`, `trace_of` and `reference_media` are the
   whole interface M3 needs.
@@ -443,7 +463,11 @@ and `test_telemetry_spans.py` (spans, span events, the
   trace id (not the session's), and writes one reference span per
   turn as a child of that turn's span, named `capture`, carrying
   `heard_audio` and `reply_audio` tokens. `capture_uploaded` carries
-  `clips=4, clips_unfiled=0, clips_failed=0`.
+  `clips=4` and no `capture_clips_incomplete` is emitted.
+- Each case below asserts the `capture_clips_incomplete` record
+  exactly: WARNING, its four counts, and its `reason` member (or its
+  absence), by typed field, one case per `ClipFilingFailure` member
+  that has a reachable decision site.
 - A turn the exporter never opened (drive #517's sequence): its clips
   count unfiled and nothing is referenced on the session instead.
 - A turn whose reply is `null`: its heard clip alone is uploaded and
@@ -618,6 +642,8 @@ Reviewed 2026-09-30 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Evidence:** The binding decision requires every upload failure to be a warning (`.review-context/issue-496-comments.md`, line 55). The plan instead records clip failures only as fields on `capture_uploaded` and explicitly adds no failure event (`docs/plans/2026-09-30-turn-audio.md`, lines 237-250). `CaptureUploaded` is currently INFO, while `CaptureUploadFailed` is WARNING (`events/catalog.py`, lines 3724-3762). The assertion that `clips_failed` has a fixed cause is false: existing classification distinguishes `unreachable`, `refused`, `too_large`, `staging_lost`, and `unreferenced` (`capture_upload.py`, lines 916-949; `events/values.py`, lines 1519 onward).
 
    **The plan should say instead:** Add a warning-level catalog outcome for incomplete clip filing, carrying sanitized counts and a closed failure reason or reason-count mapping. Preserve the existing successful pair outcome, never carry exception or far-side prose, export the warning outcome to the retained session trace, and test each materially different classification.
+
+   *Resolution:* Taken. A new WARNING event, `capture_clips_incomplete`, fires once per job whenever any listed clip was not attached, with the counts `attached`, `unfiled`, `failed`, `skipped` and a `reason` from a new closed type `ClipFilingFailure` (the first failed clip's class, absent where nothing failed), each member chosen at its classifying site. `capture_uploaded` keeps its meaning and gains only `clips`. The finding's point that one count cannot have one cause is right: `failed` spans five causes, which is why the reason rides beside it. Its export to the session trace is finding 7's resolution. M3's tests assert the record exactly for each member with a reachable decision site.
 
 4. **P1: Staged clips can escape the capture budget after pruning**
 
