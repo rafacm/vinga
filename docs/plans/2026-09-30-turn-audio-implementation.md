@@ -673,7 +673,7 @@ no clip, and the transcripts-only flag case staging nothing.
 - Integration (`tests/integration/test_capture_upload.py`): the whole
   path now expects the pair and the turn's two clips, the clips against
   a trace that is not the session's, the PUT bodies exactly the pair and
-  the clips the manifest lists (the "nothing the manifest does not list"
+  the turn's two clips (the "nothing outside what the capture staged"
   extension beside the decision-track assertion), the turn's `capture`
   span under the turn span with tokens naming the minted ids, and
   `vinga.export.clips == 2`; two new cases hold the flags apart (audio

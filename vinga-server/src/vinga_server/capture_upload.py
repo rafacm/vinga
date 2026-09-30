@@ -52,8 +52,10 @@ leaves as the pair plus up to two clips per turn, and a clip whose turn
 this server holds no trace for is reported rather than filed on the
 session instead. The decision track is a content-bearing artifact
 nothing authorized to leave, so it stays local, and the wire tests
-assert that no request ever carries it, nor any file the manifest does
-not list.
+assert that no request ever carries it, nor any file outside the
+in-process inventory the staging took. The staged manifest is uploaded
+as an artifact and never read to choose a file: a rewritten one changes
+nothing about what is sent.
 
 **What leaves is decided in process, never read back off the disk.** A
 hardlink is not a snapshot, so a staged job is treated as input
