@@ -639,25 +639,38 @@ def test_a_reply_clip_is_channel_one_over_the_span_its_turn_paced(tmp_path: Path
     against a span this test derived from what it paced.
 
     The schedule carries every shape the plan names: audio before any
-    turn (no clip), a gap inside a reply (silence, at the channel's own
-    placement), and a barge-in: `u2`'s utterance ended at 1.0625 s, which
+    turn (no clip), a chunk arriving before the one ahead of it has
+    finished (placed after it, as the channel places it), a gap inside
+    a reply (silence), and a barge-in: `u2`'s utterance ended at 1.0625 s, which
     is the instant its `turn_started` is stamped with, while the reply
     it interrupted was still being paced until 1.185 s. Those last
     frames are `u1`'s, and a cut between consecutive `turn_started`
-    stamps would have handed them to `u2`. The last turn's reply is
-    still open at close, so the close is what finishes its file.
+    stamps would have handed them to `u2`. `u3` begins while `u2`'s
+    last chunk is still playing, so each clip is bounded by where the
+    channel placed the audio, not by when it arrived. The last turn's
+    reply is still open at close, so the close is what finishes its
+    file.
     """
     capture, emitter, now = a_turn_recorder(tmp_path)
     schedule: list[tuple[str, float, object]] = [
         ("reply", 0.125, tone(100, 111)),
         ("turn", 0.5, "u1"),
         ("reply", 0.625, tone(200, 1000)),
+        # Arriving before the chunk ahead of it has finished, the way a
+        # paced batch does when it lands a little early: the channel
+        # places it after that chunk, and so must the clip.
+        ("reply", 0.6875, tone(40, 1003)),
         ("reply", 1.0, tone(100, 1001)),
         ("reply", 1.125, tone(60, 1002)),
         ("turn", 1.25, "u2"),
-        ("reply", 1.375, tone(100, 2000)),
+        # Placed from 1.375 s to 1.775 s, so it is still playing when
+        # `u3` begins at 1.75 s, and `u3`'s first chunk arrives before
+        # it ends: the channel places that chunk after it, and the clip
+        # has to start where the channel put it rather than where the
+        # chunk arrived.
+        ("reply", 1.375, tone(400, 2000)),
         ("turn", 1.75, "u3"),
-        ("reply", 1.875, tone(50, 3000)),
+        ("reply", 1.765625, tone(50, 3000)),
     ]
     play(capture, emitter, now, schedule)
     capture.close()
