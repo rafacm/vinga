@@ -830,3 +830,23 @@ Reviewed 2026-09-30 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    **The plan should say instead:** State that `capture_clips_incomplete` applies only after the existing WAV-and-manifest pair has attached successfully; a pair failure remains fully accounted for by `capture_upload_failed`, with no clip warning. Add an assertion that the pair-failure case emits exactly that existing warning and no incomplete-clips event.
 
    *Resolution:* Taken. `capture_clips_incomplete` is emitted only after the pair attached; a pair failure stays fully accounted for by `capture_upload_failed`, and the M3 test asserts exactly that warning and neither of the other two outcomes.
+
+## Plan review round 3 (re-review of round 2)
+
+Reviewed 2026-09-30 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 2m15s, at commit a72e8f75, plan blob c1af686c.
+
+---
+
+1. **P1: The rejected close-time-cut finding is still binding**
+
+   **Evidence:** The decision comment explicitly requires the reply clip be “taken at close from the finished WAV” at decision-track `t_ms` boundaries ([issue comments, lines 63-66] (`.review-context/issue-496-comments.md`:63)). The plan instead explicitly rejects that mechanism and uses an incremental `utterance_audio` window ([plan, lines 200-253] (`docs/plans/2026-09-30-turn-audio.md`:200)). The stated reason only disproves using consecutive `turn_started` timestamps. It does not disprove a close-time cut using explicit decision-track boundary events, which is precisely what the decision requires. Byte equality with a retrospectively cut WAV proves the proposed artifact, not compliance with the settled mechanism.
+
+   **The plan should say instead:** Record explicit reply-open and reply-close boundary events and frame offsets on the decision track, then cut channel 1 from the finalized WAV at close using those offsets. Test confirmed barge-in and handover against those recorded boundaries. Do not characterize the settled close-time mechanism as discretionary.
+
+2. **P1: The trusted inventory does not protect against same-inode content substitution**
+
+   **Evidence:** The plan models staged jobs as input “somebody else may have changed,” but trusts only `(st_dev, st_ino, st_size)` before reading ([plan, lines 283-314] (`docs/plans/2026-09-30-turn-audio.md`:283)). An attacker can overwrite an existing hardlinked clip or pair file in place with same-length bytes. Its inode and size remain valid, so the worker uploads the substituted content. Descriptor-relative opening prevents path substitution, not concurrent writes through the same inode. This also affects the uploaded manifest because the pair uses the same helper. The proposed altered-staging tests cover replacement, symlinks, and size changes, but not exact-size in-place mutation.
+
+   **The plan should say instead:** The inventory must include a content integrity value obtained from the trusted capture writer, and the worker must verify that value from the opened descriptor before any request is made. Add same-size in-place overwrite tests for a clip and the staged pair, using credential-shaped sentinels and asserting no sentinel reaches any request body, event, or log. If such an integrity guarantee cannot be made without an unacceptable close-path cost, the plan must narrow its hostile-staging claim and threat model rather than claiming this design prevents altered content from leaving.
+
+Verdict: **not ready**.
