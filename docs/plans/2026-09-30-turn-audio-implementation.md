@@ -28,9 +28,9 @@ kept rather than closed, and why the report is a log line said once.
 
 | Commit | What it is |
 | --- | --- |
-| `eac85bc5` Test that a turn the exporter declines is reported | The four M1 cases in `tests/unit/test_telemetry.py`, watched failing |
-| `f33534d2` Report a turn the exporter declines to open | The latch field, the split condition, the warning and the comment in `telemetry.py` |
-| `fdaab781` Add the changelog fragment for #517 | `changelog.d/517-turn-not-opened.md` under `### Fixed` |
+| `b05a4bfd` Test that a turn the exporter declines is reported | The four M1 cases in `tests/unit/test_telemetry.py`, watched failing |
+| `b99ddd17` Report a turn the exporter declines to open | The latch field, the split condition, the warning and the comment in `telemetry.py` |
+| `4c7cf701` Add the changelog fragment for #517 | `changelog.d/517-turn-not-opened.md` under `### Fixed` |
 | Record M1 of the turn audio plan | This file, created with its header, and the plan's tick |
 
 ### The tests, and how they were watched failing
@@ -120,8 +120,11 @@ makes it greppable whole.
 
 ### Verification
 
-All from `vinga-server/`, at `fdaab781` (the code and the fragment;
-this record adds prose only):
+All from `vinga-server/`, at `fdaab781`, the fragment's commit before
+the rebase onto the final plan tip (this record adds prose only). That
+rebase moved only plan-document commits beneath M1, and the same
+commit is `4c7cf701` after it; the lanes were not rerun on the rebased
+tree.
 
 - `uv run ruff check .`: `All checks passed!`
 - `uv run mypy`: `Success: no issues found in 5 source files`
@@ -138,3 +141,46 @@ this record adds prose only):
 
 Not verified locally: the image build and its smoke conversation, which
 only CI runs. M1 changes nothing either of them exercises differently.
+
+### PR review round, PR #571
+
+Automated external review of this PR's diff (feature/turn-audio-plan...22e0b230).
+Reviewed 2026-09-30 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 4m16s, at commit 22e0b230.
+Verdict as received: **mergeable after the listed fixes**. Two
+findings, both fixed here.
+
+1. **P2: the completed milestone still named `PR TBD`.** The plan's M1
+   item was ticked with the pull-request placeholder left in, where
+   `AGENTS.md` asks for the milestone's PR number in the tick.
+
+   *Resolution*: fixed in `ece2a3e9`. The item now links PR
+   [#571](https://github.com/rafacm/vinga/pull/571), in the shape the
+   other ticked plans use.
+
+2. **P2: the new warning contradicted the module's own contract.** The
+   `telemetry.py` module docstring said nothing in the module can state
+   a fact the catalog does not declare, and that a tap's dispatch makes
+   no syscall, while the #517 report is a non-catalog log line written
+   synchronously from inside that dispatch. The reviewer asked for the
+   catalog rule to be scoped to exported spans and span events, and for
+   the once-per-session warning and its ordinary logging path to be
+   acknowledged.
+
+   *Resolution*: fixed in `4f431946`. The catalog rule now covers what
+   the module exports, no span and no span event, and a new paragraph
+   names the warning as the one exception to the reply-path rule: logged
+   through the module's ordinary logger with whatever I/O its handlers
+   do, never on a trace, at most once per session and only on an event
+   order the runtime does not produce. The rest of the no-syscall claim
+   was checked while there: the module's only other logger calls are on
+   the shutdown path, not in the dispatch. Verified with
+   `uv run ruff check .` (`All checks passed!`), the two telemetry test
+   files (`144 passed in 179.65s (0:02:59)`, on a machine shared with a
+   parallel lane, against 15.85s for the same files earlier), the doc
+   link check and, last, the census lane.
+
+The rebase onto the final plan tip moved every M1 commit, so the hashes
+in the commit table above were rewritten to the rebased ones
+(`b05a4bfd`, `b99ddd17`, `4c7cf701`) in the same change that added this
+round. The verification section keeps `fdaab781`, the tree the lanes
+actually ran on, and says so.
