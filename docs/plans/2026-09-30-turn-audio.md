@@ -328,7 +328,7 @@ warning as every other upload failure is:
 - `capture_uploaded` (INFO, unchanged in meaning: the pair landed)
   gains one count, `clips`, the clips attached and referenced.
 - A new WARNING event, `capture_clips_incomplete`, emitted once per
-  job whenever any listed clip was not attached, carrying the session
+  job whenever the pair attached and any listed clip was not, carrying the session
   id and four counts, `attached`, `unfiled` (no retained turn to file
   it on), `failed` and `skipped` (the resolution of finding 5), plus
   `reason`: the classification of the first failed clip, from a new
@@ -518,8 +518,10 @@ and `test_telemetry_spans.py` (spans, span events, the
 - A staged clip missing: `staging_lost` for that clip, the rest tried.
 - `reference_media` answering False for a turn: its uploaded clips
   count failed under `unreferenced`, none counts attached.
-- The pair failing: no clip is tried; the existing failure event, and
-  no `capture_uploaded`.
+- The pair failing: no clip is tried; exactly the existing
+  `capture_upload_failed` warning, and neither `capture_uploaded` nor
+  `capture_clips_incomplete`. A job whose pair failed is fully
+  accounted for by the pair's failure, since every clip hangs off it.
 - No-leak: the existing presigned-URL sentinel tests extended to a
   clip upload (a planted credential-shaped query string on the
   presigned URL never reaches a log record, an event field, or either
@@ -769,3 +771,5 @@ Reviewed 2026-09-30 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    **Evidence:** The new warning is specified for every job with any listed clip not attached ([plan, lines 325-346] (`docs/plans/2026-09-30-turn-audio.md`:325)), but a pair failure is specified to try no clips ([lines 313-323] (`docs/plans/2026-09-30-turn-audio.md`:313)). The M3 test then expects only the existing pair failure and no successful outcome ([lines 521-522] (`docs/plans/2026-09-30-turn-audio.md`:521)). There is no defined count or lawful `ClipFilingFailure` reason for clips never attempted because the pair failed, especially `no_trace`, `incomplete`, or `dropped`, which the plan explicitly excludes from that type.
 
    **The plan should say instead:** State that `capture_clips_incomplete` applies only after the existing WAV-and-manifest pair has attached successfully; a pair failure remains fully accounted for by `capture_upload_failed`, with no clip warning. Add an assertion that the pair-failure case emits exactly that existing warning and no incomplete-clips event.
+
+   *Resolution:* Taken. `capture_clips_incomplete` is emitted only after the pair attached; a pair failure stays fully accounted for by `capture_upload_failed`, and the M3 test asserts exactly that warning and neither of the other two outcomes.
