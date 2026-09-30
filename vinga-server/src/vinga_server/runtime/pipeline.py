@@ -2636,6 +2636,13 @@ class PipelineRuntime:
             ),
             at=utterance.ended_at,
         )
+        # The audio this turn answers, to the capture as the turn's heard
+        # clip (#496), from here because here is the one place every way
+        # into a turn passes: the reply below hands these bytes to the
+        # ASR, and a confirmed barge-in's transcription it reuses was
+        # made from them. Straight after `turn_started`, which also opens
+        # the turn's reply window: nothing of this reply is paced before.
+        self._events.utterance_audio(reply.utterance, utterance.pcm)
         self._in_flight = reply
         reply.start(self._reply(utterance, reply))
 
