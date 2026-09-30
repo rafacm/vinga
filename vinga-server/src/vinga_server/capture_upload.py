@@ -1,9 +1,11 @@
 """A closed session's recording, put beside the trace it was exported
-under (#67).
+under (#67), and each of its turns' clips beside that turn's own
+trace (#496).
 
 Its callers stop having to know that Langfuse exists, that a media
 upload is three requests, that a hardlink is what keeps a recording
-alive through a prune, or that any of it happens on a thread. The
+alive through a prune, that a job has parts filed on different traces,
+or that any of it happens on a thread. The
 composition asks `build_capture_upload` for one object or for nothing
 and hands it to the capture store; the store calls two methods on it and
 the lifespan closes it. The staging, the bounded backlog, the worker,
@@ -33,17 +35,37 @@ finishes there early, at its duration limit or after a write failure,
 while the conversation carries on. And `finished()` is also where
 pruning starts considering the files, so the one moment the pair is
 guaranteed both final and still on disk is inside that callback. So
-`stage()` runs there and hardlinks the two files aside, and
+`stage()` runs there and hardlinks the files aside, and
 `session_closed()` runs from the device session's own close ordering and
 is what queues the job. An early-finished capture is therefore staged
 the moment its files are final and uploaded only when its session ends,
 and a prune storm in between cannot erase it, because the links are
 already somewhere else.
 
-**Exactly two files.** The WAV and the manifest. The decision track
-beside them is a third content-bearing artifact nothing authorized to
-leave, so it stays local, and the wire tests assert that no request ever
-carries it.
+**The pair, then each turn's clips.** The WAV and the manifest go
+first, against the session's trace, and nothing else is tried unless
+they landed. Then, turn by turn, the clips the capture kept: the heard
+clip, and the reply clip where the turn spoke, each against that turn's
+OWN trace (a turn is a trace of its own, linked to the session) and
+referenced there by one `capture` span per turn. So a session's audio
+leaves as the pair plus up to two clips per turn, and a clip whose turn
+this server holds no trace for is reported rather than filed on the
+session instead. The decision track is a content-bearing artifact
+nothing authorized to leave, so it stays local, and the wire tests
+assert that no request ever carries it, nor any file the manifest does
+not list.
+
+**What leaves is decided in process, never read back off the disk.** A
+hardlink is not a snapshot, so a staged job is treated as input
+somebody else may have changed. The capture hands the staging its own
+list of clips at its close, the staging records every staged file's
+device, inode and size, and the worker reads only those inodes, through
+descriptors opened without following a link and checked against that
+record before a byte is read. No path, link or rename can make it send
+a file other than the capture's own. What it does not guarantee is
+those files' CONTENT: a writer able to overwrite a staged file in place
+is a writer able to overwrite the capture while it records, and nothing
+here claims otherwise.
 
 **The dangerous bytes enter below the catalog**, the same rule
 `telemetry.py` states. The credentials arrive in `LANGFUSE_PUBLIC_KEY`

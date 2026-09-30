@@ -308,18 +308,40 @@ backends. The runnable graph and walkthrough are
 
 `vinga_server/capture_upload.py`.
 
-**Carries.** Content, and the only surface here that sends any off the
-host: one closed session's stereo WAV and its JSON manifest, attached to
-the trace that session was exported under. Exactly those two files. The
-decision track beside them is a third content-bearing artifact and stays
-local, and no transcript, no event payload and no identifier from the
-far side travels either way. What it carries is therefore the capture
-surface above, minus the track, sent to where the exported-traces
-surface already sends metadata.
-Its `capture` reference span is an explicit Langfuse-only OTLP exception. The
-Collector removes it from the Jaeger branch, while the WAV and manifest bytes
-continue to use Langfuse REST and the object-storage URL it returns. Jaeger
-receives neither the reference nor the media.
+**Carries.** Content: one closed session's stereo WAV and its JSON
+manifest, attached to the trace that session was exported under, and
+then every turn's clips from the capture's turns directory, the heard
+clip and, when reply audio was paced, the reply clip, each attached to
+that turn's own trace and referenced there (#496). So a session's audio
+leaves as the pair plus up to two clips per turn rather than once. A
+clip whose turn this server holds no trace for is reported, never filed
+on the session's trace instead. The decision track is a content-bearing
+artifact that stays local, and no transcript, no event payload and no
+identifier from the far side travels either way. What it carries is
+therefore the capture surface above, minus the track, sent to where the
+exported-traces surface already sends metadata.
+
+It carries audio and its metadata only. A turn's trace holds the
+(audio, transcript, model) item a dataset wants, with no joining, only
+when [exported transcripts](#exported-transcripts) are on as well
+(`server.conversations` with text stored, and
+`server.telemetry.export_transcripts`), which is a separate class and a
+separate decision; neither flag implies the other.
+
+What leaves is decided in process: the capture hands the staging its
+own list of clips at its close, the staging records every staged file's
+device, inode and size, and the worker reads only those inodes through
+descriptors opened without following a link and checked against that
+record. That guarantees which files are read, whatever is done to the
+staged names; it does not guarantee their content, which a writer able
+to overwrite the capture's files in place could change, and nothing
+here claims it does.
+
+Its `capture` reference spans, the session's and each turn's, are an
+explicit Langfuse-only OTLP exception. The Collector removes them from
+the Jaeger branch, while the WAV, manifest and clip bytes continue to
+use Langfuse REST and the object-storage URL it returns. Jaeger receives
+neither the references nor the media.
 
 **Serves.** Need 1 (deep diagnosis, off-host).
 
@@ -335,7 +357,7 @@ credentials reach it are `LANGFUSE_HOST`, `LANGFUSE_PUBLIC_KEY` and
 hands to the Langfuse REST client; no vinga configuration key holds one,
 nothing stores one, and nothing this server prints renders one. **The
 bytes do not go to that host.** The media API is asked for an upload URL
-and the two files are PUT to the presigned URL it answers with, so they
+and every file is PUT to the presigned URL it answers with, so they
 land in whatever object storage the backend is configured with, which a
 Langfuse on the operator's own network may perfectly well answer with a
 URL at a vendor. That address is the third destination the telemetry
@@ -345,17 +367,20 @@ principle: it does not exist until the backend names it, one request
 before the bytes go. Erasure on this side is the operator's act on the
 backend; deleting a session under `/api` does not reach it.
 
-**Status.** Landed (#67), and off unless `server.telemetry.export_audio`
-says otherwise, which neither `server.capture` nor
-`server.telemetry.enabled` implies: room audio leaving the pod is its
-own decision. With capture off it is a no-op, under a
-`server.data_boundary` narrower than the section's declared reach it is
-refused, and without the `langfuse` extra the boot is refused. It runs
-on a worker of its own after a session closed, never on the audio path,
-and every failure is a warning event (`capture_uploaded`,
-`capture_upload_failed` with a reason from a closed set), because a
-recording that silently failed to attach would leave a reader with a
-trace, no audio and no way to learn any was meant to be there.
+**Status.** Landed (#67; the turns' clips #496), and off unless
+`server.telemetry.export_audio` says otherwise, which neither
+`server.capture` nor `server.telemetry.enabled` implies: room audio
+leaving the pod is its own decision. With capture off it is a no-op,
+under a `server.data_boundary` narrower than the section's declared
+reach it is refused, and without the `langfuse` extra the boot is
+refused. It runs on a worker of its own after a session closed, never
+on the audio path, and every outcome is an event on the session's
+trace: `capture_uploaded`, with how many clips reached their turns;
+`capture_upload_failed`, a warning with a reason from a closed set; and
+`capture_clips_incomplete`, a warning with the clips attached, unfiled,
+failed and skipped and the first failure's reason. A recording or a
+clip that silently failed to attach would leave a reader with a trace,
+no audio and no way to learn any was meant to be there.
 
 ### Exported transcripts
 
@@ -515,7 +540,7 @@ own terms.
 
 | Class | What leaves | Flag | Today |
 | --- | --- | --- | --- |
-| **Audio** | Recordings, all of them. Today a closed session's stereo WAV and its manifest, from the capture directory; the per-utterance clips a provider heard and the per-turn reply audio are artifacts of this class rather than switches beside it | `server.telemetry.export_audio` | Landed (#67) |
+| **Audio** | Recordings, all of them, from the capture directory: a closed session's stereo WAV and its manifest, and each turn's heard clip (the audio its provider heard) and reply clip (its reply as paced out), which are artifacts of this class rather than switches beside it | `server.telemetry.export_audio` | Landed (#67, clips #496) |
 | **Transcripts** | A live utterance's acknowledged conversation rows, composed onto its original turn root with ordered per-leg attribution | `server.telemetry.export_transcripts` | Landed (#495, topology changed by #523) |
 | **LLM input and output** | The model's assembled request and raw semantic output before speech filtering, including withheld text, tool schemas, arguments, results and choice. Not vendor framing, generation parameters, endpoints, headers or credentials. Its local surface is invocation memory and then the ordinary bounded OTLP queue | `server.telemetry.export_llm_input` | Landed (#502, widened by #523) |
 
