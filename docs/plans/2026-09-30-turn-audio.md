@@ -249,6 +249,23 @@ clips, and the worker reads the list from the staged manifest rather
 than from a directory listing, so what is uploaded is what the capture
 said it wrote.
 
+**The staged manifest is untrusted input.** A hardlink is not a
+snapshot, so what the worker reads is whatever the file holds by then,
+and nothing in it may choose a path. The worker takes from
+`capture.turns` only the utterance ids, each validated by the
+`SAFE_NAME` rule, requires every entry's `heard` and `reply` to equal
+exactly the fixed names derived from its id (`<id>.heard.wav`,
+`<id>.reply.wav`, or `null` for the reply), and refuses the whole
+clip list on any other shape: a missing or non-list `turns`, an
+entry that is not an object, a duplicate id, a name that is not the
+derived one. The file it opens is always `job/turns/<derived name>`,
+built from the validated id and never from a manifest string, opened
+without following a symlink (`os.open(..., O_NOFOLLOW)`, then
+`fstat` requiring a regular file) so a planted link or device reads
+nothing. A refused list or a refused file counts toward the
+incomplete-filing warning (finding 3's resolution) under a closed
+reason, and no refused value is ever rendered.
+
 The worker uploads the pair first, exactly as today. Then, per listed
 turn, in order:
 
@@ -425,6 +442,17 @@ and `test_telemetry_spans.py` (spans, span events, the
 - The wire tests' "no request carries the decision track" assertion
   kept, and extended: no request carries anything the manifest does
   not list.
+- **Hostile staged manifest**: with the job's manifest rewritten after
+  staging, entries naming `../../<file>`, an absolute path, a name
+  that is not the derived one, a duplicate id, a non-object entry, and
+  a `turns` that is not a list; and with a clip replaced by a symlink
+  to a file outside the job, and by a directory. Each case: the
+  planted outside file's bytes (a credential-shaped sentinel) are
+  never read into any request (asserted on the fake media API's
+  received bodies), no request is made for it, the sentinel and the
+  hostile string appear in no log record, event field or either log
+  format, and the outcome is the incomplete-filing warning with its
+  closed reason.
 - Staging: the one-rename commit carries the clips; a sweep of a
   leftover job removes its clips with it.
 - Falsified: filing a clip under the session's trace fails the first
@@ -553,6 +581,8 @@ Reviewed 2026-09-30 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Evidence:** The worker is to read clip names from the staged manifest (`docs/plans/2026-09-30-turn-audio.md`, lines 210-216), but the only stated validation occurs when the capture initially writes the utterance (`lines 148-157`). Staging hard-links the manifest and the worker reads it later (`capture_upload.py`, lines 609-627 and 776-779); a hard link is not an immutable snapshot. A modified `heard` or `reply` value such as an absolute path or `../../secret` could therefore make the uploader read and send an unrelated local file. The proposed no-leak test covers only presigned URLs (`plan`, lines 384-390), not hostile staged manifests.
 
    **The plan should say instead:** Treat every staged manifest field as untrusted. Revalidate the manifest’s closed shape, validate each utterance ID, require filenames to equal the fixed names derived from that ID, reject absolute paths, separators, symlinks, non-regular files, duplicates, and missing files, and never join an unchecked manifest string to a filesystem path. Add traversal, absolute-path, symlink, and credential-sentinel tests proving no unrelated bytes are read or requested and no hostile value is logged.
+
+   *Resolution:* Taken. "How the clips are uploaded" now treats the staged manifest as untrusted: only validated utterance ids are taken from it, names must equal the fixed names derived from the id, the opened path is always built from the validated id inside the job's own `turns/` directory, opened with `O_NOFOLLOW` and required to be a regular file, and any other shape refuses the clip list under a closed reason. M3's tests add the traversal, absolute-path, derived-name, duplicate, shape, symlink and directory cases, each with a planted credential-shaped sentinel asserted absent from every request body, log record, event field and both log formats.
 
 3. **P1: Clip delivery failures are neither warnings nor actionable**
 
