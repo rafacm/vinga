@@ -2314,6 +2314,136 @@ def test_a_reference_written_on_a_turn_lands_in_that_turns_trace() -> None:
     assert written.context.trace_id != context.trace_id
 
 
+# --- a turn the exporter declines to open (#517) ------------------------
+#
+# `_open_turn` keeps its early return when a turn span is already open:
+# the pipeline never produces that order (a reply's `reply_finished` is
+# the first statement of its `finally`, and a barge-in awaits it), so the
+# case is a broken invariant owned by another module. What changed is
+# that it is no longer silent. One warning per session, the first time,
+# because a broken invariant would otherwise say so on every turn of
+# every session, and nothing on the trace, because every span event this
+# exporter writes is derived from the catalog.
+
+NOT_OPENED = "session %s: a turn started while another was open, so its span was not opened"
+OTHER_SESSION = "00112233445566778899aabbccddeeff"
+TELEMETRY_LOGGER = "vinga_server.telemetry"
+
+
+def not_opened(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    """Every record the exporter itself logged about a turn it declined,
+    matched by logger and message template rather than by rendering."""
+    return [
+        record
+        for record in caplog.records
+        if record.name == TELEMETRY_LOGGER and record.msg == NOT_OPENED
+    ]
+
+
+def test_a_turn_started_over_an_open_one_is_reported_and_not_opened(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The behavior is kept whole: still one turn span, nothing added to
+    it, and no context for the utterance whose span was never opened.
+    What is new is the one warning, pinned exactly: its logger, its
+    level, its template and the one argument it carries."""
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry, session=SESSION)
+    open_session(events)
+    clock.tick(1.0)
+    with caplog.at_level(logging.DEBUG):
+        start_turn(events, utterance=AN_UTTERANCE)
+        clock.tick(0.5)
+        start_turn(events, utterance=ANOTHER_UTTERANCE)
+        clock.tick(0.5)
+        finish_reply(events)
+        close_session(events)
+
+    spans = finished(telemetry, memory)
+    turn = named(spans, "turn")
+    assert turn.attributes["vinga.utterance.id"] == AN_UTTERANCE
+    assert turn.events == (), "the report put something on the trace"
+
+    context = telemetry.retained_context(SESSION)
+    assert telemetry.turn_context(context, AN_UTTERANCE) is not None
+    assert telemetry.turn_context(context, ANOTHER_UTTERANCE) is None
+
+    reported = [record for record in caplog.records if record.name == TELEMETRY_LOGGER]
+    assert len(reported) == 1, "expected exactly one record from the exporter"
+    record = reported[0]
+    assert record.levelno == logging.WARNING
+    assert record.msg == NOT_OPENED
+    assert record.args == (SESSION,)
+    assert type(record.args[0]) is str
+
+
+def test_the_report_is_said_once_per_session_however_often_it_fires(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The same broken order three times in one session is one warning:
+    the first line is the one that matters, and a latch that reset when
+    a turn closed would say it again on every turn."""
+    clock = Clock()
+    telemetry, _ = exporting()
+    events = session_events(clock, telemetry, session=SESSION)
+    open_session(events)
+    clock.tick(1.0)
+    with caplog.at_level(logging.DEBUG):
+        for _ in range(3):
+            start_turn(events)
+            clock.tick(0.5)
+            start_turn(events)
+            clock.tick(0.5)
+            finish_reply(events)
+            clock.tick(0.1)
+        close_session(events)
+
+    assert [record.args for record in not_opened(caplog)] == [(SESSION,)]
+
+
+def test_each_session_gets_its_own_report(caplog: pytest.LogCaptureFixture) -> None:
+    """The latch goes with the session: a second session breaking the
+    same order is its own first time, under one exporter."""
+    clock = Clock()
+    telemetry, _ = exporting()
+    with caplog.at_level(logging.DEBUG):
+        for session in (SESSION, OTHER_SESSION):
+            events = session_events(clock, telemetry, session=session)
+            open_session(events)
+            clock.tick(1.0)
+            start_turn(events)
+            clock.tick(0.5)
+            start_turn(events)
+            clock.tick(0.5)
+            finish_reply(events)
+            close_session(events)
+
+    records = not_opened(caplog)
+    assert [record.args for record in records] == [(SESSION,), (OTHER_SESSION,)]
+    assert all(record.levelno == logging.WARNING for record in records)
+
+
+def test_turns_in_the_ordinary_order_report_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`turn_started`, `reply_finished`, `turn_started`: the order the
+    pipeline produces, which is two turns and not a word from the
+    exporter."""
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry, session=SESSION)
+    open_session(events)
+    clock.tick(1.0)
+    with caplog.at_level(logging.DEBUG):
+        a_turn_under(events, clock, AN_UTTERANCE)
+        a_turn_under(events, clock, ANOTHER_UTTERANCE)
+        close_session(events)
+
+    assert len([span for span in finished(telemetry, memory) if span.name == "turn"]) == 2
+    assert [record for record in caplog.records if record.name == TELEMETRY_LOGGER] == []
+
+
 # --- the two sides holding one value -----------------------------------
 
 
