@@ -275,11 +275,16 @@ duration or has the operator keep the transcript some other way.
 In the telemetry backend the parts can meet on the turn's own trace
 with no joining at all, but only with two exports on, and neither
 implies the other. `server.telemetry.export_audio` sends the manifest
-to the session's trace and each turn's clips to its trace, audio and
-metadata only. The transcript reaches the turn only with
-`server.conversations` on and storing text and
-`server.telemetry.export_transcripts` on. What each export carries,
-and on what terms, is in
+to the session's trace and each turn's clips to that turn's trace,
+audio and metadata only, for every turn whose trace the exporter still
+holds. A turn it does not hold (one past the number of turns it
+retains, one whose span was never opened, or one it never saw) has its
+clips left unfiled and counted in the `capture_clips_incomplete`
+warning, never attached to the session's trace or anywhere else
+instead, so such a turn's item has to come from the host. The
+transcript reaches the turn only with `server.conversations` on and
+storing text and `server.telemetry.export_transcripts` on. What each
+export carries, and on what terms, is in
 [Exported capture media](architecture/observability-surfaces.md#exported-capture-media)
 and
 [Exported transcripts](architecture/observability-surfaces.md#exported-transcripts).
