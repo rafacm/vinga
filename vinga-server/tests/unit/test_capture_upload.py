@@ -737,7 +737,9 @@ async def test_staged_audio_stays_inside_the_capture_budget(
     reported: list[float] = []
     expected: list[int] = []
     # What each closed capture leaves on the disk once its sources are
-    # gone: the two files its job holds a link to.
+    # gone: the files its job holds a link to, which since #496's M3 are
+    # the pair and the turn's clips, so everything but the decision
+    # track.
     kept_by_staging = 0
     try:
         for index, session in enumerate(sessions):
@@ -746,8 +748,7 @@ async def test_staged_audio_stays_inside_the_capture_budget(
             # newest and so protected from the prune.
             written = sum(path.stat().st_size for path in capture_files(capture))
             expected.append(kept_by_staging + written)
-            kept_by_staging += capture.wav_path.stat().st_size
-            kept_by_staging += capture.manifest_path.stat().st_size
+            kept_by_staging += written - capture.jsonl_path.stat().st_size
             reported.append(float(over_budget()[-1].args[0]))  # type: ignore[index]
             date(capture, older + index)
             store.session_closed(session)

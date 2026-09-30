@@ -73,12 +73,13 @@ import logging
 import os
 import queue
 import shutil
+import stat
 import threading
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import httpx
 
@@ -90,6 +91,7 @@ from vinga_server.events.catalog import CaptureUploaded, CaptureUploadFailed
 from vinga_server.events.values import (
     AttemptedUpload,
     CaptureUploadFailure,
+    ClipFilingFailure,
     Count,
     Real,
     SessionId,
@@ -181,9 +183,18 @@ STAGING_DIRECTORY = "upload-staging"
 AUDIO_NAME = "capture.wav"
 MANIFEST_NAME = "capture.json"
 
+# Where a job keeps its turns' clips (#496), and what each staged clip
+# is called inside it: the utterance id the capture validated, and a
+# fixed suffix per kind. Built here from those two and never from a
+# string read off a disk, which is what keeps a name the worker opens
+# inside the directory it is opened in.
+TURNS_NAME = "turns"
+HEARD_LEAF = ".heard.wav"
+REPLY_LEAF = ".reply.wav"
+
 # And the name a job wears while it is being built, so a directory that
-# appears under the staging root is a job whose two links are both
-# there: the build happens under this and is committed by one rename.
+# appears under the staging root is a job whose links are all there:
+# the build happens under this and is committed by one rename.
 BUILDING_PREFIX = "."
 BUILDING_SUFFIX = ".building"
 
@@ -258,6 +269,10 @@ MEDIA_FIELD = "metadata"
 MEDIA_REFERENCE = "@@@langfuseMedia:type={kind}|id={media}|source=bytes@@@"
 AUDIO_REFERENCE = "capture_audio"
 MANIFEST_REFERENCE = "capture_manifest"
+
+# And a turn's two clips, on that turn's own trace (#496).
+HEARD_REFERENCE = "heard_audio"
+REPLY_REFERENCE = "reply_audio"
 
 # The two content types, spelled as the media API's own closed
 # enumeration spells them.
@@ -499,9 +514,64 @@ def _import_sdk() -> Sdk | None:
     return Sdk(client=LangfuseAPI, error=ApiError, content_type=MediaContentType)
 
 
+class _Identity(NamedTuple):
+    """Which file a staged name was when it was staged: the device and
+    inode it lives on and its size then.
+
+    What the worker requires of a file before it reads a byte of it, so
+    a name that has since come to mean another file (a replacement, a
+    hard link to something else, a file grown or cut short) is refused
+    rather than sent. It is identity and not content: a writer able to
+    change the same inode in place, at the same size, is not caught by
+    this, and nothing here claims otherwise."""
+
+    device: int
+    inode: int
+    size: int
+
+
+@dataclass(frozen=True)
+class _Clip:
+    """One staged clip: which reference it becomes on its turn, the leaf
+    it was staged under inside the job's `turns/`, and the file that
+    leaf was then, or None where the link could not be made, which the
+    worker reports as lost without opening anything."""
+
+    reference: str
+    leaf: str
+    identity: _Identity | None
+
+
+@dataclass(frozen=True)
+class _Turn:
+    """One turn's staged clips, in the order they are uploaded."""
+
+    utterance: str
+    clips: tuple[_Clip, ...]
+
+
+@dataclass(frozen=True)
+class _Staged:
+    """What one staging put where, decided in process and kept here
+    until the job is done: the job's directory, the two files of the
+    pair and every turn's clips, each with its identity.
+
+    The inventory the worker reads by, and the only one. Nothing on disk
+    is consulted for which files to send: not the staged manifest, which
+    is uploaded as an artifact and never parsed for this, and not a
+    listing of the directory. A boot sweeps rather than resumes a
+    previous process's jobs, so an inventory never has to outlive the
+    process that took it."""
+
+    path: Path
+    audio: _Identity
+    manifest: _Identity
+    turns: tuple[_Turn, ...] = ()
+
+
 @dataclass(frozen=True)
 class _Job:
-    """One staged pair, waiting for a worker.
+    """One staged pair and its turns' clips, waiting for a worker.
 
     `context` is the trace this job's session was exported under, taken
     at ADMISSION rather than looked up on the worker. That is the whole
@@ -517,7 +587,7 @@ class _Job:
     """
 
     session: str
-    path: Path
+    staged: _Staged
     context: Any = None
 
 
@@ -578,7 +648,7 @@ class CaptureUpload:
         # and which sessions were not staged because their recording
         # disowns itself. Both written and read on the session loop, the
         # two halves of the hook, so neither needs a lock.
-        self._staged: dict[str, Path] = {}
+        self._staged: dict[str, _Staged] = {}
         self._incomplete: set[str] = set()
         # The worker, started at the first job rather than at build, so
         # a server that records nothing pays for no thread. Under a lock
@@ -615,8 +685,14 @@ class CaptureUpload:
         the pair is guaranteed both final and still on disk: the header
         is patched and the manifest written by the close that leads
         here, and pruning starts considering the files on the line
-        after. Two hardlinks, on the same filesystem by construction, so
-        this costs no copy and no measurable time on the close path.
+        after. Hardlinks, on the same filesystem by construction, so this
+        costs no copy and no measurable time on the close path.
+
+        `turns` is the capture's own list of the clips it kept (#496),
+        and they are linked into the job's `turns/` in the same build,
+        so the one rename commits them with the pair. Every staged file's
+        identity is recorded here, in this process, and that inventory is
+        the only thing the worker ever reads by: see `_Staged`.
 
         A capture the manifest disowns is never staged. A write failure
         leaves `complete: false` and a WAV whose header may never have
@@ -652,18 +728,23 @@ class CaptureUpload:
             _remove(building)
             _remove(final)
             building.mkdir()
-            os.link(audio, building / AUDIO_NAME)
-            os.link(manifest, building / MANIFEST_NAME)
-            # One rename, which is what makes the pair atomic: a
-            # directory that appears under the staging root has both its
-            # links in it, so a sweep and a worker never meet half a
-            # job.
+            staged_audio = _linked(audio, building / AUDIO_NAME)
+            staged_manifest = _linked(manifest, building / MANIFEST_NAME)
+            staged_turns = _linked_turns(building, turns)
+            # One rename, which is what makes the job atomic: a
+            # directory that appears under the staging root has every
+            # link in it, so a sweep and a worker never meet half a job.
             building.rename(final)
         except OSError:
             _remove(building)
             self._failed(session, CaptureUploadFailure.STAGING_LOST)
             return
-        self._staged[session] = final
+        self._staged[session] = _Staged(
+            path=final,
+            audio=staged_audio,
+            manifest=staged_manifest,
+            turns=staged_turns,
+        )
 
     def session_closed(self, session: str) -> None:
         """A session ended. Queue whatever was staged for it.
@@ -682,15 +763,15 @@ class CaptureUpload:
             self._staged.pop(session, None)
             self._failed(session, CaptureUploadFailure.INCOMPLETE)
             return
-        path = self._staged.pop(session, None)
-        if path is None:
+        staged = self._staged.pop(session, None)
+        if staged is None:
             return
         self._start()
         try:
             self._queue.put_nowait(
                 _Job(
                     session=session,
-                    path=path,
+                    staged=staged,
                     # Pinned in the same breath as the admission, which
                     # is what makes the two windows below one answer.
                     context=self._telemetry.retained_context(session),
@@ -700,7 +781,7 @@ class CaptureUpload:
             # The links go in the same breath as the event, because a
             # job nobody will ever run is room audio sitting on a disk
             # for the sweep to find at the next boot.
-            _remove(path)
+            _remove(staged.path)
             self._failed(session, CaptureUploadFailure.DROPPED)
 
     # --- the way out ---------------------------------------------------
@@ -798,7 +879,7 @@ class CaptureUpload:
             reason = CaptureUploadFailure.UNREACHABLE
         if reason is not None:
             self._failed(job.session, reason)
-        _remove(job.path)
+        _remove(job.staged.path)
 
     def _deliver(self, job: _Job, began: float) -> AttemptedUpload | None:
         """The upload itself, or the reason it did not happen."""
@@ -812,9 +893,13 @@ class CaptureUpload:
             # where this server itself has no id to name.
             return CaptureUploadFailure.NO_TRACE
         try:
-            audio = (job.path / AUDIO_NAME).read_bytes()
-            manifest = (job.path / MANIFEST_NAME).read_bytes()
-        except OSError:
+            audio = _read_staged(job.staged.path, AUDIO_NAME, job.staged.audio)
+            manifest = _read_staged(job.staged.path, MANIFEST_NAME, job.staged.manifest)
+        except _Unreadable:
+            # Whatever made the pair unreadable, gone or not the file
+            # that was staged, it is the pair's one reason for it: the
+            # pair's closed set has no second member for this, and an
+            # operator does the same thing about both.
             return CaptureUploadFailure.STAGING_LOST
         if len(audio) + len(manifest) > MAX_ATTACHMENT_BYTES:
             return CaptureUploadFailure.TOO_LARGE
@@ -1015,6 +1100,156 @@ class CaptureUpload:
         the staging root.
         """
         return safe_name(session)
+
+
+def _linked(source: Path, target: Path) -> _Identity:
+    """One hardlink, and the identity of what it now names.
+
+    Taken off the new link rather than the source, with `lstat`, so what
+    is recorded is exactly the file the job holds; and only a regular
+    file is staged, since a link to anything else is not a recording.
+    Raises `OSError` where either is not so, which the caller treats as
+    the staging failing.
+    """
+    os.link(source, target)
+    held = os.lstat(target)
+    if not stat.S_ISREG(held.st_mode):
+        raise OSError
+    return _Identity(held.st_dev, held.st_ino, held.st_size)
+
+
+def _linked_turns(building: Path, turns: Sequence[TurnClips]) -> tuple[_Turn, ...]:
+    """Every turn's clips linked into the job's own `turns/`, each with
+    its identity.
+
+    A clip whose link cannot be made is kept in the inventory with no
+    identity rather than failing the job: the pair is still whole, and
+    the worker reports that clip as lost. The same for an utterance id
+    that is not a name, which the capture already refuses, so nothing
+    real reaches that branch; its leaf is never built from it, so no
+    such id is ever joined to a path.
+    """
+    if not turns:
+        return ()
+    directory = building / TURNS_NAME
+    directory.mkdir()
+    staged: list[_Turn] = []
+    for turn in turns:
+        clips: list[_Clip] = []
+        for reference, suffix, source in (
+            (HEARD_REFERENCE, HEARD_LEAF, turn.heard),
+            (REPLY_REFERENCE, REPLY_LEAF, turn.reply),
+        ):
+            if source is None:
+                continue
+            if not safe_name(turn.utterance):
+                clips.append(_Clip(reference=reference, leaf="", identity=None))
+                continue
+            leaf = f"{turn.utterance}{suffix}"
+            try:
+                identity: _Identity | None = _linked(source, directory / leaf)
+            except OSError:
+                identity = None
+            clips.append(_Clip(reference=reference, leaf=leaf, identity=identity))
+        staged.append(_Turn(utterance=turn.utterance, clips=tuple(clips)))
+    return tuple(staged)
+
+
+class _Unreadable(Exception):
+    """A staged file the worker would not read, and which reason that
+    is: gone, or not the file that was staged."""
+
+    def __init__(self, reason: ClipFilingFailure) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+# How the worker opens what it reads. Directories and leaves alike are
+# opened without following a symlink in their last component, each one
+# relative to the directory before it, so no link anywhere below the job
+# can lead a read elsewhere; and without blocking, so a FIFO planted
+# where a clip was cannot wedge the worker on its open.
+_DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+_LEAF = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+
+
+def _identity_checked(leaf: str) -> None:
+    """The instant between a staged file's identity check and the read
+    that follows it, which does nothing.
+
+    Here for one reason: it is the window a rename would have to land in
+    to make a read by name send a file that was never checked, and a
+    lane can only prove the read is by descriptor by acting inside that
+    window. So a lane replaces this and renames the file from here.
+    """
+
+
+def _read_staged(
+    job: Path, leaf: str, identity: _Identity, *, within: str | None = None
+) -> bytes:
+    """One staged file's bytes, read only if it is still the file the
+    staging recorded, and only through the descriptor that was checked.
+
+    The job's directory is opened, then `within` relative to it where the
+    file is a clip, then the leaf relative to that, each without
+    following a symlink. The opened leaf must be a regular file whose
+    device, inode and size are the inventory's; the bytes are then read
+    through that same descriptor, exactly as many as were staged, so a
+    rename after the check reads the checked file and a file grown since
+    cannot send more than was checked.
+
+    Raises `_Unreadable`: `staging_lost` where something on the way is
+    gone or cannot be read, `staging_altered` where what is there is not
+    what was staged (a link, a directory, a special file, another inode,
+    another size). No path and no value is carried: the reason is chosen
+    here, and the exception it replaces is dropped unrendered.
+    """
+    descriptors: list[int] = []
+    try:
+        try:
+            directory = os.open(job, _DIRECTORY)
+            descriptors.append(directory)
+            if within is not None:
+                directory = os.open(within, _DIRECTORY, dir_fd=directory)
+                descriptors.append(directory)
+            held = os.open(leaf, _LEAF, dir_fd=directory)
+            descriptors.append(held)
+            found = os.fstat(held)
+        except FileNotFoundError:
+            raise _Unreadable(ClipFilingFailure.STAGING_LOST) from None
+        except OSError:
+            # A symlink refused (`ELOOP`), a file where a directory was
+            # (`ENOTDIR`), or anything else that is not the staged job.
+            raise _Unreadable(ClipFilingFailure.STAGING_ALTERED) from None
+        if (
+            not stat.S_ISREG(found.st_mode)
+            or _Identity(found.st_dev, found.st_ino, found.st_size) != identity
+        ):
+            raise _Unreadable(ClipFilingFailure.STAGING_ALTERED)
+        _identity_checked(leaf)
+        return _read_exactly(held, identity.size)
+    finally:
+        for descriptor in reversed(descriptors):
+            with contextlib.suppress(OSError):
+                os.close(descriptor)
+
+
+def _read_exactly(descriptor: int, size: int) -> bytes:
+    """`size` bytes through `descriptor`, or `_Unreadable` where fewer
+    are there: a file cut short after its check is not the one checked.
+    """
+    chunks: list[bytes] = []
+    remaining = size
+    while remaining > 0:
+        try:
+            chunk = os.read(descriptor, min(remaining, 1024 * 1024))
+        except OSError:
+            raise _Unreadable(ClipFilingFailure.STAGING_LOST) from None
+        if not chunk:
+            raise _Unreadable(ClipFilingFailure.STAGING_ALTERED)
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
 
 
 def _complete(manifest: Path) -> bool:
