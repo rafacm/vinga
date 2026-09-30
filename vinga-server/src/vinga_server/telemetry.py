@@ -1728,6 +1728,10 @@ class _SessionTrace:
     prompts: dict[str, dict[str, Any]] = field(default_factory=dict)
     agent: str | None = None
     utterance: str | None = None
+    # Whether this session has already said that a turn started while
+    # another was open (#517). Here rather than on the exporter, so each
+    # session reports its own first time and the latch goes with it.
+    reported_unopened: bool = False
 
 
 @dataclass(frozen=True)
@@ -2649,7 +2653,33 @@ class Telemetry:
 
     def _open_turn(self, session: str, emission: Emission) -> None:
         trace = self._sessions.get(session)
-        if trace is None or trace.turn is not None:
+        if trace is None:
+            return
+        if trace.turn is not None:
+            # A turn starting while another is still open is not given a
+            # span: the open turn is kept, and every stage span the new
+            # one would have parented folds onto it instead. The pipeline
+            # never produces this order (`reply_finished` is the first
+            # statement of a reply's `finally`, and a barge-in awaits
+            # that `finally` before its own turn starts), so reaching
+            # here means that invariant, owned by the runtime, broke.
+            # Closing the open span would need an end time no event
+            # gave, which this exporter declines to invent anywhere.
+            #
+            # So the loss is said rather than silent (#517): one warning
+            # per session, the first time, because a broken invariant
+            # would otherwise fire on every turn of every session and
+            # the first line is the one that matters. A log line and
+            # not a span event, because every span event this exporter
+            # writes is derived from the catalog; and not a catalog
+            # event, because emitting from inside a tap's dispatch
+            # re-enters the dispatch it is running in.
+            if not trace.reported_unopened:
+                trace.reported_unopened = True
+                logger.warning(
+                    "session %s: a turn started while another was open, so its span was not opened",
+                    session,
+                )
             return
         # A playback span the previous turn left open is dropped here.
         # It is held past `reply_finished` on purpose (see there), but a
