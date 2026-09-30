@@ -313,6 +313,22 @@ somebody else may have changed. So:
   (no new pair reason), so the pair gains the same protection rather
   than keeping the path-based read beside a safer one.
 
+**What this defends, and what it does not.** The guarantee is that
+the worker reads only the inodes it staged, through the descriptors it
+checked: no path, link or rename can make it send a file other than
+the capture's own, which is the exfiltration the review rounds
+described. It does not guarantee those inodes' content. A writer able
+to overwrite a staged file in place (same inode, same size) is a
+writer able to overwrite the capture while it is being recorded, since
+the staged names are hardlinks to the capture's own files, and able to
+write whatever else this server's user can write; the bytes it could
+substitute are bytes it already holds, so what leaves is what that
+writer could send by itself. A content hash taken by the capture writer
+would narrow that only for a writer who arrives after close and before
+upload, at the price of reading every staged file back at close on the
+session loop, so it is not taken, and neither the plan nor the
+documentation claims integrity of staged content.
+
 A clip refused by any of these counts failed under a closed
 `ClipFilingFailure` member, `staging_altered`, which replaces the
 round-1 `untrusted_manifest` (the manifest is no longer read for this,
@@ -843,10 +859,14 @@ Reviewed 2026-09-30 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
 
    **The plan should say instead:** Record explicit reply-open and reply-close boundary events and frame offsets on the decision track, then cut channel 1 from the finalized WAV at close using those offsets. Test confirmed barge-in and handover against those recorded boundaries. Do not characterize the settled close-time mechanism as discretionary.
 
+   *Resolution:* Rejected, for the reasons recorded under round 2's finding 1, which this restates without a new argument. The decision comment was written by this plan's author on 2026-09-30 to describe the fold; what Rafael approved there was option (a) and folding #501, and the plan is where the mechanism is decided. The finding's own remedy (explicit reply boundaries, recorded, then a close-time cut) yields the same bytes as the plan's clip, since the plan records the same boundaries in the manifest and its test cuts the finished WAV at them and requires equality; what the remedy adds is a read of the reply spans back off the WAV on the shared session loop at every close. The deviation is stated in the plan, on #496 (comment 5920013083) and will be on the M2 pull request, where Rafael can overrule it.
+
 2. **P1: The trusted inventory does not protect against same-inode content substitution**
 
    **Evidence:** The plan models staged jobs as input “somebody else may have changed,” but trusts only `(st_dev, st_ino, st_size)` before reading ([plan, lines 283-314] (`docs/plans/2026-09-30-turn-audio.md`:283)). An attacker can overwrite an existing hardlinked clip or pair file in place with same-length bytes. Its inode and size remain valid, so the worker uploads the substituted content. Descriptor-relative opening prevents path substitution, not concurrent writes through the same inode. This also affects the uploaded manifest because the pair uses the same helper. The proposed altered-staging tests cover replacement, symlinks, and size changes, but not exact-size in-place mutation.
 
    **The plan should say instead:** The inventory must include a content integrity value obtained from the trusted capture writer, and the worker must verify that value from the opened descriptor before any request is made. Add same-size in-place overwrite tests for a clip and the staged pair, using credential-shaped sentinels and asserting no sentinel reaches any request body, event, or log. If such an integrity guarantee cannot be made without an unacceptable close-path cost, the plan must narrow its hostile-staging claim and threat model rather than claiming this design prevents altered content from leaving.
+
+   *Resolution:* Taken as the finding's own second option: the claim is narrowed rather than a content hash added. The plan now states what the inventory guarantees (the worker reads only the inodes it staged, through checked descriptors, so no path, link or rename sends another file) and what it does not (the content of those inodes). A same-inode, same-size overwrite needs write access to the capture's own files, which is the same access that could rewrite the capture during recording, and it can substitute only bytes that writer already holds. A writer-side hash would cover only the window between close and upload, at the cost of reading every staged file back on the session loop, so it is not taken, and nothing claims staged-content integrity.
 
 Verdict: **not ready**.
