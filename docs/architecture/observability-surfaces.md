@@ -329,13 +329,14 @@ when [exported transcripts](#exported-transcripts) are on as well
 separate decision; neither flag implies the other.
 
 What leaves is decided in process: the capture hands the staging its
-own list of clips at its close, the staging records every staged file's
-device, inode and size, and the worker reads only those inodes through
-descriptors opened without following a link and checked against that
-record. That guarantees which files are read, whatever is done to the
-staged names; it does not guarantee their content, which a writer able
-to overwrite the capture's files in place could change, and nothing
-here claims it does.
+own list of clips at its close, and the staging records every staged
+file's device, inode and size. The worker reads only through a
+descriptor whose device, inode and size match what was staged, opened
+without following links, so no path, link, rename or replaced file on
+the disk steers it to another file. It does not defend against a
+same-size file taking over a staged file's inode after the capture's
+own names are pruned, which only a writer running as this server's
+user can arrange, and it claims nothing about the files' content.
 
 Its `capture` reference spans, the session's and each turn's, are an
 explicit Langfuse-only OTLP exception. The Collector removes them from

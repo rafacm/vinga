@@ -2815,8 +2815,9 @@ async def test_a_rewritten_manifest_chooses_nothing(
     asked = [one.sha256hash for one in recorder.asked]
     assert len(asked) == 6
     assert asked[0] == sha(capture.wav_path.read_bytes())
-    # The second is the rewritten manifest itself, which goes: what the
-    # inventory guarantees is which inodes are read, not their content.
+    # The second is the rewritten manifest itself, which goes: the
+    # inventory checks which file is read, device, inode and size, and
+    # claims nothing about its content.
     assert asked[1] == sha(rewritten)
     assert asked[2:] == [sha(path.read_bytes()) for path in clips]
     assert [u for u, _ in traced.turn_referenced] == [U1, U2]
