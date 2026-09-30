@@ -43,8 +43,13 @@ what was paced out to the speaker while that turn was being answered
 uploaded after the session closes over the path the session WAV
 already takes, and referenced on their own turn's trace, so each
 turn's trace plays what the user said and what the assistant said
-back, beside the transcript and the provider attribution the trace
-already carries. And a turn span the exporter declines to open is
+back, beside the provider attribution the trace already carries.
+`export_audio` alone sends audio and metadata only. The
+(audio, transcript, model) dataset item #496 describes, with no
+joining, also needs the transcript on that turn, which is the separate
+content class: `server.conversations` on with text stored, and
+`server.telemetry.export_transcripts` on. The flags imply nothing about
+each other, and M3's prose says so where the flag is. And a turn span the exporter declines to open is
 reported rather than lost in silence (#517), which is what lets an
 unfiled clip's report say why.
 
@@ -548,11 +553,19 @@ and `test_telemetry_spans.py` (spans, span events, the
   per clip rather than per turn, or counting a clip attached before
   its reference answered, fails the `unreferenced` case.
 
+- Flag independence: with `export_audio` on and `export_transcripts`
+  off, the clips are filed and no transcript observation is exported;
+  with the reverse, transcripts are exported and no clip is staged or
+  requested.
+
 **Live gates** (M3's completion gate, run against the real backend at
 the PR's head, recorded in the implementation doc with session and
-trace ids): a two-turn conversation with capture and `export_audio`
-on; each turn's trace in Langfuse shows a playable heard clip and a
-playable reply clip (read back with the Langfuse MCP); and the
+trace ids): a two-turn conversation with capture, `export_audio`,
+`server.conversations` with text stored, and `export_transcripts` all
+on; each turn's trace in Langfuse shows a playable heard clip, a
+playable reply clip, the turn's transcript and the ASR provider and
+model attribution, on the same turn root (read back with the Langfuse
+MCP); and the
 byte-identity claim, verified once: one persisted heard clip re-sent
 out of band to the same openai model with the same options returns
 the recorded transcript. The rig is the #536 driver (a real server in
@@ -728,5 +741,7 @@ Reviewed 2026-09-30 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Evidence:** The plan says each clip lands beside the production transcript and that the dataset item requires no joining (`docs/plans/2026-09-30-turn-audio.md`, lines 39-47), but its live gate enables only capture and `export_audio` (`lines 396-407`). Transcripts leave only under the independent, default-off `export_transcripts` flag, which additionally requires stored conversation text (`config/models.py`, lines 980-1016; `observability-surfaces.md`, lines 347-390). The export ladder expressly says sibling flags imply nothing about each other (`observability-surfaces.md`, lines 494-516; ADR lines 214-234).
 
    **The plan should say instead:** State that `export_audio` alone produces audio plus metadata, while the no-joining `(audio, transcript, model)` dataset requires `server.conversations.enabled`, text storage, and `server.telemetry.export_transcripts`. Test audio-only behavior to preserve flag independence, and make the live dataset gate enable both exports and verify the transcript, model attribution, and clips on the same turn root.
+
+   *Resolution:* Taken. The goal now says `export_audio` alone sends audio and metadata, and that the no-joining (audio, transcript, model) item also needs `server.conversations` with text stored and `export_transcripts`; M3 states it in the flag's prose. M3 adds a flag-independence test in both directions, and the live gate enables both exports and verifies clips, transcript and model attribution on the same turn root.
 
 **Verdict:** Ready after the P1/P2 amendments.
