@@ -193,6 +193,19 @@ BUILDING_SUFFIX = ".building"
 SAFE_NAME = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
 NAME_LIMIT = 64
 
+
+def safe_name(name: str) -> bool:
+    """Whether an id this server minted may become a file or directory
+    name under the capture directory.
+
+    The one home of the rule, read by the staging here for a session id
+    and by the capture for an utterance id (#496): both are hex, so
+    nothing real is turned away, and what this refuses is a separator
+    or a traversal arriving as an id, which is the one way a name could
+    reach outside the directory it is joined to.
+    """
+    return bool(name) and len(name) <= NAME_LIMIT and set(name) <= SAFE_NAME
+
 # How long any one request may take. The export timeout's own posture
 # (`telemetry.py`), and it is what makes a failure event possible at
 # all: the hostile failure here is an endpoint that accepts the
@@ -974,7 +987,7 @@ class CaptureUpload:
         as a session id, which is the one way a name could reach outside
         the staging root.
         """
-        return bool(session) and len(session) <= NAME_LIMIT and set(session) <= SAFE_NAME
+        return safe_name(session)
 
 
 def _complete(manifest: Path) -> bool:
