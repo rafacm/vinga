@@ -866,3 +866,71 @@ Rebases during the work: onto M2's review tips `63c9c85d` and then
 f3985469` after PR #572 merged (clean; `git log origin/main..HEAD`
 lists only this milestone's commits). The mutation runs were made
 before the last rebase, which moved only M2's commits beneath them.
+
+### PR review round, PR #574
+
+Automated external review of this PR's diff (origin/main...43389ed7).
+Reviewed 2026-09-30 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 8m03s, at commit 43389ed7.
+Verdict as received: **mergeable after the listed fixes**. Three
+findings: the first rejected with its claim made exact, the other two
+fixed.
+
+1. **P1: the trusted inventory is open to inode-reuse substitution.**
+   The inventory keeps `(st_dev, st_ino, st_size)` and no descriptor, so
+   once the prune has removed the capture's names, a staged link could
+   be unlinked, its freed inode reused for same-sized unrelated content
+   at the staged name, and the worker would upload it with every check
+   passing. The reviewer asked for a descriptor held on each staged file
+   as an inode anchor until the job ends, closed on every exit, and an
+   unlink-and-reuse sentinel test for a clip and the pair.
+
+   *Resolution*: Rejected, claim made exact, in `2a7fc2e2`. Two
+   reasons. First, only a process running as this server's own user
+   can unlink a staged link and get a freed inode reused for
+   same-sized content in its place, and such a process can already
+   read every file the uploader can, and the uploader's own
+   `LANGFUSE_*` credentials from the environment, so it gains no
+   exfiltration it lacked; the staging defences are against the
+   uploader being steered by on-disk state (path strings, links,
+   renames, replaced files), not a boundary against the server's own
+   user. Second, anchors cost one descriptor per staged file held for
+   the job's whole life, up to the backlog (`max_sessions`) times two
+   plus two per turn, which puts descriptor exhaustion, and with it the
+   server's own sockets, within reach of a slow backend. What is taken
+   is the finding's point that the claim overstated the mechanism:
+   the uploader's module and `_Identity` docstrings,
+   observability-surfaces' "Exported capture media", the changelog
+   fragment, a test comment and this section's summary now say
+   exactly that the worker reads only through a descriptor whose
+   device, inode and size match what was staged, opened without
+   following links; that it does not defend against a same-size file
+   taking over a staged file's inode after the capture's own names are
+   pruned, which only a writer running as this server's user can
+   arrange; and that it claims nothing about content. No code change.
+
+2. **P2: the completed M3 item still said `PR TBD`.**
+
+   *Resolution*: fixed in this record's commit; the item now links PR
+   [#574](https://github.com/rafacm/vinga/pull/574).
+
+3. **P3: the uploader's documentation said no request carries a file
+   the manifest does not list**, which contradicts the inventory being
+   authoritative (the rewritten-manifest case sends the inventory's
+   clips whatever the manifest says).
+
+   *Resolution*: fixed in `9222af59`. The module docstring and the
+   integration wire test's prose say no file outside what the capture
+   staged, the in-process inventory, is sent; the docstring adds that
+   the staged manifest is an uploaded artifact never read to choose a
+   file. The worker is unchanged and still does not read the manifest.
+
+Verified for the round, on agentpi from `vinga-server/`, at `9222af59`
+plus this record: `uv run ruff check .` (`All checks passed!`),
+`uv run mypy` (`Success: no issues found in 5 source files`), the
+upload files in both lanes (`tests/unit/test_capture_upload.py` and
+`tests/integration/test_capture_upload.py`, `-n auto --dist loadfile`:
+`115 passed in 44.64s`), every generated reference against its
+generator (all six current; the round regenerates nothing),
+`scripts/check_doc_links.py .` and `scripts/fold_changelog.py check .`,
+and last the census lane (`66 passed`). The full unit and integration
+lanes were not rerun for the round, which changed prose only.
