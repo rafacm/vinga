@@ -2678,8 +2678,9 @@ This index is the other half: what exists, and when it fires.
 | `capture_over_budget` | the disk budget is exceeded and nothing more can be pruned |
 | `capture_enabled` | capture is on, said once at startup and at WARNING: recording room audio is not something to discover by accident |
 | `capture_disabled` | capture is configured but off |
-| `capture_uploaded` | a closed session's recording is beside its trace in the telemetry backend, with its sizes and how long it took |
+| `capture_uploaded` | a closed session's recording is beside its trace in the telemetry backend, with its sizes, how long it took and how many turn clips went to their turns |
 | `capture_upload_failed` | a recording is not beside its trace, and why, from a closed set of reasons; also what a restart says about a job it found still staged |
+| `capture_clips_incomplete` | a recording is beside its trace and some of its turns' clips are not on their turns: how many attached, had no turn, failed or were never tried, and the first failure's reason |
 | `transcripts_exported` | acknowledged content was attached to an original turn root and enqueued for ordinary OTLP processing, with how long settlement took |
 | `transcript_export_failed` | turn content was omitted before enqueue, and why, from a closed set of reasons |
 | `llm_input_exported` | a complete input and raw-output pair was attached to its actual generation span and enqueued for ordinary OTLP processing |

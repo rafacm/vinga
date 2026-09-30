@@ -960,7 +960,7 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     "vinga_server.capture_upload:CaptureUpload._deliver #1": (
         (
             "CaptureUploaded",
-            ("audio_bytes", "elapsed_ms", "event", "manifest_bytes", "session"),
+            ("audio_bytes", "clips", "elapsed_ms", "event", "manifest_bytes", "session"),
         ),
     ),
     "vinga_server.capture_upload:CaptureUpload._failed #1": (
