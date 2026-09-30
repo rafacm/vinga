@@ -278,19 +278,35 @@ turn, in order:
 2. `trace_of(turn)` names the turn's own trace, and each clip goes up
    through the existing `_attach` against that trace id, with the same
    retry loop the pair uses.
-3. `reference_media(turn, {"heard_audio": ..., "reply_audio": ...})`
-   writes the reference span as a child of the turn span. The span
+3. `reference_media(turn, {"heard_audio": ..., "reply_audio": ...})`,
+   with the tokens of the uploads that succeeded, writes the reference
+   span as a child of the turn span. The span
    keeps the `capture` name, **deliberately**: the Collector's Jaeger
    branch drops spans by that name (the Langfuse-only exception in
    `observability-surfaces.md`), and a new name would send media
    references down the Jaeger branch.
 
-A clip whose upload fails after its retries counts as **failed**, and
-the remaining clips of that job are counted failed without being
-tried: the pair just succeeded, so a clip failure means the backend
-went away, and trying N more clips against it is N more timeouts on a
-worker other sessions are queued behind. The pair failing fails the
-job exactly as today, and no clip is tried.
+Per turn, both clips are uploaded first and referenced together:
+the tokens of whichever uploads succeeded (the heard clip alone, where
+the reply is `null` or its upload failed) go into one
+`reference_media` call, and a clip counts as **attached** only when
+that call answered True. A False answer counts that turn's uploaded
+clips as failed under `unreferenced`, which is the uploader's existing
+reading of the same outcome for the pair. So no successful upload is
+left counted as attached without its reference, and none is left
+unreferenced while another clip of its turn is.
+
+Each failure is classified by the existing `_classify` and counts as
+**failed**, and the next clip is still tried, with one exception: a
+failure `_classify` calls retryable (`unreachable` over a transport
+error, a 429, a 5xx) that survived all its retries means the backend
+went away, and every clip after it is counted **skipped**, not
+failed, and not tried, because trying N more clips against it is N
+more timeouts on a worker other sessions are queued behind. A refusal
+(`refused`, `too_large`), a missing staged file (`staging_lost`) or an
+`unreferenced` answer is about that clip or that turn and stops
+nothing. The pair failing fails the job exactly as today, and no clip
+is tried.
 
 What is said: `capture_uploaded` gains three counts, `clips`
 (attached and referenced), `clips_unfiled` and `clips_failed`. Counts,
@@ -430,9 +446,19 @@ and `test_telemetry_spans.py` (spans, span events, the
   `clips=4, clips_unfiled=0, clips_failed=0`.
 - A turn the exporter never opened (drive #517's sequence): its clips
   count unfiled and nothing is referenced on the session instead.
-- A clip upload failing after retries: that clip and every later one
-  count failed, the pair's references stand, and no failure event
-  fires for the pair.
+- A turn whose reply is `null`: its heard clip alone is uploaded and
+  referenced, and counts attached.
+- The second clip of a turn failing (a refusal): the heard clip's
+  token is still referenced, it counts attached, the reply counts
+  failed, and the next turn's clips are still tried.
+- A retryable failure surviving its retries on the first clip: that
+  clip counts failed, every later clip counts skipped, none of them
+  is requested, and the pair's references stand.
+- A non-retryable refusal on the first clip: later clips are still
+  tried.
+- A staged clip missing: `staging_lost` for that clip, the rest tried.
+- `reference_media` answering False for a turn: its uploaded clips
+  count failed under `unreferenced`, none counts attached.
 - The pair failing: no clip is tried; the existing failure event, and
   no `capture_uploaded`.
 - No-leak: the existing presigned-URL sentinel tests extended to a
@@ -456,7 +482,10 @@ and `test_telemetry_spans.py` (spans, span events, the
 - Staging: the one-rename commit carries the clips; a sweep of a
   leftover job removes its clips with it.
 - Falsified: filing a clip under the session's trace fails the first
-  case; trying clips after the first failure fails the failure case.
+  case; trying clips after a retry-exhausted failure fails the skip
+  case; stopping after a refusal fails the refusal case; referencing
+  per clip rather than per turn, or counting a clip attached before
+  its reference answered, fails the `unreferenced` case.
 
 **Live gates** (M3's completion gate, run against the real backend at
 the PR's head, recorded in the implementation doc with session and
@@ -601,6 +630,8 @@ Reviewed 2026-09-30 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Evidence:** The plan declares every later clip “failed” without trying it because any clip failure supposedly means the backend disappeared (`docs/plans/2026-09-30-turn-audio.md`, lines 237-242). That premise is false for per-file size refusal, missing staging files, credentials or project refusal, and reference failure. It also does not define what happens when the heard upload succeeds but the reply upload fails before the one per-turn `reference_media` call. The successful heard media can be left uploaded but unreferenced. No M3 test covers a `reply: null` entry or failure of the second clip (`lines 369-394`).
 
    **The plan should say instead:** Stop later attempts only after a retry-exhausted transport failure if that policy is retained. Distinguish failed from skipped. Accumulate successful tokens per turn and reference the successful subset, including heard-only turns; account an upload as successful only when its reference was enqueued. Add tests for `reply: null`, second-clip failure, non-retryable first-clip refusal, missing staged media, and `reference_media` returning false.
+
+   *Resolution:* Taken. Only a retryable failure that survived its retries stops the job's later clips, which then count as skipped rather than failed and are not requested. Refusals, a missing staged file and an `unreferenced` answer stop nothing. Each turn references the subset of its clips whose uploads succeeded in one `reference_media` call, heard-only turns included, and a clip counts attached only when that call answered True; a False answer counts the turn's uploaded clips failed under `unreferenced`. M3 adds the `reply: null`, second-clip failure, non-retryable first-clip, missing staged file and `reference_media` False cases, with the matching mutations.
 
 6. **P2: The proposed `turn_not_opened` span event bypasses the declared telemetry vocabulary**
 
