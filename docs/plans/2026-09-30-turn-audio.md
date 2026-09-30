@@ -158,9 +158,18 @@ directory.
 
 The budget and the prune follow the files:
 
-- `_total_mb` counts the files inside every `*.turns` directory. It
-  deliberately still does not descend into the upload staging
-  directory, whose entries are hardlinks to files already counted.
+- `_total_mb` counts every regular file under the capture directory,
+  recursively and the upload staging directory included, **once per
+  inode** (keyed by `st_dev` and `st_ino`). A staged hardlink and its
+  capture file are one set of blocks and count once while both names
+  exist, and the blocks still count after a prune removes the capture's
+  name while an upload is waiting. Today staged bytes vanish from the
+  budget the moment their source is pruned, which is a gap for the pair
+  already and would grow by every clip; counting inodes closes it for
+  both. What prune may delete is unchanged (it never touches staging),
+  so a backlog of staged jobs over budget is reported by the existing
+  `capture_over_budget` warning rather than hidden, and it drains as
+  the worker finishes jobs.
 - `prune` removes `<stem>.turns/` with the other three files, in the
   same step. "Two thirds of a capture is not a capture" holds for five
   parts.
@@ -456,9 +465,15 @@ and `test_telemetry_spans.py` (spans, span events, the
 - **Window**: reply audio before any turn belongs to no clip; the
   window closes at the next turn, at the limit and at close.
 - **Directory and budget**: a pruned capture takes its `.turns`
-  directory with it; `_total_mb` counts clip bytes and not the
-  staging links; a planted `<x>.wav` inside `.turns` is not treated
-  as a capture.
+  directory with it; a planted `<x>.wav` inside `.turns` is not
+  treated as a capture. `_total_mb` counts clip bytes; with an
+  uploader whose worker is blocked (a double that never returns) and
+  several staged captures, the reported total equals the sum of the
+  distinct inodes' sizes both before and after the prune unlinks the
+  sources, counts a staged link and its source once, and a budget
+  below that total yields `capture_over_budget` rather than silence.
+  Falsified: counting per name double-counts the first measurement;
+  skipping staging undercounts the second.
 - **Refusals**: an utterance id outside the safe alphabet writes
   nothing and says so value-free; a disabled or limit-stopped capture
   writes no further clips.
@@ -551,8 +566,14 @@ endpoint), copied to this session's scratchpad as
 - **Disk.** Clips are mono, so a turn's pair costs at most what its
   span costs in the stereo WAV; typically about half the WAV again
   per session, more where merged utterances repeat absorbed audio.
-  The capture budget governs it: the prune counts clips. The field
-  prose says so.
+  The capture budget governs it: the prune counts clips, and staged
+  bytes stay counted until their upload finishes. The field prose says
+  so.
+- **Prune pressure from staging.** Counting staged inodes means a slow
+  backend's backlog can push the prune to remove older unstaged
+  captures sooner than before. That is the budget being honoured
+  rather than a new cost: those blocks were always on the disk. The
+  changelog fragment says so under `### Fixed`.
 - **Loop time.** The heard write is one file of one utterance, the
   same order as the capture's existing per-quarter-second writes; the
   reply writes ride the existing flush cadence. No read happens at
@@ -596,7 +617,10 @@ change only through their generators.
   call; the capture's clips, window, manifest, budget and prune; the
   docs; the changelog fragment `changelog.d/496-turn-clips.md` under
   `### Changed` (a capture now also keeps each turn's heard and reply
-  audio in `<session>.turns/`, counted against the capture budget).
+  audio in `<session>.turns/`, counted against the capture budget)
+  and `### Fixed` (the capture budget counts audio staged for upload
+  until it has gone, rather than losing sight of it when the capture
+  it was staged from is pruned).
   Design footprint: deepens `capture.py` (its callers stop having to
   know that a turn's audio is a file of its own, where it goes, or how
   the reply is cut); adds one crossing to an existing seam
@@ -672,6 +696,8 @@ Reviewed 2026-09-30 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Evidence:** The settled decision says the capture budget counts the clips (`.review-context/issue-496-comments.md`, lines 46-50). The plan deliberately excludes upload staging because its entries are hard links “already counted” (`docs/plans/2026-09-30-turn-audio.md`, lines 159-164). However, current ordering stages first and then prunes (`capture.py`, lines 597-620). Once prune unlinks the capture’s `.turns` directory, the staging hard links retain the blocks while `_total_mb` can no longer see them. A slow backend can therefore retain up to a queue of enlarged jobs outside `max_total_mb`, particularly dangerous for deployments that already have `export_audio` enabled when upgrading.
 
    **The plan should say instead:** Count unique file inodes across capture storage and staging so hard links count once while both names exist and remain counted after pruning removes one name, or introduce a separately documented and enforced staging-byte budget. Test a blocked worker, several staged captures, pruning of their source paths, and the resulting actual disk and reported budget totals.
+
+   *Resolution:* Taken, as the first of the two options. `_total_mb` counts every regular file under the capture directory once per inode, staging included, so a staged link and its source count once and the blocks stay counted after the source is pruned. The gap exists for the pair today, so M2's changelog fragment carries a `### Fixed` entry for it beside the clips' `### Changed`. The prune still never deletes staging; a backlog over budget is reported by the existing `capture_over_budget` warning. M2 tests a blocked worker with several staged captures, before and after the prune, against the distinct inodes' sizes.
 
 5. **P2: Stop-on-first-failure misreports unattempted clips and can orphan successful media**
 
