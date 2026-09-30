@@ -36,11 +36,11 @@ is cheaper and leaves the loss silent; option 1 is Rafael's call.
 
 ## Goal
 
-A capture keeps, beside a session's three files, two mono clips for
-each turn: the exact audio its ASR was handed (the "heard" clip) and
-what was paced out to the speaker while that turn was being answered
-(the "reply" clip). With `server.telemetry.export_audio` on, both are
-uploaded after the session closes over the path the session WAV
+A capture keeps, beside a session's three files, mono clips for each
+turn: every turn has a heard clip, the exact audio its ASR was handed,
+and a reply clip when reply audio was paced, what was paced out to the
+speaker while that turn was being answered. With
+`server.telemetry.export_audio` on, they are uploaded after the session closes over the path the session WAV
 already takes, and referenced on their own turn's trace, so each
 turn's trace plays what the user said and what the assistant said
 back, beside the provider attribution the trace already carries.
@@ -57,8 +57,8 @@ Four milestones:
 
 - **M1** (#517): the exporter says so when a turn starts while another
   is open. Independent of the rest, runs in parallel with M2.
-- **M2**: the capture writes each turn's two clips, locally. No
-  egress change.
+- **M2**: the capture writes each turn's heard clip, and its reply
+  clip when reply audio was paced, locally. No egress change.
 - **M3**: `export_audio` carries the clips to their turn traces. The
   class widening, with its documentation and changelog announcement,
   and the live gates.
@@ -721,7 +721,8 @@ change only through their generators.
   documentation; the changelog fragment
   `changelog.d/496-turn-clips-export.md` under `### Changed`, worded as
   the class-widening announcement (with `export_audio` on, each turn's
-  two clips now leave too, referenced on the turn's trace; an operator
+  heard clip, and its reply clip when reply audio was paced, now leave
+  too, referenced on the turn's trace; an operator
   who agreed to the pair has not agreed to this and should re-read the
   flag); the live gates recorded.
   Design footprint: deepens `capture_upload.py` (its callers still
