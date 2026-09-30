@@ -320,14 +320,24 @@ same corrected text.
 
 ### Where the durable copy lives
 
-Nowhere, until an operator copies it out. Both copies of an item are
-under a retention the dataset does not control. The capture directory
-prunes its oldest sessions whole, clips included, to stay inside
-`server.capture.max_total_mb`. The telemetry backend keeps media for
-as long as its own retention policy says, which is configured there
-and which vinga neither sets nor sees. A curated item (the heard clip,
-its corrected text, and its session's manifest) has to be copied to
-storage the operator keeps before either retention removes it.
+Nowhere, until an operator makes one. What vinga retains are the
+item's sources, not the item: the heard clip and the session's
+manifest, and the production transcript where text was stored or
+exported. Each sits under a retention the dataset does not control.
+The capture directory prunes its oldest sessions whole, clips and
+manifest included, to stay inside `server.capture.max_total_mb`. The
+conversation store prunes sessions older than
+`server.conversations.retention_days` (90 by default; 0 keeps
+everything). The telemetry backend keeps what was exported for as long
+as its own retention policy says, which is configured there and which
+vinga neither sets nor sees.
+
+The corrected expected text, which is what makes the sources an item,
+is held by none of them: it exists only where the person who wrote it
+put it. So a curated item is assembled in storage the operator keeps:
+the heard clip, the session's manifest and, where a comparison needs
+it, the production transcript, each copied out before its retention
+removes it, with the corrected text stored beside them.
 
 ### What the dataset loop may never claim
 
