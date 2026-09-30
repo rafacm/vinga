@@ -141,7 +141,7 @@ class EventTap(Protocol):
 
 
 class SessionRecording(Protocol):
-    """The two methods a session capture answers, as this module sees
+    """The three methods a session capture answers, as this module sees
     them.
 
     Described here rather than imported from `capture.py`, and the
@@ -160,6 +160,8 @@ class SessionRecording(Protocol):
     def vad(
         self, speech_ms: float, listening: bool, replying: bool, now: float
     ) -> None: ...
+
+    def utterance_audio(self, utterance: str, pcm: bytes, now: float) -> None: ...
 
 
 class LogTap:
@@ -725,6 +727,20 @@ class SessionEvents:
         if self._capture is None:
             return
         self._capture.vad(speech_ms, listening, replying, self._clock())
+
+    def utterance_audio(self, utterance: str, pcm: bytes) -> None:
+        """The audio a turn is answering, for the capture's per-turn
+        clips (#496): the exact bytes its ASR is handed, keyed by the
+        utterance id `turn_started` names. Fed by the runtime from the
+        one place a turn begins.
+
+        Outside the tap contract for a sharper reason than `vad`'s: it
+        is content. No tap is offered it, no log line carries it and it
+        never enters an `Emission`, so the audio reaches the capture and
+        nothing else. A session with no capture pays the `is None`."""
+        if self._capture is None:
+            return
+        self._capture.utterance_audio(utterance, pcm, self._clock())
 
     def dropped(self, reason: str) -> None:
         """One mic frame the session did not use, and why.
