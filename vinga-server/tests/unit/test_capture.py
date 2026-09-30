@@ -863,11 +863,15 @@ def test_a_capture_stopped_by_a_write_failure_writes_no_more_clips(
     assert capture.turns_path.read_bytes() == b"in the way"
 
 
-# Shaped like a credential, and planted on both halves of a failure a
-# capture might be tempted to render: the message, and the class name,
-# which `type` accepts as any identifier at all.
-HEADER_SENTINEL = "sk_live_0REPLYHEADER_SENTINEL"
-HeaderUnwritable: type[OSError] = type(HEADER_SENTINEL, (OSError,), {})
+# Shaped like a credential, and planted in the message of the failure a
+# capture must never render.
+HEADER_SENTINEL = "sk-live-0REPLYHEADER-SENTINEL"
+# And a class name shaped the same way. `type` accepts any identifier as
+# one, and `ClassName.of` renders any identifier it is handed, which is
+# the rule every capture failure follows; whether a rendered class name
+# needs more than that is #565's question, not this milestone's.
+HEADER_CLASS = "sk_live_0REPLYHEADER_CLASS"
+HeaderUnwritable: type[OSError] = type(HEADER_CLASS, (OSError,), {})
 
 
 def test_a_reply_clip_that_cannot_be_finished_marks_the_capture_incomplete(
@@ -875,10 +879,11 @@ def test_a_reply_clip_that_cannot_be_finished_marks_the_capture_incomplete(
 ) -> None:
     """Closing a reply window patches the clip's header, and that write
     can fail like any other. It is a capture write failure: said once,
-    as `capture_failed` naming nothing the failure carried, and the
+    as `capture_failed` with nothing of the failure's message, and the
     capture closes the rest of the way with a manifest that says it is
     not complete, rather than listing a clip with a stale header under
-    `complete: true`."""
+    `complete: true`. What it names is the class, as every capture write
+    failure does, and never the message."""
     capture, emitter, now = a_turn_recorder(tmp_path)
     now[0] = 0.5
     emitter.utterance_audio("u1", tone(20, 7))
@@ -901,8 +906,9 @@ def test_a_reply_clip_that_cannot_be_finished_marks_the_capture_incomplete(
     failed = [r for r in caplog.records if getattr(r, "event", None) == "capture_failed"]
     assert len(failed) == 1, "the failure was not said, or said more than once"
     assert fields_of(failed[0])["reason"] == "write audio"
-    # The nearest class Python itself defines, never the one raised.
-    assert fields_of(failed[0])["failure"] == "OSError"
+    # What `ClassName.of` makes of the raised class: its name, which is
+    # an identifier and so admitted (#565 owns whether it should be).
+    assert fields_of(failed[0])["failure"] == HEADER_CLASS
     manifest = json.loads(capture.manifest_path.read_text())
     assert manifest["capture"]["complete"] is False
     # The close went the rest of the way: the WAV is finished and the
@@ -913,6 +919,8 @@ def test_a_reply_clip_that_cannot_be_finished_marks_the_capture_incomplete(
     rendered = both_formats(caplog) + every_format(caplog)
     assert HEADER_SENTINEL not in rendered
     assert "no space left" not in rendered
+    for record in caplog.records:
+        assert HEADER_SENTINEL not in repr(vars(record))
     assert "Traceback" not in rendered
 
 

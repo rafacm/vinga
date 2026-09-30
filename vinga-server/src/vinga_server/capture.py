@@ -62,7 +62,6 @@ of the project promises. It is off unless a directory is configured, and
 says so on every session it records.
 """
 
-import builtins
 import contextlib
 import json
 import logging
@@ -278,19 +277,6 @@ class _ReplyClip:
             clip.close()
 
 
-def _builtin_class(failure: BaseException) -> ClassName:
-    """The nearest class in a failure's ancestry that is Python's own
-    builtin of that name, which is what a capture says failed.
-
-    Checked by identity against `builtins` rather than by `__module__`,
-    which a class may set to anything. Every exception descends from
-    `BaseException`, so there is always an answer."""
-    for kind in type(failure).__mro__:
-        if getattr(builtins, kind.__name__, None) is kind:
-            return ClassName(kind.__name__)
-    return ClassName(BaseException.__name__)
-
-
 def _offset_ms(frame: int | None) -> float | None:
     """A frame index on the `t_ms` timeline, exactly: a frame is 1/16 ms,
     so the value needs no rounding and `ms * 16` is the frame again."""
@@ -414,18 +400,11 @@ class SessionCapture:
         # worse than rendering it: `Emission.args` is deliberately not
         # copied for a tap, so a consumer was given the live exception,
         # its chain and everything the chain closes over.
-        #
-        # And not even the class that was raised, but the nearest one
-        # Python itself defines (#496's review): `type` accepts any
-        # identifier as a class name, so a raised class's own name is a
-        # string somebody else chose. Read before the thunk, which then
-        # holds a name rather than the exception.
-        failure = _builtin_class(exc)
         events.emit(
             lambda: CaptureFailed(
                 session=SessionId(self._session_id),
                 reason=doing,
-                failure=failure,
+                failure=ClassName.of(exc),
             )
         )
         self._stopped = True
