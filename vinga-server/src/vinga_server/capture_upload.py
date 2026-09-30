@@ -76,10 +76,10 @@ import shutil
 import stat
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, TypeVar
 
 import httpx
 
@@ -87,8 +87,13 @@ from vinga_server.boundary import BoundaryRefusal, Reach, check_feature
 from vinga_server.config import ConfigError
 from vinga_server.config.models import ServerConfig
 from vinga_server.events import ServerEvents
-from vinga_server.events.catalog import CaptureUploaded, CaptureUploadFailed
+from vinga_server.events.catalog import (
+    CaptureClipsIncomplete,
+    CaptureUploaded,
+    CaptureUploadFailed,
+)
 from vinga_server.events.values import (
+    ABSENT,
     AttemptedUpload,
     CaptureUploadFailure,
     ClipFilingFailure,
@@ -591,6 +596,32 @@ class _Job:
     context: Any = None
 
 
+@dataclass
+class _Filed:
+    """What became of one job's clips, counted as the worker goes: the
+    four counts `capture_clips_incomplete` carries, and the reason the
+    first failed clip failed."""
+
+    attached: int = 0
+    unfiled: int = 0
+    failed: int = 0
+    skipped: int = 0
+    reason: ClipFilingFailure | None = None
+
+    def fail(self, reason: ClipFilingFailure, clips: int = 1) -> None:
+        self.failed += clips
+        if self.reason is None:
+            self.reason = reason
+
+    @property
+    def missing(self) -> int:
+        """The clips the capture kept that are not on their turns."""
+        return self.unfiled + self.failed + self.skipped
+
+
+_Sent = TypeVar("_Sent")
+
+
 class _Refused(Exception):
     """A failure there is no point retrying, carrying the reason it will
     be reported as.
@@ -914,6 +945,10 @@ class CaptureUpload:
             # Reported rather than glossed, because a reader who cannot
             # reach the audio is a reader who does not know it is there.
             return CaptureUploadFailure.UNREFERENCED
+        # The pair is beside its trace, and only now do the clips go:
+        # every one of them hangs off it, so a job whose pair failed is
+        # fully accounted for by that failure and no clip is tried.
+        filed = self._file_turns(job)
         elapsed = int((time.monotonic() - began) * 1000)
         events.emit(
             lambda: CaptureUploaded(
@@ -922,10 +957,87 @@ class CaptureUpload:
                 manifest_bytes=Count(len(manifest)),
                 elapsed_ms=Whole(elapsed),
                 megabytes=Real((len(audio) + len(manifest)) / MB),
-                clips=Count(0),
+                clips=Count(filed.attached),
             )
         )
+        if filed.missing:
+            self._clips_incomplete(job.session, filed)
         return None
+
+    def _file_turns(self, job: _Job) -> _Filed:
+        """Every turn's clips, each on its own turn's trace, in the
+        order the turns started (#496).
+
+        Per turn: its pinned context is looked up under the session's,
+        and a turn with none (one this exporter never opened a span for,
+        or one past the retained turns) counts its clips unfiled, never
+        attached to the session trace instead, since a clip under the
+        wrong observation is worse than one that says it could not be
+        filed. Otherwise each clip goes up against the turn's own trace,
+        and the tokens of the ones that landed go into ONE reference on
+        that turn, so a clip counts attached only when that reference
+        answered, and no landed clip is left unreferenced while another
+        clip of its turn is.
+
+        A failure is about its clip and stops nothing, with one
+        exception: a failure the classification calls retryable that
+        survived every retry means the backend went away, and every
+        clip after it is skipped rather than tried, because trying each
+        would be one more timeout on a worker other sessions are queued
+        behind.
+        """
+        filed = _Filed()
+        stopped = False
+        for turn in job.staged.turns:
+            if stopped:
+                filed.skipped += len(turn.clips)
+                continue
+            target = self._telemetry.turn_context(job.context, turn.utterance)
+            trace = self._telemetry.trace_of(target)
+            if target is None or trace is None:
+                filed.unfiled += len(turn.clips)
+                continue
+            tokens: dict[str, str] = {}
+            for clip in turn.clips:
+                if stopped:
+                    filed.skipped += 1
+                    continue
+                token, reason, stopped = self._file_clip(job.staged.path, trace, clip)
+                if reason is not None:
+                    filed.fail(reason)
+                elif token is not None:
+                    tokens[clip.reference] = token
+            if not tokens:
+                continue
+            if self._telemetry.reference_media(target, tokens):
+                filed.attached += len(tokens)
+            else:
+                # The uploader's own reading of this answer for the
+                # pair: the bytes landed and nothing points at them.
+                filed.fail(ClipFilingFailure.UNREFERENCED, len(tokens))
+        return filed
+
+    def _file_clip(
+        self, job: Path, trace: str, clip: _Clip
+    ) -> tuple[str | None, ClipFilingFailure | None, bool]:
+        """One clip up against its turn's trace: its reference token, or
+        the reason it did not land and whether that means the backend
+        is gone."""
+        if clip.identity is None:
+            # Its link was never made, so there is nothing to open.
+            return None, ClipFilingFailure.STAGING_LOST, False
+        try:
+            payload = _read_staged(job, clip.leaf, clip.identity, within=TURNS_NAME)
+        except _Unreadable as unreadable:
+            return None, unreadable.reason, False
+        if len(payload) > MAX_ATTACHMENT_BYTES:
+            return None, ClipFilingFailure.TOO_LARGE, False
+        media, reason, exhausted = self._retrying(
+            lambda client: self._attach(client, trace, payload, AUDIO_TYPE)
+        )
+        if reason is not None or media is None:
+            return None, _clip_reason(reason), exhausted
+        return MEDIA_REFERENCE.format(kind=AUDIO_TYPE, media=media), None, False
 
     def _send(
         self, trace: str, audio: bytes, manifest: bytes
@@ -939,31 +1051,47 @@ class CaptureUpload:
         and the SDK's own uploader does the same thing for the same
         reason.
         """
+        references, reason, _ = self._retrying(
+            lambda client: {
+                AUDIO_REFERENCE: MEDIA_REFERENCE.format(
+                    kind=AUDIO_TYPE,
+                    media=self._attach(client, trace, audio, AUDIO_TYPE),
+                ),
+                MANIFEST_REFERENCE: MEDIA_REFERENCE.format(
+                    kind=MANIFEST_TYPE,
+                    media=self._attach(client, trace, manifest, MANIFEST_TYPE),
+                ),
+            }
+        )
+        return references or {}, reason
+
+    def _retrying(
+        self, action: Callable[[Any], _Sent]
+    ) -> tuple[_Sent | None, AttemptedUpload | None, bool]:
+        """One upload, retried to the ceiling: what it answered, or the
+        reason it failed and whether that reason survived every retry.
+
+        The third half is what the clips need and the pair does not: a
+        failure the classification calls retryable that is still failing
+        after the last retry is the backend gone, which is what stops a
+        job's later clips. A refusal answers at once and is not
+        exhausted, since trying again was never going to change it.
+        """
         reason: AttemptedUpload = CaptureUploadFailure.UNREACHABLE
         wait = self._backoff_s
         for attempt in range(self._retries + 1):
             try:
-                client = self._media()
-                return {
-                    AUDIO_REFERENCE: MEDIA_REFERENCE.format(
-                        kind=AUDIO_TYPE,
-                        media=self._attach(client, trace, audio, AUDIO_TYPE),
-                    ),
-                    MANIFEST_REFERENCE: MEDIA_REFERENCE.format(
-                        kind=MANIFEST_TYPE,
-                        media=self._attach(client, trace, manifest, MANIFEST_TYPE),
-                    ),
-                }, None
+                return action(self._media()), None, False
             except _Refused as refused:
-                return {}, refused.reason
+                return None, refused.reason, False
             except Exception as raised:  # noqa: BLE001 - every failure is an event
                 reason, again = self._classify(raised)
                 if not again:
-                    return {}, reason
+                    return None, reason, False
             if attempt < self._retries and not self._stopping.is_set():
                 time.sleep(wait)
                 wait *= 2
-        return {}, reason
+        return None, reason, True
 
     def _media(self) -> Any:
         """The SDK's REST client, constructed at the first job that
@@ -1088,6 +1216,22 @@ class CaptureUpload:
         events.emit(
             lambda: CaptureUploadFailed(
                 session=SessionId(session), reason=reason
+            )
+        )
+
+    def _clips_incomplete(self, session: str, filed: _Filed) -> None:
+        """Said once per job, after the pair attached, whenever a clip
+        the capture kept is not on its turn: a missing clip is a warning
+        like every other upload failure."""
+        reason = filed.reason
+        events.emit(
+            lambda: CaptureClipsIncomplete(
+                session=SessionId(session),
+                attached=Count(filed.attached),
+                unfiled=Count(filed.unfiled),
+                failed=Count(filed.failed),
+                skipped=Count(filed.skipped),
+                reason=ABSENT if reason is None else reason,
             )
         )
 
@@ -1250,6 +1394,23 @@ def _read_exactly(descriptor: int, size: int) -> bytes:
         chunks.append(chunk)
         remaining -= len(chunk)
     return b"".join(chunks)
+
+
+def _clip_reason(reason: AttemptedUpload | None) -> ClipFilingFailure:
+    """An upload's classification, as the clip's own reason.
+
+    The three an upload attempt can end in, by name, since `_classify`
+    and the no-endpoint refusal answer only these for a single request.
+    Anything else would be a job's reason arriving where a clip's is
+    asked for, which cannot happen, and is answered `unreachable` rather
+    than raised: a raise here would fail a job whose pair already
+    landed.
+    """
+    if reason is CaptureUploadFailure.REFUSED:
+        return ClipFilingFailure.REFUSED
+    if reason is CaptureUploadFailure.TOO_LARGE:
+        return ClipFilingFailure.TOO_LARGE
+    return ClipFilingFailure.UNREACHABLE
 
 
 def _complete(manifest: Path) -> bool:

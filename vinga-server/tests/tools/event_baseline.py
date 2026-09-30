@@ -1603,6 +1603,38 @@ async def drive_capture_upload_failed(directory: Path) -> None:
     await uploads.shutdown()
 
 
+async def drive_capture_clips_incomplete(directory: Path) -> None:
+    """A recording with one turn, whose pair lands and whose heard clip
+    was taken out of its staged job before the worker reached it: the
+    reply clip is filed on the turn's own trace and the heard clip is
+    reported lost (#496)."""
+    sdk, _ = fake_sdk()
+    utterance = "aa11" * 8
+    uploads = CaptureUpload(
+        directory / "captures",
+        sdk=sdk,
+        telemetry=exporting_traces({"s1": UPLOAD_TRACE}, turns={utterance: UPLOAD_TRACE}),
+        backlog=4,
+        retries=0,
+        shutdown_timeout_s=10.0,
+    )
+    store = capture_store(directory, uploads=uploads)
+    opened = time.monotonic()
+    capture = store.open("s1", opened, CAPTURE_MANIFEST)
+    assert capture is not None
+    capture.microphone(tone(100), opened)
+    capture.utterance_audio(utterance, tone(200), opened + 0.5)
+    capture.reply(tone(200), opened + 0.6)
+    capture.close()
+    # White-box on the staged layout, which is the uploader's own fact:
+    # a clip gone from its job between the stage and the upload is the
+    # one failure no public call can produce.
+    (store.directory / "upload-staging" / "s1" / "turns" / f"{utterance}.heard.wav").unlink()
+    with exported("LANGFUSE_HOST", "http://localhost:53010"):
+        uploads.session_closed("s1")
+        await uploads.shutdown()
+
+
 def drive_capture_upload_abandoned(directory: Path) -> None:
     """A job a previous run left staged, found by this one's startup."""
     sdk, _ = fake_sdk()
@@ -2238,6 +2270,11 @@ SERVER_DRIVERS: tuple[Driver, ...] = (
         (CAPTURE_UPLOAD, "CaptureUpload._failed", 1),
         drive_capture_upload_failed,
         "capture_upload_failed",
+    ),
+    Driver(
+        (CAPTURE_UPLOAD, "CaptureUpload._clips_incomplete", 1),
+        drive_capture_clips_incomplete,
+        "capture_clips_incomplete",
     ),
     Driver(
         (TRANSCRIPT_EXPORT, "TranscriptExport._attempt", 1),

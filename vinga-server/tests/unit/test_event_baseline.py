@@ -127,10 +127,12 @@ def test_every_driver_names_a_path_of_its_own() -> None:
     closed session's turns can be written onto its trace (#495): the
     export that landed and the one that did not. And a hundred and six
     since the requests a session assembled can go the same way (#502),
-    which is that same pair on the third post-close surface."""
+    which is that same pair on the third post-close surface. And a
+    hundred and seven since each turn's clips go to their own turn after
+    the recording (#496), and a clip that did not says so."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 106
+    assert len(set(claimed)) == len(claimed) == 107
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -965,6 +967,12 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     ),
     "vinga_server.capture_upload:CaptureUpload._failed #1": (
         ("CaptureUploadFailed", ("event", "reason", "session")),
+    ),
+    "vinga_server.capture_upload:CaptureUpload._clips_incomplete #1": (
+        (
+            "CaptureClipsIncomplete",
+            ("attached", "event", "failed", "reason", "session", "skipped", "unfiled"),
+        ),
     ),
     "vinga_server.transcript_export:TranscriptExport._attempt #1": (
         ("TranscriptsExported", ("elapsed_ms", "event", "session", "turns")),
