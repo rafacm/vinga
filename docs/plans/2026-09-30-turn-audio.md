@@ -350,21 +350,25 @@ and no far-side word reaches a log or event), and the same
 
 ### #517: what "report it" means
 
-In `Telemetry._open_turn`, where `trace.turn is not None`:
+In `Telemetry._open_turn`, where `trace.turn is not None`: one
+`logger.warning` per session, the first time it fires,
+`"session %s: a turn started while another was open, so its span was not opened"`,
+with the session id as the one argument. Once per session because a
+broken invariant would otherwise fire on every turn of every session,
+and the first line is the one that matters; the latch lives on the
+session's own trace state, so it goes with the session.
 
-- a span event on the turn that stayed open, named `turn_not_opened`,
-  carrying the dropped turn's `vinga.utterance.id`, every time it
-  fires; and
-- one `logger.warning` per session, the first time:
-  `"session %s: a turn started while another was open, so its span was not opened"`
-  with the session id as the one argument. Once per session because
-  a broken invariant would otherwise fire on every turn of every
-  session, and the first line is the one that matters.
+Nothing on the trace. Every span event this exporter writes is derived
+from the event catalog, and the exporter enforces that twice
+(`observability-surfaces.md`; the vocabulary guards in `telemetry.py`),
+so a span event of its own would be undeclared vocabulary. #517's
+option 1 asks for a log line or a span event, and the log line is the
+one that needs no new vocabulary.
 
-Not a catalog event: the exporter is a tap, and emitting from inside a
-tap's dispatch re-enters the dispatch it is running in. The existing
-exporter warnings are `logger.warning` for the same reason. The
-behavior (the early return, the stage spans folding onto the open
+Not a catalog event either: the exporter is a tap, and emitting from
+inside a tap's dispatch re-enters the dispatch it is running in. The
+existing exporter warnings are `logger.warning` for the same reason.
+The behavior (the early return, the stage spans folding onto the open
 turn) is unchanged.
 
 ### Which documentation owns which fact
@@ -422,17 +426,17 @@ and `test_telemetry_spans.py` (spans, span events, the
 ### M1
 
 - `turn_started` then `turn_started` with no `reply_finished`: still
-  one turn span (the behavior kept), a `turn_not_opened` event on it
-  carrying the second utterance id, exactly one warning record with
+  one turn span (the behavior kept) and no span event added to it,
+  exactly one warning record with its logger name, level,
   `record.msg` and typed `record.args` asserted exactly, and
   `turn_context` for the second utterance answering `None`.
-- The same sequence three times in one session: three span events,
-  still one warning.
+- The same sequence three times in one session: still one warning. A
+  second session doing it: its own one warning.
 - The ordinary order (`turn_started`, `reply_finished`,
-  `turn_started`): no event, no warning.
+  `turn_started`): no warning.
 - Falsified: removing the warning fails the first case; warning on
-  every firing fails the second; emitting the span event on the
-  session span instead fails the first.
+  every firing fails the second; a process-wide latch instead of a
+  per-session one fails the second session's case.
 
 ### M2
 
@@ -579,9 +583,8 @@ change only through their generators.
   `feature/turn-audio-plan`, in parallel with M2. Commits: the tests,
   watched failing; the report in `_open_turn`; the changelog
   fragment `changelog.d/517-turn-not-opened.md` under `### Fixed` (a
-  turn span the exporter declines to open is reported, as a span
-  event on the open turn and one warning per session, instead of
-  being lost in silence).
+  turn span the exporter declines to open is reported with one
+  warning per session instead of being lost in silence).
   Design footprint: deepens `telemetry.py`'s turn handling; no module
   or seam added. Documentation footprint: the `_open_turn` comment;
   `observability-surfaces.md` only if it describes turn span
@@ -683,6 +686,8 @@ Reviewed 2026-09-30 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Evidence:** The plan deliberately creates a span event that is not a catalog event (`docs/plans/2026-09-30-turn-audio.md`, lines 257-274). The observability contract says every exported span event is derived from the structured-event catalog and telemetry can say nothing undeclared (`docs/architecture/observability-surfaces.md`, lines 200-202 and 266-272). The implementation enforces that rule twice (`telemetry.py`, lines 2413-2435 and 3112-3137). A direct `span.add_event` would bypass both guards. Issue #517 option 1 requires a log line or a span event, not both (`.review-context/issue-517.md`, lines 40-46).
 
    **The plan should say instead:** Keep the early return and emit only the once-per-session sanitized warning, which fully implements option 1 without introducing undeclared trace vocabulary. Remove the span-event assertions and test the warning, unchanged span count, missing second turn context, and ordinary-order silence.
+
+   *Resolution:* Taken. M1 emits only the once-per-session warning, latched on the session's own trace state; the span event is gone from the design, the tests and the changelog fragment, and the plan states why (every exported span event derives from the catalog, and option 1 is satisfied by the log line). The tests now also assert no span event is added, and a second session gets its own warning.
 
 7. **P2: The new upload counts would disappear from the trace outcome**
 
