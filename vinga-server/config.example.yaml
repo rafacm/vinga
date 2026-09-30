@@ -273,8 +273,9 @@ server:
 
   # RECORDS ROOM AUDIO TO DISK when enabled. Off here, and off by
   # default: nothing below does anything until `enabled` says so.
-  # When it is on, every session writes three files, a warning says so
-  # at startup, and each recorded session names its file.
+  # When it is on, every session writes three files and a directory of
+  # per-turn clips, a warning says so at startup, and each recorded
+  # session names its file.
   #
   # It exists because acoustic problems cannot be reproduced in any test
   # lane. A recording of the microphone alongside what the speaker was
@@ -284,7 +285,11 @@ server:
   # Three files per session: a stereo WAV (channel 0 the microphone,
   # channel 1 the reply, so one sample index is one instant in both), a
   # JSONL decision track whose offsets index into it, and a JSON
-  # manifest recording what the capture was made against.
+  # manifest recording what the capture was made against. Beside them,
+  # `<session>.turns/` keeps two mono clips for every turn: the exact
+  # audio its speech recognition was handed, and channel 1 over the
+  # stretch its reply was paced out, which the manifest lists with its
+  # offsets on the WAV's timeline.
   #
   # The flag is the switch, rather than the presence of this section, so
   # that turning capture off again after a recording does not mean
@@ -297,8 +302,11 @@ server:
     # conversation carries on; only the recording stops.
     max_session_s: 900
     # Total budget for the directory. Whole captures are pruned,
-    # oldest first, when it is exceeded. Stereo 16 kHz is 64 kB/s, so
-    # 2000 MB is around nine hours.
+    # oldest first, each with its turns directory, when it is exceeded.
+    # Stereo 16 kHz is 64 kB/s, so 2000 MB is around nine hours of WAV;
+    # the per-turn clips add up to about half the WAV again. A recording
+    # staged for upload counts too, once, until the upload has finished
+    # with it, and is never pruned: a backlog over budget is a warning.
     max_total_mb: 2000
     # Refuse to start a capture when the volume has less free than
     # this. The budget above does not protect the volume on its own:
@@ -461,8 +469,9 @@ server:
   #   # never on the audio path, and a failure is a warning rather than
   #   # a failed session. A recording waiting for that worker is
   #   # hard-linked into `upload-staging/` under the capture directory,
-  #   # where the capture budget cannot see it; the queue depth bounds
-  #   # it and the next startup sweeps what was left behind.
+  #   # where it counts against the capture budget until the upload has
+  #   # finished with it; the queue depth bounds it and the next startup
+  #   # sweeps what was left behind.
   #   export_audio: false
   #   # ATTACHES WHAT WAS SAID to each reply's original turn root after
   #   # every conversation-store acknowledgement for its utterance has

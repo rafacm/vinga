@@ -136,12 +136,24 @@ cost and per-user attribution are not among them and still await users.
 `vinga_server/capture.py`.
 
 **Carries.** Raw audio plus the decision track, three files per session
-sharing one timeline.
+sharing one timeline, and beside them a `<session>.turns/` directory
+with two mono clips per turn: `<utterance>.heard.wav`, the exact bytes
+the turn's ASR was handed, and `<utterance>.reply.wav`, channel 1 of the
+WAV over the stretch that turn's reply was paced out. The manifest lists
+the turns in start order, keyed by the utterance id `turn_started`
+carries, with each reply clip's span as `reply_from_ms` and
+`reply_to_ms` on the WAV's `t_ms` timeline, so the cut can be checked
+against the WAV without trusting the clip.
 
 **Serves.** Need 1 (deep diagnosis).
 
 **Retention and access.** Bounded per session and by a total budget for
-the directory, oldest captures pruned first.
+the directory, oldest captures pruned first, each with its turns
+directory. The budget counts every file under the directory once per
+inode, recordings hard-linked into `upload-staging/` for an upload
+included, until the upload has finished with them; the prune never
+removes those, so a backlog over budget is the `capture_over_budget`
+warning rather than silence.
 
 **Status.** Landed, and off unless `server.capture.enabled` is true. The
 flag is the switch rather than the section, so a field round can stop

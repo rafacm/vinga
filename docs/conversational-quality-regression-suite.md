@@ -101,7 +101,8 @@ The preflight below is what makes it evidence.
 ## What a session yields
 
 Each captured session produces three files, together sufficient to
-re-derive everything the analysis needs:
+re-derive everything the analysis needs, and a directory of per-turn
+clips cut for the analyses that need a turn's audio on its own:
 
 - **`<session>.wav`**: stereo, 16 kHz. Channel 0 is the microphone
   as received, channel 1 what was paced to the speaker. Having the
@@ -113,7 +114,18 @@ re-derive everything the analysis needs:
 - **`<session>.json`**: the manifest: device, firmware, resolved
   provider entries verbatim, completeness flag. The manifest is what
   makes a recording comparable months later, because it answers
-  "what exactly produced this" without asking anyone.
+  "what exactly produced this" without asking anyone. At close it
+  also lists the session's turns.
+- **`<session>.turns/`**: two mono 16 kHz clips per turn, named by
+  the utterance id its `turn_started` event carries.
+  `<utterance>.heard.wav` is the exact audio the turn's ASR was
+  handed, which is what a word error rate has to be measured on: not
+  a slice of channel 0, which holds the frames the guards dropped and
+  no record of where the endpointer's pre-roll or a merged
+  utterance's two halves began. `<utterance>.reply.wav` is channel 1
+  over the stretch the turn's reply was paced out, barge-in truncation
+  included; the manifest records that stretch as `reply_from_ms` and
+  `reply_to_ms`, so the clip can be checked against the WAV.
 
 Analysis starts from the event track (reconstruct the turn timeline,
 find the moment something went wrong), drops to the WAV only where

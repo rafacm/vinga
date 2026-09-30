@@ -497,7 +497,12 @@ class CaptureConfig(BaseModel):
             "with the microphone on channel 0 and the reply on channel 1, a JSONL "
             "decision track whose offsets index into it, and a JSON manifest of "
             "what the capture was made against), a warning says so at startup, and "
-            "each recorded session names its file."
+            "each recorded session names its file. Beside them, a "
+            "`<session>.turns/` directory keeps two mono 16 kHz clips for every "
+            "turn the session started: `<utterance>.heard.wav`, the exact audio "
+            "the turn's speech recognition was handed, and `<utterance>.reply.wav`, "
+            "channel 1 of the WAV over the stretch that turn's reply was paced "
+            "out, which the manifest lists with its offsets on the WAV's timeline."
         ),
     )
 
@@ -524,8 +529,16 @@ class CaptureConfig(BaseModel):
         gt=0,
         description=(
             "Total budget for the capture directory, in megabytes. Whole captures "
-            "are pruned, oldest first, when it is exceeded. Stereo 16 kHz is "
-            "64 kB/s, so 2000 MB is around nine hours."
+            "are pruned, oldest first, when it is exceeded, each with its turns "
+            "directory. Stereo 16 kHz is 64 kB/s, so 2000 MB is around nine hours "
+            "of WAV. The per-turn clips are mono and each covers about the stretch "
+            "of the session its turn took, so they add up to about half the WAV "
+            "again, more where a merged utterance repeats audio. Everything under the "
+            "directory counts, including a recording hard-linked into "
+            "`upload-staging/` while it waits to be uploaded, once however many "
+            "names it has and until the upload has finished with it; the prune "
+            "never removes a staged upload, so a backlog over budget is reported "
+            "as a warning rather than pruned."
         ),
     )
 
@@ -971,9 +984,10 @@ class TelemetryConfig(BaseModel):
             "session closed, never on the audio path, and every failure is a "
             "warning event (`capture_upload_failed`) rather than a failed session. "
             "While a recording waits for its worker it is hard-linked into "
-            "`upload-staging/` under the capture directory, which the capture "
-            "budget does not see: it is bounded by the queue depth and swept at "
-            "the next startup."
+            "`upload-staging/` under the capture directory, where it counts "
+            "against `server.capture.max_total_mb` until the upload has finished "
+            "with it: it is bounded by the queue depth and swept at the next "
+            "startup."
         ),
     )
 
