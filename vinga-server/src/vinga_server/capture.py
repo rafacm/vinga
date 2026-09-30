@@ -29,6 +29,30 @@ tests be written against reality. Three files per session:
 - `<session>.json`, the manifest: what the capture was made against,
   because a capture outlives the code that made it.
 
+And beside them, one directory of per-turn clips (#496),
+`<session>.turns/`, holding two mono 16 kHz files for every turn the
+session started:
+
+- `<utterance>.heard.wav`, the exact bytes the turn's ASR was handed,
+  written in one piece when the turn starts. Not a cut of channel 0:
+  that channel is the capture's own decode of every frame, the guarded
+  ones included, and holds no record of where a turn's audio began (the
+  endpointer's pre-roll, a merged utterance's two halves), so a word
+  error rate measured on a slice of it would measure the slicer too.
+- `<utterance>.reply.wav`, what was paced out while that turn was being
+  answered: channel 1 of the WAV over the turn's reply window, written
+  as the channel places it, silence in its gaps included. The window
+  opens when the turn starts and closes when the next one does, at the
+  capture's limit, at a write failure or at the close, so a barge-in's
+  interrupted reply keeps its last frames and the turn that interrupted
+  it starts clean. The manifest records the span on the WAV's own
+  timeline, which is what lets anyone holding the three files reproduce
+  the clip without trusting it.
+
+A directory rather than more top-level files because the store treats
+every top-level `*.wav` as a capture of its own. The directory is part
+of its capture: counted against the budget and pruned with the rest.
+
 Everything is stamped against the session's monotonic origin, so the
 three files share one timeline.
 
@@ -39,7 +63,10 @@ says so on every session it records.
 
 import contextlib
 import json
+import logging
+import os
 import shutil
+import stat
 import struct
 import time
 from collections import OrderedDict
@@ -47,7 +74,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO, TextIO
 
-from vinga_server.capture_upload import BUILDING_PREFIX, CaptureUpload, staging_root
+from vinga_server.capture_upload import (
+    BUILDING_PREFIX,
+    CaptureUpload,
+    safe_name,
+    staging_root,
+)
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import (
     CaptureBelowFloor,
@@ -72,6 +104,11 @@ from vinga_server.events.values import (
 )
 
 events = ServerEvents(__name__)
+
+# For the one thing this module says that is not an event: an utterance
+# id it was handed and would not use, which no catalog value can carry
+# because the one value there is to name is the one being refused.
+logger = logging.getLogger(__name__)
 
 # When this process began, which is what tells a job THIS run staged
 # from one a previous run left behind.
@@ -106,11 +143,18 @@ FLUSH_LAG_S = 0.25
 
 MB = 1024 * 1024
 
+# Where a session's per-turn clips live, beside its three files, and what
+# each one is called inside it. One clip is one channel.
+TURNS_SUFFIX = ".turns"
+HEARD_SUFFIX = ".heard.wav"
+REPLY_SUFFIX = ".reply.wav"
+CLIP_CHANNELS = 1
 
-def _wav_header(data_bytes: int) -> bytes:
-    """A 44 byte canonical PCM header. `data_bytes` is a placeholder
-    when the length is not known yet."""
-    byte_rate = CAPTURE_RATE * FRAME_BYTES
+
+def _wav_header(data_bytes: int, channels: int) -> bytes:
+    """A 44 byte canonical PCM header at the capture rate. `data_bytes`
+    is a placeholder when the length is not known yet."""
+    block = channels * SAMPLE_BYTES
     return struct.pack(
         "<4sI4s4sIHHIIHH4sI",
         b"RIFF",
@@ -119,10 +163,10 @@ def _wav_header(data_bytes: int) -> bytes:
         b"fmt ",
         16,
         1,  # PCM
-        CAPTURE_CHANNELS,
+        channels,
         CAPTURE_RATE,
-        byte_rate,
-        FRAME_BYTES,
+        CAPTURE_RATE * block,
+        block,
         8 * SAMPLE_BYTES,
         b"data",
         data_bytes,
@@ -180,8 +224,66 @@ class _Channel:
         return out
 
 
+class _ReplyClip:
+    """One turn's reply clip: channel 1 over the turn's window, written as
+    the channel places it.
+
+    Fed the same audio at the same frame index the channel was, so the
+    clip is that channel's span byte for byte by construction, gaps
+    padded with the same silence. The file is opened at the first audio
+    of the window, so a turn that spoke nothing leaves no file, and its
+    header is patched when the window closes. Anything placed past the
+    capture's limit is dropped here as the close drops it from the WAV.
+    """
+
+    def __init__(self, path: Path, limit_frame: int) -> None:
+        self.path = path
+        self._limit_frame = limit_frame
+        self._file: BinaryIO | None = None
+        self._data_bytes = 0
+        # The frame the clip begins at on the WAV's timeline, and the
+        # one just past its end. None until the first audio.
+        self.from_frame: int | None = None
+        self.to_frame: int | None = None
+
+    def place(self, pcm: bytes, at: int) -> None:
+        """`pcm` placed at frame `at`, which is never before the end of
+        what was placed last: the channel's own rule."""
+        end = min(at + len(pcm) // SAMPLE_BYTES, self._limit_frame)
+        if end <= at:
+            return
+        if self._file is None:
+            self._file = self.path.open("wb")
+            self._file.write(_wav_header(0, CLIP_CHANNELS))
+            self.from_frame = self.to_frame = at
+        assert self.to_frame is not None
+        block = bytes((at - self.to_frame) * SAMPLE_BYTES) + pcm[: (end - at) * SAMPLE_BYTES]
+        self._file.write(block)
+        # For the reason the WAV is flushed as it goes.
+        self._file.flush()
+        self._data_bytes += len(block)
+        self.to_frame = end
+
+    def close(self) -> None:
+        """Patch the header and let the file go. Idempotent."""
+        clip, self._file = self._file, None
+        if clip is None:
+            return
+        try:
+            clip.seek(0)
+            clip.write(_wav_header(self._data_bytes, CLIP_CHANNELS))
+        finally:
+            clip.close()
+
+
+def _offset_ms(frame: int | None) -> float | None:
+    """A frame index on the `t_ms` timeline, exactly: a frame is 1/16 ms,
+    so the value needs no rounding and `ms * 16` is the frame again."""
+    return None if frame is None else frame * 1000 / CAPTURE_RATE
+
+
 class SessionCapture:
-    """One session's three files.
+    """One session's three files, and its turns' clips.
 
     Writes are best effort by construction: a capture that fails must
     never take a conversation down with it, so every I/O path here
@@ -203,7 +305,13 @@ class SessionCapture:
         self.wav_path = directory / f"{session_id}.wav"
         self.jsonl_path = directory / f"{session_id}.jsonl"
         self.manifest_path = directory / f"{session_id}.json"
+        self.turns_path = directory / f"{session_id}{TURNS_SUFFIX}"
         self._manifest = dict(manifest)
+        # Every turn this capture kept clips for, in the order the turns
+        # started, each with its reply clip; and the reply clip whose
+        # window is open, if any. Listed in the manifest at close.
+        self._turns: list[tuple[str, _ReplyClip]] = []
+        self._window: _ReplyClip | None = None
         self._wav: BinaryIO | None = None
         self._events: TextIO | None = None
         self._mic = _Channel()
@@ -224,14 +332,19 @@ class SessionCapture:
 
     def start(self) -> None:
         self._wav = self.wav_path.open("wb")
-        self._wav.write(_wav_header(0))
+        self._wav.write(_wav_header(0, CAPTURE_CHANNELS))
         self._events = self.jsonl_path.open("w", encoding="utf-8")
         # Written now rather than at close, because the pod being stopped
         # mid-session is plausibly the session most worth looking at, and
         # a capture with no manifest cannot be interpreted at all.
         self._write_manifest(complete=False)
 
-    def _write_manifest(self, complete: bool, duration_s: float | None = None) -> None:
+    def _write_manifest(
+        self,
+        complete: bool,
+        duration_s: float | None = None,
+        turns: list[dict[str, Any]] | None = None,
+    ) -> None:
         payload = dict(self._manifest)
         payload["capture"] = {
             "audio": self.wav_path.name,
@@ -245,10 +358,22 @@ class SessionCapture:
         }
         if duration_s is not None:
             payload["capture"]["duration_s"] = round(duration_s, 3)
+        # Only at close, as the duration is: the manifest written at open
+        # says nothing about turns, and a pod stopped mid-session leaves
+        # clips the manifest does not list, which `complete: false`
+        # already tells the analysis side to expect.
+        if turns is not None:
+            payload["capture"]["turns"] = turns
         self.manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
     def _at(self, now: float) -> float:
         return now - self._opened_at
+
+    @property
+    def _limit_frame(self) -> int:
+        """The frame the session limit falls on, which is where the WAV
+        and every clip cut from it end."""
+        return int(self._max_session_s * CAPTURE_RATE)
 
     def _frame_of(self, now: float) -> int:
         return max(0, int(self._at(now) * CAPTURE_RATE))
@@ -294,6 +419,12 @@ class SessionCapture:
         at = max(channel.next_frame, self._frame_of(now), self._start_frame)
         try:
             channel.add(pcm, at, self._start_frame)
+            # The reply clip is fed here, with the frame the channel
+            # just used, rather than cut from the WAV at close: this is
+            # the only place the placement is known, and a cut at close
+            # would read the reply spans back on the session loop.
+            if channel is self._reply and self._window is not None:
+                self._window.place(pcm, at)
             self._flush(self._frame_of(now) - int(FLUSH_LAG_S * CAPTURE_RATE))
         except Exception as exc:  # noqa: BLE001 - capture never breaks a session
             self._disable(CaptureWrite.AUDIO, exc)
@@ -312,6 +443,72 @@ class SessionCapture:
         self._wav.flush()
         self._data_bytes += len(block)
         self._start_frame = up_to_frame
+
+    def utterance_audio(self, utterance: str, pcm: bytes, now: float) -> None:
+        """A turn began, answering `pcm`: the exact bytes its ASR is
+        handed, or was, where a confirmed barge-in already transcribed
+        them. At the pipeline's rate, which is the capture's.
+
+        Written in one piece as the turn's heard clip, and the turn's
+        reply window opened in place of the last one, which closes here:
+        whatever is paced from now on answers this utterance.
+
+        The id becomes a file name, so it is held to the uploader's name
+        rule and refused otherwise, said once without the value. The
+        server mints hex, so nothing real is turned away. A refused turn
+        still closes the window before it, since a turn did begin; its
+        reply belongs to no clip."""
+        if self._stopped or self._wav is None:
+            return
+        if self._expired(now):
+            self._finish_at_limit()
+            return
+        try:
+            self._close_window()
+        except Exception as exc:  # noqa: BLE001 - capture never breaks a session
+            self._disable(CaptureWrite.AUDIO, exc)
+            return
+        if not safe_name(utterance):
+            with contextlib.suppress(Exception):
+                logger.warning(
+                    "session %s: an utterance id this server did not mint reached "
+                    "the capture, so no clip was kept for it",
+                    self._session_id,
+                )
+            return
+        try:
+            self.turns_path.mkdir(exist_ok=True)
+            with (self.turns_path / f"{utterance}{HEARD_SUFFIX}").open("wb") as heard:
+                heard.write(_wav_header(len(pcm), CLIP_CHANNELS) + pcm)
+        except Exception as exc:  # noqa: BLE001 - capture never breaks a session
+            self._disable(CaptureWrite.AUDIO, exc)
+            return
+        self._window = _ReplyClip(
+            self.turns_path / f"{utterance}{REPLY_SUFFIX}", self._limit_frame
+        )
+        self._turns.append((utterance, self._window))
+
+    def _close_window(self) -> None:
+        window, self._window = self._window, None
+        if window is not None:
+            window.close()
+
+    def _turn_entries(self) -> list[dict[str, Any]]:
+        """The manifest's `capture.turns`: one entry per turn in start
+        order, its two clips named inside `<session>.turns/`, and the
+        reply clip's span on the WAV's `t_ms` timeline, from its first
+        frame to just past its last, so cutting channel 1 at those two
+        offsets reproduces it. A turn that spoke nothing has nulls."""
+        return [
+            {
+                "utterance": utterance,
+                "heard": f"{utterance}{HEARD_SUFFIX}",
+                "reply": None if reply.from_frame is None else reply.path.name,
+                "reply_from_ms": _offset_ms(reply.from_frame),
+                "reply_to_ms": _offset_ms(reply.to_frame),
+            }
+            for utterance, reply in self._turns
+        ]
 
     def _finish_at_limit(self) -> None:
         """End a capture that has run as long as it is allowed to. The
@@ -354,7 +551,7 @@ class SessionCapture:
         """
         if self._events is None:
             return
-        frame = min(self._frame_of(now), int(self._max_session_s * CAPTURE_RATE))
+        frame = min(self._frame_of(now), self._limit_frame)
         record = {"t_ms": round(frame / CAPTURE_RATE * 1000, 1), **payload}
         # An event's offset is only useful if it indexes into the audio,
         # and a session can be open through stretches with no decodable
@@ -399,6 +596,8 @@ class SessionCapture:
         self._closing = True
         wav, events = self._wav, self._events
         self._wav = self._events = None
+        with contextlib.suppress(Exception):
+            self._close_window()
         if wav is not None:
             with contextlib.suppress(Exception):
                 # Out to the furthest of the audio and the last event.
@@ -418,14 +617,14 @@ class SessionCapture:
                 end = max(
                     self._mic.next_frame, self._reply.next_frame, self._event_frame + 1
                 )
-                self._start_frame = min(end, int(self._max_session_s * CAPTURE_RATE))
+                self._start_frame = min(end, self._limit_frame)
                 frames = self._start_frame - (self._data_bytes // FRAME_BYTES)
                 if frames > 0:
                     block = interleave(self._mic.take(frames), self._reply.take(frames))
                     wav.write(block)
                     self._data_bytes += len(block)
                 wav.seek(0)
-                wav.write(_wav_header(self._data_bytes))
+                wav.write(_wav_header(self._data_bytes, CAPTURE_CHANNELS))
             with contextlib.suppress(Exception):
                 wav.close()
         if events is not None:
@@ -435,6 +634,7 @@ class SessionCapture:
             self._write_manifest(
                 complete=not self._stopped,
                 duration_s=self._data_bytes / FRAME_BYTES / CAPTURE_RATE,
+                turns=self._turn_entries(),
             )
         # The store stops protecting this capture from pruning, and
         # checks the budget now that its final size is known.
@@ -544,16 +744,38 @@ class CaptureStore:
         return sorted(self.directory.glob("*.wav"), key=lambda p: p.stat().st_mtime)
 
     def _total_mb(self) -> float:
+        """Every regular file under the directory, its turns and the
+        upload staging included, counted once per inode.
+
+        Once per inode because staging is hardlinks: a staged pair and
+        the capture it came from are one set of blocks while both names
+        exist, and still blocks on the disk after a prune has unlinked
+        the capture's name while the upload waits. Counting names would
+        count the pair twice in the first case, and a walk that skipped
+        staging would lose it in the second. Symlinks are not followed
+        and not counted: nothing here makes one, and a planted one must
+        not make a file elsewhere count against this budget."""
+        seen: set[tuple[int, int]] = set()
         total = 0
-        for path in self.directory.glob("*"):
-            with contextlib.suppress(OSError):
-                total += path.stat().st_size
+        for root, _, names in os.walk(self.directory):
+            for name in names:
+                with contextlib.suppress(OSError):
+                    found = os.lstat(os.path.join(root, name))
+                    identity = (found.st_dev, found.st_ino)
+                    if stat.S_ISREG(found.st_mode) and identity not in seen:
+                        seen.add(identity)
+                        total += found.st_size
         return total / MB
 
     def prune(self) -> list[str]:
         """Drop whole captures, oldest first, until the directory is
-        inside its budget. All three files go together: two thirds of a
-        capture is not a capture.
+        inside its budget. All three files go together, and the turns
+        directory with them: part of a capture is not a capture.
+
+        What it never touches is the upload staging, which the budget
+        counts: a backlog of staged jobs over budget is said by the
+        warning below rather than hidden, and drains as the uploads
+        finish.
 
         Two are never dropped. A session still recording, because its
         descriptors are open and unlinking underneath it would leave the
@@ -573,6 +795,8 @@ class CaptureStore:
             for path in (oldest, oldest.with_suffix(".jsonl"), oldest.with_suffix(".json")):
                 with contextlib.suppress(OSError):
                     path.unlink()
+            with contextlib.suppress(OSError):
+                shutil.rmtree(self.directory / f"{oldest.stem}{TURNS_SUFFIX}")
             removed.append(oldest.stem)
         if removed:
             events.emit(
