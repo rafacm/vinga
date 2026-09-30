@@ -78,6 +78,7 @@ from typing import Any, BinaryIO, TextIO
 from vinga_server.capture_upload import (
     BUILDING_PREFIX,
     CaptureUpload,
+    TurnClips,
     safe_name,
     staging_root,
 )
@@ -298,7 +299,7 @@ class SessionCapture:
         opened_at: float,
         manifest: dict[str, Any],
         max_session_s: float,
-        on_close: "Callable[[str], None] | None" = None,
+        on_close: "Callable[[str, tuple[TurnClips, ...]], None] | None" = None,
     ) -> None:
         self._session_id = session_id
         self._opened_at = opened_at
@@ -517,6 +518,18 @@ class SessionCapture:
             for utterance, reply in self._turns
         ]
 
+    def _clips(self) -> tuple[TurnClips, ...]:
+        """The clips this capture kept, in the order their turns started:
+        every turn's heard clip, and its reply clip where it spoke."""
+        return tuple(
+            TurnClips(
+                utterance=utterance,
+                heard=self.turns_path / f"{utterance}{HEARD_SUFFIX}",
+                reply=None if reply.from_frame is None else reply.path,
+            )
+            for utterance, reply in self._turns
+        )
+
     def _finish_at_limit(self) -> None:
         """End a capture that has run as long as it is allowed to. The
         conversation carries on; only the recording stops."""
@@ -597,7 +610,7 @@ class SessionCapture:
         if self._wav is None and self._events is None:
             self._closing = True
             if self._on_close is not None:
-                self._on_close(self._session_id)
+                self._on_close(self._session_id, self._clips())
                 self._on_close = None
             return
         self._closing = True
@@ -658,10 +671,13 @@ class SessionCapture:
                 turns=self._turn_entries(),
             )
         # The store stops protecting this capture from pruning, and
-        # checks the budget now that its final size is known.
+        # checks the budget now that its final size is known. It is
+        # handed the clips this capture kept, from the same list the
+        # manifest was just written from: an upload is decided by what
+        # the writer knows, never by the manifest read back off a disk.
         if self._on_close is not None:
             with contextlib.suppress(Exception):
-                self._on_close(self._session_id)
+                self._on_close(self._session_id, self._clips())
             self._on_close = None
 
 
@@ -839,12 +855,16 @@ class CaptureStore:
             )
         return removed
 
-    def finished(self, session_id: str) -> None:
+    def finished(self, session_id: str, turns: tuple[TurnClips, ...] = ()) -> None:
         """A capture closed. It stops being protected, whatever is going
         to be uploaded is put out of the prune's reach, and the budget
         is checked now that its final size is known: without this a
         single session that overran would sit there until some later
         session happened to start.
+
+        `turns` is the capture's own list of the clips it kept, which the
+        staging takes beside the pair and which is the only list of them
+        an upload is ever decided by.
 
         The staging is HERE and ahead of the prune, which is the one
         ordering that works. This is where a capture's files become
@@ -860,6 +880,7 @@ class CaptureStore:
                 session_id,
                 self.directory / f"{session_id}.wav",
                 self.directory / f"{session_id}.json",
+                turns,
             )
         with contextlib.suppress(OSError):
             self.prune()

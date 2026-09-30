@@ -75,6 +75,7 @@ import queue
 import shutil
 import threading
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -264,6 +265,25 @@ AUDIO_TYPE = "audio/wav"
 MANIFEST_TYPE = "application/json"
 
 MB = 1024 * 1024
+
+
+@dataclass(frozen=True)
+class TurnClips:
+    """One turn's clips, as the capture that wrote them lists them at its
+    close (#496): the utterance the turn answered, its heard clip, and
+    its reply clip where the turn spoke at all.
+
+    The capture's own in-memory list, handed over in process, which is
+    the whole of its point: what a job sends is decided here and now by
+    the writer that made the files, never later by reading a list back
+    off a disk somebody else may have written to. The paths are where
+    the capture put the clips; the utterance id is what the staged
+    copies are named by.
+    """
+
+    utterance: str
+    heard: Path
+    reply: Path | None
 
 
 def staging_root(directory: Path) -> Path:
@@ -581,7 +601,13 @@ class CaptureUpload:
 
     # --- the two halves of the hook -----------------------------------
 
-    def stage(self, session: str, audio: Path, manifest: Path) -> None:
+    def stage(
+        self,
+        session: str,
+        audio: Path,
+        manifest: Path,
+        turns: Sequence[TurnClips] = (),
+    ) -> None:
         """A capture's files are final. Put them somewhere a prune
         cannot reach.
 
