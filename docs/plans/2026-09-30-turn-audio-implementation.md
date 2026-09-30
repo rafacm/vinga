@@ -603,7 +603,13 @@ the capture's close hands the store its in-memory clip list, the
 staging records every staged file's `(st_dev, st_ino, st_size)`, and
 one reading helper opens the job, `turns/` and each leaf descriptor
 relative without following a link, checks the identity, and reads
-through the checked descriptor. `capture_uploaded` gains `clips`, a new
+through the checked descriptor. The guarantee, exactly: the worker
+reads only through a descriptor whose device, inode and size match what
+was staged, opened without following links; it does not defend against
+a same-size file taking over a staged file's inode after the capture's
+own names are pruned, which only a writer running as this server's user
+can arrange; and it claims nothing about content. `capture_uploaded`
+gains `clips`, a new
 WARNING `capture_clips_incomplete` carries the four counts and a
 `ClipFilingFailure` reason, and both reach the session's trace.
 

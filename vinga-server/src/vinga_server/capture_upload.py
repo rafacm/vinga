@@ -58,14 +58,18 @@ not list.
 **What leaves is decided in process, never read back off the disk.** A
 hardlink is not a snapshot, so a staged job is treated as input
 somebody else may have changed. The capture hands the staging its own
-list of clips at its close, the staging records every staged file's
-device, inode and size, and the worker reads only those inodes, through
-descriptors opened without following a link and checked against that
-record before a byte is read. No path, link or rename can make it send
-a file other than the capture's own. What it does not guarantee is
-those files' CONTENT: a writer able to overwrite a staged file in place
-is a writer able to overwrite the capture while it records, and nothing
-here claims otherwise.
+list of clips at its close, and the staging records every staged file's
+device, inode and size. The worker then reads only through a descriptor
+whose device, inode and size match what was staged, opened without
+following links, so a path string, a link, a rename or a replaced file
+cannot steer it to another file. Exactly that, and no more. It does not
+defend against a same-size file taking over a staged file's inode after
+the capture's own names are pruned (the staged link unlinked and the
+freed inode reused), which only a writer running as this server's own
+user can arrange, and such a writer can already read everything the
+uploader can, its credentials included. And it claims nothing about
+content: a writer able to overwrite a staged file in place is a writer
+able to overwrite the capture while it records.
 
 **The dangerous bytes enter below the catalog**, the same rule
 `telemetry.py` states. The credentials arrive in `LANGFUSE_PUBLIC_KEY`
@@ -548,9 +552,12 @@ class _Identity(NamedTuple):
     What the worker requires of a file before it reads a byte of it, so
     a name that has since come to mean another file (a replacement, a
     hard link to something else, a file grown or cut short) is refused
-    rather than sent. It is identity and not content: a writer able to
-    change the same inode in place, at the same size, is not caught by
-    this, and nothing here claims otherwise."""
+    rather than sent. Exactly that and no more: it is not an anchor on
+    the inode, so a same-size file that takes over this inode after the
+    capture's names are pruned and the staged link unlinked (which only
+    a writer running as this server's user can arrange) matches it; and
+    it is identity, not content, so a writer changing the same inode in
+    place at the same size is not caught either."""
 
     device: int
     inode: int
