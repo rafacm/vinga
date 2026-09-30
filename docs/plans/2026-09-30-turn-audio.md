@@ -714,7 +714,7 @@ change only through their generators.
   suite's "What a session yields". No egress documentation moves: with
   M2 alone, `export_audio` still sends exactly the pair. Part of #496.
 - [x] **[M3: `export_audio` files the clips on their turns](2026-09-30-turn-audio-implementation.md#m3-export_audio-files-the-clips-on-their-turns)**
-  (PR TBD). Stacked on M2. Commits: tests watched failing; the capture's close handing
+  (PR [#574](https://github.com/rafacm/vinga/pull/574)). Stacked on M2. Commits: tests watched failing; the capture's close handing
   the store its in-memory clip list; staging with its trusted
   inventory and the descriptor-relative reading helper (pair
   included); the worker's per-turn filing; the event fields and regenerated reference; the egress
