@@ -1936,3 +1936,965 @@ async def test_a_job_whose_upload_outlives_an_eviction_still_writes_its_referenc
     assert [str(fields_of(record)["session"]) for record in uploads_said(caplog)] == [
         "target"
     ]
+
+
+# --- each turn's clips, filed on its own turn (#496) -------------------
+#
+# A capture keeps two clips per turn (M2), and with the flag on they
+# leave after the pair, each against the trace of the turn it belongs
+# to, referenced there by one span per turn. What these cases pin is
+# the filing: which trace each clip is asked against, which clips a
+# turn's one reference carries, and what is said when a clip does not
+# land. The spellings (`turns/`, `heard_audio`, the event's name and its
+# reasons) are written out rather than imported, so a case states the
+# contract it holds the module to.
+
+U1 = "aa11" * 8
+U2 = "bb22" * 8
+TURN_TRACE_1 = "11111111111111111111111111111111"
+TURN_TRACE_2 = "22222222222222222222222222222222"
+
+# A second credential-shaped sentinel, for the bytes of a file outside
+# the job that an altered staging points the worker at.
+OUTSIDE = b"sk-lf-0OUTSIDE-THE-JOB-SENTINEL"
+
+
+def a_recording_with_turns(
+    store: CaptureStore,
+    session: str,
+    turns: list[tuple[str, bool]],
+    *,
+    heard_ms: int = 500,
+    manifest: dict[str, Any] | None = None,
+) -> SessionCapture:
+    """One closed recording with a clip pair for each `(utterance,
+    spoke)` turn, or a heard clip alone where the turn spoke nothing.
+
+    Each turn's heard clip is a tone of its own value and its reply
+    another, so a clip's bytes say which clip they are."""
+    opened = time.monotonic()
+    capture = store.open(session, opened, manifest or CAPTURE_MANIFEST)
+    assert capture is not None
+    capture.microphone(tone(100), opened)
+    for index, (utterance, spoke) in enumerate(turns):
+        at = opened + 1.0 + index
+        capture.utterance_audio(utterance, tone(heard_ms, 100 + index), at)
+        if spoke:
+            capture.reply(tone(200, 200 + index), at + 0.1)
+    capture.close()
+    return capture
+
+
+def a_traced_uploader(
+    tmp_path: Path,
+    *,
+    turns: dict[str, str] | None = None,
+    refusing_turns: frozenset[str] = frozenset(),
+    **options: Any,
+) -> tuple[CaptureUpload, Recorder, Any]:
+    """An uploader whose exporter knows session `s1` and the given
+    turns, with the double handed back so a case reads what was
+    referenced where."""
+    from tests.support.uploads import Traced
+
+    traced = Traced(
+        {"s1": TRACE},
+        turns={U1: TURN_TRACE_1, U2: TURN_TRACE_2} if turns is None else turns,
+        refusing_turns=refusing_turns,
+    )
+    uploads, recorder = an_uploader(tmp_path, telemetry=traced, **options)
+    return uploads, recorder, traced
+
+
+def clips_said(caplog: pytest.LogCaptureFixture) -> list[dict[str, object]]:
+    """Every `capture_clips_incomplete` this run said, as its fields."""
+    return [
+        fields_of(record)
+        for record in caplog.records
+        if getattr(record, "event", None) == "capture_clips_incomplete"
+    ]
+
+
+def incomplete(
+    caplog: pytest.LogCaptureFixture,
+    *,
+    attached: int,
+    unfiled: int = 0,
+    failed: int = 0,
+    skipped: int = 0,
+    reason: str | None = None,
+) -> None:
+    """The one warning a job with a missing clip says, held exactly: its
+    level, the four counts and the reason, or the reason's absence."""
+    records = [
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "capture_clips_incomplete"
+    ]
+    assert len(records) == 1, f"expected one capture_clips_incomplete, got {len(records)}"
+    (record,) = records
+    assert record.levelno == logging.WARNING
+    held = fields_of(record)
+    assert held["session"] == "s1"
+    assert (held["attached"], held["unfiled"], held["failed"], held["skipped"]) == (
+        attached,
+        unfiled,
+        failed,
+        skipped,
+    )
+    if reason is None:
+        assert "reason" not in held
+    else:
+        assert str(held["reason"]) == reason
+
+
+def clips_attached(caplog: pytest.LogCaptureFixture) -> int:
+    """What `capture_uploaded` said about the clips, insisted on once."""
+    said = uploads_said(caplog)
+    assert len(said) == 1
+    return int(fields_of(said[0])["clips"])  # type: ignore[call-overload]
+
+
+def job_of(store: CaptureStore, session: str = "s1") -> Path:
+    return staging_root(store.directory) / session
+
+
+def sha(payload: bytes) -> str:
+    import base64
+    import hashlib
+
+    return base64.b64encode(hashlib.sha256(payload).digest()).decode("ascii")
+
+
+@pytest.mark.asyncio
+async def test_each_turns_clips_go_to_that_turns_trace(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, endpoint: str
+) -> None:
+    """The milestone's claim, off the fake far side: the pair against
+    the session's trace, then each turn's two clips against its OWN
+    trace, and one reference per turn carrying both tokens.
+
+    What went is the clips' own bytes, told apart by their digests, and
+    nothing else: the request list is exactly the pair and the four
+    files the capture listed."""
+    caplog.set_level(logging.INFO)
+    uploads, recorder, traced = a_traced_uploader(tmp_path)
+    store = capture_store(tmp_path, uploads=uploads)
+
+    capture = a_recording_with_turns(store, "s1", [(U1, True), (U2, True)])
+    store.session_closed("s1")
+    await drained(uploads)
+
+    turns = capture.turns_path
+    expected = [
+        capture.wav_path,
+        capture.manifest_path,
+        turns / f"{U1}.heard.wav",
+        turns / f"{U1}.reply.wav",
+        turns / f"{U2}.heard.wav",
+        turns / f"{U2}.reply.wav",
+    ]
+    assert [one.sha256hash for one in recorder.asked] == [
+        sha(path.read_bytes()) for path in expected
+    ]
+    assert [one.trace_id for one in recorder.asked] == [
+        TRACE,
+        TRACE,
+        TURN_TRACE_1,
+        TURN_TRACE_1,
+        TURN_TRACE_2,
+        TURN_TRACE_2,
+    ]
+    assert recorder.kinds == ["audio/wav", "application/json", *["audio/wav"] * 4]
+    assert {one.field for one in recorder.asked} == {"metadata"}
+    # The session's reference is the pair's, unchanged, and each turn
+    # gets one reference with both of its tokens.
+    assert [session for session, _ in traced.referenced] == ["s1"]
+    assert sorted(traced.referenced[0][1]) == ["capture_audio", "capture_manifest"]
+    assert [utterance for utterance, _ in traced.turn_referenced] == [U1, U2]
+    for _, references in traced.turn_referenced:
+        assert sorted(references) == ["heard_audio", "reply_audio"]
+        assert all(
+            token.startswith("@@@langfuseMedia:type=audio/wav|id=")
+            and token.endswith("|source=bytes@@@")
+            for token in references.values()
+        )
+    assert clips_attached(caplog) == 4
+    assert clips_said(caplog) == []
+    assert staged(store.directory) == []
+
+
+@pytest.mark.asyncio
+async def test_a_turn_that_spoke_nothing_files_its_heard_clip_alone(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, endpoint: str
+) -> None:
+    """`reply: null` in the manifest, and in the upload: the heard clip
+    goes, is referenced alone, and counts attached, with nothing said
+    about a clip that never existed."""
+    caplog.set_level(logging.INFO)
+    uploads, recorder, traced = a_traced_uploader(tmp_path)
+    store = capture_store(tmp_path, uploads=uploads)
+
+    a_recording_with_turns(store, "s1", [(U1, False), (U2, True)])
+    store.session_closed("s1")
+    await drained(uploads)
+
+    assert [one.trace_id for one in recorder.asked] == [
+        TRACE,
+        TRACE,
+        TURN_TRACE_1,
+        TURN_TRACE_2,
+        TURN_TRACE_2,
+    ]
+    assert [(u, sorted(refs)) for u, refs in traced.turn_referenced] == [
+        (U1, ["heard_audio"]),
+        (U2, ["heard_audio", "reply_audio"]),
+    ]
+    assert clips_attached(caplog) == 3
+    assert clips_said(caplog) == []
+
+
+@pytest.mark.asyncio
+async def test_a_recording_with_no_turns_says_nothing_about_clips(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, endpoint: str
+) -> None:
+    """A job that listed no clips has none to miss: the pair, `clips=0`
+    and no warning."""
+    caplog.set_level(logging.INFO)
+    uploads, recorder, _ = a_traced_uploader(tmp_path)
+    store = capture_store(tmp_path, uploads=uploads)
+
+    a_recording(store, "s1")
+    store.session_closed("s1")
+    await drained(uploads)
+
+    assert len(recorder.asked) == 2
+    assert clips_attached(caplog) == 0
+    assert clips_said(caplog) == []
+
+
+@pytest.mark.asyncio
+async def test_a_turn_with_no_retained_trace_is_unfiled_and_never_on_the_session(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, endpoint: str
+) -> None:
+    """A turn the exporter holds no context for: its clips count
+    unfiled, are never asked for, and are never attached to the session
+    trace as a consolation. The reason is absent, since nothing
+    failed."""
+    caplog.set_level(logging.INFO)
+    uploads, recorder, traced = a_traced_uploader(tmp_path, turns={U2: TURN_TRACE_2})
+    store = capture_store(tmp_path, uploads=uploads)
+
+    a_recording_with_turns(store, "s1", [(U1, True), (U2, True)])
+    store.session_closed("s1")
+    await drained(uploads)
+
+    assert [one.trace_id for one in recorder.asked] == [
+        TRACE,
+        TRACE,
+        TURN_TRACE_2,
+        TURN_TRACE_2,
+    ]
+    assert [sorted(refs) for _, refs in traced.referenced] == [
+        ["capture_audio", "capture_manifest"]
+    ]
+    assert [u for u, _ in traced.turn_referenced] == [U2]
+    assert clips_attached(caplog) == 2
+    incomplete(caplog, attached=2, unfiled=2)
+
+
+def a_refusal_at(call: int, failure: BaseException) -> Any:
+    """A far side that answers the Nth request for an upload URL with
+    `failure` and every other with bytes it already holds."""
+
+    def answering(asked: Any) -> BaseException | None:
+        del asked
+        answering.calls += 1  # type: ignore[attr-defined]
+        return failure if answering.calls == call else None  # type: ignore[attr-defined]
+
+    answering.calls = 0  # type: ignore[attr-defined]
+    return answering
+
+
+@pytest.mark.asyncio
+async def test_a_refused_reply_clip_keeps_its_heard_clip_and_the_next_turn(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, endpoint: str
+) -> None:
+    """The second clip of a turn refused: the first clip's token is
+    still referenced and counts attached, the refused one counts failed
+    under `refused`, and the next turn's clips are still tried."""
+    caplog.set_level(logging.INFO)
+    seam, recorder = fake_sdk(answering=a_refusal_at(4, ApiError(status_code=403)))
+    uploads, _, traced = a_traced_uploader(tmp_path, sdk=seam, recorder=recorder)
+    store = capture_store(tmp_path, uploads=uploads)
+
+    a_recording_with_turns(store, "s1", [(U1, True), (U2, True)])
+    store.session_closed("s1")
+    await drained(uploads)
+
+    assert len(recorder.asked) == 6
+    assert [(u, sorted(refs)) for u, refs in traced.turn_referenced] == [
+        (U1, ["heard_audio"]),
+        (U2, ["heard_audio", "reply_audio"]),
+    ]
+    assert clips_attached(caplog) == 3
+    incomplete(caplog, attached=3, failed=1, reason="refused")
+
+
+@pytest.mark.asyncio
+async def test_a_refused_first_clip_stops_nothing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, endpoint: str
+) -> None:
+    """A refusal is about the clip, not the backend, so every clip
+    after it is still tried and not retried itself."""
+    caplog.set_level(logging.INFO)
+    seam, recorder = fake_sdk(answering=a_refusal_at(3, ApiError()))
+    uploads, _, traced = a_traced_uploader(
+        tmp_path, sdk=seam, recorder=recorder, retries=2
+    )
+    store = capture_store(tmp_path, uploads=uploads)
+
+    a_recording_with_turns(store, "s1", [(U1, True), (U2, True)])
+    store.session_closed("s1")
+    await drained(uploads)
+
+    assert len(recorder.asked) == 6, "a refusal was retried, or stopped the clips"
+    assert [(u, sorted(refs)) for u, refs in traced.turn_referenced] == [
+        (U1, ["reply_audio"]),
+        (U2, ["heard_audio", "reply_audio"]),
+    ]
+    incomplete(caplog, attached=3, failed=1, reason="refused")
+
+
+@pytest.mark.asyncio
+async def test_a_clip_over_the_backends_ceiling_says_so(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, endpoint: str
+) -> None:
+    """`too_large`, from the far side's own 413, and like any refusal it
+    stops nothing."""
+    caplog.set_level(logging.INFO)
+    seam, recorder = fake_sdk(answering=a_refusal_at(5, ApiError(status_code=413)))
+    uploads, _, _ = a_traced_uploader(tmp_path, sdk=seam, recorder=recorder)
+    store = capture_store(tmp_path, uploads=uploads)
+
+    a_recording_with_turns(store, "s1", [(U1, True), (U2, True)])
+    store.session_closed("s1")
+    await drained(uploads)
+
+    assert len(recorder.asked) == 6
+    incomplete(caplog, attached=3, failed=1, reason="too_large")
+
+
+@pytest.mark.asyncio
+async def test_a_backend_gone_after_its_retries_skips_every_later_clip(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, endpoint: str
+) -> None:
+    """A retryable failure that survived its retries means the backend
+    went away: that clip is failed, every clip after it is skipped and
+    never asked for, and the pair's references stand."""
+    caplog.set_level(logging.INFO)
+    down = ApiError(status_code=503)
+
+    def answering(asked: Any) -> BaseException | None:
+        # The pair lands; from the first clip on, the backend is down.
+        return down if asked.trace_id != TRACE else None
+
+    seam, recorder = fake_sdk(answering=answering)
+    uploads, _, traced = a_traced_uploader(
+        tmp_path, sdk=seam, recorder=recorder, retries=1
+    )
+    store = capture_store(tmp_path, uploads=uploads)
+
+    a_recording_with_turns(store, "s1", [(U1, True), (U2, True)])
+    store.session_closed("s1")
+    await drained(uploads)
+
+    # The pair, then the first clip twice (one retry), then nothing.
+    assert [one.trace_id for one in recorder.asked] == [
+        TRACE,
+        TRACE,
+        TURN_TRACE_1,
+        TURN_TRACE_1,
+    ]
+    assert [sorted(refs) for _, refs in traced.referenced] == [
+        ["capture_audio", "capture_manifest"]
+    ]
+    assert traced.turn_asked == []
+    assert clips_attached(caplog) == 0
+    incomplete(caplog, attached=0, failed=1, skipped=3, reason="unreachable")
+
+
+@pytest.mark.asyncio
+async def test_a_turn_whose_reference_is_refused_counts_its_clips_unreferenced(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, endpoint: str
+) -> None:
+    """Both clips of the turn landed and nothing points at them: one
+    reference was asked for with both tokens, it answered False, and
+    both count failed under `unreferenced`, none attached."""
+    caplog.set_level(logging.INFO)
+    uploads, recorder, traced = a_traced_uploader(tmp_path, refusing_turns=frozenset({U1}))
+    store = capture_store(tmp_path, uploads=uploads)
+
+    a_recording_with_turns(store, "s1", [(U1, True), (U2, True)])
+    store.session_closed("s1")
+    await drained(uploads)
+
+    assert len(recorder.asked) == 6
+    assert [(u, sorted(refs)) for u, refs in traced.turn_asked] == [
+        (U1, ["heard_audio", "reply_audio"]),
+        (U2, ["heard_audio", "reply_audio"]),
+    ]
+    assert clips_attached(caplog) == 2
+    incomplete(caplog, attached=2, failed=2, reason="unreferenced")
+
+
+@pytest.mark.asyncio
+async def test_a_staged_clip_that_vanished_is_lost_and_the_rest_still_go(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, endpoint: str
+) -> None:
+    """`staging_lost`, for the one clip, and the job carries on."""
+    caplog.set_level(logging.INFO)
+    uploads, recorder, traced = a_traced_uploader(tmp_path)
+    store = capture_store(tmp_path, uploads=uploads)
+
+    a_recording_with_turns(store, "s1", [(U1, True), (U2, True)])
+    (job_of(store) / "turns" / f"{U1}.heard.wav").unlink()
+    store.session_closed("s1")
+    await drained(uploads)
+
+    assert len(recorder.asked) == 5
+    assert [(u, sorted(refs)) for u, refs in traced.turn_referenced] == [
+        (U1, ["reply_audio"]),
+        (U2, ["heard_audio", "reply_audio"]),
+    ]
+    incomplete(caplog, attached=3, failed=1, reason="staging_lost")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing", ["refused", "staging_lost"])
+async def test_a_failed_pair_tries_no_clip_and_says_only_what_it_always_did(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, endpoint: str, failing: str
+) -> None:
+    """Every clip hangs off the pair, so a job whose pair failed is
+    accounted for by the pair's own failure: exactly the existing
+    warning, and neither the success nor the clip warning."""
+    caplog.set_level(logging.INFO)
+    seam, recorder = fake_sdk(
+        answering=a_refusal_at(1, ApiError()) if failing == "refused" else None
+    )
+    uploads, _, traced = a_traced_uploader(tmp_path, sdk=seam, recorder=recorder)
+    store = capture_store(tmp_path, uploads=uploads)
+
+    a_recording_with_turns(store, "s1", [(U1, True), (U2, True)])
+    if failing == "staging_lost":
+        (job_of(store) / MANIFEST_NAME).unlink()
+    store.session_closed("s1")
+    await drained(uploads)
+
+    assert all(one.trace_id == TRACE for one in recorder.asked)
+    assert traced.turn_asked == []
+    assert reasons(caplog) == [failing]
+    assert uploads_said(caplog) == []
+    assert clips_said(caplog) == []
+
+
+# --- the clips, on the real exporter ------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_each_turns_reference_is_a_capture_span_under_that_turn(
+    tmp_path: Path, endpoint: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Through the real exporter: one `capture` span per turn, in the
+    turn's own trace and a child of the turn span, carrying the two
+    tokens, and the session's own `capture` span where it always was.
+
+    The name is kept on purpose, which is what this asserts too: the
+    Collector's Jaeger branch drops spans by that name, and a new one
+    would send media references down it."""
+    from opentelemetry.trace import format_trace_id
+
+    from tests.support.telemetry import (
+        SESSION,
+        Clock,
+        close_session,
+        finish_reply,
+        finished,
+        open_session,
+        released,
+        session_events,
+        start_turn,
+    )
+    from tests.support.telemetry import exporting as build_exporter
+
+    caplog.set_level(logging.INFO)
+    telemetry, memory = build_exporter()
+    try:
+        clock = Clock()
+        emitted = session_events(clock, telemetry, session=SESSION)
+        open_session(emitted)
+        for utterance in (U1, U2):
+            start_turn(emitted, utterance=utterance)
+            clock.tick(1.0)
+            finish_reply(emitted)
+        close_session(emitted)
+
+        uploads = CaptureUpload(
+            tmp_path / "captures",
+            sdk=fake_sdk()[0],
+            telemetry=telemetry,
+            backlog=4,
+            retries=0,
+            shutdown_timeout_s=10.0,
+        )
+        store = capture_store(tmp_path, uploads=uploads)
+        a_recording_with_turns(store, SESSION, [(U1, True), (U2, True)])
+        store.session_closed(SESSION)
+        await drained(uploads)
+
+        spans = finished(telemetry, memory)
+    finally:
+        released()
+
+    session_span = next(span for span in spans if span.name == "session")
+    turn_spans = [span for span in spans if span.name == "turn"]
+    references = [span for span in spans if span.name == "capture"]
+    assert len(turn_spans) == 2
+    assert len(references) == 3
+    on_session = [
+        span
+        for span in references
+        if span.context.trace_id == session_span.context.trace_id
+    ]
+    assert len(on_session) == 1
+    assert on_session[0].parent.span_id == session_span.context.span_id
+    for turn in turn_spans:
+        (reference,) = [
+            span
+            for span in references
+            if span.context.trace_id == turn.context.trace_id
+        ]
+        assert reference.parent.span_id == turn.context.span_id
+        held = dict(reference.attributes or {})
+        for name in ("heard_audio", "reply_audio"):
+            assert held[f"langfuse.observation.metadata.{name}"].startswith(
+                "@@@langfuseMedia:type=audio/wav|id="
+            )
+        assert held["session.id"] == SESSION
+        assert format_trace_id(turn.context.trace_id) != format_trace_id(
+            session_span.context.trace_id
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_turn_the_exporter_declined_to_open_is_unfiled(
+    tmp_path: Path, endpoint: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#517's sequence through the real exporter: a turn that starts
+    while another is open gets no span, so it has no context to file
+    on. Its clips count unfiled, and no reference lands anywhere for
+    them: not on the session and not on the turn that was open."""
+    from tests.support.telemetry import (
+        SESSION,
+        Clock,
+        close_session,
+        finish_reply,
+        finished,
+        open_session,
+        released,
+        session_events,
+        start_turn,
+    )
+    from tests.support.telemetry import exporting as build_exporter
+
+    caplog.set_level(logging.INFO)
+    telemetry, memory = build_exporter()
+    try:
+        clock = Clock()
+        emitted = session_events(clock, telemetry, session=SESSION)
+        open_session(emitted)
+        start_turn(emitted, utterance=U1)
+        start_turn(emitted, utterance=U2)
+        clock.tick(1.0)
+        finish_reply(emitted)
+        close_session(emitted)
+
+        seam, recorder = fake_sdk()
+        uploads = CaptureUpload(
+            tmp_path / "captures",
+            sdk=seam,
+            telemetry=telemetry,
+            backlog=4,
+            retries=0,
+            shutdown_timeout_s=10.0,
+        )
+        store = capture_store(tmp_path, uploads=uploads)
+        a_recording_with_turns(store, SESSION, [(U1, True), (U2, True)])
+        store.session_closed(SESSION)
+        await drained(uploads)
+
+        spans = finished(telemetry, memory)
+    finally:
+        released()
+
+    assert len(recorder.asked) == 4
+    references = [span for span in spans if span.name == "capture"]
+    assert len(references) == 2
+    tokens = [
+        dict(span.attributes or {}).get("langfuse.observation.metadata.heard_audio")
+        for span in references
+    ]
+    assert len([token for token in tokens if token is not None]) == 1
+    records = [
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "capture_clips_incomplete"
+    ]
+    assert len(records) == 1
+    held = fields_of(records[0])
+    assert (held["attached"], held["unfiled"], held["failed"], held["skipped"]) == (
+        2,
+        2,
+        0,
+        0,
+    )
+    assert "reason" not in held
+
+
+# --- staging the clips ----------------------------------------------------
+
+
+def test_the_clips_are_staged_in_the_same_commit_as_the_pair(tmp_path: Path) -> None:
+    """The job's own `turns/`, holding the capture's clips as links to
+    the same inodes, inside the one directory the rename commits."""
+    uploads, _ = an_uploader(tmp_path)
+    store = capture_store(tmp_path, uploads=uploads)
+
+    capture = a_recording_with_turns(store, "s1", [(U1, True), (U2, False)])
+
+    job = job_of(store)
+    assert sorted(path.name for path in job.iterdir()) == [
+        MANIFEST_NAME,
+        AUDIO_NAME,
+        "turns",
+    ]
+    staged_clips = sorted(path.name for path in (job / "turns").iterdir())
+    assert staged_clips == [f"{U1}.heard.wav", f"{U1}.reply.wav", f"{U2}.heard.wav"]
+    for name in staged_clips:
+        assert (job / "turns" / name).stat().st_ino == (
+            capture.turns_path / name
+        ).stat().st_ino
+    # And nothing half-built is left beside it.
+    assert staged(store.directory) == ["s1"]
+
+
+def test_a_sweep_removes_a_leftover_jobs_clips_with_it(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    uploads, _ = an_uploader(tmp_path)
+    store = capture_store(tmp_path, uploads=uploads)
+    a_recording_with_turns(store, "s1", [(U1, True)])
+    job = job_of(store)
+    assert (job / "turns" / f"{U1}.heard.wav").exists()
+    __import__("os").utime(job, (0, 0))
+
+    sweep_upload_staging(store.directory)
+
+    assert staged(store.directory) == []
+    assert reasons(caplog) == ["abandoned"]
+
+
+# --- an altered staging ---------------------------------------------------
+#
+# A hardlink is not a snapshot, so a staged job is input somebody else
+# may have changed. What the worker sends is decided in process at the
+# staging, and each case below alters the job on disk between the stage
+# and the upload, pointing at a file OUTSIDE the job that holds a
+# credential-shaped sentinel. None of its bytes may reach a request, no
+# request may be made for a file the staging did not put there, and
+# nothing hostile may reach a log line or an event.
+
+
+def outside_file(tmp_path: Path, size: int) -> Path:
+    """The sentinel, padded to `size` so a size check alone cannot tell
+    it from the clip it stands in for."""
+    held = tmp_path / "outside" / "secret.wav"
+    held.parent.mkdir(parents=True, exist_ok=True)
+    held.write_bytes((OUTSIDE * (size // len(OUTSIDE) + 1))[:size])
+    return held
+
+
+def no_sentinel_left(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """The log half of the claim, for one run: neither the sentinel nor
+    where it lives reaches a record, in either format."""
+    rendered = both_formats(caplog)
+    assert OUTSIDE.decode() not in rendered
+    assert str(tmp_path / "outside") not in rendered
+    assert "secret.wav" not in rendered
+    for record in caplog.records:
+        assert OUTSIDE.decode() not in repr(fields_of(record))
+
+
+def alter(job: Path, how: str, outside: Path) -> None:
+    """One altered staging, on the job's first clip or on `turns/`
+    itself."""
+    import os
+    import shutil
+
+    turns = job / "turns"
+    clip = turns / f"{U1}.heard.wav"
+    if how == "turns_symlink_to_sentinels":
+        # A directory of same-named files, every one of them the
+        # sentinel.
+        holding = outside.parent / "turns"
+        holding.mkdir()
+        for leaf in turns.iterdir():
+            shutil.copyfile(outside, holding / leaf.name)
+        shutil.rmtree(turns)
+        turns.symlink_to(holding)
+    elif how == "turns_symlink_to_the_real_clips":
+        # The same inodes, reached through a link: only a refusal to
+        # follow the directory tells this apart from the real `turns/`.
+        moved = outside.parent / "real-turns"
+        turns.rename(moved)
+        turns.symlink_to(moved)
+    elif how == "leaf_symlink":
+        clip.unlink()
+        clip.symlink_to(outside)
+    elif how == "leaf_symlink_to_itself":
+        # A link to another name for the clip's own inode: only the
+        # refusal to follow a leaf link refuses it.
+        kept = outside.parent / "kept.wav"
+        os.link(clip, kept)
+        clip.unlink()
+        clip.symlink_to(kept)
+    elif how == "hard_link_elsewhere":
+        clip.unlink()
+        os.link(outside, clip)
+    elif how == "directory":
+        clip.unlink()
+        clip.mkdir()
+        shutil.copyfile(outside, clip / "secret.wav")
+    elif how == "grown":
+        with clip.open("ab") as grown:
+            grown.write(OUTSIDE)
+    else:
+        raise AssertionError(how)
+
+
+ALTERATIONS = [
+    "turns_symlink_to_sentinels",
+    "turns_symlink_to_the_real_clips",
+    "leaf_symlink",
+    "leaf_symlink_to_itself",
+    "hard_link_elsewhere",
+    "directory",
+    "grown",
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("how", ALTERATIONS)
+async def test_an_altered_clip_is_refused_and_nothing_outside_the_job_goes(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, endpoint: str, how: str
+) -> None:
+    """Each alteration refused as `staging_altered`, the clips it did
+    not touch still filed, and the sentinel's bytes in no request: every
+    request's digest is one of the capture's own files."""
+    caplog.set_level(logging.DEBUG)
+    uploads, recorder, traced = a_traced_uploader(tmp_path)
+    store = capture_store(tmp_path, uploads=uploads)
+    capture = a_recording_with_turns(store, "s1", [(U1, True), (U2, True)])
+    heard = capture.turns_path / f"{U1}.heard.wav"
+    outside = outside_file(tmp_path, heard.stat().st_size)
+    alter(job_of(store), how, outside)
+
+    store.session_closed("s1")
+    await drained(uploads)
+
+    asked = {one.sha256hash for one in recorder.asked}
+    assert asked <= {sha(path.read_bytes()) for path in capture_files(capture)}
+    assert sha(outside.read_bytes()) not in asked
+    no_sentinel_left(tmp_path, caplog)
+    if how.startswith("turns_symlink"):
+        # `turns/` holds every clip, so every clip is refused.
+        assert len(recorder.asked) == 2
+        assert traced.turn_asked == []
+        incomplete(caplog, attached=0, failed=4, reason="staging_altered")
+    else:
+        assert len(recorder.asked) == 5
+        assert [(u, sorted(refs)) for u, refs in traced.turn_referenced] == [
+            (U1, ["reply_audio"]),
+            (U2, ["heard_audio", "reply_audio"]),
+        ]
+        incomplete(caplog, attached=3, failed=1, reason="staging_altered")
+
+
+@pytest.mark.asyncio
+async def test_a_clip_renamed_between_its_check_and_its_read_reads_the_checked_file(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    endpoint: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The window between the identity check and the read, reached
+    through the seam that runs inside it: the checked clip is renamed
+    away and the sentinel put in its place. What goes is the checked
+    clip's bytes, because the read is through the checked descriptor and
+    never through the name again."""
+    import os
+
+    from vinga_server import capture_upload
+
+    caplog.set_level(logging.DEBUG)
+    uploads, recorder, _ = a_traced_uploader(tmp_path)
+    store = capture_store(tmp_path, uploads=uploads)
+    capture = a_recording_with_turns(store, "s1", [(U1, True)])
+    heard = capture.turns_path / f"{U1}.heard.wav"
+    outside = outside_file(tmp_path, heard.stat().st_size)
+    staged_clip = job_of(store) / "turns" / f"{U1}.heard.wav"
+    swapped: list[str] = []
+
+    def rename_it(leaf: str) -> None:
+        if leaf == staged_clip.name and not swapped:
+            staged_clip.rename(staged_clip.with_name("moved.wav"))
+            os.link(outside, staged_clip)
+            swapped.append(leaf)
+
+    monkeypatch.setattr(capture_upload, "_identity_checked", rename_it)
+    store.session_closed("s1")
+    await drained(uploads)
+
+    assert swapped, "the seam never ran, so the window was never reached"
+    assert sha(heard.read_bytes()) in {one.sha256hash for one in recorder.asked}
+    assert sha(outside.read_bytes()) not in {one.sha256hash for one in recorder.asked}
+    assert clips_attached(caplog) == 2
+    assert clips_said(caplog) == []
+
+
+@pytest.mark.asyncio
+async def test_a_rewritten_manifest_chooses_nothing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, endpoint: str
+) -> None:
+    """The staged manifest rewritten in place, keeping its size, to name
+    a traversal, an absolute path and an utterance nobody staged. The
+    pair still goes (its content is what the plan does not guarantee),
+    and the clips asked for are exactly the ones the staging kept: the
+    manifest is never read to choose a file."""
+    caplog.set_level(logging.DEBUG)
+    uploads, recorder, traced = a_traced_uploader(
+        tmp_path, turns={U1: TURN_TRACE_1, U2: TURN_TRACE_2, "cc33" * 8: TRACE}
+    )
+    store = capture_store(tmp_path, uploads=uploads)
+    capture = a_recording_with_turns(store, "s1", [(U1, True), (U2, True)])
+    outside = outside_file(tmp_path, 64)
+    manifest = job_of(store) / MANIFEST_NAME
+    written = manifest.read_bytes()
+    heard_name = f"{U1}.heard.wav"
+    reply_name = f"{U2}.reply.wav"
+    traversal = f"../../../outside/{outside.name}".ljust(len(heard_name), "/")
+    absolute = "/etc/hostname".ljust(len(reply_name), "/")
+    rewritten = (
+        written.replace(heard_name.encode(), traversal.encode())
+        .replace(f'"{U2}"'.encode(), f'"{"cc33" * 8}"'.encode())
+        .replace(reply_name.encode(), absolute.encode())
+    )
+    assert rewritten != written and len(rewritten) == len(written)
+    with manifest.open("r+b") as held:
+        held.write(rewritten)
+
+    store.session_closed("s1")
+    await drained(uploads)
+
+    clips = [
+        capture.turns_path / name
+        for name in (heard_name, f"{U1}.reply.wav", f"{U2}.heard.wav", reply_name)
+    ]
+    asked = [one.sha256hash for one in recorder.asked]
+    assert len(asked) == 6
+    assert asked[0] == sha(capture.wav_path.read_bytes())
+    # The second is the rewritten manifest itself, which goes: what the
+    # inventory guarantees is which inodes are read, not their content.
+    assert asked[1] == sha(rewritten)
+    assert asked[2:] == [sha(path.read_bytes()) for path in clips]
+    assert [u for u, _ in traced.turn_referenced] == [U1, U2]
+    no_sentinel_left(tmp_path, caplog)
+    assert clips_attached(caplog) == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "how", ["leaf_symlink", "hard_link_elsewhere", "directory", "grown"]
+)
+async def test_an_altered_pair_is_lost_and_nothing_outside_the_job_goes(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, endpoint: str, how: str
+) -> None:
+    """The pair read through the same helper, so it gains the same
+    refusals and keeps its one reason for them, `staging_lost`."""
+    import os
+    import shutil
+
+    caplog.set_level(logging.DEBUG)
+    uploads, recorder, _ = a_traced_uploader(tmp_path)
+    store = capture_store(tmp_path, uploads=uploads)
+    capture = a_recording(store, "s1")
+    audio = job_of(store) / AUDIO_NAME
+    outside = outside_file(tmp_path, capture.wav_path.stat().st_size)
+    if how == "leaf_symlink":
+        audio.unlink()
+        audio.symlink_to(outside)
+    elif how == "hard_link_elsewhere":
+        audio.unlink()
+        os.link(outside, audio)
+    elif how == "directory":
+        audio.unlink()
+        audio.mkdir()
+        shutil.copyfile(outside, audio / "secret.wav")
+    else:
+        with audio.open("ab") as grown:
+            grown.write(OUTSIDE)
+
+    store.session_closed("s1")
+    await drained(uploads)
+
+    assert recorder.asked == []
+    assert reasons(caplog) == ["staging_lost"]
+    no_sentinel_left(tmp_path, caplog)
+
+
+# --- what may never leak, from a clip -------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_clips_presigned_url_never_reaches_a_log_or_an_event(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    endpoint: str,
+) -> None:
+    """A clip's upload URL is a credential in a query string, like the
+    pair's. The pair lands; the first clip is answered with a presigned
+    URL whose PUT cannot connect, and the query string is hunted in both
+    log formats, every event field and both streams."""
+    caplog.set_level(logging.DEBUG)
+    presigned = f"http://127.0.0.1:9/put?X-Amz-Signature={SECRET}"
+
+    def answering(asked: Any) -> str | None:
+        return presigned if asked.trace_id == TURN_TRACE_1 else None
+
+    seam, recorder = fake_sdk(answering=answering)
+    uploads, _, _ = a_traced_uploader(tmp_path, sdk=seam, recorder=recorder)
+    store = capture_store(tmp_path, uploads=uploads)
+
+    a_recording_with_turns(store, "s1", [(U1, True), (U2, True)])
+    store.session_closed("s1")
+    await drained(uploads)
+
+    captured = capsys.readouterr()
+    rendered = both_formats(caplog)
+    incomplete(caplog, attached=0, failed=1, skipped=3, reason="unreachable")
+    assert SECRET not in rendered
+    assert SECRET not in captured.err + captured.out
+    for record in caplog.records:
+        assert SECRET not in repr(fields_of(record))

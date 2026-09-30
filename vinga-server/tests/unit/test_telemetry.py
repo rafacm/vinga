@@ -57,6 +57,7 @@ from tests.support.telemetry import (
     assemble_prompt,
     barge_in,
     call_tool,
+    capture_clips_incomplete,
     capture_emitter,
     capture_started,
     capture_upload_failed,
@@ -920,6 +921,63 @@ def test_a_failed_upload_says_why_on_the_trace() -> None:
     held = dict(named(finished(telemetry, memory), "capture_upload_failed").attributes or {})
     assert held["vinga.export.reason"] == "unreachable"
     assert "reason" not in held
+
+
+def test_an_upload_outcome_says_how_many_turn_clips_were_attached() -> None:
+    """`clips`, the one count #496 adds to the pair's success, on the
+    span under the table's own name: the table is iterated rather than
+    searched, so a field left out of it is not exported at all."""
+    telemetry, memory = exporting()
+    a_session(telemetry, SESSION)
+
+    with watching_the_server(telemetry):
+        capture_uploaded(upload_emitter())
+
+    held = dict(named(finished(telemetry, memory), "capture_uploaded").attributes or {})
+    assert held["vinga.export.clips"] == 4
+    assert "clips" not in held
+
+
+def test_turn_clips_that_did_not_all_land_say_so_on_the_session_trace() -> None:
+    """`capture_clips_incomplete` is a post-close outcome like the pair's
+    two: a span on the session's retained trace, under the session span,
+    carrying the four counts and the first failure's reason."""
+    telemetry, memory = exporting()
+    a_session(telemetry, SESSION)
+
+    with watching_the_server(telemetry):
+        capture_clips_incomplete(upload_emitter())
+
+    spans = finished(telemetry, memory)
+    written = named(spans, "capture_clips_incomplete")
+    session_span = named(spans, "session")
+    assert written.context.trace_id == session_span.context.trace_id
+    assert written.parent is not None
+    assert written.parent.span_id == session_span.context.span_id
+    held = dict(written.attributes or {})
+    assert held["vinga.export.attached"] == 3
+    assert held["vinga.export.unfiled"] == 2
+    assert held["vinga.export.failed"] == 1
+    assert held["vinga.export.skipped"] == 5
+    assert held["vinga.export.reason"] == "staging_altered"
+    assert held["vinga.session.id"] == SESSION
+    assert [key for key in held if not key.count(".")] == []
+
+
+def test_turn_clips_that_were_only_unfiled_carry_no_reason() -> None:
+    """Nothing failed, so nothing is said about why: the reason is
+    absent from the event and from its span alike."""
+    telemetry, memory = exporting()
+    a_session(telemetry, SESSION)
+
+    with watching_the_server(telemetry):
+        capture_clips_incomplete(upload_emitter(), reason=False)
+
+    held = dict(
+        named(finished(telemetry, memory), "capture_clips_incomplete").attributes or {}
+    )
+    assert held["vinga.export.unfiled"] == 2
+    assert "vinga.export.reason" not in held
 
 
 def test_a_content_attachment_outcome_remains_on_the_session_trace() -> None:

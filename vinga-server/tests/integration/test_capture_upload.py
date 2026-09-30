@@ -10,9 +10,11 @@ real Langfuse SDK talking to a media endpoint running on a socket in
 this process. What that certifies is the HTTP round trip the SDK
 actually makes and the shape of the request it makes it with, which a
 fake client asserts nothing about: three requests per attachment, the
-presigned PUT among them, exactly two attachments and their MIME types,
-a WAV whose header has its length patched in, a manifest that says it is
-complete, and no request anywhere carrying the decision track.
+presigned PUT among them, the pair and then the turn's two clips against
+the turn's own trace (#496), their MIME types, a WAV whose header has
+its length patched in, a manifest that says it is complete, and no
+request anywhere carrying the decision track or any file the manifest
+does not list.
 
 **The hostile backend.** One that accepts the connection and never
 answers, which is the failure a naive uploader has no answer for: the
@@ -50,16 +52,20 @@ from tests.support.telemetry import Receiver, attributes, named
 from tests.support.uploads import exporting
 from vinga_server.capture_upload import (
     _QUIETING,
-    AUDIO_NAME,
     LANGFUSE_HOST_ENV,
     LANGFUSE_PUBLIC_KEY_ENV,
     LANGFUSE_SECRET_KEY_ENV,
-    MANIFEST_NAME,
     CaptureUpload,
     staging_root,
 )
 from vinga_server.config import Config
-from vinga_server.config.models import CaptureConfig, ServerConfig, TelemetryConfig
+from vinga_server.config.models import (
+    CaptureConfig,
+    ConversationsConfig,
+    ServerConfig,
+    TelemetryConfig,
+)
+from vinga_server.telemetry import TURN_INPUT
 
 pytestmark = pytest.mark.asyncio
 
@@ -231,23 +237,32 @@ async def test_a_recorded_session_is_attached_to_its_trace(
     async with serve(attaching(captures)) as port:
         await simulate(port, DEVICE_MAC)
         manifest = await a_finished_capture(captures)
-        await uploaded(media, 2)
+        await uploaded(media, 4)
 
     asked = [json.loads(body) for _, _, body in media.of("POST")]
+    written = json.loads(manifest.read_text(encoding="utf-8"))
+    (turn,) = written["capture"]["turns"]
+    clips = manifest.with_suffix(".turns")
 
-    # Exactly two attachments, and their kinds.
-    assert len(asked) == 2
-    assert [one["contentType"] for one in asked] == ["audio/wav", "application/json"]
-    # Both against one trace, which is the whole point of the surface,
-    # and in the spelling the media API takes: thirty-two hex characters.
-    traces = {one["traceId"] for one in asked}
-    assert len(traces) == 1
-    trace = traces.pop()
+    # The pair, then the one turn's two clips, and their kinds.
+    assert len(asked) == 4
+    assert [one["contentType"] for one in asked] == ["audio/wav", "application/json"] + [
+        "audio/wav"
+    ] * 2
+    # The pair against one trace, which is the whole point of the
+    # surface, in the spelling the media API takes: thirty-two hex
+    # characters. The clips against ANOTHER, the turn's own, since a
+    # turn is a trace of its own linked to the session.
+    trace = asked[0]["traceId"]
+    assert asked[1]["traceId"] == trace
     assert len(trace) == 32 and int(trace, 16) >= 0
+    turn_trace = asked[2]["traceId"]
+    assert asked[3]["traceId"] == turn_trace
+    assert turn_trace != trace and len(turn_trace) == 32
     # The presigned PUT is a real request to a real URL, and it is the
-    # bytes of the two files.
-    assert len(media.of("PUT")) == 2
-    assert len(media.of("PATCH")) == 2
+    # bytes of the files.
+    assert len(media.of("PUT")) == 4
+    assert len(media.of("PATCH")) == 4
     audio = media.of("PUT")[0][2]
     assert audio.startswith(b"RIFF")
     # The header's two length fields are patched on a clean close, so a
@@ -255,19 +270,23 @@ async def test_a_recorded_session_is_attached_to_its_trace(
     assert int.from_bytes(audio[40:44], "little") == len(audio) - 44
     assert int.from_bytes(audio[4:8], "little") == len(audio) - 8
     # And the manifest that went is the final one.
-    written = json.loads(media.of("PUT")[1][2])
-    assert written["capture"]["complete"] is True
-    assert written == json.loads(manifest.read_text(encoding="utf-8"))
+    went = json.loads(media.of("PUT")[1][2])
+    assert went["capture"]["complete"] is True
+    assert went == written
     # The decision track never leaves. Asserted on its CONTENT rather
     # than on its name, because the manifest legitimately names the
     # file beside it: what may not go is the track's own lines, and
     # every one of them carries the offset that indexes into the WAV.
     track = manifest.with_suffix(".jsonl").read_bytes()
     assert track, "the capture wrote no decision track, so this asserts nothing"
-    assert {body for _, _, body in media.of("PUT")} == {
+    # And nothing goes that the manifest does not list: the PUT bodies
+    # are exactly the pair and the clips its `capture.turns` names.
+    assert [body for _, _, body in media.of("PUT")] == [
         manifest.with_suffix(".wav").read_bytes(),
         manifest.read_bytes(),
-    }
+        (clips / turn["heard"]).read_bytes(),
+        (clips / turn["reply"]).read_bytes(),
+    ]
     assert not any(b'"t_ms"' in body for _, _, body in media.requests)
     assert all(one["field"] == "metadata" for one in asked)
     # And the staging is empty, because a job nobody will run again is
@@ -304,16 +323,20 @@ async def test_the_uploaded_pair_is_referenced_on_the_session_trace(
         async with serve(attaching(captures)) as port:
             await simulate(port, DEVICE_MAC)
             await a_finished_capture(captures)
-            await uploaded(media, 2)
+            await uploaded(media, 4)
         spans = collector.spans()
     finally:
         collector.close()
 
     minted = media.minted
-    assert len(minted) == 2
+    assert len(minted) == 4
     assert spans, "nothing reached the collector at all"
 
-    written = named(spans, "capture")
+    session_span = named(spans, "session")
+    turn_span = named(spans, "turn")
+    references = [span for span in spans if span.name == "capture"]
+    assert len(references) == 2
+    (written,) = [one for one in references if one.trace_id == session_span.trace_id]
     held = attributes(written)
     # Both tokens, in the backend's own spelling, naming the ids the
     # endpoint minted a moment earlier.
@@ -327,12 +350,23 @@ async def test_the_uploaded_pair_is_referenced_on_the_session_trace(
     # In the session's own trace and under the session span, which is
     # what makes a reader looking at the session find it rather than a
     # player in a trace nobody opens.
-    session_span = named(spans, "session")
-    assert written.trace_id == session_span.trace_id
     assert written.parent_span_id == session_span.span_id
     # And it groups with the session, so the query a reader makes for
     # that session returns it beside the turns.
     assert held["session.id"] == attributes(session_span)["session.id"]
+
+    # The turn's two clips, referenced once in the turn's own trace and
+    # under the turn span, under the same `capture` name: the
+    # Collector's Jaeger branch drops spans by that name, which is what
+    # keeps media references out of it.
+    (on_turn,) = [one for one in references if one.trace_id == turn_span.trace_id]
+    assert on_turn.parent_span_id == turn_span.span_id
+    turn_held = attributes(on_turn)
+    for name, media_id in (("heard_audio", minted[2]), ("reply_audio", minted[3])):
+        token = f"@@@langfuseMedia:type=audio/wav|id={media_id}|source=bytes@@@"
+        assert turn_held[f"langfuse.observation.metadata.{name}"] == token
+        assert token in turn_held["langfuse.observation.output"]
+    assert turn_held["session.id"] == attributes(session_span)["session.id"]
 
 
 async def test_the_upload_outcome_reaches_the_collector_too(
@@ -359,7 +393,7 @@ async def test_the_upload_outcome_reaches_the_collector_too(
         async with serve(attaching(captures)) as port:
             await simulate(port, DEVICE_MAC)
             manifest = await a_finished_capture(captures)
-            await uploaded(media, 2)
+            await uploaded(media, 4)
         spans = collector.spans()
     finally:
         collector.close()
@@ -386,9 +420,96 @@ async def test_the_upload_outcome_reaches_the_collector_too(
     )
     assert held["vinga.export.manifest_bytes"] == manifest.stat().st_size
     assert held["vinga.export.elapsed_ms"] >= 0
+    # And the turn's two clips, attached and referenced.
+    assert held["vinga.export.clips"] == 2
     # No failure went out beside it, which is what makes the success
     # reading a reading rather than a coincidence.
     assert [span for span in spans if span.name == "capture_upload_failed"] == []
+    assert [span for span in spans if span.name == "capture_clips_incomplete"] == []
+
+
+# --- the two content flags, apart (#496) ---------------------------------
+#
+# `export_audio` sends audio and its metadata, and nothing else;
+# `export_transcripts` sends what was said, and nothing else. The
+# (audio, transcript, model) item a turn's trace holds with both on is
+# two decisions, and each of these cases makes one of them.
+
+HEARD = "the words the turn heard 0FLAG-INDEPENDENCE-SENTINEL"
+
+
+def both_surfaces(captures: Path, *, audio: bool, transcripts: bool) -> Config:
+    return Config(
+        providers={
+            **MOCK_PROVIDERS,
+            "asr": {"mock": {"type": "mock", "text": HEARD}},
+        },
+        agents={"assistant": MOCK_AGENT},
+        default_agent="assistant",
+        server=ServerConfig(
+            capture=CaptureConfig(enabled=True, dir=captures),
+            conversations=ConversationsConfig(enabled=True, text=True),
+            telemetry=TelemetryConfig(
+                enabled=True, export_audio=audio, export_transcripts=transcripts
+            ),
+        ),
+    )
+
+
+async def test_audio_alone_files_the_clips_and_exports_no_transcript(
+    serve, simulate, tmp_path: Path, media: Media, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captures = tmp_path / "captures"
+    monkeypatch.setenv(LANGFUSE_HOST_ENV, media.url)
+    monkeypatch.setenv(LANGFUSE_PUBLIC_KEY_ENV, "pk-lf-test")
+    monkeypatch.setenv(LANGFUSE_SECRET_KEY_ENV, "sk-lf-test")
+    collector = Receiver()
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.endpoint)
+
+    try:
+        async with serve(both_surfaces(captures, audio=True, transcripts=False)) as port:
+            await simulate(port, DEVICE_MAC)
+            await a_finished_capture(captures)
+            await uploaded(media, 4)
+        spans = collector.spans()
+        bodies = list(collector.bodies)
+    finally:
+        collector.close()
+
+    assert len(media.of("POST")) == 4
+    turn = named(spans, "turn")
+    assert TURN_INPUT not in attributes(turn)
+    assert not any(HEARD.encode() in body for body in bodies)
+    assert not any(HEARD.encode() in body for _, _, body in media.requests)
+
+
+async def test_transcripts_alone_export_the_words_and_stage_no_clip(
+    serve, simulate, tmp_path: Path, media: Media, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captures = tmp_path / "captures"
+    monkeypatch.setenv(LANGFUSE_HOST_ENV, media.url)
+    monkeypatch.setenv(LANGFUSE_PUBLIC_KEY_ENV, "pk-lf-test")
+    monkeypatch.setenv(LANGFUSE_SECRET_KEY_ENV, "sk-lf-test")
+    collector = Receiver()
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.endpoint)
+
+    try:
+        async with serve(both_surfaces(captures, audio=False, transcripts=True)) as port:
+            await simulate(port, DEVICE_MAC)
+            manifest = await a_finished_capture(captures)
+        spans = collector.spans()
+    finally:
+        collector.close()
+
+    # The capture kept its clips locally, and none of it was staged or
+    # asked for.
+    written = json.loads(manifest.read_text(encoding="utf-8"))
+    assert len(written["capture"]["turns"]) == 1
+    assert media.requests == []
+    root = staging_root(captures)
+    assert not root.exists() or list(root.iterdir()) == []
+    assert attributes(named(spans, "turn"))[TURN_INPUT] == HEARD
+    assert [span for span in spans if span.name == "capture"] == []
 
 
 # --- the hostile backend ----------------------------------------------
@@ -450,12 +571,15 @@ class Withholding:
         self._thread.join(timeout=5.0)
 
 
-def a_staged_pair(directory: Path, session: str) -> None:
-    """One job on disk in the shape a close would have left it."""
-    job = staging_root(directory) / session
-    job.mkdir(parents=True)
-    (job / AUDIO_NAME).write_bytes(b"RIFF" + bytes(40) + b"\x00" * 64)
-    (job / MANIFEST_NAME).write_text(json.dumps({"capture": {"complete": True}}))
+def a_staged_pair(uploads: CaptureUpload, directory: Path, session: str) -> None:
+    """One pair, written where a capture would have written it and
+    staged the way a close stages it."""
+    directory.mkdir(parents=True, exist_ok=True)
+    audio = directory / f"{session}.wav"
+    manifest = directory / f"{session}.json"
+    audio.write_bytes(b"RIFF" + bytes(40) + b"\x00" * 64)
+    manifest.write_text(json.dumps({"capture": {"complete": True}}))
+    uploads.stage(session, audio, manifest)
 
 
 async def test_a_backend_that_never_answers_costs_three_bounded_things(
@@ -493,8 +617,7 @@ async def test_a_backend_that_never_answers_costs_three_bounded_things(
         backoff_s=0.1,
         shutdown_timeout_s=1.0,
     )
-    a_staged_pair(tmp_path / "captures", "s1")
-    uploads._staged["s1"] = staging_root(tmp_path / "captures") / "s1"
+    a_staged_pair(uploads, tmp_path / "captures", "s1")
 
     try:
         began = time.monotonic()
@@ -567,8 +690,7 @@ async def test_the_real_sdk_says_nothing_after_the_shutdowns_bound(
         backoff_s=0.0,
         shutdown_timeout_s=0.2,
     )
-    a_staged_pair(tmp_path / "captures", "s1")
-    uploads._staged["s1"] = staging_root(tmp_path / "captures") / "s1"
+    a_staged_pair(uploads, tmp_path / "captures", "s1")
 
     try:
         uploads.session_closed("s1")

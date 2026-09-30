@@ -720,6 +720,33 @@ def capture_uploaded(emitter: ServerEvents, session: str = SESSION) -> None:
             manifest_bytes=Count(1258),
             elapsed_ms=Whole(412),
             megabytes=Real(0.17),
+            clips=Count(4),
+        )
+    )
+
+
+def capture_clips_incomplete(
+    emitter: ServerEvents, session: str = SESSION, *, reason: bool = True
+) -> None:
+    """A job whose pair landed and some of whose turn clips did not (#496),
+    with the first failed clip's reason, or none where nothing failed.
+
+    Imported here rather than at the top, so the suites that never say
+    it do not depend on its declaration."""
+    from vinga_server.events.catalog import CaptureClipsIncomplete
+    from vinga_server.events.values import ClipFilingFailure
+
+    extra: dict[str, Any] = (
+        {"reason": ClipFilingFailure.STAGING_ALTERED} if reason else {}
+    )
+    emitter.emit(
+        lambda: CaptureClipsIncomplete(
+            session=SessionId(session),
+            attached=Count(3),
+            unfiled=Count(2),
+            failed=Count(1),
+            skipped=Count(5),
+            **extra,
         )
     )
 
