@@ -9,10 +9,12 @@ audio, and that the manifest says what the capture was made against.
 """
 
 import asyncio
+import itertools
 import json
 import logging
 import struct
 import wave
+from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -20,16 +22,28 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.support.configs import (
+    BOTH_MAC,
     DEVICE_MAC,
     DEVICE_UUID,
     FRAME_BYTES,
     FRAME_MS,
+    base_config,
     config_with_agent,
     world,
 )
 from tests.support.events import both_formats
-from tests.support.providers import built_world
-from tests.support.sessions import attached_capture, drive_reply
+from tests.support.providers import ScriptedLlm, built_world
+from tests.support.sessions import (
+    agent_providers,
+    attached_capture,
+    call,
+    drive_reply,
+    end_utterance,
+    handshaken,
+    plant_utterance,
+    start_reply,
+    wait_for_reply,
+)
 from tests.support.sockets import LoopingSocket
 from tests.support.stores import memory as lane_memory
 from tests.support.wire import (
@@ -44,11 +58,22 @@ from tests.support.wire import (
 from vinga_server.app import create_app
 from vinga_server.audio.opus import OpusEncoder
 from vinga_server.capture import CAPTURE_RATE, CaptureStore
+from vinga_server.config import Config
 from vinga_server.device import recording as recording_module
 from vinga_server.device.recording import recordings
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import SESSION_LOGGER
 from vinga_server.protocol import framing
+from vinga_server.providers import (
+    AsrResult,
+    LlmEvent,
+    LlmProvider,
+    TextDelta,
+    ToolChoice,
+    ToolDef,
+    Turn,
+)
+from vinga_server.providers.mock import MockAsr
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
 from vinga_server.tools.mcp import McpServers
 
@@ -504,3 +529,273 @@ async def test_a_capture_whose_codecs_will_not_open_is_released_and_the_session_
     printed = capsys.readouterr()
     assert CODEC_SENTINEL not in printed.out + printed.err
     assert CODEC_CLASS_SENTINEL not in printed.out + printed.err
+
+
+# --- each turn's two clips, from a served session (#496) ---------------
+#
+# The writer's own suite proves the cut against a schedule it controls.
+# These prove the wiring: that a turn's heard clip is the exact bytes
+# its ASR was handed, whichever call handed them (the reply's own
+# transcription, or the barge-in gate's confirmation the reply reuses),
+# that a turn the gate turned away gets none, that a handover's two
+# replies under one utterance are one clip, and that what a real reply
+# paced out is channel 1 of the WAV between the offsets the manifest
+# records.
+
+
+class HeardAsr(MockAsr):
+    """The mock ASR, keeping every buffer it was handed, which is the
+    one place outside the pipeline where what the ear heard is visible."""
+
+    def __init__(self) -> None:
+        super().__init__(text="hello")
+        self.handed: list[bytes] = []
+
+    async def transcribe(
+        self, pcm: bytes, sample_rate: int, language_hint: str | None = None
+    ) -> AsrResult:
+        self.handed.append(bytes(pcm))
+        return await super().transcribe(pcm, sample_rate, language_hint)
+
+
+class SpeaksThenHangs(LlmProvider):
+    """A first reply that says one sentence and then hangs until it is
+    cancelled, and every later one answering at once."""
+
+    def __init__(self) -> None:
+        self.replies = 0
+        self.hanging = asyncio.Event()
+
+    async def stream(
+        self,
+        system: str,
+        history: Sequence[Turn],
+        tools: Sequence[ToolDef] = (),
+        tool_choice: ToolChoice = "auto",
+    ) -> AsyncIterator[LlmEvent]:
+        self.replies += 1
+        if self.replies == 1:
+            # The start of a second sentence is what tells the splitter
+            # the first one is finished, so the first is spoken while
+            # this hangs.
+            yield TextDelta("Interrupted now. And")
+            self.hanging.set()
+            await asyncio.sleep(30)
+            return
+        yield TextDelta("Answered.")
+
+
+async def a_served_capture(
+    tmp_path: Path,
+    config: Config,
+    *,
+    mac: str = DEVICE_MAC,
+    scripts: dict[str, Any] | None = None,
+    asr: Any = None,
+) -> tuple[DeviceSession, LoopingSocket, asyncio.Task[None]]:
+    """A session built the way `ws.py` builds one, recording into a
+    capture store, with its engines substituted before it is built, its
+    `run` in flight and its hello exchanged."""
+    captures = CaptureStore(tmp_path / "captures", 900.0, 2000.0, 0.0)
+    stages = {"asr": asr} if asr is not None else None
+    generations = world(config, providers=agent_providers(config, scripts, stages))
+    factory = bespoke_runtime_factory(generations, McpServers({}), lane_memory(), None)
+    websocket = LoopingSocket()
+    websocket.headers["device-id"] = mac
+    session = DeviceSession(cast(Any, websocket), generations, factory, recordings(captures))
+    task = asyncio.create_task(session.run())
+    await handshaken(session, websocket)
+    return session, websocket, task
+
+
+async def closed(websocket: LoopingSocket, task: asyncio.Task[None]) -> None:
+    await websocket.close(1000, "goodbye")
+    await asyncio.wait_for(task, timeout=10)
+
+
+def turn_clips(tmp_path: Path) -> tuple[Path, list[dict]]:
+    """The one capture's turns directory and its manifest's turns."""
+    wav, _, manifest_path = only_capture(tmp_path)
+    turns = json.loads(manifest_path.read_text())["capture"]["turns"]
+    return wav.with_suffix(".turns"), turns
+
+
+def mono(path: Path) -> bytes:
+    with wave.open(str(path), "rb") as handle:
+        assert handle.getnchannels() == 1
+        assert handle.getframerate() == CAPTURE_RATE
+        assert handle.getsampwidth() == 2
+        return handle.readframes(handle.getnframes())
+
+
+def reply_cut(wav: Path, turn: dict) -> bytes:
+    """Channel 1 of the finished WAV between a turn's two recorded
+    offsets."""
+    with wave.open(str(wav), "rb") as handle:
+        data = handle.readframes(handle.getnframes())
+    right = bytearray(len(data) // 2)
+    right[0::2] = data[2::4]
+    right[1::2] = data[3::4]
+    per_ms = CAPTURE_RATE // 1000
+    return bytes(right)[
+        int(turn["reply_from_ms"] * per_ms) * 2 : int(turn["reply_to_ms"] * per_ms) * 2
+    ]
+
+
+def samples_of(pcm: bytes) -> list[int]:
+    return list(struct.unpack(f"<{len(pcm) // 2}h", pcm))
+
+
+async def until_speaking(session: DeviceSession, llm: SpeaksThenHangs) -> None:
+    """Wait until the first reply is hanging with its sentence going out,
+    and then long enough for some of it to have been paced."""
+    await asyncio.wait_for(llm.hanging.wait(), 5)
+    for _ in range(500):
+        if session.speaking_started_at() is not None:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        raise AssertionError("the first reply never spoke")
+    await asyncio.sleep(0.25)
+
+
+# Two utterances a listener could tell apart, so a clip that is the
+# wrong one of them is a failure rather than a coincidence.
+FIRST_WORDS = speech_pcm(400)
+SECOND_WORDS = bytes(reversed(speech_pcm(300)))
+
+
+async def test_each_turns_heard_clip_is_what_its_asr_was_handed(tmp_path: Path) -> None:
+    """Two ordinary turns: each clip's data chunk is the bytes the ear
+    was handed, its length is the turn's `heard.duration_s`, and each
+    reply clip is channel 1 of the WAV between its recorded offsets."""
+    ears = HeardAsr()
+    session, websocket, task = await a_served_capture(
+        tmp_path, capturing_config(tmp_path), asr=ears
+    )
+    start_reply(session, FIRST_WORDS)
+    await wait_for_reply(session)
+    start_reply(session, SECOND_WORDS)
+    await wait_for_reply(session)
+    await closed(websocket, task)
+
+    assert ears.handed == [FIRST_WORDS, SECOND_WORDS]
+    turns_path, turns = turn_clips(tmp_path)
+    wav, jsonl, _ = only_capture(tmp_path)
+    started = [e["utterance"] for e in events(jsonl) if e["event"] == "turn_started"]
+    heard = [e["duration_s"] for e in events(jsonl) if e["event"] == "heard"]
+    assert [turn["utterance"] for turn in turns] == started
+    for turn, handed, duration_s in zip(turns, ears.handed, heard, strict=True):
+        clip = mono(turns_path / turn["heard"])
+        assert clip == handed
+        assert round(len(clip) / 2 / CAPTURE_RATE, 2) == duration_s
+        assert turn["reply"] is not None, "a turn that answered kept no reply clip"
+        reply = mono(turns_path / turn["reply"])
+        assert loudest(samples_of(reply)) > 0
+        assert reply_cut(wav, turn) == reply
+
+
+async def test_a_confirmed_barge_in_keeps_the_gates_bytes_as_its_one_clip(
+    tmp_path: Path,
+) -> None:
+    """The interrupting turn never transcribes: it reuses the gate's
+    confirmation of its own audio. Its clip is the bytes the gate was
+    handed, it is one clip, and the interrupted reply's paced frames stay
+    with the turn that sent them."""
+    ears = HeardAsr()
+    llm = SpeaksThenHangs()
+    session, websocket, task = await a_served_capture(
+        tmp_path,
+        capturing_config(tmp_path, barge_in_min_speech_ms=0.0),
+        scripts={"assistant": llm},
+        asr=ears,
+    )
+    start_reply(session, FIRST_WORDS)
+    await until_speaking(session, llm)
+    plant_utterance(session, SECOND_WORDS)
+    await end_utterance(session, endpointed=True)
+    await wait_for_reply(session)
+    await closed(websocket, task)
+
+    # The reply's own transcription, then the gate's; nothing a third
+    # time, which is what "reuses its transcription" means.
+    assert len(ears.handed) == 2
+    turns_path, turns = turn_clips(tmp_path)
+    wav, jsonl, _ = only_capture(tmp_path)
+    started = [e for e in events(jsonl) if e["event"] == "turn_started"]
+    assert [e["barge_in"] for e in started] == [False, True]
+    assert [turn["utterance"] for turn in turns] == [e["utterance"] for e in started]
+    interrupted, interrupting = turns
+    assert mono(turns_path / interrupted["heard"]) == ears.handed[0]
+    assert mono(turns_path / interrupting["heard"]) == ears.handed[1]
+    heard_clips = sorted(p.name for p in turns_path.iterdir() if p.name.endswith(".heard.wav"))
+    assert len(heard_clips) == 2
+    for turn in turns:
+        reply = mono(turns_path / turn["reply"])
+        assert loudest(samples_of(reply)) > 0
+        assert reply_cut(wav, turn) == reply
+    assert interrupted["reply_to_ms"] <= interrupting["reply_from_ms"]
+
+
+async def test_a_barge_in_the_gate_turned_away_keeps_no_clip(tmp_path: Path) -> None:
+    """A candidate under the speech floor never starts a turn, so it
+    leaves nothing in the turns directory."""
+    ears = HeardAsr()
+    llm = SpeaksThenHangs()
+    session, websocket, task = await a_served_capture(
+        tmp_path,
+        capturing_config(tmp_path, barge_in_min_speech_ms=5000.0),
+        scripts={"assistant": llm},
+        asr=ears,
+    )
+    start_reply(session, FIRST_WORDS)
+    await until_speaking(session, llm)
+    plant_utterance(session, SECOND_WORDS)
+    await end_utterance(session, endpointed=True)
+    await closed(websocket, task)
+
+    assert ears.handed == [FIRST_WORDS]
+    turns_path, turns = turn_clips(tmp_path)
+    assert len(turns) == 1
+    (heard,) = [p for p in turns_path.iterdir() if p.name.endswith(".heard.wav")]
+    assert mono(heard) == FIRST_WORDS
+
+
+def zero_crossings(samples: list[int]) -> int:
+    return sum(1 for a, b in itertools.pairwise(samples) if (a < 0) != (b < 0))
+
+
+async def test_a_handover_is_one_reply_clip_with_both_voices_in_order(
+    tmp_path: Path,
+) -> None:
+    """Two replies under one utterance (#502 M4a's 2:1 case): the clip is
+    keyed by the utterance, so the poet's audio and then the tutor's are
+    one clip and one manifest entry. The two mock voices are an octave
+    apart, which is what tells them apart in the decoded audio."""
+    poet = ScriptedLlm([["Poet speaking first.", call("switch_agent", agent="tutor")]])
+    tutor = ScriptedLlm([["Tutor here now."]])
+    config = base_config(
+        server={"capture": {"enabled": True, "dir": str(tmp_path / "captures")}}
+    )
+    session, websocket, task = await a_served_capture(
+        tmp_path, config, mac=BOTH_MAC, scripts={"poet": poet, "tutor": tutor}
+    )
+    start_reply(session, FIRST_WORDS)
+    await wait_for_reply(session)
+    await closed(websocket, task)
+
+    turns_path, turns = turn_clips(tmp_path)
+    _, jsonl, _ = only_capture(tmp_path)
+    assert len([e for e in events(jsonl) if e["event"] == "turn_started"]) == 1
+    (turn,) = turns
+    samples = samples_of(mono(turns_path / turn["reply"]))
+    loud = [index for index, sample in enumerate(samples) if abs(sample) > 1000]
+    assert loud, "the reply clip is silent"
+    tenth = CAPTURE_RATE // 10
+    # A tenth of a second into the first voice and a tenth before the end
+    # of the last, clear of either onset.
+    first = zero_crossings(samples[loud[0] + tenth // 2 : loud[0] + tenth // 2 + tenth])
+    last = zero_crossings(samples[loud[-1] - tenth // 2 - tenth : loud[-1] - tenth // 2])
+    # 440 Hz crosses zero about 88 times in a tenth of a second, 880 Hz
+    # about 176.
+    assert first < 130 < last, (first, last)

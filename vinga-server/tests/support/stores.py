@@ -21,6 +21,7 @@ opens with. Both importing suites keep their own spelling by alias.
 """
 
 import contextlib
+import os
 import struct
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
@@ -32,7 +33,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from vinga_server import db as db_module
-from vinga_server.capture import CAPTURE_RATE, CaptureStore
+from vinga_server.capture import CAPTURE_RATE, CaptureStore, SessionCapture
 from vinga_server.capture_upload import CaptureUpload
 from vinga_server.config import entities
 from vinga_server.config import store as config_store
@@ -48,6 +49,7 @@ from vinga_server.db import (
     read_engine,
     write_engine,
 )
+from vinga_server.events import SessionEvents
 from vinga_server.memory.store import MEMORY_CHAIN, MemoryStore, open_memory
 
 # --- a second writer, holding the lock ---------------------------------
@@ -121,6 +123,39 @@ def store(
     }
     options.update(kwargs)
     return CaptureStore(tmp_path / "captures", uploads=uploads, **options)  # type: ignore[arg-type]
+
+
+def a_capture_with_a_turn(keeper: CaptureStore, session: str) -> SessionCapture:
+    """One closed capture holding one turn's two clips, a second of each,
+    fed through the session's events the way a served session feeds
+    them, so the suites about the directory and its budget have clips
+    to count."""
+    now = [0.0]
+    capture = keeper.open(session, 0.0, CAPTURE_MANIFEST)
+    assert capture is not None
+    emitter = SessionEvents(session, clock=lambda: now[0])
+    emitter.opened_at = 0.0
+    emitter.attach_capture(capture)
+    capture.microphone(tone(2000), 0.0)
+    now[0] = 0.5
+    emitter.utterance_audio("u1", tone(1000, 5))
+    capture.reply(tone(1000, 6), 0.625)
+    emitter.detach_capture()
+    capture.close()
+    return capture
+
+
+def capture_files(capture: SessionCapture) -> list[Path]:
+    """Every file one capture wrote, its clips included."""
+    turns = sorted(capture.turns_path.iterdir()) if capture.turns_path.exists() else []
+    return [capture.wav_path, capture.jsonl_path, capture.manifest_path, *turns]
+
+
+def date(capture: SessionCapture, stamp: float) -> None:
+    """Give every file of a capture one modification time, so "oldest"
+    is well defined on a fast disk."""
+    for path in capture_files(capture):
+        os.utime(path, (stamp, stamp))
 
 
 # --- the conversations database ---------------------------------------

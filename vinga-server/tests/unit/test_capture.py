@@ -11,6 +11,8 @@ everything after it.
 """
 
 import json
+import logging
+import os
 import struct
 import time
 import wave
@@ -18,12 +20,21 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.events import both_formats, fields_of
 from tests.support.stores import CAPTURE_MANIFEST as MANIFEST
-from tests.support.stores import store, tone
+from tests.support.stores import (
+    a_capture_with_a_turn,
+    capture_files,
+    date,
+    store,
+    tone,
+)
 from vinga_server.capture import (
     CAPTURE_RATE,
     FRAME_BYTES,
+    MB,
     WAV_HEADER_BYTES,
+    CaptureStore,
     DeviceFacts,
     SessionCapture,
     interleave,
@@ -503,3 +514,394 @@ def test_a_capture_that_never_started_is_not_a_capture(tmp_path: Path) -> None:
     capture.microphone(tone(100), time.monotonic())
     capture.close()
     assert not capture.wav_path.exists()
+
+
+# --- each turn's two clips (#496) --------------------------------------
+#
+# Beside the session's three files, a capture keeps two mono clips per
+# turn in `<session>.turns/`: what the turn's ASR was handed, and what
+# was paced out while the turn was being answered. The first arrives in
+# one piece through `utterance_audio`; the second is cut from channel 1
+# as it is placed, so the claims below are all about that cut agreeing
+# with the channel, frame for frame, over a span the test works out for
+# itself from what it paced rather than reading back off the capture.
+#
+# The clock is driven by hand and every instant is an exact binary
+# fraction of a second, so a frame index is an exact product and the
+# expected spans are arithmetic rather than tolerances.
+
+
+def wav_parts(path: Path) -> tuple[int, int, int, bytes]:
+    """A WAV's channel count, rate, sample width and data, read through
+    its header, so a header that was never patched reads as no data."""
+    with wave.open(str(path), "rb") as handle:
+        return (
+            handle.getnchannels(),
+            handle.getframerate(),
+            handle.getsampwidth(),
+            handle.readframes(handle.getnframes()),
+        )
+
+
+def reply_channel(path: Path) -> bytes:
+    """Channel 1 of the finished session WAV, as mono s16le bytes."""
+    channels, _, _, data = wav_parts(path)
+    assert channels == 2
+    right = bytearray(len(data) // 2)
+    right[0::2] = data[2::4]
+    right[1::2] = data[3::4]
+    return bytes(right)
+
+
+def cut(channel: bytes, from_ms: float, to_ms: float) -> bytes:
+    """The span of a mono channel between two offsets on the `t_ms`
+    timeline, which is what anyone holding the three files would do
+    with a manifest entry."""
+    per_ms = CAPTURE_RATE // 1000
+    return channel[int(from_ms * per_ms) * 2 : int(to_ms * per_ms) * 2]
+
+
+def silence(frames: int) -> bytes:
+    return bytes(frames * 2)
+
+
+def turns_of(capture: SessionCapture) -> list[dict]:
+    return json.loads(capture.manifest_path.read_text())["capture"]["turns"]
+
+
+def clip_names(capture: SessionCapture) -> list[str]:
+    if not capture.turns_path.exists():
+        return []
+    return sorted(path.name for path in capture.turns_path.iterdir())
+
+
+def a_turn_recorder(
+    tmp_path: Path, **options: float
+) -> tuple[SessionCapture, SessionEvents, list[float]]:
+    """A capture attached to a session's events the way a served session
+    attaches one, on a clock the test moves."""
+    now = [0.0]
+    capture = store(tmp_path, **options).open("s1", 0.0, MANIFEST)
+    assert capture is not None
+    emitter = SessionEvents("s1", clock=lambda: now[0])
+    emitter.opened_at = 0.0
+    emitter.attach_capture(capture)
+    return capture, emitter, now
+
+
+def frame(seconds: float) -> int:
+    return int(seconds * CAPTURE_RATE)
+
+
+def expected_clips(schedule: list[tuple[str, float, object]]) -> dict[str, tuple[int, int, bytes]]:
+    """What each turn's reply clip should be, worked out from the
+    schedule alone: a turn's window opens when it starts and closes when
+    the next one does, and each reply chunk is placed at its own instant
+    or just past the chunk before it, whichever is later, with silence in
+    any gap. Chunks paced while no window is open belong to no clip.
+
+    Answers `{utterance: (from_frame, to_frame, bytes)}`."""
+    clips: dict[str, tuple[int, int, bytes]] = {}
+    window: str | None = None
+    channel_end = 0
+    for kind, at, what in schedule:
+        if kind == "turn":
+            window = str(what)
+            continue
+        pcm = bytes(what)  # type: ignore[arg-type]
+        placed = max(frame(at), channel_end)
+        channel_end = placed + len(pcm) // 2
+        if window is None:
+            continue
+        if window not in clips:
+            clips[window] = (placed, placed, b"")
+        start, end, data = clips[window]
+        clips[window] = (start, channel_end, data + silence(placed - end) + pcm)
+    return clips
+
+
+def play(
+    capture: SessionCapture,
+    emitter: SessionEvents,
+    now: list[float],
+    schedule: list[tuple[str, float, object]],
+) -> None:
+    for kind, at, what in schedule:
+        now[0] = at
+        if kind == "turn":
+            emitter.utterance_audio(str(what), tone(20, 7))
+        else:
+            capture.reply(bytes(what), at)  # type: ignore[arg-type]
+
+
+def test_a_reply_clip_is_channel_one_over_the_span_its_turn_paced(tmp_path: Path) -> None:
+    """The reply clip is a cut of channel 1, and the cut is checked
+    against a span this test derived from what it paced.
+
+    The schedule carries every shape the plan names: audio before any
+    turn (no clip), a gap inside a reply (silence, at the channel's own
+    placement), and a barge-in: `u2`'s utterance ended at 1.0625 s, which
+    is the instant its `turn_started` is stamped with, while the reply
+    it interrupted was still being paced until 1.185 s. Those last
+    frames are `u1`'s, and a cut between consecutive `turn_started`
+    stamps would have handed them to `u2`. The last turn's reply is
+    still open at close, so the close is what finishes its file.
+    """
+    capture, emitter, now = a_turn_recorder(tmp_path)
+    schedule: list[tuple[str, float, object]] = [
+        ("reply", 0.125, tone(100, 111)),
+        ("turn", 0.5, "u1"),
+        ("reply", 0.625, tone(200, 1000)),
+        ("reply", 1.0, tone(100, 1001)),
+        ("reply", 1.125, tone(60, 1002)),
+        ("turn", 1.25, "u2"),
+        ("reply", 1.375, tone(100, 2000)),
+        ("turn", 1.75, "u3"),
+        ("reply", 1.875, tone(50, 3000)),
+    ]
+    play(capture, emitter, now, schedule)
+    capture.close()
+
+    expected = expected_clips(schedule)
+    assert sorted(expected) == ["u1", "u2", "u3"]
+    channel = reply_channel(capture.wav_path)
+    turns = turns_of(capture)
+    assert [turn["utterance"] for turn in turns] == ["u1", "u2", "u3"]
+    for turn in turns:
+        start, end, data = expected[turn["utterance"]]
+        assert turn["reply"] == f"{turn['utterance']}.reply.wav"
+        # The recorded offsets are the derived span, exactly.
+        assert turn["reply_from_ms"] == start * 1000 / CAPTURE_RATE
+        assert turn["reply_to_ms"] == end * 1000 / CAPTURE_RATE
+        channels, rate, width, clip = wav_parts(capture.turns_path / turn["reply"])
+        assert (channels, rate, width) == (1, CAPTURE_RATE, 2)
+        # The clip is what was paced in that span, silence and all ...
+        assert clip == data
+        # ... and it IS channel 1 of the finished WAV between the two
+        # offsets the manifest records, which is the check anyone
+        # holding the three files can make without trusting the clip.
+        assert cut(channel, turn["reply_from_ms"], turn["reply_to_ms"]) == clip
+
+    # The interrupted reply's last frames are the interrupted turn's.
+    u1 = wav_parts(capture.turns_path / "u1.reply.wav")[3]
+    assert u1.endswith(tone(60, 1002))
+    assert struct.pack("<h", 1002) not in wav_parts(capture.turns_path / "u2.reply.wav")[3]
+    # And the audio paced before any turn is in no clip.
+    for name in ("u1", "u2", "u3"):
+        samples = set(struct.unpack_from("<h", tone(1, 111)))
+        clip = wav_parts(capture.turns_path / f"{name}.reply.wav")[3]
+        assert not samples & set(struct.unpack(f"<{len(clip) // 2}h", clip))
+
+
+def test_the_window_closes_at_the_capture_limit(tmp_path: Path) -> None:
+    """A reply that runs past the limit is cut where the WAV is cut, and
+    a turn that starts past it is the capture ending, not a clip."""
+    capture, emitter, now = a_turn_recorder(tmp_path, max_session_s=2.0)
+    now[0] = 0.5
+    emitter.utterance_audio("u1", tone(20, 7))
+    # 250 ms placed from 1.875 s runs 125 ms past the two second limit.
+    capture.reply(tone(250, 500), 1.875)
+    now[0] = 2.5
+    emitter.utterance_audio("u2", tone(20, 8))
+    capture.close()
+
+    (turn,) = turns_of(capture)
+    assert turn["utterance"] == "u1"
+    assert turn["reply_from_ms"] == 1875.0
+    assert turn["reply_to_ms"] == 2000.0
+    clip = wav_parts(capture.turns_path / "u1.reply.wav")[3]
+    assert clip == tone(125, 500)
+    channel = reply_channel(capture.wav_path)
+    assert len(channel) == frame(2.0) * 2, "the WAV is cut at the limit"
+    assert cut(channel, turn["reply_from_ms"], turn["reply_to_ms"]) == clip
+    assert clip_names(capture) == ["u1.heard.wav", "u1.reply.wav"]
+
+
+def test_the_manifest_lists_every_turn_in_start_order(tmp_path: Path) -> None:
+    """One entry per turn, in the order the turns started, and a turn
+    that spoke nothing says so with nulls rather than being left out.
+    The manifest written at open says nothing about turns."""
+    capture, emitter, now = a_turn_recorder(tmp_path)
+    assert "turns" not in json.loads(capture.manifest_path.read_text())["capture"]
+    now[0] = 0.25
+    emitter.utterance_audio("u1", tone(20, 7))
+    now[0] = 0.5
+    emitter.utterance_audio("u2", tone(20, 7))
+    capture.reply(tone(100, 900), 0.625)
+    now[0] = 1.0
+    emitter.utterance_audio("u3", tone(20, 7))
+    capture.close()
+
+    assert turns_of(capture) == [
+        {
+            "utterance": "u1",
+            "heard": "u1.heard.wav",
+            "reply": None,
+            "reply_from_ms": None,
+            "reply_to_ms": None,
+        },
+        {
+            "utterance": "u2",
+            "heard": "u2.heard.wav",
+            "reply": "u2.reply.wav",
+            "reply_from_ms": 625.0,
+            "reply_to_ms": 725.0,
+        },
+        {
+            "utterance": "u3",
+            "heard": "u3.heard.wav",
+            "reply": None,
+            "reply_from_ms": None,
+            "reply_to_ms": None,
+        },
+    ]
+    assert clip_names(capture) == [
+        "u1.heard.wav",
+        "u2.heard.wav",
+        "u2.reply.wav",
+        "u3.heard.wav",
+    ]
+
+
+def test_the_heard_clip_is_the_bytes_it_was_handed(tmp_path: Path) -> None:
+    """Mono, 16 kHz, 16 bit, and its data chunk byte for byte what came
+    across, with a header that says how long it is."""
+    capture, emitter, now = a_turn_recorder(tmp_path)
+    pcm = bytes(range(256)) * 25
+    now[0] = 0.5
+    emitter.utterance_audio("u1", pcm)
+    capture.close()
+
+    raw = (capture.turns_path / "u1.heard.wav").read_bytes()
+    assert len(raw) == WAV_HEADER_BYTES + len(pcm)
+    assert raw[WAV_HEADER_BYTES:] == pcm
+    assert wav_parts(capture.turns_path / "u1.heard.wav") == (1, CAPTURE_RATE, 2, pcm)
+
+
+UNMINTED = "../../outside-0TURNCLIP-SENTINEL"
+
+
+def test_an_utterance_id_this_server_did_not_mint_writes_nothing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The id becomes a file name, so a separator or a traversal must not
+    reach the filesystem. Refused under the uploader's own name rule, said
+    once without the value, and the window of the turn before it still
+    closes: reply audio after it belongs to no clip."""
+    capture, emitter, now = a_turn_recorder(tmp_path)
+    now[0] = 0.5
+    emitter.utterance_audio("u1", tone(20, 7))
+    capture.reply(tone(100, 900), 0.625)
+    with caplog.at_level(logging.WARNING):
+        now[0] = 1.0
+        emitter.utterance_audio(UNMINTED, tone(20, 7))
+    capture.reply(tone(100, 901), 1.125)
+    capture.close()
+
+    assert [turn["utterance"] for turn in turns_of(capture)] == ["u1"]
+    assert clip_names(capture) == ["u1.heard.wav", "u1.reply.wav"]
+    assert wav_parts(capture.turns_path / "u1.reply.wav")[3] == tone(100, 900)
+    written = sorted(
+        str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*") if path.is_file()
+    )
+    assert written == [
+        "captures/s1.json",
+        "captures/s1.jsonl",
+        "captures/s1.turns/u1.heard.wav",
+        "captures/s1.turns/u1.reply.wav",
+        "captures/s1.wav",
+    ]
+    (refused,) = [
+        record
+        for record in caplog.records
+        if record.name == "vinga_server.capture" and record.levelno >= logging.WARNING
+    ]
+    assert refused.levelno == logging.WARNING
+    assert refused.msg == (
+        "session %s: an utterance id this server did not mint reached the "
+        "capture, so no clip was kept for it"
+    )
+    assert refused.args == ("s1",)
+    assert "SENTINEL" not in both_formats(caplog)
+
+
+def test_a_capture_stopped_by_a_write_failure_writes_no_more_clips(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A clip write that fails disables the capture the way any capture
+    write failure does, and nothing is written for a turn after it."""
+    capture, emitter, now = a_turn_recorder(tmp_path)
+    # Where the clips go is taken by a file, so the first clip cannot be
+    # written.
+    capture.turns_path.write_bytes(b"in the way")
+    with caplog.at_level(logging.WARNING):
+        now[0] = 0.5
+        emitter.utterance_audio("u1", tone(20, 7))
+    now[0] = 1.0
+    emitter.utterance_audio("u2", tone(20, 7))
+    capture.close()
+
+    (failed,) = [r for r in caplog.records if getattr(r, "event", None) == "capture_failed"]
+    assert fields_of(failed)["reason"] == "write audio"
+    manifest = json.loads(capture.manifest_path.read_text())
+    assert manifest["capture"]["complete"] is False
+    assert manifest["capture"]["turns"] == []
+    assert capture.turns_path.read_bytes() == b"in the way"
+
+
+def test_no_capture_attached_keeps_no_clip(tmp_path: Path) -> None:
+    """The session that is not recording pays one `is None` and writes
+    nothing anywhere."""
+    emitter = SessionEvents("s1", clock=lambda: 0.5)
+    emitter.utterance_audio("u1", tone(20, 7))
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_pruned_capture_takes_its_turns_with_it(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Five parts go together now. And a `.wav` planted inside a turns
+    directory is not a capture of its own: were it one, it would be the
+    newest and the one protected, and the real newest would be pruned."""
+    keeper = store(tmp_path, max_total_mb=1_000.0)
+    opened = time.time()
+    captures = []
+    for index in range(4):
+        captures.append(a_capture_with_a_turn(keeper, f"s{index}"))
+        date(captures[-1], opened + index)
+    planted = captures[3].turns_path / "zzz.wav"
+    planted.write_bytes(bytes(1000))
+    os.utime(planted, (opened + 10, opened + 10))
+
+    # Tight enough that only about one capture fits.
+    cheap = CaptureStore(keeper.directory, 900.0, 0.15, 0.0)
+    with caplog.at_level(logging.INFO):
+        cheap.prune()
+
+    pruned = [
+        tuple(fields_of(record)["sessions"])  # type: ignore[arg-type]
+        for record in caplog.records
+        if getattr(record, "event", None) == "capture_pruned"
+    ]
+    assert pruned and "zzz" not in pruned[0]
+    assert "s0" in pruned[0]
+    assert not captures[0].turns_path.exists(), "a pruned capture left its clips behind"
+    assert captures[3].wav_path.exists(), "the newest capture was pruned"
+    assert planted.exists()
+
+
+def test_the_budget_counts_the_clips(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """The total the budget is checked against is every file the
+    capture wrote, its clips included, and it is the number the warning
+    reports."""
+    keeper = store(tmp_path, max_total_mb=0.001)
+    with caplog.at_level(logging.WARNING):
+        capture = a_capture_with_a_turn(keeper, "s1")
+
+    expected = sum(path.stat().st_size for path in capture_files(capture))
+    (over,) = [
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "capture_over_budget"
+    ]
+    assert over.args[0] == expected / MB  # type: ignore[index]

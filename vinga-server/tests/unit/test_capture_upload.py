@@ -32,11 +32,17 @@ from typing import Any
 import pytest
 
 from tests.support.events import both_formats, fields_of
-from tests.support.stores import CAPTURE_MANIFEST, tone
+from tests.support.stores import (
+    CAPTURE_MANIFEST,
+    a_capture_with_a_turn,
+    capture_files,
+    date,
+    tone,
+)
 from tests.support.stores import store as capture_store
-from tests.support.uploads import ApiError, Recorder, exporting, fake_sdk
+from tests.support.uploads import ApiError, FakeClient, Recorder, exporting, fake_sdk
 from vinga_server.boundary import Reach
-from vinga_server.capture import CaptureStore, SessionCapture, sweep_upload_staging
+from vinga_server.capture import MB, CaptureStore, SessionCapture, sweep_upload_staging
 from vinga_server.capture_upload import (
     _QUIETING,
     ATTACH_KEY,
@@ -48,6 +54,7 @@ from vinga_server.capture_upload import (
     MANIFEST_NAME,
     NEEDS_THE_LANGFUSE_EXTRA,
     CaptureUpload,
+    Sdk,
     build_capture_upload,
     staging_root,
 )
@@ -687,6 +694,71 @@ async def test_a_prune_between_the_two_moments_cannot_erase_the_pair(
     await drained(uploads)
     assert len(recorder.asked) == 2, "the staged pair did not survive the prune"
     assert recorder.asked[0].content_length > 44
+
+
+@pytest.mark.asyncio
+async def test_staged_audio_stays_inside_the_capture_budget(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, endpoint: str
+) -> None:
+    """The budget counts what is on the disk, and a staged link is on
+    the disk: once while it and its source both exist, and still after
+    a prune has unlinked the source while the job waits (#496).
+
+    Driven with the worker held inside its first job, which is a backend
+    too slow to keep up: every session's pair is staged, the first job
+    cannot finish, and the rest wait behind it. Each session's close
+    prunes under a budget no capture fits, so from the second close on
+    the prune unlinks the older captures' sources and their staged pairs
+    are all that is left of them. The total the warning reports is then
+    exactly the distinct files' sizes, worked out here from the files
+    each capture wrote rather than from a walk of the directory.
+    """
+    caplog.set_level(logging.INFO)
+    gate = threading.Event()
+    recorder = Recorder()
+
+    def held(**options: Any) -> FakeClient:
+        assert gate.wait(30), "the worker was never released"
+        return FakeClient(recorder=recorder, **options)
+
+    sessions = ["s0", "s1", "s2"]
+    uploads, _ = an_uploader(
+        tmp_path,
+        traces=dict.fromkeys(sessions, TRACE),
+        sdk=Sdk(client=held, error=ApiError, content_type=str),
+        recorder=recorder,
+    )
+    store = capture_store(tmp_path, uploads=uploads, max_total_mb=0.001)
+    older = time.time() - 100
+
+    def over_budget() -> list[logging.LogRecord]:
+        return [r for r in caplog.records if getattr(r, "event", None) == "capture_over_budget"]
+
+    reported: list[float] = []
+    expected: list[int] = []
+    # What each closed capture leaves on the disk once its sources are
+    # gone: the two files its job holds a link to.
+    kept_by_staging = 0
+    try:
+        for index, session in enumerate(sessions):
+            capture = a_capture_with_a_turn(store, session)
+            # Everything this capture wrote, measured while it is the
+            # newest and so protected from the prune.
+            written = sum(path.stat().st_size for path in capture_files(capture))
+            expected.append(kept_by_staging + written)
+            kept_by_staging += capture.wav_path.stat().st_size
+            kept_by_staging += capture.manifest_path.stat().st_size
+            reported.append(float(over_budget()[-1].args[0]))  # type: ignore[index]
+            date(capture, older + index)
+            store.session_closed(session)
+        assert not (store.directory / "s0.wav").exists(), "the prune never bit"
+        assert not (store.directory / "s1.turns").exists(), "the prune never bit"
+        assert staged(store.directory) == sessions
+    finally:
+        gate.set()
+        await drained(uploads)
+
+    assert reported == [total / MB for total in expected]
 
 
 @pytest.mark.asyncio
