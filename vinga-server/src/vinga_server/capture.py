@@ -61,6 +61,7 @@ of the project promises. It is off unless a directory is configured, and
 says so on every session it records.
 """
 
+import builtins
 import contextlib
 import json
 import logging
@@ -276,6 +277,19 @@ class _ReplyClip:
             clip.close()
 
 
+def _builtin_class(failure: BaseException) -> ClassName:
+    """The nearest class in a failure's ancestry that is Python's own
+    builtin of that name, which is what a capture says failed.
+
+    Checked by identity against `builtins` rather than by `__module__`,
+    which a class may set to anything. Every exception descends from
+    `BaseException`, so there is always an answer."""
+    for kind in type(failure).__mro__:
+        if getattr(builtins, kind.__name__, None) is kind:
+            return ClassName(kind.__name__)
+    return ClassName(BaseException.__name__)
+
+
 def _offset_ms(frame: int | None) -> float | None:
     """A frame index on the `t_ms` timeline, exactly: a frame is 1/16 ms,
     so the value needs no rounding and `ms * 16` is the frame again."""
@@ -382,6 +396,14 @@ class SessionCapture:
         return self._at(now) >= self._max_session_s
 
     def _disable(self, doing: CaptureWrite, exc: BaseException) -> None:
+        """Say the write failed, stop recording, and close what is open."""
+        self._failed(doing, exc)
+        with contextlib.suppress(Exception):
+            self.close()
+
+    def _failed(self, doing: CaptureWrite, exc: BaseException) -> None:
+        """Say a write failed, and stop recording: whatever closes the
+        capture after this writes `complete: false`."""
         # The class name and never the exception (the PR #153 review).
         # Every caller here catches a bare `Exception` around a write,
         # so what arrives is whatever the filesystem, the wave module or
@@ -391,16 +413,21 @@ class SessionCapture:
         # worse than rendering it: `Emission.args` is deliberately not
         # copied for a tap, so a consumer was given the live exception,
         # its chain and everything the chain closes over.
+        #
+        # And not even the class that was raised, but the nearest one
+        # Python itself defines (#496's review): `type` accepts any
+        # identifier as a class name, so a raised class's own name is a
+        # string somebody else chose. Read before the thunk, which then
+        # holds a name rather than the exception.
+        failure = _builtin_class(exc)
         events.emit(
             lambda: CaptureFailed(
                 session=SessionId(self._session_id),
                 reason=doing,
-                failure=ClassName.of(exc),
+                failure=failure,
             )
         )
         self._stopped = True
-        with contextlib.suppress(Exception):
-            self.close()
 
     def microphone(self, pcm: bytes, now: float) -> None:
         """Mic audio as decoded, before any of the session's guards."""
@@ -596,8 +623,22 @@ class SessionCapture:
         self._closing = True
         wav, events = self._wav, self._events
         self._wav = self._events = None
-        with contextlib.suppress(Exception):
+        # A reply clip still open is finished first, and a failure to
+        # finish it (its header patch, or the close under it) is a
+        # write failure like any other: said, and the manifest below
+        # then says the capture is not complete, rather than listing a
+        # clip with a stale header under `complete: true`. Said after
+        # the suite rather than in it, so nothing the report does can
+        # carry the exception along as its context. A capture already
+        # stopped by a failure has said so once, and says nothing more.
+        unfinished: BaseException | None = None
+        try:
             self._close_window()
+        except Exception as exc:  # noqa: BLE001 - capture never breaks a session
+            unfinished = exc
+        if unfinished is not None and not self._stopped:
+            self._failed(CaptureWrite.AUDIO, unfinished)
+        unfinished = None
         if wav is not None:
             with contextlib.suppress(Exception):
                 # Out to the furthest of the audio and the last event.
