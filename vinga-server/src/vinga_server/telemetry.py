@@ -13,8 +13,8 @@ else.
 event is derived from the typed events the pipeline already emits, at
 the one seam the events package documents for this issue: "the #66/#67
 exporters attach as more, without touching a single emit site". No emit
-site moves for this module, and nothing here can say a fact
-`catalog.py` does not declare.
+site moves for this module, and nothing it exports, no span and no span
+event, can say a fact `catalog.py` does not declare.
 
 **It never blocks a reply.** A tap's `emit` runs on the reply path, so
 what happens there is object assembly and nothing else: no lock the
@@ -22,6 +22,16 @@ export holds, no syscall, no wait. The SDK's `BatchSpanProcessor` owns
 the bounded queue and the background thread, and a full queue drops
 spans with a counter, which is the posture this issue chose out loud:
 dropped spans are acceptable, a stalled reply is not.
+
+The one thing the dispatch says that is not exported, and the one
+exception to the rule just stated, is an operator's log line. A turn
+that starts while another is still open is not given a span (#517), and
+the first time that happens in a session the dispatch logs one warning
+through this module's ordinary logger, synchronously and with whatever
+I/O the configured handlers do. It is not a catalog event and never
+reaches a trace. It fires at most once per session, and only on an
+event order the runtime does not produce, so the reply path pays for it
+only when an invariant owned elsewhere has already broken.
 
 **It owns its tracer provider.** The process-global provider is never
 read and never set, so two sequential lifespans in one process each get
