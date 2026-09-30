@@ -735,7 +735,7 @@ change only through their generators.
   observability-surfaces' "Exported capture media" and the Audio row.
   Part of #496.
 - [x] **[M4: which loop answers which ASR question](2026-09-30-turn-audio-implementation.md#m4-which-loop-answers-which-asr-question)**
-  (PR TBD). Stacked on M3.
+  (PR [#573](https://github.com/rafacm/vinga/pull/573)). Stacked on M3.
   Documentation only: a section in
   `docs/conversational-quality-regression-suite.md` per the
   2026-09-20 comment on #496 (the two loops as supplier and consumer;
