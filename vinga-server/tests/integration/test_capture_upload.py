@@ -13,8 +13,8 @@ fake client asserts nothing about: three requests per attachment, the
 presigned PUT among them, the pair and then the turn's two clips against
 the turn's own trace (#496), their MIME types, a WAV whose header has
 its length patched in, a manifest that says it is complete, and no
-request anywhere carrying the decision track or any file the manifest
-does not list.
+request anywhere carrying the decision track or any file outside what
+the capture staged.
 
 **The hostile backend.** One that accepts the connection and never
 answers, which is the failure a naive uploader has no answer for: the
@@ -279,8 +279,10 @@ async def test_a_recorded_session_is_attached_to_its_trace(
     # every one of them carries the offset that indexes into the WAV.
     track = manifest.with_suffix(".jsonl").read_bytes()
     assert track, "the capture wrote no decision track, so this asserts nothing"
-    # And nothing goes that the manifest does not list: the PUT bodies
-    # are exactly the pair and the clips its `capture.turns` names.
+    # And nothing goes beyond what the capture staged: the PUT bodies
+    # are exactly the pair and the turn's two clips. The manifest is
+    # read here only by this case, to find those clips on the disk; the
+    # worker sends by its in-process inventory and never reads it.
     assert [body for _, _, body in media.of("PUT")] == [
         manifest.with_suffix(".wav").read_bytes(),
         manifest.read_bytes(),
