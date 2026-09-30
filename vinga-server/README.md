@@ -2179,11 +2179,11 @@ how far this section's destinations lie, and there are three of them:
   the exported transcripts ride;
 - the Langfuse the recording upload talks to, in `LANGFUSE_HOST`;
 - and wherever that Langfuse keeps its media. The upload asks it for an
-  upload URL and PUTs the WAV and the manifest to the presigned URL it
-  answers with, so the bytes land in whatever object storage the backend
-  is configured with. **A Langfuse on your own network can answer with a
-  URL at a cloud vendor**, and this server hands the bytes over without
-  reading it.
+  upload URL and PUTs the WAV, the manifest and each turn's clips to the
+  presigned URL it answers with, so the bytes land in whatever object
+  storage the backend is configured with. **A Langfuse on your own
+  network can answer with a URL at a cloud vendor**, and this server
+  hands the bytes over without reading it.
 
 One key covers all three and means the outermost of them, so the tracing,
 the transcript export, the recording upload and the LLM input export are
@@ -2855,8 +2855,9 @@ Fanout applies one policy decision and gives both exporters the same records.
 It is not a transaction across two backends. A backend outage can still make
 their stored populations differ, so compare trace IDs when diagnosing parity.
 The Langfuse-only `capture` reference span is removed on the Jaeger branch.
-Recording WAV and manifest bytes never enter OTLP: they remain on the separate
-Langfuse REST and object-storage upload path governed by `export_audio`.
+Recording bytes (the WAV, the manifest and each turn's clips) never enter OTLP:
+they remain on the separate Langfuse REST and object-storage upload path
+governed by `export_audio`.
 
 ## Capturing a session
 

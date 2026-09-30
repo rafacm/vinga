@@ -174,9 +174,10 @@ server:
   #   # not a proof: nothing here reads any of the three, and the last
   #   # does not exist until the backend names it.
   #   reach: internet
-  #   # Attaching a closed session's recording to its trace, which SENDS
-  #   # ROOM AUDIO OFF THIS HOST and is its own decision: capture on and
-  #   # telemetry on do not imply it. Retention is then the backend's,
+  #   # Attaching a closed session's recording to its trace, and each
+  #   # turn's clips to that turn's trace, which SENDS ROOM AUDIO OFF
+  #   # THIS HOST and is its own decision: capture on and telemetry on do
+  #   # not imply it. Retention is then the backend's,
   #   # and a backend with no policy configured retains indefinitely.
   #   # The upload reads LANGFUSE_HOST, LANGFUSE_PUBLIC_KEY and
   #   # LANGFUSE_SECRET_KEY, which must name the same deployment and the
