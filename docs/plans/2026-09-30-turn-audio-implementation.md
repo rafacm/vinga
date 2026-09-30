@@ -934,3 +934,129 @@ generator (all six current; the round regenerates nothing),
 `scripts/check_doc_links.py .` and `scripts/fold_changelog.py check .`,
 and last the census lane (`66 passed`). The full unit and integration
 lanes were not rerun for the round, which changed prose only.
+
+## M4: which loop answers which ASR question
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.286; 2026-10-01.
+
+Documentation only. `docs/conversational-quality-regression-suite.md`
+gains a section, "Which loop answers which ASR question", between the
+three layers and the invalidation table, written to the 2026-09-20
+comment on #496 item by item: the field round and the dataset loop as
+supplier and consumer; the decision rule as two lists of examples; how
+an item is born, attributed to its session's manifest and its round,
+with the clips as instrument and the numbers derived from them as
+calibration; that the parts meet by utterance id on the host, and on
+the turn's own trace only with `export_transcripts` on (with
+`server.conversations` storing text) as well as `export_audio` (round
+1, finding 8); who corrects the expected text, paid once per item;
+where the durable copy lives, which is nowhere until an operator
+copies it out of both retentions; and the closed list of what the
+dataset loop may never claim, each with its reason. The invalidation
+table's ASR row is split in place into two rows, one per loop, and the
+field round's row carries the sentence that keeps short-clip loss rate
+apart from word error rate on survivors. The page is research and
+field notes in `docs/README.md`'s taxonomy, which is where evidence
+about how to run and read a round belongs; what the exports carry is
+left to `observability-surfaces.md`, which the section links rather
+than restates.
+
+The section describes M3's behavior (each turn's clips filed on its
+own trace under `export_audio`) as the plan and its review rounds
+specify it, since this milestone merges after M3.
+
+### The commits
+
+| Commit | What it is |
+| --- | --- |
+| `5d580622` Say which loop answers which ASR question | The section, the split row, and one sentence in the working procedure below the table |
+| Record M4 of the turn audio plan | This section and the plan's tick |
+
+### Deviations, resolutions and decisions
+
+One deviation from the plan's M4 item, in how it was built rather
+than what it says: the item says "stacked on M3", and this branch was
+cut from `origin/main` (the plan, M1 and M2) while M3 was implemented
+in parallel, at the orchestrator's direction, to be rebased onto M3
+before it merges. So the section was written against M3's plan and
+review resolutions rather than M3's merged prose, and the link check
+is rerun after that rebase. Nothing in the section depends on M3's
+wording, only on its behavior.
+
+What the plan and the comment left to the writer, decided here:
+
+- **The loss-rate sentence follows the plan, not the 2026-09-20
+  comment's wording.** The comment said none of the lost clips has a
+  dataset item. That was written before the capture kept them: M2
+  writes the heard clip in `start_reply`, before the ASR runs, so a
+  turn whose transcript the echo retry discarded (or that fell under
+  the openai adapter's minimum) keeps its clip, which is the plan's
+  stated reason for keeping short audio. The table row therefore says
+  speech the VAD never segmented never has an item and a discarded
+  transcript has no transcript to score, and the section adds that a
+  lost clip can be harvested and corrected like any other, so the
+  dataset can say how a candidate does on it but never how many the
+  pipeline loses.
+- **The split is two rows, not two cells.** "Each cell names the loop"
+  is met by naming the loop in each row's Change cell, so the
+  Re-measure and Still valid cells stay one answer each, in the
+  table's existing shape.
+- **The closed list is the comment's six field-only classes plus the
+  loss rate.** The comment calls the list the between-turn failure
+  classes; the loss rate is the one number counted over them, and it
+  is the concrete case the section exists to prevent, so it is on the
+  list with its reason. The list says how it grows: a between-turn
+  class found later joins it in the change that finds it.
+- **The durable-copy paragraph follows the 2026-09-30 decision.** The
+  2026-09-20 comment said the three field files last; the capture has
+  a budget and prunes whole sessions, so the section says neither copy
+  is durable, as the decision comment settled.
+- **Two sentences beyond the comment's list**, both consequences of it
+  rather than new claims: that an item's audio survives an ASR change
+  but not a device change or input-pipeline redesign, whose ASR
+  questions wait for a harvest of their own (the invalidation table's
+  own device and pipeline rows); and, in the working procedure under
+  the table, that for an ASR change the dataset's row runs first and
+  the field round carries only its own.
+- **Links.** The page links other documentation pages and cites the
+  tracker only by bare issue number in its introduction; it links no
+  plan and no issue. The section follows that: it links the two
+  `observability-surfaces.md` sections that own what the exports
+  carry (`#exported-capture-media`, `#exported-transcripts`), and
+  names no issue or plan. Those anchors are headings M3 edits the
+  prose under; the link check is rerun after the rebase onto M3.
+- **The field-only reason for "does it feel right"** is worded as
+  happening "across the exchange as a person lived it", since feel is
+  not literally located between two turns the way a VAD miss is.
+
+No changelog fragment, as the plan says.
+
+### Mutations
+
+None: the milestone changes no code and adds no test, so there is no
+claim a mutation could falsify. The claims the prose makes about the
+code were read at the source rather than assumed: the heard clip is
+written in `start_reply` before the ASR runs (M2's section above and
+`runtime/pipeline.py`); the echo retry's discarding outcomes answer an
+empty transcript (`providers/openai_asr.py`, `_retry_without_prompt`, whose
+`EchoSkipped`, `EchoRetryTimedOut`, `EchoConfirmed` and
+`EchoConfirmedEmpty` arms all return an empty hearing);
+the conversation store's turn row carries `utterance`
+(`docs/reference/conversations-schema.md`); the transcript export
+needs `server.conversations.text` and `export_transcripts`
+(`config/models.py`, `observability-surfaces.md`); the capture prunes
+to `server.capture.max_total_mb`.
+
+### Verification
+
+From the worktree, after the final prose edit:
+
+- `python3 scripts/check_doc_links.py .`: `checked 278 files, 0 failures`
+- Census lane, `uv run pytest tests/census -q` from `vinga-server/`,
+  on the final prose with only this line still to fill in:
+  `66 passed in 32.60s`, neither manifest needing regeneration; rerun
+  after this record was committed, as the last step, with the same
+  count.
+
+The unit and integration lanes were not run: nothing they exercise
+changed.
