@@ -67,20 +67,32 @@ interrupted write, which is the step it was named for.
 
 ## Changes
 
-Three commits, all to the test; the seeding scripts and every
-production module are untouched.
+Every commit is to the test; the seeding scripts and every production
+module are untouched. The pull request's external review round (three
+P2 findings) changed how the reset is made, made every run meet the
+ignored-SIGINT condition, and made the failure path wait; this section
+describes the result.
 
-### The child gets a trappable SIGINT
+### Every launch meets SIGINT ignored, and resets it
 
-`Popen(..., preexec_fn=_default_interrupt)` sets SIGINT to `SIG_DFL` in
-the child between fork and exec, which is the disposition a terminal's
-foreground job has and the one the script's handler is written for.
-That function does one call and nothing else. Python documents
-`preexec_fn` as unsafe in a process with threads, because the child
-may inherit a lock another thread held; `signal.signal` takes none
-beyond the interpreter's own, which the forking thread holds, and a
-probe with a live second thread and `-W error` raised no warning on the
-lane's Python 3.12.14.
+The seeding is started through two launch steps, each a freshly
+exec'd interpreter that sets SIGINT to a named disposition and execs
+the rest of its command line (`_with_sigint`). The outer step sets
+`SIG_IGN`, which is the condition an asynchronous launch hands every
+child; the inner one sets `SIG_DFL`, the disposition a terminal's
+foreground job has and the one the script's handler is written for,
+and execs the seeding shell. The process id survives each `exec`, so
+the process the test signals is the shell.
+
+Two review findings shaped this. The first version reset SIGINT with
+a `preexec_fn`, which runs Python in the forked child of a process
+that may have other threads and can deadlock inside `Popen` on a lock
+one of them held, before any timeout here applies; a launch step runs
+nothing between this process's fork and exec. And the first version
+only met the ignored condition when the lane itself was launched in
+the background, which CI never does, so deleting the reset left CI
+green. With the ignoring step, every run reproduces the condition, and
+deleting the reset fails the case in a foreground run.
 
 ### The script is held at its second write
 
@@ -118,16 +130,29 @@ mutation below that deletes `seed.sh`'s INT trap lets the default
 SIGINT end the shell without stopping the server, and that server
 process was still running 45 minutes later, on a machine other lanes
 were sharing, until it was killed by hand. The assertions now sit
-inside the `try`, and any failure kills the whole process group with
-`os.killpg`, which reaches the server and the stand-in whether or not
-the shell is still there, since a process group lives as long as any
-member does. A passing run sends nothing.
+inside the `try`, and any failure ends the whole process group
+(`_end_group`), which reaches the server and the stand-in whether or
+not the shell is still there, since a process group lives as long as
+any member does. A passing run sends nothing.
+
+Ending it means waiting as well as signalling, which the review round
+asked for: SIGKILL is not synchronous, and with an exited leader and a
+live descendant the group was still present straight after `killpg`
+returned in 20 of 20 probes, gone within about 10 ms. `_end_group`
+reaps the leader if it has not been (an unreaped leader keeps the
+group alive as a zombie), then polls `killpg(group, 0)` until
+`ProcessLookupError`, bounded at 10 s, before the database the server
+was on is dropped. The original exception is re-raised either way,
+with a note on it if the bound passed. A regression,
+`test_ending_a_group_outlasts_its_leader`, builds that shape with
+`sh -c 'sleep 300 & exit 0'` in a session of its own and checks the
+group is gone the moment `_end_group` returns.
 
 ### Sibling cases
 
 `test_a_seeding_script_reports_a_server_that_will_not_start`, the
-file's other `returncode != 0` assertion, sends no
-signal and has no race: it removes `VINGA_API_SECRET`, the server
+file's other `returncode != 0` assertion, sends no signal and has no
+race: it removes `VINGA_API_SECRET`, the server
 refuses to boot, and the script's own `kill -0` sees it gone. It is
 unaffected by the disposition as well, and is unchanged. No other test
 in the repository sends a signal to a subprocess; the only other
@@ -151,8 +176,8 @@ lets the held script run to the end either way.
   reported failure was not an interleaving, so a loosened case would
   have gone green by no longer asking the question, while the dropped
   signal stayed dropped.
-- **The disposition reset alone.** One function and one argument, and
-  it fixes the reported failure; it is the first commit. What the hold
+- **The disposition reset alone.** One launch step, and it fixes the
+  reported failure. What the hold
   buys over it is measured rather than estimated: without it, five of
   five runs interrupted the start-up and none a write, so the case's
   stated subject was untested. The hold costs a thirteen-line shell
@@ -168,15 +193,15 @@ lets the held script run to the end either way.
   write has completed, so "mid-way" is a fact the database shows.
 - The stand-in's own bound: 600 polls of 0.1 s.
 - The test's wait for the hold: 180 s.
+- The bound on a killed group disappearing (`GROUP_GONE_S`): 10 s.
 
 ## Verification
 
 - The old case reproduced as above: 3 of 3 asynchronous launches
   failed on an idle machine, 3 of 3 foreground runs and 5 of 5
   foreground runs under load passed.
-- The new case passed 3 of 3 asynchronous launches and the whole
-  seeds file passed (9 passed).
-- Under contention: **20 of 20 passed**, each launched the way the
+- Before the review round, under contention: **20 of 20 passed**,
+  each launched the way the
   original failure was, as an asynchronous list with SIGINT therefore
   ignored on entry, while four busy loops ran on the four cores
   throughout, this branch's own unit lane (`-n auto`) overlapped the
@@ -184,17 +209,27 @@ lets the held script run to the end either way.
   Postgres instance (how many, run by run, is not recorded).
   One-minute load average at each run's start ranged from 5.5 to 20.3,
   and run times from 17 s to 464 s.
+- After the review round, under four busy loops and whatever other
+  lanes shared the machine: **20 of 20 passed**, ten foreground runs (the way
+  CI runs it) and ten asynchronous launches, alternating. One-minute
+  load average at each run's start ranged from 6.5 to 10.1, and run
+  times from 7.5 s to 17.2 s.
+- After the review round, the whole seeds file, still under the four
+  busy loops: `10 passed in 90.53s`.
 - Mutations, each applied by `sed`, run, and restored by copy and
   `touch`:
 
 | Mutation | Result |
 |---|---|
-| no `preexec_fn`, asynchronous launch | killed: `assert 0 != 0` |
+| no reset step (the ignoring step execs the shell), foreground run | killed: `assert 0 != 0` |
+| no reset step, asynchronous launch | killed: `assert 0 != 0` |
 | `on_interrupt` exits 0 | killed: `assert 0 != 0` |
 | no `trap on_interrupt INT` in `seed.sh` | killed: `interrupted` not on stderr; with the group kill, no server left running (one was before it) |
 | `on_interrupt` returns instead of exiting | killed: 3 calls, not 2 (the previous case passes this one) |
 | the stand-in never holds | killed: the seeding never reached its second write |
 | release before the signal | survived, 3 of 3 |
+| `_end_group` without its wait loop | killed 3 of 3: the group is still there on return |
+| `_end_group` without its `killpg` | killed: the group outlives the bound |
 
   The surviving mutation reorders the test's own two lines. Sending
   the signal before the release is what guarantees where it lands;
@@ -221,8 +256,8 @@ lets the held script run to the end either way.
 ## Files modified
 
 - `vinga-server/tests/integration/test_smoke_seeds.py`: the stand-in,
-  the disposition reset, the held interrupt and its new assertions, and
-  the process-group kill on any failure; the readiness helper `_ready`
-  removed.
+  the two launch steps, the held interrupt and its new assertions, the
+  bounded process-group end on any failure and its regression; the
+  readiness helper `_ready` removed.
 - `docs/features/2026-10-01-interrupted-seeding-hold.md`: this doc.
 - `changelog.d/555-interrupted-seeding-hold.md`: the changelog fragment.
