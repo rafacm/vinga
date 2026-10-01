@@ -260,9 +260,12 @@ call, the n-th tool call of that round's exported output. The
 provider's own call id is not on the span: it is far-side bytes, and it
 stays inside the opt-in LLM input export. A turn carries
 `vinga.prompt.sha256` beside `vinga.prompt.characters`: the SHA-256 of
-the speaking agent's know-how half exactly as the model is sent it,
-server-shipped guidance included, so two sessions on one prompt compare
-equal and an edit that keeps the length still shows. It is operator
+the speaking agent's know-how half in its canonical rendering,
+server-shipped guidance included, which is the bytes the half
+contributes whenever another block follows it. A lone persona is sent
+untrimmed when nothing follows it, and its leading whitespace is not
+part of the fingerprint. Two sessions on one prompt compare equal and
+an edit that keeps the length still shows. It is operator
 configuration digested rather than content, and its one residual risk
 is stated rather than engineered away: a digest confirms a guess only
 when every other byte of the half is known, so a persona copied from a

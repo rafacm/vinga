@@ -1784,10 +1784,14 @@ class PromptAssembled(Variant):
     )
     sha256: Sha256 = value(
         note=(
-            "The SHA-256 of the know-how half exactly as the model is "
-            "sent it, server-shipped guidance included, so two sessions "
-            "on the same prompt carry the same value and an edit that "
-            "keeps the length still changes it. A digest confirms a "
+            "The SHA-256 of the know-how half's canonical rendering, "
+            "server-shipped guidance included: the bytes the half "
+            "contributes whenever another block follows it. A lone "
+            "persona is sent untrimmed when nothing follows it, and its "
+            "leading whitespace is not part of the fingerprint. Two "
+            "sessions on the same prompt carry the same value, and an "
+            "edit that keeps the length still changes it. A digest "
+            "confirms a "
             "guess only where every other byte of the half is known, "
             "which is the case of a persona copied from a known template "
             "with one personal slot: personal facts belong in memory, "
