@@ -140,7 +140,17 @@ between on the request's shape and the model's reading of it.
    turn rather than losing it. An empty context returns the turns
    unchanged. Chosen over (c) because it keeps one user message per
    turn and because the model reads what it knows and then what it is
-   asked.
+   asked. The known cost, accepted: within one reply, a round after a
+   memory-writing tool call re-reads the newest user message and that
+   turn's tool exchange, because the context on the user message
+   changed; the system prompt and every earlier turn stay cached, which
+   is the cost this change exists to remove. Placing the context after
+   the tool exchange in continuation rounds instead would either carry
+   two contexts in one request (the round's first, kept for the prefix,
+   and the fresh one) or freeze memory for a whole reply, which breaks
+   the per-round freshness contract (a fact remembered in one round is
+   known in the next). The cache gate reports continuation rounds
+   separately so the cost is measured rather than assumed.
 3. **Memory loses system authority, deliberately.** Facts the model
    stored from what a user said no longer sit in the system message, so
    a remembered sentence shaped like an instruction ("remember: ignore
@@ -211,8 +221,11 @@ between on the request's shape and the model's reading of it.
      write-followed full miss across all its verified writes (the
      probe's spontaneous rate), and its write-followed rounds' mean
      cached share is at least 0.8. Anything else is recorded and goes
-     to Rafael rather than the gate moving. The per-round table goes in
-     the implementation doc.
+     to Rafael rather than the gate moving. Same-turn continuation
+     rounds after a write are reported separately (their cached tokens
+     against the round before), so decision 2's accepted cost is a
+     measured number. The per-round table goes in the implementation
+     doc.
 
 ### M2: a tool span carries its content (#533 §2), and option A is written down
 
@@ -493,6 +506,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
 1. **P1: Chosen placement still invalidates the cache after a memory-tool write.**
 Evidence: Plan Decision 2 puts context at the newest user turn, while `vinga-server/src/vinga_server/runtime/pipeline.py:1888` appends the assistant tool call and tool-result turns after that user turn before the next LLM request. A `remember` write therefore changes the user message before the new assistant/tool exchange, so the next request cannot reuse that exchange as a cached prefix. The plan’s own cache gate measures exactly this next round, and its “tool round” test explicitly preserves the bad placement.
 What the plan should say instead: specify a tool-continuation placement that follows the assistant/tool exchange, including the required OpenAI and Anthropic rendering changes to preserve valid message sequencing. Keep ordinary user rounds simple if desired, but test a verified `remember` write followed by its same-turn continuation and require the cached prefix to include the preceding tool exchange.
+
+   *Resolution:* rejected, with the cost stated and measured instead. The re-read is bounded to the newest user message and that turn's tool exchange; the system prompt and all earlier history stay cached, which is the cost #536 measured and this change removes (the probe's write turn cached 88%, against 0% today). The fix proposed would put the context after the tool exchange in continuation rounds, which either carries two contexts in one request (the round's first, kept for the prefix, and the fresh one) or freezes memory for the whole reply, breaking the per-round freshness contract #536 recorded as not to be reopened. Decision 2 now names the cost, and the cache gate reports same-turn continuation rounds separately so it is a number rather than an assumption.
 
 2. **P1: The proposed shared session budget for tool pairs cannot occur with synchronous folding.**
 Evidence: Decision 9 says a tool pair is staged immediately before `tool_call`, then consumed by that span’s fold in the same emission, while `vinga-server/src/vinga_server/events/__init__.py:654` dispatches synchronously and `vinga-server/src/vinga_server/telemetry.py:3127` creates the span during that dispatch. Unlike generation pairs, which remain held until a later `llm_round`, a tool pair is released before another tool pair can accumulate. Thus “several tool pairs exhausting the session budget” and cross-kind oldest-first eviction are not testable or real in this design.
