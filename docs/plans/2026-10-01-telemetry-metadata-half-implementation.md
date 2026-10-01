@@ -616,3 +616,211 @@ was one block with no leading whitespace, so its canonical rendering
 is its text. Code and test in `Digest the know-how half as it precedes
 a scope`; this wording in `Define the prompt digest by its canonical
 rendering`.
+
+## M3: the system prompt reaches Langfuse
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.286; 2026-10-01.
+
+### What landed
+
+| Decision | Where | Commit |
+| --- | --- | --- |
+| 10, the `llm` content export stops writing `langfuse.observation.input` and `.output` | `llm_input_export.py` (`_stage`, `finish`) | `Stop writing Langfuse aliases on the llm span` |
+| 11, the streaming preflight charges one canonical output | `llm_input_export.py` (`observe`) | `Charge a streamed output once in the preflight` |
+| The comment above `OBSERVATION_INPUT` | `telemetry.py` | `Say why the llm export writes no Langfuse field` |
+| The documentation footprint and the changelog fragment | `docs/architecture/observability-surfaces.md`, `vinga-server/README.md`, `changelog.d/533-system-prompt-in-langfuse.md` | `Document the system prompt reaching Langfuse` |
+
+Decisions 12 and 13 needed no code: no new byte leaves (the system
+prompt was already on the span), and with `export_llm_input` off
+nothing is staged, which the existing off-switch tests
+(`test_builder_is_off_by_default`, the wire lane's
+`test_the_flag_off_puts_no_such_span_on_the_wire`) still cover.
+
+### Deviations from the plan
+
+None in substance. Three in form:
+
+1. **The comment above `OBSERVATION_INPUT` gained a paragraph rather
+   than losing a list entry.** The plan asked that it drop the content
+   export from its list of the alias's writers; the comment never named
+   the content export (it lists the media reference and the turn's
+   text), so there was nothing to drop. It now says, where a reader of
+   the constant looks, that the `llm` export writes neither field on
+   purpose and why.
+2. **"The staged size is the conventions' bytes alone" has no test of
+   its own.** It is the exact-fit boundary test: its ceiling is the sum
+   of the five conventions' values as staged, and the pair is exported
+   at that ceiling only if nothing else is staged beside them (the old
+   code, with the aliases, fails it).
+3. **The Collector configuration is unchanged.** Plan review round 5's
+   resolution asked for any rule under `deploy/telemetry/` naming the
+   two fields to be updated or shown inert. `collector.yml:37-38` mask
+   email-shaped text in both. They are not inert: the turn span's
+   transcript aliases (`telemetry.py`, `_turn_content_attributes`) still
+   write both fields, and `test_telemetry_deploy.py`
+   (`test_the_common_mask_names_every_content_field_and_alias`) and
+   `test_telemetry_fanout.py` pin the masking list that includes them. On the `llm`
+   span they now match nothing, and nothing is lost by that, because
+   what Langfuse derives the observation's input and output from,
+   `gen_ai.system_instructions`, `gen_ai.input.messages` and
+   `gen_ai.output.messages`, is on the same masking list
+   (`collector.yml:32-34`). The list's comment ("every canonical content
+   field and every alias vinga derives") stays true. The Jaeger branch
+   drops `langfuse.*` whatever it holds.
+
+### Resolutions of plan review round 5
+
+- Finding 1 (rejected): no cardinality change. The system prompt still
+  rides every `llm` span, per round, because the memory half is read
+  per round; the live gate below shows the know-how half alone in the
+  first two rounds and the memory block from the round after the
+  `remember` on.
+- Finding 2 (accepted): decision 11 as amended, with both boundary
+  tests on the streaming path.
+- Finding 3 (accepted): the `### Changed` entry names the removal as a
+  breaking change to the exported trace schema, with the migration and
+  why the aliases are not retained; the observability page's "direct
+  Langfuse input and output aliases are derived from them" is
+  rewritten; the Collector check is deviation 3.
+
+### Discoveries
+
+- **The preflight charges a lower bound, which is why charging once is
+  safe.** `observe()` weighs each delta's raw UTF-8 bytes (or a tool
+  call's own JSON); `finish()` weighs the rendered output, which only
+  adds framing and escapes to those bytes. So the preflight never drops
+  a pair `finish` would admit, and the exact-fit test can sit exactly
+  on the ceiling. While the alias existed, the doubled charge was the
+  conservative mirror of a doubled final; without the alias it would
+  have dropped any pair whose streamed output took more than about half
+  the room its request left under the ceiling (the mutation below shows
+  it on a 1,000-byte reply).
+- **Legibility cannot have regressed for the messages after the system
+  turn.** The alias's value was `input_json` verbatim, the same string
+  as `gen_ai.input.messages`, so the user, assistant and tool messages
+  Langfuse shows are the same `parts` JSON it showed before; the only
+  new element is the prepended system message, in Langfuse's own
+  `{"role", "content"}` shape. The readback below is through the
+  public API, where every message comes back as structured JSON with
+  text, tool-call arguments and tool responses intact. The web UI's
+  rendering was not looked at.
+- **`gen_ai.system_instructions` stays out of Langfuse's metadata**, as
+  its ingestion source says: no observation's `metadata.attributes`
+  carried a `gen_ai.system*` key in either run. The system prompt is
+  visible in the input and nowhere else, which is one copy rather than
+  two.
+
+### Inventories
+
+By `git grep -n`, untruncated, over `vinga-server/`.
+
+- **`OBSERVATION_INPUT`**: 11 hits at the plan commit (`7739f54a`), 8
+  at this section's tree. Removed: the import and the `_stage` write in
+  `llm_input_export.py`, and the fixture entry in
+  `test_telemetry_llm_input.py`. Kept: the constant, the transcript
+  write (`telemetry.py`, `attributes[OBSERVATION_INPUT] = heard`), the
+  three transcript-export test lines, and in
+  `test_telemetry_llm_input.py` the import and two assertions that the
+  `llm` span carries no such field (one changed from presence to
+  absence, one already asserted absence).
+- **`OBSERVATION_OUTPUT`**: 11 hits at the plan commit, 8 now. Removed:
+  the import and the `finish` write in `llm_input_export.py`, the
+  fixture entry in `test_telemetry_llm_input.py`. Kept: the constant,
+  the capture reference (`telemetry.py`, the `capture` span's output)
+  and the transcript write, the three transcript-export test lines, and
+  the import and one absence assertion in `test_telemetry_llm_input.py`.
+- **Tests that pinned the `llm` aliases, updated deliberately**: four.
+  `tests/unit/test_telemetry_llm_input.py`, whose `_open` fixture
+  staged both aliases and whose
+  `test_content_enriches_the_actual_generation_span` asserted both on
+  the span (the fixture now stages what the export stages, and the
+  assertions are of absence); and
+  `tests/integration/test_llm_input_export.py`, where
+  `test_a_conversations_assembled_requests_arrive_as_observations`
+  asserted the heard sentinel in `langfuse.observation.input` (now:
+  neither field on the wire) and
+  `test_nothing_of_the_request_is_anywhere_else_on_the_wire` listed
+  `("llm", "langfuse.observation.output")` among the attributes
+  carrying the prompt sentinel (now gone from the list, so a returning
+  alias fails it). The module docstring's "in the field the backend
+  renders as an observation's input" is rewritten to match.
+- **The literal key strings** (`langfuse.observation.input` or
+  `.output`) over `vinga-server/` and `deploy/`: 13 hits now, all
+  either the constants, the Collector's two masking rules (deviation
+  3), the deploy and fanout tests that pin those rules, the capture
+  upload's output reference tests, or the two new absence assertions.
+
+### Falsification
+
+New and changed tests were run against the code before the change
+(the plan commit's `llm_input_export.py` copied in, then restored by
+copy and `touch`): `test_a_round_stages_the_conventions_and_no_alias`
+failed for both the reply and the recap,
+`test_a_streamed_pair_that_fits_the_ceiling_exactly_is_exported`
+failed (the pair was dropped), and both changed wire tests failed. The
+one-byte-over test passed before, as a boundary partner should: the old
+code drops that pair too.
+
+| Mutation | Result |
+| --- | --- |
+| The input alias restored in `_stage` | killed: `test_a_round_stages_the_conventions_and_no_alias` (reply and recap) and the exact-fit test |
+| The preflight's doubled charge restored (`2 * (output_size + added)`) | killed: `test_a_streamed_pair_that_fits_the_ceiling_exactly_is_exported` |
+| Both aliases and the doubled preflight restored (the plan commit's file), run through the live gate | killed: Langfuse lost the system message on every round (below) |
+
+None survived.
+
+### The live gate
+
+Run on agentpi, 2026-10-01 07:46 to 07:47 CEST, from an uncommitted
+driver in the session's scratchpad (the M2 rig's shape): a server in
+process on this branch at `9661b1c9` plus the comment-only change
+committed as `3c359dbc`, with OpenAI ASR (`gpt-4o-mini-transcribe`),
+the OpenAI-compatible LLM on `api.openai.com` with `gpt-4.1-mini`,
+OpenAI TTS (`gpt-4o-mini-tts`), silero VAD, the builtin tools, and
+telemetry on with `export_llm_input`, exporting directly to the
+project's Langfuse (`/api/public/otel`, ingestion version 4). Three
+spoken questions through the xiaozhi-sdk client: a herb question, a
+request to remember a favourite herb (the model called `remember`),
+and a request to say what it remembers after checking with `recall`
+(the model called `recall`). The agent's prompt carried the marker
+`KNOWHOW-M3-MARK`. Session `7b9600368fb84c4ead544b725c5314a9`; each
+`llm` observation read back with `GET /api/public/observations/<id>`.
+
+| Observation | Round | `input[0]` | Memory block in it | Messages after it | `output` |
+| --- | --- | --- | --- | --- | --- |
+| `f54a31ca1558071f` | turn 1, round 1 | `system`, the know-how text with the marker | no | user | reply text |
+| `8a795400a0557365` | turn 2, round 1 | `system`, the know-how text | no | user, assistant, user | `tool_call` `remember`, arguments `{"text": "My favorite herb is basil."}` |
+| `be4f0a74ad02d02c` | turn 2, round 2 | `system`, the know-how text | yes: `You remember these facts about past conversations:` / `- My favorite herb is basil.` | user, assistant, user, assistant (`tool_call` `remember`), tool (`tool_call_response` `Remembered [1]: ...`) | reply text |
+| `518683949ac2dc08` | turn 3, round 1 | `system`, the know-how text | yes | user, assistant, user, assistant, user | `tool_call` `recall`, arguments `{"query": "favorite herb"}` |
+| `b3779d2e619c97c6` | turn 3, round 2 | `system`, the know-how text | yes | ...user, assistant (`tool_call` `recall`), tool (`tool_call_response` `- [1] My favorite herb is basil.`) | reply text |
+
+**The gate passes.** Every reply round's input begins with a `system`
+message holding the know-how text; from the round after the
+`remember` (`be4f0a74ad02d02c`, invocation
+`7ead48d8b257483ab2b2313d96617b61`) it also holds the memory block;
+the user, assistant and tool messages follow in the conventions'
+`parts` shape with text, tool-call arguments, call ids and tool
+responses legible; and each output holds the reply text or the tool
+call. All five rounds reported `llm_input_exported`, and each staged
+exactly the five conventions' keys.
+
+**With the alias restored** (the plan commit's `llm_input_export.py`,
+the same driver, 07:48 CEST, session
+`286c32e3b97c430f8c45e0c3fe891aab`), the five observations
+`6908e74c5a468309`, `b942bcc757d8ef57`, `6e2c755c906cf88a`,
+`09c7b0e3b14dd50b` and `226c1bf6c3132dcf` came back with inputs that
+open on a `user` message and contain neither the marker nor the memory
+block anywhere, which is the probe's finding reproduced on a real
+session.
+
+**One real round's staged size**, `be4f0a74ad02d02c`: 7,828 bytes
+after (system instructions 407, input messages 681, tools 6,592, tool
+choice 4, output messages 144). Before, the same round would have
+staged 8,653: the alias values were the input and output strings
+verbatim, so the difference is exactly 681 plus 144. The mutated run's
+corresponding round, a different conversation of similar length,
+staged 8,641 with the aliases present. The tool schemas are most of a
+round's weight; the aliases were about a tenth of it here, and their
+share grows with the history.
+
+### Lanes
