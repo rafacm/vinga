@@ -713,6 +713,14 @@ class PipelineRuntime:
             events,
             conversations,
             self._remembering_now,
+            # Where each call's arguments and result go for its tool
+            # span, bound to this session, and nothing at all with the
+            # content export off (#533).
+            stage_content=(
+                None
+                if llm_input is None
+                else functools.partial(llm_input.stage_tool, self.session_id)
+            ),
         )
         # The activation the connect used to do by hand, and the MCP
         # revive that followed it, in that order. No task is spawned

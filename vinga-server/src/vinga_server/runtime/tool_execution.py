@@ -40,6 +40,14 @@ from vinga_server.tools import names
 from vinga_server.tools.arguments import with_lossless_coercions
 from vinga_server.tools.source import ToolSource, no_such_tool, withheld
 
+# What a call's content is handed to just before its `tool_call` event,
+# when `export_llm_input` is on: the asking round's invocation, the
+# call's position, what the model asked with (the reserved claim's
+# arguments, or its raw text where it sent no JSON object), and the
+# result the model is handed back. Bound to the session by the runtime,
+# which is what knows which export and which session this is.
+StageToolContent = Callable[[str, int, Mapping[str, Any] | str, str], None]
+
 # How long a builtin or a device tool may take. Server tools use their
 # own entry's tool_timeout_s. The device hears silence meanwhile, which
 # is why this is not generous.
@@ -70,6 +78,22 @@ def _coercions(sent: Mapping[str, Any], executing: Mapping[str, Any]) -> int:
         if held is not sent[name]
         and (type(held) is not type(sent[name]) or held != sent[name])
     )
+
+
+def _asked(classified: ToolInvocation, call: ToolCall) -> Mapping[str, Any] | str:
+    """What the model asked a call with, as the content export carries it.
+
+    The reserved claim's arguments, which are the model's own values,
+    and never the execution copy's, which may have been coerced to the
+    types the tool declared: what the export promises is what the model
+    was given and gave. A malformed call has no arguments object, so its
+    raw text is the one thing it asked with.
+    """
+    if call.malformed_arguments is not None:
+        return call.malformed_arguments
+    if classified.arguments is None:
+        return {}
+    return classified.arguments
 
 
 def _tool_fragment(classified: ToolInvocation) -> Fragment:
@@ -240,7 +264,10 @@ class ToolExecution:
     can replace the MCP registry between two calls, so an answer taken
     at construction would be the wrong answer by the second reply.
     `remembering` is the reply's memory policy, asked before a call to a
-    memory tool is answered at all.
+    memory tool is answered at all. `stage_content` is where a call's
+    arguments and result go for its tool span when the content export
+    is on, and `None` when it is off, compared `is not None` at the one
+    call site so the flag off renders nothing at all (#533).
     """
 
     def __init__(
@@ -251,6 +278,7 @@ class ToolExecution:
         events: SessionEvents,
         conversations: SessionConversations,
         remembering: Callable[[], bool],
+        stage_content: StageToolContent | None = None,
     ) -> None:
         self._sources = sources
         self._device_tools = device_tools
@@ -258,6 +286,7 @@ class ToolExecution:
         self._events = events
         self._conversations = conversations
         self._remembering = remembering
+        self._stage_content = stage_content
 
     @property
     def _agent(self) -> str | None:
@@ -547,6 +576,14 @@ class ToolExecution:
             content, is_error = f'the tool "{call.name}" failed: {exc}', True
             error_type = type(exc).__name__
         elapsed = loop.time() - started
+        if self._stage_content is not None:
+            # Immediately before the event, with nothing awaited between
+            # them: the event folds synchronously, so its tool span takes
+            # this pair within the same emission, under the same
+            # invocation and position the event carries.
+            self._stage_content(
+                invocation, classified.position, _asked(classified, call), content
+            )
         self._events.emit(
             lambda: _tool_called(
                 classified,
