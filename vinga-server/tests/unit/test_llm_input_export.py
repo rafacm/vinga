@@ -446,6 +446,10 @@ def _outcomes(caplog: pytest.LogCaptureFixture) -> list[tuple[str, ...]]:
     ]
 
 
+def _emitted() -> None:
+    """The `tool_call` emission a unit case has no event for."""
+
+
 TOOL_DROPPED = ("failed", LlmInputExportKind.TOOL_CALL.value, LlmInputExportFailure.DROPPED.value)
 TOOL_EXPORTED = ("exported", 0, 1)
 
@@ -460,7 +464,7 @@ def test_a_tool_pair_uses_the_conventions_keys_and_the_part_encoding(
     arguments = {"text": "the kettle is new", "id": 7, "nested": {"b": 1, "a": "ä"}}
 
     with caplog.at_level(logging.INFO):
-        staged.stage_tool("session", "round", 2, arguments, 'saved "fact" 7')
+        staged.stage_tool("session", "round", 2, arguments, 'saved "fact" 7', _emitted)
 
     [(invocation, position, attributes)] = recorded.tool_snapshots
     assert (invocation, position) == ("round", 2)
@@ -486,7 +490,7 @@ def test_a_tool_pair_uses_the_conventions_keys_and_the_part_encoding(
 def test_a_malformed_tool_call_exports_its_raw_argument_text() -> None:
     staged, recorded = exporter()
 
-    staged.stage_tool("session", "round", 0, '{"fact": "tea', "not a JSON object")
+    staged.stage_tool("session", "round", 0, '{"fact": "tea', "not a JSON object", _emitted)
 
     [(_, _, attributes)] = recorded.tool_snapshots
     assert attributes[GEN_AI_TOOL_CALL_ARGUMENTS] == '{"fact": "tea'
@@ -498,7 +502,7 @@ def test_a_tool_pair_over_the_ceiling_is_dropped_and_reported(
     staged, recorded = exporter(max_request_bytes=64)
 
     with caplog.at_level(logging.INFO):
-        staged.stage_tool("session", "round", 0, {"fact": "tea"}, "x" * 64)
+        staged.stage_tool("session", "round", 0, {"fact": "tea"}, "x" * 64, _emitted)
 
     assert recorded.tool_snapshots == []
     assert _outcomes(caplog) == [TOOL_DROPPED]
@@ -511,7 +515,7 @@ def test_a_tool_pair_telemetry_refuses_is_reported_as_a_tool_call(
     staged = LlmInputExport(telemetry=telemetry)
 
     with caplog.at_level(logging.INFO):
-        staged.stage_tool("session", "round", 0, {"fact": "tea"}, "saved")
+        staged.stage_tool("session", "round", 0, {"fact": "tea"}, "saved", _emitted)
 
     assert recorded.tool_snapshots == []
     assert _outcomes(caplog) == [TOOL_DROPPED]
@@ -530,8 +534,8 @@ def test_one_round_s_tool_pairs_share_one_ceiling(
 
     with caplog.at_level(logging.INFO):
         for position in range(5):
-            staged.stage_tool("session", "busy", position, {}, result)
-        staged.stage_tool("session", "next", 0, {}, result)
+            staged.stage_tool("session", "busy", position, {}, result, _emitted)
+        staged.stage_tool("session", "next", 0, {}, result, _emitted)
 
     assert [(i, p) for i, p, _ in recorded.tool_snapshots] == [
         ("busy", 0),
@@ -554,8 +558,29 @@ def test_a_session_close_forgets_its_round_budget() -> None:
     one = len(b"{}") + len(result.encode())
     staged, recorded = exporter(max_request_bytes=one)
 
-    staged.stage_tool("session", "busy", 0, {}, result)
+    staged.stage_tool("session", "busy", 0, {}, result, _emitted)
     staged.session_closed("session")
-    staged.stage_tool("session", "busy", 1, {}, result)
+    staged.stage_tool("session", "busy", 1, {}, result, _emitted)
 
     assert [p for _, p, _ in recorded.tool_snapshots] == [0, 1]
+
+
+@pytest.mark.parametrize(
+    "bounds, accepts",
+    [({}, True), ({"max_request_bytes": 8}, True), ({}, False)],
+    ids=["attached", "over-ceiling", "refused"],
+)
+def test_the_tool_call_event_is_emitted_once_whatever_becomes_of_the_pair(
+    bounds: dict[str, int], accepts: bool
+) -> None:
+    """The stager owns the emission, so a pair dropped at staging must
+    not take its `tool_call` event with it."""
+    telemetry, _ = exporting(accepts=accepts)
+    staged = LlmInputExport(telemetry=telemetry, **bounds)
+    emitted: list[str] = []
+
+    staged.stage_tool(
+        "session", "round", 0, {"fact": "tea"}, "saved", lambda: emitted.append("tool_call")
+    )
+
+    assert emitted == ["tool_call"]

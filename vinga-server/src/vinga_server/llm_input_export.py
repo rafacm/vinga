@@ -2,7 +2,7 @@
 
 import json
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -254,14 +254,19 @@ class LlmInputExport:
         position: int,
         arguments: Mapping[str, Any] | str,
         result: str,
+        emit: Callable[[], object],
     ) -> None:
-        """Stage one tool call's pair for the `tool_call` event about to fold.
+        """Hand one tool call's pair to the `tool_call` event `emit` says.
 
-        Called after the call returned and immediately before its event
-        is emitted, which folds synchronously, so the pair is taken by
-        the tool span within the same emission and is never held beside
-        another (#533). `invocation` and `position` are that event's own
-        join keys.
+        The pair is staged, `emit` is called exactly once whatever
+        happens to the pair, and the handoff is then settled: the event
+        folds synchronously, so by the time `emit` returns its tool span
+        has taken the pair or never will. Only a pair the fold wrote
+        onto a span is counted as exported and charged to the round; one
+        the emission never delivered (a refused construction) is
+        discarded there and then and reported, so nothing waits for
+        shutdown and nothing is claimed that did not happen (#533).
+        `invocation` and `position` are the event's own join keys.
 
         `arguments` is the reserved claim's: what the model asked with,
         not the copy coerced for the far side, encoded the way the
@@ -272,10 +277,37 @@ class LlmInputExport:
 
         Bounded twice, with nothing truncated: a pair over the
         per-request ceiling is dropped whole, and so is one that would
-        take a round's admitted tool pairs past that same ceiling,
+        take a round's attached tool pairs past that same ceiling,
         because a round runs its whole call list at once and each pair
         lands on a span in telemetry's bounded queue.
         """
+        staged = self._stage_tool(session, invocation, position, arguments, result)
+        emit()
+        if staged is None:
+            return
+        if not self._telemetry.settle_tool_content(invocation, position):
+            self._failed(session, TOOL_CALL, LlmInputExportFailure.DROPPED)
+            return
+        self._tool_round[session] = (invocation, staged)
+        events.emit(
+            lambda: LlmInputExported(
+                session=SessionId(session),
+                rounds=Count(0),
+                tool_calls=Count(1),
+            )
+        )
+
+    def _stage_tool(
+        self,
+        session: str,
+        invocation: str,
+        position: int,
+        arguments: Mapping[str, Any] | str,
+        result: str,
+    ) -> int | None:
+        """Render, bound and stage one pair, answering the round's
+        attached bytes once it lands, or None where it was dropped and
+        already reported."""
         try:
             encoded = arguments if isinstance(arguments, str) else _json(dict(arguments))
             attributes = {
@@ -285,23 +317,16 @@ class LlmInputExport:
             size = _size(attributes)
         except Exception:  # noqa: BLE001 - content export never breaks a reply
             self._failed(session, TOOL_CALL, LlmInputExportFailure.DROPPED)
-            return
+            return None
         current = self._tool_round.get(session)
         admitted = current[1] if current is not None and current[0] == invocation else 0
         if admitted + size > self._max_content_bytes:
             self._failed(session, TOOL_CALL, LlmInputExportFailure.DROPPED)
-            return
+            return None
         if not self._telemetry.stage_tool_content(session, invocation, position, attributes):
             self._failed(session, TOOL_CALL, LlmInputExportFailure.DROPPED)
-            return
-        self._tool_round[session] = (invocation, admitted + size)
-        events.emit(
-            lambda: LlmInputExported(
-                session=SessionId(session),
-                rounds=Count(0),
-                tool_calls=Count(1),
-            )
-        )
+            return None
+        return admitted + size
 
     def session_closed(self, session: str) -> None:
         for invocation in tuple(self._sessions.get(session, ())):

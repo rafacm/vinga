@@ -40,13 +40,17 @@ from vinga_server.tools import names
 from vinga_server.tools.arguments import with_lossless_coercions
 from vinga_server.tools.source import ToolSource, no_such_tool, withheld
 
-# What a call's content is handed to just before its `tool_call` event,
-# when `export_llm_input` is on: the asking round's invocation, the
-# call's position, what the model asked with (the reserved claim's
-# arguments, or its raw text where it sent no JSON object), and the
-# result the model is handed back. Bound to the session by the runtime,
-# which is what knows which export and which session this is.
-StageToolContent = Callable[[str, int, Mapping[str, Any] | str, str], None]
+# What a call's content is handed to with its `tool_call` event, when
+# `export_llm_input` is on: the asking round's invocation, the call's
+# position, what the model asked with (the reserved claim's arguments,
+# or its raw text where it sent no JSON object), the result the model
+# is handed back, and the emission itself, which the stager makes
+# exactly once between staging the pair and settling it. Bound to the
+# session by the runtime, which is what knows which export and which
+# session this is.
+StageToolContent = Callable[
+    [str, int, Mapping[str, Any] | str, str, Callable[[], object]], None
+]
 
 # How long a builtin or a device tool may take. Server tools use their
 # own entry's tool_timeout_s. The device hears silence meanwhile, which
@@ -576,25 +580,31 @@ class ToolExecution:
             content, is_error = f'the tool "{call.name}" failed: {exc}', True
             error_type = type(exc).__name__
         elapsed = loop.time() - started
+
+        def announce() -> None:
+            self._events.emit(
+                lambda: _tool_called(
+                    classified,
+                    self._agent,
+                    self._conversation,
+                    elapsed,
+                    is_error,
+                    error_type,
+                    invocation,
+                )
+            )
+
         if self._stage_content is not None:
-            # Immediately before the event, with nothing awaited between
-            # them: the event folds synchronously, so its tool span takes
-            # this pair within the same emission, under the same
-            # invocation and position the event carries.
+            # The stager makes the emission itself, between staging the
+            # pair and settling it, with nothing awaited in between: the
+            # event folds synchronously, so its tool span takes the pair
+            # under the invocation and position the event carries, and a
+            # refused emission is found and cleaned up at once.
             self._stage_content(
-                invocation, classified.position, _asked(classified, call), content
+                invocation, classified.position, _asked(classified, call), content, announce
             )
-        self._events.emit(
-            lambda: _tool_called(
-                classified,
-                self._agent,
-                self._conversation,
-                elapsed,
-                is_error,
-                error_type,
-                invocation,
-            )
-        )
+        else:
+            announce()
         turn.executed(slot, content, is_error, round(elapsed * 1000))
         return ToolResult(tool_call_id=call.id, content=content, is_error=is_error)
 

@@ -42,6 +42,13 @@ class Exported:
             self.tool_snapshots.append((invocation, position, dict(attributes)))
         return self.accepts
 
+    def settle_tool_content(self, invocation: str, position: int) -> bool:
+        """As though the fold always consumed what was staged."""
+        return any(
+            (staged, at) == (invocation, position)
+            for staged, at, _ in self.tool_snapshots
+        )
+
 
 def exporting(
     contexts: dict[str, Any] | None = None, **answers: Any

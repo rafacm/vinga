@@ -1759,7 +1759,12 @@ async def drive_llm_input_tool_exported(directory: Path) -> None:
     second kind of pair the same ledger counts (#533)."""
     exporter, recorded = llm_inputs({"s1": AN_LLM_CONTEXT})
     exporter.stage_tool(
-        "s1", "0123456789abcdef0123456789abcdef", 0, {"fact": "tea"}, "saved"
+        "s1",
+        "0123456789abcdef0123456789abcdef",
+        0,
+        {"fact": "tea"},
+        "saved",
+        lambda: None,
     )
     assert recorded.tool_snapshots
     await exporter.shutdown()
