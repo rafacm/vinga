@@ -327,3 +327,59 @@ merge rebases.
   tests and mutations, a live readback of a tool observation's input
   and output in Langfuse, its documentation footprint. One pull request;
   whichever of the two merges last closes #533.
+
+## Plan review round
+
+Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 8m47s, at commit d8cc2f40, plan blob 6973e0cd.
+
+---
+
+1. **P1: The plan does not implement #533’s once-per-agent system-prompt cardinality.**
+
+   **Evidence:** Decision 5 claims moving memory “answers #533 §3’s ‘once per agent’” (`docs/plans/2026-10-01-memory-placement-and-tool-content.md:133-145`). But `PipelineRuntime` still calls `stage_reply` inside every round (`runtime/pipeline.py:1768,1805-1813`), and `_stage` writes `gen_ai.system_instructions` into every round snapshot (`llm_input_export.py:139-160`). The metadata-half review explicitly deferred the one-copy design to this content half (`docs/plans/2026-10-01-telemetry-metadata-half.md:900-904`).
+
+   **Plan should say instead:** Define the carrier that exports the stable know-how text once per agent activation, plus how every generation references it while carrying per-round context. Test multiple rounds and a handover, proving exactly one stable-prompt copy per activation and correct Langfuse rendering.
+
+2. **P1: Adapter placement would make the LLM-input export differ from what the model received.**
+
+   **Evidence:** Decisions 1 and 2 insert context only inside provider adapters (plan lines 95-118`). Today the exporter stages `system` and the unmodified `working` turns before adapter translation (`runtime/pipeline.py:1794-1817`), and serializes only those turns (`llm_input_export.py:111-160`). Consequently `gen_ai.input.messages` would omit the context, contradicting Decision 5 and the exported-input contract that the snapshot is the assembled request. No M1 test checks the exported messages (plan lines 241-256`).
+
+   **Plan should say instead:** Pass the context into `stage_reply` and render it into the newest user message under the same placement rules, including tool rounds and the no-user fallback. Add a production-path test comparing the provider request and exported messages, including a failed generation.
+
+3. **P2: The prerequisite gate that previously stayed closed is silently treated as open.**
+
+   **Evidence:** The completed cached-token milestone says “M2’s gate not opened as written” (`docs/plans/2026-09-25-cached-prompt-tokens.md:345-350`), and its implementation records the literal result as “M2’s gate does not open” pending Rafael’s decision (`...-implementation.md:268-290`). This plan proceeds with M2 based on new probe scripts that are not committed (plan lines 68-89`) without stating that the earlier gate was resolved or superseded.
+
+   **Plan should say instead:** Record the settled resolution of the earlier gate, identify the evidence that supersedes it, and make the new reproducible criterion explicit before authorizing implementation.
+
+4. **P2: The new cache gate cannot be evaluated as written.**
+
+   **Evidence:** The gate accepts `set_state` as a verified write but requires `vinga.llm.memory.facts` to change (plan lines 157-166`). `PromptMemory` explicitly gives IDs only to agent and device facts; ledger state has none (`memory/store.py:418-445`). Moreover, `llm_round` reports total and cached tokens, not the token count of “history before the newest turn,” so the proposed threshold is not directly observable.
+
+   **Plan should say instead:** Either restrict interventions to fact-backed writes such as `remember`, or verify `set_state` through the exported context or a direct memory read. Define an observable cache criterion using paired requests and raw cached-token counts, with an explicit repeatability threshold.
+
+5. **P2: The `stream` signature change can silently misbind existing positional arguments.**
+
+   **Evidence:** The current seam is `(system, turns, tools, tool_choice)` (`providers/base.py:491-498`). Both the reply and recap pass tools and choice positionally (`runtime/pipeline.py:1817,2188`), as do provider tests and subclass calls. Inserting `context` after `turns` would turn `()` into context and `"none"` into tools. Numerous support and inline providers also override the existing signature, including `tests/support/providers.py:99-105,148-154,171-177`.
+
+   **Plan should say instead:** Add `context` as a keyword-only parameter after the existing parameters, pass it as `context=...`, and inventory every production and test implementation. Leave `ProviderWatch` unchanged: its existing zero-argument stream factory already retries fixed arguments, so adding a context pass-through there would be a shallow forwarding change.
+
+6. **P2: The prompt digest’s new input remains conditional when it must change.**
+
+   **Evidence:** Decision 5 only says to simplify canonical rendering “if nothing follows” (plan lines 137-141`). Today `Assembled.canonical` deliberately differs from `text` for a lone persona with leading whitespace (`runtime/prompt.py:352-369`), and `_prompt_assembled` hashes `half.canonical` (`runtime/pipeline.py:1119-1124`). After memory leaves the system message, the provider receives `half.text`; retaining the current digest would fingerprint different bytes.
+
+   **Plan should say instead:** Hash the exact system string sent, `half.text`, and remove or redefine the follower-based canonical form. Add a regression using a leading-whitespace lone persona plus nonempty context.
+
+7. **P2: The promised tool-content session bound has no implementable lifecycle or test.**
+
+   **Evidence:** Decision 9 says tool pairs share the existing per-request and per-session bounds (plan lines 185-192`), but the current session budget covers only unfinished `_Round` objects and is released at `finish()` (`llm_input_export.py:168-177,208-265`). The generation finishes before tools run (`runtime/pipeline.py:1852-1863,1900-1905`). The proposed tests cover only an over-ceiling pair, not session-budget exhaustion (plan lines 258-268`).
+
+   **Plan should say instead:** Specify when tool pairs enter and leave the session’s held-byte accounting, their eviction order relative to generation pairs, and cleanup on cancellation, missing traces, session close, and shutdown. Test multiple tool pairs exhausting the session budget, not only one pair exceeding the per-operation ceiling.
+
+8. **P2: Reusing the export outcome event would make its retained wording and counts false.**
+
+   **Evidence:** The plan reports dropped tool pairs through `llm_input_export_failed` but considers only whether its reason token fits (plan lines 185-190`). The event currently says a generation pair was omitted from its LLM span, while `llm_input_exported.rounds` counts actual generation spans (`events/catalog.py:4064-4100`; `events/values.py:1766-1779`). Neither vocabulary describes a tool span. The exported-traces documentation also currently states that tool arguments and results do not enter spans.
+
+   **Plan should say instead:** Decide whether tool attachment outcomes get separate metadata events or the existing events are generalized. Define how successful tool attachments are counted, update catalog/value prose and the exported-traces section, regenerate `events.md`, and pin the resulting exact event schema.
+
+**Verdict: not ready.** The once-per-agent requirement and exported-request parity need concrete designs before implementation; the remaining P2 amendments should be resolved in the same plan revision.
