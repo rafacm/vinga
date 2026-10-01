@@ -519,7 +519,8 @@ server:
   #   # outcome event reports attachment and enqueue, not backend
   #   # acknowledgement.
   #   export_transcripts: false
-  #   # ATTACHES THE REQUEST AND RAW OUTPUT to each actual LLM span.
+  #   # ATTACHES THE REQUEST AND RAW OUTPUT to each actual LLM span,
+  #   # and each tool call's arguments and result to its tool span.
   #   # Output is captured before speech filtering, including tool calls
   #   # and text withheld from the user. Off by default and its own
   #   # decision: neither `enabled`
@@ -551,11 +552,20 @@ server:
   #   # What one operation may attach is bounded to 256 KiB, with a
   #   # bounded pending budget for the session. A pair over the ceiling is
   #   # dropped whole rather than truncated; over the budget, whole
-  #   # unfinished requests go oldest first. The outcome event reports
-  #   # attachment and enqueue, not backend acknowledgement.
+  #   # unfinished requests go oldest first. A tool call's pair has the
+  #   # same ceiling, and so do one round's tool calls together. The
+  #   # outcome event reports attachment and enqueue, not backend
+  #   # acknowledgement.
   #   #
   #   # EXPORTED REQUESTS OUTLIVE ERASURE HERE, the way exported text
   #   # does, and retention is then the backend's.
+  #   #
+  #   # THE HOUSEHOLD'S REMEMBERED FACTS LEAVE WITH IT, with no switch of
+  #   # their own: the memory each round's request carries goes with
+  #   # every round, and the memory tools' arguments and results go on
+  #   # their tool spans. The backend keeps them by its own policy, and
+  #   # deleting or correcting a fact here reaches none of what already
+  #   # left.
   #   #
   #   # With `enabled` above off it is refused at boot, and under a
   #   # `data_boundary` narrower than this section's `reach` it is
@@ -563,9 +573,9 @@ server:
   #   # local surface behind it to switch off, so `conversations` and
   #   # `capture` are irrelevant to it. It needs no extra and no second
   #   # credential and rides the same OTEL_EXPORTER_OTLP_* transport on
-  #   # the actual generation span. Pairing finishes synchronously at
-  #   # each round boundary; a content omission is a warning rather than
-  #   # a failed session.
+  #   # the actual generation and tool spans. Pairing finishes
+  #   # synchronously at each round boundary and each tool call; a
+  #   # content omission is a warning rather than a failed session.
   #   export_llm_input: false
 
   # Whether speech that arrives while a reply is playing interrupts it.
