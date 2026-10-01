@@ -634,9 +634,14 @@ def test_a_successful_recap_is_a_generation_without_a_reply_ordinal() -> None:
     assert llm.attributes["gen_ai.operation.name"] == "chat"
 
 
-def test_the_first_token_is_a_mark_inside_the_round() -> None:
-    """The number a stalled reply is diagnosed by, drawn where it
-    happened: 250 ms into a round that took 800."""
+def test_the_first_token_is_an_attribute_of_the_round() -> None:
+    """The number a stalled reply is diagnosed by, on the span a backend
+    ingests: 250 ms into a round that took 800.
+
+    An attribute and no span event, which is #533's parity rule: the
+    backend this surface exists for ingests no span events at all, so a
+    mark there was a fact only a plain OTLP backend ever saw. One
+    carrier, so the event is gone rather than kept beside it."""
     clock = Clock()
     telemetry, memory = exporting()
     events = a_turn(clock, telemetry)
@@ -647,14 +652,39 @@ def test_the_first_token_is_a_mark_inside_the_round() -> None:
     close_session(events)
 
     llm = named(finished(telemetry, memory), LLM_SPAN)
-    assert [event.name for event in llm.events] == ["first_token"]
-    assert llm.events[0].timestamp - llm.start_time == 250 * MS
+    assert llm.attributes["vinga.llm.first_token_ms"] == 250
+    assert llm.events == ()
 
 
-def test_a_round_that_spoke_no_token_gets_no_mark() -> None:
-    """A round that only asked for a tool timed no spoken token. An
-    event at the round's own start would say the first token arrived
-    instantly, which is the wrong answer rather than a missing one."""
+def test_a_recap_carries_its_first_token_as_a_reply_round_does() -> None:
+    """Both generation variants carry the field, so both spans carry the
+    attribute: a recap the user waits through is timed the same way."""
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+
+    clock.tick(0.9)
+    round_done(
+        events,
+        duration_ms=900,
+        first_token_ms=310,
+        round_=None,
+        purpose="recap",
+        invocation="abcdefabcdefabcdefabcdefabcdefab",
+    )
+    finish_reply(events)
+    close_session(events)
+
+    llm = named(finished(telemetry, memory), LLM_SPAN)
+    assert llm.attributes["vinga.llm.purpose"] == "recap"
+    assert llm.attributes["vinga.llm.first_token_ms"] == 310
+    assert llm.events == ()
+
+
+def test_a_round_that_spoke_no_token_carries_no_first_token() -> None:
+    """A round that only asked for a tool timed no spoken token. A zero
+    would say the first token arrived instantly, which is the wrong
+    answer rather than a missing one, so the attribute is absent."""
     clock = Clock()
     telemetry, memory = exporting()
     events = a_turn(clock, telemetry)
@@ -665,6 +695,7 @@ def test_a_round_that_spoke_no_token_gets_no_mark() -> None:
     close_session(events)
 
     llm = named(finished(telemetry, memory), LLM_SPAN)
+    assert "vinga.llm.first_token_ms" not in llm.attributes
     assert llm.events == ()
 
 
@@ -742,9 +773,12 @@ def test_a_retry_stays_a_span_event_on_the_turn() -> None:
     turn = named(spans, TURN_SPAN)
     assert [event.name for event in turn.events] == ["llm_retry"]
     assert turn.events[0].attributes["round"] == 1
-    # And the round that eventually answered carries only its own mark,
-    # so the retry is not counted twice in two places.
-    assert [event.name for event in named(spans, LLM_SPAN).events] == ["first_token"]
+    # And the round that eventually answered carries no span event at
+    # all, so the retry is not counted twice in two places: its first
+    # token is an attribute of its own.
+    llm = named(spans, LLM_SPAN)
+    assert llm.events == ()
+    assert llm.attributes["vinga.llm.first_token_ms"] == 250
 
 
 # --- the tool call, which stopped being a span event ------------------

@@ -402,7 +402,10 @@ async def test_the_gen_ai_keys_arrive_spelled_as_the_conventions_spell_them(
         "session.id",
     }
     assert carried["gen_ai.operation.name"] == "chat"
-    assert [event.name for event in llm.events] == ["first_token"]
+    # The first token as an attribute and never as a span event, off the
+    # wire (#533): the mock speaks, so the round timed one.
+    assert isinstance(carried["vinga.llm.first_token_ms"], int)
+    assert [event.name for event in llm.events] == []
 
 
 async def test_the_session_id_arrives_under_the_grouping_alias_too(
