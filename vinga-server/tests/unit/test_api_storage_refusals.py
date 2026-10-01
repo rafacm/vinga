@@ -450,3 +450,117 @@ def test_a_store_refusal_logs_the_class_of_what_failed_and_nothing_planted(
     _nothing_planted(answer, caplog)
     _severed(caught)
 
+
+# And a class that cannot be named, at the same three classifiers. A
+# trigger can only raise what the driver raises, so the forged failure
+# is handed to the statement instead: the route's own connection is
+# wrapped so that a statement on the one table raises it, and every
+# other statement runs as it would. The erasure's connection comes from
+# the runtime's eraser and the rename's from the configuration store's
+# engine, which are the two seams the routes take them from.
+
+
+class _Refusing:
+    """A connection whose statements on one table raise a chosen failure."""
+
+    def __init__(self, real: Any, table: str, failure: Exception) -> None:
+        self._real = real
+        self._table = table
+        self._failure = failure
+
+    def execute(self, statement: Any, *args: Any, **kwargs: Any) -> Any:
+        if self._table in str(statement):
+            raise self._failure
+        return self._real.execute(statement, *args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._real, name)
+
+
+class _RefusingEngine:
+    """An engine whose transactions hand out `_Refusing` connections."""
+
+    def __init__(self, real: Any, table: str, failure: Exception) -> None:
+        self._real = real
+        self._table = table
+        self._failure = failure
+
+    @contextlib.contextmanager
+    def begin(self) -> Iterator[Any]:
+        with self._real.begin() as connection:
+            yield _Refusing(connection, self._table, self._failure)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._real, name)
+
+
+@contextlib.contextmanager
+def forging_at(api: FastAPI, table: str) -> Iterator[None]:
+    runtime = api.state.api_runtime
+    failure = forged_failure()
+    opening = runtime.erasures
+
+    @contextlib.contextmanager
+    def erasures() -> Iterator[Any]:
+        with opening() as connection:
+            yield _Refusing(connection, table, failure)
+
+    store = replace(runtime.store, engine=_RefusingEngine(runtime.store.engine, table, failure))
+    api.state.api_runtime = replace(runtime, erasures=erasures, store=store)
+    try:
+        yield
+    finally:
+        api.state.api_runtime = runtime
+
+
+@pytest.mark.parametrize(
+    ("table", "prepare", "request_", "sentence"),
+    [
+        pytest.param(
+            "memory.state",
+            lambda client: _a_thread_to_erase(),
+            _erasing,
+            memory_store.PURGE_FAILED,
+            id="memory-purge",
+        ),
+        pytest.param(
+            "record.conversations",
+            _an_agent_to_rename,
+            _renaming,
+            conversation_record.RENAME_FAILED,
+            id="record-rename",
+        ),
+        pytest.param(
+            "memory.facts",
+            _an_agent_to_rename,
+            _renaming,
+            memory_store.RENAME_FAILED,
+            id="memory-owner-rename",
+        ),
+    ],
+)
+def test_a_store_refusal_over_a_class_that_cannot_be_named_logs_the_refusal(
+    api: FastAPI,
+    client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+    table: str,
+    prepare: Any,
+    request_: Any,
+    sentence: str,
+) -> None:
+    """The store answers with its own sentence still, and the line names
+    the refusal: a classifier that spelled the class without the
+    validation would raise while building the refusal and lose it."""
+    prepare(client)
+
+    with forging_at(api, table), watching(api) as caught:
+        with caplog.at_level(logging.DEBUG):
+            answer = request_(client)
+
+    assert answer.status_code == 500
+    assert answer.json()["detail"] == sentence
+    said = only(caplog, "api_storage_error")
+    assert said.getMessage().endswith("(StorageError)")
+    assert not [found for found in renderings(caplog) if "the store is fine" in found]
+    _nothing_planted(answer, caplog)
+    _severed(caught)
