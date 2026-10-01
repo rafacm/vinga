@@ -714,8 +714,9 @@ None in substance. Three in form:
 
 By `git grep -n`, untruncated, over `vinga-server/`.
 
-- **`OBSERVATION_INPUT`**: 11 hits at the plan commit (`7739f54a`), 8
-  at this section's tree. Removed: the import and the `_stage` write in
+- **`OBSERVATION_INPUT`**: 11 hits at the plan commit (`ef649ce6` after the rebase
+  onto M1), 8 at this section's tree, the same counts before and after
+  that rebase. Removed: the import and the `_stage` write in
   `llm_input_export.py`, and the fixture entry in
   `test_telemetry_llm_input.py`. Kept: the constant, the transcript
   write (`telemetry.py`, `attributes[OBSERVATION_INPUT] = heard`), the
@@ -773,8 +774,9 @@ None survived.
 
 Run on agentpi, 2026-10-01 07:46 to 07:47 CEST, from an uncommitted
 driver in the session's scratchpad (the M2 rig's shape): a server in
-process on this branch at `9661b1c9` plus the comment-only change
-committed as `3c359dbc`, with OpenAI ASR (`gpt-4o-mini-transcribe`),
+process on this branch before its rebase onto M1, at the commit now
+`ef6673f2` plus the comment-only change now `2c670ad7` (M1 does not
+touch `llm_input_export.py`), with OpenAI ASR (`gpt-4o-mini-transcribe`),
 the OpenAI-compatible LLM on `api.openai.com` with `gpt-4.1-mini`,
 OpenAI TTS (`gpt-4o-mini-tts`), silero VAD, the builtin tools, and
 telemetry on with `export_llm_input`, exporting directly to the
@@ -824,3 +826,22 @@ round's weight; the aliases were about a tenth of it here, and their
 share grows with the history.
 
 ### Lanes
+
+From `vinga-server/`, on agentpi (shared with other implementers),
+both lanes with `-n auto --dist loadfile`, on the tree rebased onto
+M1 (`a0a84320`, plus this section's own wording fixes):
+
+- `uv run ruff check .`: all checks passed; `uv run mypy`: no issues in
+  5 source files.
+- Unit: `1 failed, 7787 passed, 19 skipped in 874.94s`. The one failure
+  is `tests/unit/test_event_docs.py::test_a_reader_who_stops_reading_mid_chunk_gets_no_traceback`,
+  the agentpi-only pipe test M2 recorded (16 KiB pages; passes on CI),
+  untouched by this milestone.
+- Integration: `350 passed in 228.87s`.
+- `python3 scripts/check_doc_links.py .`: `checked 282 files, 0
+  failures`.
+- `uv run pytest tests/census -q`: run last, after this section; its
+  result is in the pull request's verification list.
+
+A first pair of lanes started before the rebase onto M1 was stopped
+part-way and discarded; nothing above comes from it.
