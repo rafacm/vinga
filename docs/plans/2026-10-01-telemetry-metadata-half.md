@@ -422,8 +422,15 @@ alone, no system prompt anywhere.
 11. **The size bound gets smaller, not larger.** The input and output
     were each written twice (convention and alias) and counted twice by
     `_size`; dropping the aliases halves those two, so a request that
-    fit before fits after. The implementation doc records one real
-    round's staged size before and after.
+    fit before fits after. The streaming admission path charges the
+    output separately: `LlmInputExport.observe()` reserves twice every
+    output delta because both the conventions' output and
+    `OBSERVATION_OUTPUT` existed (`llm_input_export.py:197-201`). It now
+    charges one canonical output, its comment says why, and the final
+    `_size()` check stays the authority. Boundary tests: a streamed pair
+    whose final canonical attributes fit the ceiling exactly is
+    exported; one byte more is dropped and reported. The implementation
+    doc records one real round's staged size before and after.
 12. **What leaves does not widen, but what Langfuse stores does.** No
     new byte leaves this server: the system prompt already travels on
     the span under `export_llm_input`. What changes is that Langfuse,
@@ -884,6 +891,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
 2. **P2: The size-bound change omits the streaming preflight that still charges the deleted output alias.**
    **Evidence:** Decision 11 discusses `_size` only (`plans/2026-10-01-telemetry-metadata-half.md:422`). But `LlmInputExport.observe()` separately reserves `2 *` every output delta solely because canonical output and `OBSERVATION_OUTPUT` both exist (`vinga-server/src/vinga_server/llm_input_export.py:197`). Removing the alias without changing this calculation will prematurely drop a valid large canonical pair, so that round reaches Langfuse with neither output nor system prompt. The proposed tests check the final staged size, not the near-ceiling streaming admission path (`plans/2026-10-01-telemetry-metadata-half.md:438`).
    **Plan should say instead:** Change the output preflight to charge one canonical output, update its comment, and add boundary tests: a streamed pair whose final canonical attributes fit must export; the minimally larger one must be dropped. Keep the exact final `_size()` check as the authority.
+
+   *Resolution:* accepted. Decision 11 now changes the streaming preflight in `observe()` to charge one canonical output, keeps `_size()` as the authority, and adds the exact-fit and one-byte-over boundary tests on the streaming path.
 
 3. **P2: Alias removal is an unannounced telemetry-schema break for running deployments.**
    **Evidence:** Decision 10 removes two emitted OTLP attributes (`plans/2026-10-01-telemetry-metadata-half.md:408`), which the current public observability contract calls “direct Langfuse input and output aliases” (`architecture/observability-surfaces.md:472`). Existing collectors, dashboards, or custom consumers can read those keys even if Langfuse should no longer do so. The issue says these changes are backward compatible, while M3 labels the changelog entry only `### Fixed` (`plans/2026-10-01-telemetry-metadata-half.md:458`).
