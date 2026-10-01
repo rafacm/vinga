@@ -2011,6 +2011,26 @@ def test_a_declared_mapping_the_catalog_would_refuse_is_not_exported(
     assert planted not in str(list(carried.items()))
 
 
+def test_a_list_of_session_ids_exports_as_it_always_has() -> None:
+    """The regression pin for widening the sequence fold to integers
+    (#533): a string list is still exported whole, in order, as strings,
+    so no existing list-valued field changes on any span."""
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = session_events(clock, telemetry)
+    open_session(events)
+    clock.tick(1.0)
+    _fold(
+        telemetry,
+        {"event": "capture_pruned", "session": SESSION, "sessions": ["beta", "alpha"]},
+    )
+    close_session(events)
+
+    session = named(finished(telemetry, memory), "session")
+    assert [event.name for event in session.events] == ["capture_pruned"]
+    assert session.events[0].attributes["sessions"] == ("beta", "alpha")
+
+
 def _fold(telemetry: object, payload: dict[str, object]) -> None:
     """One payload straight at the session tap, which is what a tap
     contract cannot stop a caller doing.
