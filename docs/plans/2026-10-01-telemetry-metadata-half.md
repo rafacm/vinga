@@ -316,11 +316,24 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
    carrying none.
 8. **The `llm` span carries it under the round's own names.**
    `vinga.llm.system.characters`, `vinga.llm.memory.characters`,
-   `vinga.llm.memory.sources.<provenance>` (the three scope blocks only; the know-how half's blocks are the turn span's `vinga.prompt.sources.*`, and the whole total is `vinga.llm.system.characters`, which the children are not meant to sum to)
-   and `vinga.llm.memory.facts` (the ids), plus
+   `vinga.llm.memory.sources.<provenance>` (the three scope blocks
+   only; the know-how half's blocks are the turn span's
+   `vinga.prompt.sources.*`, and the whole total is
+   `vinga.llm.system.characters`, which the children are not meant to
+   sum to) and `vinga.llm.memory.facts` (the ids), plus
    `vinga.llm.memory.fact_count`, the length of the id list, derived in
    the fold rather than carried as a second field, because a backend
-   can filter on a number and cannot on an array's length. Deliberately
+   can filter on a number and cannot on an array's length. The count
+   is emitted only when the fact list is present: `0` for a read that
+   injected nothing, absent when memory was off, never
+   `len(payload.get(..., []))`, which would turn "off" into "empty".
+   The per-provenance keys cannot come from the generic fold, which
+   exports a mapping value as one JSON attribute
+   (`telemetry.py:771-793`), and the attribute tables cannot name a
+   wildcard suffix; so a validated helper analogous to
+   `_prompt_attributes` flattens `MemorySources` into exactly the three
+   provenance keys, and both `_llm_span` and the LLM branch of
+   `_provider_failed` compose it. Deliberately
    NOT the turn span's `vinga.prompt.*` names: those describe the
    know-how half once per agent, and the same name meaning "half" on
    one span and "whole" on another is the ambiguity this repository's
@@ -432,7 +445,12 @@ M2:
   proves the joins are counted, and the leading-whitespace one-block
   case proves the count survives the trim.
 - The span carries the id list, the derived count and the per-block
-  sizes; a scope at its cap is still accepted (decision 9).
+  sizes as individual `vinga.llm.memory.sources.*` attributes, on a
+  successful and on a failed reply span; a scope at its cap is still
+  accepted (decision 9).
+- Facts, empty and disabled, each on the event and the span, on the
+  success and failure paths: the count is the length, `0`, and
+  absent respectively.
 - The `LlmRound` carried-key set gains the fields, driven through the
   production session path.
 - Generated `docs/reference/events.md` regenerates; its drift check is
@@ -604,6 +622,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
 
    *Resolution:* accepted. The collision came from round 2's concatenation of selected blocks, which finding 1's resolution removed: the digest input is now `half.text` exactly as sent, the one canonical sequence, already trimmed and joined by assembly, with no further normalization. Tests added for a boundary-moving edit and for whitespace both inside a block and at a trimmed end.
 
+   *Resolution:* accepted. Decision 8 adds a validated flattening helper beside `_prompt_attributes` that emits exactly the three `vinga.llm.memory.sources.*` keys, composed into `_llm_span` and the LLM branch of `_provider_failed`, with tests on successful and failed reply spans. Sent to the M2 implementer while it runs.
+
 5. **P2: Several schema decisions are still deferred to implementation.**
    **Evidence:** The plan leaves the tool-ID grammar “to be confirmed,” invocation requiredness conditional on later discovery, the source mapping type conditional on reading a pattern that already explicitly excludes memory, and integer versus decimal-string fact IDs undecided (`docs/plans/...`, lines 126–143, 191–200, 218–224). `PromptSources` confirms that its grammar is intentionally know-how-only (`events/values.py:1113-1138`), while `_as_attribute` currently strips integers from every sequence (`telemetry.py:896-917`). These choices determine the public event and OTLP schemas and cannot safely be implementation notes.
    **Plan should say instead:** Commit to a separate closed memory-source mapping, integer-valued `FactIds`, and a sequence fold that preserves homogeneous integers after the declared value type accepts them, with a regression test that existing string `SessionIds` remain unchanged. Also settle the accepted tool-ID grammar and make invocation definitively required on the only production emission path.
@@ -621,6 +641,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Plan should say instead:** Preserve the event while adding the attribute, at least for a documented deprecation period. If the parity decision intentionally permits immediate removal, state that it is a breaking telemetry-schema change, document the query migration, and test both the retained temporal mark and the new backend-portable attribute.
 
    *Resolution:* accepted in part. Decision 1 now names the removal as a breaking change to the exported trace schema and gives the migration in one sentence (read `vinga.llm.first_token_ms`; the instant is the span start plus that many milliseconds), carried by the changelog's `### Changed` entry and the observability page, and the span test asserts the round carries no span event. Rejected: keeping the event for a deprecation period. Rafael decided on 2026-10-01 that one fact has one carrier so OTLP backends and Langfuse see the same thing; the project is pre-release with no third-party installation known (the compatibility-floor ADR, lines 27-28); and an event kept for a while is the two-carrier state that decision rejects. The issue's "alongside" wording predates the decision, which the Step 0 comment records.
+
+   *Resolution:* accepted. Decision 8 states the count is emitted only when the fact list is present, `0` for an empty read and absent when memory is off, and the tests cover all three states on the event and the span, success and failure paths. Sent to the M2 implementer while it runs.
 
 7. **P2: `vinga.llm.system.sources.*` falsely presents a partial source inventory as the whole system’s sources.**
    **Evidence:** The plan pairs `vinga.llm.system.characters`, defined as the whole system prompt, with `vinga.llm.system.sources.*`, populated only from `state`, `memory`, and `device` (`docs/plans/...`, lines 188–197 and 209–217). Persona, fragments, and MCP guidance are also system-prompt sources but are deliberately excluded. A backend reader will reasonably expect the children of `system.sources` to account for `system.characters`; they cannot.
