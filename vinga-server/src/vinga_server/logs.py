@@ -133,6 +133,15 @@ _STANDARD_ATTRIBUTES = frozenset(
 # lifespan that failed, an exception in the application with its
 # traceback, a request that would not parse.
 #
+# What the floor does not cover is what those kept records carry. An
+# ERROR record with a traceback renders the exception's message and its
+# chain as they were raised, and nothing here sanitizes them: the floor
+# is about which levels reach the handler, not about what a record that
+# reaches it says. This server's own code renders no traceback (it names
+# a failure by its class, see `serving._report_drain`), so uvicorn's
+# is the exception to that rule rather than an instance of it. It was
+# the same under the INFO floor, and this floor does not change it.
+#
 # A filter cutting the query and the address out of the handshake line
 # and keeping the rest was priced against this and rejected. It reads
 # uvicorn's message template and argument order, which three websocket

@@ -450,7 +450,13 @@ async def test_what_uvicorn_says_above_info_still_reaches_the_log(
     """What the floor keeps, one line from each level above it: a
     request that would not parse, which uvicorn reports at WARNING, and
     an exception in the application, which it reports at ERROR with the
-    traceback. An operator needs both whatever else was held back."""
+    traceback. An operator needs both whatever else was held back.
+
+    The exception is asserted by its class and uvicorn's fixed line,
+    and deliberately not by its message. The traceback this floor keeps
+    is not sanitized by it, the same as every other traceback this
+    server renders, so the message reaching the log is a fact about
+    that and not a property to hold here."""
     logs.configure(ServerConfig(log_level="INFO"))
 
     async with uvicorn_serving() as port:
@@ -464,7 +470,7 @@ async def test_what_uvicorn_says_above_info_still_reaches_the_log(
     out = printed(capsys)
     assert "Invalid HTTP request received." in out
     assert "Exception in ASGI application" in out
-    assert f"RuntimeError: {FAILURE}" in out
+    assert "RuntimeError" in out
 
 
 # --- what the database library is allowed to say (#124) --------------
