@@ -529,7 +529,9 @@ model was handed back. The pair is staged when the call returns,
 immediately before its `tool_call` event, and taken by that event's
 fold under the event's own invocation and position, so two calls in one
 round never take each other's pair, and a session with no trace
-discards it. It has the per-request ceiling, and one round's tool pairs
+discards it. Right after the event the handoff is settled, so a pair
+its event never consumed is discarded at once and reported rather than
+counted. It has the per-request ceiling, and one round's tool pairs
 together have that same ceiling, since a round runs its calls at once:
 a pair past either is dropped whole and reported with `kind` set to
 `tool_call`. These are a second copy of bytes the generation spans
@@ -588,12 +590,21 @@ is refused. It answers to no second switch, unlike the two exports above
 it: there is no local surface behind it that could be off, so it is
 never a no-op, and `server.conversations` and `server.capture` are
 irrelevant to it. It needs no extra and no second credential, because
-the content travels on the actual generation span over the transport
-the traces already use. Pairing finishes synchronously immediately
-before the matching `llm_round` or `provider_failed` event creates and
-ends that span. `llm_input_exported` means attachment and enqueue into
-the ordinary OTLP processor, not backend acknowledgement; a pre-enqueue
-omission is `llm_input_export_failed`. Both outcomes remain metadata-only
+the content travels on the actual generation and tool spans over the
+transport the traces already use. A generation's pair finishes
+synchronously immediately before the matching `llm_round` or
+`provider_failed` event creates and ends its `llm` span, and is counted
+in `llm_input_exported`'s `rounds` once it is staged for that span. A
+tool call's pair is staged when the call returns, its `tool_call` event
+is emitted, and the handoff is then settled: it is counted in
+`tool_calls` only once that event's fold wrote it onto the `tool`
+span, and a pair the emission never delivered (a refused construction,
+or no live trace) is discarded there and then rather than held until
+shutdown. Either way `llm_input_exported` means attachment and enqueue
+into the ordinary OTLP processor, not backend acknowledgement. Every
+omission before that, a pair over a ceiling, refused by telemetry, or
+not consumed by its event, is `llm_input_export_failed`, whose `kind`
+says which span went without. Both outcomes remain metadata-only
 spans beside the retained session trace, so the trace keeps the export
 ledger without copying request or output content into the event surface.
 
