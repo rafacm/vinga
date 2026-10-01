@@ -80,6 +80,26 @@ session that wrote this plan; not committed.
 | Long history, write at turn 11: cached share of turn 11 | **0%** | 88% | 82% |
 | Spontaneous full misses across 17 turns, no write involved | 2 | 1 | 3 |
 
+Method, so it can be rerun: one chat-completions client, no vinga
+server; a system prompt of a nonce plus 45 numbered one-line rules
+(about 1,100 tokens, over the 1,024-token cache floor); 17 user turns,
+the first nine asking for three detailed facts each (`max_tokens` 160)
+so the history grows to about 1,000 tokens; a memory block of one fact
+until turn 10 and two from turn 11; each variant with its own nonce so
+no variant reads another's cache; one second between requests; the
+cached count read from `usage.prompt_tokens_details.cached_tokens`.
+
+**The earlier gate.** #536 M1 recorded its own gate for this change as
+not opened as written (the treatment signature held at three of four
+interventions or four of four, depending on how "same-numbered" was
+read, and one control round also missed), and left the decision to
+Rafael (`docs/plans/2026-09-25-cached-prompt-tokens-implementation.md`).
+On 2026-10-01 Rafael decided to build the change on this probe's
+evidence, which isolates the variable that gate could not: the same
+conversation with only the memory block's position changed. That
+decision supersedes the earlier gate; this plan's own gate (decision 6)
+is the reproducible criterion the implementation must meet.
+
 So a write voids the cached history only in today's placement, while
 full misses that no write explains hit every placement at a similar
 rate (#536 M1 saw them too). They are the provider's, not this plan's to
@@ -378,6 +398,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Evidence:** The completed cached-token milestone says “M2’s gate not opened as written” (`docs/plans/2026-09-25-cached-prompt-tokens.md:345-350`), and its implementation records the literal result as “M2’s gate does not open” pending Rafael’s decision (`...-implementation.md:268-290`). This plan proceeds with M2 based on new probe scripts that are not committed (plan lines 68-89`) without stating that the earlier gate was resolved or superseded.
 
    **Plan should say instead:** Record the settled resolution of the earlier gate, identify the evidence that supersedes it, and make the new reproducible criterion explicit before authorizing implementation.
+
+   *Resolution:* accepted. The probe section now records the earlier gate's outcome (not opened as written, the decision left to Rafael), that Rafael decided on 2026-10-01 to build the change on this probe's evidence, which isolates the one variable the earlier A/B could not, and the probe's method in enough detail to rerun; decision 6 is the reproducible criterion the implementation must meet. The scripts stay uncommitted, as #536 M1's rig did.
 
 4. **P2: The new cache gate cannot be evaluated as written.**
 
