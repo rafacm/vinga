@@ -231,8 +231,13 @@ between on the request's shape and the model's reading of it.
 
 7. **The tool span carries the call's arguments and result under
    `export_llm_input`.** As the conventions' `gen_ai.tool.call.arguments`
-   (the arguments exactly as the model sent them, the reserved claim's,
-   not the coerced execution copy, JSON-encoded) and
+   (the reserved claim's semantic arguments, not the coerced execution
+   copy, encoded with the same JSON encoding the `llm` span's
+   `tool_call` parts already use, `llm_input_export._call`, so the two
+   copies of one call read alike; both adapters parse a valid
+   arguments object and keep no raw string, so this is the call's
+   content and not the provider's bytes, and a malformed call carries
+   its raw argument text, the one case the neutral model keeps it) and
    `gen_ai.tool.call.result` (the result content exactly as the model
    was handed it). With the setting off, nothing changes. Langfuse maps
    both to the tool observation's input and output natively, so no
@@ -275,9 +280,14 @@ between on the request's shape and the model's reading of it.
    and the event baseline's exact carried-key sets pin both new fields.
    The observability page's exported-traces sentence that tool arguments
    and results do not enter spans is rewritten.
-10. **The Collector masks them like the rest.** The two keys join the
-    content-masking rules in `deploy/telemetry/collector.yml` beside
-    `gen_ai.input.messages` and kin.
+10. **The Collector masks them like the rest, and its tests say so.**
+    The two keys join the content-masking rules in
+    `deploy/telemetry/collector.yml` beside `gen_ai.input.messages` and
+    kin; `tests/unit/test_telemetry_deploy.py`'s exact content-key set
+    gains them, and `tests/integration/test_telemetry_fanout.py` sends a
+    credential-shaped and an email-shaped value in each new field
+    through the real Collector and shows both masked before both
+    sinks.
 11. **Option A, written down.** Memory text stays under
     `export_llm_input`, with no switch of its own. The setting's
     description (generated into `docs/reference/server-config.md` from
@@ -519,6 +529,8 @@ What the plan should say instead: either make tool attachment deliberately defer
 Evidence: Decision 7 says arguments are “exactly as the model sent them,” JSON-encoded. But `vinga-server/src/vinga_server/providers/openai_llm.py:96` parses valid JSON into a `dict` and discards the raw string; `vinga-server/src/vinga_server/providers/base.py:370` retain raw text only for malformed arguments. Anthropic likewise supplies parsed input. Re-encoding changes whitespace and can change key order.
 What the plan should say instead: define the field as the reserved neutral claim’s semantic arguments, deterministically JSON-encoded, with malformed calls retaining their raw argument text. Do not claim byte-for-byte provider output unless the plan adds and carries a raw-arguments representation through both adapters, which would conflict with the established neutral-seam boundary.
 
+   *Resolution:* accepted. Decision 7 now defines the arguments as the reserved claim's semantic arguments encoded with the same JSON encoding the `llm` span's `tool_call` parts use (`llm_input_export._call`), says plainly that neither adapter keeps a raw string for a valid call, and keeps raw text only for a malformed call; no byte-for-byte claim and no raw-arguments representation is added.
+
 4. **P2: The tool-content handoff and no-trace release are not concretely plumbed.**
 Evidence: `vinga-server/src/vinga_server/runtime/tool_execution.py:460` has no content-export collaborator; `vinga-server/src/vinga_server/runtime/pipeline.py:709` constructs it without one. Telemetry currently keys content only by invocation, and its no-trace tool route simply returns without consuming anything (`vinga-server/src/vinga_server/telemetry.py:3157`). The plan requires a distinct `(invocation, position)` content slot and explicit consumption on both traced and untraced folds, but does not name those changes.
 What the plan should say instead: name the `PipelineRuntime` to `ToolExecution` wiring, the tool-specific stage/take/discard API, and a `(invocation, position)` key in telemetry. Require `_tool_span` to consume/discard the slot even when the session trace is absent, with tests covering the no-trace path and two positions in one invocation.
@@ -528,5 +540,7 @@ What the plan should say instead: name the `PipelineRuntime` to `ToolExecution` 
 5. **P2: Collector masking is asserted without naming its enforced test surfaces.**
 Evidence: Decision 10 adds two content attributes, but `vinga-server/tests/unit/test_telemetry_deploy.py:23` holds the collector’s complete content-key set exactly, and `vinga-server/tests/integration/test_telemetry_fanout.py:43` sends every declared content key through the real collector. Neither is in the plan’s test footprint.
 What the plan should say instead: explicitly update both content-key inventories and the fanout test so a credential- and email-shaped value in each new tool field is masked before both sinks. This is the test that substantiates “like the rest,” rather than merely parsing the changed YAML.
+
+   *Resolution:* accepted. Decision 10 names `tests/unit/test_telemetry_deploy.py`'s exact content-key set and `tests/integration/test_telemetry_fanout.py`'s real-Collector path, which sends credential- and email-shaped values in each new field and shows them masked before both sinks.
 
 Verdict: **not ready**. Amend the two P1 design contradictions before implementation, then incorporate the P2 plumbing, fidelity, and masking requirements.
