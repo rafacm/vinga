@@ -170,17 +170,29 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
    log line, the catalog's single home for the event; neither appears
    in the `TEMPLATE`. The conventions' `gen_ai.tool.call.id` is not
    used, because its value would be the provider's id.
-3. **The know-how half gets a fingerprint.** `PromptAssembled` gains
-   `sha256: Sha256` (a new value type, exactly 64 lowercase hex
-   characters), the SHA-256 of the know-how half's text as assembled
-   (`half.text`, UTF-8), computed where the event is built. The turn
-   span carries it as `vinga.prompt.sha256` beside
-   `vinga.prompt.characters`, through `PROMPT_ATTRIBUTES`. Unkeyed and
-   unconditional, as the issue asks: the know-how half is
-   operator-authored configuration (persona, fragments, MCP guidance),
-   not personal data, so a confirmation oracle over it reveals nothing
-   an operator does not already hold. That argument does NOT extend to
-   the memory half; see decision 6.
+3. **The operator-authored part of the know-how half gets a fingerprint.** `PromptAssembled` gains
+   `authored_sha256: Sha256` (a new value type, exactly 64 lowercase
+   hex characters): the SHA-256 of the operator-authored blocks of the
+   know-how half only, which are the `persona` block, every
+   `fragment:` block and every `instructions:` block (the guidance the
+   operator wrote for an entry), joined in assembly order and encoded
+   UTF-8, computed where the event is built. The blocks an MCP server
+   supplied, `server_instructions:` and `server_prompt:`
+   (`runtime/prompt.py:131-148`), are excluded: their text is far-side
+   content, and an unkeyed digest is a confirmation oracle over it,
+   the same reason decision 6 rejects a memory digest. Their changes
+   remain visible as sizes in `vinga.prompt.sources.*`. The
+   classification is a closed decision taken on each block's
+   provenance kind, the constants in `runtime/prompt.py`, never on
+   text; a provenance kind added later is excluded until someone
+   classifies it, so the safe answer is the default. The turn span
+   carries it as `vinga.prompt.authored.sha256` beside
+   `vinga.prompt.characters`, through `PROMPT_ATTRIBUTES`; the name
+   says what it covers, so nobody reads it as a digest of the whole
+   half. Unkeyed and unconditional, as the issue asks for this case:
+   operator-authored configuration is not far-side content, and a
+   confirmation oracle over it reveals nothing the operator does not
+   hold.
 4. **`language_confidence` says who fills it.** A `note=` on the
    catalog field: faster-whisper reports it when it detected the
    language rather than being pinned to one; the OpenAI-compatible
@@ -376,8 +388,13 @@ M1:
   and syntactically clean (`sk_live_` followed by 24 alphanumerics) is
   absent from the `tool_call` log line in both formats and from every
   attribute of the tool span, with content export off.
-- `prompt_assembled` carries the digest of exactly the know-how text;
-  a persona edit that preserves length changes it.
+- `prompt_assembled` carries the digest of exactly the
+  operator-authored blocks; a persona edit that preserves length
+  changes it; a change to an MCP server's instructions or prompt text
+  leaves it unchanged (the sentinel: a low-entropy value planted in
+  `ServerInstructions` text cannot be confirmed by hashing candidates
+  against any exported attribute, because no exported digest covers
+  it).
 - The carried-key sets for `tool_call` and `prompt_assembled` gain the
   new fields, driven through the production path.
 
@@ -407,7 +424,8 @@ M2:
 first. Mutations, one run each (straight-line logic), reported in the
 implementation doc: M1, the `LLM_ATTRIBUTES` entry removed; the
 position taken from the partitioned list instead of the model's
-(the same-entry-twice test must fail); the digest computed over the full prompt instead of the half;
+(the same-entry-twice test must fail); the digest computed over the whole know-how half instead of the
+authored blocks (the MCP-text test must fail);
 the invocation taken from the wrong round. M2, `_core`'s kept ids
 replaced by `_newest`'s read ids (the byte-cap test must fail); the
 recap given the fields; the fact count taken from a stale list.
@@ -423,7 +441,7 @@ the implementation doc, per milestone:
 
 - M1: the `llm` observation shows `vinga.llm.first_token_ms`; the tool
   observation shows the invocation id equal to its round's and its
-  position; the turn shows `vinga.prompt.sha256`.
+  position; the turn shows `vinga.prompt.authored.sha256`.
 - M2: the round after the `remember` shows the new id in
   `vinga.llm.memory.facts`, and the count and sizes; whether Langfuse
   renders an integer array (or the string rendering decision 8 chose)
@@ -472,7 +490,7 @@ the implementation doc, per milestone:
 - `docs/architecture/observability-surfaces.md`, "Exported traces":
   the first token is an attribute of the generation; a tool call names
   the call and the round that asked for it; a turn carries the
-  know-how half's digest; a reply round carries its whole system size,
+  digest of its operator-authored blocks; a reply round carries its whole system size,
   the memory blocks' sizes and the ids of the facts injected, with the
   reason ids and not a digest, and that an id resolves against the
   store's current state only; the parity rule in one sentence. M1
@@ -520,6 +538,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Plan should say instead:** Make `system_characters` present on every completed reply generation. Derive source sizes from the actual `Assembled` sent, so a device block remains reported when present even with remembered facts disabled. Specify separately whether an unread or disabled fact list is absent or empty.
 
    *Resolution:* accepted. Decision 7 now splits the two kinds of field: the sizes describe the prompt actually sent and are present on every completed reply round, memory on or off, so a device block carrying the live record is reported either way; the fact list is present (possibly empty) wherever the round read memory and absent where memory is switched off, and a failed read yields an empty list because the model saw no fact. The memory-off and failed-read tests are rewritten to match.
+
+   *Resolution:* accepted, by the first alternative. The premise was wrong: the know-how half holds `server_instructions:` and `server_prompt:` blocks an MCP server supplied. Decision 3 now digests only the operator-authored blocks (`persona`, `fragment:`, `instructions:`), classified by provenance kind with any future kind excluded by default, and exports it as `vinga.prompt.authored.sha256` so the name says what it covers. MCP-supplied text stays visible only as sizes. The tests add the sentinel the finding asks for: a low-entropy value planted in `ServerInstructions` text changes no exported digest, and the mutation that digests the whole half must fail it.
 
 3. **P2: Fact IDs do not provide the stable historical join the plan claims.**
    **Evidence:** The plan says IDs let a trace join back to the local store and answer which facts produced an output (`docs/plans/...`, lines 32–40 and 176–184). Existing facts are mutable under the same ID (`memory/store.py:983-1025`), are deleted by cap pruning (`memory/store.py:1924-1971`), and can be permanently or operator-deleted; the observability contract explicitly says facts last only until corrected and that API deletion is hard deletion (`docs/architecture/observability-surfaces.md`, Memory, lines 183–196). A later lookup can therefore return changed text or no row at all.
