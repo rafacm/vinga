@@ -713,6 +713,44 @@ async def test_the_scopes_are_counted_as_sent_after_a_persona_that_was_trimmed(
     assert rounded.system_characters == len(system)
 
 
+async def test_the_digest_is_of_the_half_as_sent_ahead_of_a_scope(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The external review's regression on #533's digest. A lone
+    persona is sent untrimmed, and once a scope block follows it loses
+    its leading whitespace, so `"   POET"` and `"POET"` send the model
+    byte-identical prompts in every round that reads memory. The digest
+    is of the half's canonical rendering, the bytes it contributes
+    whenever another block follows it: here exactly the know-how prefix
+    of the system string the provider received, and the same for both
+    spellings."""
+    store = lane_memory()
+    await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+    tail = f"\n\n{MEMORY_HEADING}\n- the user is vegetarian"
+    digests: list[str] = []
+    systems: list[str] = []
+    for persona in ("   POET", "POET"):
+        llm = RecordingLlm()
+        caplog.clear()
+        with caplog.at_level("INFO"):
+            session = session_with(
+                CountingServers(),
+                {"poet": llm},
+                memory=store,
+                config=with_poet({"prompt": persona}),
+            )
+            await run_reply(session, "hello")
+        (assembled,) = prompt_events(caplog)
+        (system,) = llm.systems
+        assert system.endswith(tail)
+        digests.append(assembled.sha256)
+        systems.append(system)
+
+    assert systems[0] == systems[1]
+    assert digests[0] == digest_of(systems[0][: -len(tail)])
+    assert digests[0] == digests[1]
+
+
 async def test_a_round_with_every_scope_at_its_cap_is_still_accepted(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

@@ -349,6 +349,25 @@ class Assembled:
         event carries."""
         return {block.provenance: block.characters for block in self.blocks}
 
+    @property
+    def canonical(self) -> str:
+        """This prompt's bytes as they stand whenever another block
+        follows it, which is what the know-how half's fingerprint is of
+        (#533).
+
+        Not always `text`. A lone persona is handed over untouched, and
+        once a scope block follows it `_assembled` trims its leading
+        whitespace, so `"   POET"` and `"POET"` reach the model as the
+        same bytes in every round that reads memory and must carry the
+        same digest. Derived by running the same assembly with a block
+        behind it and keeping what this prompt became, rather than by a
+        second copy of the trimming that could drift from the first. A
+        half of several blocks is already trimmed, so for it this is
+        `text` exactly.
+        """
+        followed = _assembled((*self.blocks, _FOLLOWER))
+        return JOIN.join(block.text for block in followed.blocks[:-1])
+
 
 @dataclass(frozen=True)
 class RoundPrompt:
@@ -572,6 +591,12 @@ def _device_block(device: "LiveDevice | None", remembered: str) -> Block | None:
     if not parts:
         return None
     return Block(DEVICE, "\n\n".join(parts))
+
+
+# The stand-in for "any block at all" that `Assembled.canonical` puts
+# behind a prompt to see what assembly makes of it there. Its content is
+# never read: it only has to be a block assembly keeps.
+_FOLLOWER = Block("following", "-")
 
 
 def _assembled(blocks: Sequence[Block]) -> Assembled:
