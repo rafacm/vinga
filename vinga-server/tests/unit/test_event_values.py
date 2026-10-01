@@ -49,6 +49,7 @@ from vinga_server.events.values import (
     EchoOutcome,
     EventName,
     EventValueError,
+    FactIds,
     FirmwareVersion,
     Flag,
     FromEntry,
@@ -59,6 +60,7 @@ from vinga_server.events.values import (
     McpRefusal,
     McpReloadOutcome,
     McpTransport,
+    MemorySources,
     Nothing,
     NotOffered,
     OriginProvenance,
@@ -72,6 +74,7 @@ from vinga_server.events.values import (
     ReachingHost,
     Real,
     ReportedMac,
+    ScopeProvenance,
     SessionId,
     SessionIds,
     SessionList,
@@ -79,6 +82,7 @@ from vinga_server.events.values import (
     ToolSource,
     Whole,
 )
+from vinga_server.runtime import prompt
 from vinga_server.runtime.turns import TOOL_SOURCES as CLASSIFIED_AS
 
 # The same spelling the refusal sentinels use: printable, so it is
@@ -272,6 +276,50 @@ def test_prompt_sources_refuse_anything_that_is_not_a_size_by_provenance(
         PromptSources(refused)  # type: ignore[arg-type]
 
 
+def test_memory_sources_carry_sizes_by_scope_provenance() -> None:
+    """The per-round half's blocks, which `PromptSources` refuses by
+    design (#533): a separate closed mapping rather than a widened
+    grammar, so `prompt_assembled` still cannot say `memory`."""
+    assert MemorySources({"state": 4, "memory": 9, "device": 2}).carried() == {
+        "state": 4,
+        "memory": 9,
+        "device": 2,
+    }
+    assert MemorySources({}).carried() == {}
+
+
+@pytest.mark.parametrize(
+    "refused",
+    [
+        {"persona": 4},
+        {"fragment:tone": 4},
+        {"memory": -1},
+        {"memory": True},
+        {"memory": 4.0},
+        {4: 4},
+        "memory",
+    ],
+)
+def test_memory_sources_refuse_anything_but_a_scope_block_size(refused: object) -> None:
+    with pytest.raises(EventValueError):
+        MemorySources(refused)  # type: ignore[arg-type]
+
+
+def test_fact_ids_carry_a_list_of_positive_integers() -> None:
+    """Integers on the record and on the span, so a backend filters on
+    the number a store addresses a fact by; empty is lawful, since a
+    round that read memory and found nothing says so with an empty
+    list."""
+    assert FactIds((3, 17)).carried() == [3, 17]
+    assert FactIds(()).carried() == []
+
+
+@pytest.mark.parametrize("refused", [(0,), (-3,), (True,), ("3",), (3.0,), [3], None])
+def test_fact_ids_refuse_anything_but_a_tuple_of_row_ids(refused: object) -> None:
+    with pytest.raises(EventValueError):
+        FactIds(refused)  # type: ignore[arg-type]
+
+
 # --- the closed sets are closed, and by their decision sites ----------
 
 
@@ -287,6 +335,12 @@ def test_the_close_reasons_are_the_ones_the_edge_can_latch() -> None:
 def test_the_tool_sources_are_the_ones_the_classifier_can_answer() -> None:
     assert frozenset(ToolSource) == frozenset(CLASSIFIED_AS)
     assert frozenset(ToolSource) == frozenset(STORED_TOOL_SOURCES)
+
+
+def test_the_scope_provenances_are_the_ones_the_assembler_writes() -> None:
+    assert frozenset(ScopeProvenance) == frozenset(
+        {prompt.STATE, prompt.MEMORY, prompt.DEVICE}
+    )
 
 
 def test_the_outcome_tokens_are_the_words_their_sentences_use() -> None:
@@ -357,6 +411,8 @@ REFUSING = (
     ("client id", lambda: ClientId(SENTINEL * 4)),
     ("agent names", lambda: AgentNames((SENTINEL, "  "))),
     ("prompt sources", lambda: PromptSources({SENTINEL: 1})),
+    ("memory sources", lambda: MemorySources({SENTINEL: 1})),
+    ("fact ids", lambda: FactIds((SENTINEL,))),
     ("fragment", lambda: FromEntry(SENTINEL)),
 )
 

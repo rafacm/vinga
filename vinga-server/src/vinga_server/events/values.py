@@ -92,6 +92,11 @@ class Kind(Enum):
     ID_LIST = "id_list"
     # A mapping from prompt provenance to character counts.
     SOURCES = "sources"
+    # A mapping from the three per-round scope blocks of a reply's prompt
+    # to character counts. Beside `SOURCES` rather than inside it: that
+    # grammar is the know-how half's by design, and this is the half it
+    # deliberately excludes.
+    MEMORY_SOURCES = "memory_sources"
     # A mapping from the closed set of reasons a mic frame is discarded
     # to how many frames one second of the session lost to each.
     DROP_COUNTS = "drop_counts"
@@ -267,6 +272,15 @@ LANGUAGE = Syntax(
     "or a tagged form such as `en-US`.",
 )
 
+FACT_ID = Syntax(
+    "fact_id",
+    r"[1-9][0-9]{0,18}",
+    19,
+    "A remembered fact's row id, the number the memory tools and the "
+    "operator API address it by. Carried as a JSON integer rather than "
+    "a string; the pattern is its decimal spelling.",
+)
+
 SYNTAXES: dict[str, Syntax] = {
     one.name: one
     for one in (
@@ -278,6 +292,7 @@ SYNTAXES: dict[str, Syntax] = {
         ACTIVATION_CODE,
         EVENT_NAME,
         LANGUAGE,
+        FACT_ID,
     )
 }
 
@@ -794,6 +809,36 @@ class SessionIds(EventValue):
 
 
 @dataclass(frozen=True)
+class FactIds(EventValue):
+    """The remembered facts one reply round's prompt injected, by id,
+    in the order the model read them.
+
+    Integers rather than their decimal strings, because an id is a
+    number to the store and a backend filters on a number (#533). A
+    tuple in here for the reason `SessionIds` gives, and empty is
+    lawful: a round that read memory and injected nothing says so with
+    an empty list, which is a different fact from carrying none.
+    """
+
+    KIND: ClassVar[Kind] = Kind.ID_LIST
+    SYNTAX: ClassVar[Syntax | None] = FACT_ID
+
+    value: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.value, tuple):
+            raise EventValueError("FactIds is a tuple of fact ids")
+        for one in self.value:
+            # `bool` refused first, as `Count` refuses it: `True` is an
+            # `int` to `isinstance`, and it is not a row.
+            if isinstance(one, bool) or not isinstance(one, int) or one < 1:
+                raise EventValueError("a FactIds element is a positive whole number")
+
+    def carried(self) -> list[int]:
+        return list(self.value)
+
+
+@dataclass(frozen=True)
 class ClassName(TextValue):
     """An exception or type name, which is the whole of what an event
     may say about a failure: a type name says what went wrong, a message
@@ -1229,6 +1274,36 @@ class DroppedFrames(EventValue):
         return dict(self.value)
 
 
+@dataclass(frozen=True)
+class MemorySources(EventValue):
+    """How much of one reply round's prompt each scope block took, by
+    the block's provenance.
+
+    A closed mapping of its own rather than `PromptSources` widened:
+    that grammar is the know-how half only, which is
+    `prompt_assembled`'s decision made unrepresentable, and these are
+    exactly the blocks it excludes. Every key is one of the assembler's
+    three scope provenances and every value a character count; a block
+    that was not sent is absent rather than zero.
+    """
+
+    KIND: ClassVar[Kind] = Kind.MEMORY_SOURCES
+
+    value: dict[str, int]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.value, dict):
+            raise EventValueError("MemorySources is a mapping")
+        for key, held in self.value.items():
+            if not isinstance(key, str) or key not in frozenset(ScopeProvenance):
+                raise EventValueError("a MemorySources key is a scope provenance")
+            if isinstance(held, bool) or not isinstance(held, int) or held < 0:
+                raise EventValueError("a MemorySources value is a character count")
+
+    def carried(self) -> dict[str, int]:
+        return dict(self.value)
+
+
 # --- the closed sets, as types ----------------------------------------
 #
 # A token used to be a string a site wrote and a set a registry
@@ -1334,6 +1409,20 @@ class DropReason(StrEnum):
     FRAMING_ERROR = "framing_error"
     NOT_OPUS = "not_opus"
     UNDECODABLE = "undecodable"
+
+
+class ScopeProvenance(StrEnum):
+    """The three blocks a reply round appends to the know-how half.
+
+    The assembler's own tokens, restated here for the reason the
+    module's other closed sets are restated: their decision site is
+    `runtime/prompt.py`, which sits in a package that imports this. The
+    unit tests hold the two equal.
+    """
+
+    STATE = "state"
+    MEMORY = "memory"
+    DEVICE = "device"
 
 
 class Suppression(StrEnum):
@@ -1938,6 +2027,7 @@ __all__ = [
     "Descriptor",
     "DropReason",
     "DroppedFrames",
+    "FactIds",
     "DeviceId",
     "DeviceName",
     "DeviceOrUnidentified",
@@ -1969,6 +2059,7 @@ __all__ = [
     "OriginSource",
     "OtaRefusal",
     "PendingRefusal",
+    "MemorySources",
     "PromptSources",
     "ProviderEntries",
     "ProviderOutcome",
@@ -1980,6 +2071,7 @@ __all__ = [
     "ReplyOutcome",
     "ReportedMac",
     "SessionId",
+    "ScopeProvenance",
     "SessionIds",
     "SessionList",
     "Suppression",
