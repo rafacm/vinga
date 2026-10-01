@@ -739,17 +739,17 @@ def test_a_reader_who_stops_reading_gets_no_traceback(tmp_path: Path) -> None:
 # binary one, five runs each.
 #
 # So it is built rather than hoped for, and the construction is the
-# plan's, measured there:
+# plan's, measured there, with its first step since counted in pages:
 #
 #   1. A pipe whose capacity is the next power of two above the
-#      document, pre-filled so the free space is exactly the document's
-#      whole-chunk part.
+#      document, pre-filled in whole pages so the free space is the most
+#      whole pages the document overfills.
 #   2. A child that writes the document into it, and a parent that reads
 #      nothing at all.
 #   3. The child fills the free space exactly and blocks. When the
 #      parent closes the read end, the kernel hands that blocked write
 #      back the bytes it did place, which is a short write rather than a
-#      failure, and the remainder is under one buffer, so the stream
+#      failure, and the remainder is at most one buffer, so the stream
 #      keeps it and the command returns believing it printed everything.
 #
 # That remainder is the whole bug. Without a flush inside the boundary
@@ -819,29 +819,41 @@ def test_a_reader_who_stops_reading_mid_chunk_gets_no_traceback(tmp_path: Path) 
     green.
 
     Two guards make it a regression test rather than a hopeful one. The
-    regime is chosen rather than inherited: the free capacity is the
-    document's whole-chunk part, derived from the document this test
-    just rendered, so it holds whatever the catalog has grown to. And
-    the poll's conclusion is checked: the pipe must end exactly full,
-    which is what the construction predicts and what a poll that fired
-    early cannot produce, since a child still writing leaves it short.
-    That assertion is known to be able to fail; the same construction
-    against the much larger `config openapi` document comes up one
-    buffer short, because a larger document retains more than one
-    buffer's worth.
+    regime is chosen rather than inherited, from the document this test
+    just rendered and the machine it runs on, so it holds whatever the
+    catalog has grown to and whatever the kernel's page size is.
+
+    The page size is in it because a pipe is made of whole pages, and a
+    write is not merged into a half-filled last page unless the whole
+    of its odd tail fits there. A pre-fill that ends mid-page wastes the
+    rest of that page, and the child is cut off that much short of the
+    free space the arithmetic promised. So the free space is whole
+    pages, the most of them the document overfills, which makes the
+    pre-fill whole pages too, and what the child keeps back is between
+    one byte and one page. That has to fit the buffer the child's stdout
+    holds, which `open()` sizes from the pipe's `st_blksize`, one page
+    on Linux. A remainder larger than the buffer is written again at
+    once, and fails inside `write`: that is the regime the test above
+    reaches, and it answers 141 with or without the flush this test is
+    for.
+
+    And the poll's conclusion is checked: the pipe must end exactly
+    full, which is what the construction predicts and what a poll that
+    fired early cannot produce, since a child still writing leaves it
+    short. That assertion is known to be able to fail. The construction
+    this one replaced left free the document's length rounded down to
+    8,192-byte chunks, and held only where that came to whole pages: on
+    a 16 KiB-page kernel it came up half a page short, 253,952 of
+    262,144, and passed or failed as the catalog grew.
     """
     if SET_PIPE_SIZE is None:
         pytest.skip("setting a pipe's capacity is a Linux command")
 
     document = events_docgen.reference().encode("utf-8")
-    retained = len(document) % io.DEFAULT_BUFFER_SIZE
-    assert retained, (
-        "the document is an exact multiple of the stream's buffer, so this "
-        "construction leaves nothing retained and reaches the wrong regime. "
-        "Make the free capacity one buffer smaller than the whole-chunk part "
-        "and assert the pipe ends one buffer short of full."
-    )
-    free = len(document) - retained
+    page = resource.getpagesize()
+    # Whole pages, the most of them that leave something over.
+    free = (len(document) - 1) // page * page
+    retained = len(document) - free
 
     read_fd, write_fd = os.pipe()
     child: subprocess.Popen[str] | None = None
@@ -850,8 +862,15 @@ def test_a_reader_who_stops_reading_mid_chunk_gets_no_traceback(tmp_path: Path) 
             capacity = fcntl.fcntl(write_fd, SET_PIPE_SIZE, 1 << len(document).bit_length())
         except OSError as refused:
             pytest.skip(f"this pipe's capacity could not be set: {refused}")
-        # Pre-filled, so what is left is exactly the whole-chunk part
-        # however big the document has become.
+        buffered = os.fstat(write_fd).st_blksize
+        assert retained <= buffered, (
+            f"the child would keep back {retained} bytes against a {buffered}-byte "
+            "stdout buffer, so it would write again at once and fail inside "
+            "`write`, which is the mid-write regime and passes with or without "
+            "the flush this test is for"
+        )
+        # Pre-filled, in whole pages since the capacity and the free
+        # space both are, so what is left is exactly the free space.
         filled = capacity - free
         while filled > queued(read_fd):
             os.write(write_fd, b"\0" * (filled - queued(read_fd)))
@@ -888,9 +907,10 @@ def test_a_reader_who_stops_reading_mid_chunk_gets_no_traceback(tmp_path: Path) 
             child.wait()
 
     assert standing == capacity, (
-        f"the pipe holds {standing} of {capacity} bytes, so the child had not "
-        "finished writing when the reader closed. That is the mid-write "
-        f"regime and not this test's: {errors!r}"
+        f"the pipe holds {standing} of {capacity} bytes, so either the child "
+        "had not finished writing when the reader closed or the pipe took "
+        f"less than the {free} bytes left free, which a pre-fill ending "
+        f"mid-page does. Neither is this test's regime: {errors!r}"
     )
     assert "Traceback" not in errors
     assert "Exception ignored" not in errors, (
