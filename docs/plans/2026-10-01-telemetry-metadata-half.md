@@ -22,13 +22,14 @@ token, one field and one attribute for the fingerprint, one catalog
 note for `language_confidence`). Two pieces cost more than the
 cheapest thing that would also help, and say what they buy:
 
-- *The tool join.* The cheapest is the provider's call id alone. It
-  is not unique within a turn: the OpenAI-compatible adapter mints
-  `call_{index}` when a server sends no id
-  (`providers/openai_llm.py:127`), so two rounds of one turn can both
-  hold a `call_0`. Adding the requesting round's invocation id, which
-  the server mints and already exports on the `llm` span, makes the
-  join exact for one more field.
+- *The tool join.* The cheapest would be the provider's call id
+  alone, and it is not available: it is far-side bytes, which the
+  content and telemetry ADR keeps off metadata surfaces, and it is not
+  even unique within a turn (the OpenAI-compatible adapter mints
+  `call_{index}` when a server sends none, `providers/openai_llm.py:127`).
+  The plan joins on two server-minted values instead, the requesting
+  round's invocation id and the call's position in that round, which
+  is exact and discloses nothing.
 - *The memory half.* The cheapest is per-round block sizes, which the
   per-round `Assembled` already holds and the pipeline throws away
   after taking `.text` (`runtime/pipeline.py:2421,2428`); no store
@@ -133,19 +134,17 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
    migration in one sentence: read `vinga.llm.first_token_ms` on the
    `llm` span, and where an instant is wanted, it is the span's start
    plus that many milliseconds.
-2. **The tool span carries the call it ran.** Each `tool_call` variant
-   gains two fields, and `TOOL_ATTRIBUTES` maps them:
-   - `call_id: ToolCallId | Absent`, exported as the conventions'
-     `gen_ai.tool.call.id`. `ToolCallId` is a new `MachineId`-style
-     value type with the syntax `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`,
-     which admits the three id shapes above (`call_...`, `toolu_...`,
-     `call_{index}`) and refuses whitespace, control characters, quotes
-     and anything over 128 characters. Settled here; widening it is a
-     later change with a reason. The provider's id is far-side bytes, and an
-     emission whose value fails its type is refused whole, so the
-     builder in `events/assembly.py` passes `ABSENT` for an id that
-     does not match rather than letting the event fail: a malformed id
-     must cost the attribute, never the event.
+2. **The tool span carries the call it ran, in server-minted terms
+   only.** The provider's call id is far-side bytes, and the content
+   and telemetry ADR keeps far-side bytes off every metadata surface
+   (`docs/adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md`);
+   the executor's own docstring says the tool boundary keeps "nothing
+   far-side" (`runtime/tool_execution.py:185-190`). A syntax check does
+   not make it safe, since a credential-shaped id passes any pattern.
+   So the join is made from two values the server owns, and the
+   provider id stays where it already is, inside the opt-in content
+   export. Each `tool_call` variant gains two fields, and
+   `TOOL_ATTRIBUTES` maps them:
    - `invocation: InvocationId`, the server-minted id of the round
      that asked for the call, exported under the same
      `LLM_INVOCATION_ID` key the `llm` span uses, so the join is one
@@ -157,10 +156,20 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
      `invocation` in scope. `run` gains an `invocation` keyword and
      passes it down; the implementer's inventory confirms the single
      call site with an untruncated `git grep -n`.
-   Both are metadata: an opaque provider id and a server-minted id.
-   They also reach the retained `tool_call` log line, which is the
-   catalog's single home for the event; neither appears in the
-   `TEMPLATE`.
+   - `position: Whole`, the zero-based index of the call in the list
+     the model returned for that round (`calls` in the reply loop,
+     before any partition of it), exported as
+     `vinga.tool.call.position`. With the invocation it names exactly
+     one call: the content export renders a round's tool calls in that
+     order, which the implementer confirms against
+     `llm_input_export.py` and pins with a test that the n-th
+     `tool_call` part of a round's exported output is the call whose
+     span carries position n. Where the model asked for the same
+     entry twice in one round, the two spans differ by position.
+   Both are server-minted metadata and reach the retained `tool_call`
+   log line, the catalog's single home for the event; neither appears
+   in the `TEMPLATE`. The conventions' `gen_ai.tool.call.id` is not
+   used, because its value would be the provider's id.
 3. **The know-how half gets a fingerprint.** `PromptAssembled` gains
    `sha256: Sha256` (a new value type, exactly 64 lowercase hex
    characters), the SHA-256 of the know-how half's text as assembled
@@ -328,12 +337,10 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
 
 No new module, seam or config key.
 
-- `events/values.py`: three new value types, `ToolCallId`, `Sha256`,
-  `FactIds`, each one rule in one place; possibly a closed mapping for
-  the scope sizes (decision 7).
+- `events/values.py`: three new value types, `Sha256`, `FactIds` and
+  `MemorySources`, each one rule in one place.
 - `events/catalog.py`, `events/assembly.py`: fields on `tool_call`'s
-  three variants, `PromptAssembled` and `LlmRound`; builders that drop
-  a malformed provider id to `ABSENT` at the boundary.
+  three variants, `PromptAssembled`, `LlmRound` and `ProviderFailed`.
 - `telemetry.py`: `LLM_ATTRIBUTES`, `TOOL_ATTRIBUTES`,
   `PROMPT_ATTRIBUTES` entries; the span event removed; the derived fact
   count. What a backend reader stops having to know: which span a
@@ -360,14 +367,15 @@ M1:
 - A reply round and a recap round with a first token carry
   `vinga.llm.first_token_ms` and no span events; one without carries
   neither.
-- A tool span carries `gen_ai.tool.call.id` and the invocation id equal
-  to the requesting `llm` span's; two calls in one round, and two
-  rounds each with a `call_0`, are told apart by the pair.
-- A provider id that fails `ToolCallId` (a newline, 129 characters, an
-  empty string, a credential-shaped value with a space) yields an
-  accepted event with the field absent, and the value appears nowhere:
-  not in the log line in either format, not on the span (the no-leak
-  sentinel).
+- A tool span carries the invocation id equal to the requesting `llm`
+  span's and its position in that round; two calls to the same entry
+  in one round differ by position, and two rounds' first calls differ
+  by invocation. With content export on, the n-th exported `tool_call`
+  part of a round is the call whose span carries position n.
+- The no-leak sentinel: a provider call id that is credential-shaped
+  and syntactically clean (`sk_live_` followed by 24 alphanumerics) is
+  absent from the `tool_call` log line in both formats and from every
+  attribute of the tool span, with content export off.
 - `prompt_assembled` carries the digest of exactly the know-how text;
   a persona edit that preserves length changes it.
 - The carried-key sets for `tool_call` and `prompt_assembled` gain the
@@ -398,8 +406,8 @@ M2:
 **Falsification, per the lens.** Each new test is watched failing
 first. Mutations, one run each (straight-line logic), reported in the
 implementation doc: M1, the `LLM_ATTRIBUTES` entry removed; the
-malformed-id guard removed (the event-refused test must fail, not
-pass); the digest computed over the full prompt instead of the half;
+position taken from the partitioned list instead of the model's
+(the same-entry-twice test must fail); the digest computed over the full prompt instead of the half;
 the invocation taken from the wrong round. M2, `_core`'s kept ids
 replaced by `_newest`'s read ids (the byte-cap test must fail); the
 recap given the fields; the fact count taken from a stale list.
@@ -414,8 +422,8 @@ Read back through the Langfuse API (or the Langfuse MCP) and record in
 the implementation doc, per milestone:
 
 - M1: the `llm` observation shows `vinga.llm.first_token_ms`; the tool
-  observation shows `gen_ai.tool.call.id` and the invocation id equal
-  to its round's; the turn shows `vinga.prompt.sha256`.
+  observation shows the invocation id equal to its round's and its
+  position; the turn shows `vinga.prompt.sha256`.
 - M2: the round after the `remember` shows the new id in
   `vinga.llm.memory.facts`, and the count and sizes; whether Langfuse
   renders an integer array (or the string rendering decision 8 chose)
@@ -427,10 +435,6 @@ the implementation doc, per milestone:
 
 ## Risks
 
-- **A far-side id refuses an event.** The one way M1 can make telemetry
-  worse than today, since a refused `tool_call` loses the whole log
-  line and span. Mitigated by decision 2's drop-to-absent at the
-  builder and its test.
 - **Log volume.** M2 adds up to `CORE_LINES` plus the device cap of
   integers to every reply round's retained line. Bounded by decision
   9; the implementer measures one real round's line length before and
@@ -439,14 +443,15 @@ the implementation doc, per milestone:
   fields must then be absent or empty consistently with what the model
   received (no ids for facts it never saw); a test covers the failed
   read.
-- **No-leak.** The new string-valued facts are a provider's tool-call
-  id (validated, dropped when malformed) and a hex digest; ids are
-  integers. No ledger key, no fact text, no prompt byte reaches any
+- **No-leak.** The one new string-valued fact is a hex digest of
+  operator-authored text (decision 3); positions and ids are
+  integers, and the invocation is server-minted. No ledger key, no fact text, no prompt byte reaches any
   surface.
 
 ## Standing lenses
 
-- *No-leak*: the malformed-id sentinel in M1; M2 adds no string.
+- *No-leak*: the credential-shaped call-id sentinel and the
+  MCP-text digest sentinel in M1; M2 adds no string.
 - *Pin before reshaping*: `_system_prompt`'s return change and the
   rendering functions' new tuple returns are covered by the existing
   memory and prompt-assembly tests, which must pass byte-unchanged on
@@ -479,7 +484,7 @@ the implementation doc, per milestone:
   `docs/reference/conversations-schema.md` regenerated (the drift
   check alone cannot see a missing row, as #536's review found).
 - `changelog.d/533-tool-and-round-attributes.md` (M1: `### Added` the
-  call id, invocation and digest; `### Changed` the first token from a
+  tool call's round and position, and the digest; `### Changed` the first token from a
   span event to an attribute) and
   `changelog.d/533-memory-half-per-round.md` (M2: `### Added`).
 
@@ -507,6 +512,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Plan should say instead:** Add a specifically defined `memory_characters` field and `vinga.llm.memory.characters` attribute, computed from the exact incremental text `with_scopes` added to the know-how half, including joins. Test it against the actual system string supplied to the provider.
 
    *Resolution:* accepted. Decision 7 adds `memory_characters`, the exact text `with_scopes` appended to the know-how half, joins included, computed as a difference of the two texts with the prefix asserted; decision 8 exports it as `vinga.llm.memory.characters`; the tests pin it against the string the provider received with two blocks present. Its note says it includes the device record, since that shares the device block, so it is the per-round half of the prompt rather than remembered facts alone.
+
+   *Resolution:* accepted, by the first alternative. Decision 2 no longer exports the provider's call id at all: the tool span joins its round on two server-minted values, the requesting round's invocation id (already on the `llm` span) and the call's position in the list the model returned, which names exactly one call and discloses nothing. The provider id stays inside the opt-in content export, where it already is; `gen_ai.tool.call.id` is not used. The sentinel now plants a syntactically clean credential-shaped id (`sk_live_` plus 24 alphanumerics) and asserts it reaches neither log format nor any span attribute; `ToolCallId` and its drop-to-absent builder are gone, and so is the risk they mitigated.
 
 2. **P2: The memory-off test contradicts both the field definition and current prompt behavior.**
    **Evidence:** Decision 7 defines `system_characters` as the whole system prompt, but makes every M2 field absent when memory is off; the tests repeat that expectation (`docs/plans/...`, lines 185–205 and 309–317). `_system_prompt` still assembles and sends the know-how prompt when memory is off, and may still append the live device record through `with_scopes(..., NOTHING_REMEMBERED, record)` (`runtime/pipeline.py:2417-2428`; `runtime/prompt.py:412-453`). Thus a real system prompt, and potentially a `device` block, exists in precisely the case the proposed test requires all accounting to disappear.
