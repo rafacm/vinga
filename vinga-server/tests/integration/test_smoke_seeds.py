@@ -282,26 +282,31 @@ def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
         released.touch()
         _, errors = seeding.communicate(timeout=60)
         written = _domain(database)
+
+        assert seeding.returncode != 0
+        assert "interrupted" in errors
+        # The write it was in finished, and none after it began: the
+        # seeding stopped where it was interrupted rather than running on.
+        assert calls.read_text(encoding="utf-8").count("call") == 2
+        stages = {s for s in ("llm", "asr", "tts", "vad") if getattr(written.providers, s)}
+        assert stages == {"llm", "asr"}
+        assert written.default_agent is None
+        # And the server it started is gone with it.
+        _wait_for(lambda: not _listening(port), "the seeding server outlived the script")
+    except BaseException:
+        # The whole group, so a server the script left behind goes too,
+        # including when the script itself has already exited: the group
+        # outlives its leader for as long as any member does.
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(seeding.pid, signal.SIGKILL)
+        raise
     finally:
         released.touch()
         if seeding.poll() is None:  # pragma: no cover, only on a failure
-            # The whole group, so the server and the stand-in go too.
-            os.killpg(seeding.pid, signal.SIGKILL)
             seeding.communicate(timeout=30)
         # The database this script's server was on, taken away only once
         # nothing is connected to it.
         stack.close()
-
-    assert seeding.returncode != 0
-    assert "interrupted" in errors
-    # The write it was in finished, and none after it began: the seeding
-    # stopped where it was interrupted rather than running to the end.
-    assert calls.read_text(encoding="utf-8").count("call") == 2
-    stages = {s for s in ("llm", "asr", "tts", "vad") if getattr(written.providers, s)}
-    assert stages == {"llm", "asr"}
-    assert written.default_agent is None
-    # And the server it started is gone with it.
-    _wait_for(lambda: not _listening(port), "the seeding server outlived the script")
 
 
 def _listening(port: int) -> bool:
