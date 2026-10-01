@@ -288,7 +288,17 @@ def test_a_live_trace_refusal_drops_the_pair_truthfully(
     ]
 
 
-def test_output_growth_can_drop_the_whole_pair() -> None:
+def test_output_growth_drops_the_pair_while_it_streams(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The preflight, not `finish`, drops a stream that outgrew the ceiling.
+
+    The delta's raw bytes alone exceed the ceiling, so the drop is due
+    the moment it is observed. Asserting before `finish` is what makes
+    this the preflight's test: `finish` would refuse the pair too, so a
+    case that only looked afterwards would pass with no preflight at
+    all, holding an arbitrarily long stream until it ended.
+    """
     staged, recorded = exporter(max_request_bytes=512)
     staged.stage_reply(
         "session",
@@ -299,9 +309,17 @@ def test_output_growth_can_drop_the_whole_pair() -> None:
         tools=[],
         choice="none",
     )
-    staged.observe("grows", TextDelta("x" * 1000))
-    staged.finish("grows")
+    with caplog.at_level(logging.WARNING):
+        staged.observe("grows", TextDelta("x" * 513))
+
+        assert _dropped(caplog) == [LlmInputExportFailure.DROPPED.value]
+        assert recorded.discarded == ["grows"]
+
+        staged.observe("grows", TextDelta("more"))
+        staged.finish("grows")
+
     assert recorded.snapshots == []
+    assert _dropped(caplog) == [LlmInputExportFailure.DROPPED.value]
 
 
 def test_streaming_output_is_rendered_once_at_finish(
