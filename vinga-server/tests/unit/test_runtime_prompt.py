@@ -634,3 +634,77 @@ def test_a_board_nobody_has_named_still_says_where_it_is() -> None:
 
 def test_a_device_with_neither_fact_contributes_nothing() -> None:
     assert prompt.device_introduction(None, None) == ""
+
+
+# One reply round's prompt and what memory gave it (#533)
+
+
+def test_a_round_prompt_counts_what_the_scopes_added_joins_included() -> None:
+    """Two scope blocks, so the join between them and the one before
+    the first are both counted: a sum of block sizes alone would come
+    out four characters short here."""
+    sent = prompt.with_scopes(
+        prompt.know_how("POET"),
+        PromptMemory(state="- a: b", agent="- a fact", device="", agent_ids=(7,)),
+    )
+    round_ = prompt.RoundPrompt(sent, facts=(7,))
+
+    added = f"\n\n{prompt.STATE_HEADING}\n- a: b\n\n{prompt.MEMORY_HEADING}\n- a fact"
+    assert round_.text == sent.text == "POET" + added
+    assert round_.system_characters == len(sent.text)
+    assert round_.memory_characters == len(added)
+    assert round_.memory_sources == {
+        "state": len(f"{prompt.STATE_HEADING}\n- a: b"),
+        "memory": len(f"{prompt.MEMORY_HEADING}\n- a fact"),
+    }
+    assert round_.memory_characters > sum(round_.memory_sources.values())
+    assert round_.facts == (7,)
+
+
+def test_a_round_prompt_counts_the_scopes_as_sent_after_a_trimmed_persona() -> None:
+    """The trap a text difference falls into (plan review round 4): a
+    persona standing alone is sent untouched, and the same persona with
+    a block after it loses its leading whitespace, so the know-how half
+    is not a prefix of the round's prompt. The count is of the scope
+    blocks as rendered, which is the tail of what was sent."""
+    half = prompt.know_how("  You are a poet.  \n")
+    sent = prompt.with_scopes(half, remembered("- a fact"))
+    round_ = prompt.RoundPrompt(sent, facts=())
+
+    assert not sent.text.startswith(half.text)
+    tail = f"\n\n{prompt.MEMORY_HEADING}\n- a fact"
+    assert sent.text.endswith(tail)
+    assert round_.memory_characters == len(tail)
+
+
+def test_a_round_prompt_over_a_blank_persona_counts_no_join() -> None:
+    """With nothing before the first scope block there is no blank line
+    before it either, so the whole prompt is the scopes' contribution."""
+    sent = prompt.with_scopes(prompt.know_how(""), remembered("- a fact"))
+    round_ = prompt.RoundPrompt(sent, facts=())
+
+    assert sent.text == f"{prompt.MEMORY_HEADING}\n- a fact"
+    assert round_.memory_characters == len(sent.text)
+
+
+def test_a_round_prompt_with_no_scopes_added_nothing() -> None:
+    half = prompt.know_how("POET")
+    round_ = prompt.RoundPrompt(prompt.with_scopes(half, remembered("")), facts=None)
+
+    assert round_.system_characters == len("POET")
+    assert round_.memory_characters == 0
+    assert round_.memory_sources == {}
+    assert round_.facts is None
+
+
+def test_a_round_prompt_reports_a_device_record_with_memory_off() -> None:
+    """The device record rides the device block whatever the memory
+    setting, so a round that read no memory still reports it."""
+    sent = prompt.with_scopes(
+        prompt.know_how("POET"), PromptMemory(state="", agent="", device=""), named()
+    )
+    round_ = prompt.RoundPrompt(sent, facts=None)
+
+    introduction = prompt.device_introduction("Kitchen Speaker", None)
+    assert round_.memory_sources == {"device": len(introduction)}
+    assert round_.memory_characters == len("\n\n") + len(introduction)
