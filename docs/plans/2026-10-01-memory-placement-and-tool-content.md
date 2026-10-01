@@ -161,10 +161,16 @@ between on the request's shape and the model's reading of it.
    (the know-how half), and `vinga.llm.memory.characters` and
    `vinga.llm.memory.sources.*` measure the context; the catalog notes
    and the observability page say so. The prompt digest
-   (`vinga.prompt.sha256`) was always over the know-how half; its
-   canonical-rendering definition, written for a half that scopes could
-   follow, is re-read and simplified if nothing follows the half any
-   more. The content export's `gen_ai.system_instructions` is now the
+   (`vinga.prompt.sha256`) becomes the SHA-256 of `half.text`, the
+   exact system string sent, since nothing follows the half in the
+   system message any more; the follower-based `Assembled.canonical`
+   (`runtime/prompt.py`), which existed only because scopes could
+   follow the half and trim it, is removed, and the catalog note, the
+   `PROMPT_ATTRIBUTES` comment and the observability page say "exactly
+   as sent" again. A regression runs a lone persona with leading
+   whitespace and a non-empty context through the production path and
+   asserts the digest equals the SHA-256 of the system string the
+   provider received. The content export's `gen_ai.system_instructions` is now the
    stable half, and the context appears in `gen_ai.input.messages` as
    the newest user message's leading text part, which is what the model
    received. The stable half is still exported on every round's span,
@@ -430,6 +436,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Evidence:** Decision 5 only says to simplify canonical rendering “if nothing follows” (plan lines 137-141`). Today `Assembled.canonical` deliberately differs from `text` for a lone persona with leading whitespace (`runtime/prompt.py:352-369`), and `_prompt_assembled` hashes `half.canonical` (`runtime/pipeline.py:1119-1124`). After memory leaves the system message, the provider receives `half.text`; retaining the current digest would fingerprint different bytes.
 
    **Plan should say instead:** Hash the exact system string sent, `half.text`, and remove or redefine the follower-based canonical form. Add a regression using a leading-whitespace lone persona plus nonempty context.
+
+   *Resolution:* accepted. Decision 5 now makes the digest the SHA-256 of `half.text`, the exact system string sent once nothing follows the half, removes `Assembled.canonical`, restores "exactly as sent" in the docs that describe it, and adds the leading-whitespace lone-persona regression against the system string the provider received.
 
 7. **P2: The promised tool-content session bound has no implementable lifecycle or test.**
 
