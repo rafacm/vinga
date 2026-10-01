@@ -868,3 +868,23 @@ Evidence: Decision 7 distinguishes disabled memory (`memory_facts` absent) from 
 What the plan should say instead: specify that `vinga.llm.memory.fact_count` is emitted only when the fact-list field is present, is `0` for an attempted empty read, and is absent when memory was disabled. Test all three states on both event and span projections.
 
 Verdict: **not ready.**
+
+## Plan review round 5 (M3)
+
+Reviewed 2026-10-01 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 3m42s, at commit 77c12c8f, plan blob 4380eaee.
+
+---
+
+1. **P1: M3 retains the per-round system-prompt duplication that #533 rejects.**
+   **Evidence:** Issue #533 §3 requires system-prompt text “once per agent, not per round.” Decision 10 retains `gen_ai.system_instructions` on every `llm` span (`plans/2026-10-01-telemetry-metadata-half.md:408`); the reply loop stages it for every round (`vinga-server/src/vinga_server/runtime/pipeline.py:1782`); telemetry attaches it to each resulting `llm` span (`vinga-server/src/vinga_server/telemetry.py:3086`). The live gate checks round observations, not the required one-copy cardinality (`plans/2026-10-01-telemetry-metadata-half.md:447`).
+   **Plan should say instead:** Either explicitly record a settled supersession of #533’s once-per-agent requirement, or export the stable prompt once at agent activation on a content-capable prompt/session observation, define how later changing memory is represented, and test multiple rounds for one activation produce exactly one copy of the stable prompt.
+
+2. **P2: The size-bound change omits the streaming preflight that still charges the deleted output alias.**
+   **Evidence:** Decision 11 discusses `_size` only (`plans/2026-10-01-telemetry-metadata-half.md:422`). But `LlmInputExport.observe()` separately reserves `2 *` every output delta solely because canonical output and `OBSERVATION_OUTPUT` both exist (`vinga-server/src/vinga_server/llm_input_export.py:197`). Removing the alias without changing this calculation will prematurely drop a valid large canonical pair, so that round reaches Langfuse with neither output nor system prompt. The proposed tests check the final staged size, not the near-ceiling streaming admission path (`plans/2026-10-01-telemetry-metadata-half.md:438`).
+   **Plan should say instead:** Change the output preflight to charge one canonical output, update its comment, and add boundary tests: a streamed pair whose final canonical attributes fit must export; the minimally larger one must be dropped. Keep the exact final `_size()` check as the authority.
+
+3. **P2: Alias removal is an unannounced telemetry-schema break for running deployments.**
+   **Evidence:** Decision 10 removes two emitted OTLP attributes (`plans/2026-10-01-telemetry-metadata-half.md:408`), which the current public observability contract calls “direct Langfuse input and output aliases” (`architecture/observability-surfaces.md:472`). Existing collectors, dashboards, or custom consumers can read those keys even if Langfuse should no longer do so. The issue says these changes are backward compatible, while M3 labels the changelog entry only `### Fixed` (`plans/2026-10-01-telemetry-metadata-half.md:458`).
+   **Plan should say instead:** Declare removal as a breaking exported-trace schema change, use `### Changed` as well as `### Fixed`, and give the migration: consumers must read `gen_ai.input.messages` and `gen_ai.output.messages`. If retaining aliases is ruled out by parity, state that explicitly rather than implying an upgrade is transparent.
+
+**Verdict:** not ready.
