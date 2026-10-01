@@ -383,62 +383,82 @@ gate: with `export_llm_input` on, the `llm` span carries the system
 prompt under the conventions' `gen_ai.system_instructions`
 (`llm_input_export.py:154-162`), which a plain OTLP backend shows, and
 Langfuse shows it neither in the observation's input nor in its
-metadata. Its Input panel is fed from `langfuse.observation.input`,
-which vinga fills with the message list alone. So the content export
-delivers the system prompt to one class of backend and not the other,
-which is the parity rule broken on the content side.
+metadata. That is the parity rule broken on the content side.
 
-10. **The Langfuse input list starts with the system message.** In
-    `LlmInputExport._stage`, `OBSERVATION_INPUT` becomes
-    `[{"role": "system", "parts": [{"type": "text", "content": system}]}, *messages]`,
-    in exactly the part shape `_message` already produces, whenever
-    `system` is non-empty; an empty system prompt adds no entry.
-    `gen_ai.system_instructions` and `gen_ai.input.messages` are
-    unchanged, so what a conventions-reading backend receives does not
-    move. Both call shapes go through `_stage`, so the reply round and
-    the recap (whose system is `RECAP_INSTRUCTION`) are covered by one
-    change.
-11. **The size bound counts what is sent.** The system text now rides
-    the span twice (the conventions' attribute and the Langfuse input),
-    and the per-request ceiling and the session budget are computed
-    over the attributes as staged (`_size`), so the duplicate is
-    counted rather than hidden. A request the change pushes over the
-    ceiling is dropped whole and reported by `llm_input_export_failed`,
-    exactly as any other over-ceiling request is; the implementation
-    doc records the measured size of a real round before and after.
+**The cause is vinga's own alias, measured.** Langfuse's OTel ingestion
+(`packages/shared/src/server/otel/OtelIngestionProcessor.ts` in
+langfuse/langfuse, read at `b7b4c7cc0c`, 2026-09-28) maps the GenAI
+conventions itself: it takes `gen_ai.input.messages` as the input and
+prepends `gen_ai.system_instructions` as a distinct
+`{"role": "system", "content": ...}` message, which its chat view
+renders as a system turn. But `langfuse.observation.input` is first in
+its precedence and short-circuits every mapping below it, and
+`gen_ai.system_instructions` is on its list of attributes filtered out
+of metadata. vinga writes `langfuse.observation.input` (and `.output`)
+on the `llm` span as "derived compatibility aliases" of the conventions'
+messages, so the list without the system prompt wins. A probe against
+Langfuse Cloud on 2026-10-01 sent one span twice: with the conventions
+only, the observation's input read back as `[{"role": "system",
+"content": "...persona... ## What you remember..."}, {"role": "user",
+...}]`; with vinga's alias added, it read back as the user message
+alone, no system prompt anywhere.
+
+10. **The `llm` content export stops writing the Langfuse aliases.**
+    `LlmInputExport._stage` no longer sets `OBSERVATION_INPUT`, and the
+    output path no longer sets `OBSERVATION_OUTPUT`; the span carries
+    `gen_ai.system_instructions`, `gen_ai.input.messages`,
+    `gen_ai.output.messages`, the tool schemas and the tool choice
+    exactly as today. Langfuse then derives the observation's input and
+    output from the conventions, system message first. Every backend
+    now reads the same keys, which is the parity rule at its plainest,
+    and the system text is no longer the one part of the request
+    Langfuse discards. Only the `llm` content export changes: the other
+    writers of these Langfuse fields (the transcript and audio
+    references on turn and ASR spans, `telemetry.py`) are outside this
+    milestone and keep theirs, since nothing maps a convention onto
+    them.
+11. **The size bound gets smaller, not larger.** The input and output
+    were each written twice (convention and alias) and counted twice by
+    `_size`; dropping the aliases halves those two, so a request that
+    fit before fits after. The implementation doc records one real
+    round's staged size before and after.
 12. **What leaves does not widen, but what Langfuse stores does.** No
     new byte leaves this server: the system prompt already travels on
     the span under `export_llm_input`. What changes is that Langfuse,
-    which today appears to discard it, will store and display it, memory
-    blocks included. That is what `export_llm_input`'s documentation
-    has promised since it shipped ("the system prompt with its memory
-    and know-how blocks"); whether memory text should earn its own
-    switch stays an open question on #533, unchanged by this.
+    which today discards it, will store and display it, memory blocks
+    included. That is what `export_llm_input`'s documentation has
+    promised since it shipped ("the system prompt with its memory and
+    know-how blocks"); whether memory text should earn its own switch
+    stays an open question on #533, unchanged by this.
 13. **Off stays off.** With `export_llm_input` off nothing is staged and
-    nothing changes; the existing off-switch tests cover it and one
-    asserts no `langfuse.observation.input` system entry appears.
+    nothing changes; the existing off-switch tests cover it.
 
-Tests: the staged input list starts with the system message in the
-part shape, followed by the messages unchanged; an empty system adds
-no entry; a recap's input starts with `RECAP_INSTRUCTION`;
-`gen_ai.system_instructions` and `gen_ai.input.messages` are byte
-identical to before; a request whose duplicated system pushes it over
-the ceiling is dropped and reported. Mutations: the prepend removed
-(the first test must fail); the system entry built in another shape
-(the shape test must fail).
+Tests: a staged round's attributes contain no `langfuse.observation.input`
+or `.output` key, and contain the three conventions' keys byte identical
+to before; the same for a recap; the staged size is the conventions'
+bytes alone. Existing tests that pin the aliases are updated
+deliberately and listed in the implementation doc, from an untruncated
+`git grep -n OBSERVATION_INPUT` and `OBSERVATION_OUTPUT` over
+`vinga-server/`. Mutation: the alias restored (the no-alias test must
+fail, and the live gate must lose the system message).
 
-Live gate (blocking): with `export_llm_input` on, one session against
-Langfuse, read back through the public API: the round's observation
-input's first entry is the system message and contains the know-how
-text and, after a `remember`, the memory block. If Langfuse does not
-render a `system` role entry from that shape, the implementer tries the
-shape Langfuse documents for chat input (`{"role": "system",
-"content": "..."}`) before stopping, and records which rendered.
+Live gate (blocking): with `export_llm_input` on, one real session
+against Langfuse including a tool call and a `remember`, read back
+through the public API: the reply round's observation input begins
+with a `system` message holding the know-how text and, in the round
+after the `remember`, the memory block; the user and tool messages
+follow and are legible; the output holds the reply and the tool call.
+If Langfuse renders the conventions' `parts` messages less legibly than
+the alias did (a tool call or result unreadable), that is recorded with
+the observation ids and raised with Rafael before the pull request,
+rather than worked around by restoring an alias.
 
 Documentation footprint: `docs/architecture/observability-surfaces.md`'s
-content-export section says the system prompt appears in a Langfuse
-observation's input as its first message; the server-config reference
-is generated and already promises the system prompt. Changelog:
+content-export section says the export is written under the GenAI
+conventions alone and that Langfuse shows the system prompt as the
+first message of the observation's input; the comment above
+`OBSERVATION_INPUT` in `telemetry.py` drops the content export from its
+list of the alias's writers. Changelog:
 `changelog.d/533-system-prompt-in-langfuse.md`, `### Fixed`.
 
 ## Out of scope, with reasons
