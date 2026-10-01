@@ -2724,50 +2724,55 @@ session %s: turn transcript not attached to telemetry (%s)
 
 ### `llm_input_exported`
 
-One complete assembled request and raw output pair was attached to its actual
-generation span and admitted to ordinary OTLP processing. Deliberately nothing
-of the pair itself: content rides the span the flag authorizes, and this says
-only that it went.
+One complete content pair was attached to its actual span and admitted to
+ordinary OTLP processing: an assembled request and raw output on a generation
+span, or a tool call's arguments and result on its tool span. Deliberately
+nothing of the pair itself: content rides the span the flag authorizes, and
+this says only that it went.
 
 #### Variant 1: `vinga_server.llm_input_export` at INFO
 
 ```text
-session %s: %d LLM content pairs attached to telemetry
+session %s: %d generation and %d tool call content pairs attached to telemetry
 ```
 
 | # | Argument | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- |
 | 1 | `session` (`ID`) | no | the `session_id` syntax |  |
 | 2 | `rounds` (`COUNT`) | no |  |  |
+| 3 | `tool_calls` (`COUNT`) | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
 | `rounds` | `COUNT` | yes | no |  | How many actual generation spans received a complete pair. A logical round rather than a provider attempt: the first-token watchdog re-sends content fixed before the first try, so a retried round is one request that was made twice and not two requests. |
+| `tool_calls` | `COUNT` | yes | no |  | How many tool spans received a complete pair: a call's arguments and the result the model was handed, under `gen_ai.tool.call.arguments` and `gen_ai.tool.call.result`. Counted apart from `rounds`, whose meaning does not change. |
 
 ### `llm_input_export_failed`
 
-One assembled request and raw output pair was omitted before its generation
-span reached ordinary OTLP processing. The other half of the ledger, and the
-half that matters most on this surface: there is no local copy to read after
-the operation ends.
+One content pair was omitted before its span reached ordinary OTLP processing,
+a generation's request and output or a tool call's arguments and result. The
+other half of the ledger, and the half that matters most on this surface:
+there is no local copy to read after the operation ends.
 
 #### Variant 1: `vinga_server.llm_input_export` at WARNING
 
 ```text
-session %s: LLM content pair not attached to telemetry (%s)
+session %s: %s content pair not attached to telemetry (%s)
 ```
 
 | # | Argument | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- |
 | 1 | `session` (`ID`) | no | the `session_id` syntax |  |
-| 2 | `reason` (`TOKEN`) | no | one of: `dropped` |  |
+| 2 | `kind` (`TOKEN`) | no | one of: `generation`, `tool_call` |  |
+| 3 | `reason` (`TOKEN`) | no | one of: `dropped` |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `kind` | `TOKEN` | yes | no | one of: `generation`, `tool_call` | Which span lost its content: `generation` for an `llm` span's request and output, `tool_call` for a `tool` span's arguments and result. Decided where the pair is dropped. |
 | `reason` | `TOKEN` | yes | no | one of: `dropped` | Why this server omitted the pair before the matching span ended. Never the content itself and never a backend delivery verdict, which belongs to ordinary telemetry exporter health. |
 
 ### `capture_enabled`

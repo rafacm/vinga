@@ -1764,7 +1764,7 @@ class TranscriptExportFailure(StrEnum):
 
 
 class LlmInputExportFailure(StrEnum):
-    """Why a generation content pair was omitted from its actual span.
+    """Why a content pair was omitted from its actual span.
 
     The whole of what `llm_input_export_failed` may say, and the reason
     that event exists: this class has no local store behind it, so an
@@ -1788,6 +1788,23 @@ class LlmInputExportFailure(StrEnum):
     # The complete pair exceeded its content ceiling, lost a bounded
     # pending slot, could not be rendered, or missed its invocation.
     DROPPED = "dropped"
+
+
+class LlmInputExportKind(StrEnum):
+    """Which span a content pair was meant for.
+
+    Decided where the pair is dropped, which is where it is known: the
+    generation path stages a request and its output for an `llm` span,
+    and a tool call's arguments and result are staged for its `tool`
+    span. Two members and no third, because those are the two spans
+    the content export writes onto.
+    """
+
+    # An assembled request and its raw output, for an `llm` span.
+    GENERATION = "generation"
+    # A tool call's arguments and the result the model was handed, for
+    # its `tool` span.
+    TOOL_CALL = "tool_call"
 
 
 class EchoOutcome(StrEnum):
@@ -2073,6 +2090,7 @@ __all__ = [
     "InvocationId",
     "LanguageTag",
     "LlmInputExportFailure",
+    "LlmInputExportKind",
     "LlmPurpose",
     "LoopbackHost",
     "MachineId",

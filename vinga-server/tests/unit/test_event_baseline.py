@@ -1008,10 +1008,10 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
         ("TranscriptExportFailed", ("event", "reason", "session")),
     ),
     "vinga_server.llm_input_export:LlmInputExport.finish #1": (
-        ("LlmInputExported", ("event", "rounds", "session")),
+        ("LlmInputExported", ("event", "rounds", "session", "tool_calls")),
     ),
     "vinga_server.llm_input_export:LlmInputExport._failed #1": (
-        ("LlmInputExportFailed", ("event", "reason", "session")),
+        ("LlmInputExportFailed", ("event", "kind", "reason", "session")),
     ),
     "vinga_server.config.api:_SanitizedErrors.__call__ #1": (
         ("ApiError", ("event",)),
