@@ -266,11 +266,21 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
    - `memory_facts: FactIds`, the agent and device ids in reading
      order, as a new `ID_LIST`-kind value type modeled on `SessionIds`
      (`events/values.py:772`), whose elements are positive integers.
-   The emission point stays `ProviderWatch.reply_round_done`, which
-   gains one keyword argument carrying the round's memory accounting;
-   `_system_prompt` returns the per-round `Assembled` and the ids
-   instead of `.text` alone, and the caller takes `.text` where it
-   needs the string. Per-round emission adds fields to an event that
+   The handoff is one value, `RoundPrompt`, a frozen dataclass in
+   `runtime/prompt.py` built where `with_scopes` is called: the
+   per-round `Assembled` that was sent, the know-how `Assembled` it was
+   built on, and `facts: tuple[int, ...] | None`, where `None` means
+   this round did not read memory (`_remembering_now()` false) and `()`
+   means it read and injected nothing, including a read that failed
+   and fell back to `NOTHING_REMEMBERED`. `PromptMemory` cannot carry
+   that distinction (a failed read and an empty one are the same value
+   there), and it does not need to: whether a read was attempted is
+   known at the call site, which is where `None` is chosen.
+   `_system_prompt` returns a `RoundPrompt` instead of `.text`, the
+   caller takes `.text` where it needs the string, and the event fields
+   are derived from the one value on both the success path
+   (`ProviderWatch.reply_round_done`, one new keyword) and the failure
+   path (decision 7a), so the two cannot disagree. Per-round emission adds fields to an event that
    already fires per round, which is the reason `_prompt_assembled`'s
    docstring gives for keeping memory off `prompt_assembled`, so it
    holds and the docstring gains one sentence pointing here.
@@ -546,6 +556,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Plan should say instead:** Describe the IDs as a best-effort correlation to current local state, not historical identity. If historical version identity is required, carry a non-content row version such as the fact’s update timestamp and acknowledge that deleted or superseded content remains unreconstructible without the content export. Add correction, pruning, and hard-deletion tests for the documented behavior.
 
    *Resolution:* accepted in part. Decision 6 now states that the id join is best effort and to the store's current state (a correction keeps the id with new text, pruning and API deletion leave no row), and the catalog note and the observability page say the same; the historical text is the content export's to carry. Rejected: a per-id row version, which doubles the list to answer a historical question `export_llm_input` already answers, and new correction, prune and delete tests, since those behaviors belong to the memory store and its existing tests pin them; nothing in this plan changes them.
+
+   *Resolution:* accepted. Decision 7 now defines the handoff as one value, `RoundPrompt` (the sent `Assembled`, the know-how `Assembled`, and `facts: tuple[int, ...] | None`, `None` for no read attempted and `()` for a read that injected nothing, a failed read included), chosen at the call site where the attempt is known, and derived into the event fields on both the success path and decision 7a's failure path.
 
 4. **P2: Failed LLM requests lose all proposed per-round memory metadata.**
    **Evidence:** M2 adds fields only to `LlmRound` and threads them only through `reply_round_done` (`docs/plans/...`, lines 185–208). A stream failure emits `ProviderFailed` instead (`runtime/provider_watch.py:134-166,409-458`), and telemetry turns that into the actual failed `llm` span (`telemetry.py:2952-2990`). The existing LLM-content export deliberately finishes and attaches the failed request by invocation, but the planned memory accounting has no equivalent path. The proposed tests cover successful rounds and recaps only.
