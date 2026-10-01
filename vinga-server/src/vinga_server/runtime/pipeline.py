@@ -1116,11 +1116,12 @@ class PipelineRuntime:
                 conversation=ConversationId(self._conversation),
                 characters=Count(half.characters),
                 sources=PromptSources(half.sizes()),
-                # The half's text exactly as the model is sent it, which
-                # assembly has already trimmed and joined: the one
-                # canonical form of it, so nothing is framed or
-                # normalized on the way into the digest (#533).
-                sha256=Sha256.of(half.text),
+                # The half as it reaches the model whenever another
+                # block follows it, which prompt assembly defines in one
+                # place: a lone persona's leading whitespace is not part
+                # of the fingerprint, since a round that reads memory
+                # trims it (#533).
+                sha256=Sha256.of(half.canonical),
             )
         )
 
