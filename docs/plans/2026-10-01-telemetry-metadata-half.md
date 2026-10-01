@@ -188,6 +188,16 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
    - `system_characters: Count`, the whole system prompt this round
      sent (know-how half, scope blocks and joins), so the per-round
      prompt size is no longer under-reported;
+   - `memory_characters: Count`, the exact number of characters
+     `with_scopes` appended to the know-how half this round: the scope
+     blocks and the joins between them and the half, computed as the
+     difference between the per-round `Assembled`'s text and the
+     know-how half's text (a prefix of it, asserted rather than
+     assumed), never as a sum of block sizes, which omits the joins.
+     The device block holds the device record as well as the device's
+     notes (`runtime/prompt.py:470-485`), so this is the per-round half
+     of the prompt rather than remembered facts alone, and its note
+     says so;
    - `memory_sources`: each scope block's size by provenance (`state`,
      `memory`, `device`), from the per-round `Assembled.sizes()`
      restricted to those three provenances, with a block that is not
@@ -207,7 +217,8 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
    docstring gives for keeping memory off `prompt_assembled`, so it
    holds and the docstring gains one sentence pointing here.
 8. **The `llm` span carries it under the round's own names.**
-   `vinga.llm.system.characters`, `vinga.llm.system.sources.<provenance>`
+   `vinga.llm.system.characters`, `vinga.llm.memory.characters`,
+   `vinga.llm.system.sources.<provenance>`
    and `vinga.llm.memory.facts` (the ids), plus
    `vinga.llm.memory.fact_count`, the length of the id list, derived in
    the fold rather than carried as a second field, because a backend
@@ -314,7 +325,10 @@ M2:
   switched off carries none of the M2 fields; a recap carries none.
 - `system_characters` equals the length of the system string the
   provider was handed in that round (asserted against what the fake
-  provider received, not against a recomputation).
+  provider received, not against a recomputation), and
+  `memory_characters` equals that string's length minus the know-how
+  half's, with the half a prefix of it; a round with two scope blocks
+  proves the joins are counted.
 - The span carries the id list, the derived count and the per-block
   sizes; a scope at its cap is still accepted (decision 9).
 - The `LlmRound` carried-key set gains the fields, driven through the
@@ -431,6 +445,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
 1. **P1: M2 never exports the memory character total required by §5.**
    **Evidence:** Issue #533 §5 requires memory identity, count, and character total. The plan exports the whole system length plus individual block lengths (`docs/plans/2026-10-01-telemetry-metadata-half.md`, Decisions 7–8, lines 185–224). `Assembled.sizes()` counts block text only (`runtime/prompt.py:339-342`), excluding blank-line joins, while the device block also includes the device record rather than only remembered facts (`runtime/prompt.py:470-485`). Consequently neither the individual sizes nor their sum is the exact memory-half character total.
    **Plan should say instead:** Add a specifically defined `memory_characters` field and `vinga.llm.memory.characters` attribute, computed from the exact incremental text `with_scopes` added to the know-how half, including joins. Test it against the actual system string supplied to the provider.
+
+   *Resolution:* accepted. Decision 7 adds `memory_characters`, the exact text `with_scopes` appended to the know-how half, joins included, computed as a difference of the two texts with the prefix asserted; decision 8 exports it as `vinga.llm.memory.characters`; the tests pin it against the string the provider received with two blocks present. Its note says it includes the device record, since that shares the device block, so it is the per-round half of the prompt rather than remembered facts alone.
 
 2. **P2: The memory-off test contradicts both the field definition and current prompt behavior.**
    **Evidence:** Decision 7 defines `system_characters` as the whole system prompt, but makes every M2 field absent when memory is off; the tests repeat that expectation (`docs/plans/...`, lines 185–205 and 309–317). `_system_prompt` still assembles and sends the know-how prompt when memory is off, and may still append the live device record through `with_scopes(..., NOTHING_REMEMBERED, record)` (`runtime/pipeline.py:2417-2428`; `runtime/prompt.py:412-453`). Thus a real system prompt, and potentially a `device` block, exists in precisely the case the proposed test requires all accounting to disappear.
