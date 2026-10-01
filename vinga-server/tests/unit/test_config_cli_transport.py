@@ -34,6 +34,7 @@ import vinga_server.tools.mcp as mcp_module
 from tests.support.config_cli import API_SECRET_ENV, OTHER_SECRET, SECRET, TOKEN, runner
 from tests.support.config_cli import logged as _logged
 from tests.support.leaks import chain as _chain
+from tests.support.leaks import unfloored
 from tests.support.stores import holding_the_write_lock, the_lock_held
 from vinga_server.config import cli
 from vinga_server.config.api import MOUNT_PATH, build_api
@@ -550,20 +551,31 @@ def _answering(body: object = None) -> httpx.MockTransport:
     return httpx.MockTransport(answer)
 
 
+# The two libraries the request's own boundary holds, spelled here
+# rather than read off `reach.REQUEST_LOGGERS`: what the cases below
+# lift is what they then assert about, and a name dropped from the
+# production tuple must not drop out of the lift at the same moment.
+CLIENT_LIBRARIES = ("httpx", "httpcore")
+
+
 def test_no_request_this_command_makes_narrates_itself(
     run, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """The surface the two failures above do not cover, and the one a
     terminal does not show: httpx writes a line per request at INFO
-    naming the URL it was given, and `logs.py` floors that library at
-    INFO deliberately, because for every other caller in this server the
-    URL says nothing that is not already public.
+    naming the URL it was given.
 
     For this one it is the address an operator typed, accepted with its
     query string whole, and a log record is retained in a way a terminal
     is not. So the request runs inside a logging boundary and this is a
     successful command, which is the case no refusal test could reach:
     the credential is in the URL whether or not anything went wrong.
+
+    Run with the server's floor off both libraries. The command's entry
+    point floors them at WARNING before any request (`logs.py`), which
+    would hold this line back with the boundary gone; the boundary is
+    what still holds it when somebody has lifted the floor by name, so
+    that is the state this case runs in.
     """
     monkeypatch.setattr(
         reach,
@@ -571,7 +583,7 @@ def test_no_request_this_command_makes_narrates_itself(
         lambda base_url, token: httpx.Client(base_url=base_url, transport=_answering()),
     )
 
-    with caplog.at_level(logging.DEBUG):
+    with unfloored(CLIENT_LIBRARIES), caplog.at_level(logging.DEBUG):
         assert run(
             "--api-url", REACHABLE_NOWHERE, "import", "-f", "-", stdin="{}\n"
         ) == 0
@@ -609,7 +621,8 @@ def test_neither_library_can_narrate_while_the_request_is_open(
     in flight, which is exactly when the libraries write theirs, and it
     plants the credential in one as an argument rather than in the
     message, since a value that reached a record that way is a value the
-    formatter puts back into the line.
+    formatter puts back into the line. With the floor off both
+    libraries, for the reason the case above gives.
     """
     narrated: list[str] = []
 
@@ -627,7 +640,7 @@ def test_neither_library_can_narrate_while_the_request_is_open(
         ),
     )
 
-    with caplog.at_level(logging.DEBUG):
+    with unfloored(CLIENT_LIBRARIES), caplog.at_level(logging.DEBUG):
         assert run(
             "--api-url", REACHABLE_NOWHERE, "import", "-f", "-", stdin="{}\n"
         ) == 0
@@ -649,19 +662,32 @@ def test_the_quiet_lasts_exactly_as_long_as_the_request(
     """Logger levels are process state, so a command that left one
     raised would have silenced a library for whatever runs next. Every
     name the boundary holds, since a restore that put one back is not a
-    restore."""
-    before = {name: logging.getLogger(name).level for name in reach.REQUEST_LOGGERS}
+    restore.
+
+    With the floor off both libraries, because the command's entry point
+    applies it and a floor is meant to stay: what is under test is that
+    the request's own boundary puts back what it found, and the floor
+    raising the same levels on the way in would answer for it, or
+    against it, depending on what an earlier test left behind."""
     monkeypatch.setattr(
         reach,
         "build_client",
         lambda base_url, token: httpx.Client(base_url=base_url, transport=_answering()),
     )
 
-    assert run(
-        "--api-url", REACHABLE_NOWHERE, "import", "-f", "-", stdin="{}\n"
-    ) == 0
+    with unfloored(CLIENT_LIBRARIES):
+        # A level of each one's own, distinct and below the boundary's,
+        # so a boundary that left the quiet on and one that put back
+        # NOTSET rather than what it found both read differently here.
+        logging.getLogger("httpx").setLevel(logging.INFO)
+        logging.getLogger("httpcore").setLevel(logging.DEBUG)
+        before = {name: logging.getLogger(name).level for name in reach.REQUEST_LOGGERS}
+        assert run(
+            "--api-url", REACHABLE_NOWHERE, "import", "-f", "-", stdin="{}\n"
+        ) == 0
+        after = {name: logging.getLogger(name).level for name in reach.REQUEST_LOGGERS}
 
-    assert {name: logging.getLogger(name).level for name in reach.REQUEST_LOGGERS} == before
+    assert after == before
     # Read off the production tuple above, and checked to be the pair it
     # is: a name dropped from it would otherwise be a name this test
     # stopped asserting about at the same moment it stopped being held.
