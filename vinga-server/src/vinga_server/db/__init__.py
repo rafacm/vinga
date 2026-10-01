@@ -679,28 +679,43 @@ def is_busy(exc: BaseException) -> bool:
     return False
 
 
-def failure_name(exc: BaseException) -> str:
-    """The class name a storage refusal carries about its cause, which
-    is the whole of what it carries.
+def failure_class(exc: BaseException) -> ClassName | None:
+    """The class name a storage refusal may carry about its cause, or
+    None where the class's name is not one anything may repeat.
 
     Rendered through `ClassName`, which is how a failed component's
     class reaches telemetry, rather than `type(exc).__name__` spelled at
     the site: a class can be given any name at all, a line break and a
     forged sentence after it included, and the value type is what
-    admits an identifier and nothing else. A name it refuses becomes
-    `UNNAMED_FAILURE` rather than an exception of its own, because a
-    refusal that raised while it was being built would lose the
-    sentence it exists to say.
+    admits an identifier and nothing else. A name it refuses is None
+    rather than an exception of its own, because a refusal that raised
+    while it was being built would lose the sentence it exists to say.
 
-    Public because both storage refusals ask it: the migration failure
-    below and the configuration store's read and write failure
-    (`config/store.py`). They answer one question, what a storage
-    refusal may say about its cause, and the answer has one home.
+    The value form, for the refusals that carry the class beside their
+    sentence (`StorageError.cause`, which the API's refusal handler
+    logs, #586); `failure_name` below is the same answer spelled into a
+    sentence. One validation, so the two cannot disagree about which
+    names are sayable.
     """
     try:
-        return ClassName.of(exc).value
+        return ClassName.of(exc)
     except EventValueError:
-        return UNNAMED_FAILURE
+        return None
+
+
+def failure_name(exc: BaseException) -> str:
+    """The class name a storage refusal says about its cause, which is
+    the whole of what it says: `failure_class` spelled for a sentence,
+    with `UNNAMED_FAILURE` where that has no name to give.
+
+    Public because both storage refusals that put the class in their
+    sentence ask it: the migration failure below and the configuration
+    store's read and write failure (`config/store.py`). They answer one
+    question, what a storage refusal may say about its cause, and the
+    answer has one home.
+    """
+    named = failure_class(exc)
+    return UNNAMED_FAILURE if named is None else named.value
 
 
 def migration_failure(exc: Exception) -> ConfigError:
@@ -926,6 +941,7 @@ __all__ = [
     "StoreChain",
     "advisory_key",
     "connection_url",
+    "failure_class",
     "failure_name",
     "is_busy",
     "migration_failure",

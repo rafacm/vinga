@@ -163,7 +163,7 @@ from vinga_server.conversations.views import (
     View,
     grouped,
 )
-from vinga_server.db import is_busy, read_engine, write_engine
+from vinga_server.db import failure_class, is_busy, read_engine, write_engine
 from vinga_server.memory.store import Purged, purge
 from vinga_server.paging import LIMIT_DEFAULT, LIMIT_MAX, MAX_ROW_ID
 
@@ -1195,7 +1195,7 @@ def _erasure(
         raise
     except Exception as exc:  # noqa: BLE001 - the driver's own words never travel
         problem = DatabaseBusyError(_ERASURE_BUSY) if is_busy(exc) else StorageError(
-            _ERASURE_FAILED
+            _ERASURE_FAILED, cause=failure_class(exc)
         )
     if problem is not None:
         raise problem

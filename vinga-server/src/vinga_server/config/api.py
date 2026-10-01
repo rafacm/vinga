@@ -3455,14 +3455,22 @@ def _refusal(status: int) -> Callable[[Request, Exception], Any]:
 
     async def handler(request: Request, exc: Exception) -> JSONResponse:
         if status >= 500:
-            # One fixed line naming the exception's class, and never the
-            # exception itself: a record's args hold whatever is passed
-            # to them, and an exception object carries its message and
-            # its chain to anything that walks it. The sentence goes to
-            # the caller, which is the channel that was sanitized for
-            # it.
-            failure = exc
-            events.emit(lambda: ApiStorageError(failure=ClassName.of(failure)))
+            # One fixed line naming a class, and never the exception
+            # itself: a record's args hold whatever is passed to them,
+            # and an exception object carries its message and its chain
+            # to anything that walks it. The sentence goes to the
+            # caller, which is the channel that was sanitized for it.
+            #
+            # Which class is the refusal's to say. A storage refusal
+            # built over a failure it caught carries that failure's
+            # class, validated where it was caught, and that is what is
+            # named (#586): the refusal's own class is `StorageError` at
+            # every site that sets a cause, and says nothing the event's
+            # name does not. Every other refusal names its own, which
+            # for a row that will not read is the subclass that says so.
+            cause = exc.cause if isinstance(exc, StorageError) else None
+            named = cause if cause is not None else ClassName.of(exc)
+            events.emit(lambda: ApiStorageError(failure=named))
         # Every type this handler is registered for is a ConfigError, so
         # the check is about typing rather than about doubt; an
         # exception that arrived some other way has nothing structured

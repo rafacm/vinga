@@ -2926,7 +2926,7 @@ the configuration API met unreadable stored state (%s)
 
 | # | Argument | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- |
-| 1 | `failure` (`CLASS_NAME`) | no |  |  |
+| 1 | `failure` (`CLASS_NAME`) | no |  | The class of the exception a storage refusal was decided from, where the refusal caught one and its class has a name that may be repeated; otherwise the refusal's own class. Never anything else of either. |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |

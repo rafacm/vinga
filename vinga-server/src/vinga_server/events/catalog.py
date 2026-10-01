@@ -4255,7 +4255,15 @@ class ApiStorageError(Variant):
     )
     ARGS: ClassVar[tuple[str, ...]] = ("failure",)
 
-    failure: ClassName = value(carried=False)
+    failure: ClassName = value(
+        carried=False,
+        rendered_note=(
+            "The class of the exception a storage refusal was decided "
+            "from, where the refusal caught one and its class has a "
+            "name that may be repeated; otherwise the refusal's own "
+            "class. Never anything else of either."
+        ),
+    )
 
 
 OTA_CHECK = declare(
