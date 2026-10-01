@@ -64,6 +64,7 @@ from vinga_server.conversations import views as conversations_views
 from vinga_server.conversations.store import open_conversations
 from vinga_server.db import (
     DEFAULT_PASSWORD,
+    MIGRATION_FAILED,
     PASSWORD_ENV,
     SCHEMA_NOT_PERMITTED,
     UNREACHABLE,
@@ -842,7 +843,10 @@ def test_a_schema_under_the_wrong_owner_is_not_told_to_rerun_the_file(
     the provisioning file's creates are `IF NOT EXISTS`, so running it
     again would find the schema present, change nothing, and leave an
     operator to discover that for themselves. The general sentence is
-    the honest answer, because it prescribes nothing.
+    the honest answer, because it prescribes nothing; since #530 it
+    names the exception's class, and it is no longer the connection
+    sentence, which sent the operator of a reachable instance to check
+    that it was there.
 
     This is the case a classifier that read the exception class out of
     the whole migration would get wrong, and the reason the rerun
@@ -854,7 +858,8 @@ def test_a_schema_under_the_wrong_owner_is_not_told_to_rerun_the_file(
     with pytest.raises(StorageError) as refusal:
         open_memory(settings)
 
-    assert str(refusal.value) == UNREACHABLE
+    assert str(refusal.value) == MIGRATION_FAILED.format(failure="ProgrammingError")
+    assert str(refusal.value) != UNREACHABLE
     assert str(refusal.value) != SCHEMA_NOT_PERMITTED
     assert "deploy/postgres-init.sql" not in str(refusal.value)
     # The chain is severed here as it is everywhere else: what psycopg
