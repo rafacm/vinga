@@ -86,6 +86,7 @@ GEN_AI: tuple[tuple[str, str, str], ...] = (
     ("model", "gen_ai.request.model", "the `llm_round`, `llm_retry` and `provider_failed` events"),
     ("type", "gen_ai.provider.name", "the provider-bearing events, and `sessions.providers`"),
     ("host", "server.address", "the provider-bearing events"),
+    ("tool", "gen_ai.tool.name", "the `tool_call` event, for a builtin only"),
 )
 
 
