@@ -21,6 +21,7 @@ assertion about the shape is the suite's.
 """
 
 import gzip
+import hashlib
 import http.server
 import threading
 import time
@@ -75,6 +76,7 @@ from vinga_server.events.values import (
     Real,
     ReplyOutcome,
     SessionId,
+    Sha256,
     UtteranceId,
     Whole,
 )
@@ -396,7 +398,8 @@ def assemble_prompt(
     `agent` is whose know-how half was assembled, because the event is
     emitted once per agent rather than once per turn: a case about what
     a handover changes needs two of these and they are not the same
-    fact.
+    fact. The digest is of a text standing in for that agent's half,
+    `prompt_digest(agent)`, so two agents carry two digests.
     """
     return events.emit(
         lambda: PromptAssembled(
@@ -404,8 +407,20 @@ def assemble_prompt(
             conversation=ConversationId(CONVERSATION),
             characters=Count(sum(sources.values())),
             sources=PromptSources(dict(sources)),
+            sha256=Sha256.of(prompt_text(agent)),
         )
     )
+
+
+def prompt_text(agent: str = AGENT) -> str:
+    """The text `assemble_prompt` says an agent's half was."""
+    return f"the know-how half of {agent}"
+
+
+def prompt_digest(agent: str = AGENT) -> str:
+    """The digest a turn by that agent carries, as a reader computes it:
+    the standard library's SHA-256 of the text, in hex."""
+    return hashlib.sha256(prompt_text(agent).encode("utf-8")).hexdigest()
 
 
 def hear(
