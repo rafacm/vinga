@@ -183,8 +183,18 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
    sizes approximate for the ledger; the ledger case a size cannot see,
    a `set_state` that keeps its length, is recorded as the known gap.
 7. **The round carries it.** `LlmRound` (not `LlmRecap`, whose prompt
-   holds no memory) gains, all `| Absent` and absent where memory was
-   not read this round (memory off for the agent, no conversation):
+   holds no memory) gains the fields below. The sizes describe the
+   prompt actually sent, so they are present on every completed reply
+   round whatever the agent's memory setting: with memory off the
+   prompt still holds the know-how half and may hold a device block
+   carrying the live device record (`runtime/pipeline.py:2417-2421`).
+   The fact list says what memory contributed, so it is present, and
+   possibly empty, wherever this round read memory (`_remembering_now()`
+   true), and absent where memory is switched off for the agent, which
+   is a different fact from "read, and held nothing". A read that failed
+   answers `NOTHING_REMEMBERED` today and the model saw no fact, so its
+   list is empty; the failure itself is already `memory_unreadable`'s
+   to report.
    - `system_characters: Count`, the whole system prompt this round
      sent (know-how half, scope blocks and joins), so the per-round
      prompt size is no longer under-reported;
@@ -199,9 +209,10 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
      of the prompt rather than remembered facts alone, and its note
      says so;
    - `memory_sources`: each scope block's size by provenance (`state`,
-     `memory`, `device`), from the per-round `Assembled.sizes()`
-     restricted to those three provenances, with a block that is not
-     present absent from the mapping rather than `0`; reusing
+     `memory`, `device`), from the `Assembled` actually sent, restricted
+     to those three provenances, with a block that is not present absent
+     from the mapping rather than `0` (so a memory-off round with a
+     device record reports its `device` block); reusing
      `PromptSources` if its grammar admits the three tokens, otherwise
      a closed mapping type whose keys are exactly those three, decided
      by reading `SOURCE_KEY_PATTERN` (`events/values.py:502`);
@@ -322,7 +333,10 @@ M2:
   including when `_core`'s byte cap drops some of the newest forty
   (the dropped ids absent) and when the device scope is empty.
 - A round after a `remember` carries the new id; a round with memory
-  switched off carries none of the M2 fields; a recap carries none.
+  switched off carries the sizes (including a `device` block when the
+  device has a record) and no fact list; a round whose memory read
+  failed carries an empty fact list; a recap carries none of the
+  fields.
 - `system_characters` equals the length of the system string the
   provider was handed in that round (asserted against what the fake
   provider received, not against a recomputation), and
@@ -451,6 +465,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
 2. **P2: The memory-off test contradicts both the field definition and current prompt behavior.**
    **Evidence:** Decision 7 defines `system_characters` as the whole system prompt, but makes every M2 field absent when memory is off; the tests repeat that expectation (`docs/plans/...`, lines 185–205 and 309–317). `_system_prompt` still assembles and sends the know-how prompt when memory is off, and may still append the live device record through `with_scopes(..., NOTHING_REMEMBERED, record)` (`runtime/pipeline.py:2417-2428`; `runtime/prompt.py:412-453`). Thus a real system prompt, and potentially a `device` block, exists in precisely the case the proposed test requires all accounting to disappear.
    **Plan should say instead:** Make `system_characters` present on every completed reply generation. Derive source sizes from the actual `Assembled` sent, so a device block remains reported when present even with remembered facts disabled. Specify separately whether an unread or disabled fact list is absent or empty.
+
+   *Resolution:* accepted. Decision 7 now splits the two kinds of field: the sizes describe the prompt actually sent and are present on every completed reply round, memory on or off, so a device block carrying the live record is reported either way; the fact list is present (possibly empty) wherever the round read memory and absent where memory is switched off, and a failed read yields an empty list because the model saw no fact. The memory-off and failed-read tests are rewritten to match.
 
 3. **P2: Fact IDs do not provide the stable historical join the plan claims.**
    **Evidence:** The plan says IDs let a trace join back to the local store and answer which facts produced an output (`docs/plans/...`, lines 32–40 and 176–184). Existing facts are mutable under the same ID (`memory/store.py:983-1025`), are deleted by cap pruning (`memory/store.py:1924-1971`), and can be permanently or operator-deleted; the observability contract explicitly says facts last only until corrected and that API deletion is hard deletion (`docs/architecture/observability-surfaces.md`, Memory, lines 183–196). A later lookup can therefore return changed text or no row at all.
