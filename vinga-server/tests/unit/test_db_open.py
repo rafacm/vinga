@@ -17,23 +17,39 @@ cannot use, tested below.
 """
 
 import threading
+from pathlib import Path
 
+import psycopg
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import DBAPIError, OperationalError, ProgrammingError
 
 import vinga_server
+from tests.support.configs import config_with_agent
+from tests.support.leaks import chain, renderings
+from vinga_server import db, serving
+from vinga_server.app import StartupFailed, create_app
 from vinga_server.config import ConfigError
 from vinga_server.config.loader import DatabaseBusyError, StorageError
 from vinga_server.config.models import DatabaseConfig
+from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 from vinga_server.db import (
     DOMAIN_CHAIN,
     LOCK_TIMEOUT_MS,
+    MIGRATION_FAILED,
     SCHEMA_NOT_PERMITTED,
+    UNNAMED_FAILURE,
     UNREACHABLE,
+    StoreChain,
+    advisory_key,
     connection_url,
+    failure_name,
     migration_failure,
+    open_at,
     open_database,
 )
+from vinga_server.memory.store import MEMORY_CHAIN
 
 EXPECTED_TABLES = {
     "providers",
@@ -271,6 +287,180 @@ def test_every_other_connection_failure_is_the_same_sentence(
     assert isinstance(caught.value, StorageError)
     assert not isinstance(caught.value, DatabaseBusyError)
 
+# What a failure with no answer of its own is told (#530)
+#
+# The connection sentence used to be the answer to everything the other
+# arms did not claim, so a migration that failed on an instance that was
+# up and accepting the credentials sent its operator to check the host,
+# the port and the password. Now it is said for the failures it is true
+# of, which the cases above pin, and everything else is told its
+# exception's class and nothing more: the rule the configuration store
+# already answers its own storage failures with.
+
+
+def test_a_failure_with_no_answer_names_its_class(
+    blank_database: str, tmp_path: Path
+) -> None:
+    """Driven for real, through the opener, at a reachable instance: a
+    chain whose migrations are not where it says they are, which Alembic
+    refuses with its own `CommandError` after the connection was made and
+    the schema created.
+
+    A failure no arm has a remedy for, and the shape of the one that
+    motivated #530: the instance is fine, so the sentence that sends
+    an operator to check it is the wrong one to say.
+    """
+    nowhere = StoreChain(
+        schema="vinga_no_migrations_here",
+        migrations=tmp_path / "missing",
+        lock_key=advisory_key(0x530),
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        open_at(DatabaseConfig(name=blank_database), nowhere)
+
+    assert str(caught.value) == MIGRATION_FAILED.format(failure="CommandError")
+    assert str(caught.value) != UNREACHABLE
+    assert isinstance(caught.value, StorageError)
+    assert not isinstance(caught.value, DatabaseBusyError)
+    assert str(tmp_path) not in str(caught.value)
+
+
+def test_an_answer_from_a_server_that_was_reached_is_not_the_connection() -> None:
+    """The boundary `_unreachable` draws by exact type, at its nearest
+    neighbour. psycopg files every SQLSTATE in class 53 and class 57
+    under `OperationalError`, the same class it raises when libpq could
+    not connect at all, so a classifier that asked `isinstance` would
+    tell an instance with a full disk to check that it is running.
+
+    Constructed, because a full disk is not something a lane can arrange.
+    """
+    answered = psycopg.errors.DiskFull("could not extend file")
+    problem = migration_failure(OperationalError("create table", {}, answered))
+
+    assert str(problem) == MIGRATION_FAILED.format(failure="OperationalError")
+    assert str(problem) != UNREACHABLE
+
+
+def test_a_connect_that_timed_out_is_the_connection_sentence() -> None:
+    """The one subclass the connection sentence does claim: psycopg's own
+    `ConnectionTimeout`, raised when a connect outlasts its timeout,
+    which is a host that did not answer rather than one that refused.
+
+    Constructed, because a real one waits out the timeout it is named
+    for.
+    """
+    timed_out = psycopg.errors.ConnectionTimeout("connection timeout expired")
+    problem = migration_failure(OperationalError(None, None, timed_out))
+
+    assert str(problem) == UNREACHABLE
+
+
+def test_a_class_name_that_is_not_an_identifier_is_not_repeated() -> None:
+    """A class can be named anything, a line break and a sentence after
+    it included, and an operator's terminal would print that second line
+    as if this server had said it. The name goes through `ClassName`,
+    which admits an identifier and nothing else, and what it refuses is
+    replaced by a fixed phrase rather than dropped or raised."""
+    forged = type("Forged\nthe database was dropped", (Exception,), {})
+
+    problem = migration_failure(forged("sk-test-5f02c1-never-a-real-credential"))
+
+    assert str(problem) == MIGRATION_FAILED.format(failure=UNNAMED_FAILURE)
+    assert "\n" not in str(problem)
+    assert "dropped" not in str(problem)
+    assert failure_name(forged()) == UNNAMED_FAILURE
+    assert failure_name(ValueError()) == "ValueError"
+
+
+# The sentinel, at both doors a migration failure leaves through
+#
+# A credential-shaped value planted everywhere a real failure keeps one:
+# in the DSN a driver error quotes, in the statement and the parameters
+# bound to it, and on the exception's `__cause__`. What has to hold is
+# that none of it reaches the refusal, its arguments, anything walking
+# its chain, or a log record in either format, while the class name
+# does reach the sentence. The boot opens the domain chain and prints
+# its refusal; the lifespan opens the memory chain and hands uvicorn a
+# `StartupFailed`. They are separate `except` clauses on the way out, so
+# each is driven.
+
+PLANTED = "sk-test-7c4d93-never-a-real-credential"
+
+
+def _a_failure_holding_the_sentinel() -> ProgrammingError:
+    dsn = f"postgresql+psycopg://vinga:{PLANTED}@db.internal:5432/vinga"
+    driver = psycopg.errors.InsufficientPrivilege(f"permission denied, connected as {dsn}")
+    failure = ProgrammingError(
+        f"INSERT INTO domain.providers (secrets) VALUES ('{PLANTED}')",
+        {"secrets": PLANTED},
+        driver,
+    )
+    failure.__cause__ = RuntimeError(f"while migrating over {dsn}")
+    return failure
+
+
+def _failing_at(monkeypatch: pytest.MonkeyPatch, chain: StoreChain) -> None:
+    """Every chain migrates as it always does except the one named,
+    whose migration raises the planted failure from where a real one
+    would: inside the opener's own `try`."""
+    real = db.upgrade_to_head
+
+    def upgrade(engine: object, which: StoreChain) -> None:
+        if which is chain:
+            raise _a_failure_holding_the_sentinel()
+        real(engine, which)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(db, "upgrade_to_head", upgrade)
+
+
+def test_the_boot_refusal_carries_the_class_and_nothing_planted(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+    monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
+    _failing_at(monkeypatch, DOMAIN_CHAIN)
+
+    with caplog.at_level(0):
+        assert serving.run(None) == 1
+
+    printed = capsys.readouterr()
+    assert MIGRATION_FAILED.format(failure="ProgrammingError") in printed.err
+    assert PLANTED not in printed.err
+    assert PLANTED not in printed.out
+    assert not [found for found in renderings(caplog) if PLANTED in found]
+
+
+def test_the_lifespan_refusal_carries_the_class_and_nothing_planted(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _failing_at(monkeypatch, MEMORY_CHAIN)
+
+    with caplog.at_level(0), pytest.raises(StartupFailed) as raised:
+        with TestClient(create_app(config_with_agent())):
+            pass
+
+    refusal = raised.value
+    assert str(refusal) == MIGRATION_FAILED.format(failure="ProgrammingError")
+    assert PLANTED not in chain(refusal)
+    assert refusal.__cause__ is None
+    assert refusal.__context__ is None
+    assert not [found for found in renderings(caplog) if PLANTED in found]
+
+
+def test_the_refusal_itself_carries_nothing_planted() -> None:
+    """The exception the opener raises, before any door renders it: its
+    text, its arguments both ways and everything a walker of its graph
+    would find."""
+    problem = migration_failure(_a_failure_holding_the_sentinel())
+
+    assert str(problem) == MIGRATION_FAILED.format(failure="ProgrammingError")
+    assert PLANTED not in chain(problem)
+    assert problem.__cause__ is None
+    assert problem.__context__ is None
+
 
 # A schema the role may not create
 #
@@ -301,15 +491,16 @@ def test_a_privilege_failure_inside_a_migration_prescribes_nothing() -> None:
     the schema creation itself, and that decision is made at the
     statement rather than here.
     """
-    import psycopg
-    from sqlalchemy.exc import DBAPIError
-
     refused = psycopg.errors.InsufficientPrivilege(
         "permission denied for table sk-test-9e21b4-never-a-real-credential"
     )
     problem = migration_failure(DBAPIError("create table", {}, refused))
 
-    assert str(problem) == UNREACHABLE
+    # The general sentence, naming the class it was handed. It was the
+    # connection sentence until #530, which told an operator whose
+    # instance had answered to go and check that it was there.
+    assert str(problem) == MIGRATION_FAILED.format(failure="DBAPIError")
+    assert str(problem) != UNREACHABLE
     assert str(problem) != SCHEMA_NOT_PERMITTED
     assert "deploy/postgres-init.sql" not in str(problem)
     assert isinstance(problem, StorageError)
@@ -319,9 +510,6 @@ def test_a_privilege_failure_inside_a_migration_prescribes_nothing() -> None:
 def test_the_refused_privilege_repeats_nothing_the_driver_said() -> None:
     """A psycopg error quotes what it was asked about, and a refusal is
     printed to an operator's terminal and into whatever captured it."""
-    import psycopg
-    from sqlalchemy.exc import DBAPIError
-
     planted = "sk-test-9e21b4-never-a-real-credential"
     refused = psycopg.errors.InsufficientPrivilege(f"permission denied for {planted}")
     problem = migration_failure(DBAPIError("create table", {"p": planted}, refused))

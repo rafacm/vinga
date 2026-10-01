@@ -50,7 +50,9 @@ Three properties every caller gets and none of them states:
   is what makes a contended write a 409 with a sentence rather than a
   wait with no end.
 - **Nothing about the connection is ever quoted back.** The refusals
-  below are fixed strings. A driver's own connection failure quotes the
+  below are fixed strings, and the one that says anything about its
+  cause says the exception's class name, validated as an identifier,
+  and nothing else. A driver's own connection failure quotes the
   DSN it tried, a URL can carry a password in its authority and in its
   query (`sslpassword`), and the discrete values are no better, so
   none of the four travel: not in a message, not in `args`, and not on
@@ -77,6 +79,7 @@ from vinga_server.config.models import (
     DatabaseConfig,
 )
 from vinga_server.db import schema
+from vinga_server.events.values import ClassName, EventValueError
 
 # How long a connection waits for another one's lock before it gives up.
 # A CLI write while the server holds the advisory lock is the case this
@@ -120,7 +123,9 @@ ACCEPTED_SCHEMES = frozenset({"postgresql", DIALECT})
 
 # The refusals. Fixed and value-free, every one of them, for the reason
 # the module docstring gives: what would be quoted back is a connection
-# string, and a connection string is where a password lives.
+# string, and a connection string is where a password lives. The one
+# exception is `MIGRATION_FAILED` below, which carries a class name and
+# says why that is not a value from the connection.
 URL_REFUSED = (
     f"{URL_ENV} does not name a Postgres database. It has to be a postgresql:// or "
     f"postgresql+psycopg:// URL and nothing else: this server keeps both halves of "
@@ -132,6 +137,12 @@ URL_REFUSED = (
 # The five names are the ones `DatabaseConfig` declares rather than five
 # more literals: this sentence is what an operator reads when nothing
 # opens, so a name it spells wrong is a name they would go and set.
+#
+# Raised for a connection that could not be made or did not survive,
+# and for nothing else (`_unreachable` decides which those are). It was
+# once the answer to every migration failure no other arm claimed, and
+# so it sent operators to check a host, a port and a password on
+# instances that were up and accepting them (#530).
 UNREACHABLE = (
     f"cannot open the vinga database. Nothing of the connection is repeated here, "
     f"because a database URL carries credentials in its authority and in its query: "
@@ -189,6 +200,37 @@ MIGRATION_BUSY = (
     "reader inside a long transaction is what blocks a migration, because the schema "
     "changes it makes need a lock that reads hold off"
 )
+
+# What every migration failure without an answer of its own is told,
+# which is what the connection sentence above used to be told about all
+# of them (#530).
+#
+# The exception's class name and nothing else from the failure, which
+# is the rule the configuration store's own storage refusal already
+# keeps (`config/store.py`): a type name says what went wrong, and the
+# text beside it is the driver's, which can quote the DSN it connected
+# on, the statement it ran and the values bound to that statement. The
+# name is rendered through `failure_name`, so a class whose name is not
+# an identifier cannot write a second line into an operator's terminal.
+#
+# It prescribes nothing, on purpose. What reaches it is a privilege a
+# migration was refused somewhere other than the schema creation, a
+# migration script that failed, or an error a server sent back on a
+# connection that worked: none of them has one remedy, and a sentence
+# that guessed one would send somebody to fix the wrong thing, which is
+# what the connection sentence did for every one of them.
+MIGRATION_FAILED = (
+    "the vinga database could not be brought up to the schema this server runs "
+    "on ({failure}), and the failure is not one this server has an answer for. "
+    "Only the exception's class name is repeated here: the failure's own text can "
+    "quote the connection it was made on and the statement it was running, with "
+    "the values bound to it"
+)
+
+# What `failure_name` renders in place of a class name it may not
+# repeat. A phrase rather than nothing, so a refusal still says that
+# something was raised, and fixed, so it says nothing about what.
+UNNAMED_FAILURE = "an exception whose class name is not an identifier"
 
 # The revisions a re-cut deleted, named one by one because the set is
 # closed and can never grow: it is the list of what one decision
@@ -292,9 +334,10 @@ def open_database(settings: DatabaseConfig) -> Engine:
     """Open and migrate the domain half's schema.
 
     Returns an engine the caller owns and disposes. Every failure is a
-    `ConfigError` carrying one of the fixed sentences above, because the
-    answer to all of them is either to point the `VINGA_DB_*` variables
-    at a reachable instance or to try again.
+    `ConfigError` carrying one of the sentences above, chosen by
+    `migration_failure` from the type of what was raised: point the
+    `VINGA_DB_*` variables at a reachable instance, try again, or the
+    one fact about the failure that is safe to repeat, its class name.
 
     Which `ConfigError` matters to the callers that open at startup:
     boot, the CLI per command, and the lifespan that owns the
@@ -475,8 +518,8 @@ def upgrade_to_head(engine: Engine, chain: StoreChain) -> None:
     schema standing under the wrong owner is not moved by a rerun, and a
     table-level grant a later revision wanted is not granted by one.
     Everything else that this connection is refused travels out as it
-    is and is sanitized by `migration_failure`, which says the instance
-    cannot be used as configured and prescribes nothing.
+    is and is sanitized by `migration_failure`, which names the
+    exception's class and prescribes nothing.
     """
     with engine.connect() as connection:
         # Takes the lock before Alembic looks at the version table: the
@@ -582,15 +625,41 @@ def is_busy(exc: BaseException) -> bool:
     return False
 
 
+def failure_name(exc: BaseException) -> str:
+    """The class name a storage refusal carries about its cause, which
+    is the whole of what it carries.
+
+    Rendered through `ClassName`, which is how a failed component's
+    class reaches telemetry, rather than `type(exc).__name__` spelled at
+    the site: a class can be given any name at all, a line break and a
+    forged sentence after it included, and the value type is what
+    admits an identifier and nothing else. A name it refuses becomes
+    `UNNAMED_FAILURE` rather than an exception of its own, because a
+    refusal that raised while it was being built would lose the
+    sentence it exists to say.
+
+    Public because both storage refusals ask it: the migration failure
+    below and the configuration store's read and write failure
+    (`config/store.py`). They answer one question, what a storage
+    refusal may say about its cause, and the answer has one home.
+    """
+    try:
+        return ClassName.of(exc).value
+    except EventValueError:
+        return UNNAMED_FAILURE
+
+
 def migration_failure(exc: Exception) -> ConfigError:
     """What an open that did not migrate is answered with.
 
-    Three sentences and no fourth: the lock that did not arrive, which
-    the caller may retry; a database stamped at a revision a re-cut
-    deleted, which has to be replaced; and everything else, which is an
-    instance the server cannot use as configured. None of them carries a
+    Four sentences: the lock that did not arrive, which the caller may
+    retry; a database stamped at a revision a re-cut deleted, which has
+    to be replaced; a connection that could not be made, which names
+    the variables to check; and everything else, which names the
+    exception's class and prescribes nothing. None of them carries a
     word of the driver's own text, because a psycopg connection error
-    quotes the DSN it tried.
+    quotes the DSN it tried and a statement error carries the values
+    bound to it.
 
     A privilege the role does not have is deliberately not a fourth arm
     here. It has an answer only when the refused statement is the
@@ -618,7 +687,39 @@ def migration_failure(exc: Exception) -> ConfigError:
         return DatabaseBusyError(MIGRATION_BUSY)
     if _stranded(exc):
         return StorageError(SUPERSEDED_REVISION)
-    return StorageError(UNREACHABLE)
+    if _unreachable(exc):
+        return StorageError(UNREACHABLE)
+    return StorageError(MIGRATION_FAILED.format(failure=failure_name(exc)))
+
+
+def _unreachable(exc: BaseException) -> bool:
+    """Whether this failure is a connection that could not be made or
+    did not survive, which is the one thing `UNREACHABLE` is true of.
+
+    By type, walked to through `orig` like `is_busy`, and by EXACT type
+    rather than `isinstance`. Measured against the lane's instance,
+    every failure the connection sentence lists (a refused port, a host
+    name that does not resolve, and a database, a role or a password
+    the instance does not accept) arrives as psycopg's bare
+    `OperationalError`: libpq gave up before any server answered, so
+    there is no SQLSTATE and so no subclass. A connection lost partway
+    through is the same bare class, and its operator has the same list
+    to check. `ConnectionTimeout` is the one subclass psycopg raises on
+    its own account, when a connect outlasts its timeout.
+
+    Every other subclass of `OperationalError` is a SQLSTATE a server
+    sent back on a connection that worked, `LockNotAvailable` and a full
+    disk among them, and telling an operator to check a host and a port
+    for one of those is the misdirection this function exists to stop.
+    """
+    seen: set[int] = set()
+    cause: BaseException | None = exc
+    while cause is not None and id(cause) not in seen:
+        seen.add(id(cause))
+        if type(cause) in _CONNECTION_FAILURES:
+            return True
+        cause = getattr(cause, "orig", None)
+    return False
 
 
 def _not_permitted(exc: BaseException) -> bool:
@@ -675,6 +776,9 @@ _RETRYABLE = (
     psycopg.errors.SerializationFailure,
 )
 
+# Matched by exact type, for the reason `_unreachable` gives.
+_CONNECTION_FAILURES = frozenset({psycopg.OperationalError, psycopg.errors.ConnectionTimeout})
+
 
 def _connect_args(read_only: bool) -> dict[str, str]:
     """The startup options every connection this module makes carries.
@@ -719,16 +823,19 @@ __all__ = [
     "DOMAIN_CHAIN",
     "LOCK_TIMEOUT_MS",
     "MIGRATION_BUSY",
+    "MIGRATION_FAILED",
     "PASSWORD_ENV",
     "SCHEMA_NOT_PERMITTED",
     "SUPERSEDED_REVISION",
     "SUPERSEDED_REVISIONS",
     "URL_ENV",
     "URL_REFUSED",
+    "UNNAMED_FAILURE",
     "UNREACHABLE",
     "StoreChain",
     "advisory_key",
     "connection_url",
+    "failure_name",
     "is_busy",
     "migration_failure",
     "open_at",
