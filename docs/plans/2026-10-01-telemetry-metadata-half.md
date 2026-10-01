@@ -197,7 +197,12 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
      (a new value type, exactly 64 lowercase hex characters): the
      HMAC-SHA256 of the know-how half's text exactly as sent
      (`half.text`, UTF-8), under the key below, computed where the
-     event is built. The whole half, MCP-supplied blocks included, since
+     event is built. That rendered text is the one canonical byte
+     sequence: it is what the model receives, assembly has already
+     trimmed the ends and joined the blocks with blank lines
+     (`runtime/prompt.py:514`), and nothing is normalized after it,
+     because a whitespace change the model can see is a prompt
+     change. No block list is concatenated, so no framing is needed. The whole half, MCP-supplied blocks included, since
      a keyed digest is not an oracle over them either; this reverses
      round 2's restriction to authored blocks, which existed only
      because the digest was unkeyed.
@@ -438,7 +443,10 @@ M1:
   absent from the `tool_call` log line in both formats and from every
   attribute of the tool span, with content export off.
 - `prompt_assembled` carries the keyed digest of exactly the
-  know-how text; a persona edit that preserves length changes it; two
+  know-how text; a persona edit that preserves length changes it; a
+  boundary-moving edit (blocks `"ab"`, `"c"` against `"a"`, `"bc"`)
+  changes it; a whitespace change inside a block changes it, and one
+  that assembly trims away does not; two
   activations on the same prompt and key carry the same value; no
   master key means no field. The no-leak sentinel: the exported value
   equals neither the public SHA-256 of the prompt text nor that of a
@@ -627,6 +635,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    *Resolution:* accepted. New decision 7a: `ProviderFailed` gains the same optional fields for an LLM-stage reply-round failure only, threaded `reply_stream` to `watched` to `failed` to `assembly.provider_failure` beside the invocation those already carry, and the failed `llm` span maps them. Tests cover a failure after assembly, a second-attempt watchdog failure, and ASR and TTS failures carrying none.
 
    *Resolution:* accepted. M1 extends `test_every_convention_the_llm_span_speaks_has_its_row`'s guard to every conventions-prefixed key `TOOL_ATTRIBUTES` maps. Since finding 1's resolution removed `gen_ai.tool.call.id`, the extension adds no new key, but it covers the existing `gen_ai.tool.name`; any row it finds missing is added and `conversations-schema.md` regenerated.
+
+   *Resolution:* accepted. The collision came from round 2's concatenation of selected blocks, which finding 1's resolution removed: the digest input is now `half.text` exactly as sent, the one canonical sequence, already trimmed and joined by assembly, with no further normalization. Tests added for a boundary-moving edit and for whitespace both inside a block and at a trimmed end.
 
 5. **P2: Several schema decisions are still deferred to implementation.**
    **Evidence:** The plan leaves the tool-ID grammar “to be confirmed,” invocation requiredness conditional on later discovery, the source mapping type conditional on reading a pattern that already explicitly excludes memory, and integer versus decimal-string fact IDs undecided (`docs/plans/...`, lines 126–143, 191–200, 218–224). `PromptSources` confirms that its grammar is intentionally know-how-only (`events/values.py:1113-1138`), while `_as_attribute` currently strips integers from every sequence (`telemetry.py:896-917`). These choices determine the public event and OTLP schemas and cannot safely be implementation notes.
