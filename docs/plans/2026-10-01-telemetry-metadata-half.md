@@ -376,6 +376,71 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
    accepted (a 40-plus-N element list must not trip any size guard on
    the event or the span).
 
+### M3: the system prompt reaches Langfuse
+
+Added 2026-10-01 on Rafael's decision, from a discovery in M2's live
+gate: with `export_llm_input` on, the `llm` span carries the system
+prompt under the conventions' `gen_ai.system_instructions`
+(`llm_input_export.py:154-162`), which a plain OTLP backend shows, and
+Langfuse shows it neither in the observation's input nor in its
+metadata. Its Input panel is fed from `langfuse.observation.input`,
+which vinga fills with the message list alone. So the content export
+delivers the system prompt to one class of backend and not the other,
+which is the parity rule broken on the content side.
+
+10. **The Langfuse input list starts with the system message.** In
+    `LlmInputExport._stage`, `OBSERVATION_INPUT` becomes
+    `[{"role": "system", "parts": [{"type": "text", "content": system}]}, *messages]`,
+    in exactly the part shape `_message` already produces, whenever
+    `system` is non-empty; an empty system prompt adds no entry.
+    `gen_ai.system_instructions` and `gen_ai.input.messages` are
+    unchanged, so what a conventions-reading backend receives does not
+    move. Both call shapes go through `_stage`, so the reply round and
+    the recap (whose system is `RECAP_INSTRUCTION`) are covered by one
+    change.
+11. **The size bound counts what is sent.** The system text now rides
+    the span twice (the conventions' attribute and the Langfuse input),
+    and the per-request ceiling and the session budget are computed
+    over the attributes as staged (`_size`), so the duplicate is
+    counted rather than hidden. A request the change pushes over the
+    ceiling is dropped whole and reported by `llm_input_export_failed`,
+    exactly as any other over-ceiling request is; the implementation
+    doc records the measured size of a real round before and after.
+12. **What leaves does not widen, but what Langfuse stores does.** No
+    new byte leaves this server: the system prompt already travels on
+    the span under `export_llm_input`. What changes is that Langfuse,
+    which today appears to discard it, will store and display it, memory
+    blocks included. That is what `export_llm_input`'s documentation
+    has promised since it shipped ("the system prompt with its memory
+    and know-how blocks"); whether memory text should earn its own
+    switch stays an open question on #533, unchanged by this.
+13. **Off stays off.** With `export_llm_input` off nothing is staged and
+    nothing changes; the existing off-switch tests cover it and one
+    asserts no `langfuse.observation.input` system entry appears.
+
+Tests: the staged input list starts with the system message in the
+part shape, followed by the messages unchanged; an empty system adds
+no entry; a recap's input starts with `RECAP_INSTRUCTION`;
+`gen_ai.system_instructions` and `gen_ai.input.messages` are byte
+identical to before; a request whose duplicated system pushes it over
+the ceiling is dropped and reported. Mutations: the prepend removed
+(the first test must fail); the system entry built in another shape
+(the shape test must fail).
+
+Live gate (blocking): with `export_llm_input` on, one session against
+Langfuse, read back through the public API: the round's observation
+input's first entry is the system message and contains the know-how
+text and, after a `remember`, the memory block. If Langfuse does not
+render a `system` role entry from that shape, the implementer tries the
+shape Langfuse documents for chat input (`{"role": "system",
+"content": "..."}`) before stopping, and records which rendered.
+
+Documentation footprint: `docs/architecture/observability-surfaces.md`'s
+content-export section says the system prompt appears in a Langfuse
+observation's input as its first message; the server-config reference
+is generated and already promises the system prompt. Changelog:
+`changelog.d/533-system-prompt-in-langfuse.md`, `### Fixed`.
+
 ## Out of scope, with reasons
 
 - **The content half of #533** (arguments and results on the tool
@@ -596,7 +661,11 @@ variants, so the second to merge rebases and regenerates.
 - [x] **[M2: the memory half, per round](2026-10-01-telemetry-metadata-half-implementation.md#m2-the-memory-half-per-round)**
   ([PR #580](https://github.com/rafacm/vinga/pull/580)). Decisions 5 to 9, their
   tests and mutations, the M2 rows of the live gate, its documentation
-  footprint. One pull request; neither closes #533.
+  footprint. One pull request; it leaves #533 open.
+- [ ] **M3: the system prompt reaches Langfuse.** Decisions 10 to 13,
+  their tests and mutations, the blocking live gate, its documentation
+  footprint. One pull request; it leaves #533 open. Added after M2's
+  live gate found the gap.
 
 ## Plan review round
 
