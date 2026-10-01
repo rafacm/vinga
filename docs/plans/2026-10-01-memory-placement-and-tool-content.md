@@ -220,7 +220,13 @@ between on the request's shape and the model's reading of it.
    - *Cache:* a paired comparison through the real server, the same
      scripted session of at least 15 turns run on `main` (old
      placement) and on the branch (new), four sessions counterbalanced
-     old, new, new, old, each with at least four verified writes. A
+     old, new, new, old, each with at least four verified writes. Each
+     arm starts from memory cleared and verified empty (the agent's and
+     the device's facts and the conversation ledger, listed through the
+     CLI and recorded), with the device record and state baseline
+     stated, and is cleaned afterwards; each arm's persona carries its
+     own nonce, stable within the arm so its turns warm its own cache
+     and different across arms so none prewarms another. A
      verified write is a non-error `remember` call whose next round's
      injected fact ids (the metadata half's `vinga.llm.memory.facts`)
      gain the new id; `set_state` is not used as an intervention, since
@@ -593,6 +599,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    Evidence: The proposed old/new/ new/old sessions have verified writes but no verified empty baseline, cleanup, namespace separation, or cache-key isolation (`plan:207-227`). `remember` deliberately persists across conversations, so an earlier arm changes the later arm’s injected context. Reusing the same provider-visible prefix can also prewarm the following arm.
 
    Plan should say instead: Before each arm, clear and verify the exact memory scope is empty; clean it afterward; make the device and state baseline explicit; and use an arm-specific nonce that is stable within that arm so its own 15 turns warm its cache but another arm cannot. Record those setup and teardown checks in the implementation table.
+
+   *Resolution:* accepted. The cache gate now clears and verifies empty memory (agent, device, ledger) before each arm, states the device and state baseline, cleans up after, and gives each arm a persona nonce stable within it and different across arms; the checks are recorded in the implementation table.
 
 4. **P2: The no-user fallback violates the plan’s Anthropic alternation claim.**
 
