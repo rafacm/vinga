@@ -507,10 +507,16 @@ the implementation doc, per milestone:
   writes the first three, M2 the rest.
 - `vinga-server/README.md`, if its telemetry or cost table names the
   first-token mark or prompt size (checked, and left alone if not).
-- `docs/reference/events.md` regenerated; `conversations/docgen.py`'s
-  `GEN_AI` table gains `gen_ai.tool.call.id` from `tool_call`, then
-  `docs/reference/conversations-schema.md` regenerated (the drift
-  check alone cannot see a missing row, as #536's review found).
+- `docs/reference/events.md` regenerated. No new conventions' key is
+  added (decision 2 dropped `gen_ai.tool.call.id`), but the guard that
+  keeps `conversations/docgen.py`'s `GEN_AI` table complete covers only
+  the `llm` span today
+  (`tests/unit/test_conversations_docgen.py:241-253`), so M1 extends it
+  to every conventions-prefixed key `TOOL_ATTRIBUTES` maps, which today
+  includes `gen_ai.tool.name`. Any row the extension shows missing is
+  added and `docs/reference/conversations-schema.md` regenerated
+  through its generator (the drift check alone cannot see a missing
+  row, as #536's review found).
 - `changelog.d/533-tool-and-round-attributes.md` (M1: `### Added` the
   tool call's round and position, and the digest; `### Changed` the first token from a
   span event to an attribute) and
@@ -564,6 +570,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Plan should say instead:** Decide how reply memory accounting reaches an LLM `ProviderFailed` event and span, then name the required changes to `reply_stream`/`watched`/`failed` or an invocation-keyed staging mechanism. Test provider failure after request assembly and the second-watchdog failure.
 
    *Resolution:* accepted. New decision 7a: `ProviderFailed` gains the same optional fields for an LLM-stage reply-round failure only, threaded `reply_stream` to `watched` to `failed` to `assembly.provider_failure` beside the invocation those already carry, and the failed `llm` span maps them. Tests cover a failure after assembly, a second-attempt watchdog failure, and ASR and TTS failures carrying none.
+
+   *Resolution:* accepted. M1 extends `test_every_convention_the_llm_span_speaks_has_its_row`'s guard to every conventions-prefixed key `TOOL_ATTRIBUTES` maps. Since finding 1's resolution removed `gen_ai.tool.call.id`, the extension adds no new key, but it covers the existing `gen_ai.tool.name`; any row it finds missing is added and `conversations-schema.md` regenerated.
 
 5. **P2: Several schema decisions are still deferred to implementation.**
    **Evidence:** The plan leaves the tool-ID grammar “to be confirmed,” invocation requiredness conditional on later discovery, the source mapping type conditional on reading a pattern that already explicitly excludes memory, and integer versus decimal-string fact IDs undecided (`docs/plans/...`, lines 126–143, 191–200, 218–224). `PromptSources` confirms that its grammar is intentionally know-how-only (`events/values.py:1113-1138`), while `_as_attribute` currently strips integers from every sequence (`telemetry.py:896-917`). These choices determine the public event and OTLP schemas and cannot safely be implementation notes.
