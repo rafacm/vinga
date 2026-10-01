@@ -16,11 +16,19 @@ here; neither pull request closes #533.
 identity, a digest or a timing on an exported span; no conversational
 capability moves.
 
-**Cheapest alternative:** for three of the five pieces this plan is
+**Cheapest alternative:** for two of the five pieces this plan is
 already the cheapest change (one `LLM_ATTRIBUTES` entry for the first
-token, one field and one attribute for the fingerprint, one catalog
-note for `language_confidence`). Two pieces cost more than the
-cheapest thing that would also help, and say what they buy:
+token, one catalog note for `language_confidence`). Three pieces cost
+more than the cheapest thing that would also help, and say what they
+buy:
+
+- *The fingerprint.* The cheapest is an unkeyed SHA-256 of the prompt,
+  one field and one attribute. It is a confirmation oracle over prompt
+  content, which the content and telemetry ADR keeps off metadata
+  surfaces (plan review rounds 2 and 3). Keying it with a subkey of the
+  existing `VINGA_MASTER_KEY` costs one derivation at composition and
+  one injected argument, and buys the same comparison with nothing to
+  confirm against; the price is no digest where no master key is set.
 
 - *The tool join.* The cheapest would be the provider's call id
   alone, and it is not available: it is far-side bytes, which the
@@ -170,29 +178,42 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
    log line, the catalog's single home for the event; neither appears
    in the `TEMPLATE`. The conventions' `gen_ai.tool.call.id` is not
    used, because its value would be the provider's id.
-3. **The operator-authored part of the know-how half gets a fingerprint.** `PromptAssembled` gains
-   `authored_sha256: Sha256` (a new value type, exactly 64 lowercase
-   hex characters): the SHA-256 of the operator-authored blocks of the
-   know-how half only, which are the `persona` block, every
-   `fragment:` block and every `instructions:` block (the guidance the
-   operator wrote for an entry), joined in assembly order and encoded
-   UTF-8, computed where the event is built. The blocks an MCP server
-   supplied, `server_instructions:` and `server_prompt:`
-   (`runtime/prompt.py:131-148`), are excluded: their text is far-side
-   content, and an unkeyed digest is a confirmation oracle over it,
-   the same reason decision 6 rejects a memory digest. Their changes
-   remain visible as sizes in `vinga.prompt.sources.*`. The
-   classification is a closed decision taken on each block's
-   provenance kind, the constants in `runtime/prompt.py`, never on
-   text; a provenance kind added later is excluded until someone
-   classifies it, so the safe answer is the default. The turn span
-   carries it as `vinga.prompt.authored.sha256` beside
-   `vinga.prompt.characters`, through `PROMPT_ATTRIBUTES`; the name
-   says what it covers, so nobody reads it as a digest of the whole
-   half. Unkeyed and unconditional, as the issue asks for this case:
-   operator-authored configuration is not far-side content, and a
-   confirmation oracle over it reveals nothing the operator does not
-   hold.
+3. **The know-how half gets a keyed fingerprint.** A prompt is
+   content under the content and telemetry ADR, operator-authored or
+   not, and any unkeyed digest of it is a confirmation oracle: whoever
+   holds the trace can hash a guessed persona or a guessed secret in
+   it and compare. So the digest is keyed with an installation-private
+   key, which keeps what the issue wanted (two sessions on the same
+   prompt carry the same value; an edit that preserves length changes
+   it) and gives a trace holder without the key nothing to confirm
+   against.
+   - **The value.** `PromptAssembled` gains `digest: Digest | Absent`
+     (a new value type, exactly 64 lowercase hex characters): the
+     HMAC-SHA256 of the know-how half's text exactly as sent
+     (`half.text`, UTF-8), under the key below, computed where the
+     event is built. The whole half, MCP-supplied blocks included, since
+     a keyed digest is not an oracle over them either; this reverses
+     round 2's restriction to authored blocks, which existed only
+     because the digest was unkeyed.
+   - **The key.** Derived from the newest entry of `VINGA_MASTER_KEY`
+     (`config/secrets.py:146-180`) with a fixed label, the way
+     `onboarding/keys.py:88-89` derives the onboarding key from its
+     secret: `HMAC-SHA256(master, b"vinga prompt digest v1")`, so the
+     master key itself never touches prompt text and the subkey is
+     useless for decryption. Derived once at composition and injected
+     into the pipeline as an optional `bytes` (`is not None`, never
+     truthiness), so no module beside the composition reads the
+     environment for it.
+   - **Lifecycle, stated in the catalog note and the observability
+     page.** No master key configured: no digest, the field absent,
+     which is the honest answer rather than an unkeyed fallback.
+     Rotating the master key (a new newest entry) changes every digest
+     from that boot on, so a comparison across a rotation reads as
+     "changed"; that is the price of not storing a second key, and the
+     page says so. The key is never logged, exported or rendered, and
+     a digest is never comparable across installations.
+   - **Exported** as `vinga.prompt.digest` on the turn span beside
+     `vinga.prompt.characters`, through `PROMPT_ATTRIBUTES`.
 4. **`language_confidence` says who fills it.** A `note=` on the
    catalog field: faster-whisper reports it when it detected the
    language rather than being pinned to one; the OpenAI-compatible
@@ -359,7 +380,7 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
 
 No new module, seam or config key.
 
-- `events/values.py`: three new value types, `Sha256`, `FactIds` and
+- `events/values.py`: three new value types, `Digest`, `FactIds` and
   `MemorySources`, each one rule in one place.
 - `events/catalog.py`, `events/assembly.py`: fields on `tool_call`'s
   three variants, `PromptAssembled`, `LlmRound` and `ProviderFailed`.
@@ -370,6 +391,9 @@ No new module, seam or config key.
 - `memory/store.py`: `PromptMemory` deepens by the ids it rendered;
   callers stop having to re-read the store to learn which facts a
   prompt held.
+- `composition.py`: derives the prompt-digest subkey once from the
+  loaded master keys and hands it to the pipeline; nothing else reads
+  `VINGA_MASTER_KEY` for it.
 - `runtime/pipeline.py`, `runtime/provider_watch.py`,
   `runtime/tool_execution.py`: the round's memory accounting and the
   call's invocation threaded to their emission points.
@@ -398,13 +422,14 @@ M1:
   and syntactically clean (`sk_live_` followed by 24 alphanumerics) is
   absent from the `tool_call` log line in both formats and from every
   attribute of the tool span, with content export off.
-- `prompt_assembled` carries the digest of exactly the
-  operator-authored blocks; a persona edit that preserves length
-  changes it; a change to an MCP server's instructions or prompt text
-  leaves it unchanged (the sentinel: a low-entropy value planted in
-  `ServerInstructions` text cannot be confirmed by hashing candidates
-  against any exported attribute, because no exported digest covers
-  it).
+- `prompt_assembled` carries the keyed digest of exactly the
+  know-how text; a persona edit that preserves length changes it; two
+  activations on the same prompt and key carry the same value; no
+  master key means no field. The no-leak sentinel: the exported value
+  equals neither the public SHA-256 of the prompt text nor that of a
+  guessed low-entropy value planted in it, and the master key and the
+  derived subkey appear in no log line, event field or span
+  attribute.
 - The carried-key sets for `tool_call` and `prompt_assembled` gain the
   new fields, driven through the production path.
 
@@ -434,8 +459,8 @@ M2:
 first. Mutations, one run each (straight-line logic), reported in the
 implementation doc: M1, the `LLM_ATTRIBUTES` entry removed; the
 position taken from the partitioned list instead of the model's
-(the same-entry-twice test must fail); the digest computed over the whole know-how half instead of the
-authored blocks (the MCP-text test must fail);
+(the same-entry-twice test must fail); the digest computed as a plain SHA-256 (the public-hash sentinel
+must fail);
 the invocation taken from the wrong round. M2, `_core`'s kept ids
 replaced by `_newest`'s read ids (the byte-cap test must fail); the
 recap given the fields; the fact count taken from a stale list.
@@ -451,7 +476,7 @@ the implementation doc, per milestone:
 
 - M1: the `llm` observation shows `vinga.llm.first_token_ms`; the tool
   observation shows the invocation id equal to its round's and its
-  position; the turn shows `vinga.prompt.authored.sha256`.
+  position; the turn shows `vinga.prompt.digest`.
 - M2, **blocking**: the round after the `remember` shows the new id in
   `vinga.llm.memory.facts`, and the count and sizes, read back through
   the Langfuse public API as values a query can use (the id array
@@ -480,8 +505,8 @@ the implementation doc, per milestone:
   fields must then be absent or empty consistently with what the model
   received (no ids for facts it never saw); a test covers the failed
   read.
-- **No-leak.** The one new string-valued fact is a hex digest of
-  operator-authored text (decision 3); positions and ids are
+- **No-leak.** The one new string-valued fact is a keyed digest
+  (decision 3); positions and ids are
   integers, and the invocation is server-minted. No ledger key, no fact text, no prompt byte reaches any
   surface.
 
@@ -509,7 +534,7 @@ the implementation doc, per milestone:
 - `docs/architecture/observability-surfaces.md`, "Exported traces":
   the first token is an attribute of the generation; a tool call names
   the call and the round that asked for it; a turn carries the
-  digest of its operator-authored blocks; a reply round carries its whole system size,
+  keyed digest, absent without a master key, and why it is keyed; a reply round carries its whole system size,
   the memory blocks' sizes and the ids of the facts injected, with the
   reason ids and not a digest, and that an id resolves against the
   store's current state only; the parity rule in one sentence. M1
@@ -557,6 +582,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    *Resolution:* accepted. Decision 7 adds `memory_characters`, the exact text `with_scopes` appended to the know-how half, joins included, computed as a difference of the two texts with the prefix asserted; decision 8 exports it as `vinga.llm.memory.characters`; the tests pin it against the string the provider received with two blocks present. Its note says it includes the device record, since that shares the device block, so it is the per-round half of the prompt rather than remembered facts alone.
 
    *Resolution:* accepted, by the first alternative. Decision 2 no longer exports the provider's call id at all: the tool span joins its round on two server-minted values, the requesting round's invocation id (already on the `llm` span) and the call's position in the list the model returned, which names exactly one call and discloses nothing. The provider id stays inside the opt-in content export, where it already is; `gen_ai.tool.call.id` is not used. The sentinel now plants a syntactically clean credential-shaped id (`sk_live_` plus 24 alphanumerics) and asserts it reaches neither log format nor any span attribute; `ToolCallId` and its drop-to-absent builder are gone, and so is the risk they mitigated.
+
+   *Resolution:* accepted, by the keyed alternative. Decision 3 now exports `vinga.prompt.digest`, an HMAC-SHA256 of the know-how half exactly as sent, keyed by a labelled subkey of the newest `VINGA_MASTER_KEY` entry (the `onboarding/keys.py` derivation pattern), derived once at composition and injected. Lifecycle stated: no master key, no digest; a rotation changes every digest from that boot on. The sentinel asserts the value matches neither the public SHA-256 of the prompt nor of a planted guess, and that neither key appears on any surface. Because a keyed digest is not an oracle, round 2's restriction to authored blocks is reversed and the whole half is covered. Flagged to Rafael as a decision taken in review: the fingerprint now exists only on deployments that set a master key.
 
 2. **P2: The memory-off test contradicts both the field definition and current prompt behavior.**
    **Evidence:** Decision 7 defines `system_characters` as the whole system prompt, but makes every M2 field absent when memory is off; the tests repeat that expectation (`docs/plans/...`, lines 185–205 and 309–317). `_system_prompt` still assembles and sends the know-how prompt when memory is off, and may still append the live device record through `with_scopes(..., NOTHING_REMEMBERED, record)` (`runtime/pipeline.py:2417-2428`; `runtime/prompt.py:412-453`). Thus a real system prompt, and potentially a `device` block, exists in precisely the case the proposed test requires all accounting to disappear.
