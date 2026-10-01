@@ -244,10 +244,16 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
      prompt size is no longer under-reported;
    - `memory_characters: Count`, the exact number of characters
      `with_scopes` appended to the know-how half this round: the scope
-     blocks and the joins between them and the half, computed as the
-     difference between the per-round `Assembled`'s text and the
-     know-how half's text (a prefix of it, asserted rather than
-     assumed), never as a sum of block sizes, which omits the joins.
+     blocks and the joins that precede each of them in the full text,
+     reported by prompt assembly itself where it renders them and
+     carried on `RoundPrompt`. Never a subtraction of the half's text
+     from the full text: `_assembled` leaves a one-block prompt as it
+     is but `lstrip`s the first block once scopes add a second, so the
+     full text need not begin with `half.text`. Never a sum of block
+     sizes either, which omits the joins. What `_assembled` sends the
+     model does not change. A regression test assembles a one-block
+     half with a leading-whitespace persona plus a memory block and
+     checks the count against the string the provider received.
      The device block holds the device record as well as the device's
      notes (`runtime/prompt.py:470-485`), so this is the per-round half
      of the prompt rather than remembered facts alone, and its note
@@ -421,9 +427,10 @@ M2:
 - `system_characters` equals the length of the system string the
   provider was handed in that round (asserted against what the fake
   provider received, not against a recomputation), and
-  `memory_characters` equals that string's length minus the know-how
-  half's, with the half a prefix of it; a round with two scope blocks
-  proves the joins are counted.
+  `memory_characters` equals the characters of the scope blocks and
+  their preceding joins in that string; a round with two scope blocks
+  proves the joins are counted, and the leading-whitespace one-block
+  case proves the count survives the trim.
 - The span carries the id list, the derived count and the per-block
   sizes; a scope at its cap is still accepted (decision 9).
 - The `LlmRound` carried-key set gains the fields, driven through the
@@ -572,6 +579,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    *Resolution:* accepted, by the first alternative. The premise was wrong: the know-how half holds `server_instructions:` and `server_prompt:` blocks an MCP server supplied. Decision 3 now digests only the operator-authored blocks (`persona`, `fragment:`, `instructions:`), classified by provenance kind with any future kind excluded by default, and exports it as `vinga.prompt.authored.sha256` so the name says what it covers. MCP-supplied text stays visible only as sizes. The tests add the sentinel the finding asks for: a low-entropy value planted in `ServerInstructions` text changes no exported digest, and the mutation that digests the whole half must fail it.
 
    *Resolution:* accepted. Decision 2 fixes the position by enumerating `calls` before `_run_tools` partitions them, and carries it immutably through `_run_tools`, `ToolExecution.run`, `_run_one`, `_tool_called` and the builders. A new test puts executable calls on both sides of an agent move and asserts the gap survives (0 and 2), and the mutation now targets that test, which the same-entry case could not expose.
+
+   *Resolution:* accepted. Decision 7 now has prompt assembly report the scope contribution where it renders the blocks (scope blocks plus their preceding joins), carried on `RoundPrompt`, with no subtraction and no change to what the model is sent. The leading-whitespace one-block regression case is added. Also sent to the M2 implementer while it runs.
 
 3. **P2: Fact IDs do not provide the stable historical join the plan claims.**
    **Evidence:** The plan says IDs let a trace join back to the local store and answer which facts produced an output (`docs/plans/...`, lines 32–40 and 176–184). Existing facts are mutable under the same ID (`memory/store.py:983-1025`), are deleted by cap pruning (`memory/store.py:1924-1971`), and can be permanently or operator-deleted; the observability contract explicitly says facts last only until corrected and that API deletion is hard deletion (`docs/architecture/observability-surfaces.md`, Memory, lines 183–196). A later lookup can therefore return changed text or no row at all.
