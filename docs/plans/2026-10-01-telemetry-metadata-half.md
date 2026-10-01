@@ -594,7 +594,7 @@ variants, so the second to merge rebases and regenerates.
   tests and mutations, the M1 rows of the live gate, its documentation
   footprint. One pull request.
 - [x] **[M2: the memory half, per round](2026-10-01-telemetry-metadata-half-implementation.md#m2-the-memory-half-per-round)**
-  (PR TBD). Decisions 5 to 9, their
+  ([PR #580](https://github.com/rafacm/vinga/pull/580)). Decisions 5 to 9, their
   tests and mutations, the M2 rows of the live gate, its documentation
   footprint. One pull request; neither closes #533.
 
