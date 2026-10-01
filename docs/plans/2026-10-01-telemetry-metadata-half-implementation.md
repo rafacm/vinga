@@ -276,21 +276,32 @@ both lanes with `-n auto --dist loadfile`:
 | 1, the first token as `vinga.llm.first_token_ms`, the `first_token` span event removed | `telemetry.py` (`LLM_ATTRIBUTES`, `_llm_span`; `FIRST_TOKEN` and `_after` deleted) | `Carry the first token as a round attribute` |
 | 2, `invocation` and `position` on the three `tool_call` variants, mapped by `TOOL_ATTRIBUTES` | `events/catalog.py`, `events/assembly.py`, `runtime/tool_execution.py`, `runtime/pipeline.py`, `telemetry.py`, `docs/reference/events.md` regenerated | `Name the round and place of a tool call on its span` |
 | 2, the exact-payload tests the full lane found | `tests/unit/test_session_tool_events.py`, `tests/unit/test_tts_lookahead.py` | `Pin a tool call's round and place in its line` |
+| 3, the know-how half's SHA-256 as `vinga.prompt.sha256` | `events/values.py` (`Sha256`), `events/catalog.py`, `runtime/pipeline.py` (`_prompt_assembled`), `telemetry.py` (`PROMPT_ATTRIBUTES`), `docs/reference/events.md` regenerated | `Fingerprint the know-how half with its SHA-256` |
 | 4, the `language_confidence` note | `events/catalog.py`, `docs/reference/events.md` regenerated | `Say which engines report language_confidence` |
 | The `GEN_AI` guard over `TOOL_ATTRIBUTES`, and the row it found missing | `tests/unit/test_conversations_docgen.py`, `conversations/docgen.py`, `docs/reference/conversations-schema.md` regenerated | `Hold the GenAI table to the tool span's mapping too` |
 | The documentation footprint and the changelog fragment | `docs/architecture/observability-surfaces.md`, `changelog.d/533-tool-and-round-attributes.md` | `Document M1 of #533 and tick it` |
 
-### Plan amendment from review round 4
+### Decision 3, withdrawn and restored while this ran
 
-Decision 3, the keyed prompt digest, was withdrawn from the plan by its
-fourth review round while this milestone was being implemented, and
-deferred to Rafael (the plan's decision 3 now says why). It is an
-amendment to the plan, not a deviation from it: none of it was written
-here. No `Digest` value type, no `digest` field on `PromptAssembled`,
-no `vinga.prompt.digest`, no master-key subkey and no composition
-change exist on this branch, and the digest tests, sentinel, mutation
-and live-gate row went with the decision. The branch was rebased onto
-the amended plan (`01d1b11c`) before this section was written.
+Two plan amendments landed on the plan branch while this milestone was
+being implemented, and neither is a deviation from the plan.
+
+- **Withdrawn after review round 4** (`ed495b50`): the keyed digest
+  under a subkey of `VINGA_MASTER_KEY` was taken out of the plan and
+  deferred to Rafael, since a keyed digest is unconditional only with a
+  key every deployment holds. No keyed code had been written here when
+  that arrived, so nothing was reverted.
+- **Restored on Rafael's decision** (`acec435b`) as an unkeyed SHA-256
+  of the know-how half as sent, exported as `vinga.prompt.sha256`: the
+  content and telemetry ADR bars conversation text, far-side bytes and
+  exception text, and operator configuration is none of those. It is
+  built here exactly as the restored decision says, with its tests,
+  mutation and live-gate row; no key, no master-key subkey and no
+  composition change exist on this branch.
+
+The branch was rebased onto each amended plan head in turn (`01d1b11c`,
+then `acec435b`), each time with only the plan file moving underneath
+it.
 
 ### Deviations from the plan
 
@@ -324,6 +335,12 @@ One, in how decision 2's position travels.
 
 ### Resolutions of what the plan left open
 
+- **Where the digest is taken.** `Sha256.of(text)` on the new value
+  type is the one place a digest is computed (UTF-8, exactly as given),
+  and `_prompt_assembled` hands it `half.text` where the event is
+  built. A digest therefore cannot be built from anything but text, and
+  the type's syntax refuses anything but 64 lowercase hex characters
+  from any other caller.
 - **The tests' home.** The production-path join tests live in
   `tests/unit/test_telemetry_spans.py` beside the tool-span fold tests,
   driving a real session (`session_for` with a scripted model) whose
@@ -383,6 +400,37 @@ One, in how decision 2's position travels.
   0 and 1 for the MCP pair), which makes them production-path pins of
   the join as well.
 
+- **On a 16 KiB-page kernel, the events reference's pipe test now fails
+  for a reason in the test, not the server.**
+  `tests/unit/test_event_docs.py::test_a_reader_who_stops_reading_mid_chunk_gets_no_traceback`
+  pre-fills a pipe so that exactly the document's whole-buffer part
+  fits, and asserts the pipe ends exactly full. With the digest's two
+  new rows `events.md` is 139,750 bytes, so the pre-fill is 122,880
+  bytes, seven and a half 16 KiB pages on agentpi. Linux merges a write
+  into a pipe's partly filled last page only when the write's sub-page
+  remainder fits beside it, and the child's single large write
+  (remainder 8,678 bytes) does not fit beside 8,192, so it takes whole
+  new pages and stops one 8 KiB half-page short: 253,952 of 262,144,
+  the exact figure the failure reports. Before the digest the document
+  was 139,071 bytes and the pre-fill eight whole pages, and the test
+  passed (measured by swapping the two catalog files back). On a 4 KiB
+  page kernel, which is what CI runs on, 122,880 bytes is thirty whole
+  pages and the merge question never arises, so CI is expected to pass;
+  that is inferred from the arithmetic, not measured. It fails 3 of 3
+  here. The test's construction assumes the pre-fill ends on a page
+  boundary, and M2 will move the document's size again. Not fixed in
+  this milestone: it is a test-construction fault of the same family as
+  #541's, and the remedy (page-aligning the pre-fill, or measuring the
+  merge rule) is a change to that test's design.
+- **The live gate also answered the plan's "observed, not gated" row.**
+  With `export_llm_input` on, a generation observation read back in
+  full (`GET /api/public/observations/c6e5aafaf9d407dd`) holds no
+  `gen_ai.system_instructions` attribute and no byte of the persona
+  anywhere: not in its metadata attributes, not in its input (which is
+  the user message only), not in its output. So Langfuse does not
+  render the exported system instructions on the generation, which is
+  what Step 0's §3 row asked.
+
 ### Inventories
 
 By `git grep -n`, untruncated, at `4c669b40` (the plan commit this
@@ -407,6 +455,11 @@ branch started from), counted with `wc -l` and read in full.
   `runtime/tool_execution.py:_tool_called`, the three in
   `tests/support/telemetry.py:call_tool` and three assertions in
   `tests/unit/test_event_assembly.py`. All updated.
+- **`PromptAssembled(` construction sites**: 2, the production one in
+  `runtime/pipeline.py:_prompt_assembled` and the test helper
+  `tests/support/telemetry.py:assemble_prompt`. Both now pass `sha256`;
+  the field is required, so a third site that forgot it would refuse to
+  construct.
 - **`ToolExecution.run` call sites**: one production caller,
   `runtime/pipeline.py:1924` in `_run_tools`, whose one caller is the
   reply loop with the round's `invocation` in scope; four direct test
@@ -425,7 +478,10 @@ production-path tests (`test_a_tool_span_joins_the_round_that_asked_for_it`,
 `test_a_move_keeps_its_place_in_the_round`,
 `test_the_nth_exported_call_is_the_span_at_position_n`,
 `test_the_provider_s_call_id_reaches_no_metadata_surface`), and the
-extended docgen guard (on the missing `gen_ai.tool.name` row).
+extended docgen guard (on the missing `gen_ai.tool.name` row). The
+digest's tests were watched failing the same way before `sha256`
+existed: the four session-path tests and the four turn-span tests
+(8 failed, 4 errors).
 Mutations, one run each, restored by copy-aside, copy-back and
 `touch`:
 
@@ -435,24 +491,31 @@ Mutations, one run each, restored by copy-aside, copy-back and
 | Position taken from the partitioned list (`enumerate` over `run`'s `calls`) | killed: the move-gap test and the n-th-exported-call test |
 | Invocation taken from the wrong round (the first round's, for every round) | killed: `test_a_tool_span_joins_the_round_that_asked_for_it` |
 | Not in the plan: the provider's call id passed as the invocation (a credential-shaped id satisfies the invocation syntax) | killed: the no-leak sentinel |
+| Digest over the persona alone (`half.text.split("\n\n")[0]`) | killed: the MCP-text test and the exact-half test (the persona-edit test passes under it, as it must, since the persona is the half's first block) |
+| Not in the plan: `PROMPT_ATTRIBUTES`' `sha256` entry removed | killed: 3 turn-span tests |
 
 None survived.
 
 ### The live gate
 
-Run on agentpi, 2026-10-01 from 03:15:39 to 03:16:19 UTC, from an
-uncommitted driver in the session's scratchpad: a real server in
-process on this branch's tree (at `43dc13df` plus the uncommitted
-documentation), with OpenAI ASR, the OpenAI-compatible LLM on
-`api.openai.com` with `gpt-4.1-mini`, OpenAI TTS, silero VAD, the
-builtin memory tools, and telemetry on with `export_llm_input`,
-exporting directly to the project's Langfuse over OTLP/HTTP. Two
-questions, synthesized with OpenAI TTS and resampled to 16 kHz, were
-sent through the xiaozhi-sdk client on one connection, so one session
-of two turns. Both turns' first rounds called two tools in one round,
-which is the case the position exists for. The observations were read
-back through the Langfuse public API (`GET /api/public/observations`,
-17 observations from the run's start).
+Run twice on agentpi on 2026-10-01 from an uncommitted driver in the
+session's scratchpad: a real server in process on this branch's tree,
+with OpenAI ASR, the OpenAI-compatible LLM on `api.openai.com` with
+`gpt-4.1-mini`, OpenAI TTS, silero VAD, the builtin memory tools, and
+telemetry on with `export_llm_input`, exporting directly to the
+project's Langfuse over OTLP/HTTP. The agent's persona was 246
+characters and it had no fragments or MCP entries, so its know-how
+half was the persona alone. Two questions, synthesized with OpenAI TTS
+and resampled to 16 kHz, were sent through the xiaozhi-sdk client on
+one connection, so each run was one session of two turns. The
+observations were read back through the Langfuse public API
+(`GET /api/public/observations` from each run's start, and one
+generation in full by id).
+
+**Run 1**, 03:15:39 to 03:16:19 UTC, at the tree of `cc78ec18`
+(`43dc13df` then, before the rebase onto the restored plan), with no
+digest. Both turns' first rounds called two tools in one round,
+which is the case the position exists for.
 
 | Observation | Id | `vinga.llm.invocation.id` | `vinga.tool.call.position` | `vinga.llm.first_token_ms` |
 | --- | --- | --- | --- | --- |
@@ -465,13 +528,38 @@ back through the Langfuse public API (`GET /api/public/observations`,
 | turn 2, `recall` | `b529810692d29bd7` | `a5331404...` | `1` | |
 | turn 2, `llm` round 2 | `493a3151a3a16532` | `c51e8898...` | | `552` |
 
-Every M1 row passes: the speaking rounds carry the first token as an
-attribute and the tool-only rounds carry none; each tool observation
-carries the invocation id of the round that asked for it, equal to
-that round's own, and its position, and the two calls of one round
-differ by position. No observation carries an `events` key. The two
-asking rounds' exported output holds two `call_...` provider ids each,
-and none of the four appears anywhere on a tool observation.
+**Run 2**, 05:00:00 to 05:00:30 UTC, at `016280dd` (the digest in
+place). Turn 2 this time called `recall` once in each of two rounds,
+so the same entry appears under two invocations at position 0.
+
+| Observation | Id | Attributes read back |
+| --- | --- | --- |
+| turn 1 | `415acc1e0e26ce13` | `vinga.prompt.sha256` `0b978b77...2b8886`, `vinga.prompt.characters` 246 |
+| turn 1, `llm` round 1 | `c6e5aafaf9d407dd` | invocation `e97db65e...`, no first token (tools only) |
+| turn 1, `remember` | `030f23d02320201a` | invocation `e97db65e...`, position 0 |
+| turn 1, `remember` | `27948c3585d84650` | invocation `e97db65e...`, position 1 |
+| turn 1, `llm` round 2 | `14c7f2f59d573490` | invocation `0b2a817a...`, `vinga.llm.first_token_ms` 1678 |
+| turn 2 | `d3d29bdf16795855` | `vinga.prompt.sha256` `0b978b77...2b8886`, `vinga.prompt.characters` 246 |
+| turn 2, `llm` round 1 | `907986f87b5b4936` | invocation `4fdbbca7...` |
+| turn 2, `recall` | `8c8cf132efc05a54` | invocation `4fdbbca7...`, position 0 |
+| turn 2, `llm` round 2 | `a3fc9fe38d8c78a5` | invocation `7f174428...` |
+| turn 2, `recall` | `54b3016fbaaf36eb` | invocation `7f174428...`, position 0 |
+| turn 2, `llm` round 3 | `4100def3c5977560` | invocation `292abb94...`, `vinga.llm.first_token_ms` 479 |
+
+Every M1 row passes. The speaking rounds carry the first token as an
+attribute and the tool-only rounds carry none. Each tool observation
+carries the invocation id of the round that asked for it, equal to that
+round's own, and its position; two calls in one round differ by
+position, and the same entry in two rounds differs by invocation. Both
+turns carry `vinga.prompt.sha256`, the same value on each, and it is
+the standard library's SHA-256 of the 246-character persona the driver
+configured (`0b978b779f9132ab738ae90c31ab4fdc13ee266d896b4834c9c2b1b59e2b8886`),
+computed independently of the server. No observation carries an
+`events` key. In run 1 the two asking rounds' exported output holds
+two `call_...` provider ids each, and none of the four appears anywhere
+on a tool observation. Langfuse returns every attribute here as a
+string (`"0"`, `"561"`, `"246"`), the existing `vinga.llm.round`
+included; see Discoveries.
 
 ### Lanes
 

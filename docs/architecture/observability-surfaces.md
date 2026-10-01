@@ -258,7 +258,16 @@ invocation id of the round that asked for it, under the same
 that round returned, moves included. Together they name exactly one
 call, the n-th tool call of that round's exported output. The
 provider's own call id is not on the span: it is far-side bytes, and it
-stays inside the opt-in LLM input export.
+stays inside the opt-in LLM input export. A turn carries
+`vinga.prompt.sha256` beside `vinga.prompt.characters`: the SHA-256 of
+the speaking agent's know-how half exactly as the model is sent it,
+server-shipped guidance included, so two sessions on one prompt compare
+equal and an edit that keeps the length still shows. It is operator
+configuration digested rather than content, and its one residual risk
+is stated rather than engineered away: a digest confirms a guess only
+when every other byte of the half is known, so a persona copied from a
+known template with one personal slot filled in can be guessed slot by
+slot, and personal facts belong in memory, which is never digested.
 
 A failed ASR, LLM, TTS or tool operation is the same real stage span with
 OpenTelemetry `ERROR` status, no status description and a safe `error.type`.
