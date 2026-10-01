@@ -706,7 +706,7 @@ variants, so the second to merge rebases and regenerates.
   tests and mutations, the M2 rows of the live gate, its documentation
   footprint. One pull request; it leaves #533 open.
 - [x] **[M3: the system prompt reaches Langfuse](2026-10-01-telemetry-metadata-half-implementation.md#m3-the-system-prompt-reaches-langfuse)**
-  (PR TBD). Decisions 10 to 13,
+  ([PR #583](https://github.com/rafacm/vinga/pull/583)). Decisions 10 to 13,
   their tests and mutations, the blocking live gate, its documentation
   footprint. One pull request; it leaves #533 open. Added after M2's
   live gate found the gap.
