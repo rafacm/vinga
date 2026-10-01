@@ -545,3 +545,31 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    *Resolution:* accepted. The per-round block sizes export as `vinga.llm.memory.sources.<provenance>`, the three scope blocks only, beside `vinga.llm.memory.characters` (finding 1), which is the exact per-round total including joins; `vinga.llm.system.characters` stays the whole prompt with no `system.sources` children, so nothing invites summing a partial inventory to it.
 
 **Verdict:** not ready.
+
+## Plan review round 2
+
+Reviewed 2026-10-01 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 4m29s, at commit 544a1b6a, plan blob f8a7ceaa.
+
+---
+
+1. **P1: Raw provider call IDs violate the no-leak boundary.**
+   **Evidence:** Plan Decision 2 exports `ToolCall.id` after only a character-pattern check. That value comes directly from OpenAI-compatible fragments and Anthropic `block.id` (`providers/openai_llm.py:126-132`, `providers/anthropic_llm.py:194-196`). The existing tool boundary explicitly says it keeps “nothing far-side” (`runtime/tool_execution.py:185-190`), and the telemetry ADR forbids far-side bytes on retained surfaces (`docs/adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md:12-14, 49-54`). The proposed regex accepts credential-shaped or user-derived strings without whitespace, including `sk_live_...`; the planned sentinel only tests one containing a space.
+   **Plan should say instead:** Do not place the raw provider ID on metadata surfaces. Use a server-minted per-call correlation key, or explicitly change the governing no-leak decision with an approved exception and test valid-syntax secret-shaped IDs as well as malformed ones. If raw-ID correlation is required, keep that mapping only in the existing opt-in LLM-content export.
+
+2. **P1: The unconditional prompt hash can disclose MCP-server content.**
+   **Evidence:** Decision 3 calls the entire know-how half “operator-authored configuration,” then exports its SHA-256 unconditionally. That premise is false: `prompt.know_how()` includes `ServerInstructions` and `ServerPrompt` text supplied by a connected MCP server (`runtime/prompt.py:262-294, 345-381`), and the module deliberately avoids putting server-chosen prompt names on metadata surfaces (`runtime/prompt.py:304-307`). A deterministic hash is a confirmation oracle, exactly the reason Decision 6 rejects a memory hash. The proposed hash test covers only a persona edit, not remote supplied text.
+   **Plan should say instead:** Resolve the trust classification before implementation. Either restrict the unconditional digest to demonstrably operator-owned blocks, put a digest of any server-supplied prompt material behind the content-export policy, or amend the telemetry/content boundary deliberately. Add a sentinel test using an MCP-supplied low-entropy secret that proves it cannot be confirmed from an exported trace when content export is off.
+
+3. **P2: The memory-fact absent-versus-empty contract has no representable handoff.**
+   **Evidence:** Decision 7 requires an absent list when memory is disabled and an empty list after a failed read, but says `_system_prompt` returns only the `Assembled` prompt and “the ids” (`docs/plans/2026-10-01-telemetry-metadata-half.md:215-251`). `PromptMemory` currently represents an unreadable read as the same `NOTHING_REMEMBERED` value used for no facts (`memory/store.py:418-442, 898-945`). A tuple of IDs alone cannot preserve the required distinction.
+   **Plan should say instead:** Define the accounting handoff explicitly, for example `memory_facts: tuple[int, ...] | None`, where `None` means no memory read was attempted and `()` means a read produced no injected facts. Thread that single accounting value through successful and failed reply paths.
+
+4. **P2: The required generated GenAI documentation row is not protected by the planned tests.**
+   **Evidence:** The plan correctly notes that reference drift cannot detect an omitted `GEN_AI` row (`docs/plans/2026-10-01-telemetry-metadata-half.md:477-480`), but M1 names no test for it. The existing completeness test checks only `LLM_ATTRIBUTES` against `docgen.GEN_AI` (`tests/unit/test_conversations_docgen.py:241-253`), not `TOOL_ATTRIBUTES`; regeneration alone remains green if `gen_ai.tool.call.id` is never added.
+   **Plan should say instead:** Add a test extending the completeness check to every convention-prefixed mapping on both `LLM_ATTRIBUTES` and `TOOL_ATTRIBUTES`, then regenerate `conversations-schema.md`.
+
+5. **P2: Integer-array backend support is treated as an observation, not an acceptance criterion.**
+   **Evidence:** Decision 8 commits to integer `vinga.llm.memory.facts`, while the live gate says that whether Langfuse renders it legibly will merely be “recorded as observed” (`docs/plans/2026-10-01-telemetry-metadata-half.md:274-291, 419-422`). This plan’s stated outcome is metadata reaching every supported backend. The fake-tracer tests can establish OTLP validity but cannot establish Langfuse ingestion or queryability.
+   **Plan should say instead:** Set a pass/fail requirement for the supported backend before M2 lands. If integer arrays are not returned and usable through its API, choose and document a portable scalar encoding, update the event type and attribute fold accordingly, and make the live gate block completion rather than merely record the result.
+
+Verdict: **not ready.**
