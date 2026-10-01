@@ -16,11 +16,14 @@ copied into `tmp_path` first: autogenerate WRITES a revision file, and a
 test that let it write into the packaged tree would leave one behind.
 """
 
+import re
 import shutil
+import threading
 from pathlib import Path
 
 import psycopg
 import pytest
+from alembic import command
 
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.db import DOMAIN_CHAIN, URL_REFUSED, StoreChain, connection_url
@@ -102,17 +105,97 @@ def test_the_scratch_database_is_made_migrated_and_taken_away(
 
     A revision file is written, which is only possible against a
     database Alembic reached and compared, and the scratch database is
-    gone afterwards, which is what makes the command repeatable.
+    gone afterwards, which is what makes the command repeatable. Asked
+    about by the name this run made, and no other: a concurrent lane's
+    run is free to hold a database with the same prefix at this moment.
+
+    The name is the prefix and a suffix of its own, and a lowercase
+    identifier Postgres would neither fold nor truncate, so the name
+    the command drops is the name it made.
     """
     monkeypatch.setenv("VINGA_DB_URL", _url_of(blank_database))
     chain = _chain_in(tmp_path)
     before = set((chain.migrations / "versions").glob("*.py"))
 
-    autogen.generate("a probe that leaves a file", chain)
+    name = autogen.generate("a probe that leaves a file", chain)
 
     written = set((chain.migrations / "versions").glob("*.py")) - before
     assert len(written) == 1, written
-    assert not _exists(autogen.SCRATCH)
+    assert name.startswith(autogen.SCRATCH_PREFIX), name
+    assert name != autogen.SCRATCH_PREFIX, name
+    assert re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", name), name
+    assert not _exists(name)
+
+
+def test_two_runs_at_once_each_keep_their_own_scratch_database(
+    blank_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two lanes on one instance, which is every machine with more than
+    one worktree, and the interleaving that used to break one of them.
+
+    The first run is held at the moment it has its scratch database at
+    head and a connection open inside it, about to compare, and the
+    second run goes through its whole lifecycle in that window. Then
+    the first is let go. Forced rather than raced, so the collision is
+    met on every run and not on a lucky one: with one fixed name the
+    second run's `drop ... with (force)` terminated the first's
+    connection and its comparison failed, and with no drop before the
+    create it is the second run's `create` that fails instead. Either
+    way one of the two did not complete.
+
+    Each run writes its own candidate and leaves no database behind,
+    asked about by the name each one made.
+    """
+    monkeypatch.setenv("VINGA_DB_URL", _url_of(blank_database))
+    chains = {
+        "first": _chain_in(tmp_path / "first"),
+        "second": _chain_in(tmp_path / "second"),
+    }
+    before = {
+        run: set((chain.migrations / "versions").glob("*.py"))
+        for run, chain in chains.items()
+    }
+    holding = threading.Event()
+    second_done = threading.Event()
+    compare = command.revision
+
+    def held_revision(config, **options):
+        # The first run's thread pauses here, with its connection to its
+        # scratch database open, until the second run has finished.
+        if threading.current_thread().name == "first":
+            holding.set()
+            second_done.wait(timeout=600)
+        return compare(config, **options)
+
+    monkeypatch.setattr(command, "revision", held_revision)
+    outcomes: dict[str, str | Exception] = {}
+
+    def run(which: str) -> None:
+        try:
+            outcomes[which] = autogen.generate(f"a probe from the {which} run", chains[which])
+        except Exception as failure:
+            # Kept rather than raised: a thread's exception reaches no
+            # assertion, and the answer below reads both outcomes.
+            outcomes[which] = failure
+
+    first = threading.Thread(target=run, args=("first",), name="first")
+    first.start()
+    try:
+        assert holding.wait(timeout=600), outcomes
+        run("second")
+    finally:
+        second_done.set()
+        first.join(timeout=600)
+    assert not first.is_alive()
+
+    for which in chains:
+        assert isinstance(outcomes[which], str), (which, outcomes[which])
+    names = {which: str(outcomes[which]) for which in chains}
+    assert names["first"] != names["second"], names
+    for which, chain in chains.items():
+        written = set((chain.migrations / "versions").glob("*.py")) - before[which]
+        assert len(written) == 1, (which, written)
+        assert not _exists(names[which]), which
 
 
 # Which chain a selector reaches
@@ -197,11 +280,11 @@ def test_the_memory_chain_autogenerates_against_a_scratch_database(
     chain = _chain_in(tmp_path, MEMORY_CHAIN)
     before = set((chain.migrations / "versions").glob("*.py"))
 
-    autogen.generate("a probe of the third chain", chain)
+    name = autogen.generate("a probe of the third chain", chain)
 
     written = set((chain.migrations / "versions").glob("*.py")) - before
     assert len(written) == 1, written
-    assert not _exists(autogen.SCRATCH)
+    assert not _exists(name)
     # And the database the URL named is as blank as it was: the scratch
     # database is derived from that connection, never the one it names.
     assert MEMORY_CHAIN.schema not in _schemas(blank_database)
