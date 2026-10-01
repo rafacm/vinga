@@ -618,6 +618,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
 
    Plan should say instead: Separate transient staging lifetime from export admission. Add a per-invocation tool-content byte and/or pair budget derived from the queue budget, drop later complete pairs with `kind=tool_call`, and test many under-ceiling results exhausting that admission budget. The existing per-pair limit alone is not an operational bound.
 
+   *Resolution:* accepted. Decision 9 adds a per-invocation admission budget: one round's admitted tool pairs together may not exceed the per-request ceiling, later pairs are dropped whole and reported with `kind=tool_call`, tested with many under-ceiling results and exact counts.
+
 6. **P2: The byte-identical-history test contradicts the accepted continuation behavior.**
 
    Evidence: Decision 4 and its test require the previous user message to be byte-identical across consecutive requests (`plan:162-168`, `plan:352-354`). Decision 2 correctly says a memory-writing tool changes context on that same newest user turn in the continuation request (`plan:143-152`). The pipeline retains that user turn while appending the assistant call and tool results (`pipeline.py:1888-1905`).
