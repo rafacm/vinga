@@ -61,6 +61,7 @@ Three properties every caller gets and none of them states:
 """
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -251,7 +252,8 @@ SUPERSEDED_REVISIONS = frozenset({"1001_postgres_conversations"})
 # What a database still stamped at one of those is told, and the whole
 # of the operator-facing surface of "unsupported". Fixed and value-free
 # like every other refusal here: the revision it was stamped at is not
-# quoted back, being a value in a table nothing here validates, and the
+# quoted back, because the set above is what it was matched against and
+# naming the member would add nothing the sentence needs, and the
 # connection is not repeated for the reason the sentences above give.
 #
 # The remedy is the only thing worth saying, because there is no other:
@@ -268,6 +270,58 @@ SUPERSEDED_REVISION = (
     "not carried across, which the changelog announces and "
     "docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md records "
     "with what it costs"
+)
+
+# The shape of every revision id this project commits: four digits that
+# number the chain and the revision's place in it, then the migration's
+# name in lower snake case (`1010_turns_name_their_utterance`). At most
+# `REVISION_ID_MAX` characters, which is the width of the `version_num`
+# column Alembic creates. A test holds every committed revision to both,
+# so a migration named some other way fails a lane rather than being
+# quietly left out of the sentence below.
+REVISION_ID_PATTERN = r"[0-9]{4}(?:_[a-z0-9]+)+"
+REVISION_ID_MAX = 32
+_REVISION_ID = re.compile(rf"\A(?:{REVISION_ID_PATTERN})\Z")
+
+# What a database stamped at a revision this install does not carry is
+# told, when that revision is not one a re-cut deleted (#530). The
+# motivating case is an install built from a stale cache, missing a
+# migration its own source has, which met a database a fuller build had
+# already stamped and was told to check that the instance was running.
+#
+# It points at the install, because that is where the fault is in both
+# of the ways a database gets here: a newer build stamped it and an
+# older one is opening it, which the closed set above exists to keep
+# from being told to reset anything, or this install lacks a migration
+# its own release ships. Neither is fixed by touching the database, so
+# the sentence says so in as many words.
+#
+# It names the revision, which is the one fact that tells the two cases
+# apart from the outside: an operator can see whether the id is one
+# their source tree has. The id comes from the DATABASE, being the
+# stored stamp Alembic could not resolve (`ResolutionError.argument`),
+# so it is stored data rather than this install's own constant, and it
+# is repeated only when it has the shape `REVISION_ID_PATTERN` states.
+# Anything else, a line break, a credential pasted into the wrong
+# table, a value longer than the column Alembic made, is replaced by
+# `UNSHAPED_REVISION`. The shape admits lowercase words and digits and
+# nothing else, which is a filename's worth of text: it cannot forge a
+# line, and it is no more than this project's own migrations are named.
+UNKNOWN_REVISION = (
+    "the vinga database is stamped at {stamp}, and none of the migrations this "
+    "install carries is that revision. The fault is in the install rather than in "
+    "the database, and nothing stored needs to change: either a newer build of this "
+    "server migrated the database and an older one is now opening it, in which case "
+    "run the newer build again, or this install is stale or partial and is missing "
+    "a migration its own release ships, in which case rebuild or reinstall it from "
+    "a clean state. Do not drop or reset the database for this"
+)
+
+# What `UNKNOWN_REVISION` names in place of a stored stamp that is not
+# shaped like a revision this project writes.
+UNSHAPED_REVISION = (
+    "a revision that is not repeated here, because the stored value does not have "
+    "the shape of one this project writes"
 )
 
 # The advisory-lock keys, one per chain, carrying a namespace rather
@@ -652,10 +706,12 @@ def failure_name(exc: BaseException) -> str:
 def migration_failure(exc: Exception) -> ConfigError:
     """What an open that did not migrate is answered with.
 
-    Four sentences: the lock that did not arrive, which the caller may
+    Five sentences: the lock that did not arrive, which the caller may
     retry; a database stamped at a revision a re-cut deleted, which has
-    to be replaced; a connection that could not be made, which names
-    the variables to check; and everything else, which names the
+    to be replaced; a database stamped at any other revision this
+    install does not carry, which is the install's fault and names the
+    revision; a connection that could not be made, which names the
+    variables to check; and everything else, which names the
     exception's class and prescribes nothing. None of them carries a
     word of the driver's own text, because a psycopg connection error
     quotes the DSN it tried and a statement error carries the values
@@ -669,24 +725,27 @@ def migration_failure(exc: Exception) -> ConfigError:
     change, and falls through to the general sentence below rather than
     being told to run something that does nothing.
 
-    The middle arm is narrow on purpose, because the sentence it answers
-    with says to throw a database away. Three things have to hold before
-    it is said, and each rules out a case that would be told to destroy
-    something it should keep. It has to be Alembic's own `CommandError`,
-    which a driver failure is not. Its cause has to be a
+    The superseded arm is narrow on purpose, because the sentence it
+    answers with says to throw a database away. Three things have to
+    hold before it is said, and each rules out a case that would be told
+    to destroy something it should keep. It has to be Alembic's own
+    `CommandError`, which a driver failure is not. Its cause has to be a
     `ResolutionError`, which is the stored revision not being findable
     rather than an unreadable script directory or a chain with two
     heads. And the revision it could not find has to be one a re-cut is
     known to have deleted: a database stamped by a NEWER build, met by
     an image that was rolled back, raises exactly the same
-    `ResolutionError` and is current rather than stranded, so it falls
-    through to the general sentence and its operator rolls forward
-    instead of deleting a live volume.
+    `ResolutionError` and is current rather than stranded, so it is
+    given the unknown-revision sentence instead, which points at the
+    install and tells its operator not to touch the database.
     """
     if is_busy(exc):
         return DatabaseBusyError(MIGRATION_BUSY)
     if _stranded(exc):
         return StorageError(SUPERSEDED_REVISION)
+    unlocatable = _unlocatable(exc)
+    if unlocatable is not None:
+        return StorageError(UNKNOWN_REVISION.format(stamp=_stamp(unlocatable.argument)))
     if _unreachable(exc):
         return StorageError(UNREACHABLE)
     return StorageError(MIGRATION_FAILED.format(failure=failure_name(exc)))
@@ -749,25 +808,53 @@ def _not_permitted(exc: BaseException) -> bool:
     return False
 
 
-def _stranded(exc: Exception) -> bool:
-    """Whether this failure is a database left behind by a re-cut, which
-    is the one failure answered by telling an operator to replace it.
+def _unlocatable(exc: Exception) -> ResolutionError | None:
+    """The stored revision Alembic could not find, when that is what
+    this failure is, and otherwise nothing.
 
-    The cause chain is walked rather than only its first link, because
-    what makes this the right question is Alembic's `ResolutionError`
-    being in it at all; which library happened to wrap it is not this
-    module's business to depend on.
+    Alembic's own `CommandError` with a `ResolutionError` on its cause
+    chain, decided by type and never by the "Can't locate revision"
+    text. The chain is walked rather than only its first link, because
+    what makes this the right question is the `ResolutionError` being in
+    it at all; which library happened to wrap it is not this module's
+    business to depend on.
+
+    Answers the error rather than a yes, because both arms that ask it
+    then read the revision off it: membership of the closed set is what
+    tells a stranded database from one this install does not carry, and
+    the second arm names what it found.
     """
     if not isinstance(exc, CommandError):
-        return False
+        return None
     seen: set[int] = set()
     cause: BaseException | None = exc.__cause__
     while cause is not None and id(cause) not in seen:
         seen.add(id(cause))
         if isinstance(cause, ResolutionError):
-            return cause.argument in SUPERSEDED_REVISIONS
+            return cause
         cause = cause.__cause__
-    return False
+    return None
+
+
+def _stranded(exc: Exception) -> bool:
+    """Whether this failure is a database left behind by a re-cut, which
+    is the one failure answered by telling an operator to replace it."""
+    unlocatable = _unlocatable(exc)
+    return unlocatable is not None and unlocatable.argument in SUPERSEDED_REVISIONS
+
+
+def _stamp(revision: object) -> str:
+    """The stored revision as `UNKNOWN_REVISION` may say it: named when
+    it has the shape every committed revision has, and replaced by a
+    fixed phrase otherwise, because it was read out of a table rather
+    than out of this install."""
+    if (
+        isinstance(revision, str)
+        and len(revision) <= REVISION_ID_MAX
+        and _REVISION_ID.match(revision)
+    ):
+        return f"revision {revision}"
+    return UNSHAPED_REVISION
 
 
 _RETRYABLE = (
@@ -825,11 +912,15 @@ __all__ = [
     "MIGRATION_BUSY",
     "MIGRATION_FAILED",
     "PASSWORD_ENV",
+    "REVISION_ID_MAX",
+    "REVISION_ID_PATTERN",
     "SCHEMA_NOT_PERMITTED",
     "SUPERSEDED_REVISION",
     "SUPERSEDED_REVISIONS",
     "URL_ENV",
+    "UNSHAPED_REVISION",
     "URL_REFUSED",
+    "UNKNOWN_REVISION",
     "UNNAMED_FAILURE",
     "UNREACHABLE",
     "StoreChain",
