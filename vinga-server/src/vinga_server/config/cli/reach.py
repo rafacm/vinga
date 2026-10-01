@@ -207,17 +207,22 @@ NOT_THE_EVENT_STREAM = (
 # held while it is made.
 #
 # `httpx` writes one line per request at INFO carrying the method, the
-# URL and the status, and `logs.py` keeps that deliberately where it
-# floors the vendor libraries: for every other caller in this server the
-# URL it names says nothing that is not already public. For this one it
-# is the address an operator typed, which is accepted with its query
-# string whole and can carry `?token=<secret>` in it, so the record the
-# library writes is the one surface `Address` exists to keep the
-# credential off. A log record is retained in a way a terminal is not.
-# `httpcore` traces the connection underneath and is held with it. The
-# same two loggers, at the same level and for the same reason, as
-# `doctor.py`'s probe; neither module may import the other, so the
-# reason is stated in both rather than shared through one.
+# URL and the status. For this command the URL is the address an
+# operator typed, which is accepted with its query string whole and can
+# carry `?token=<secret>` in it, so the record the library writes is the
+# one surface `Address` exists to keep the credential off. A log record
+# is retained in a way a terminal is not. `httpcore` traces the
+# connection underneath and is held with it. The same two loggers, at
+# the same level and for the same reason, as `doctor.py`'s probe;
+# neither module may import the other, so the reason is stated in both
+# rather than shared through one.
+#
+# `logs.py` floors both at WARNING for the whole process, and this
+# command's entry point applies that floor before any request, so on the
+# ordinary path the floor already holds the line back. This is held
+# anyway, because the floor is a standing setting a diagnosis may lift
+# by name, which `logs.py` leaves open on purpose, and a request whose
+# URL is a secret must stay quiet when it has been.
 #
 # Held for every request rather than only for an address whose two forms
 # differ. The rule is then one rule: this command's own sentences are
