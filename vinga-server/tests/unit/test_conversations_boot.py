@@ -46,7 +46,13 @@ from vinga_server.config.models import (
 from vinga_server.conversations import schema
 from vinga_server.conversations import store as store_module
 from vinga_server.conversations.store import ConversationStore, open_conversations
-from vinga_server.db import SUPERSEDED_REVISION, SUPERSEDED_REVISIONS, read_engine
+from vinga_server.db import (
+    SUPERSEDED_REVISION,
+    SUPERSEDED_REVISIONS,
+    UNKNOWN_REVISION,
+    UNREACHABLE,
+    read_engine,
+)
 
 EXPECTED_TABLES = {
     "sessions",
@@ -354,6 +360,12 @@ def test_a_revision_from_a_newer_build_is_not_told_to_reset(
     was rolled back fails Alembic in exactly the same way, and it is
     current rather than stranded: telling its operator to drop it would
     destroy a live volume over a rollback.
+
+    What it IS told changed with #530, deliberately. It used to get the
+    connection sentence and no revision at all; it now gets the sentence
+    that points at the install, says not to touch the database, and
+    names the revision it found, which is what lets its operator see
+    that the database is ahead of the image rather than broken.
     """
     engine = open_conversations(DatabaseConfig(name=spare_database))
     try:
@@ -369,8 +381,10 @@ def test_a_revision_from_a_newer_build_is_not_told_to_reset(
         with TestClient(create_app(recording_config(spare_database))):
             pass
 
-    assert str(refusal.value) != SUPERSEDED_REVISION
-    assert "9999_from_the_future" not in str(refusal.value)
+    said = str(refusal.value)
+    assert said == UNKNOWN_REVISION.format(stamp="revision 9999_from_the_future")
+    assert said != SUPERSEDED_REVISION
+    assert said != UNREACHABLE
 
 
 def test_a_writer_that_cannot_start_leaves_stop_harmless(

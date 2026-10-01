@@ -16,11 +16,15 @@ arm. What replaces both is one refusal for an instance this server
 cannot use, tested below.
 """
 
+import re
 import threading
 from pathlib import Path
 
 import psycopg
 import pytest
+from alembic.script import ScriptDirectory
+from alembic.script.revision import ResolutionError
+from alembic.util.exc import CommandError
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import DBAPIError, OperationalError, ProgrammingError
@@ -34,13 +38,20 @@ from vinga_server.config import ConfigError
 from vinga_server.config.loader import DatabaseBusyError, StorageError
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
+from vinga_server.conversations.store import CONVERSATIONS_CHAIN
 from vinga_server.db import (
     DOMAIN_CHAIN,
     LOCK_TIMEOUT_MS,
     MIGRATION_FAILED,
+    REVISION_ID_MAX,
+    REVISION_ID_PATTERN,
     SCHEMA_NOT_PERMITTED,
+    SUPERSEDED_REVISION,
+    SUPERSEDED_REVISIONS,
+    UNKNOWN_REVISION,
     UNNAMED_FAILURE,
     UNREACHABLE,
+    UNSHAPED_REVISION,
     StoreChain,
     advisory_key,
     connection_url,
@@ -371,6 +382,130 @@ def test_a_class_name_that_is_not_an_identifier_is_not_repeated() -> None:
     assert "dropped" not in str(problem)
     assert failure_name(forged()) == UNNAMED_FAILURE
     assert failure_name(ValueError()) == "ValueError"
+
+
+# A revision this install does not carry (#530)
+#
+# The failure that motivated the change: an install built from a stale
+# cache, missing a migration its own source has, met a database a fuller
+# build had already stamped, and was told to check that the instance was
+# running. Alembic's answer is a `ResolutionError` under a
+# `CommandError`, and now it has an arm of its own that points at the
+# install and names the revision, which is read out of the database and
+# so is repeated only when it is shaped like a revision this project
+# writes.
+
+
+def _stamped_at(database: str, revision: str) -> None:
+    """A migrated domain schema whose stamp has been moved to a revision
+    this install does not carry, which is exactly the state a newer
+    build or a fuller install leaves behind."""
+    engine = open_database(DatabaseConfig(name=database))
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(f"update {SCHEMA}.alembic_version set version_num = :stamp"),
+                {"stamp": revision},
+            )
+    finally:
+        engine.dispose()
+
+
+def test_a_revision_this_install_lacks_points_at_the_install(blank_database: str) -> None:
+    """Driven for real: the stamp is read back by Alembic, which cannot
+    resolve it against the packaged scripts. The sentence names the
+    revision so an operator can see which side has it, and it is neither
+    the connection sentence, since the instance answered throughout, nor
+    the reset, since the database is fine."""
+    _stamped_at(blank_database, "9999_from_a_newer_build")
+
+    with pytest.raises(ConfigError) as caught:
+        open_database(DatabaseConfig(name=blank_database))
+
+    said = str(caught.value)
+    assert said == UNKNOWN_REVISION.format(stamp="revision 9999_from_a_newer_build")
+    assert said != UNREACHABLE
+    assert said != SUPERSEDED_REVISION
+    assert "Do not drop or reset the database" in said
+    assert isinstance(caught.value, StorageError)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        pytest.param("sk-test-61b0e2-never-a-real-cred", id="a-credential-pasted-in"),
+        pytest.param("1010_turns\nthe database is fine", id="a-forged-second-line"),
+        pytest.param("1010_Turns_Name_Their_Utterance", id="not-this-projects-case"),
+        pytest.param("10", id="a-bare-prefix"),
+    ],
+)
+def test_a_stamp_not_shaped_like_a_revision_is_not_repeated(
+    blank_database: str, stored: str
+) -> None:
+    """The stamp is stored data, read out of a table anyone with the
+    server role's grants can write, so what reaches an operator's
+    terminal is decided by its shape and not by where it came from. Each
+    of these is something the column holds and the pattern refuses."""
+    _stamped_at(blank_database, stored)
+
+    with pytest.raises(ConfigError) as caught:
+        open_database(DatabaseConfig(name=blank_database))
+
+    said = str(caught.value)
+    assert said == UNKNOWN_REVISION.format(stamp=UNSHAPED_REVISION)
+    assert stored not in chain(caught.value)
+
+
+def test_a_stamp_longer_than_the_column_is_not_repeated() -> None:
+    """The length bound, which a lane cannot store its way past (the
+    column Alembic made is `REVISION_ID_MAX` wide), so the failure is
+    built the way Alembic builds it."""
+    overlong = "1010_" + "a" * REVISION_ID_MAX
+    unresolved = ResolutionError(f"No such revision or branch '{overlong}'", overlong)
+    failure = CommandError(f"Can't locate revision identified by '{overlong}'")
+    failure.__cause__ = unresolved
+
+    problem = migration_failure(failure)
+
+    assert str(problem) == UNKNOWN_REVISION.format(stamp=UNSHAPED_REVISION)
+    assert overlong not in str(problem)
+
+
+def test_a_resolution_failure_further_down_the_chain_is_still_found() -> None:
+    """By type wherever it sits on the cause chain, not only as the first
+    link, because which library wrapped Alembic's error on the way out is
+    not something this classification should depend on. Today Alembic
+    raises the `CommandError` directly from the `ResolutionError`; this
+    is the case where something has wrapped it once more."""
+    unresolved = ResolutionError("No such revision or branch", "9999_further_down")
+    between = RuntimeError("wrapped on the way out")
+    between.__cause__ = unresolved
+    failure = CommandError("Can't locate revision")
+    failure.__cause__ = between
+
+    problem = migration_failure(failure)
+
+    assert str(problem) == UNKNOWN_REVISION.format(stamp="revision 9999_further_down")
+
+
+def test_every_committed_revision_has_the_shape_the_sentence_admits() -> None:
+    """The pattern and the migrations are two structures that must
+    agree, so the second is read off the first's subject: every revision
+    of every chain, as Alembic itself lists them. A migration named some
+    other way would be left out of the unknown-revision sentence the
+    day an install lacked it, which is the day the name is wanted."""
+    revisions = [
+        script.revision
+        for store in (DOMAIN_CHAIN, CONVERSATIONS_CHAIN, MEMORY_CHAIN)
+        for script in ScriptDirectory(str(store.migrations)).walk_revisions()
+    ]
+
+    assert revisions
+    for revision in [*revisions, *SUPERSEDED_REVISIONS]:
+        assert len(revision) <= REVISION_ID_MAX, revision
+        assert re.fullmatch(REVISION_ID_PATTERN, revision), revision
 
 
 # The sentinel, at both doors a migration failure leaves through
