@@ -308,19 +308,33 @@ def test_a_refused_configuration_write_logs_the_class_and_nothing_planted(
     # walks the chain today; it is recorded on #586's pull request.
 
 
+@pytest.mark.parametrize(
+    ("seam", "request_", "body"),
+    [
+        pytest.param("memory_writes", _forgetting, MEMORY_REFUSAL, id="memory"),
+        pytest.param("erasures", _erasing, ERASURE_REFUSAL, id="erasure"),
+    ],
+)
 def test_a_failure_whose_class_cannot_be_named_logs_the_refusal(
-    api: FastAPI, client: TestClient, caplog: pytest.LogCaptureFixture
+    api: FastAPI,
+    client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+    seam: str,
+    request_: Any,
+    body: bytes,
 ) -> None:
     """A class can be given any name, a line break and a sentence after
     it included. The refusal is still answered, with the same body, and
     the line names the refusal's own class rather than a name it may
     not repeat: what the route could classify was that it failed, and
-    that is what it says."""
-    with writing_through(api, "erasures", forged_failure()), watching(api) as caught:
+    that is what it says. Per route, because each builds its own
+    refusal, and one that spelled the class without the validation
+    would raise while building it and lose the body."""
+    with writing_through(api, seam, forged_failure()), watching(api) as caught:
         with caplog.at_level(logging.DEBUG):
-            answer = _erasing(client)
+            answer = request_(client)
 
-    assert answer.content == ERASURE_REFUSAL
+    assert answer.content == body
     said = only(caplog, "api_storage_error")
     assert said.getMessage().endswith("(StorageError)")
     assert not [found for found in renderings(caplog) if "the store is fine" in found]
