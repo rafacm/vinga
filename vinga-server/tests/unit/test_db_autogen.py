@@ -124,9 +124,12 @@ def test_the_scratch_database_is_made_migrated_and_taken_away(
     about by the name this run made, and no other: a concurrent lane's
     run is free to hold a database with the same prefix at this moment.
 
-    The name is the prefix and a suffix of its own, and a lowercase
-    identifier Postgres would neither fold nor truncate, so the name
-    the command drops is the name it made.
+    The name is the prefix and exactly sixteen lowercase hex digits,
+    sixty-four random bits, which is what keeps two runs from meeting
+    on one name: a shorter suffix would still pass every lifecycle case
+    here and only collide now and then. It is also a lowercase
+    identifier inside Postgres's 63 bytes, which Postgres neither folds
+    nor truncates, so the name the command drops is the name it made.
     """
     monkeypatch.setenv("VINGA_DB_URL", _url_of(blank_database))
     chain = _chain_in(tmp_path)
@@ -136,8 +139,7 @@ def test_the_scratch_database_is_made_migrated_and_taken_away(
 
     written = set((chain.migrations / "versions").glob("*.py")) - before
     assert len(written) == 1, written
-    assert name.startswith(autogen.SCRATCH_PREFIX), name
-    assert name != autogen.SCRATCH_PREFIX, name
+    assert re.fullmatch(re.escape(autogen.SCRATCH_PREFIX) + "[0-9a-f]{16}", name), name
     assert re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", name), name
     assert not _exists(name)
 
