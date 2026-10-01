@@ -10,7 +10,7 @@ from vinga_server import llm_input_export as export_module
 from vinga_server.boundary import Reach
 from vinga_server.config import ConfigError
 from vinga_server.config.models import ServerConfig
-from vinga_server.events.values import LlmInputExportFailure
+from vinga_server.events.values import LlmInputExportFailure, LlmInputExportKind
 from vinga_server.llm_input_export import LlmInputExport, build_llm_input_export
 from vinga_server.providers.base import TextDelta, ToolCall, ToolResult
 from vinga_server.telemetry import (
@@ -256,7 +256,9 @@ def test_a_pair_over_the_operation_ceiling_is_dropped_whole(
         for record in caplog.records
         if getattr(record, "event", None) == "llm_input_export_failed"
     ]
-    assert failures[0].reason == LlmInputExportFailure.DROPPED.value
+    assert [(failure.kind, failure.reason) for failure in failures] == [
+        (LlmInputExportKind.GENERATION.value, LlmInputExportFailure.DROPPED.value)
+    ]
 
 
 def test_a_live_trace_refusal_drops_the_pair_truthfully(
@@ -283,8 +285,8 @@ def test_a_live_trace_refusal_drops_the_pair_truthfully(
         for record in caplog.records
         if getattr(record, "event", None) == "llm_input_export_failed"
     ]
-    assert [failure.reason for failure in failures] == [
-        LlmInputExportFailure.DROPPED.value
+    assert [(failure.kind, failure.reason) for failure in failures] == [
+        (LlmInputExportKind.GENERATION.value, LlmInputExportFailure.DROPPED.value)
     ]
 
 

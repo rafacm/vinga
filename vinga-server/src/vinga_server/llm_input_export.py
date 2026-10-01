@@ -14,6 +14,7 @@ from vinga_server.events.catalog import LlmInputExported, LlmInputExportFailed
 from vinga_server.events.values import (
     Count,
     LlmInputExportFailure,
+    LlmInputExportKind,
     LlmPurpose,
     SessionId,
 )
@@ -33,6 +34,8 @@ events = ServerEvents(__name__)
 LLM_INPUT_KEY = "server.telemetry.export_llm_input"
 REPLY = LlmPurpose.REPLY
 RECAP = LlmPurpose.RECAP
+GENERATION = LlmInputExportKind.GENERATION
+TOOL_CALL = LlmInputExportKind.TOOL_CALL
 MAX_CONTENT_BYTES = 256 * 1024
 MAX_REQUEST_BYTES = MAX_CONTENT_BYTES
 SESSION_BUDGET_BYTES = 4 * MAX_CONTENT_BYTES
@@ -146,7 +149,7 @@ class LlmInputExport:
         choice: str,
     ) -> None:
         if invocation in self._rounds:
-            self._failed(session, LlmInputExportFailure.DROPPED)
+            self._failed(session, GENERATION, LlmInputExportFailure.DROPPED)
             return
         try:
             system_json = _json([{"type": "text", "content": system}])
@@ -160,10 +163,10 @@ class LlmInputExport:
             }
             size = _size(attributes)
         except Exception:  # noqa: BLE001 - content export never breaks a reply
-            self._failed(session, LlmInputExportFailure.DROPPED)
+            self._failed(session, GENERATION, LlmInputExportFailure.DROPPED)
             return
         if size > self._max_content_bytes:
-            self._failed(session, LlmInputExportFailure.DROPPED)
+            self._failed(session, GENERATION, LlmInputExportFailure.DROPPED)
             return
         staged = _Round(session, invocation, attributes, size)
         self._rounds[invocation] = staged
@@ -218,20 +221,21 @@ class LlmInputExport:
                 GEN_AI_OUTPUT_MESSAGES: output,
             }
             if _size(attributes) > self._max_content_bytes:
-                self._failed(staged.session, LlmInputExportFailure.DROPPED)
+                self._failed(staged.session, GENERATION, LlmInputExportFailure.DROPPED)
                 return
         except Exception:  # noqa: BLE001 - content export never breaks a reply
-            self._failed(staged.session, LlmInputExportFailure.DROPPED)
+            self._failed(staged.session, GENERATION, LlmInputExportFailure.DROPPED)
             return
         if not self._telemetry.stage_llm_content(
             staged.session, invocation, attributes
         ):
-            self._failed(staged.session, LlmInputExportFailure.DROPPED)
+            self._failed(staged.session, GENERATION, LlmInputExportFailure.DROPPED)
             return
         events.emit(
             lambda: LlmInputExported(
                 session=SessionId(staged.session),
                 rounds=Count(1),
+                tool_calls=Count(0),
             )
         )
 
@@ -249,7 +253,7 @@ class LlmInputExport:
             return
         self._remove(staged)
         self._telemetry.discard_llm_content(invocation)
-        self._failed(staged.session, LlmInputExportFailure.DROPPED)
+        self._failed(staged.session, GENERATION, LlmInputExportFailure.DROPPED)
 
     def _remove(self, staged: _Round) -> None:
         ordered = self._sessions.get(staged.session)
@@ -264,8 +268,17 @@ class LlmInputExport:
         else:
             self._held.pop(staged.session, None)
 
-    def _failed(self, session: str, reason: LlmInputExportFailure) -> None:
-        events.emit(lambda: LlmInputExportFailed(session=SessionId(session), reason=reason))
+    def _failed(
+        self,
+        session: str,
+        kind: LlmInputExportKind,
+        reason: LlmInputExportFailure,
+    ) -> None:
+        events.emit(
+            lambda: LlmInputExportFailed(
+                session=SessionId(session), kind=kind, reason=reason
+            )
+        )
 
 
 def _json(value: Any) -> str:

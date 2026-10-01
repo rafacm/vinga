@@ -98,6 +98,7 @@ from vinga_server.events.values import (
     Kind,
     LanguageTag,
     LlmInputExportFailure,
+    LlmInputExportKind,
     LlmPurpose,
     LoopbackHost,
     McpConnectFailure,
@@ -4034,23 +4035,21 @@ class TranscriptExportFailed(Variant):
 # --- llm_input_export.py: what the model was given, onto the trace -----
 #
 # The vocabulary of the fourth rung of the disclosure ladder (#502, M5):
-# the request a session assembled for each of its LLM rounds, staged
-# while the session ran and written onto its trace after it closed,
-# behind a flag of its own. Two events and the whole ledger between
-# them, for the reason the two pairs above each have one, and here it is
-# the strongest of the three: this class has no local store behind it,
-# so an export that failed silently leaves nothing anybody could go back
+# the request a session assembled for each of its LLM rounds, and the
+# arguments and result of each tool call the model asked for, each
+# staged immediately before the event that builds its span, behind a
+# flag of its own. Two events and the whole ledger between them, for
+# the reason the two pairs above each have one, and here it is the
+# strongest of the three: this class has no local store behind it, so
+# an export that failed silently leaves nothing anybody could go back
 # and read.
 #
-# The exported event carries three counts rather than one, and that is
-# the bound made legible. What a session stages is capped in bytes, per
-# request and per session, so a long conversation with a talkative tool
-# loop genuinely can arrive incomplete; a reader who has only the
-# observations cannot tell a short session from a truncated one. So the
-# event says how many rounds went, how many were too large to carry at
-# all, and how many the session's own budget pushed out, because those
-# two absences mean different things to whoever is looking: one request
-# was outsized, or the conversation outgrew what may be held for it.
+# One pair is one span's content, of one of two kinds (#533): a
+# generation's request and output for its `llm` span, or a tool call's
+# arguments and result for its `tool` span. The exported event counts
+# each kind separately and the failure says which kind it lost, so a
+# reader holding only the observations can tell which span went without
+# what it should carry.
 #
 # What neither of these may carry is what the other two pairs may not,
 # and one thing more. No URL and no far-side identifier. No exception
@@ -4063,12 +4062,14 @@ class TranscriptExportFailed(Variant):
 
 @dataclass(frozen=True)
 class LlmInputExported(Variant):
-    """One complete input and output pair was attached to its LLM span."""
+    """One complete content pair was staged for the span it belongs to."""
 
     CHANNEL: ClassVar[str] = LLM_INPUT_EXPORT_CHANNEL
     LEVEL: ClassVar[int] = logging.INFO
-    TEMPLATE: ClassVar[str] = "session %s: %d LLM content pairs attached to telemetry"
-    ARGS: ClassVar[tuple[str, ...]] = ("session", "rounds")
+    TEMPLATE: ClassVar[str] = (
+        "session %s: %d generation and %d tool call content pairs attached to telemetry"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "rounds", "tool_calls")
 
     session: SessionId = value()
     rounds: Count = value(
@@ -4080,18 +4081,33 @@ class LlmInputExported(Variant):
             "twice and not two requests."
         )
     )
+    tool_calls: Count = value(
+        note=(
+            "How many tool spans received a complete pair: a call's "
+            "arguments and the result the model was handed, under "
+            "`gen_ai.tool.call.arguments` and `gen_ai.tool.call.result`. "
+            "Counted apart from `rounds`, whose meaning does not change."
+        )
+    )
 @dataclass(frozen=True)
 class LlmInputExportFailed(Variant):
-    """A generation content pair was omitted from its LLM span."""
+    """A content pair was omitted from the span it belongs to."""
 
     CHANNEL: ClassVar[str] = LLM_INPUT_EXPORT_CHANNEL
     LEVEL: ClassVar[int] = logging.WARNING
     TEMPLATE: ClassVar[str] = (
-        "session %s: LLM content pair not attached to telemetry (%s)"
+        "session %s: %s content pair not attached to telemetry (%s)"
     )
-    ARGS: ClassVar[tuple[str, ...]] = ("session", "reason")
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "kind", "reason")
 
     session: SessionId = value()
+    kind: LlmInputExportKind = value(
+        note=(
+            "Which span lost its content: `generation` for an `llm` "
+            "span's request and output, `tool_call` for a `tool` span's "
+            "arguments and result. Decided where the pair is dropped."
+        )
+    )
     reason: LlmInputExportFailure = value(
         note=(
             "Why this server omitted the pair before the matching span "
@@ -4576,11 +4592,12 @@ TRANSCRIPT_EXPORT_FAILED = declare(
 LLM_INPUT_EXPORTED = declare(
     "llm_input_exported",
     note=(
-        "One complete assembled request and raw output pair was attached "
-        "to its actual generation span and admitted to ordinary OTLP "
-        "processing. Deliberately nothing of the pair itself: content "
-        "rides the span the flag authorizes, and this says only that it "
-        "went."
+        "One complete content pair was attached to its actual span and "
+        "admitted to ordinary OTLP processing: an assembled request and "
+        "raw output on a generation span, or a tool call's arguments and "
+        "result on its tool span. Deliberately nothing of the pair "
+        "itself: content rides the span the flag authorizes, and this "
+        "says only that it went."
     ),
     variants=(LlmInputExported,),
 )
@@ -4588,10 +4605,11 @@ LLM_INPUT_EXPORTED = declare(
 LLM_INPUT_EXPORT_FAILED = declare(
     "llm_input_export_failed",
     note=(
-        "One assembled request and raw output pair was omitted before its "
-        "generation span reached ordinary OTLP processing. The other half "
-        "of the ledger, and the half that matters most on this surface: "
-        "there is no local copy to read after the operation ends."
+        "One content pair was omitted before its span reached ordinary "
+        "OTLP processing, a generation's request and output or a tool "
+        "call's arguments and result. The other half of the ledger, and "
+        "the half that matters most on this surface: there is no local "
+        "copy to read after the operation ends."
     ),
     variants=(LlmInputExportFailed,),
 )
