@@ -121,6 +121,18 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
    event, `git grep -n first_token` over `vinga-server/` and `docs/`
    (untruncated) lists every reader of the span event, recorded in the
    implementation doc; the expectation from Step 0 is tests only.
+   This is a breaking change to the exported trace schema and is named
+   as one: a query, alert or dashboard over the `first_token` span
+   event stops matching. No deprecation period, deliberately: the
+   parity decision is that one fact has one carrier, the project is
+   pre-release with no third-party installation known
+   (`docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md`,
+   lines 27-28), and an event kept
+   "for a while" is the two-carrier state the decision rejects. The
+   changelog's `### Changed` entry and the observability page carry the
+   migration in one sentence: read `vinga.llm.first_token_ms` on the
+   `llm` span, and where an instant is wanted, it is the span's start
+   plus that many milliseconds.
 2. **The tool span carries the call it ran.** Each `tool_call` variant
    gains two fields, and `TOOL_ATTRIBUTES` maps them:
    - `call_id: ToolCallId | Absent`, exported as the conventions'
@@ -523,6 +535,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
 6. **P2: Removing the first-token event creates an unhandled upgrade break.**
    **Evidence:** Decision 1 deletes the existing precisely timestamped `first_token` event (`docs/plans/...`, lines 113–123), although issue #533 §4 proposed an attribute alongside the event and its common notes call the changes backward compatible. Current OTLP consumers can query or visualize that event (`telemetry.py:2994-3032`). Repository grep can find tests and documentation, but cannot inventory dashboards, alerts, or downstream collectors in running deployments. The changelog entry records the change but supplies no compatibility period or migration guidance.
    **Plan should say instead:** Preserve the event while adding the attribute, at least for a documented deprecation period. If the parity decision intentionally permits immediate removal, state that it is a breaking telemetry-schema change, document the query migration, and test both the retained temporal mark and the new backend-portable attribute.
+
+   *Resolution:* accepted in part. Decision 1 now names the removal as a breaking change to the exported trace schema and gives the migration in one sentence (read `vinga.llm.first_token_ms`; the instant is the span start plus that many milliseconds), carried by the changelog's `### Changed` entry and the observability page, and the span test asserts the round carries no span event. Rejected: keeping the event for a deprecation period. Rafael decided on 2026-10-01 that one fact has one carrier so OTLP backends and Langfuse see the same thing; the project is pre-release with no third-party installation known (the compatibility-floor ADR, lines 27-28); and an event kept for a while is the two-carrier state that decision rejects. The issue's "alongside" wording predates the decision, which the Step 0 comment records.
 
 7. **P2: `vinga.llm.system.sources.*` falsely presents a partial source inventory as the whole system’s sources.**
    **Evidence:** The plan pairs `vinga.llm.system.characters`, defined as the whole system prompt, with `vinga.llm.system.sources.*`, populated only from `state`, `memory`, and `device` (`docs/plans/...`, lines 188–197 and 209–217). Persona, fragments, and MCP guidance are also system-prompt sources but are deliberately excluded. A backend reader will reasonably expect the children of `system.sources` to account for `system.characters`; they cannot.
