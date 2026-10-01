@@ -17,6 +17,8 @@ from vinga_server.telemetry import (
     GEN_AI_INPUT_MESSAGES,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_SYSTEM_INSTRUCTIONS,
+    GEN_AI_TOOL_CALL_ARGUMENTS,
+    GEN_AI_TOOL_CALL_RESULT,
     LLM_TOOL_CHOICE,
     LLM_TOOLS,
 )
@@ -425,3 +427,135 @@ def test_a_lone_surrogate_is_escaped_without_escaping_the_reply() -> None:
     )
     staged.finish("awkward")
     assert len(recorded.snapshots) == 1
+
+
+# --- a tool call's pair, for its tool span (#533) ----------------------
+
+
+def _outcomes(caplog: pytest.LogCaptureFixture) -> list[tuple[str, ...]]:
+    """Both outcome events in order, as the fields that distinguish them."""
+    return [
+        (
+            ("exported", record.rounds, record.tool_calls)
+            if record.event == "llm_input_exported"
+            else ("failed", record.kind, record.reason)
+        )
+        for record in caplog.records
+        if getattr(record, "event", None)
+        in {"llm_input_exported", "llm_input_export_failed"}
+    ]
+
+
+TOOL_DROPPED = ("failed", LlmInputExportKind.TOOL_CALL.value, LlmInputExportFailure.DROPPED.value)
+TOOL_EXPORTED = ("exported", 0, 1)
+
+
+def test_a_tool_pair_uses_the_conventions_keys_and_the_part_encoding(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The arguments are encoded exactly as the round's `tool_call` part
+    encodes them, so the two copies of one call read alike, and the
+    result is the string the model was handed, unencoded."""
+    staged, recorded = exporter()
+    arguments = {"text": "the kettle is new", "id": 7, "nested": {"b": 1, "a": "ä"}}
+
+    with caplog.at_level(logging.INFO):
+        staged.stage_tool("session", "round", 2, arguments, 'saved "fact" 7')
+
+    [(invocation, position, attributes)] = recorded.tool_snapshots
+    assert (invocation, position) == ("round", 2)
+    assert set(attributes) == {GEN_AI_TOOL_CALL_ARGUMENTS, GEN_AI_TOOL_CALL_RESULT}
+    staged.stage_reply(
+        "session",
+        invocation="asking",
+        agent=None,
+        system="s",
+        turns=[],
+        tools=[],
+        choice="auto",
+    )
+    staged.observe("asking", ToolCall(id="c", name="remember", arguments=arguments))
+    staged.finish("asking")
+    rendered = recorded.snapshots[0][1][GEN_AI_OUTPUT_MESSAGES]
+    assert f'"arguments":{attributes[GEN_AI_TOOL_CALL_ARGUMENTS]},' in rendered
+    assert json.loads(attributes[GEN_AI_TOOL_CALL_ARGUMENTS]) == arguments
+    assert attributes[GEN_AI_TOOL_CALL_RESULT] == 'saved "fact" 7'
+    assert _outcomes(caplog)[0] == TOOL_EXPORTED
+
+
+def test_a_malformed_tool_call_exports_its_raw_argument_text() -> None:
+    staged, recorded = exporter()
+
+    staged.stage_tool("session", "round", 0, '{"fact": "tea', "not a JSON object")
+
+    [(_, _, attributes)] = recorded.tool_snapshots
+    assert attributes[GEN_AI_TOOL_CALL_ARGUMENTS] == '{"fact": "tea'
+
+
+def test_a_tool_pair_over_the_ceiling_is_dropped_and_reported(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    staged, recorded = exporter(max_request_bytes=64)
+
+    with caplog.at_level(logging.INFO):
+        staged.stage_tool("session", "round", 0, {"fact": "tea"}, "x" * 64)
+
+    assert recorded.tool_snapshots == []
+    assert _outcomes(caplog) == [TOOL_DROPPED]
+
+
+def test_a_tool_pair_telemetry_refuses_is_reported_as_a_tool_call(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    telemetry, recorded = exporting(accepts=False)
+    staged = LlmInputExport(telemetry=telemetry)
+
+    with caplog.at_level(logging.INFO):
+        staged.stage_tool("session", "round", 0, {"fact": "tea"}, "saved")
+
+    assert recorded.tool_snapshots == []
+    assert _outcomes(caplog) == [TOOL_DROPPED]
+
+
+def test_one_round_s_tool_pairs_share_one_ceiling(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Round 3's admission budget: each pair fits alone, and the round's
+    calls together may not pass the per-request ceiling, so the earlier
+    pairs attach and the rest are dropped whole and reported. The next
+    round starts from nothing."""
+    result = "r" * 90
+    one = len(b"{}") + len(result.encode())
+    staged, recorded = exporter(max_request_bytes=3 * one + one // 2)
+
+    with caplog.at_level(logging.INFO):
+        for position in range(5):
+            staged.stage_tool("session", "busy", position, {}, result)
+        staged.stage_tool("session", "next", 0, {}, result)
+
+    assert [(i, p) for i, p, _ in recorded.tool_snapshots] == [
+        ("busy", 0),
+        ("busy", 1),
+        ("busy", 2),
+        ("next", 0),
+    ]
+    assert _outcomes(caplog) == [
+        TOOL_EXPORTED,
+        TOOL_EXPORTED,
+        TOOL_EXPORTED,
+        TOOL_DROPPED,
+        TOOL_DROPPED,
+        TOOL_EXPORTED,
+    ]
+
+
+def test_a_session_close_forgets_its_round_budget() -> None:
+    result = "r" * 90
+    one = len(b"{}") + len(result.encode())
+    staged, recorded = exporter(max_request_bytes=one)
+
+    staged.stage_tool("session", "busy", 0, {}, result)
+    staged.session_closed("session")
+    staged.stage_tool("session", "busy", 1, {}, result)
+
+    assert [p for _, p, _ in recorded.tool_snapshots] == [0, 1]
