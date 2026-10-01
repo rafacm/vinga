@@ -255,6 +255,14 @@ between on the request's shape and the model's reading of it.
    pair. `_tool_span` takes the slot on every path, discarding it when
    the session has no trace, so nothing outlives the emission that
    staged it. The `tool_call` event and the retained log gain nothing.
+   *Ownership (review round 3):* the dependency runs the way generation
+   content already does. `Telemetry` owns a second, locked map keyed by
+   `(invocation, position)` with stage, take and discard methods;
+   `LlmInputExport` serializes and bounds the pair and stages it into
+   `Telemetry`; `_tool_span` takes it on the traced and untraced paths.
+   `ToolExecution` has no session id, so `PipelineRuntime` injects a
+   session-bound staging callable (or `None` with the setting off). A
+   staging telemetry refuses is reported with `kind=tool_call`.
 9. **One ceiling per pair, no shared budget.** Events fold
    synchronously (`SessionEvents.emit`), so a tool pair is staged and
    taken within one emission and never accumulates beside another; a
@@ -556,6 +564,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    Evidence: Decision 8 says `Telemetry._tool_span` calls `LlmInputExport.take_tool` (`plan:245-257`). Today the dependency runs the other way: `LlmInputExport` stages into `Telemetry` (`llm_input_export.py:226-229`), while telemetry owns the content map and `_tool_span` has no exporter collaborator (`telemetry.py:2057-2058`, `telemetry.py:3156-3168`). `ToolExecution` also has no session ID to supply to the proposed `stage_tool(session, ...)` (`tool_execution.py:246-260`).
 
    Plan should say instead: Telemetry owns a second, locked `(invocation, position)` content map and exposes stage/take/discard methods, as it already does for generation content. `LlmInputExport` serializes and bounds the pair, then stages it into Telemetry; `_tool_span` takes it on traced and untraced paths. Pass `session_id` to `ToolExecution`, or inject a session-bound staging callback. Define failure handling when telemetry rejects staging.
+
+   *Resolution:* accepted as written. Decision 8 now has `Telemetry` own a locked `(invocation, position)` map with stage, take and discard, `LlmInputExport` serialize, bound and stage into it as it does for generation content, `_tool_span` take on both paths, and `PipelineRuntime` inject a session-bound staging callable into `ToolExecution`; a refused staging is reported with `kind=tool_call`.
 
 2. **P1: Moving `with_scopes` strands the public prompt-preview API.**
 
