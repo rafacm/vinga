@@ -188,17 +188,25 @@ between on the request's shape and the model's reading of it.
      must answer every probe the old one answers. One extra probe stores
      an instruction-shaped fact and records whether the model obeys it
      under each placement (observed, not gated).
-   - *Cache:* a session of at least 15 turns with at least four verified
-     memory writes (a non-error `remember` or `set_state` call, and the
-     next round's injected fact ids changed, read off the metadata
-     half's `vinga.llm.memory.facts`), read back per round from
-     `llm_round`'s cached-token count. The gate opens when no verified
-     write is followed by a round caching less than the history before
-     the newest turn, allowing for the spontaneous full misses the probe
-     measured: a write-followed full miss counts against the gate only
-     if write-followed rounds miss at a higher rate than rounds with no
-     write in the same session. The table goes in the implementation
-     doc.
+   - *Cache:* a paired comparison through the real server, the same
+     scripted session of at least 15 turns run on `main` (old
+     placement) and on the branch (new), four sessions counterbalanced
+     old, new, new, old, each with at least four verified writes. A
+     verified write is a non-error `remember` call whose next round's
+     injected fact ids (the metadata half's `vinga.llm.memory.facts`)
+     gain the new id; `set_state` is not used as an intervention, since
+     the ledger carries no ids to verify it by. Per write, the raw
+     `cached_tokens` of the following round is read from `llm_round`
+     (`cache_read_input_tokens`), and a full miss is a following round
+     caching fewer than 1,024 tokens (the provider's floor). The gate
+     opens when (i) the old arm shows the problem the change exists for,
+     at least half its verified writes followed by a full miss, so the
+     rig reproduces it, and (ii) the new arm has at most one
+     write-followed full miss across all its verified writes (the
+     probe's spontaneous rate), and its write-followed rounds' mean
+     cached share is at least 0.8. Anything else is recorded and goes
+     to Rafael rather than the gate moving. The per-round table goes in
+     the implementation doc.
 
 ### M2: a tool span carries its content (#533 §2), and option A is written down
 
@@ -406,6 +414,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Evidence:** The gate accepts `set_state` as a verified write but requires `vinga.llm.memory.facts` to change (plan lines 157-166`). `PromptMemory` explicitly gives IDs only to agent and device facts; ledger state has none (`memory/store.py:418-445`). Moreover, `llm_round` reports total and cached tokens, not the token count of “history before the newest turn,” so the proposed threshold is not directly observable.
 
    **Plan should say instead:** Either restrict interventions to fact-backed writes such as `remember`, or verify `set_state` through the exported context or a direct memory read. Define an observable cache criterion using paired requests and raw cached-token counts, with an explicit repeatability threshold.
+
+   *Resolution:* accepted. The cache gate is now a counterbalanced paired comparison (old, new, new, old) through the real server with `remember` as the only intervention (verified by the injected fact ids gaining the new id; `set_state` dropped, since the ledger has no ids), raw `cached_tokens` of the following round, a full miss defined as under the 1,024-token floor, and explicit thresholds: the old arm must reproduce the problem (at least half its writes followed by a full miss), and the new arm may have at most one write-followed full miss with a mean write-followed cached share of at least 0.8.
 
 5. **P2: The `stream` signature change can silently misbind existing positional arguments.**
 
