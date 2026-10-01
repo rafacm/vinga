@@ -275,9 +275,12 @@ slot, and personal facts belong in memory, which is never digested.
 A failed ASR, LLM, TTS or tool operation is the same real stage span with
 OpenTelemetry `ERROR` status, no status description and a safe `error.type`.
 The type is the exception class name at an exception boundary, or the closed
-`tool_error` token for a tool that returned an error result. Exception prose,
-tracebacks, tool arguments and results do not enter the span, and the fold does
-not add a duplicate failure event to the turn. OpenTelemetry attributes remain
+`tool_error` token for a tool that returned an error result. Exception prose
+and tracebacks do not enter the span. A tool call's arguments and result enter
+its span only under `server.telemetry.export_llm_input`, as content that
+export carries (see [Exported LLM input](#exported-llm-input)), and never as
+metadata or on the `tool_call` event. The fold does not add a duplicate
+failure event to the turn. OpenTelemetry attributes remain
 canonical. The existing Langfuse usage aliases are derived compatibility
 copies for the direct exporter path, not a second source of telemetry facts.
 
@@ -511,6 +514,36 @@ input and output fields as copies of the messages, and Langfuse reads
 those first, so the system prompt never reached it; they are no longer
 written.
 
+**A tool span carries its call's content too** (#533). Each `tool`
+span a call ran under carries the conventions'
+`gen_ai.tool.call.arguments` and `gen_ai.tool.call.result`, with no
+backend-specific alias, and Langfuse maps them to the tool observation's
+input and output itself. The arguments are what the model asked with,
+the call's reserved values rather than the copy coerced to the tool's
+declared types for the far side, encoded exactly as the asking round's
+`tool_call` part encodes them, so the two copies of one call read alike;
+neither adapter keeps a valid call's raw string, so this is the call's
+content and not the provider's bytes, and a call that sent no JSON
+object carries its raw argument text. The result is the string the
+model was handed back. The pair is staged when the call returns,
+immediately before its `tool_call` event, and taken by that event's
+fold under the event's own invocation and position, so two calls in one
+round never take each other's pair, and a session with no trace
+discards it. It has the per-request ceiling, and one round's tool pairs
+together have that same ceiling, since a round runs its calls at once:
+a pair past either is dropped whole and reported with `kind` set to
+`tool_call`. These are a second copy of bytes the generation spans
+already carry (a call in one round's output, its result in the next
+round's input), counted against the same bound rather than a new one.
+
+**Remembered facts leave with it, with no switch of their own.** This is
+the decision recorded on #533 as option A. With the export on, the
+memory every round's request carries leaves with every round, and the
+memory tools' arguments and results leave on their tool spans. The
+backend retains them by its own policy, and deleting or correcting a
+fact here reaches none of what already left. A deployment that wants
+the household's facts never to leave keeps this export off.
+
 **It contains what the transcripts surface contains.** An assembled
 request holds the dialogue as the model saw it, so this class is
 content-wise a superset of that one, and the switches are nonetheless
@@ -599,7 +632,7 @@ own terms.
 | --- | --- | --- | --- |
 | **Audio** | Recordings, all of them, from the capture directory: a closed session's stereo WAV and its manifest, and each turn's heard clip (the audio its provider heard) and reply clip (its reply as paced out), which are artifacts of this class rather than switches beside it | `server.telemetry.export_audio` | Landed (#67, clips #496) |
 | **Transcripts** | A live utterance's acknowledged conversation rows, composed onto its original turn root with ordered per-leg attribution | `server.telemetry.export_transcripts` | Landed (#495, topology changed by #523) |
-| **LLM input and output** | The model's assembled request and raw semantic output before speech filtering, including withheld text, tool schemas, arguments, results and choice. Not vendor framing, generation parameters, endpoints, headers or credentials. Its local surface is invocation memory and then the ordinary bounded OTLP queue | `server.telemetry.export_llm_input` | Landed (#502, widened by #523) |
+| **LLM input and output** | The model's assembled request and raw semantic output before speech filtering, including withheld text, tool schemas, arguments, results and choice, and each tool call's arguments and result on its own tool span. Not vendor framing, generation parameters, endpoints, headers or credentials. Its local surface is invocation memory and then the ordinary bounded OTLP queue | `server.telemetry.export_llm_input` | Landed (#502, widened by #523 and #533) |
 
 Two things are true of the classes rather than of any one flag. **A
 class may gain an artifact**, which widens what an already-on flag
