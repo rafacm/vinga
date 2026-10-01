@@ -767,8 +767,11 @@ code drops that pair too.
 | The input alias restored in `_stage` | killed: `test_a_round_stages_the_conventions_and_no_alias` (reply and recap) and the exact-fit test |
 | The preflight's doubled charge restored (`2 * (output_size + added)`) | killed: `test_a_streamed_pair_that_fits_the_ceiling_exactly_is_exported` |
 | Both aliases and the doubled preflight restored (the plan commit's file), run through the live gate | killed: Langfuse lost the system message on every round (below) |
+| The preflight condition in `observe()` deleted (added after the PR review round below) | killed: `test_output_growth_drops_the_pair_while_it_streams` |
 
-None survived.
+None survived. The last row was added after the PR review round: the
+first version of this table had no mutation for a preflight that drops
+too little, and the tests then would have let it survive.
 
 ### The live gate
 
@@ -824,6 +827,35 @@ corresponding round, a different conversation of similar length,
 staged 8,641 with the aliases present. The tool schemas are most of a
 round's weight; the aliases were about a tenth of it here, and their
 share grows with the history.
+
+
+### PR review round
+
+[PR #583](https://github.com/rafacm/vinga/pull/583), reviewed
+2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1,
+at `b3656e90`, runtime 4m27s. Verdict: mergeable after the listed fix.
+
+1. **P2: the tests did not pin the streaming preflight.** Both boundary
+   tests, and the older growth test, inspected the result only after
+   `finish()`, whose own `_size()` check refuses the same pairs. So
+   deleting the preflight condition in `observe()` left every case
+   green, while an over-ceiling stream was held in memory until it
+   ended instead of being dropped at the bound. The doubled-charge
+   mutation above was killed only because doubling drops too much,
+   which the exact-fit test sees; nothing saw a preflight that drops
+   too little.
+
+   *Resolution:* accepted, by turning the older growth test into the
+   preflight's test (`test_output_growth_drops_the_pair_while_it_streams`,
+   commit `Drop a stream in the preflight, before finish`): a delta
+   whose raw bytes alone exceed the ceiling is reported as
+   `llm_input_export_failed` and discarded from telemetry right after
+   `observe()` and before `finish()`; a later delta and `finish()` then
+   stage nothing and report no second failure. Deleting the condition
+   fails it (the mutation table). The two boundary tests are left as
+   they are: they pin where the boundary sits, and this one pins when
+   the drop happens. Affected file after the change: `16 passed`;
+   `uv run ruff check .` clean.
 
 ### Lanes
 
