@@ -119,13 +119,18 @@ ACTIVATION_SEGMENT = "activate"
 # held while it is made.
 #
 # `httpx` writes one line per request at INFO carrying the method, the
-# URL and the status, which `logs.py` names where it floors the vendor
-# libraries and keeps deliberately, since for every other caller in this
-# server it says nothing that is not already public. For this one it says
-# the whole of what every verdict refuses to print: a supplied OTA URL
-# can be the deployment's secret `ota_path`, and a log record is a
-# retained surface in a way a terminal is not. `httpcore` traces the
-# connection under it and is held with it.
+# URL and the status. For this request it says the whole of what every
+# verdict refuses to print: a supplied OTA URL can be the deployment's
+# secret `ota_path`, and a log record is a retained surface in a way a
+# terminal is not. `httpcore` traces the connection under it and is held
+# with it.
+#
+# `logs.py` floors both at WARNING for the whole process, and both entry
+# points apply that floor before these commands run, so on the ordinary
+# path the floor already holds the line back. This is held anyway,
+# because the floor is a standing setting a diagnosis may lift by name,
+# which `logs.py` leaves open on purpose, and a request whose URL is a
+# secret must stay quiet when it has been.
 #
 # WARNING rather than off, so a library that has something genuinely
 # wrong to say can still say it, and scoped to the request rather than
