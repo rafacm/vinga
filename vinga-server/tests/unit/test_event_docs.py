@@ -58,6 +58,7 @@ from vinga_server.events.values import (
     ArgKind,
     DropReason,
     Kind,
+    ScopeProvenance,
 )
 
 
@@ -252,6 +253,12 @@ def check_constraint(rendered: str, declared: Any, kind: str, where: str) -> Non
         # meets the reasons at all.
         for reason in sorted(DropReason):
             assert token(str(reason)) in rendered, f"{where}: reason {reason!r} missing"
+        return
+    if kind == "MEMORY_SOURCES":
+        # The three keys, for the reason the drop reasons are listed:
+        # the cell is where a reader meets the closed set.
+        for scope in sorted(ScopeProvenance):
+            assert token(str(scope)) in rendered, f"{where}: scope {scope!r} missing"
         return
     if kind == "PROVIDER_ENTRIES":
         for name in PROVIDER_ENTRY_REQUIRED + PROVIDER_ENTRY_OPTIONAL:

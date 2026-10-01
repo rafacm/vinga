@@ -1105,7 +1105,9 @@ class PipelineRuntime:
         round's log volume for a number that moves slowly, and
         `llm_round` already carries that round's token counts. The
         inspection surface reads memory fresh and answers its size on
-        demand.
+        demand. The per-round half rides `llm_round` itself instead, an
+        event that already fires per round (#533): the whole system
+        size, the scope blocks' sizes and the ids of the facts injected.
         """
         self._events.emit(
             lambda: PromptAssembled(
@@ -1780,7 +1782,10 @@ class PipelineRuntime:
             invocation = uuid.uuid4().hex
             # Resolved before the request is built, and per round rather
             # than per reply, because that is the memory block's clock.
-            system = await self._system_prompt()
+            # Kept whole rather than as its text: the round's events
+            # carry its accounting, on success and on failure alike.
+            sent = await self._system_prompt()
+            system = sent.text
             if self._llm_input is not None:
                 # Staged HERE, where the round is assembled, and
                 # deliberately not inside the partial below. The
@@ -1805,6 +1810,7 @@ class PipelineRuntime:
                     functools.partial(providers.llm.stream, system, working, offer.tools, choice),
                     invocation=invocation,
                     round_=self._pass.round,
+                    prompt=sent,
                 ):
                     if self._llm_input is not None:
                         self._llm_input.observe(invocation, event)
@@ -1846,6 +1852,7 @@ class PipelineRuntime:
                     first_token_at,
                     usage,
                     invocation=invocation,
+                    prompt=sent,
                 )
                 tail = splitter.flush()
                 if tail is not None and not self._withheld(tail, offer):
@@ -2362,10 +2369,17 @@ class PipelineRuntime:
             )
         return None
 
-    async def _system_prompt(self) -> str:
+    async def _system_prompt(self) -> prompt.RoundPrompt:
         """The prompt this round is sent: the half cached at activation,
         plus everything memory holds for it and everything the device
         record says, both as they stand right now.
+
+        Answered with what the round's events need to account for it
+        (#533): the assembled prompt and the ids of the facts it holds.
+        Whether memory was read is known only here, so this is where the
+        fact list is chosen to be None (not read: the agent's memory is
+        off) or the read's ids, which are empty where it read nothing
+        and where the read failed, since the model then saw no fact.
 
         The half is not rebuilt here. What this adds is the scope blocks,
         which keep the clock the memory block has always had: read on
@@ -2418,14 +2432,18 @@ class PipelineRuntime:
         assert self._conversation is not None
         record = await self._device_record()
         if not self._remembering_now():
-            return prompt.with_scopes(self._know_how, NOTHING_REMEMBERED, record).text
+            return prompt.RoundPrompt(
+                prompt.with_scopes(self._know_how, NOTHING_REMEMBERED, record), facts=None
+            )
         scopes = await asyncio.to_thread(
             self._memory.read_for_prompt,
             self._agent,
             self._device if record is None else record.mac,
             self._conversation,
         )
-        return prompt.with_scopes(self._know_how, scopes, record).text
+        return prompt.RoundPrompt(
+            prompt.with_scopes(self._know_how, scopes, record), facts=scopes.facts
+        )
 
     async def _device_record(self) -> LiveDevice | None:
         """What this conversation is speaking through, as the record it

@@ -54,6 +54,7 @@ from typing import Any, cast
 import pytest
 
 from tests.support.configs import BOTH_MAC, DEVICE_MAC, POET_MAC, base_config, world
+from tests.support.events import events
 from tests.support.providers import CountingServers, RecordingLlm, ScriptedLlm, built_world
 from tests.support.registry import AGENT, STAGES, store_at
 from tests.support.sessions import agent_providers, call, run_reply, session_for
@@ -170,6 +171,32 @@ async def test_an_agent_that_may_not_remember_still_knows_its_device() -> None:
     # The introduction, and none of the notes the board is carrying.
     assert system == f"POET\n\n{device_introduction(NAME, LOCATION)}"
     assert NOTE not in system and DEVICE_HEADING not in system
+
+
+async def test_a_round_that_may_not_remember_still_reports_its_device_block(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """What the round says about that prompt (#533): its sizes describe
+    the prompt that was sent, so the device block holding the record is
+    reported with memory off, and there is no fact list, since no memory
+    was read."""
+    store = lane_memory()
+    await store.add(MemoryScope.DEVICE, normalize_mac(POET_MAC), NOTE, agent="poet")
+    llm = RecordingLlm()
+    session = session_for(
+        named_config(poet=OFF), POET_MAC, {"poet": llm}, memory=store
+    )
+
+    with caplog.at_level("INFO"):
+        await run_reply(session, "hello")
+
+    (system,) = llm.systems
+    introduction = device_introduction(NAME, LOCATION)
+    (rounded,) = events(caplog, "llm_round")
+    assert rounded.system_characters == len(system)
+    assert rounded.memory_characters == len("\n\n") + len(introduction)
+    assert rounded.memory_sources == {"device": len(introduction)}
+    assert not hasattr(rounded, "memory_facts")
 
 
 async def test_an_agent_that_may_not_remember_reads_no_memory(

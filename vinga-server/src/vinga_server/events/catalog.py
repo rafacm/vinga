@@ -85,6 +85,7 @@ from vinga_server.events.values import (
     EventName,
     EventValue,
     EventValueError,
+    FactIds,
     FallbackReason,
     FillerSkip,
     FirmwareVersion,
@@ -105,6 +106,7 @@ from vinga_server.events.values import (
     McpReloadOutcome,
     McpTransport,
     MemoryScope,
+    MemorySources,
     Nothing,
     NotOffered,
     OriginProvenance,
@@ -1818,6 +1820,42 @@ CACHE_READ_INPUT_TOKENS_NOTE = (
     "rather than a zero."
 )
 
+# The notes for a reply round's prompt accounting (#533), one per field
+# and shared by the two variants that carry it: a round that finished
+# and a round that failed after its request was built describe the same
+# prompt, so the reference says the same thing about both.
+SYSTEM_CHARACTERS_NOTE = (
+    "The whole system prompt this round sent: the know-how half, the "
+    "scope blocks and the blank lines joining them. Present on every "
+    "reply round, finished or failed after its request was built, "
+    "whatever the agent's memory setting; absent on a recap and on any "
+    "other stage's failure."
+)
+MEMORY_CHARACTERS_NOTE = (
+    "How much of `system_characters` the round's scope blocks added: "
+    "each block as rendered and the blank line before it. The device "
+    "block carries the device record as well as the device's notes, so "
+    "this is the per-round part of the prompt rather than remembered "
+    "facts alone."
+)
+MEMORY_SOURCES_NOTE = (
+    "Each scope block's size by provenance, `state`, `memory` and "
+    "`device`, with a block that was not sent absent rather than zero. "
+    "Sizes, never text, and never summing to `system_characters`: the "
+    "know-how half's blocks are `prompt_assembled.sources`."
+)
+MEMORY_FACTS_NOTE = (
+    "The ids of the remembered facts the prompt injected, the agent's "
+    "block then the device's, at most 70 (the agent block's newest 40 "
+    "and the device scope's cap of 30). Present, and possibly empty, "
+    "where the round read memory, a read that failed included; absent "
+    "where the agent's memory is off. The conversation's ledger "
+    "contributes none. An id joins to the memory store's current state, "
+    "best effort: a corrected fact keeps its id with new text, and a "
+    "pruned or deleted one leaves no row. What the model actually read "
+    "is the LLM input export's to carry."
+)
+
 
 @dataclass(frozen=True)
 class LlmRound(Variant):
@@ -1887,6 +1925,10 @@ class LlmRound(Variant):
             "for a tool carries none."
         ),
     )
+    system_characters: Count | Absent = value(default=ABSENT, note=SYSTEM_CHARACTERS_NOTE)
+    memory_characters: Count | Absent = value(default=ABSENT, note=MEMORY_CHARACTERS_NOTE)
+    memory_sources: MemorySources | Absent = value(default=ABSENT, note=MEMORY_SOURCES_NOTE)
+    memory_facts: FactIds | Absent = value(default=ABSENT, note=MEMORY_FACTS_NOTE)
     purpose: LlmPurpose = value(fixed=LlmPurpose.REPLY)
 
 
@@ -1971,6 +2013,13 @@ class ProviderFailed(Variant):
     model: Identifier | Absent = value(default=ABSENT)
     invocation: InvocationId | Absent = value(default=ABSENT)
     purpose: LlmPurpose | Absent = value(default=ABSENT)
+    # A reply round that failed after its request was built carries its
+    # prompt's accounting, since a context-length refusal is where the
+    # size matters most; every other failure carries none of it.
+    system_characters: Count | Absent = value(default=ABSENT, note=SYSTEM_CHARACTERS_NOTE)
+    memory_characters: Count | Absent = value(default=ABSENT, note=MEMORY_CHARACTERS_NOTE)
+    memory_sources: MemorySources | Absent = value(default=ABSENT, note=MEMORY_SOURCES_NOTE)
+    memory_facts: FactIds | Absent = value(default=ABSENT, note=MEMORY_FACTS_NOTE)
 
 
 @dataclass(frozen=True)

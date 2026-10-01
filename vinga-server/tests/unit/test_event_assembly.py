@@ -68,7 +68,9 @@ from vinga_server.events.values import (
     ToolSource,
     Whole,
 )
+from vinga_server.memory.store import PromptMemory
 from vinga_server.providers.base import ProviderIdentity
+from vinga_server.runtime import prompt
 
 
 @dataclass(frozen=True)
@@ -108,6 +110,7 @@ UNREGISTERED = Stamped()
 
 
 INTERFACE = [
+    "RoundAccounting",
     "builtin_sentence_withheld",
     "builtin_tool_called",
     "heard",
@@ -141,7 +144,8 @@ def defined_here(module: ModuleType) -> list[str]:
 
 
 def test_the_module_defines_its_builders_and_nothing_that_makes_an_entry() -> None:
-    """The interface is the twelve builders and the fragment. The quartet
+    """The interface is the twelve builders, the fragment, and the shape
+    a reply round's prompt accounting arrives in (#533). The quartet
     type and the crossing that fills it are private, which is what makes
     the builders the only producers of the four entry values.
 
@@ -435,6 +439,105 @@ def test_a_wait_is_told_from_a_refusal_by_type() -> None:
     timed_out = assembly.provider_failure("poet", THREAD, "llm", UNREGISTERED, TimeoutError(), 0.5)
 
     assert timed_out.outcome is ProviderOutcome.TIMED_OUT  # type: ignore[attr-defined]
+
+
+# --- a reply round's prompt accounting (#533) ---------------------------
+
+
+def a_round_prompt(facts: tuple[int, ...] | None) -> prompt.RoundPrompt:
+    """A round's prompt with two scope blocks, which is the shape that
+    tells a count with its joins from a sum of block sizes."""
+    return prompt.RoundPrompt(
+        prompt.with_scopes(
+            prompt.know_how("POET"),
+            PromptMemory(state="- a: b", agent="- a fact", device="", agent_ids=(4,)),
+        ),
+        facts=facts,
+    )
+
+
+def test_a_reply_round_carries_its_prompt_accounting() -> None:
+    sent = a_round_prompt((4,))
+
+    payload = carried(
+        assembly.llm_rounded(
+            "poet", THREAD, "llm", CLOUD, 1, 1, 0.5, None, None, None, INVOCATION, prompt=sent
+        )
+    )
+
+    assert payload["system_characters"] == len(sent.text)
+    assert payload["memory_characters"] == sent.memory_characters
+    assert payload["memory_sources"] == sent.memory_sources
+    assert payload["memory_facts"] == [4]
+
+
+def test_a_round_that_read_nothing_says_so_and_one_that_read_no_memory_is_silent() -> None:
+    """Empty and absent are two facts: a read that injected nothing, a
+    failed read included, against memory switched off. The sizes are
+    there either way, since the prompt was sent either way."""
+    read = carried(
+        assembly.llm_rounded(
+            "poet", THREAD, "llm", CLOUD, 1, 1, 0.5, None, None, None, INVOCATION,
+            prompt=a_round_prompt(()),
+        )
+    )
+    unread = carried(
+        assembly.llm_rounded(
+            "poet", THREAD, "llm", CLOUD, 1, 1, 0.5, None, None, None, INVOCATION,
+            prompt=a_round_prompt(None),
+        )
+    )
+
+    assert read["memory_facts"] == []
+    assert "memory_facts" not in unread
+    assert unread["system_characters"] == read["system_characters"]
+    assert unread["memory_sources"] == read["memory_sources"]
+
+
+def test_a_recap_refuses_a_prompt_accounting() -> None:
+    """A recap's prompt is the summarization instruction and holds no
+    memory, so a recap handed the reply's accounting is a defect."""
+    with pytest.raises(ValueError):
+        assembly.llm_rounded(
+            "poet", THREAD, "llm", CLOUD, None, 1, 0.5, None, None, None, INVOCATION,
+            "recap", prompt=a_round_prompt((4,)),
+        )
+
+
+def test_a_failed_reply_round_carries_its_prompt_accounting() -> None:
+    sent = a_round_prompt((4,))
+
+    payload = carried(
+        assembly.provider_failure(
+            "poet", THREAD, "llm", CLOUD, ConnectionRefusedError(), 0.5,
+            invocation=INVOCATION, purpose="reply", prompt=sent,
+        )
+    )
+    unaccounted = carried(
+        assembly.provider_failure(
+            "poet", THREAD, "llm", CLOUD, ConnectionRefusedError(), 0.5,
+            invocation=INVOCATION, purpose="reply",
+        )
+    )
+
+    assert payload["system_characters"] == len(sent.text)
+    assert payload["memory_characters"] == sent.memory_characters
+    assert payload["memory_sources"] == sent.memory_sources
+    assert payload["memory_facts"] == [4]
+    for field in ("system_characters", "memory_characters", "memory_sources", "memory_facts"):
+        assert field not in unaccounted
+
+
+@pytest.mark.parametrize(("stage", "purpose"), [("asr", None), ("tts", None), ("llm", "recap")])
+def test_only_a_reply_round_failure_takes_a_prompt_accounting(
+    stage: str, purpose: str | None
+) -> None:
+    with pytest.raises(ValueError):
+        assembly.provider_failure(
+            "poet", THREAD, stage, CLOUD, ConnectionRefusedError(), 0.5,
+            invocation=INVOCATION if stage == "llm" else None,
+            purpose=purpose, prompt=a_round_prompt((4,)),
+        )
 
 
 # --- the three tool-call shapes ---------------------------------------

@@ -40,8 +40,9 @@ imports the catalog and the value vocabulary and no subsystem, which is
 what lets it be called from anywhere an event is emitted.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import cast
+from typing import Protocol, cast
 
 from vinga_server.events.catalog import (
     BuiltinSentenceWithheld,
@@ -65,6 +66,7 @@ from vinga_server.events.values import (
     ClassName,
     ConversationId,
     Count,
+    FactIds,
     Flag,
     Fragment,
     FromEntry,
@@ -72,6 +74,7 @@ from vinga_server.events.values import (
     InvocationId,
     LanguageTag,
     LlmPurpose,
+    MemorySources,
     Nothing,
     ProviderOutcome,
     QuotedProvider,
@@ -85,6 +88,7 @@ from vinga_server.events.values import (
 )
 
 __all__ = [
+    "RoundAccounting",
     "builtin_sentence_withheld",
     "builtin_tool_called",
     "heard",
@@ -387,6 +391,48 @@ def _namespace(source: str) -> UnnamedToolSource:
     return cast(UnnamedToolSource, ToolSource(source))
 
 
+class RoundAccounting(Protocol):
+    """What one reply round's prompt held, in the plain numbers its
+    events carry (#533).
+
+    A protocol rather than an import, because this module takes plain
+    values and reaches no subsystem: `runtime.prompt.RoundPrompt` is the
+    one production shape, and it satisfies this by having these four.
+    `facts` is None where the round read no memory and empty where it
+    read and injected nothing.
+    """
+
+    @property
+    def system_characters(self) -> int: ...
+
+    @property
+    def memory_characters(self) -> int: ...
+
+    @property
+    def memory_sources(self) -> Mapping[str, int]: ...
+
+    @property
+    def facts(self) -> tuple[int, ...] | None: ...
+
+
+def _accounted(
+    prompt: RoundAccounting | None,
+) -> tuple[Count | Absent, Count | Absent, MemorySources | Absent, FactIds | Absent]:
+    """A round's prompt accounting as the four fields both of its events
+    carry, derived in this one place so a round that finished and a
+    round that failed cannot describe one prompt two ways. All absent
+    where there is no accounting, and the fact list absent on its own
+    where the round read no memory."""
+    if prompt is None:
+        return ABSENT, ABSENT, ABSENT, ABSENT
+    return (
+        Count(prompt.system_characters),
+        Count(prompt.memory_characters),
+        MemorySources(dict(prompt.memory_sources)),
+        ABSENT if prompt.facts is None else FactIds(tuple(prompt.facts)),
+    )
+
+
 def llm_retried(
     agent: str,
     conversation: str,
@@ -426,6 +472,7 @@ def llm_rounded(
     purpose: str = "reply",
     *,
     cache_read_input_tokens: int | None = None,
+    prompt: RoundAccounting | None = None,
 ) -> Variant:
     """The `llm_round` event for this generation.
 
@@ -435,6 +482,8 @@ def llm_rounded(
     a round that only asked for a tool timed no spoken token.
     `cache_read_input_tokens` is the part of `input_tokens` the
     provider's prompt cache served, already a subset when it arrives.
+    `prompt` is a reply round's accounting of what it sent, which a
+    recap has none of: its prompt is the summarization instruction.
     """
     entry, type_, host, model = _entry_fields(provider)
     declared_input = Count(input_tokens) if input_tokens is not None else ABSENT
@@ -449,6 +498,8 @@ def llm_rounded(
     if declared is LlmPurpose.RECAP:
         if round_ is not None:
             raise ValueError("a recap generation has no reply-local round")
+        if prompt is not None:
+            raise ValueError("a recap generation's prompt holds no memory")
         return LlmRecap(
             agent=Identifier(agent),
             conversation=ConversationId(conversation),
@@ -468,6 +519,7 @@ def llm_rounded(
         )
     if round_ is None:
         raise ValueError("a reply generation has a reply-local round")
+    system, memory, sources, facts = _accounted(prompt)
     return LlmRound(
         agent=Identifier(agent),
         conversation=ConversationId(conversation),
@@ -485,6 +537,10 @@ def llm_rounded(
         cache_read_input_tokens=declared_cached,
         output_tokens=declared_output,
         first_token_ms=declared_first_token,
+        system_characters=system,
+        memory_characters=memory,
+        memory_sources=sources,
+        memory_facts=facts,
     )
 
 
@@ -584,8 +640,14 @@ def provider_failure(
     *,
     invocation: str | None = None,
     purpose: str | None = None,
+    prompt: RoundAccounting | None = None,
 ) -> Variant:
     """The `provider_failed` event for this failure.
+
+    `prompt` is the accounting of a reply round that failed after its
+    request was built, which is where a prompt's size matters most (a
+    context-length refusal), and is refused for any other failure: no
+    other stage and no recap sent a reply round's prompt.
 
     The class name is reported and the exception's message is not, which
     the value types make structural rather than careful: `ClassName` is
@@ -603,12 +665,15 @@ def provider_failure(
     `openai.APITimeoutError` is an `APIConnectionError` and
     `httpx.TimeoutException` inherits from neither.
     """
+    if prompt is not None and (stage != "llm" or purpose != LlmPurpose.REPLY):
+        raise ValueError("only a reply round's failure carries its prompt's accounting")
     outcome = (
         ProviderOutcome.TIMED_OUT
         if isinstance(failure, TimeoutError)
         else ProviderOutcome.FAILED
     )
     entry, type_, host, model = _entry_fields(provider)
+    system, memory, sources, facts = _accounted(prompt)
     return ProviderFailed(
         agent=Identifier(agent),
         conversation=ConversationId(conversation),
@@ -625,4 +690,8 @@ def provider_failure(
         model=model,
         invocation=ABSENT if invocation is None else InvocationId(invocation),
         purpose=ABSENT if purpose is None else LlmPurpose(purpose),
+        system_characters=system,
+        memory_characters=memory,
+        memory_sources=sources,
+        memory_facts=facts,
     )

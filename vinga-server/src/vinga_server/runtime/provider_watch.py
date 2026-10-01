@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 from vinga_server.events import SessionEvents, assembly
 from vinga_server.events.values import LlmPurpose
 from vinga_server.providers import LlmEvent, StreamStarted, Turn, Usage
+from vinga_server.runtime.prompt import RoundPrompt
 from vinga_server.runtime.turns import TurnUnderway
 from vinga_server.session_conversations import SessionConversations
 
@@ -138,6 +139,7 @@ class ProviderWatch:
         *,
         invocation: str,
         purpose: LlmPurpose,
+        prompt: RoundPrompt | None = None,
     ) -> AsyncIterator[Any]:
         """An LLM stream, with a failure raised by the stream itself
         reported as that provider's.
@@ -146,7 +148,10 @@ class ProviderWatch:
         LLM for a TTS failure raised while speaking what the model had
         already said, and report one failure twice. Pulling the stream
         by hand is what separates the two: what the consumer raises
-        closes this generator rather than passing through the guard."""
+        closes this generator rather than passing through the guard.
+
+        `prompt` is a reply round's accounting, which its failure
+        carries (#533); a recap has none to hand over."""
         started = asyncio.get_running_loop().time()
         iterator = events.__aiter__()
         while True:
@@ -162,6 +167,7 @@ class ProviderWatch:
                     asyncio.get_running_loop().time() - started,
                     invocation=invocation,
                     purpose=purpose,
+                    prompt=prompt,
                 )
                 raise
             yield event
@@ -173,6 +179,7 @@ class ProviderWatch:
         *,
         invocation: str,
         round_: int,
+        prompt: RoundPrompt,
     ) -> AsyncIterator[LlmEvent]:
         """An LLM stream whose wait for the first event is bounded.
 
@@ -212,7 +219,13 @@ class ProviderWatch:
 
         `round_` is the reply's round this stream is, counted by the
         caller across the whole reply, which is what the retry line
-        names. This is itself the generator a caller iterates, with no
+        names. `prompt` is the round's accounting of what it is sending,
+        built once before the first attempt, and a failure carries it by
+        both of the routes that end a round here: through `watched` for
+        a failure the stream raised, and directly for the second stall,
+        which is reported below rather than by the stream (#533). The
+        retry re-sends the same arguments, so one accounting is right
+        for both attempts. This is itself the generator a caller iterates, with no
         second one wrapped around it, so a cancellation lands in the
         wait above rather than in an await added on the way to it."""
         timeout_s = self._first_token_timeout_s
@@ -223,6 +236,7 @@ class ProviderWatch:
                 make_stream(),
                 invocation=invocation,
                 purpose=LlmPurpose.REPLY,
+                prompt=prompt,
             )
             started = loop.time()
             stalled: float | None = None
@@ -256,6 +270,7 @@ class ProviderWatch:
                         elapsed,
                         invocation=invocation,
                         purpose=LlmPurpose.REPLY,
+                        prompt=prompt,
                     )
                     raise failure
                 # The loop variable is read by a thunk the emitter calls
@@ -289,10 +304,12 @@ class ProviderWatch:
         usage: Usage | None,
         *,
         invocation: str,
+        prompt: RoundPrompt,
     ) -> None:
         """A round of a reply finished: its `llm_round`, numbered
-        `round_`, and the round filed on `turn`, the record of the turn
-        it belongs to."""
+        `round_` and carrying the accounting of the `prompt` it sent,
+        and the round filed on `turn`, the record of the turn it belongs
+        to."""
         elapsed, first_token_ms, inputs, outputs = self._rounded(
             provider,
             working,
@@ -302,6 +319,7 @@ class ProviderWatch:
             invocation=invocation,
             purpose=LlmPurpose.REPLY,
             round_=round_,
+            prompt=prompt,
         )
         # Counted here rather than where the round starts, so that the
         # turn's rounds, its summed duration and its token totals all
@@ -349,6 +367,7 @@ class ProviderWatch:
         invocation: str,
         purpose: LlmPurpose,
         round_: int | None,
+        prompt: RoundPrompt | None = None,
     ) -> tuple[float, int | None, int | None, int | None]:
         """One `llm_round` event, which is where a slow reply becomes
         attributable.
@@ -402,6 +421,7 @@ class ProviderWatch:
                 invocation,
                 purpose,
                 cache_read_input_tokens=cached,
+                prompt=prompt,
             )
         )
         return elapsed, first_token_ms, inputs, outputs
@@ -415,9 +435,11 @@ class ProviderWatch:
         *,
         invocation: str | None = None,
         purpose: LlmPurpose | None = None,
+        prompt: RoundPrompt | None = None,
     ) -> None:
         """One `provider_failed` event, and the sentence that goes with
-        it. A timeout is worded as one, because where traffic is
+        it, carrying a failed reply round's `prompt` accounting where
+        there is one. A timeout is worded as one, because where traffic is
         dropped rather than refused the whole symptom is a wait.
 
         Which failure is a wait is a question of type. Every provider
@@ -454,5 +476,6 @@ class ProviderWatch:
                 elapsed,
                 invocation=invocation,
                 purpose=purpose,
+                prompt=prompt,
             )
         )

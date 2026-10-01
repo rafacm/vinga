@@ -1080,6 +1080,10 @@ session %s: %s round %d took %.2f s over %d turns
 | `cache_read_input_tokens` | `COUNT` | no | no |  | The part of `input_tokens` the provider served from its prompt cache, so never larger than it and never to be added to it. The GenAI conventions' `gen_ai.usage.cache_read.input_tokens`. Absent where the endpoint did not say, which is a fact about the endpoint rather than a zero. |
 | `output_tokens` | `COUNT` | no | no |  |  |
 | `first_token_ms` | `INT` | no | no |  | Times the first spoken token, so a round that only asked for a tool carries none. |
+| `system_characters` | `COUNT` | no | no |  | The whole system prompt this round sent: the know-how half, the scope blocks and the blank lines joining them. Present on every reply round, finished or failed after its request was built, whatever the agent's memory setting; absent on a recap and on any other stage's failure. |
+| `memory_characters` | `COUNT` | no | no |  | How much of `system_characters` the round's scope blocks added: each block as rendered and the blank line before it. The device block carries the device record as well as the device's notes, so this is the per-round part of the prompt rather than remembered facts alone. |
+| `memory_sources` | `MEMORY_SOURCES` | no | no | keyed by `device`, `memory`, `state`, with counts for values | Each scope block's size by provenance, `state`, `memory` and `device`, with a block that was not sent absent rather than zero. Sizes, never text, and never summing to `system_characters`: the know-how half's blocks are `prompt_assembled.sources`. |
+| `memory_facts` | `ID_LIST` | no | no | each element: the `fact_id` syntax | The ids of the remembered facts the prompt injected, the agent's block then the device's, at most 70 (the agent block's newest 40 and the device scope's cap of 30). Present, and possibly empty, where the round read memory, a read that failed included; absent where the agent's memory is off. The conversation's ledger contributes none. An id joins to the memory store's current state, best effort: a corrected fact keeps its id with new text, and a pruned or deleted one leaves no row. What the model actually read is the LLM input export's to carry. |
 | `purpose` | `TOKEN` | yes | no | one of: `reply` |  |
 
 #### Variant 2: `vinga_server.session` at INFO
@@ -1162,6 +1166,10 @@ session %s: %s provider%s %s after %.2f s%s: %s
 | `model` | `IDENTIFIER` | no | no |  |  |
 | `invocation` | `ID` | no | no | the `invocation_id` syntax |  |
 | `purpose` | `TOKEN` | no | no | one of: `recap`, `reply` |  |
+| `system_characters` | `COUNT` | no | no |  | The whole system prompt this round sent: the know-how half, the scope blocks and the blank lines joining them. Present on every reply round, finished or failed after its request was built, whatever the agent's memory setting; absent on a recap and on any other stage's failure. |
+| `memory_characters` | `COUNT` | no | no |  | How much of `system_characters` the round's scope blocks added: each block as rendered and the blank line before it. The device block carries the device record as well as the device's notes, so this is the per-round part of the prompt rather than remembered facts alone. |
+| `memory_sources` | `MEMORY_SOURCES` | no | no | keyed by `device`, `memory`, `state`, with counts for values | Each scope block's size by provenance, `state`, `memory` and `device`, with a block that was not sent absent rather than zero. Sizes, never text, and never summing to `system_characters`: the know-how half's blocks are `prompt_assembled.sources`. |
+| `memory_facts` | `ID_LIST` | no | no | each element: the `fact_id` syntax | The ids of the remembered facts the prompt injected, the agent's block then the device's, at most 70 (the agent block's newest 40 and the device scope's cap of 30). Present, and possibly empty, where the round read memory, a read that failed included; absent where the agent's memory is off. The conversation's ledger contributes none. An id joins to the memory store's current state, best effort: a corrected fact keeps its id with new text, and a pruned or deleted one leaves no row. What the model actually read is the LLM input export's to carry. |
 
 ### `tool_call`
 
