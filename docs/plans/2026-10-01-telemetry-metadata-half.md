@@ -468,7 +468,21 @@ conventions alone and that Langfuse shows the system prompt as the
 first message of the observation's input; the comment above
 `OBSERVATION_INPUT` in `telemetry.py` drops the content export from its
 list of the alias's writers. Changelog:
-`changelog.d/533-system-prompt-in-langfuse.md`, `### Fixed`.
+`changelog.d/533-system-prompt-in-langfuse.md`, with `### Fixed` (Langfuse
+shows the system prompt as the first message of an exported
+generation's input) and `### Changed` naming the removal as a breaking
+change to the exported trace schema: the `llm` span no longer carries
+`langfuse.observation.input` or `langfuse.observation.output`, and a
+consumer reads `gen_ai.input.messages`, `gen_ai.system_instructions`
+and `gen_ai.output.messages` instead. Retaining the aliases is ruled
+out, not overlooked: they are what keeps the system prompt out of
+Langfuse, and a second spelling of the same content is what the parity
+rule removes. The observability page's sentence naming them "direct
+Langfuse input and output aliases" (`observability-surfaces.md`, the
+content-export section) is rewritten in the same milestone, and the
+Collector configuration under `deploy/telemetry/` is checked for any
+rule that names them (its Jaeger branch drops `langfuse.*` already;
+any masking rule that lists them is updated or shown to be inert).
 
 ## Out of scope, with reasons
 
@@ -897,5 +911,7 @@ Reviewed 2026-10-01 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
 3. **P2: Alias removal is an unannounced telemetry-schema break for running deployments.**
    **Evidence:** Decision 10 removes two emitted OTLP attributes (`plans/2026-10-01-telemetry-metadata-half.md:408`), which the current public observability contract calls “direct Langfuse input and output aliases” (`architecture/observability-surfaces.md:472`). Existing collectors, dashboards, or custom consumers can read those keys even if Langfuse should no longer do so. The issue says these changes are backward compatible, while M3 labels the changelog entry only `### Fixed` (`plans/2026-10-01-telemetry-metadata-half.md:458`).
    **Plan should say instead:** Declare removal as a breaking exported-trace schema change, use `### Changed` as well as `### Fixed`, and give the migration: consumers must read `gen_ai.input.messages` and `gen_ai.output.messages`. If retaining aliases is ruled out by parity, state that explicitly rather than implying an upgrade is transparent.
+
+   *Resolution:* accepted. The changelog entry gains `### Changed`, naming the removal as a breaking change to the exported trace schema with the migration (read the three conventions keys), and records why retaining the aliases is ruled out rather than overlooked. The observability page's "direct Langfuse input and output aliases" sentence and any Collector rule under `deploy/telemetry/` that names them are in the documentation footprint.
 
 **Verdict:** not ready.
