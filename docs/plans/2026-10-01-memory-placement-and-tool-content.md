@@ -544,3 +544,47 @@ What the plan should say instead: explicitly update both content-key inventories
    *Resolution:* accepted. Decision 10 names `tests/unit/test_telemetry_deploy.py`'s exact content-key set and `tests/integration/test_telemetry_fanout.py`'s real-Collector path, which sends credential- and email-shaped values in each new field and shows them masked before both sinks.
 
 Verdict: **not ready**. Amend the two P1 design contradictions before implementation, then incorporate the P2 plumbing, fidelity, and masking requirements.
+
+## Plan review round 3
+
+Reviewed 2026-10-01 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 5m51s, at commit ce69b393, plan blob 2ef7b5c4.
+
+---
+
+1. **P1: Tool-content handoff has no implementable ownership path.**
+
+   Evidence: Decision 8 says `Telemetry._tool_span` calls `LlmInputExport.take_tool` (`plan:245-257`). Today the dependency runs the other way: `LlmInputExport` stages into `Telemetry` (`llm_input_export.py:226-229`), while telemetry owns the content map and `_tool_span` has no exporter collaborator (`telemetry.py:2057-2058`, `telemetry.py:3156-3168`). `ToolExecution` also has no session ID to supply to the proposed `stage_tool(session, ...)` (`tool_execution.py:246-260`).
+
+   Plan should say instead: Telemetry owns a second, locked `(invocation, position)` content map and exposes stage/take/discard methods, as it already does for generation content. `LlmInputExport` serializes and bounds the pair, then stages it into Telemetry; `_tool_span` takes it on traced and untraced paths. Pass `session_id` to `ToolExecution`, or inject a session-bound staging callback. Define failure handling when telemetry rejects staging.
+
+2. **P1: Moving `with_scopes` strands the public prompt-preview API.**
+
+   Evidence: Decision 1 changes `with_scopes` from one `Assembled` system prompt to separate system/context renderings (`plan:115-124`). `_prompt_preview` directly returns `with_scopes(half, scopes)` as an `Assembled` (`app.py:1145-1161`). The public route and `AssembledPrompt` promise one system prompt with memory blocks in a single ordered list (`config/api.py:1727-1799`, `config/responses.py:597-620`). The plan neither names this caller nor decides its changed response contract.
+
+   Plan should say instead: Define how `GET /runtime/agents/{name}/prompt` and `vinga agent preview` represent a request whose stable system prompt and per-round context are in different messages. Specify backward compatibility for the existing `blocks`/`characters` response, update the response model, route prose, CLI renderer, OpenAPI artifact, and tests. The preview must not silently omit memory or claim it remains in the system message.
+
+3. **P2: The cache gate does not isolate its treatment arms.**
+
+   Evidence: The proposed old/new/ new/old sessions have verified writes but no verified empty baseline, cleanup, namespace separation, or cache-key isolation (`plan:207-227`). `remember` deliberately persists across conversations, so an earlier arm changes the later arm’s injected context. Reusing the same provider-visible prefix can also prewarm the following arm.
+
+   Plan should say instead: Before each arm, clear and verify the exact memory scope is empty; clean it afterward; make the device and state baseline explicit; and use an arm-specific nonce that is stable within that arm so its own 15 turns warm its cache but another arm cannot. Record those setup and teardown checks in the implementation table.
+
+4. **P2: The no-user fallback violates the plan’s Anthropic alternation claim.**
+
+   Evidence: Decision 2 appends a final user turn when none exists while also claiming no consecutive user messages and valid Anthropic alternation (`plan:129-140`). A neutral tool-result turn is already rendered by Anthropic as a `user` message (`anthropic_llm.py:57-70`). A no-user sequence ending in tool results therefore renders as adjacent user messages, and the current adapter does not merge them.
+
+   Plan should say instead: Define the fallback for every valid neutral-turn tail. Either require and enforce the reply-path invariant that a user turn always exists, or add the necessary adapter rendering to merge context with a trailing Anthropic tool-result message. Test the empty sequence and a sequence ending in tool results.
+
+5. **P2: “One ceiling per pair” does not bound exported tool content in a running deployment.**
+
+   Evidence: Decision 9 removes all aggregate accounting because staging and taking are synchronous (`plan:258-270`). But taking a pair attaches it to an ended span, which enters telemetry’s bounded global queue, not an immediately delivered sink. The queue permits 2,048 spans and each tool pair may be 256 KiB (`telemetry.py:172-176`). `ToolExecution.run` executes every non-ordered call in a supplied list, concurrently and without a call-count cap (`tool_execution.py:452-503`). A single tool-heavy reply can therefore fill the global queue with hundreds of individually valid content spans.
+
+   Plan should say instead: Separate transient staging lifetime from export admission. Add a per-invocation tool-content byte and/or pair budget derived from the queue budget, drop later complete pairs with `kind=tool_call`, and test many under-ceiling results exhausting that admission budget. The existing per-pair limit alone is not an operational bound.
+
+6. **P2: The byte-identical-history test contradicts the accepted continuation behavior.**
+
+   Evidence: Decision 4 and its test require the previous user message to be byte-identical across consecutive requests (`plan:162-168`, `plan:352-354`). Decision 2 correctly says a memory-writing tool changes context on that same newest user turn in the continuation request (`plan:143-152`). The pipeline retains that user turn while appending the assistant call and tool results (`pipeline.py:1888-1905`).
+
+   Plan should say instead: Specify that persistence preserves the unplaced utterance, and that older user turns are byte-identical on the next independent user reply. Test that case after a completed reply. Separately test that a same-reply continuation after a verified write changes the current placed user message and report its cache cost, rather than asserting impossible equality.
+
+Verdict: **not ready.**
