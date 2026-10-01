@@ -17,6 +17,7 @@ test that let it write into the packaged tree would leave one behind.
 """
 
 import re
+import secrets
 import shutil
 import threading
 from pathlib import Path
@@ -24,6 +25,7 @@ from pathlib import Path
 import psycopg
 import pytest
 from alembic import command
+from sqlalchemy import text
 
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.db import DOMAIN_CHAIN, URL_REFUSED, StoreChain, connection_url
@@ -77,6 +79,19 @@ def _exists(database: str) -> bool:
         connection.close()
 
 
+def _drop_scratch(database: str) -> None:
+    """Clean up after a case whose subject is a database the command may
+    have left behind, so a mutant that leaks one does not litter the
+    instance. Refuses any name that is not the command's own."""
+    assert database.startswith(autogen.SCRATCH_PREFIX), database
+    url = connection_url(DatabaseConfig(name="postgres")).set(drivername="postgresql")
+    connection = psycopg.connect(url.render_as_string(hide_password=False), autocommit=True)
+    try:
+        connection.execute(f'drop database if exists "{database}" with (force)')
+    finally:
+        connection.close()
+
+
 def test_a_url_override_never_migrates_the_database_it_names(
     blank_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -125,6 +140,77 @@ def test_the_scratch_database_is_made_migrated_and_taken_away(
     assert name != autogen.SCRATCH_PREFIX, name
     assert re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", name), name
     assert not _exists(name)
+
+
+class ComparisonFailed(Exception):
+    """What the comparison raises in the case below: nothing a real
+    failure could be mistaken for."""
+
+
+def test_a_failed_comparison_still_takes_its_scratch_database_away(
+    blank_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The drop is in a `finally`, and this is the case that says so.
+
+    The comparison fails after the scratch database was made, migrated
+    and connected to, which is where an Alembic failure lands. The
+    database is named from inside it, through the connection the
+    command handed Alembic, and it must be gone once the failure has
+    travelled out. A drop on the success path only would leave it.
+    """
+    monkeypatch.setenv("VINGA_DB_URL", _url_of(blank_database))
+    made: list[str] = []
+
+    def failing_revision(config, **options):
+        connection = config.attributes["connection"]
+        made.append(connection.execute(text("select current_database()")).scalar_one())
+        raise ComparisonFailed
+
+    monkeypatch.setattr(command, "revision", failing_revision)
+    try:
+        with pytest.raises(ComparisonFailed):
+            autogen.generate("a probe whose comparison fails", _chain_in(tmp_path))
+
+        assert len(made) == 1, made
+        assert made[0].startswith(autogen.SCRATCH_PREFIX), made
+        assert not _exists(made[0])
+    finally:
+        for name in made:
+            _drop_scratch(name)
+
+
+def test_a_name_already_taken_is_refused_and_left_alone(
+    blank_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other edge of the same `finally`: the drop is entered only
+    once this run's own `create` succeeded.
+
+    The name the command would choose is made to exist first, which is
+    a collision forced rather than waited for: the random suffix is
+    pinned to one drawn here, so no other run, this lane's or another's,
+    can hold it. The command must refuse at its `create` and leave that
+    database exactly where it was, because it is somebody else's. A
+    `finally` that also covered the `create` would drop it with `force`,
+    connections and all, which is the bug the per-run name exists to fix.
+    """
+    monkeypatch.setenv("VINGA_DB_URL", _url_of(blank_database))
+    suffix = secrets.token_hex(8)
+    taken = autogen.SCRATCH_PREFIX + suffix
+    url = connection_url(DatabaseConfig(name="postgres")).set(drivername="postgresql")
+    connection = psycopg.connect(url.render_as_string(hide_password=False), autocommit=True)
+    try:
+        connection.execute(f'create database "{taken}"')
+    finally:
+        connection.close()
+    try:
+        monkeypatch.setattr(secrets, "token_hex", lambda nbytes=None: suffix)
+
+        with pytest.raises(psycopg.errors.DuplicateDatabase):
+            autogen.generate("a probe that meets a taken name", _chain_in(tmp_path))
+
+        assert _exists(taken)
+    finally:
+        _drop_scratch(taken)
 
 
 def test_two_runs_at_once_each_keep_their_own_scratch_database(
