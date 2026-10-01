@@ -29,6 +29,8 @@ CONTENT_ATTRIBUTES = {
     "gen_ai.output.messages",
     "vinga.llm.tools",
     "vinga.llm.tool_choice",
+    "gen_ai.tool.call.arguments",
+    "gen_ai.tool.call.result",
     "langfuse.observation.input",
     "langfuse.observation.output",
     "langfuse.observation.metadata.legs",
