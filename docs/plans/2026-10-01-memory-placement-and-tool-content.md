@@ -192,6 +192,19 @@ between on the request's shape and the model's reading of it.
    generation again, re-opening the gap the metadata half's M3 just
    closed, to save bytes the content bound already counts. #533 is
    closed with that reason recorded.
+5a. **The prompt preview tells the truth about where each block goes.**
+   `GET /runtime/agents/{name}/prompt` and `vinga agent preview`
+   (`app.py`'s `_prompt_preview`, `config/api.py`, `AssembledPrompt` in
+   `config/responses.py`) present the prompt as one system prompt with
+   memory in it. The response stays backward compatible and becomes
+   truthful: `blocks` stays one ordered list (know-how blocks, then the
+   scope blocks, as today) and `characters` today's total; each block
+   gains `placement` from a closed set (`system`, `context`), and the
+   response gains `system_characters` and `context_characters`. The
+   route's prose, the CLI renderer (two labelled sections: the system
+   prompt, and the per-round context that leads the user's message),
+   the generated OpenAPI document and the tests change with it. The
+   preview never claims memory is in the system message.
 6. **The gate is a behavior check and a cache measurement, both on
    OpenAI.** Anthropic is unmeasurable on this machine (no key) and is
    covered by its adapter's rendering tests only, stated as an unchecked
@@ -572,6 +585,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    Evidence: Decision 1 changes `with_scopes` from one `Assembled` system prompt to separate system/context renderings (`plan:115-124`). `_prompt_preview` directly returns `with_scopes(half, scopes)` as an `Assembled` (`app.py:1145-1161`). The public route and `AssembledPrompt` promise one system prompt with memory blocks in a single ordered list (`config/api.py:1727-1799`, `config/responses.py:597-620`). The plan neither names this caller nor decides its changed response contract.
 
    Plan should say instead: Define how `GET /runtime/agents/{name}/prompt` and `vinga agent preview` represent a request whose stable system prompt and per-round context are in different messages. Specify backward compatibility for the existing `blocks`/`characters` response, update the response model, route prose, CLI renderer, OpenAPI artifact, and tests. The preview must not silently omit memory or claim it remains in the system message.
+
+   *Resolution:* accepted. New decision 5a keeps the preview response backward compatible (one ordered `blocks` list and today's `characters` total) and makes it truthful: a closed `placement` (`system`, `context`) on each block, `system_characters` and `context_characters` at the top, the route prose, the CLI renderer in two labelled sections, the regenerated OpenAPI document and tests. It belongs to M1.
 
 3. **P2: The cache gate does not isolate its treatment arms.**
 
