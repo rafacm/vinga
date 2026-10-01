@@ -34,6 +34,8 @@ processors:
           - replace_pattern(attributes["gen_ai.output.messages"], "(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", "[email]") where attributes["gen_ai.output.messages"] != nil
           - replace_pattern(attributes["vinga.llm.tools"], "(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", "[email]") where attributes["vinga.llm.tools"] != nil
           - replace_pattern(attributes["vinga.llm.tool_choice"], "(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", "[email]") where attributes["vinga.llm.tool_choice"] != nil
+          - replace_pattern(attributes["gen_ai.tool.call.arguments"], "(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", "[email]") where attributes["gen_ai.tool.call.arguments"] != nil
+          - replace_pattern(attributes["gen_ai.tool.call.result"], "(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", "[email]") where attributes["gen_ai.tool.call.result"] != nil
           - replace_pattern(attributes["langfuse.observation.input"], "(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", "[email]") where attributes["langfuse.observation.input"] != nil
           - replace_pattern(attributes["langfuse.observation.output"], "(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", "[email]") where attributes["langfuse.observation.output"] != nil
           - replace_pattern(attributes["langfuse.observation.metadata.legs"], "(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", "[email]") where attributes["langfuse.observation.metadata.legs"] != nil

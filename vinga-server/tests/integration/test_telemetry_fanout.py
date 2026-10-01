@@ -53,6 +53,8 @@ CANONICAL_CONTENT = {
     "gen_ai.output.messages",
     "vinga.llm.tools",
     "vinga.llm.tool_choice",
+    "gen_ai.tool.call.arguments",
+    "gen_ai.tool.call.result",
 }
 LANGFUSE_CONTENT = {
     "langfuse.observation.input",
