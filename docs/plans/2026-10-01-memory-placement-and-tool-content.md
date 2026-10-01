@@ -147,8 +147,15 @@ between on the request's shape and the model's reading of it.
    more. The content export's `gen_ai.system_instructions` is now the
    stable half, and the context appears in `gen_ai.input.messages` as
    the newest user message's leading text part, which is what the model
-   received; this also answers #533 §3's "once per agent" for the
-   stable half without a separate change.
+   received. The stable half is still exported on every round's span,
+   deliberately: #533 §3's "once per agent" is declined rather than
+   built. Each generation is rendered by the backend from its own span
+   (Langfuse builds a generation's input from that span's
+   `gen_ai.system_instructions` and `gen_ai.input.messages`), so a
+   once-per-activation carrier would take the system prompt off every
+   generation again, re-opening the gap the metadata half's M3 just
+   closed, to save bytes the content bound already counts. #533 is
+   closed with that reason recorded.
 6. **The gate is a behavior check and a cache measurement, both on
    OpenAI.** Anthropic is unmeasurable on this machine (no key) and is
    covered by its adapter's rendering tests only, stated as an unchecked
@@ -355,6 +362,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Evidence:** Decision 5 claims moving memory “answers #533 §3’s ‘once per agent’” (`docs/plans/2026-10-01-memory-placement-and-tool-content.md:133-145`). But `PipelineRuntime` still calls `stage_reply` inside every round (`runtime/pipeline.py:1768,1805-1813`), and `_stage` writes `gen_ai.system_instructions` into every round snapshot (`llm_input_export.py:139-160`). The metadata-half review explicitly deferred the one-copy design to this content half (`docs/plans/2026-10-01-telemetry-metadata-half.md:900-904`).
 
    **Plan should say instead:** Define the carrier that exports the stable know-how text once per agent activation, plus how every generation references it while carrying per-round context. Test multiple rounds and a handover, proving exactly one stable-prompt copy per activation and correct Langfuse rendering.
+
+   *Resolution:* accepted that the plan overclaimed, and the "once per agent" cardinality is declined rather than built, on the merits. A backend renders each generation from its own span: Langfuse builds a generation's input from that span's `gen_ai.system_instructions` and `gen_ai.input.messages`, so exporting the stable half once per activation would take the system prompt off every generation again, re-opening the gap the metadata half's M3 closed, to save bytes the content bound already counts. Decision 5 now says so, and #533 closes with the reason recorded. The metadata-half review that deferred it deferred it to Rafael's content decisions, which did not choose it.
 
 2. **P1: Adapter placement would make the LLM-input export differ from what the model received.**
 
