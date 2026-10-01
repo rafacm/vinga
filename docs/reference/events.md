@@ -111,8 +111,9 @@ refuse a lawful deployment's traffic.
 | `BOOL` | `True` or `False`. |
 | `COUNT` | A whole number of zero or more, for the fields whose meaning is how many. |
 | `IDENTIFIER_LIST` | A list whose every element is an `IDENTIFIER`. |
-| `ID_LIST` | A list whose every element is an `ID` of the field's declared syntax. |
+| `ID_LIST` | A list whose every element is an `ID` of the field's declared syntax, carried as a string, or as an integer where the syntax says so. |
 | `SOURCES` | A mapping from prompt provenance to character counts, keyed by the grammar below. |
+| `MEMORY_SOURCES` | A mapping from the scope blocks a reply round appends to its prompt to their character counts. Every key is a scope provenance, and a block that was not sent is absent rather than zero. |
 | `DROP_COUNTS` | A mapping from the reasons a mic frame is discarded to how many frames one second lost to each. Every key is a declared reason and every value a count of one or more. |
 | `PROVIDER_ENTRIES` | A mapping from each bound agent to its pipeline stages, and from a stage to the resolved entry's `name`, `type` and, where the type has them, `host` and `model`. Nothing else off a provider entry reaches it, so no configured option and no credential can. |
 
@@ -157,6 +158,7 @@ a bare code span would hide it.
 | `activation_code` | `'[0-9]{6}'` | 6 | A claim ticket read off a screen, not a credential. |
 | `event_name` | `'[a-z][a-z0-9_]{0,63}'` | 64 | The registry's own key, carried in the payload as `event`. |
 | `language` | `'[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{1,8})*'` | 16 | A language code as an ASR engine reports it: the bare ISO 639 code or a tagged form such as `en-US`. |
+| `fact_id` | `'[1-9][0-9]{0,18}'` | 19 | A remembered fact's row id, the number the memory tools and the operator API address it by. Carried as a JSON integer rather than a string; the pattern is its decimal spelling. |
 
 ## The composed grammars
 

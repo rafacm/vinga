@@ -60,6 +60,7 @@ from vinga_server.events.values import (
     ArgKind,
     DropReason,
     Kind,
+    ScopeProvenance,
 )
 
 
@@ -125,10 +126,18 @@ KIND_MEANING: dict[Kind, str] = {
     Kind.BOOL: "`True` or `False`.",
     Kind.COUNT: "A whole number of zero or more, for the fields whose meaning is how many.",
     Kind.IDENTIFIER_LIST: "A list whose every element is an `IDENTIFIER`.",
-    Kind.ID_LIST: "A list whose every element is an `ID` of the field's declared syntax.",
+    Kind.ID_LIST: (
+        "A list whose every element is an `ID` of the field's declared syntax, "
+        "carried as a string, or as an integer where the syntax says so."
+    ),
     Kind.SOURCES: (
         "A mapping from prompt provenance to character counts, keyed by the "
         "grammar below."
+    ),
+    Kind.MEMORY_SOURCES: (
+        "A mapping from the scope blocks a reply round appends to its prompt "
+        "to their character counts. Every key is a scope provenance, and a "
+        "block that was not sent is absent rather than zero."
     ),
     Kind.DROP_COUNTS: (
         "A mapping from the reasons a mic frame is discarded to how many "
@@ -495,6 +504,9 @@ def _field_constraint(declared: Declared) -> str:
         return "one name, or several joined with `, `"
     if kind is Kind.SOURCES:
         return "keyed by the prompt provenance grammar, with counts for values"
+    if kind is Kind.MEMORY_SOURCES:
+        scopes = ", ".join(f"`{one}`" for one in sorted(ScopeProvenance))
+        return f"keyed by {scopes}, with counts for values"
     if kind is Kind.DROP_COUNTS:
         reasons = ", ".join(f"`{one}`" for one in sorted(DropReason))
         return f"keyed by {reasons}, with frame counts for values"
