@@ -17,12 +17,22 @@ import threading
 import pytest
 
 from tests.support.configs import BOTH_MAC, POET_MAC, base_config
+from tests.support.events import events
 from tests.support.providers import CountingServers, RecordingLlm, ScriptedLlm
 from tests.support.sessions import call, run_reply, session_with, talking_thread
 from tests.support.stores import memory as lane_memory
+from tests.support.stores import memory_that_cannot_read
 from vinga_server.config import Config
-from vinga_server.memory.store import MemoryScope, MemoryStore, PromptMemory
+from vinga_server.events.catalog import MEMORY_FACTS_NOTE
+from vinga_server.memory.store import (
+    CORE_LINES,
+    DEVICE_LINES,
+    MemoryScope,
+    MemoryStore,
+    PromptMemory,
+)
 from vinga_server.runtime.prompt import (
+    MEMORY_HEADING,
     STATE_HEADING,
     Guidance,
     ServerInstructions,
@@ -499,3 +509,140 @@ async def test_the_event_survives_a_session_built_off_the_loop() -> None:
     a traceback."""
     config = base_config()
     await asyncio.to_thread(session_with, CountingServers(), None, None, POET_MAC, config)
+
+
+# What a round says about the prompt it sent (#533)
+
+
+def with_poet(poet: dict[str, object]) -> Config:
+    """The lane's two agents, with the poet's entry replaced by the one
+    the case is about."""
+    return base_config(
+        agents={
+            "poet": {"tts": "tenor", **poet},
+            "tutor": {"prompt": "TUTOR", "tts": "alto"},
+        }
+    )
+
+
+async def test_a_round_after_a_remember_names_the_new_fact_and_counts_its_prompt(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The round the issue asks about: the one after a `remember`
+    carries the new fact's id, read off the store rather than assumed.
+    The sizes are asserted against the string the model was handed, and
+    the second round has two scope blocks, so the blank line between
+    them is part of what has to add up."""
+    store = lane_memory()
+    script = ScriptedLlm([[call("remember", text="the user is vegetarian")], "Noted."])
+    session = session_with(CountingServers(), {"poet": script}, memory=store)
+    thread = talking_thread(session)
+    assert thread is not None
+    await store.set_state(thread, "scene", "the tavern", agent="poet")
+
+    with caplog.at_level("INFO"):
+        await run_reply(session, "remember that I am vegetarian")
+
+    (remembered,) = store.read_for_prompt("poet", None, None).agent_ids
+    before, after = events(caplog, "llm_round")
+    assert before.memory_facts == []
+    assert after.memory_facts == [remembered]
+    for rounded, system in zip((before, after), script.systems, strict=True):
+        assert rounded.system_characters == len(system)
+        assert system.startswith("POET\n\n")
+        assert rounded.memory_characters == len(system) - len("POET")
+    assert set(after.memory_sources) == {"state", "memory"}
+    assert after.memory_characters == sum(after.memory_sources.values()) + 2 * len("\n\n")
+
+
+async def test_a_round_with_memory_off_carries_its_sizes_and_no_fact_list(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = lane_memory()
+    await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+    llm = RecordingLlm()
+    config = with_poet({"prompt": "POET", "memory": {"enabled": False}})
+    session = session_with(CountingServers(), {"poet": llm}, memory=store, config=config)
+
+    with caplog.at_level("INFO"):
+        await run_reply(session, "hello")
+
+    (rounded,) = events(caplog, "llm_round")
+    assert llm.systems == ["POET"]
+    assert rounded.system_characters == len("POET")
+    assert rounded.memory_characters == 0
+    assert rounded.memory_sources == {}
+    assert not hasattr(rounded, "memory_facts")
+
+
+async def test_a_round_whose_memory_read_failed_names_no_fact(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The model saw no fact, so the list is empty rather than absent:
+    the read was attempted, and its failure is `memory_unreadable`'s to
+    report."""
+    llm = RecordingLlm()
+    session = session_with(CountingServers(), {"poet": llm}, memory=memory_that_cannot_read())
+
+    with caplog.at_level("INFO"):
+        await run_reply(session, "hello")
+
+    (rounded,) = events(caplog, "llm_round")
+    assert rounded.memory_facts == []
+    assert rounded.system_characters == len(llm.systems[0])
+    assert events(caplog, "memory_unreadable")
+
+
+async def test_the_scopes_are_counted_as_sent_after_a_persona_that_was_trimmed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Plan review round 4's regression: a persona with leading
+    whitespace is sent untouched alone and trimmed once a block follows
+    it, so the know-how half is not a prefix of this round's prompt.
+    What the scopes added is still exactly the tail the model got."""
+    store = lane_memory()
+    await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+    llm = RecordingLlm()
+    config = with_poet({"prompt": "   POET"})
+    session = session_with(CountingServers(), {"poet": llm}, memory=store, config=config)
+
+    with caplog.at_level("INFO"):
+        await run_reply(session, "hello")
+
+    (system,) = llm.systems
+    (rounded,) = events(caplog, "llm_round")
+    tail = f"\n\n{MEMORY_HEADING}\n- the user is vegetarian"
+    assert system == "POET" + tail
+    assert rounded.memory_characters == len(tail)
+    assert rounded.system_characters == len(system)
+
+
+async def test_a_round_with_every_scope_at_its_cap_is_still_accepted(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Decision 9's bound, through the production path: an agent block
+    at `CORE_LINES` and a device scope at `DEVICE_LINES` give a round
+    whose id list is the whole of both, and nothing on the event's way
+    refuses a list that long."""
+    store = lane_memory()
+    for index in range(CORE_LINES):
+        await store.add(MemoryScope.AGENT, "poet", f"fact {index}", agent="poet")
+    for index in range(DEVICE_LINES):
+        await store.add(MemoryScope.DEVICE, POET_MAC, f"note {index}", agent="poet")
+    session = session_with(CountingServers(), {"poet": RecordingLlm()}, memory=store)
+
+    with caplog.at_level("INFO"):
+        await run_reply(session, "hello")
+
+    (rounded,) = events(caplog, "llm_round")
+    assert len(rounded.memory_facts) == CORE_LINES + DEVICE_LINES
+    assert events(caplog, "construction_failed") == []
+
+
+def test_the_fact_list_s_bound_is_stated_as_the_store_sets_it() -> None:
+    """The catalog cannot import the store's constants (the store emits
+    events), so its note states the numbers, and this holds them to the
+    constants they come from."""
+    assert f"at most {CORE_LINES + DEVICE_LINES}" in MEMORY_FACTS_NOTE
+    assert f"newest {CORE_LINES}" in MEMORY_FACTS_NOTE
+    assert f"cap of {DEVICE_LINES}" in MEMORY_FACTS_NOTE
