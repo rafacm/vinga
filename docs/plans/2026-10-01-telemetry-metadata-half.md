@@ -13,22 +13,20 @@ export switch of its own) is Rafael's to decide and is not planned
 here; neither pull request closes #533.
 
 **Local baseline:** not applicable. Every change is a count, an
-identity, a digest or a timing on an exported span; no conversational
+identity or a timing on an exported span; no conversational
 capability moves.
 
-**Cheapest alternative:** for two of the five pieces this plan is
-already the cheapest change (one `LLM_ATTRIBUTES` entry for the first
-token, one catalog note for `language_confidence`). Three pieces cost
+**Cheapest alternative:** for two of the four pieces this plan builds
+it is already the cheapest change (one `LLM_ATTRIBUTES` entry for the
+first token, one catalog note for `language_confidence`). Two cost
 more than the cheapest thing that would also help, and say what they
-buy:
+buy; a fifth piece, the fingerprint, is deferred:
 
-- *The fingerprint.* The cheapest is an unkeyed SHA-256 of the prompt,
-  one field and one attribute. It is a confirmation oracle over prompt
-  content, which the content and telemetry ADR keeps off metadata
-  surfaces (plan review rounds 2 and 3). Keying it with a subkey of the
-  existing `VINGA_MASTER_KEY` costs one derivation at composition and
-  one injected argument, and buys the same comparison with nothing to
-  confirm against; the price is no digest where no master key is set.
+- *The fingerprint.* The cheapest, an unkeyed SHA-256, is a
+  confirmation oracle over prompt content; every keyed shape that meets
+  the issue's "unconditionally" needs a stored installation key. Four
+  review rounds priced it, and it is deferred (decision 3) rather than
+  built at a cost the rest of this plan does not justify.
 
 - *The tool join.* The cheapest would be the provider's call id
   alone, and it is not available: it is far-side bytes, which the
@@ -184,47 +182,16 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
    log line, the catalog's single home for the event; neither appears
    in the `TEMPLATE`. The conventions' `gen_ai.tool.call.id` is not
    used, because its value would be the provider's id.
-3. **The know-how half gets a keyed fingerprint.** A prompt is
-   content under the content and telemetry ADR, operator-authored or
-   not, and any unkeyed digest of it is a confirmation oracle: whoever
-   holds the trace can hash a guessed persona or a guessed secret in
-   it and compare. So the digest is keyed with an installation-private
-   key, which keeps what the issue wanted (two sessions on the same
-   prompt carry the same value; an edit that preserves length changes
-   it) and gives a trace holder without the key nothing to confirm
-   against.
-   - **The value.** `PromptAssembled` gains `digest: Digest | Absent`
-     (a new value type, exactly 64 lowercase hex characters): the
-     HMAC-SHA256 of the know-how half's text exactly as sent
-     (`half.text`, UTF-8), under the key below, computed where the
-     event is built. That rendered text is the one canonical byte
-     sequence: it is what the model receives, assembly has already
-     trimmed the ends and joined the blocks with blank lines
-     (`runtime/prompt.py:514`), and nothing is normalized after it,
-     because a whitespace change the model can see is a prompt
-     change. No block list is concatenated, so no framing is needed. The whole half, MCP-supplied blocks included, since
-     a keyed digest is not an oracle over them either; this reverses
-     round 2's restriction to authored blocks, which existed only
-     because the digest was unkeyed.
-   - **The key.** Derived from the newest entry of `VINGA_MASTER_KEY`
-     (`config/secrets.py:146-180`) with a fixed label, the way
-     `onboarding/keys.py:88-89` derives the onboarding key from its
-     secret: `HMAC-SHA256(master, b"vinga prompt digest v1")`, so the
-     master key itself never touches prompt text and the subkey is
-     useless for decryption. Derived once at composition and injected
-     into the pipeline as an optional `bytes` (`is not None`, never
-     truthiness), so no module beside the composition reads the
-     environment for it.
-   - **Lifecycle, stated in the catalog note and the observability
-     page.** No master key configured: no digest, the field absent,
-     which is the honest answer rather than an unkeyed fallback.
-     Rotating the master key (a new newest entry) changes every digest
-     from that boot on, so a comparison across a rotation reads as
-     "changed"; that is the price of not storing a second key, and the
-     page says so. The key is never logged, exported or rendered, and
-     a digest is never comparable across installations.
-   - **Exported** as `vinga.prompt.digest` on the turn span beside
-     `vinga.prompt.characters`, through `PROMPT_ATTRIBUTES`.
+3. **No prompt fingerprint in this plan; deferred to Rafael.** The
+   issue asks for one unconditionally, the content and telemetry ADR
+   makes an unkeyed digest of prompt text a confirmation oracle (plan
+   review rounds 2 and 3), and a keyed one is unconditional only with
+   an installation key every deployment holds, which `VINGA_MASTER_KEY`
+   is not (round 4). That leaves three shapes, each a decision about
+   the product rather than this milestone: a stored installation key
+   generated at first boot (a migration, a rotation story), a digest
+   only where a master key is set, or no digest. Raised with Rafael;
+   `prompt_assembled` and the turn span are unchanged here.
 4. **`language_confidence` says who fills it.** A `note=` on the
    catalog field: faster-whisper reports it when it detected the
    language rather than being pinned to one; the OpenAI-compatible
@@ -398,7 +365,7 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
 
 No new module, seam or config key.
 
-- `events/values.py`: three new value types, `Digest`, `FactIds` and
+- `events/values.py`: two new value types, `FactIds` and
   `MemorySources`, each one rule in one place.
 - `events/catalog.py`, `events/assembly.py`: fields on `tool_call`'s
   three variants, `PromptAssembled`, `LlmRound` and `ProviderFailed`.
@@ -409,9 +376,6 @@ No new module, seam or config key.
 - `memory/store.py`: `PromptMemory` deepens by the ids it rendered;
   callers stop having to re-read the store to learn which facts a
   prompt held.
-- `composition.py`: derives the prompt-digest subkey once from the
-  loaded master keys and hands it to the pipeline; nothing else reads
-  `VINGA_MASTER_KEY` for it.
 - `runtime/pipeline.py`, `runtime/provider_watch.py`,
   `runtime/tool_execution.py`: the round's memory accounting and the
   call's invocation threaded to their emission points.
@@ -442,17 +406,6 @@ M1:
   and syntactically clean (`sk_live_` followed by 24 alphanumerics) is
   absent from the `tool_call` log line in both formats and from every
   attribute of the tool span, with content export off.
-- `prompt_assembled` carries the keyed digest of exactly the
-  know-how text; a persona edit that preserves length changes it; a
-  boundary-moving edit (blocks `"ab"`, `"c"` against `"a"`, `"bc"`)
-  changes it; a whitespace change inside a block changes it, and one
-  that assembly trims away does not; two
-  activations on the same prompt and key carry the same value; no
-  master key means no field. The no-leak sentinel: the exported value
-  equals neither the public SHA-256 of the prompt text nor that of a
-  guessed low-entropy value planted in it, and the master key and the
-  derived subkey appear in no log line, event field or span
-  attribute.
 - The carried-key sets for `tool_call` and `prompt_assembled` gain the
   new fields, driven through the production path.
 
@@ -482,9 +435,7 @@ M2:
 first. Mutations, one run each (straight-line logic), reported in the
 implementation doc: M1, the `LLM_ATTRIBUTES` entry removed; the
 position taken from the partitioned list instead of the model's
-(the move-gap test must fail); the digest computed as a plain SHA-256 (the public-hash sentinel
-must fail);
-the invocation taken from the wrong round. M2, `_core`'s kept ids
+(the move-gap test must fail); the invocation taken from the wrong round. M2, `_core`'s kept ids
 replaced by `_newest`'s read ids (the byte-cap test must fail); the
 recap given the fields; the fact count taken from a stale list.
 
@@ -499,7 +450,7 @@ the implementation doc, per milestone:
 
 - M1: the `llm` observation shows `vinga.llm.first_token_ms`; the tool
   observation shows the invocation id equal to its round's and its
-  position; the turn shows `vinga.prompt.digest`.
+  position.
 - M2, **blocking**: the round after the `remember` shows the new id in
   `vinga.llm.memory.facts`, and the count and sizes, read back through
   the Langfuse public API as values a query can use (the id array
@@ -531,15 +482,14 @@ the implementation doc, per milestone:
   fields must then be absent or empty consistently with what the model
   received (no ids for facts it never saw); a test covers the failed
   read.
-- **No-leak.** The one new string-valued fact is a keyed digest
-  (decision 3); positions and ids are
+- **No-leak.** No new string-valued fact: positions and ids are
   integers, and the invocation is server-minted. No ledger key, no fact text, no prompt byte reaches any
   surface.
 
 ## Standing lenses
 
-- *No-leak*: the credential-shaped call-id sentinel and the
-  MCP-text digest sentinel in M1; M2 adds no string.
+- *No-leak*: the credential-shaped call-id sentinel in M1; M2 adds
+  no string.
 - *Pin before reshaping*: `_system_prompt`'s return change and the
   rendering functions' new tuple returns are covered by the existing
   memory and prompt-assembly tests, which must pass byte-unchanged on
@@ -559,12 +509,12 @@ the implementation doc, per milestone:
 
 - `docs/architecture/observability-surfaces.md`, "Exported traces":
   the first token is an attribute of the generation; a tool call names
-  the call and the round that asked for it; a turn carries the
-  keyed digest, absent without a master key, and why it is keyed; a reply round carries its whole system size,
+  the call by its round and its position in that round; a reply
+  round carries its whole system size,
   the memory blocks' sizes and the ids of the facts injected, with the
   reason ids and not a digest, and that an id resolves against the
   store's current state only; the parity rule in one sentence. M1
-  writes the first three, M2 the rest.
+  writes the first two, M2 the rest.
 - `vinga-server/README.md`, if its telemetry or cost table names the
   first-token mark or prompt size (checked, and left alone if not).
 - `docs/reference/events.md` regenerated. No new conventions' key is
@@ -578,7 +528,7 @@ the implementation doc, per milestone:
   through its generator (the drift check alone cannot see a missing
   row, as #536's review found).
 - `changelog.d/533-tool-and-round-attributes.md` (M1: `### Added` the
-  tool call's round and position, and the digest; `### Changed` the first token from a
+  tool call's round and position; `### Changed` the first token from a
   span event to an attribute) and
   `changelog.d/533-memory-half-per-round.md` (M2: `### Added`).
 
@@ -611,6 +561,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
 
    *Resolution:* accepted, by the keyed alternative. Decision 3 now exports `vinga.prompt.digest`, an HMAC-SHA256 of the know-how half exactly as sent, keyed by a labelled subkey of the newest `VINGA_MASTER_KEY` entry (the `onboarding/keys.py` derivation pattern), derived once at composition and injected. Lifecycle stated: no master key, no digest; a rotation changes every digest from that boot on. The sentinel asserts the value matches neither the public SHA-256 of the prompt nor of a planted guess, and that neither key appears on any surface. Because a keyed digest is not an oracle, round 2's restriction to authored blocks is reversed and the whole half is covered. Flagged to Rafael as a decision taken in review: the fingerprint now exists only on deployments that set a master key.
 
+   *Resolution:* accepted, by obtaining the decision rather than weakening the requirement silently: decision 3 is withdrawn from this plan and deferred to Rafael with the three shapes priced (a stored installation key generated at first boot, a digest only where a master key is set, or none). Nothing in this plan emits a digest, so the issue's "unconditionally" is not contradicted, only not yet delivered; the Step 0 comment and the PR say so.
+
 2. **P2: The memory-off test contradicts both the field definition and current prompt behavior.**
    **Evidence:** Decision 7 defines `system_characters` as the whole system prompt, but makes every M2 field absent when memory is off; the tests repeat that expectation (`docs/plans/...`, lines 185–205 and 309–317). `_system_prompt` still assembles and sends the know-how prompt when memory is off, and may still append the live device record through `with_scopes(..., NOTHING_REMEMBERED, record)` (`runtime/pipeline.py:2417-2428`; `runtime/prompt.py:412-453`). Thus a real system prompt, and potentially a `device` block, exists in precisely the case the proposed test requires all accounting to disappear.
    **Plan should say instead:** Make `system_characters` present on every completed reply generation. Derive source sizes from the actual `Assembled` sent, so a device block remains reported when present even with remembered facts disabled. Specify separately whether an unread or disabled fact list is absent or empty.
@@ -631,6 +583,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
 
    *Resolution:* accepted. Decision 7a now threads `RoundPrompt` to `failed` by both routes: through `watched` for a stream-raised failure, and directly into `reply_stream`'s own retry-exhaustion `self.failed(...)` call. The watchdog test is specified to drive that direct branch.
 
+   *Resolution:* moot after finding 1's resolution: with no digest there is no key to derive, so no composition change and no secrets API is added. The finding's correction stands for whichever shape Rafael picks: the composition root is the lifespan in `app.py`, and `config/secrets.py` would need a narrow derivation function rather than exposing key material.
+
 4. **P2: Failed LLM requests lose all proposed per-round memory metadata.**
    **Evidence:** M2 adds fields only to `LlmRound` and threads them only through `reply_round_done` (`docs/plans/...`, lines 185–208). A stream failure emits `ProviderFailed` instead (`runtime/provider_watch.py:134-166,409-458`), and telemetry turns that into the actual failed `llm` span (`telemetry.py:2952-2990`). The existing LLM-content export deliberately finishes and attaches the failed request by invocation, but the planned memory accounting has no equivalent path. The proposed tests cover successful rounds and recaps only.
    **Plan should say instead:** Decide how reply memory accounting reaches an LLM `ProviderFailed` event and span, then name the required changes to `reply_stream`/`watched`/`failed` or an invocation-keyed staging mechanism. Test provider failure after request assembly and the second-watchdog failure.
@@ -650,6 +604,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    *Resolution:* accepted. The M2 rows of the live gate are now blocking: the id array must come back through the Langfuse public API as usable values, and if integer arrays fail, the encoding falls back to decimal strings, then to one comma-joined string, each re-gated, with the event type, fold and note changed in the same milestone. M2's pull request does not open until one encoding passes.
 
    *Resolution:* accepted. The comma-joined fallback is removed; the only fallback is an array of decimal strings, re-gated the same way, and if neither array passes M2 stops and the result goes to Rafael rather than the gate being lowered.
+
+   *Resolution:* moot after finding 1's resolution: `PromptAssembled` gains no field, so nothing new reaches its span event. The point carries to the deferred decision: a digest on `prompt_assembled` must be excluded from the span-event projection, or it is two carriers.
 
 6. **P2: Removing the first-token event creates an unhandled upgrade break.**
    **Evidence:** Decision 1 deletes the existing precisely timestamped `first_token` event (`docs/plans/...`, lines 113–123), although issue #533 §4 proposed an attribute alongside the event and its common notes call the changes backward compatible. Current OTLP consumers can query or visualize that event (`telemetry.py:2994-3032`). Repository grep can find tests and documentation, but cannot inventory dashboards, alerts, or downstream collectors in running deployments. The changelog entry records the change but supplies no compatibility period or migration guidance.
