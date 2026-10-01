@@ -83,27 +83,48 @@ _STANDARD_ATTRIBUTES = frozenset(
 # floor and is owned by the module that connects with it. A floor here
 # as well would be a second rule to keep in agreement with that one.
 #
-# INFO for these, because what each says at that level is worth keeping
-# and carries none of it: httpx's one line per request (the method, the
-# URL and the status, no headers and no body), uvicorn's startup and
-# per-connection lines.
+# INFO for the SDKs and for uvicorn, because what each says at that
+# level is worth keeping and carries none of it: uvicorn's startup and
+# per-connection lines, and the SDKs' notice that a request is being
+# retried, which names the endpoint's path and not its query.
 #
-# sqlalchemy is the exception, at WARNING, because INFO is where its
-# payload is: an engine whose logger is enabled for INFO echoes every
-# statement with the parameters bound to it, and those parameters are
-# the stored configuration and, once #120 lands, what was said. The
+# The HTTP clients and the database are at WARNING, because INFO is
+# where a payload of somebody else's composing starts.
+#
+# httpx writes one line per request at INFO: the method, the full URL
+# with its query string, and the status. Nothing in it is secret today,
+# since every provider this server speaks to authenticates in a header
+# and a header is not on that line. But the line is composed by the
+# library rather than by code anyone here audited, it sits outside the
+# closed event vocabulary the rest of the log is held to, and a provider
+# that one day carries a key or a session id in a query string would
+# have it logged verbatim. What holding it back loses is a line per
+# request, and with it a failed call's status code. What it keeps is
+# `provider_failed`, whose fields are closed (the stage, the provider
+# entry with its type and model, the host, the duration and the
+# exception's class name), and whose `host` is the one part of the URL
+# worth retaining. httpcore writes nothing above DEBUG today and is held
+# with httpx, so that whatever it ever starts saying at INFO about the
+# same connection is held to the same rule.
+#
+# sqlalchemy, because an engine whose logger is enabled for INFO echoes
+# every statement with the parameters bound to it, and those parameters
+# are the stored configuration and, once #120 lands, what was said. The
 # library pins its own logger at WARNING when it is imported, and this
 # is deliberately not a reliance on that.
 #
 # There is no configuration key to lift these, and deliberately so. A
 # diagnosis that genuinely needs one raises it by name in the process
-# that needs it (`logging.getLogger("httpx").setLevel(logging.DEBUG)`),
-# which is a deliberate act rather than a side effect of the server's
-# own level.
+# that needs it, after this has run
+# (`logging.getLogger("httpx").setLevel(logging.INFO)` brings the request
+# line back), which is a deliberate act rather than a side effect of the
+# server's own level. A request that carries a secret in its URL holds
+# these two loggers quiet around itself as well (`quieted` below), so
+# lifting the floor does not lift that.
 VENDOR_LOG_FLOORS: Mapping[str, int] = {
     "anthropic": logging.INFO,
-    "httpcore": logging.INFO,
-    "httpx": logging.INFO,
+    "httpcore": logging.WARNING,
+    "httpx": logging.WARNING,
     "openai": logging.INFO,
     "sqlalchemy": logging.WARNING,
     "uvicorn.error": logging.INFO,
