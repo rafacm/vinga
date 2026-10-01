@@ -1204,6 +1204,16 @@ TOOL_ATTRIBUTES = {
     "tool": "gen_ai.tool.name",
     "entry": "vinga.tool.entry",
     "error": ERROR_TYPE,
+    # Which call this span ran, in two values the server minted (#533):
+    # the round that asked for it, under the very key the `llm` span
+    # carries it as, so the join is one attribute equal on both spans;
+    # and its place in the list that round returned, which with the
+    # round names exactly one call and is the n-th call of the round's
+    # exported output. Not the conventions' `gen_ai.tool.call.id`, whose
+    # value would be the provider's id: far-side bytes, kept off every
+    # metadata surface and not even unique within a turn.
+    "invocation": LLM_INVOCATION_ID,
+    "position": "vinga.tool.call.position",
 }
 
 # The per-sentence TTS span. The stream's lifetime is the span's own

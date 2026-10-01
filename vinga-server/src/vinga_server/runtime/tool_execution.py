@@ -120,6 +120,7 @@ def _tool_called(
     duration_s: float,
     is_error: bool,
     error_type: str | None,
+    invocation: str,
 ) -> Variant:
     """Which of the three `tool_call` shapes describes this call.
 
@@ -130,17 +131,25 @@ def _tool_called(
     structure that has to agree. What each shape is made of is the
     assembly module's; which one this call is, is the classifier's
     neighbour's.
+
+    Every shape names the call the same way: `invocation` is the round
+    that asked for it, and the position is the one the reservation took
+    from the model's own list before anything partitioned it (#533).
+    Read off the reservation rather than counted here, because by now
+    the moves are gone from the list this call arrived in, and a count
+    over that would close the gap a move leaves.
     """
+    where = {"invocation": invocation, "position": classified.position}
     if classified.source == BUILTIN:
         return assembly.builtin_tool_called(
-            agent, conversation, classified.name, duration_s, is_error, error_type
+            agent, conversation, classified.name, duration_s, is_error, error_type, **where
         )
     if classified.source == MCP and classified.entry is not None:
         return assembly.mcp_tool_called(
-            agent, conversation, classified.entry, duration_s, is_error, error_type
+            agent, conversation, classified.entry, duration_s, is_error, error_type, **where
         )
     return assembly.unnamed_tool_called(
-        agent, conversation, classified.source, duration_s, is_error, error_type
+        agent, conversation, classified.source, duration_s, is_error, error_type, **where
     )
 
 
@@ -441,7 +450,11 @@ class ToolExecution:
         return replace(call, arguments=arguments)
 
     async def run(
-        self, turn: TurnUnderway, calls: Sequence[tuple[int, ToolCall]]
+        self,
+        turn: TurnUnderway,
+        calls: Sequence[tuple[int, ToolCall]],
+        *,
+        invocation: str,
     ) -> list[ToolResult]:
         """Execute one round's calls, none of them a move, each paired
         with the slot it was reserved at. Almost all of them run
@@ -461,17 +474,24 @@ class ToolExecution:
         Before the rest rather than beside them, which costs a round
         trip nothing was waiting on and buys the simplest cancellation
         story there is: a barge-in during one of these leaves no
-        dispatch running that nobody is awaiting."""
+        dispatch running that nobody is awaiting.
+
+        `invocation` is the server-minted id of the round that asked for
+        these calls, which every `tool_call` event names so a call joins
+        its round on the key the round's own event carries."""
         answered: dict[int, ToolResult] = {}
         for slot, call in calls:
             if call.name in names.ORDERED_TOOL_NAMES:
-                answered[slot] = await self._run_one(turn, call, slot)
+                answered[slot] = await self._run_one(turn, call, slot, invocation)
         together = [(slot, call) for slot, call in calls if slot not in answered]
         answered.update(
             zip(
                 (slot for slot, _ in together),
                 await asyncio.gather(
-                    *(self._run_one(turn, call, slot) for slot, call in together)
+                    *(
+                        self._run_one(turn, call, slot, invocation)
+                        for slot, call in together
+                    )
                 ),
                 strict=True,
             )
@@ -482,7 +502,9 @@ class ToolExecution:
         # round that did not happen.
         return [answered[slot] for slot, _ in calls]
 
-    async def _run_one(self, turn: TurnUnderway, call: ToolCall, slot: int) -> ToolResult:
+    async def _run_one(
+        self, turn: TurnUnderway, call: ToolCall, slot: int, invocation: str
+    ) -> ToolResult:
         """One tool call, bounded and never raising into the loop. Every
         failure becomes an error result: the model explains it in its
         own words, where a canned apology would be fixed-language and
@@ -533,6 +555,7 @@ class ToolExecution:
                 elapsed,
                 is_error,
                 error_type,
+                invocation,
             )
         )
         turn.executed(slot, content, is_error, round(elapsed * 1000))

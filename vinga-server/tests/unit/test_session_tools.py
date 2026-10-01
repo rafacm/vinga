@@ -899,6 +899,11 @@ async def test_malformed_arguments_come_back_as_an_error_result() -> None:
 # where a JSON object belongs; the second is shaped like a tool name, so
 # both LLM APIs accept it and the publishing rule leaves it untouched,
 # which is how a credential arrives as a name a peer chose (#154).
+# The round a directly driven execution says its calls came from. A
+# server-minted id in production; any id of that form serves here.
+INVOCATION = "0123456789abcdef0123456789abcdef"
+
+
 ARGUMENT_SENTINEL = "sk-test-4f8b2c9e-never-a-real-credential"
 NAME_SENTINEL = "sk_test_4f8b2c9e_never_a_real_credential"
 
@@ -1048,7 +1053,9 @@ async def test_a_name_that_changes_owner_between_calls_is_refused_not_rerouted(
         assert servers.owner_of(name) == "home__inside"
 
         with caplog.at_level("INFO"):
-            (result,) = await execution.run(turn, [(slot, call(name))])
+            (result,) = await execution.run(
+                turn, [(slot, call(name))], invocation=INVOCATION
+            )
     finally:
         await servers.stop_all()
 
@@ -1193,7 +1200,9 @@ async def test_a_tool_of_an_entry_whose_name_holds_the_separator_is_dispatched()
     try:
         assert await run_reply(session, "tell me") == ["The word is rhubarb."]
         (slot,) = execution.reserve(turn, [stalled])
-        (timed_out,) = await execution.run(turn, [(slot, stalled)])
+        (timed_out,) = await execution.run(
+            turn, [(slot, stalled)], invocation=INVOCATION
+        )
     finally:
         await servers.stop_all()
 

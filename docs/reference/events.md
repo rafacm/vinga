@@ -1201,6 +1201,8 @@ session %s: %s tool%s took %.2f s%s
 | `tool` | `IDENTIFIER` | yes | no |  | The only tool names this server authors. |
 | `duration_ms` | `INT` | yes | no |  |  |
 | `is_error` | `BOOL` | yes | no |  |  |
+| `invocation` | `ID` | yes | no | the `invocation_id` syntax | The server-minted invocation of the round that asked for this call, the same value its `llm_round` carries, so a call joins its round on one key. Never the provider's own call id. |
+| `position` | `INT` | yes | no |  | Where this call sat in the list of calls its round returned, counted from zero and with moves included, so with `invocation` it names exactly one call, the n-th call of that round's exported output. The same number the call's `tool_invocations` row records. |
 | `error` | `CLASS_NAME` | no | no |  |  |
 
 #### Variant 2: `vinga_server.session` at INFO
@@ -1228,6 +1230,8 @@ session %s: %s tool%s took %.2f s%s
 | `entry` | `IDENTIFIER` | yes | no |  | The configured entry, never the far side's tool name. |
 | `duration_ms` | `INT` | yes | no |  |  |
 | `is_error` | `BOOL` | yes | no |  |  |
+| `invocation` | `ID` | yes | no | the `invocation_id` syntax | The server-minted invocation of the round that asked for this call, the same value its `llm_round` carries, so a call joins its round on one key. Never the provider's own call id. |
+| `position` | `INT` | yes | no |  | Where this call sat in the list of calls its round returned, counted from zero and with moves included, so with `invocation` it names exactly one call, the n-th call of that round's exported output. The same number the call's `tool_invocations` row records. |
 | `error` | `CLASS_NAME` | no | no |  |  |
 
 #### Variant 3: `vinga_server.session` at INFO
@@ -1257,6 +1261,8 @@ session %s: %s tool%s took %.2f s%s
 | `source` | `TOKEN` | yes | no | one of: `device`, `unknown` |  |
 | `duration_ms` | `INT` | yes | no |  |  |
 | `is_error` | `BOOL` | yes | no |  |  |
+| `invocation` | `ID` | yes | no | the `invocation_id` syntax | The server-minted invocation of the round that asked for this call, the same value its `llm_round` carries, so a call joins its round on one key. Never the provider's own call id. |
+| `position` | `INT` | yes | no |  | Where this call sat in the list of calls its round returned, counted from zero and with moves included, so with `invocation` it names exactly one call, the n-th call of that round's exported output. The same number the call's `tool_invocations` row records. |
 | `error` | `CLASS_NAME` | no | no |  |  |
 
 ### `tool_arguments_coerced`

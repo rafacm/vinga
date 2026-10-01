@@ -604,6 +604,8 @@ def call_tool(
     duration_s: float = 0.25,
     is_error: bool = False,
     error_type: str | None = None,
+    invocation: str = "11111111111111111111111111111111",
+    position: int = 0,
 ) -> float:
     """One `tool_call` in whichever of its three shapes, built through
     the events' own assembly.
@@ -612,16 +614,22 @@ def call_tool(
     that is what the catalog declares: the naming policy is structural,
     so a builtin names its tool, an MCP call names the entry an operator
     configured, and the third names neither.
+
+    `invocation` is the round that asked for the call, defaulting to the
+    one `round_done` defaults to, so a case that emits both gets a call
+    and the round it belongs to; `position` is where the call sat in
+    that round's list.
     """
+    where = {"invocation": invocation, "position": position}
     built = {
         "builtin": lambda: assembly.builtin_tool_called(
-            AGENT, CONVERSATION, name, duration_s, is_error, error_type
+            AGENT, CONVERSATION, name, duration_s, is_error, error_type, **where
         ),
         "mcp": lambda: assembly.mcp_tool_called(
-            AGENT, CONVERSATION, name, duration_s, is_error, error_type
+            AGENT, CONVERSATION, name, duration_s, is_error, error_type, **where
         ),
         "unnamed": lambda: assembly.unnamed_tool_called(
-            AGENT, CONVERSATION, "device", duration_s, is_error, error_type
+            AGENT, CONVERSATION, "device", duration_s, is_error, error_type, **where
         ),
     }[which]
     return events.emit(built)
