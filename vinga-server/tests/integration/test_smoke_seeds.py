@@ -32,6 +32,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -199,9 +200,23 @@ exec {real} "$@"
 """
 
 
-def _default_interrupt() -> None:
-    """Hand the script SIGINT at its default disposition, whatever this
-    process inherited.
+# One step of a launch: set SIGINT to the named disposition, then exec
+# the rest of the command line. A freshly exec'd interpreter rather than
+# a `preexec_fn`, because a pre-exec hook runs Python in a forked copy
+# of a process that may have other threads, and can deadlock inside
+# `Popen` on a lock one of them held, before any timeout here applies.
+# Here nothing runs between this process's fork and exec, and the step
+# itself is a single-threaded program that execs at once.
+_EXEC_WITH_SIGINT = (
+    "import os, signal, sys; "
+    "signal.signal(signal.SIGINT, getattr(signal, sys.argv[1])); "
+    "os.execvp(sys.argv[2], sys.argv[2:])"
+)
+
+
+def _with_sigint(disposition: str, argv: list[str]) -> list[str]:
+    """`argv`, started with SIGINT at `disposition` ("SIG_DFL" or
+    "SIG_IGN").
 
     A non-interactive shell cannot trap a signal that was ignored when
     it started. A runner started as an asynchronous list
@@ -209,14 +224,14 @@ def _default_interrupt() -> None:
     POSIX requires, and every child inherits that across `exec`. The
     script's `trap on_interrupt INT` is then silently a no-op, the
     signal is dropped, and the seeding finishes with status zero, which
-    is the `assert 0 != 0` this case used to fail with. The disposition
-    restored here is the one a terminal's foreground job has, which is
-    the interrupt the script's handler is for.
+    is the `assert 0 != 0` this case used to fail with. SIG_DFL is the
+    disposition a terminal's foreground job has, which is the interrupt
+    the script's handler is for.
 
-    Run in the child between fork and exec, where it does nothing but
-    this one call.
+    The process id survives every `exec`, so the process `Popen` started
+    is the shell by the time a signal is sent to it.
     """
-    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    return [sys.executable, "-c", _EXEC_WITH_SIGINT, disposition, *argv]
 
 
 def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
@@ -262,7 +277,7 @@ def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
     )
 
     seeding = subprocess.Popen(
-        ["sh", str(SMOKE / "seed.sh")],
+        _with_sigint("SIG_DFL", ["sh", str(SMOKE / "seed.sh")]),
         env=environment,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -270,7 +285,6 @@ def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
         # Its own process group, so the signal reaches the script the way
         # a shell would send it and not this test runner as well.
         start_new_session=True,
-        preexec_fn=_default_interrupt,
     )
     try:
         # As long as the seeding itself may take to start its server.
