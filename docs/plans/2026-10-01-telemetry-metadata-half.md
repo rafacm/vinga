@@ -317,17 +317,24 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
    `provider_failed` instead of `llm_round`. So `ProviderFailed` gains
    the same optional fields, populated only for an LLM-stage failure of
    a reply round and absent for every other stage and for a recap. The
-   path: `reply_stream` gains a keyword carrying the round's memory
-   accounting, built once before the stream starts; it hands it to
-   `watched`, which passes it to `failed` beside the `invocation` it
-   already passes; `failed` hands it to `assembly.provider_failure`.
+   path: `reply_stream` gains a keyword carrying the round's
+   `RoundPrompt`, built once before the stream starts, and it reaches
+   `failed` by BOTH routes that end a reply round in failure: through
+   `watched`, for a failure the stream raises, and directly, for the
+   watchdog's second first-token timeout, which `reply_stream` reports
+   with its own `self.failed(...)` call
+   (`runtime/provider_watch.py:253`). `failed` hands it to
+   `assembly.provider_failure` beside the `invocation` it already
+   passes.
    The first-token watchdog's retry re-sends arguments fixed before the
    first attempt (`runtime/pipeline.py:1785-1792`), so a second-attempt
    failure carries the same accounting, which is correct. The failed
    `llm` span (`telemetry.py`'s `_provider_failed`) maps the same
    attributes as decision 8. Tested: a provider failure after the
-   request was assembled, and a watchdog failure on the second
-   attempt, each carrying the accounting; an ASR and a TTS failure
+   request was assembled, and the watchdog's direct second-timeout
+   branch (driven so that `reply_stream`'s own `failed` call is the
+   one that fires, not a stream-raised failure), each carrying the
+   accounting; an ASR and a TTS failure
    carrying none.
 8. **The `llm` span carries it under the round's own names.**
    `vinga.llm.system.characters`, `vinga.llm.memory.characters`,
@@ -610,6 +617,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    *Resolution:* accepted in part. Decision 6 now states that the id join is best effort and to the store's current state (a correction keeps the id with new text, pruning and API deletion leave no row), and the catalog note and the observability page say the same; the historical text is the content export's to carry. Rejected: a per-id row version, which doubles the list to answer a historical question `export_llm_input` already answers, and new correction, prune and delete tests, since those behaviors belong to the memory store and its existing tests pin them; nothing in this plan changes them.
 
    *Resolution:* accepted. Decision 7 now defines the handoff as one value, `RoundPrompt` (the sent `Assembled`, the know-how `Assembled`, and `facts: tuple[int, ...] | None`, `None` for no read attempted and `()` for a read that injected nothing, a failed read included), chosen at the call site where the attempt is known, and derived into the event fields on both the success path and decision 7a's failure path.
+
+   *Resolution:* accepted. Decision 7a now threads `RoundPrompt` to `failed` by both routes: through `watched` for a stream-raised failure, and directly into `reply_stream`'s own retry-exhaustion `self.failed(...)` call. The watchdog test is specified to drive that direct branch.
 
 4. **P2: Failed LLM requests lose all proposed per-round memory metadata.**
    **Evidence:** M2 adds fields only to `LlmRound` and threads them only through `reply_round_done` (`docs/plans/...`, lines 185–208). A stream failure emits `ProviderFailed` instead (`runtime/provider_watch.py:134-166,409-458`), and telemetry turns that into the actual failed `llm` span (`telemetry.py:2952-2990`). The existing LLM-content export deliberately finishes and attaches the failed request by invocation, but the planned memory accounting has no equivalent path. The proposed tests cover successful rounds and recaps only.
