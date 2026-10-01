@@ -54,6 +54,14 @@ BOUND_MAC = "11:22:33:44:55:01"
 # that could print it is a library rendering the frame.
 FRAME_SENTINEL = "sk-test-2b7c9f1e-never-a-real-credential"
 
+# What a client built to upstream's convention, or a browser that cannot
+# set a header, puts in the query of its upgrade request: the bearer
+# token. This server reads only the header, so the query is ignored and
+# a handshake with nothing else is refused, but uvicorn writes the path
+# it was asked for, query and all, on the line for either answer (#578).
+QUERY_SENTINEL = "sk-test-7d3e1a9c-never-a-real-credential"
+QUERY = f"?device-id={BOUND_MAC}&authorization=Bearer%20{QUERY_SENTINEL}"
+
 # No database of this module's own any more, and the reason is worth
 # keeping: the configuration below is composed while this file is being
 # imported, before any fixture could point it anywhere, so two modules
@@ -153,6 +161,11 @@ async def test_debug_puts_no_request_line_and_no_frame_back(
     websockets protocol, which renders every frame's payload with the
     text decoded. Nothing here writes those records, so the assertion is
     about what a library says while the server serves.
+
+    The handshakes also carry a credential in their query, through the
+    server's own refusal and its own accept. uvicorn writes that one at
+    INFO rather than at DEBUG, once per handshake, so it is held by
+    uvicorn's floor rather than by the level (#578).
     """
     # Seeded through the repository rather than composed straight from
     # the object, because the server reads its device bindings from the
@@ -181,8 +194,17 @@ async def test_debug_puts_no_request_line_and_no_frame_back(
             ) as client:
                 headers = {"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID}
                 assert (await client.post(OTA_PATH, json={}, headers=headers)).status_code == 200
+            # Refused, with the credential where upstream would put it:
+            # closed before the accept, which uvicorn answers 403.
+            with pytest.raises(websockets.InvalidStatus) as refused:
+                await websockets.connect(
+                    f"ws://127.0.0.1:{port}{WEBSOCKET_PATH}{QUERY}", open_timeout=30
+                )
+            assert refused.value.response.status_code == 403
+            # And accepted with the same query beside the header that
+            # authenticates it.
             socket = await websockets.connect(
-                f"ws://127.0.0.1:{port}{WEBSOCKET_PATH}",
+                f"ws://127.0.0.1:{port}{WEBSOCKET_PATH}{QUERY}",
                 additional_headers={
                     "Device-Id": BOUND_MAC,
                     "Client-Id": DEVICE_UUID,
@@ -222,6 +244,7 @@ async def test_debug_puts_no_request_line_and_no_frame_back(
     assert SECRET_SEGMENT not in rendered
     assert token not in rendered
     assert FRAME_SENTINEL not in rendered
+    assert QUERY_SENTINEL not in rendered
     # And the run really was a run: the session opened on the frame that
     # was sent, so there was one to render and a request to trace.
     assert any(record.__dict__.get("event") == "session_open" for record in caplog.records)
