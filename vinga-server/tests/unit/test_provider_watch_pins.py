@@ -49,6 +49,7 @@ from tests.support.sessions import (
 from tests.support.sockets import QuietSocket
 from tests.tools.event_baseline import failing_reply
 from vinga_server.providers import AsrResult, Usage
+from vinga_server.runtime.prompt import MEMORY_HEADING
 
 # The utterance the direct drives hand a reply: 20 ms of silence, which
 # the mock ASR answers whatever it holds.
@@ -69,6 +70,16 @@ CLOUD = {
     "type": "openai",
     "host": "api.example.com",
     "model": "gpt-4o-mini",
+}
+
+# What a failed reply round says about the prompt it was sending, for
+# the lane's agent with nothing remembered: its persona, no scope block,
+# and a read that injected nothing (#533).
+NOTHING_IN_MEMORY = {
+    "system_characters": len("POET"),
+    "memory_characters": 0,
+    "memory_sources": {},
+    "memory_facts": [],
 }
 
 
@@ -162,6 +173,7 @@ async def test_a_round_given_up_says_provider_failed_as_first_token_timeout(
         "provider": "mock",
         "type": "mock",
         "purpose": "reply",
+        **NOTHING_IN_MEMORY,
     }
 
 
@@ -205,6 +217,17 @@ async def test_every_reply_round_says_llm_round_and_files_itself_on_the_turn(
         invocation = fields.pop("invocation")
         assert isinstance(invocation, str) and MINTED.match(invocation)
         invocations.append(invocation)
+        # The second round is sent the fact the first one remembered,
+        # under the id the store gave it (#533).
+        facts = fields.pop("memory_facts")
+        block = f"{MEMORY_HEADING}\n- tea"
+        assert fields.pop("memory_sources") == ({} if number == 1 else {"memory": len(block)})
+        added = 0 if number == 1 else len("\n\n") + len(block)
+        assert fields.pop("memory_characters") == added
+        assert fields.pop("system_characters") == len("POET") + added
+        assert facts == [] if number == 1 else (
+            len(facts) == 1 and isinstance(facts[0], int) and facts[0] > 0
+        )
         assert fields == {
             "event": "llm_round",
             **the_pair(session),
@@ -274,6 +297,7 @@ async def test_a_failing_stream_says_provider_failed_at_the_llm_stage(
         "stage": "llm",
         **CLOUD,
         "purpose": "reply",
+        **NOTHING_IN_MEMORY,
     }
 
 
