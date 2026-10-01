@@ -134,10 +134,12 @@ between on the request's shape and the model's reading of it.
    message, which some local templates reject or fold, and no two
    consecutive user messages), and Anthropic's alternation holds with
    no system role. In a tool round the newest user turn precedes the
-   tool exchange, and the context stays on it. A request with no user
-   turn (none is known to exist on the reply path; the implementer
-   confirms by reading the callers) gets the context as a final user
-   turn rather than losing it. An empty context returns the turns
+   tool exchange, and the context stays on it. A turn list with no user
+   turn is refused by the placing function with an explicit programming
+   error rather than given a trailing user turn, which after a
+   tool-result tail would render as two adjacent user messages on
+   Anthropic; the implementer confirms by reading every caller that the
+   reply path always has one, and stops and reports if one does not. An empty context returns the turns
    unchanged. Chosen over (c) because it keeps one user message per
    turn and because the model reads what it knows and then what it is
    asked. The known cost, accepted: within one reply, a round after a
@@ -365,8 +367,8 @@ and `tests/tools/event_baseline.py`.
 M1:
 - The placing function: the context leads the newest user turn's
   content and appears nowhere else; every other turn is the same
-  object; with no user turn the context is a final user turn; an empty
-  context returns the turns unchanged.
+  object; a list with no user turn (empty, or ending in tool results)
+  is refused; an empty context returns the turns unchanged.
 - Through each adapter's existing rendering (the fake SDKs), the
   request's system field or message is the know-how half alone and the
   newest user message begins with the context.
@@ -607,6 +609,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    Evidence: Decision 2 appends a final user turn when none exists while also claiming no consecutive user messages and valid Anthropic alternation (`plan:129-140`). A neutral tool-result turn is already rendered by Anthropic as a `user` message (`anthropic_llm.py:57-70`). A no-user sequence ending in tool results therefore renders as adjacent user messages, and the current adapter does not merge them.
 
    Plan should say instead: Define the fallback for every valid neutral-turn tail. Either require and enforce the reply-path invariant that a user turn always exists, or add the necessary adapter rendering to merge context with a trailing Anthropic tool-result message. Test the empty sequence and a sequence ending in tool results.
+
+   *Resolution:* accepted, by enforcing the invariant rather than adding Anthropic merging: the placing function refuses a turn list with no user turn, tested on an empty list and a tool-result tail, and the implementer confirms every caller has one or stops and reports.
 
 5. **P2: “One ceiling per pair” does not bound exported tool content in a running deployment.**
 
