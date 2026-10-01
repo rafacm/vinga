@@ -313,12 +313,11 @@ def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
         assert written.default_agent is None
         # And the server it started is gone with it.
         _wait_for(lambda: not _listening(port), "the seeding server outlived the script")
-    except BaseException:
+    except BaseException as failure:
         # The whole group, so a server the script left behind goes too,
-        # including when the script itself has already exited: the group
-        # outlives its leader for as long as any member does.
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(seeding.pid, signal.SIGKILL)
+        # and gone before the database it was on is dropped below.
+        if not _end_group(seeding):  # pragma: no cover, only if SIGKILL fails
+            failure.add_note(f"the seeding's process group outlived SIGKILL by {GROUP_GONE_S} s")
         raise
     finally:
         released.touch()
@@ -327,6 +326,68 @@ def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
         # The database this script's server was on, taken away only once
         # nothing is connected to it.
         stack.close()
+
+
+# How long a killed process group may take to disappear. Measured at
+# about 10 ms on a four-core machine; the bound is for a loaded one.
+GROUP_GONE_S = 10.0
+
+
+def _end_group(process: subprocess.Popen, timeout: float = GROUP_GONE_S) -> bool:
+    """Kill every process in `process`'s group and wait, bounded, until
+    none is left. True when the group is gone.
+
+    The group is the one `start_new_session` made, led by `process`, and
+    it outlives its leader for as long as any member does: a server the
+    script started and did not stop is still in it after the shell has
+    exited and been reaped, which is the case killing the shell alone
+    missed. SIGKILL is not synchronous, so the members are still there
+    when `killpg` returns, and waiting for nothing would let the caller
+    drop a database a dying server is still connected to.
+    """
+    group = process.pid
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(group, signal.SIGKILL)
+    # The leader is this process's own child, and an unreaped one would
+    # keep the group in existence as a zombie.
+    if process.poll() is None:
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.communicate(timeout=timeout)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(group, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_ending_a_group_outlasts_its_leader() -> None:
+    """The failure path's cleanup, on the shape it exists for: a leader
+    that has exited and been reaped, and a descendant that has not.
+
+    Checked straight after the call rather than eventually, because a
+    killed group is still there when `killpg` returns, so a cleanup
+    that signalled without waiting would fail here.
+    """
+    leader = subprocess.Popen(
+        ["sh", "-c", "sleep 300 & exit 0"],
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    leader.wait(timeout=30)
+    try:
+        # The shape holds: the leader is gone and the group is not.
+        os.killpg(leader.pid, 0)
+
+        assert _end_group(leader)
+        with pytest.raises(ProcessLookupError):
+            os.killpg(leader.pid, 0)
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(leader.pid, signal.SIGKILL)
 
 
 def _listening(port: int) -> bool:
