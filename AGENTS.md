@@ -109,28 +109,35 @@ a scripted cycle finishes inside one second, and the `.pyc` validation looks at
 nothing else. If a result ever contradicts the source you are reading, suspect
 this before suspecting the code.
 
-### A stale `uv` build cache, wearing a database's error message
+### A stale `uv` build cache, wearing a revision the install lacks
 
-Third cache of the same family, and the one that lies about where the fault
-is. The tier-closure lane (`tests/integration/test_tier_closure.py`) builds
+Third cache of the same family, and the one that used to lie about where the
+fault is. The tier-closure lane (`tests/integration/test_tier_closure.py`) builds
 throwaway installs with `uv sync --frozen --no-dev --no-editable`, and `uv`
 can reuse a cached build of this project. When it does, the install is missing
 every migration added since that cache entry was made, while the lane migrates
 its own database from the source tree. The install then meets a database
 stamped at a revision its packaged scripts do not contain.
 
-What that reads as is the trap. Alembic raises `Can't locate revision
-identified by ...`, which is neither cause `db.migration_failure` recognizes,
-so it falls through to the general sentence: **`cannot open the vinga
-database`**, naming host, port, credentials and a database that is open and
-reachable throughout. CI never sees it, because its cache is cold.
+What that reads as: Alembic raises `Can't locate revision identified by
+...`, and `db.migration_failure` answers it with its unknown-revision
+sentence, **`the vinga database is stamped at <revision>, and none of the
+migrations this install carries is that revision`**, which says the fault is
+in the install and not to reset the database. Before #530 the same failure
+fell through to `cannot open the vinga database`, naming host, port and
+credentials on an instance that was reachable throughout, and that sentence
+sent one session after the database instead of the cache. The two readings
+the new sentence offers (a newer build stamped the database, or this install
+is stale) are both possible in general; in this lane it is the second. CI
+never sees it, because its cache is cold.
 
 `uv cache clean vinga-server` and rerun. Confirm the diagnosis rather than
 assuming it, by listing the built venv's
 `site-packages/vinga_server/conversations/migrations/versions/` against the
-source tree; the venv's path is in the failure's own traceback. Nothing in
-the repository is wrong when this happens, so a fix committed in response to
-it is a fix to the wrong thing.
+source tree; the lane builds each venv under pytest's temporary directory
+(`tests/integration/test_tier_closure.py`, `_synced`). Nothing in the
+repository is wrong when this happens, so a fix committed in response to it
+is a fix to the wrong thing.
 
 ### Rebasing a milestone branch
 
