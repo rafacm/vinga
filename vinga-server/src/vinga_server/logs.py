@@ -121,15 +121,21 @@ _STANDARD_ATTRIBUTES = frozenset(
 # process id at start and at finish, the lifespan's start and
 # completion, `Uvicorn running on <scheme>://<host>:<port>`, the
 # shutdown notices, and the `connection open` and `connection rejected`
-# the websockets library writes through the same logger. A connection's
-# outcome is the events' to say (`auth_rejected`, `session_open`,
-# `session_rejected`); the onboarding banner names the origin a device
-# reaches, which is the listen address unless `server.public_url` or
-# `server.websocket_url` names a better one; and the drain announces the
-# shutdown. What no line says any more is the process id, which is the
-# runtime's to report, and the bind address of a deployment that names
-# its public origin, which is in its own configuration. What the floor
-# keeps is everything at WARNING and above: a bind that failed, a
+# the websockets library writes through the same logger. A refusal is
+# the events' to say (`auth_rejected`, `session_rejected`), and so is a
+# session once its hello is valid (`session_open`); the onboarding
+# banner names the origin a device reaches, which is the listen address
+# unless `server.public_url` or `server.websocket_url` names a better
+# one; and the drain announces the shutdown. What no line says any more
+# is the process id, which is the runtime's to report, the bind address
+# of a deployment that names its public origin, which is in its own
+# configuration, and that a connection was accepted at all when it ends
+# before a valid hello: `DeviceSession._receive_hello` closes a
+# disconnect, a timeout and every first frame it refuses without an
+# event, save a text frame the message parser rejects, which it logs,
+# and `connection open` was the only trace the rest left. No event
+# replaces it here; that is a decision of its own. What the floor keeps
+# is everything at WARNING and above: a bind that failed, a
 # lifespan that failed, an exception in the application with its
 # traceback, a request that would not parse.
 #
@@ -146,8 +152,10 @@ _STANDARD_ATTRIBUTES = frozenset(
 # and keeping the rest was priced against this and rejected. It reads
 # uvicorn's message template and argument order, which three websocket
 # implementations each spell out for themselves, and it needs a pin
-# that fails when an upgrade moves them, all to keep lines nothing here
-# reads.
+# that fails when an upgrade moves them, all to keep lines no code here
+# reads. It would also have kept `connection open`, the one trace of a
+# connection that fails its hello, which the floor gives up as said
+# above.
 #
 # sqlalchemy, because an engine whose logger is enabled for INFO echoes
 # every statement with the parameters bound to it, and those parameters
