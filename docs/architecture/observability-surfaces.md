@@ -252,6 +252,26 @@ not add a duplicate failure event to the turn. OpenTelemetry attributes remain
 canonical. The existing Langfuse usage aliases are derived compatibility
 copies for the direct exporter path, not a second source of telemetry facts.
 
+A reply round's generation, finished or failed after its request was built,
+also says what its system prompt held, under the round's own names rather than
+the turn's `vinga.prompt.*` (which describe the know-how half once per agent):
+`vinga.llm.system.characters` is the whole prompt the round sent,
+`vinga.llm.memory.characters` is what the per-round blocks added to it,
+the blank lines joining them included, and
+`vinga.llm.memory.sources.<state|memory|device>` is each of those blocks, a
+block that was not sent being absent. They are present whatever the agent's
+memory setting, since the device block carries the device record as well as
+its notes. `vinga.llm.memory.facts` lists the ids of the remembered facts the
+prompt injected, as integers, with `vinga.llm.memory.fact_count` beside it:
+empty and zero where the round read memory and injected nothing, a failed read
+included, and both absent where the agent's memory is off. Ids rather than a
+digest, because a digest of a short personal fact is a confirmation oracle
+(hash the guesses and compare) and an id discloses nothing to whoever holds the
+trace. An id resolves against the memory store's current state only, and best
+effort: a corrected fact keeps its id with new text, and a pruned or deleted
+one leaves no row, so what the model actually read is the LLM input export's to
+carry. A recap's prompt holds no memory and carries none of these.
+
 **Serves.** Needs 1 and 5.
 
 **Retention and access.** **The collector's
