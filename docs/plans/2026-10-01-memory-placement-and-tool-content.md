@@ -237,35 +237,32 @@ between on the request's shape and the model's reading of it.
    was handed it). With the setting off, nothing changes. Langfuse maps
    both to the tool observation's input and output natively, so no
    Langfuse alias is written, under the parity rule.
-8. **Through the content export, never the event surface.** The tool
-   execution hands the pair to the content exporter keyed by the
-   metadata half's join (the requesting round's invocation and the
-   call's position); the tool span takes it at its fold, the way the
-   `llm` span takes its content by invocation. The `tool_call` event and
-   the retained log gain nothing.
-9. **Bounded like every content pair, with its own lifecycle.**
-   - *Enters:* the tool execution stages the pair immediately after the
-     call returns and immediately before its `tool_call` event is
-     emitted, keyed by the requesting round's invocation and the call's
-     position; its bytes join the session's held total
-     (`LlmInputExport._held`) at staging. A call cancelled before it
-     returns stages nothing, since there is nothing to export.
-   - *Leaves:* when the tool span's fold takes it, which is the same
-     emission that stages it; or it is discarded, and its bytes released,
-     when the fold finds no trace for the session (as `_take_llm_content`
-     discards today), when the session closes with it still held, and at
-     shutdown with the content export's existing close.
-   - *Ceilings:* a pair over the per-request ceiling is dropped whole at
-     staging; when staging would exceed the session budget, held pairs
-     are evicted oldest first across generation and tool pairs alike,
-     the same rule the generation pairs follow today. Every drop and
-     eviction is reported (decision 9a).
-   - A malformed call (no arguments object) exports its raw argument
-     text as the model sent it, since that is what the model sent.
-   - Tested: several tool pairs exhausting the session budget (the
-     oldest evicted first, one report each, the newest attached); a pair
-     whose session has no trace discarded and its bytes released; a
-     session closing with a pair held releases it.
+8. **Through the content export, never the event surface, and handed
+   over in one emission.** `PipelineRuntime` gives `ToolExecution` the
+   session's `LlmInputExport` as an optional collaborator (`None` when
+   `export_llm_input` is off; compared `is not None`). The export gains
+   a tool-specific `stage_tool(session, invocation, position,
+   arguments, result)`, called by `_run_one` after the call returns and
+   immediately before its `tool_call` event is emitted, and a
+   `take_tool(invocation, position)` that telemetry's `_tool_span` calls
+   with the event's own `invocation` and `position`, the metadata
+   half's join keys, so two calls in one round never take each other's
+   pair. `_tool_span` takes the slot on every path, discarding it when
+   the session has no trace, so nothing outlives the emission that
+   staged it. The `tool_call` event and the retained log gain nothing.
+9. **One ceiling per pair, no shared budget.** Events fold
+   synchronously (`SessionEvents.emit`), so a tool pair is staged and
+   taken within one emission and never accumulates beside another; a
+   session budget and eviction order would be rules no pair could meet.
+   So a tool pair has the per-request ceiling only: one over it is
+   dropped whole at staging and reported (decision 9a). It does not
+   join the generation pairs' held total. A malformed call (no
+   arguments object) exports its raw argument text as the model sent
+   it. Tested: a pair over the ceiling dropped and reported with
+   `kind=tool_call`; a session with no trace whose slot is discarded by
+   `_tool_span`; two positions in one invocation each taking their own
+   pair; exact `rounds` and `tool_calls` counts on `llm_input_exported`
+   for a session with two rounds and three tool calls.
 9a. **The outcome events say which kind of pair.** Rather than make
    `llm_input_export_failed` say "a generation pair was omitted from its
    LLM span" about a tool span, both outcome events are generalized
@@ -314,8 +311,10 @@ No new module, and no provider changes. Deepened:
   to the provider and the content export alike. `ProviderWatch` is
   unchanged: its zero-argument stream factory already retries the
   arguments fixed before the first attempt.
-- `llm_input_export.py`, `runtime/tool_execution.py`, `telemetry.py`:
-  the tool pair staged and taken by the existing join keys.
+- `llm_input_export.py`: `stage_tool` and `take_tool`, keyed by the
+  join; `runtime/tool_execution.py` holds the export as an optional
+  collaborator `PipelineRuntime` passes in; `telemetry.py`'s
+  `_tool_span` takes the slot on every path.
 - `deploy/telemetry/collector.yml`, `config/models.py` (the
   `export_llm_input` description), docs.
 
@@ -355,9 +354,10 @@ M2:
 - A coerced call exports the model's arguments, not the coerced copy; a
   malformed call exports its raw text.
 - Two calls in one round each carry their own pair (by position).
-- Over-ceiling pair dropped whole and reported; the `tool_call` event's
-  carried keys are unchanged (the event baseline's `CARRIED` set pins
-  it).
+- The `tool_call` event's carried keys are unchanged (the event
+  baseline's `CARRIED` set pins it); the outcome events' new fields are
+  pinned there too (decision 9a), and decision 9's ceiling, no-trace,
+  two-position and exact-count tests.
 - The no-leak sentinel: with the setting off, a credential-shaped
   argument appears on no span and no log line.
 
@@ -513,6 +513,8 @@ What the plan should say instead: specify a tool-continuation placement that fol
 Evidence: Decision 9 says a tool pair is staged immediately before `tool_call`, then consumed by that span’s fold in the same emission, while `vinga-server/src/vinga_server/events/__init__.py:654` dispatches synchronously and `vinga-server/src/vinga_server/telemetry.py:3127` creates the span during that dispatch. Unlike generation pairs, which remain held until a later `llm_round`, a tool pair is released before another tool pair can accumulate. Thus “several tool pairs exhausting the session budget” and cross-kind oldest-first eviction are not testable or real in this design.
 What the plan should say instead: either make tool attachment deliberately deferred, with an explicit ordered post-execution fold and a justified retention budget, or state that immediate tool pairs have only a per-pair ceiling and remove the shared-budget, eviction, and held-on-session-close claims and tests. Add exact assertions for the emitted `rounds` and `tool_calls` counts and for `kind` on each failure path.
 
+   *Resolution:* accepted. Decision 9 now says what synchronous folding implies: a tool pair is staged and taken in one emission, so it has the per-request ceiling only, joins no shared budget, and has no eviction order or session-close hold; those claims and tests are removed. The tests now assert the over-ceiling drop with `kind=tool_call`, the no-trace discard, and exact `rounds` and `tool_calls` counts.
+
 3. **P2: The plan promises raw valid arguments that the neutral model no longer retains.**
 Evidence: Decision 7 says arguments are “exactly as the model sent them,” JSON-encoded. But `vinga-server/src/vinga_server/providers/openai_llm.py:96` parses valid JSON into a `dict` and discards the raw string; `vinga-server/src/vinga_server/providers/base.py:370` retain raw text only for malformed arguments. Anthropic likewise supplies parsed input. Re-encoding changes whitespace and can change key order.
 What the plan should say instead: define the field as the reserved neutral claim’s semantic arguments, deterministically JSON-encoded, with malformed calls retaining their raw argument text. Do not claim byte-for-byte provider output unless the plan adds and carries a raw-arguments representation through both adapters, which would conflict with the established neutral-seam boundary.
@@ -520,6 +522,8 @@ What the plan should say instead: define the field as the reserved neutral claim
 4. **P2: The tool-content handoff and no-trace release are not concretely plumbed.**
 Evidence: `vinga-server/src/vinga_server/runtime/tool_execution.py:460` has no content-export collaborator; `vinga-server/src/vinga_server/runtime/pipeline.py:709` constructs it without one. Telemetry currently keys content only by invocation, and its no-trace tool route simply returns without consuming anything (`vinga-server/src/vinga_server/telemetry.py:3157`). The plan requires a distinct `(invocation, position)` content slot and explicit consumption on both traced and untraced folds, but does not name those changes.
 What the plan should say instead: name the `PipelineRuntime` to `ToolExecution` wiring, the tool-specific stage/take/discard API, and a `(invocation, position)` key in telemetry. Require `_tool_span` to consume/discard the slot even when the session trace is absent, with tests covering the no-trace path and two positions in one invocation.
+
+   *Resolution:* accepted. Decision 8 now names the plumbing: `PipelineRuntime` passes the session's `LlmInputExport` to `ToolExecution` as an optional collaborator; the export gains `stage_tool(session, invocation, position, ...)` called by `_run_one` just before the `tool_call` emit and `take_tool(invocation, position)` called by `_tool_span` with the event's own join keys; `_tool_span` takes the slot on every path, discarding it when the session has no trace. Tests cover the no-trace path and two positions in one invocation.
 
 5. **P2: Collector masking is asserted without naming its enforced test surfaces.**
 Evidence: Decision 10 adds two content attributes, but `vinga-server/tests/unit/test_telemetry_deploy.py:23` holds the collector’s complete content-key set exactly, and `vinga-server/tests/integration/test_telemetry_fanout.py:43` sends every declared content key through the real collector. Neither is in the plan’s test footprint.
