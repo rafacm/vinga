@@ -12,6 +12,7 @@ clock, so what one round wrote down is what the next round is sent.
 """
 
 import asyncio
+import hashlib
 import threading
 
 import pytest
@@ -452,6 +453,101 @@ async def test_the_event_counts_the_server_shipped_blocks_without_quoting_them(
     )
     assert shipped not in written and published not in written
     assert "house_style" not in written
+
+
+# The fingerprint (#533): the SHA-256 of the know-how half exactly as
+# sent, so two sessions on one prompt compare equal, and an edit that
+# keeps the length still shows.
+
+
+def digest_of(text: str) -> str:
+    """What a reader computes from the text, with the standard library
+    and nothing of this server's."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def persona_config(persona: str) -> Config:
+    return base_config(
+        agents={
+            "poet": {"prompt": persona, "tts": "tenor"},
+            "tutor": {"prompt": "TUTOR", "tts": "alto"},
+        }
+    )
+
+
+def assembled_digest(
+    caplog: pytest.LogCaptureFixture,
+    config: Config | None = None,
+    servers: object = None,
+) -> str:
+    """The digest one fresh activation's `prompt_assembled` carries."""
+    caplog.clear()
+    with caplog.at_level("INFO"):
+        session_with(
+            servers if servers is not None else CountingServers(),  # type: ignore[arg-type]
+            {"poet": ScriptedLlm(["Said."])},
+            config=config,
+        )
+    (assembled,) = prompt_events(caplog)
+    return assembled.sha256
+
+
+async def test_activation_logs_the_digest_of_exactly_the_know_how_half(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The whole half, the server-shipped guidance included, as the
+    model received it at the head of its system prompt."""
+    config = base_config()
+    guidance = (Guidance("home", GUIDANCE), ServerInstructions("home", "Call list_devices first."))
+    llm = RecordingLlm()
+    with caplog.at_level("INFO"):
+        session = session_with(CountingServers(guidance), {"poet": llm}, config=config)
+        await run_reply(session, "hello")
+
+    (system,) = llm.systems
+    (assembled,) = prompt_events(caplog)
+    expected = know_how(
+        config.prompt_for_agent("poet"), config.fragments_for_agent("poet"), guidance
+    )
+    assert system.startswith(expected.text)
+    assert "server_instructions:home" in assembled.sources
+    assert assembled.sha256 == digest_of(expected.text)
+
+
+async def test_a_persona_edit_that_keeps_the_length_changes_the_digest(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The case the size alone cannot see."""
+    before = assembled_digest(caplog, persona_config("Be brief."))
+    after = assembled_digest(caplog, persona_config("Be fierce"))
+
+    assert len("Be brief.") == len("Be fierce")
+    assert before != after
+
+
+async def test_two_activations_on_one_prompt_carry_one_digest(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Two sessions, two threads, one prompt: one value, which is what
+    makes the digest a thing to group sessions by."""
+    assert assembled_digest(caplog) == assembled_digest(caplog)
+
+
+async def test_a_change_to_server_shipped_text_changes_the_digest(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """MCP-supplied blocks are in the half the model reads, so they are
+    in what the digest covers, and a server that changes its
+    instructions changes the prompt even where the length holds."""
+    early = assembled_digest(
+        caplog, servers=CountingServers((ServerInstructions("home", "Call list_devices early."),))
+    )
+    first = assembled_digest(
+        caplog, servers=CountingServers((ServerInstructions("home", "Call list_devices first."),))
+    )
+
+    assert len("early") == len("first")
+    assert early != first
 
 
 async def test_the_shipped_guidance_reaches_the_model() -> None:

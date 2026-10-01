@@ -38,6 +38,7 @@ a kind is what a value IS here rather than a claim a declaration makes
 about it.
 """
 
+import hashlib
 import os
 import re
 from dataclasses import dataclass
@@ -257,6 +258,15 @@ INVOCATION_ID = Syntax(
     "same id because it is still the same logical generation.",
 )
 
+SHA256 = Syntax(
+    "sha256",
+    r"[0-9a-f]{64}",
+    64,
+    "A SHA-256 digest in lowercase hex of a text this server assembled. "
+    "The digest and never the text: two records carry the same value "
+    "when the text was the same.",
+)
+
 EVENT_NAME = Syntax(
     "event_name",
     r"[a-z][a-z0-9_]{0,63}",
@@ -289,6 +299,7 @@ SYNTAXES: dict[str, Syntax] = {
         SESSION_ID,
         CONVERSATION_ID,
         INVOCATION_ID,
+        SHA256,
         ACTIVATION_CODE,
         EVENT_NAME,
         LANGUAGE,
@@ -713,6 +724,24 @@ class InvocationId(MachineId):
     """
 
     SYNTAX: ClassVar[Syntax | None] = INVOCATION_ID
+
+
+@dataclass(frozen=True)
+class Sha256(MachineId):
+    """The SHA-256 of a text this server assembled, in lowercase hex.
+
+    `of` is the one place the digest is taken, so what was hashed is
+    always the text's UTF-8 bytes exactly as given: no framing and no
+    normalization, because the text a site hands in is already the
+    canonical form of what it describes (#533).
+    """
+
+    SYNTAX: ClassVar[Syntax | None] = SHA256
+
+    @classmethod
+    def of(cls, text: str) -> "Sha256":
+        """The digest of `text`, UTF-8 encoded exactly as given."""
+        return cls(hashlib.sha256(text.encode("utf-8")).hexdigest())
 
 
 @dataclass(frozen=True)
@@ -2074,6 +2103,7 @@ __all__ = [
     "ScopeProvenance",
     "SessionIds",
     "SessionList",
+    "Sha256",
     "Suppression",
     "TextValue",
     "ToolOutcome",

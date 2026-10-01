@@ -73,6 +73,7 @@ from tests.support.telemetry import (
     hear,
     named,
     open_session,
+    prompt_digest,
     released,
     round_done,
     session_events,
@@ -1500,6 +1501,10 @@ def test_a_turn_carries_the_provenance_of_the_prompt_behind_it() -> None:
     for name, characters in FLATTENED.items():
         assert turn.attributes[name] == characters, name
     assert turn.attributes["vinga.prompt.characters"] == 294
+    # And the half's fingerprint beside its size (#533): the digest a
+    # reader computes from the text with nothing but the standard
+    # library, so two sessions on one prompt compare equal anywhere.
+    assert turn.attributes["vinga.prompt.sha256"] == prompt_digest()
 
 
 def test_the_second_turn_by_one_agent_carries_them_too() -> None:
@@ -1524,6 +1529,7 @@ def test_the_second_turn_by_one_agent_carries_them_too() -> None:
     for turn in turns:
         assert turn.attributes["vinga.prompt.characters"] == 294
         assert turn.attributes["vinga.prompt.sources.persona"] == 210
+        assert turn.attributes["vinga.prompt.sha256"] == prompt_digest()
 
 
 def test_a_handover_switches_which_prompt_a_turn_is_stamped_from() -> None:
@@ -1548,6 +1554,8 @@ def test_a_handover_switches_which_prompt_a_turn_is_stamped_from() -> None:
     turn = named(finished(telemetry, memory), "turn")
     assert turn.attributes["vinga.prompt.characters"] == 11
     assert turn.attributes["vinga.prompt.sources.persona"] == 11
+    assert turn.attributes["vinga.prompt.sha256"] == prompt_digest(OTHER_AGENT)
+    assert prompt_digest(OTHER_AGENT) != prompt_digest()
     assert "vinga.prompt.sources.instructions.house" not in turn.attributes
 
 

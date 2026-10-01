@@ -615,6 +615,7 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                 "device",
                 "event",
                 "session",
+                "sha256",
                 "sources",
             ),
         ),

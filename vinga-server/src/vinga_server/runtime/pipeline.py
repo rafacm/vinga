@@ -98,6 +98,7 @@ from vinga_server.events.values import (
     PromptSources,
     Real,
     ReplyOutcome,
+    Sha256,
     UtteranceId,
     Whole,
 )
@@ -1115,6 +1116,11 @@ class PipelineRuntime:
                 conversation=ConversationId(self._conversation),
                 characters=Count(half.characters),
                 sources=PromptSources(half.sizes()),
+                # The half's text exactly as the model is sent it, which
+                # assembly has already trimmed and joined: the one
+                # canonical form of it, so nothing is framed or
+                # normalized on the way into the digest (#533).
+                sha256=Sha256.of(half.text),
             )
         )
 

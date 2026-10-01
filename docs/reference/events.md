@@ -155,6 +155,7 @@ a bare code span would hide it.
 | `session_id` | `'[0-9A-Za-z_-]{1,64}'` | 64 | A token this server minted. Production ids are `uuid4().hex`; the syntax is the bounded machine form rather than that one spelling, because the capture and store suites drive sessions of their own naming and a session id is never far-side bytes whoever chose it. |
 | `conversation_id` | `'[0-9A-Za-z_-]{1,64}'` | 64 | A token this server minted for one conversation thread. Production ids are `uuid4().hex`, the same shape and the same bounded machine form a session id takes, and for the same reason: the store suites drive threads of their own naming, and a thread id is never far-side bytes whoever chose it. |
 | `invocation_id` | `'[0-9A-Za-z_-]{1,64}'` | 64 | A token this server minted for one logical model invocation. Production ids are `uuid4().hex`; a first-token retry keeps the same id because it is still the same logical generation. |
+| `sha256` | `'[0-9a-f]{64}'` | 64 | A SHA-256 digest in lowercase hex of a text this server assembled. The digest and never the text: two records carry the same value when the text was the same. |
 | `activation_code` | `'[0-9]{6}'` | 6 | A claim ticket read off a screen, not a credential. |
 | `event_name` | `'[a-z][a-z0-9_]{0,63}'` | 64 | The registry's own key, carried in the payload as `event`. |
 | `language` | `'[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{1,8})*'` | 16 | A language code as an ASR engine reports it: the bare ISO 639 code or a tagged form such as `en-US`. |
@@ -1001,6 +1002,7 @@ session %s: assembled %d characters of prompt for %s
 | `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `characters` | `COUNT` | yes | no |  |  |
 | `sources` | `SOURCES` | yes | no | keyed by the prompt provenance grammar, with counts for values | Each block's size by provenance: how much of the prompt came from where, never any of the prompt itself. |
+| `sha256` | `ID` | yes | no | the `sha256` syntax | The SHA-256 of the know-how half exactly as the model is sent it, server-shipped guidance included, so two sessions on the same prompt carry the same value and an edit that keeps the length still changes it. A digest confirms a guess only where every other byte of the half is known, which is the case of a persona copied from a known template with one personal slot: personal facts belong in memory, which is never digested. |
 
 ### `llm_retry`
 
