@@ -26,11 +26,13 @@ assignment is what is holding.
 """
 
 import contextlib
+import os
+import shlex
+import shutil
 import signal
 import socket
 import subprocess
 import time
-import urllib.request
 from pathlib import Path
 
 import pytest
@@ -171,6 +173,32 @@ def test_a_seed_ignores_an_ambient_api_url(
         assert _domain(decoy).default_agent is None
 
 
+# What stands in for `vinga-server` on the interrupted seeding's PATH:
+# the real one, called with the same arguments, except that the call
+# making the seeding's second write first says so and waits to be
+# released. The call that starts the server goes straight through, and
+# `exec` keeps the process the script started the one it later stops,
+# so the script under test runs unmodified and so does everything it
+# calls.
+#
+# The wait is bounded, so a test that died while holding it leaves a
+# script that finishes rather than one that waits for ever.
+HOLDING_STANDIN = """#!/bin/sh
+if [ "${{1-}}" = config ]; then
+    echo call >> {calls}
+    if [ "$(wc -l < {calls})" -eq {hold_at} ]; then
+        : > {held}
+        i=0
+        while [ ! -e {released} ] && [ "$i" -lt 600 ]; do
+            sleep 0.1
+            i=$((i + 1))
+        done
+    fi
+fi
+exec {real} "$@"
+"""
+
+
 def _default_interrupt() -> None:
     """Hand the script SIGINT at its default disposition, whatever this
     process inherited.
@@ -195,9 +223,34 @@ def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
     tmp_path: Path,
 ) -> None:
     """A seeding step that was interrupted must not look like one that
-    finished, and must not leave the server it started running: CI would
-    then hold a port and a data volume open for the container that comes
-    next."""
+    finished, must not carry on writing, and must not leave the server
+    it started running: CI would then hold a port and a data volume open
+    for the container that comes next.
+
+    The interrupt is sent while the script is provably mid-way, held at
+    its second write by a stand-in on PATH, rather than when the server
+    first answers: the test sees the server ready before the script
+    does, so a signal sent then lands while the script is still starting
+    it, and the writes this case is about never begin.
+    """
+    real = shutil.which("vinga-server")
+    assert real is not None
+    calls, held, released = (tmp_path / name for name in ("calls", "held", "released"))
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    standin = binaries / "vinga-server"
+    standin.write_text(
+        HOLDING_STANDIN.format(
+            calls=shlex.quote(str(calls)),
+            held=shlex.quote(str(held)),
+            released=shlex.quote(str(released)),
+            real=shlex.quote(real),
+            hold_at=2,
+        ),
+        encoding="utf-8",
+    )
+    standin.chmod(0o755)
+
     port = _free_port()
     stack = contextlib.ExitStack()
     database = stack.enter_context(throwaway_database())
@@ -205,6 +258,7 @@ def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
         without=["VINGA_CONFIG"],
         VINGA_SERVER__PORT=str(port),
         VINGA_DB_NAME=database,
+        PATH=f"{binaries}{os.pathsep}{os.environ['PATH']}",
     )
 
     seeding = subprocess.Popen(
@@ -219,12 +273,20 @@ def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
         preexec_fn=_default_interrupt,
     )
     try:
-        _wait_for(lambda: _ready(port), "the seeding server never became ready")
+        # As long as the seeding itself may take to start its server.
+        _wait_for(held.exists, "the seeding never reached its second write", timeout=180)
+        # Sent while the script waits on the held write. The shell runs
+        # its trap once that command returns, so the signal is already
+        # pending when the write is let go, whatever the scheduler does.
         seeding.send_signal(signal.SIGINT)
+        released.touch()
         _, errors = seeding.communicate(timeout=60)
+        written = _domain(database)
     finally:
+        released.touch()
         if seeding.poll() is None:  # pragma: no cover, only on a failure
-            seeding.kill()
+            # The whole group, so the server and the stand-in go too.
+            os.killpg(seeding.pid, signal.SIGKILL)
             seeding.communicate(timeout=30)
         # The database this script's server was on, taken away only once
         # nothing is connected to it.
@@ -232,22 +294,14 @@ def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
 
     assert seeding.returncode != 0
     assert "interrupted" in errors
+    # The write it was in finished, and none after it began: the seeding
+    # stopped where it was interrupted rather than running to the end.
+    assert calls.read_text(encoding="utf-8").count("call") == 2
+    stages = {s for s in ("llm", "asr", "tts", "vad") if getattr(written.providers, s)}
+    assert stages == {"llm", "asr"}
+    assert written.default_agent is None
     # And the server it started is gone with it.
     _wait_for(lambda: not _listening(port), "the seeding server outlived the script")
-
-
-def _ready(port: int) -> bool:
-    """The server ready, which is when the script starts writing: an
-    interrupt landing before that would prove less than this needs to.
-
-    The same probe the script itself waits on, so this waits for the
-    moment the script is waiting for rather than an earlier one.
-    """
-    try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/readyz", timeout=1):
-            return True
-    except OSError:
-        return False
 
 
 def _listening(port: int) -> bool:
