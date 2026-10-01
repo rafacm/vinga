@@ -452,11 +452,11 @@ async def test_what_uvicorn_says_above_info_still_reaches_the_log(
     an exception in the application, which it reports at ERROR with the
     traceback. An operator needs both whatever else was held back.
 
-    The exception is asserted by its class and uvicorn's fixed line,
-    and deliberately not by its message. The traceback this floor keeps
-    is not sanitized by it, the same as every other traceback this
-    server renders, so the message reaching the log is a fact about
-    that and not a property to hold here."""
+    This pins only uvicorn's fixed header and the exception's class,
+    deliberately not its message: what a kept traceback says is outside
+    what this change claims to sanitize, so the message reaching the log
+    is not a property to hold here. This server's own code renders no
+    traceback at all; uvicorn's is the one the floor keeps."""
     logs.configure(ServerConfig(log_level="INFO"))
 
     async with uvicorn_serving() as port:
