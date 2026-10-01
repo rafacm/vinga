@@ -886,8 +886,11 @@ def config_reloader(
             raise
         except DatabaseBusyError:
             refusal = DatabaseBusyError(_RELOAD_DATABASE_BUSY)
-        except StorageError:
-            refusal = StorageError(_RELOAD_UNREADABLE)
+        except StorageError as exc:
+            # The sentence is replaced and the class of what failed
+            # under it is kept, which is a validated name and the only
+            # thing the log line this sentence points to can say (#586).
+            refusal = StorageError(_RELOAD_UNREADABLE, cause=exc.cause)
         except ConfigError:
             refusal = ConfigError(_RELOAD_REFUSED)
         raise refusal
@@ -1029,8 +1032,9 @@ def config_diff_reader(
             return await asyncio.to_thread(read)
         except DatabaseBusyError:
             refusal = DatabaseBusyError(_DIFF_DATABASE_BUSY)
-        except StorageError:
-            refusal = StorageError(_DIFF_UNREADABLE)
+        except StorageError as exc:
+            # The cause's class travels for the reason the reload's does.
+            refusal = StorageError(_DIFF_UNREADABLE, cause=exc.cause)
         except ConfigError:
             refusal = ConfigError(_DIFF_REFUSED)
         raise refusal

@@ -54,6 +54,7 @@ from vinga_server.config.secrets import (
 )
 from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database, schema
+from vinga_server.events.values import ClassName
 from vinga_server.logs import JsonFormatter
 from vinga_server.tools.mcp import McpServers
 
@@ -342,6 +343,25 @@ async def test_a_refused_stored_half_keeps_its_type_and_loses_its_words(
     # raised, which is what "loses its words" means here.
     assert REJECTED not in str(caught.value)
     assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+async def test_a_refused_stored_half_keeps_the_class_of_what_failed() -> None:
+    """The words are replaced and the class the store's refusal was
+    decided from is kept, because this read's sentence says the failure
+    is recorded in the log and the class is all that line can say
+    (#586)."""
+    diff = config_diff_reader(
+        world(NO_ENTRIES),
+        McpServers.build(NO_ENTRIES),
+        failing(StorageError(f"over {REJECTED}", cause=ClassName("OperationalError"))),
+    )
+
+    with pytest.raises(StorageError) as caught:
+        await diff()
+
+    assert caught.value.cause == ClassName("OperationalError")
+    assert REJECTED not in str(caught.value)
     assert caught.value.__context__ is None
 
 

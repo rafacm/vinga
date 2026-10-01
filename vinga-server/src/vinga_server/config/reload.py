@@ -91,6 +91,7 @@ from vinga_server.config.secrets import EntityKind
 # conversation store reads this package's loader and models and never
 # this module.
 from vinga_server.conversations.store import erasure_order
+from vinga_server.db import failure_class
 from vinga_server.filler import Fillers, build_agent_fillers
 from vinga_server.generation import Generation, Generations
 from vinga_server.providers import Built, Provider, ProviderError, build_world
@@ -119,10 +120,13 @@ _RELOAD_IN_PROGRESS = (
 # already this application's own words. A `StorageError`, because that
 # is exactly what this is (stored state that could not be read, through
 # no fault of the caller) and because its type is what the API turns
-# into a status. The failure itself is named by class in the event
-# beside this, which is where an operator looks; a `read` callable that
-# fails unexpectedly may be holding a connection string, and the reload
-# endpoint's response body is not the place to find out.
+# into a status. The failure itself is named by class on the refusal,
+# validated where it is caught, and the API logs that name in its
+# `api_storage_error` line, which is where an operator looks (#586; the
+# `mcp_reload` event beside it records the refusal's kind, not the
+# class). A `read` callable that fails unexpectedly may be holding a
+# connection string, and the reload endpoint's response body is not
+# the place to find out.
 _RELOAD_UNREADABLE = (
     f"{mcp.RELOAD_REFUSED} this server's configuration could not be read. The failure "
     "is recorded in this server's log."
@@ -336,6 +340,7 @@ class ConfigReload:
         not part of the reload's answer.
         """
         problem: str | None = None
+        cause = None
         try:
             stored, renames_known = await self._stored()
             previous = self._generations.current()
@@ -408,7 +413,8 @@ class ConfigReload:
         except Exception as exc:
             mcp.refused(exc)
             problem = _RELOAD_UNREADABLE
-        raise StorageError(problem)
+            cause = failure_class(exc)
+        raise StorageError(problem, cause=cause)
 
     async def _built(self, previous: Generation, candidate: Generation) -> Built:
         """The engines the candidate world would speak through, in the
