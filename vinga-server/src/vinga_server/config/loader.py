@@ -20,6 +20,7 @@ what validates the whole snapshot the way it always has.
 import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 from dotenv import find_dotenv, load_dotenv
@@ -43,6 +44,13 @@ from vinga_server.config.models import (
     yaml_data_var,
 )
 from vinga_server.config.responses import RefusalReason
+
+if TYPE_CHECKING:
+    # For the annotation alone. The event vocabulary imports the event
+    # catalog, and a configuration client that never logs an event has
+    # no reason to load it; the value is built by `db.failure_class`,
+    # which is on the server's side of that line already.
+    from vinga_server.events.values import ClassName
 
 CONFIG_ENV_VAR = "VINGA_CONFIG"
 
@@ -400,7 +408,36 @@ class ProviderRefusedError(ConfigError):
 
 class StorageError(ConfigError):
     """The stored state cannot be read as configuration, or the database
-    could not be read or written at all. Not the caller's mistake."""
+    could not be read or written at all. Not the caller's mistake.
+
+    `cause` is the class name of the failure the refusal was decided
+    from, where a raise site caught one, and None everywhere else. It
+    exists so the log can say what the sentence does not (#586): a
+    storage refusal quotes nothing of the driver's own text, which can
+    carry the DSN it connected on and the values bound into the
+    statement it ran, and it is built inside the `except` arm and raised
+    after it, so nothing of the failure is on its chain either. Without
+    this the one line an operator is pointed to would name the refusal
+    and nothing under it.
+
+    A validated `ClassName` and never the exception, chosen where the
+    classifying happens (`db.failure_class`), for the reason `reason`
+    is: what a refusal is gets carried beside its sentence rather than
+    recovered from it. The API's refusal handler is what reads it, and
+    nothing that answers a caller does: the sentence, the status and
+    the response body are exactly what they were without it.
+    """
+
+    def __init__(
+        self,
+        message: object,
+        problems: Sequence[FieldProblem] = (),
+        *,
+        reason: RefusalReason | None = None,
+        cause: "ClassName | None" = None,
+    ) -> None:
+        super().__init__(message, problems, reason=reason)
+        self.cause = cause
 
 
 class StoredConfigUnreadableError(StorageError):

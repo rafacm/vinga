@@ -7,12 +7,24 @@ server's log", and the third names the failure's class in its own
 sentence. Each is driven here through the API, with a failure planted
 where the route's own boundary meets it.
 
-**The body is the one it always was, byte for byte.** Pinned before the
-log line was reshaped, so what a caller receives can be shown not to
-move when it is.
+What is held, per route:
+
+- **The body is the one it always was, byte for byte.** Pinned before
+  the log line was reshaped and left untouched after, so what a caller
+  receives is shown not to have moved.
+- **The log names the class of what failed**, which is what "the
+  details are in the server's log" promises, rendered through
+  `db.failure_name`'s validation so a class whose name is not an
+  identifier names nothing but the refusal.
+- **Nothing planted travels.** A credential-shaped value sits in the
+  failing exception's message, in the statement and parameters it
+  carries, in the driver error under it and on its `__cause__`, and is
+  hunted in the body, in every log record in both formats and in the
+  record objects, and in everything the refusal itself carries.
 """
 
 import contextlib
+import logging
 from collections.abc import Iterator
 from dataclasses import replace
 from typing import Any
@@ -21,9 +33,12 @@ import psycopg
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
+from tests.support.events import only
+from tests.support.leaks import chain, renderings
 from vinga_server.config.api import build_api
+from vinga_server.config.loader import StorageError
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 from vinga_server.db import connection_url
@@ -89,6 +104,15 @@ def planted_failure() -> OperationalError:
     return failure
 
 
+def forged_failure() -> SQLAlchemyError:
+    """A failure whose class name is not an identifier, and so is not a
+    name any line may repeat."""
+    forged = type("Forged\nthe store is fine", (SQLAlchemyError,), {})
+    failure = forged(f"connected as {PLANTED}")
+    failure.__cause__ = RuntimeError(PLANTED)
+    return failure
+
+
 @contextlib.contextmanager
 def writing_through(api: FastAPI, seam: str, failure: Exception) -> Iterator[None]:
     """The transaction a route writes in, replaced at the runtime by one
@@ -110,6 +134,27 @@ def writing_through(api: FastAPI, seam: str, failure: Exception) -> Iterator[Non
         yield
     finally:
         api.state.api_runtime = runtime
+
+
+@contextlib.contextmanager
+def watching(api: FastAPI) -> Iterator[list[Exception]]:
+    """Every storage refusal the routes raise, kept so a test can walk
+    what it carries. The production handler still answers, so the body
+    and the log are the ones a deployment sends."""
+    caught: list[Exception] = []
+    original = api.exception_handlers[StorageError]
+
+    async def watched(request: Any, exc: Exception) -> Any:
+        caught.append(exc)
+        return await original(request, exc)
+
+    api.add_exception_handler(StorageError, watched)
+    api.middleware_stack = None
+    try:
+        yield caught
+    finally:
+        api.add_exception_handler(StorageError, original)
+        api.middleware_stack = None
 
 
 @contextlib.contextmanager
@@ -179,3 +224,77 @@ def test_a_refused_configuration_write_answers_the_body_it_always_has(
 
     assert answer.status_code == 500
     assert answer.content == CONFIG_REFUSAL
+
+
+# What the log says, and what nothing says
+#
+# One case per route, each asserting both halves together: the one
+# event the failure produces names the class of what failed rather
+# than the refusal built from it, and the planted value is in no log
+# record, no response and nothing the refusal carries. Together because
+# they are one claim about one line: a line that named the class by
+# quoting the failure would pass the first half alone.
+
+
+def _nothing_planted(answer: Any, caplog: pytest.LogCaptureFixture) -> None:
+    """Not in the body, and not in any record in either format or in the
+    record object behind them."""
+    assert PLANTED not in answer.text
+    assert not [found for found in renderings(caplog) if PLANTED in found]
+
+
+def _severed(caught: list[Exception]) -> None:
+    """And not in the refusal: its text, its arguments, what its
+    attributes hold (the cause's class among them) and anything on its
+    chain."""
+    [problem] = caught
+    assert PLANTED not in chain(problem)
+    assert problem.__cause__ is None
+    assert problem.__context__ is None
+
+
+@pytest.mark.parametrize(
+    ("seam", "request_", "body"),
+    [
+        pytest.param("memory_writes", _forgetting, MEMORY_REFUSAL, id="memory"),
+        pytest.param("erasures", _erasing, ERASURE_REFUSAL, id="erasure"),
+    ],
+)
+def test_a_refused_write_logs_the_class_of_what_failed_and_nothing_planted(
+    api: FastAPI,
+    client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+    seam: str,
+    request_: Any,
+    body: bytes,
+) -> None:
+    with writing_through(api, seam, planted_failure()), watching(api) as caught:
+        with caplog.at_level(logging.DEBUG):
+            answer = request_(client)
+
+    assert answer.content == body
+    said = only(caplog, "api_storage_error")
+    assert said.getMessage().endswith("(OperationalError)")
+    assert said.exc_info is None
+    _nothing_planted(answer, caplog)
+    _severed(caught)
+
+
+def test_a_failure_whose_class_cannot_be_named_logs_the_refusal(
+    api: FastAPI, client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A class can be given any name, a line break and a sentence after
+    it included. The refusal is still answered, with the same body, and
+    the line names the refusal's own class rather than a name it may
+    not repeat: what the route could classify was that it failed, and
+    that is what it says."""
+    with writing_through(api, "erasures", forged_failure()), watching(api) as caught:
+        with caplog.at_level(logging.DEBUG):
+            answer = _erasing(client)
+
+    assert answer.content == ERASURE_REFUSAL
+    said = only(caplog, "api_storage_error")
+    assert said.getMessage().endswith("(StorageError)")
+    assert not [found for found in renderings(caplog) if "the store is fine" in found]
+    _nothing_planted(answer, caplog)
+    _severed(caught)

@@ -94,7 +94,7 @@ from vinga_server.config.responses import (
     request_body,
 )
 from vinga_server.conversations.store import erasure_order
-from vinga_server.db import is_busy, read_engine, write_engine
+from vinga_server.db import failure_class, is_busy, read_engine, write_engine
 from vinga_server.memory import store
 from vinga_server.memory.scopes import MemoryScope
 from vinga_server.memory.store import MEMORY_CHAIN, NOT_STORABLE, storable
@@ -816,7 +816,7 @@ def _written[T](
         raise
     except Exception as exc:  # noqa: BLE001 - the driver's own words never travel
         problem = DatabaseBusyError(_MEMORY_BUSY) if is_busy(exc) else StorageError(
-            _MEMORY_FAILED
+            _MEMORY_FAILED, cause=failure_class(exc)
         )
     raise problem
 

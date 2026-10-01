@@ -1021,12 +1021,13 @@ def test_a_correction_the_database_refuses_says_nothing_of_it(
     assert "log" in refused(answer.json(), 500)
     assert SENTINEL not in answer.text
     assert SENTINEL not in both_formats(caplog)
-    # The one event this failure produces says the class of what
-    # reached the handler, which is this module's own refusal rather
-    # than the driver's error, and carries no traceback to rebuild the
-    # rest from.
+    # The one event this failure produces says the class of what the
+    # database raised (#586), which the refusal carries beside its
+    # sentence rather than on its chain, and carries no traceback to
+    # rebuild the rest from. `ProgrammingError` is what SQLAlchemy
+    # raises for an exception a PL/pgSQL trigger raised.
     said = only(caplog, "api_storage_error")
-    assert said.getMessage().endswith("(StorageError)")
+    assert said.getMessage().endswith("(ProgrammingError)")
     assert said.exc_info is None
     [problem] = caught
     assert SENTINEL not in str(problem)
