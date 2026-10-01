@@ -2022,6 +2022,28 @@ class ProviderFailed(Variant):
     memory_facts: FactIds | Absent = value(default=ABSENT, note=MEMORY_FACTS_NOTE)
 
 
+# How a `tool_call` names the call it ran, in the server's own terms
+# only (#533). The provider's call id would be the obvious join and is
+# not one: it is far-side bytes, which a metadata surface does not
+# carry, and a credential-shaped id passes any syntax check. It is not
+# even unique within a turn, since an adapter mints `call_0` where a
+# server sends none. So the call is named by two values this server
+# owns, the same on all three shapes, and the provider's id stays in the
+# opt-in content export where it already is.
+TOOL_CALL_INVOCATION_NOTE = (
+    "The server-minted invocation of the round that asked for this "
+    "call, the same value its `llm_round` carries, so a call joins its "
+    "round on one key. Never the provider's own call id."
+)
+TOOL_CALL_POSITION_NOTE = (
+    "Where this call sat in the list of calls its round returned, "
+    "counted from zero and with moves included, so with `invocation` it "
+    "names exactly one call, the n-th call of that round's exported "
+    "output. The same number the call's `tool_invocations` row "
+    "records."
+)
+
+
 @dataclass(frozen=True)
 class BuiltinToolCall(Variant):
     """A builtin returns. The one branch that names its tool, because a
@@ -2051,6 +2073,8 @@ class BuiltinToolCall(Variant):
     tool: Identifier = value(note="The only tool names this server authors.")
     duration_ms: Whole = value()
     is_error: Flag = value()
+    invocation: InvocationId = value(note=TOOL_CALL_INVOCATION_NOTE)
+    position: Whole = value(note=TOOL_CALL_POSITION_NOTE)
     named: QuotedToolName = value(carried=False)
     duration_s: Real = value(carried=False)
     outcome: ToolOutcome = value(carried=False)
@@ -2087,6 +2111,8 @@ class McpToolCall(Variant):
     )
     duration_ms: Whole = value()
     is_error: Flag = value()
+    invocation: InvocationId = value(note=TOOL_CALL_INVOCATION_NOTE)
+    position: Whole = value(note=TOOL_CALL_POSITION_NOTE)
     named: FromEntry = value(carried=False)
     duration_s: Real = value(carried=False)
     outcome: ToolOutcome = value(carried=False)
@@ -2124,6 +2150,8 @@ class UnnamedToolCall(Variant):
     source: UnnamedToolSource = value()
     duration_ms: Whole = value()
     is_error: Flag = value()
+    invocation: InvocationId = value(note=TOOL_CALL_INVOCATION_NOTE)
+    position: Whole = value(note=TOOL_CALL_POSITION_NOTE)
     named: Nothing = value(carried=False)
     duration_s: Real = value(carried=False)
     outcome: ToolOutcome = value(carried=False)

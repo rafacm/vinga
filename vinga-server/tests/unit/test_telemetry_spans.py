@@ -32,6 +32,7 @@ also fold, and that the events beside them still do.
 """
 
 import asyncio
+import json
 import time
 from collections.abc import Iterator
 from typing import Any, cast
@@ -43,11 +44,13 @@ from tests.support.events import both_formats
 from tests.support.events import events as logged_events
 from tests.support.providers import BrokenStreamingTts, ScriptedEndpointer, ScriptedLlm
 from tests.support.sessions import (
+    call,
     drive_reply,
     end_utterance,
     events_of,
     plant_utterance,
     realtime_session,
+    run_reply,
     session_for,
     start_reply,
     turn_taking,
@@ -89,12 +92,15 @@ from tests.support.telemetry import (
 )
 from tests.support.wire import speech_pcm
 from vinga_server.events.values import ReplyOutcome
+from vinga_server.llm_input_export import LlmInputExport
 from vinga_server.memory.store import PromptMemory
 from vinga_server.providers import AsrResult
+from vinga_server.providers.base import ToolCall
 from vinga_server.runtime import prompt
 from vinga_server.telemetry import (
     _QUIETING,
     ASR_SPAN,
+    GEN_AI_OUTPUT_MESSAGES,
     LLM_SPAN,
     PLAYBACK_SPAN,
     SESSION_ID_ALIAS,
@@ -982,6 +988,202 @@ def test_a_tool_call_with_no_turn_open_is_a_span_on_the_session() -> None:
     session = named(spans, "session")
     assert tool.parent is session.context
     assert [event.name for event in session.events] == []
+
+
+def test_a_tool_call_names_its_round_and_its_place_in_it() -> None:
+    """The join, at the fold: the round's own invocation under the key
+    the `llm` span uses for it, and the call's place in that round.
+
+    One attribute name for the invocation on both spans, so the join is
+    one key equal on two observations rather than a mapping a reader
+    has to know."""
+    clock = Clock()
+    telemetry, memory = exporting()
+    events = a_turn(clock, telemetry)
+    invocation = "abcdefabcdefabcdefabcdefabcdefab"
+
+    clock.tick(0.4)
+    round_done(events, invocation=invocation)
+    clock.tick(0.25)
+    call_tool(events, "builtin", invocation=invocation, position=0)
+    clock.tick(0.25)
+    call_tool(events, "mcp", name="search", invocation=invocation, position=1)
+    finish_reply(events)
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    llm = named(spans, LLM_SPAN)
+    builtin, mcp = spans_of(TOOL_SPAN, spans)
+    for tool in (builtin, mcp):
+        assert tool.attributes["vinga.llm.invocation.id"] == invocation
+        assert tool.attributes["vinga.llm.invocation.id"] == llm.attributes[
+            "vinga.llm.invocation.id"
+        ]
+    assert builtin.attributes["vinga.tool.call.position"] == 0
+    assert mcp.attributes["vinga.tool.call.position"] == 1
+
+
+# --- the join, driven through the reply loop ---------------------------
+#
+# The fold above is told the invocation and the position. What it cannot
+# show is that the reply loop tells it the RIGHT ones: the round's own
+# invocation rather than another round's, and the place the call had in
+# the list the model returned rather than in the list left after the
+# moves are taken out. So these drive a real reply.
+
+# A provider call id shaped like a live credential and syntactically
+# clean, which no pattern check could refuse: the reason the provider's
+# id is not exported at all rather than validated first.
+CREDENTIAL_SHAPED_ID = "sk_live_" + "4eC39HqLyjWDarjtT1zdp7dc"
+
+
+def traced_session(
+    telemetry: Any, rounds: list[Any], llm_input: Any = None
+) -> tuple[Any, Any]:
+    """A real session speaking through `rounds`, its events tapped by
+    this exporter, opened and inside a turn."""
+    session = session_for(
+        base_config(), POET_MAC, {"poet": ScriptedLlm(rounds)}, llm_input=llm_input
+    )
+    events = events_of(session)
+    events.attach(telemetry.session_tap())
+    open_session(events, providers={}, conversations=session.session_conversations)
+    start_turn(events)
+    return session, events
+
+
+async def test_a_tool_span_joins_the_round_that_asked_for_it() -> None:
+    """Two calls to the same entry in one round, then one more in the
+    next: each span carries its own round's invocation, the two in one
+    round differ by position, and the first call of each round differs
+    from the other by invocation."""
+    telemetry, memory = exporting()
+    session, events = traced_session(
+        telemetry,
+        [
+            [call("recall", query="tea"), call("recall", query="coffee")],
+            [call("recall", query="milk")],
+            "Done.",
+        ],
+    )
+
+    await run_reply(session, "what do I drink")
+    finish_reply(events)
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    rounds = [span.attributes["vinga.llm.invocation.id"] for span in spans_of(LLM_SPAN, spans)]
+    assert len(set(rounds)) == 3
+    joined = [
+        (
+            tool.attributes["vinga.llm.invocation.id"],
+            tool.attributes["vinga.tool.call.position"],
+        )
+        for tool in spans_of(TOOL_SPAN, spans)
+    ]
+    assert sorted(joined) == sorted([(rounds[0], 0), (rounds[0], 1), (rounds[1], 0)])
+
+
+async def test_a_move_keeps_its_place_in_the_round() -> None:
+    """Executable calls on both sides of a move: the move is resolved by
+    the loop and never becomes a tool span, and the call after it keeps
+    the place the model gave it. Numbering the list left after the moves
+    are taken out would close the gap and call it 1."""
+    telemetry, memory = exporting()
+    session, events = traced_session(
+        telemetry,
+        [
+            [
+                call("recall", query="tea"),
+                call("switch_agent", agent="stranger"),
+                call("set_state", key="drink", value="tea"),
+            ],
+            "Done.",
+        ],
+    )
+
+    await run_reply(session, "what do I drink")
+    finish_reply(events)
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    placed = {
+        tool.attributes["gen_ai.tool.name"]: tool.attributes["vinga.tool.call.position"]
+        for tool in spans_of(TOOL_SPAN, spans)
+    }
+    assert placed == {"recall": 0, "set_state": 2}
+
+
+async def test_the_nth_exported_call_is_the_span_at_position_n() -> None:
+    """With the content export on, a round's output lists its calls in
+    the order the model returned them, and the span carrying position n
+    is the n-th `tool_call` part of that list. `set_state` runs FIRST,
+    since memory writes are ordered before the rest, so the spans are
+    emitted in neither the model's order nor each other's, and the
+    position is the only thing tying each one to its part."""
+    telemetry, memory = exporting()
+    exporter = LlmInputExport(telemetry=telemetry)
+    session, events = traced_session(
+        telemetry,
+        [
+            [
+                call("recall", query="tea"),
+                call("switch_agent", agent="stranger"),
+                call("set_state", key="drink", value="tea"),
+            ],
+            "Done.",
+        ],
+        llm_input=exporter,
+    )
+
+    await run_reply(session, "what do I drink")
+    finish_reply(events)
+    close_session(events)
+
+    spans = finished(telemetry, memory)
+    asking = spans_of(LLM_SPAN, spans)[0]
+    (message,) = json.loads(asking.attributes[GEN_AI_OUTPUT_MESSAGES])
+    parts = [part for part in message["parts"] if part["type"] == "tool_call"]
+    assert [part["name"] for part in parts] == ["recall", "switch_agent", "set_state"]
+    tools = spans_of(TOOL_SPAN, spans)
+    assert [tool.attributes["gen_ai.tool.name"] for tool in tools] == ["set_state", "recall"]
+    for tool in tools:
+        assert tool.attributes["vinga.llm.invocation.id"] == asking.attributes[
+            "vinga.llm.invocation.id"
+        ]
+        position = tool.attributes["vinga.tool.call.position"]
+        assert parts[position]["name"] == tool.attributes["gen_ai.tool.name"]
+
+
+async def test_the_provider_s_call_id_reaches_no_metadata_surface(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The no-leak sentinel. A provider's call id is far-side bytes, and
+    one shaped like a live credential passes any syntax check, so the
+    join is made of server-minted values and the id itself reaches
+    neither format of the `tool_call` line nor any span attribute with
+    the content export off."""
+    telemetry, memory = exporting()
+    session, events = traced_session(
+        telemetry,
+        [
+            [ToolCall(id=CREDENTIAL_SHAPED_ID, name="recall", arguments={"query": "tea"})],
+            "Done.",
+        ],
+    )
+
+    with caplog.at_level("DEBUG"):
+        await run_reply(session, "what do I drink")
+        finish_reply(events)
+        close_session(events)
+
+    (logged,) = logged_events(caplog, "tool_call")
+    assert logged.position == 0
+    assert CREDENTIAL_SHAPED_ID not in both_formats(caplog)
+    spans = finished(telemetry, memory)
+    assert spans_of(TOOL_SPAN, spans)
+    for span in spans:
+        assert CREDENTIAL_SHAPED_ID not in repr(dict(span.attributes)), span.name
 
 
 # --- TTS, and the name that had to be argued for ----------------------

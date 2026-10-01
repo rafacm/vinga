@@ -20,6 +20,10 @@ from vinga_server.runtime.turns import TurnUnderway
 from vinga_server.session_conversations import SessionConversations
 from vinga_server.tools import names
 
+# The round a directly driven execution says its calls came from. A
+# server-minted id in production; any id of that form serves here.
+INVOCATION = "0123456789abcdef0123456789abcdef"
+
 
 def a_tool(name: str) -> ToolDef:
     return ToolDef(name=name, description=name, input_schema={"type": "object"})
@@ -112,7 +116,9 @@ async def test_the_memory_writes_run_first_one_at_a_time_and_then_the_rest() -> 
     ]
     slots = execution.reserve(turn, calls)
 
-    await execution.run(turn, list(zip(slots, calls, strict=True)))
+    await execution.run(
+        turn, list(zip(slots, calls, strict=True)), invocation=INVOCATION
+    )
 
     assert journal.journal == [
         "start remember",
@@ -139,7 +145,9 @@ async def test_the_results_come_back_in_the_models_order() -> None:
     ]
     slots = execution.reserve(turn, calls)
 
-    results = await execution.run(turn, list(zip(slots, calls, strict=True)))
+    results = await execution.run(
+        turn, list(zip(slots, calls, strict=True)), invocation=INVOCATION
+    )
 
     assert [(one.tool_call_id, one.content) for one in results] == [
         ("a", "lamp"),

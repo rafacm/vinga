@@ -1890,7 +1890,9 @@ class PipelineRuntime:
                 self._tools.for_execution(self._turn, call, slot, offer)
                 for call, slot in zip(calls, slots, strict=True)
             ]
-            results, switch_to = await self._run_tools(executing, slots, switches_left)
+            results, switch_to = await self._run_tools(
+                executing, slots, switches_left, invocation
+            )
             if switch_to is not None:
                 break
             working.append(Turn("tool", "", tool_results=tuple(results)))
@@ -1902,7 +1904,11 @@ class PipelineRuntime:
         return switch_to
 
     async def _run_tools(
-        self, calls: Sequence[ToolCall], slots: Sequence[int], switches_left: int
+        self,
+        calls: Sequence[ToolCall],
+        slots: Sequence[int],
+        switches_left: int,
+        invocation: str,
     ) -> tuple[list[ToolResult], "_Transition | None"]:
         """Execute one round of calls. Everything that is not a move is
         `ToolExecution.run`'s, which says in what order it runs them;
@@ -1919,7 +1925,13 @@ class PipelineRuntime:
         that IS the precedence when it asks for more than one: the first
         wins and the rest are refused, whether they were the same kind
         of move or not. A rule about which kind outranks which would be
-        a rule nobody could predict from the outside."""
+        a rule nobody could predict from the outside.
+
+        `invocation` is the round these calls came from, handed to the
+        execution so every `tool_call` names the round that asked for
+        it. Where each call sat in the model's list is not handed over:
+        the reservation took it before this partition, and the slot is
+        how it is read back (#533)."""
         plain = [
             (slots[index], call)
             for index, call in enumerate(calls)
@@ -1928,7 +1940,7 @@ class PipelineRuntime:
         moves = [
             (slots[index], call) for index, call in enumerate(calls) if self._moves(call)
         ]
-        results = await self._tools.run(self._turn, plain)
+        results = await self._tools.run(self._turn, plain, invocation=invocation)
 
         transition: _Transition | None = None
         for order, (slot, call) in enumerate(moves):
