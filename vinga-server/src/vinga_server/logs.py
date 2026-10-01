@@ -123,21 +123,24 @@ _STANDARD_ATTRIBUTES = frozenset(
 # shutdown notices, and the `connection open` and `connection rejected`
 # the websockets library writes through the same logger. A refusal is
 # the events' to say (`auth_rejected`, `session_rejected`), and so is a
-# session once its hello is valid (`session_open`); the onboarding
-# banner names the origin a device reaches, which is the listen address
-# unless `server.public_url` or `server.websocket_url` names a better
-# one; and the drain announces the shutdown. What no line says any more
-# is the process id, which is the runtime's to report, the bind address
-# of a deployment that names its public origin, which is in its own
-# configuration, and that a connection was accepted at all when it ends
-# before a valid hello: `DeviceSession._receive_hello` closes a
+# session once its hello is valid and the setup after it (the server's
+# hello sent, the recording opened) has succeeded (`session_open`); the
+# onboarding banner names the origin a device reaches, which is the
+# listen address unless `server.public_url` or `server.websocket_url`
+# names a better one; and the drain announces the shutdown. What no line
+# says any more is the process id, which is the runtime's to report, the
+# bind address of a deployment that names its public origin, which is in
+# its own configuration, and that a connection was accepted at all when
+# it ends before a valid hello: `DeviceSession._receive_hello` closes a
 # disconnect, a timeout and every first frame it refuses without an
 # event, save a text frame the message parser rejects, which it logs,
 # and `connection open` was the only trace the rest left. No event
-# replaces it here; that is a decision of its own. What the floor keeps
-# is everything at WARNING and above: a bind that failed, a
-# lifespan that failed, an exception in the application with its
-# traceback, a request that would not parse.
+# replaces it here; that is a decision of its own. What the floor keeps,
+# at a server level of WARNING or below, is everything at WARNING and
+# above (the floor is the higher of the two, so at ERROR or CRITICAL
+# uvicorn's warnings go as well): a bind that failed, a lifespan that
+# failed, an exception in the application with its traceback, a request
+# that would not parse.
 #
 # What the floor does not cover is what those kept records carry. An
 # ERROR record with a traceback renders the exception's message and its

@@ -100,7 +100,7 @@ says where, and the paragraphs after it say what is said nowhere now:
 | uvicorn line | Where the fact still is |
 | --- | --- |
 | `<address> - "WebSocket <path>" 403`, `connection rejected` | `auth_rejected`, or `session_rejected` for a server that is full or draining, each with its reason |
-| `... [accepted]`, `connection open` | `session_open` once a valid hello arrives, or `session_rejected` with its reason when the session turns the device away after the accept and before the hello (a Device-Id that is not a MAC, no agent, an agent not loaded). A transport that ends before a valid hello has no event; see below |
+| `... [accepted]`, `connection open` | `session_open`, emitted only once a valid hello has arrived and the setup after it has succeeded (the server's hello sent, the recording opened), or `session_rejected` with its reason when the session turns the device away after the accept and before the hello (a Device-Id that is not a MAC, no agent, an agent not loaded). A transport that ends before a valid hello has no event; see below |
 | `Started server process [<pid>]`, `Finished server process [<pid>]` | Nowhere in the log. The process id is the container's or the supervisor's to report |
 | `Waiting for application startup.`, `Application startup complete.` | The onboarding banner (`onboarding_banner`) is written from the started callback, just before `Application startup complete.`; `/readyz` answers readiness |
 | `Uvicorn running on <scheme>://<host>:<port>` | The banner's `origin`, which is the listen address unless `server.public_url` or `server.websocket_url` names a better one; otherwise `server.host` and `server.port` in the file the operator wrote |
@@ -117,10 +117,15 @@ shutdown that did not complete shows as a missing exit rather than as a
 missing log line.
 
 Also gone, and the larger loss: that a connection was accepted at all,
-when it ends before a valid hello. `session_open` is emitted only after
-`DeviceSession._receive_hello` returns a hello, and read from
-`device/session.py`, that function returns with no event when the
-client disconnects before its first frame, when no frame arrives
+when it ends before a valid hello. Read from `device/session.py`,
+`session_open` is emitted only after `DeviceSession._receive_hello`
+returns a hello, the server's hello has been sent, and the recording has
+opened (the capture and the conversation store's session row). A
+connection lost while the server's hello is being sent has no event of
+the server's own, and a failure while the recording opens is followed
+by `session_closed` with reason `error` and no `session_open`. Before
+any of that, `_receive_hello` returns with no event when the client
+disconnects before its first frame, when no frame arrives
 within the first-contact window (`HELLO_TIMEOUT_S`, 10 s), when the
 first frame is not text, or when the first message is not a hello, or
 is a hello whose transport is not `websocket`, whose audio format is not
@@ -142,9 +147,12 @@ A server started as `uvicorn vinga_server.app:app` loses the same lines,
 since `create_app` applies the floor before uvicorn writes its first
 one. That entry point is not one the documentation offers an operator.
 
-What the floor keeps is everything uvicorn says at WARNING and above.
-Read from the source at 0.51.0, that is: a request that would not parse
-(`Invalid HTTP request received.`), an unsupported upgrade, the
+What the floor keeps, at a `server.log_level` of WARNING or below, is
+everything uvicorn says at WARNING and above. The floor is the higher of
+the configured level and WARNING, so a server configured at ERROR or
+CRITICAL prints none of uvicorn's warnings either, which was equally
+true under the INFO floor. Read from the source at 0.51.0, what is kept
+is: a request that would not parse (`Invalid HTTP request received.`), an unsupported upgrade, the
 concurrency limit, a bind that failed (the `OSError` itself), a startup
 or shutdown the lifespan failed, an exception in the application with
 its traceback, an application that returned without answering, a
