@@ -41,7 +41,9 @@ from vinga_server.config.api import build_api
 from vinga_server.config.loader import StorageError
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
+from vinga_server.conversations import store as conversation_record
 from vinga_server.db import connection_url
+from vinga_server.memory import store as memory_store
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
@@ -157,35 +159,47 @@ def watching(api: FastAPI) -> Iterator[list[Exception]]:
         api.middleware_stack = None
 
 
-@contextlib.contextmanager
-def refusing_provider_writes() -> Iterator[None]:
-    """A trigger refusing every write to the stored providers, with the
-    planted value in what it says.
-
-    The configuration store's own boundary is what this route's failure
-    has to cross, so the failure is a real one from the database rather
-    than a stand-in: the statement runs, the database refuses it, and
-    the driver's error carries the trigger's words beside what the
-    request bound into the statement.
-    """
+def _holder() -> psycopg.Connection:
+    """A connection this suite owns, on nobody's engine, for the
+    triggers and the rows planted below."""
     url = connection_url(DatabaseConfig()).set(drivername="postgresql")
-    holder = psycopg.connect(url.render_as_string(hide_password=False))
+    return psycopg.connect(url.render_as_string(hide_password=False))
+
+
+@contextlib.contextmanager
+def refusing(table: str, when: str) -> Iterator[None]:
+    """A statement trigger refusing `when` on `table` (schema-qualified),
+    with the planted value in what it says.
+
+    The boundary each case is about is inside a store, so the failure is
+    a real one from the database rather than a stand-in: the statement
+    runs, the database refuses it, and the driver's error carries the
+    trigger's words beside what the request bound into the statement.
+    A statement trigger rather than a row trigger, so it fires whether
+    or not the statement would have touched a row.
+    """
+    schema_name = table.split(".")[0]
+    holder = _holder()
     try:
         holder.execute(
-            "create function domain.refuse_586() returns trigger language plpgsql as "
-            f"$$ begin raise exception 'refused near {PLANTED}'; end $$"
+            f"create function {schema_name}.refuse_586() returns trigger language plpgsql "
+            f"as $$ begin raise exception 'refused near {PLANTED}'; end $$"
         )
         holder.execute(
-            "create trigger refuse_586 before insert or update on domain.providers "
-            "for each statement execute function domain.refuse_586()"
+            f"create trigger refuse_586 before {when} on {table} "
+            f"for each statement execute function {schema_name}.refuse_586()"
         )
         holder.commit()
         yield
     finally:
-        holder.execute("drop trigger if exists refuse_586 on domain.providers")
-        holder.execute("drop function if exists domain.refuse_586()")
+        holder.execute(f"drop trigger if exists refuse_586 on {table}")
+        holder.execute(f"drop function if exists {schema_name}.refuse_586()")
         holder.commit()
         holder.close()
+
+
+def refusing_provider_writes() -> contextlib.AbstractContextManager[None]:
+    return refusing("domain.providers", "insert or update")
 
 
 def _erasing(client: TestClient) -> Any:
@@ -340,3 +354,99 @@ def test_a_failure_whose_class_cannot_be_named_logs_the_refusal(
     assert not [found for found in renderings(caplog) if "the store is fine" in found]
     _nothing_planted(answer, caplog)
     _severed(caught)
+
+
+# The stores' own classifiers
+#
+# Three refusals are decided one level further in, inside a store
+# function the route's transaction calls, and pass the route's own
+# boundary untouched because they are already `ConfigError`s: the memory
+# purge an erasure runs, and the two halves of an agent rename beyond
+# the configuration itself, its recorded threads and its remembered
+# facts. A failure injected at the route's writer never reaches them,
+# so each is driven by a trigger on the table its statement writes.
+
+
+def _a_thread_to_erase() -> None:
+    """One thread row, which is all an erasure needs to reach the purge
+    of that thread's memory."""
+    with _holder() as holder:
+        holder.execute(
+            "insert into record.conversations "
+            "(conversation, agent, device, created_at, last_active_at) "
+            "values (%s, %s, %s, %s, %s)",
+            (THREAD, AGENT, "aa:bb:cc:dd:ee:ff", "2026-10-01T12:00:00+00:00",
+             "2026-10-01T12:00:00+00:00"),
+        )
+
+
+def _an_agent_to_rename(client: TestClient) -> None:
+    """The smallest configuration an agent can be written into."""
+    for path, body in (
+        ("/providers/llm/claude", {"type": "anthropic", "model": "m"}),
+        ("/providers/asr/whisper", {"type": "mock"}),
+        ("/agent-defaults", {"llm": "claude", "asr": "whisper"}),
+        (f"/agents/{AGENT}", {"prompt": "You are a poet."}),
+    ):
+        assert client.put(path, json=body).status_code == 200, path
+
+
+def _renaming(client: TestClient) -> Any:
+    return client.post(f"/agents/{AGENT}/rename", json={"to": "bard"})
+
+
+@pytest.mark.parametrize(
+    ("table", "when", "prepare", "request_", "sentence"),
+    [
+        pytest.param(
+            "memory.state",
+            "delete",
+            lambda client: _a_thread_to_erase(),
+            _erasing,
+            memory_store.PURGE_FAILED,
+            id="memory-purge",
+        ),
+        pytest.param(
+            "record.conversations",
+            "update",
+            _an_agent_to_rename,
+            _renaming,
+            conversation_record.RENAME_FAILED,
+            id="record-rename",
+        ),
+        pytest.param(
+            "memory.facts",
+            "update",
+            _an_agent_to_rename,
+            _renaming,
+            memory_store.RENAME_FAILED,
+            id="memory-owner-rename",
+        ),
+    ],
+)
+def test_a_store_refusal_logs_the_class_of_what_failed_and_nothing_planted(
+    api: FastAPI,
+    client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+    table: str,
+    when: str,
+    prepare: Any,
+    request_: Any,
+    sentence: str,
+) -> None:
+    """The sentence is the inner classifier's own, which is what shows
+    the failure was decided there rather than by the route around it."""
+    prepare(client)
+
+    with refusing(table, when), watching(api) as caught:
+        with caplog.at_level(logging.DEBUG):
+            answer = request_(client)
+
+    assert answer.status_code == 500
+    assert answer.json()["detail"] == sentence
+    said = only(caplog, "api_storage_error")
+    assert said.getMessage().endswith("(ProgrammingError)")
+    assert said.exc_info is None
+    _nothing_planted(answer, caplog)
+    _severed(caught)
+
