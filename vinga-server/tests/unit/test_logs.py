@@ -210,18 +210,87 @@ async def test_a_transport_error_and_its_cause_are_held_back(
     assert all(SENTINEL not in str(record.__dict__) for record in caplog.records)
 
 
-async def test_the_one_request_line_httpx_writes_survives(
-    caplog: pytest.LogCaptureFixture, restore_vendor_levels
+# --- the request line the HTTP client composes (#445) ----------------
+
+# What a provider that authenticated in its query string would be asked
+# for. None does today; the floor is for the one that will.
+KEYED_URL = f"https://provider.invalid/v1/speak?key={SENTINEL}"
+
+# Written beside each request through this server's own channel, so a
+# test that finds the sentinel missing also finds this present: the
+# handler under test was live and printing, and the absence is the
+# floor rather than a capture that saw nothing at all.
+OWN_LINE = "the server's own line, which does reach the log"
+
+
+async def request_keyed_url() -> None:
+    """One request through a real httpx client, which writes its request
+    line once the response is in, failed or not."""
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(404))
+    ) as client:
+        await client.get(KEYED_URL)
+    logging.getLogger("vinga_server.providers").warning(OWN_LINE)
+
+
+def printed(capsys: pytest.CaptureFixture[str]) -> str:
+    """Everything the handler `logs.configure` installed wrote, which is
+    the stream a deployment's log collection reads."""
+    captured = capsys.readouterr()
+    return captured.out + captured.err
+
+
+@pytest.mark.parametrize("level", ["INFO", "DEBUG"])
+async def test_the_request_line_httpx_writes_never_reaches_the_log(
+    level: str,
+    capsys: pytest.CaptureFixture[str],
+    restore_root_logger,
+    restore_vendor_levels,
 ) -> None:
-    """The floor is INFO rather than WARNING for this: the method, the
-    URL and the status are the useful half, and they carry no header and
-    no body."""
-    logs.quiet_vendor_libraries(logging.DEBUG)
+    """Through the configured logging end to end, rather than by reading
+    the floor back out of the mapping: what is claimed is that the line
+    is not printed, at the default level and at the loudest one an
+    operator can configure, and a pin on the mapping would go on passing
+    if httpx ever wrote it under a name the mapping does not reach."""
+    logs.configure(ServerConfig(log_level=level))
 
-    with caplog.at_level(logging.INFO):
-        await speak_to(echoing_header)
+    await request_keyed_url()
 
-    assert [r for r in caplog.records if r.name == "httpx" and "401" in r.getMessage()]
+    out = printed(capsys)
+    assert OWN_LINE in out
+    assert SENTINEL not in out
+    assert "HTTP Request" not in out
+
+
+async def test_without_the_floor_httpx_prints_the_whole_url(
+    capsys: pytest.CaptureFixture[str], restore_root_logger, restore_vendor_levels
+) -> None:
+    """The load-bearing half: the same request with httpx left to
+    inherit the server's level puts the URL on the log, query string and
+    all, which is the line the test above says is gone."""
+    logs.configure(ServerConfig(log_level="INFO"))
+    logging.getLogger("httpx").setLevel(logging.NOTSET)
+
+    await request_keyed_url()
+
+    assert SENTINEL in printed(capsys)
+
+
+def test_whatever_httpcore_says_at_info_is_held_with_httpx(
+    capsys: pytest.CaptureFixture[str], restore_root_logger, restore_vendor_levels
+) -> None:
+    """httpcore writes nothing above DEBUG today, so no real request can
+    show its floor doing anything. This record stands in for the INFO
+    line a later release might add, under a name it really writes as and
+    carrying the URL it would be about."""
+    logs.configure(ServerConfig(log_level="DEBUG"))
+
+    logging.getLogger("httpcore.http11").info("send_request_headers %s", KEYED_URL)
+    logging.getLogger("vinga_server.providers").warning(OWN_LINE)
+
+    out = printed(capsys)
+    assert OWN_LINE in out
+    assert SENTINEL not in out
 
 
 def test_the_floor_never_makes_a_quiet_server_louder(restore_vendor_levels) -> None:
@@ -349,9 +418,10 @@ def _child(*source: str, cwd: Path, **environment: str) -> subprocess.CompletedP
 # it starts an interpreter and migrates a database.
 CHILD_TIMEOUT_S = 120.0
 
-# The three the child reports on: the one uvicorn turns up, the one
-# whose floor is not INFO, and one of the four that were already held.
-FLOORED = ("uvicorn.error", "sqlalchemy", "httpx")
+# The three the child reports on: the one uvicorn turns up, one whose
+# floor is WARNING, and one whose floor is INFO and so sits below the
+# level an unconfigured process already runs at.
+FLOORED = ("uvicorn.error", "sqlalchemy", "openai")
 
 # A token shaped like the ones the environment carries, for the child
 # that has to get all the way to a described application.
@@ -405,10 +475,11 @@ def test_an_external_asgi_runner_gets_the_floor_too(tmp_path: Path) -> None:
     assert finished.returncode == 0, finished.stderr
     levels = json.loads(finished.stdout.splitlines()[-1])
     # uvicorn's DEBUG comes back down to the floor, the engine's override
-    # is overridden in turn, and httpx is pinned where it already
-    # effectively was: without a level to hold them to, the floor makes
-    # nothing louder than the process already is.
-    assert levels == {"uvicorn.error": "INFO", "sqlalchemy": "WARNING", "httpx": "WARNING"}
+    # is overridden in turn, and the openai client is pinned where it
+    # already effectively was rather than at its INFO floor: without a
+    # level to hold them to, the floor makes nothing louder than the
+    # process already is.
+    assert levels == {"uvicorn.error": "INFO", "sqlalchemy": "WARNING", "openai": "WARNING"}
 
 
 def test_the_boot_that_reads_the_configuration_is_inside_the_floor(tmp_path: Path) -> None:
