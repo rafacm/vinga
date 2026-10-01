@@ -284,13 +284,21 @@ between on the request's shape and the model's reading of it.
    `ToolExecution` has no session id, so `PipelineRuntime` injects a
    session-bound staging callable (or `None` with the setting off). A
    staging telemetry refuses is reported with `kind=tool_call`.
-9. **One ceiling per pair, no shared budget.** Events fold
+9. **A ceiling per pair and a budget per round, no session budget.** Events fold
    synchronously (`SessionEvents.emit`), so a tool pair is staged and
    taken within one emission and never accumulates beside another; a
    session budget and eviction order would be rules no pair could meet.
    So a tool pair has the per-request ceiling only: one over it is
    dropped whole at staging and reported (decision 9a). It does not
-   join the generation pairs' held total. A malformed call (no
+   join the generation pairs' held total. *Admission (review round 3):*
+   a taken pair lands on an ended span in telemetry's bounded queue,
+   and one round's calls run concurrently and uncapped, so a per-round
+   budget bounds them together: the tool pairs admitted for one
+   invocation may not exceed the per-request ceiling in total, and a
+   pair that would exceed it is dropped whole and reported with
+   `kind=tool_call`. Tested with many under-ceiling results exhausting
+   it: the earlier attached, the later dropped and reported, exact
+   counts. A malformed call (no
    arguments object) exports its raw argument text as the model sent
    it. Tested: a pair over the ceiling dropped and reported with
    `kind=tool_call`; a session with no trace whose slot is discarded by
