@@ -307,10 +307,6 @@ LLM_SPAN = "llm"
 TTS_SPAN = "tts_stream"
 PLAYBACK_SPAN = "playback"
 
-# The two span events a stage span carries in its middle, named for the
-# instant rather than for the field the instant was derived from.
-FIRST_TOKEN = "first_token"
-
 # The payload keys the emitter itself contributes, which are the two
 # identities every session event carries.
 SESSION_FIELD = "session"
@@ -1107,6 +1103,14 @@ LLM_ATTRIBUTES = {
     "turns": "vinga.llm.turns",
     "invocation": LLM_INVOCATION_ID,
     "purpose": LLM_PURPOSE,
+    # How long the round took to its first spoken token, as an attribute
+    # and nowhere else (#533). It used to be a span event placed that
+    # many milliseconds into the round, and the backend this surface
+    # exists for ingests no span events, so the one timing a person
+    # actually feels never reached it. One fact, one carrier: where an
+    # instant is wanted it is the span's start plus this number. Absent
+    # on a round that only asked for a tool, never a zero.
+    "first_token_ms": "vinga.llm.first_token_ms",
 }
 
 FAILED_PROVIDER_ATTRIBUTES = {
@@ -1752,19 +1756,6 @@ def _before(end: int, ms: Any) -> int:
     if isinstance(ms, bool) or not isinstance(ms, int | float):
         return end
     return end - int(ms * 1_000_000)
-
-
-def _after(start: int, ms: Any) -> int | None:
-    """The instant `ms` milliseconds after `start`, or nothing.
-
-    Nothing where the event carried no number, which is a real answer
-    rather than a missing one: a round that only asked for a tool timed
-    no spoken token, and a span event at the round's own start would say
-    the first token arrived instantly.
-    """
-    if isinstance(ms, bool) or not isinstance(ms, int | float):
-        return None
-    return start + int(ms * 1_000_000)
 
 
 @dataclass
@@ -3068,13 +3059,17 @@ class Telemetry:
         the conventions chose for them, plus the configured entry's name
         under vinga's own.
 
-        `first_token_ms` becomes a span event inside the round rather
-        than an attribute beside it, because it is an INSTANT: a backend
-        that draws a span draws it, and the gap between the round's
-        start and that mark is the number a stalled reply is diagnosed
-        by. A round that only asked for a tool timed no spoken token and
-        gets no mark, which is a fact about the round rather than a
-        missing measurement.
+        `first_token_ms` is an attribute of the round and nothing else,
+        under `vinga.llm.first_token_ms`. It used to be a span event, an
+        instant drawn inside the span, and the backend this surface
+        exists for ingests no span events at all, so the number a
+        stalled reply is diagnosed by reached a plain OTLP backend and
+        never that one (#533). Every fact on a trace is a span attribute
+        so both read the same carrier, and the instant is not lost: it
+        is the span's start plus that many milliseconds. A round that
+        only asked for a tool timed no spoken token and carries no
+        attribute, which is a fact about the round rather than a missing
+        measurement.
         """
         payload = emission.payload
         trace = self._sessions.get(session)
@@ -3082,7 +3077,6 @@ class Telemetry:
             self._take_llm_content(payload.get("invocation"))
             return
         end = self._at(emission)
-        start = _before(end, payload.get("duration_ms"))
         span = self._tracer.start_span(
             LLM_SPAN,
             context=self._within(trace.turn if trace.turn is not None else trace.span),
@@ -3093,11 +3087,8 @@ class Telemetry:
                 **_round_prompt_attributes(payload),
                 **self._take_llm_content(payload.get("invocation")),
             },
-            start_time=start,
+            start_time=_before(end, payload.get("duration_ms")),
         )
-        first_token = _after(start, payload.get("first_token_ms"))
-        if first_token is not None:
-            span.add_event(FIRST_TOKEN, timestamp=first_token)
         span.end(end_time=end)
 
     def _take_llm_content(self, invocation: Any) -> dict[str, Any]:
