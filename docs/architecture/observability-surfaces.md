@@ -498,11 +498,18 @@ the tool choice. Vendor framing, the generation parameters, the
 endpoint, headers and credentials are not in it, because the snapshot is
 taken at this server's own provider seam, which is the one place a
 request exists once rather than once per vendor and the one place that
-never sees a credential. The canonical attributes are
-`gen_ai.system_instructions`, `gen_ai.input.messages`,
-`gen_ai.output.messages`, `vinga.llm.tools` and
-`vinga.llm.tool_choice`; direct Langfuse input and output aliases are
-derived from them.
+never sees a credential. It is written under the GenAI conventions
+alone, `gen_ai.system_instructions`, `gen_ai.input.messages` and
+`gen_ai.output.messages`, with vinga's `vinga.llm.tools` and
+`vinga.llm.tool_choice` beside them, and no backend-specific alias, so
+every backend reads the same keys. Langfuse derives the observation's
+input and output from them itself and shows the system prompt as the
+first message of the input, a `system` turn holding the know-how
+blocks and the memory blocks that round read; it is the prompt each
+round actually sent, since memory is read per round. Until #533 the span also carried Langfuse's own
+input and output fields as copies of the messages, and Langfuse reads
+those first, so the system prompt never reached it; they are no longer
+written.
 
 **It contains what the transcripts surface contains.** An assembled
 request holds the dialogue as the model saw it, so this class is

@@ -2807,9 +2807,11 @@ text and ordered handover legs enrich the original turn root as
 `gen_ai.system_instructions`, `gen_ai.input.messages`,
 `gen_ai.output.messages`, `vinga.llm.tools` and `vinga.llm.tool_choice`.
 Generated output is captured before speech filtering, so text withheld from the
-user also leaves. Direct Langfuse input, output and legs aliases are derived
-from those canonical values. The former `transcript` and `llm_input` child
-spans no longer exist.
+user also leaves. The turn root also carries direct Langfuse input, output and
+legs aliases derived from its transcript values; the generation span carries
+none, because Langfuse maps the GenAI conventions itself and shows the system
+prompt as the first message of the generation's input. The former `transcript`
+and `llm_input` child spans no longer exist.
 
 The ordinary trace path still has one bounded batch queue. A full queue drops
 spans instead of delaying a reply, and a bounded shutdown gives the exporter a
