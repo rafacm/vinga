@@ -112,6 +112,14 @@ MEMORY = "memory"
 STATE = "state"
 DEVICE = "device"
 
+# The three together: the blocks `with_scopes` appends, which are what
+# a round's memory accounting counts and nothing else is.
+SCOPES = (STATE, MEMORY, DEVICE)
+
+# What `_assembled` puts between two blocks, named once because a
+# round's accounting counts it as well as writing it.
+JOIN = "\n\n"
+
 # The operator's own guidance about one MCP entry, qualified by the
 # entry name, which is safe to print by construction: an entry name has
 # been through the `[A-Za-z0-9_-]+` rule that makes it a tool prefix.
@@ -342,6 +350,65 @@ class Assembled:
         return {block.provenance: block.characters for block in self.blocks}
 
 
+@dataclass(frozen=True)
+class RoundPrompt:
+    """One reply round's prompt as it was sent, and what memory gave
+    it: the value a round's accounting is derived from on every path,
+    so a round that finished and one that failed say the same thing
+    about the same prompt (#533).
+
+    `facts` is the ids of the facts the scope blocks injected, agent
+    block then device block. None where this round did not read memory
+    at all, because the agent's memory is off, and empty where it read
+    and injected nothing, a read that failed included: the two are
+    different facts, and only the caller knows whether a read was
+    attempted, so it is chosen there rather than inferred here.
+    """
+
+    sent: Assembled
+    facts: tuple[int, ...] | None
+
+    @property
+    def text(self) -> str:
+        return self.sent.text
+
+    @property
+    def system_characters(self) -> int:
+        """The whole system prompt this round sent: the know-how half,
+        the scope blocks and the blank lines joining them."""
+        return self.sent.characters
+
+    @property
+    def memory_characters(self) -> int:
+        """How much of the prompt the scope blocks added: each block as
+        rendered and the blank line before it, where there is one.
+
+        Counted on the blocks as `_assembled` joined them rather than as
+        a difference between this prompt and the know-how half, because
+        the half is not always a prefix of it: a persona standing alone
+        is sent untouched, and the same persona with a block after it
+        loses its leading whitespace. The blocks are what was sent, and
+        the text is exactly them joined, so nothing is counted twice and
+        nothing is missed.
+        """
+        return sum(
+            block.characters + (len(JOIN) if index else 0)
+            for index, block in enumerate(self.sent.blocks)
+            if block.provenance in SCOPES
+        )
+
+    @property
+    def memory_sources(self) -> dict[str, int]:
+        """Each scope block's size by provenance, a block that was not
+        sent absent rather than zero. The know-how half's blocks are
+        `prompt_assembled`'s to report, once per activation."""
+        return {
+            block.provenance: block.characters
+            for block in self.sent.blocks
+            if block.provenance in SCOPES
+        }
+
+
 def know_how(
     persona: str,
     fragments: Sequence[Fragment] = (),
@@ -547,7 +614,7 @@ def _assembled(blocks: Sequence[Block]) -> Assembled:
         Block(block.provenance, text, block.name)
         for block, text in zip(kept, texts, strict=True)
     )
-    return Assembled(trimmed, "\n\n".join(block.text for block in trimmed))
+    return Assembled(trimmed, JOIN.join(block.text for block in trimmed))
 
 
 __all__ = [
@@ -555,9 +622,11 @@ __all__ = [
     "DEVICE_HEADING",
     "FRAGMENT",
     "INSTRUCTIONS",
+    "JOIN",
     "MEMORY",
     "MEMORY_HEADING",
     "PERSONA",
+    "SCOPES",
     "SERVER_INSTRUCTIONS",
     "SERVER_PROMPT",
     "STATE",
@@ -567,6 +636,7 @@ __all__ = [
     "Fragment",
     "Guidance",
     "GuidanceBlock",
+    "RoundPrompt",
     "ServerInstructions",
     "ServerPrompt",
     "device_introduction",

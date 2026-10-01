@@ -338,9 +338,8 @@ def test_the_tool_sources_are_the_ones_the_classifier_can_answer() -> None:
 
 
 def test_the_scope_provenances_are_the_ones_the_assembler_writes() -> None:
-    assert frozenset(ScopeProvenance) == frozenset(
-        {prompt.STATE, prompt.MEMORY, prompt.DEVICE}
-    )
+    assert frozenset(ScopeProvenance) == frozenset(prompt.SCOPES)
+    assert frozenset(prompt.SCOPES) == {prompt.STATE, prompt.MEMORY, prompt.DEVICE}
 
 
 def test_the_outcome_tokens_are_the_words_their_sentences_use() -> None:
