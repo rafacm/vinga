@@ -838,7 +838,7 @@ M1 (`a0a84320`, plus this section's own wording fixes):
   the agentpi-only pipe test M2 recorded (16 KiB pages; passes on CI),
   untouched by this milestone.
 - Integration: `350 passed in 228.87s`.
-- `python3 scripts/check_doc_links.py .`: `checked 282 files, 0
+- `python3 scripts/check_doc_links.py .`: `checked 283 files, 0
   failures`.
 - `uv run pytest tests/census -q`: run last, after this section; its
   result is in the pull request's verification list.
