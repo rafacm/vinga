@@ -428,11 +428,27 @@ class PromptMemory:
     their precedence: what this conversation is currently doing, what
     the agent knows, what the place knows. Each is the empty string
     where the scope holds nothing, and where it could not be read.
+
+    The ids beside two of them are the facts each block actually
+    rendered, line for line, so a trace can say which facts a prompt
+    held without anybody reading the store again (#533). Rendered and
+    counted out of one list by `_block`, so the text and the ids cannot
+    disagree: the agent block's ids are the lines its byte cap kept, not
+    every fact the read took. The ledger has none, since its entries are
+    keyed by model-written text rather than by an id.
     """
 
     state: str
     agent: str
     device: str
+    agent_ids: tuple[int, ...] = ()
+    device_ids: tuple[int, ...] = ()
+
+    @property
+    def facts(self) -> tuple[int, ...]:
+        """Every fact id this prompt injected, in the order the model
+        reads them: the agent's block, then the device's."""
+        return self.agent_ids + self.device_ids
 
 
 # What a prompt read answers when nothing could be read at all. A named
@@ -925,23 +941,29 @@ class MemoryStore:
         there is nothing to read. The preview an operator asks for is
         exactly that shape, one scope of the three.
         """
-        return self._read(
-            agent,
-            _reaching(device, conversation),
-            lambda connection: PromptMemory(
+        def read(connection: Connection) -> PromptMemory:
+            agent_block, agent_ids = _core(
+                _newest(connection, MemoryScope.AGENT, agent, CORE_LINES)
+            )
+            device_block, device_ids = (
+                ("", ())
+                if device is None
+                else _block(_active(connection, MemoryScope.DEVICE, device))
+            )
+            return PromptMemory(
                 state=(
                     ""
                     if conversation is None
                     else _ledger_rendered(_ledger(connection, conversation))
                 ),
-                agent=_core(_newest(connection, MemoryScope.AGENT, agent, CORE_LINES)),
-                device=(
-                    ""
-                    if device is None
-                    else _rendered(_active(connection, MemoryScope.DEVICE, device))
-                ),
-            ),
-            NOTHING_REMEMBERED,
+                agent=agent_block,
+                device=device_block,
+                agent_ids=agent_ids,
+                device_ids=device_ids,
+            )
+
+        return self._read(
+            agent, _reaching(device, conversation), read, NOTHING_REMEMBERED
         )
 
     def recall(self, agent: str, device: str, query: str) -> str:
@@ -1987,9 +2009,10 @@ def _recorded(column: object) -> object:
     )
 
 
-def _core(newest: Sequence[tuple[int, str]]) -> str:
+def _core(newest: Sequence[tuple[int, str]]) -> tuple[str, tuple[int, ...]]:
     """The part of one agent's scope that is injected: of the newest
-    lines, the ones that fit inside the block's byte cap.
+    lines, the ones that fit inside the block's byte cap, with the ids
+    of exactly those.
 
     The line bound is the read's, since the statement asked for exactly
     `CORE_LINES` of them; what is left here is the byte bound, which
@@ -2007,7 +2030,7 @@ def _core(newest: Sequence[tuple[int, str]]) -> str:
     kept = list(newest)
     while kept and len(_rendered(kept).encode("utf-8")) > CORE_BYTES:
         kept.pop(0)
-    return _rendered(kept)
+    return _block(kept)
 
 
 def _ledger(connection: Connection, conversation: str) -> list[tuple[str, str]]:
@@ -2147,6 +2170,13 @@ def _shortened(line: str, room: int) -> str:
 
 def _rendered(stored: Sequence[tuple[int, str]]) -> str:
     return "\n".join(line for _, line in stored)
+
+
+def _block(stored: Sequence[tuple[int, str]]) -> tuple[str, tuple[int, ...]]:
+    """A prompt block's text and the ids of the facts in it, out of the
+    one list both are read from, so the ids a trace carries are the
+    lines the model was sent and no others."""
+    return _rendered(stored), tuple(row_id for row_id, _ in stored)
 
 
 def _utc_now() -> dt.datetime:
