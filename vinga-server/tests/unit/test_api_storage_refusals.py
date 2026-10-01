@@ -280,6 +280,34 @@ def test_a_refused_write_logs_the_class_of_what_failed_and_nothing_planted(
     _severed(caught)
 
 
+def test_a_refused_configuration_write_logs_the_class_and_nothing_planted(
+    api: FastAPI, client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The configuration store's refusal named the class in its body
+    already (#530) and its log line named only `StorageError`, so the
+    log said less than the response did. The planted value is in the
+    trigger's words, which the driver's error and the SQLAlchemy error
+    wrapping it both carry, and in the statement's bound body."""
+    with refusing_provider_writes():
+        with caplog.at_level(logging.DEBUG):
+            answer = client.put(
+                "/providers/llm/claude", json={"type": "anthropic", "model": PLANTED}
+            )
+
+    assert answer.content == CONFIG_REFUSAL
+    said = only(caplog, "api_storage_error")
+    assert said.getMessage().endswith("(ProgrammingError)")
+    assert said.exc_info is None
+    _nothing_planted(answer, caplog)
+    # The refusal's own chain is not asserted here, because it does not
+    # hold, and did not before this change: the store translates the
+    # failure in a generator context manager (`ConfigStore`'s
+    # transaction), and an exception raised while `__exit__` handles
+    # another takes that one as its `__context__` wherever in the
+    # generator it is raised. Nothing that answers or logs a refusal
+    # walks the chain today; it is recorded on #586's pull request.
+
+
 def test_a_failure_whose_class_cannot_be_named_logs_the_refusal(
     api: FastAPI, client: TestClient, caplog: pytest.LogCaptureFixture
 ) -> None:
