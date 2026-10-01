@@ -752,7 +752,8 @@ class Shape(Enum):
 
     # A string, number or flag, exported under its own name as it is.
     SCALAR = "scalar"
-    # A list of names, exported as a sequence of strings.
+    # A list of names or of row ids, exported as a sequence of strings
+    # or of integers.
     SEQUENCE = "sequence"
     # A mapping, exported as one JSON string under its own name: the
     # OTel attribute types have no mapping, and the alternative to a
@@ -919,7 +920,15 @@ def _as_attribute(held: Any, rule: _Rule) -> Any | None:
     if shape is Shape.SEQUENCE:
         if not isinstance(held, list | tuple):
             return None
-        return tuple(one for one in held if isinstance(one, str))
+        # Homogeneous or nothing, which is what an OTel array is: all
+        # strings (the names and session ids it has always carried) or
+        # all integers (fact ids, #533), a `bool` being neither here.
+        # A mixed list exports nothing rather than the half that fits.
+        if all(isinstance(one, str) for one in held):
+            return tuple(held)
+        if all(isinstance(one, int) and not isinstance(one, bool) for one in held):
+            return tuple(held)
+        return None
     if shape is Shape.JSON:
         if not isinstance(held, dict):
             return None
