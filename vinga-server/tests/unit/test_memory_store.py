@@ -857,6 +857,49 @@ async def test_an_injected_core_over_its_bound_is_empty_rather_than_over_it(
     assert store.read_for_prompt("poet", "aa:bb", THREAD).agent == "- a short one"
 
 
+async def test_the_prompt_read_names_exactly_the_facts_it_rendered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ids a round's trace carries are the lines the model was sent
+    (#533). The core's byte cap can drop some of the newest forty after
+    the read took them, so a dropped fact's id has to leave with its
+    line: counted from what the cap kept, never from what the read took.
+    The device's ids follow the agent's, which is the order the blocks
+    are read in, and the ledger contributes none."""
+    monkeypatch.setattr(store_module, "CORE_BYTES", 40)
+    store = memory()
+    dropped = await store.add(
+        MemoryScope.AGENT, "poet", "an older fact " + "y" * 30, agent="poet"
+    )
+    first = await store.add(MemoryScope.AGENT, "poet", "fact one", agent="poet")
+    second = await store.add(MemoryScope.AGENT, "poet", "fact two", agent="poet")
+    noted = await store.add(MemoryScope.DEVICE, "aa:bb", "the kettle is loud", agent="poet")
+    await store.add(MemoryScope.DEVICE, "cc:dd", "the door creaks", agent="poet")
+    await store.set_state(THREAD, "turn", "white to move", agent="poet")
+
+    read = store.read_for_prompt("poet", "aa:bb", THREAD)
+
+    assert read.agent == "- fact one\n- fact two"
+    assert read.agent_ids == (first, second)
+    assert dropped not in read.facts
+    assert read.device_ids == (noted,)
+    assert read.facts == (first, second, noted)
+
+
+async def test_a_prompt_read_with_an_empty_device_scope_names_no_device_fact() -> None:
+    """An empty device scope and no device at all both name nothing,
+    and neither takes anything off the agent's ids."""
+    store = memory()
+    known = await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+    await store.add(MemoryScope.DEVICE, "aa:bb", "the kettle is loud", agent="poet")
+
+    elsewhere = store.read_for_prompt("poet", "cc:dd", THREAD)
+    nowhere = store.read_for_prompt("poet", None, THREAD)
+
+    assert (elsewhere.device_ids, elsewhere.facts) == ((), (known,))
+    assert (nowhere.device_ids, nowhere.facts) == ((), (known,))
+
+
 # The conversation's ledger
 #
 # Keyed, current-only, and shared with its thread's lifecycle. The key
@@ -1015,12 +1058,12 @@ async def test_a_prompt_read_with_no_device_and_no_thread_reads_one_scope(
     read never asked about.
     """
     store = memory()
-    await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+    known = await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
     await store.add(MemoryScope.DEVICE, "aa:bb", "the kettle is loud", agent="poet")
     await store.set_state(THREAD, "turn", "white to move", agent="poet")
 
     assert store.read_for_prompt("poet", None, None) == store_module.PromptMemory(
-        state="", agent="- the user is vegetarian", device=""
+        state="", agent="- the user is vegetarian", device="", agent_ids=(known,)
     )
 
     with caplog.at_level("WARNING"):
