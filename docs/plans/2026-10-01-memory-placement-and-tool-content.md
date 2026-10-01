@@ -470,7 +470,7 @@ merge rebases.
 - [ ] **M1: memory leaves the system message.** Decisions 1 to 6, their
   tests and mutations, the behavior and cache gates, its documentation
   footprint. One pull request; it closes #536.
-- [x] **[M2: a tool span carries its content](2026-10-01-memory-placement-and-tool-content-implementation.md#m2-a-tool-span-carries-its-content)** (PR TBD). Decisions 7 to 11, their
+- [x] **[M2: a tool span carries its content](2026-10-01-memory-placement-and-tool-content-implementation.md#m2-a-tool-span-carries-its-content)** ([PR #587](https://github.com/rafacm/vinga/pull/587)). Decisions 7 to 11, their
   tests and mutations, a live readback of a tool observation's input
   and output in Langfuse, its documentation footprint. One pull request;
   whichever of the two merges last closes #533.
