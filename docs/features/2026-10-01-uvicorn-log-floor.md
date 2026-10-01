@@ -93,14 +93,14 @@ for alongside the rest.
 
 ### What that costs, priced
 
-Every other INFO line above goes too. None of them says a fact the
-server does not already say some other way, or that the operator does
-not already hold:
+Every other INFO line above goes too. Most of what they say, the
+server says some other way or the operator already holds; the table
+says where, and the paragraphs after it say what is said nowhere now:
 
 | uvicorn line | Where the fact still is |
 | --- | --- |
 | `<address> - "WebSocket <path>" 403`, `connection rejected` | `auth_rejected`, or `session_rejected` for a server that is full or draining, each with its reason |
-| `... [accepted]`, `connection open` | `session_open`, or `session_rejected` with its reason when the session turns the device away after the accept |
+| `... [accepted]`, `connection open` | `session_open` once a valid hello arrives, or `session_rejected` with its reason when the session turns the device away after the accept and before the hello (a Device-Id that is not a MAC, no agent, an agent not loaded). A transport that ends before a valid hello has no event; see below |
 | `Started server process [<pid>]`, `Finished server process [<pid>]` | Nowhere in the log. The process id is the container's or the supervisor's to report |
 | `Waiting for application startup.`, `Application startup complete.` | The onboarding banner (`onboarding_banner`) is written from the started callback, just before `Application startup complete.`; `/readyz` answers readiness |
 | `Uvicorn running on <scheme>://<host>:<port>` | The banner's `origin`, which is the listen address unless `server.public_url` or `server.websocket_url` names a better one; otherwise `server.host` and `server.port` in the file the operator wrote |
@@ -115,6 +115,28 @@ clean shutdown. None was judged worth a vinga line of its own: the
 first is in the configuration, the second is the runtime's, and a
 shutdown that did not complete shows as a missing exit rather than as a
 missing log line.
+
+Also gone, and the larger loss: that a connection was accepted at all,
+when it ends before a valid hello. `session_open` is emitted only after
+`DeviceSession._receive_hello` returns a hello, and read from
+`device/session.py`, that function returns with no event when the
+client disconnects before its first frame, when no frame arrives
+within the first-contact window (`HELLO_TIMEOUT_S`, 10 s), when the
+first frame is not text, or when the first message is not a hello, or
+is a hello whose transport is not `websocket`, whose audio format is not
+`opus`, or whose protocol version is unsupported. Each of those closes
+the socket (the timeout and the invalid hellos with a protocol-error
+close code and a reason sent to the device) and logs nothing. A first
+message of a type the protocol does not know counts as not a hello. The
+one exception is a first text frame the message parser refuses (not
+JSON, not an object, no string `type`, or a known type that fails its
+model), which is logged as a plain warning (`session <id>: malformed
+hello: ...`) rather than as a catalog event. Before this change
+uvicorn's `[accepted]` and `connection open` were the only trace of the
+rest; now a device that connects and fails its hello in any of those
+ways is invisible in the log. This change adds no event for them, as
+the review round decided; whether the server should say so in an event
+of its own is a separate decision.
 
 A server started as `uvicorn vinga_server.app:app` loses the same lines,
 since `create_app` applies the floor before uvicorn writes its first
@@ -161,9 +183,14 @@ when websockets is installed and which wrote the lines above, and the
 `websockets_impl` and `wsproto_impl` a configuration can name
 instead). It would need a pin that fails when an upgrade moves any of
 them, since a filter that stops matching fails open, printing the query
-again with nothing to say so. What it would buy is the lines
-in the table above, none of which anything here reads. The proportion
-test picks the floor: one map value and its comment against a filter,
+again with nothing to say so. What it would buy is the lines in the
+table above, which no code here reads. Among them is `connection open`,
+the only trace of a connection that fails its hello, so the filter
+would have kept that and the floor does not. That loss was found in
+review after the choice was made, and is now stated rather than priced
+away: a scrubbed copy of a library's line is a weaker carrier for it
+than an event of the server's own would be, and the proportion test
+still picks the floor, one map value and its comment against a filter,
 its pin and a recurring upgrade check.
 
 Typed handshake events of the server's own, in place of uvicorn's lines,
