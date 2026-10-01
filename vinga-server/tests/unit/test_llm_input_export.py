@@ -148,6 +148,68 @@ def test_a_round_stages_the_conventions_and_no_alias(stage: str) -> None:
     )
 
 
+def _streamed(ceiling: int, reply: str) -> list[tuple[str, dict[str, str]]]:
+    """Stream one reply in pieces under a ceiling; what was exported."""
+    staged, recorded = exporter(max_request_bytes=ceiling)
+    staged.stage_reply(
+        "session",
+        invocation="streamed",
+        agent=None,
+        system="be concise",
+        turns=[a_turn()],
+        tools=[a_tool()],
+        choice="auto",
+    )
+    for start in range(0, len(reply), 100):
+        staged.observe("streamed", TextDelta(reply[start : start + 100]))
+    staged.finish("streamed")
+    return recorded.snapshots
+
+
+def _conventions_size(attributes: dict[str, str]) -> int:
+    return sum(len(attributes[name].encode("utf-8")) for name in CONVENTIONS)
+
+
+def _dropped(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.reason
+        for record in caplog.records
+        if getattr(record, "event", None) == "llm_input_export_failed"
+    ]
+
+
+# A reply long enough that charging its streamed bytes twice, as the
+# preflight did while an output alias existed, overshoots a ceiling the
+# final canonical pair fits exactly.
+LONG_REPLY = "y" * 1000
+
+
+def test_a_streamed_pair_that_fits_the_ceiling_exactly_is_exported(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    [(_, measured)] = _streamed(10 * 1024 * 1024, LONG_REPLY)
+    ceiling = _conventions_size(measured)
+
+    with caplog.at_level(logging.WARNING):
+        [(_, attributes)] = _streamed(ceiling, LONG_REPLY)
+
+    assert _dropped(caplog) == []
+    assert _conventions_size(attributes) == ceiling
+
+
+def test_a_streamed_pair_one_byte_over_the_ceiling_is_dropped_and_reported(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    [(_, measured)] = _streamed(10 * 1024 * 1024, LONG_REPLY)
+    ceiling = _conventions_size(measured)
+
+    with caplog.at_level(logging.WARNING):
+        snapshots = _streamed(ceiling, LONG_REPLY + "y")
+
+    assert snapshots == []
+    assert _dropped(caplog) == [LlmInputExportFailure.DROPPED.value]
+
+
 def test_malformed_tool_arguments_remain_in_both_message_sides() -> None:
     staged, recorded = exporter()
     malformed = ToolCall(
