@@ -591,7 +591,7 @@ touch the same catalog, telemetry and generated files but different
 variants, so the second to merge rebases and regenerates.
 
 - [x] **[M1: the round and the tool call](2026-10-01-telemetry-metadata-half-implementation.md#m1-the-round-and-the-tool-call)**
-  (PR TBD). Decisions 1 to 4, their tests and mutations, the M1 rows
+  ([PR #581](https://github.com/rafacm/vinga/pull/581)). Decisions 1 to 4, their tests and mutations, the M1 rows
   of the live gate, its documentation footprint. One pull request.
 - [x] **[M2: the memory half, per round](2026-10-01-telemetry-metadata-half-implementation.md#m2-the-memory-half-per-round)**
   ([PR #580](https://github.com/rafacm/vinga/pull/580)). Decisions 5 to 9, their
