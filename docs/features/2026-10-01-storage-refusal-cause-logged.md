@@ -81,8 +81,17 @@ naming `StorageError`.
 | `app.py` reload rewrap | `StorageError` (cause dropped) | the store refusal's cause, passed on |
 | `app.py` diff rewrap | `StorageError` (cause dropped) | the store refusal's cause, passed on |
 | `config/reload.py` untyped failure | `StorageError` | the failure's class |
+| `memory/store.py` `purge` (an erasure's memory) | `StorageError` | the driver failure's class |
+| `conversations/store.py` `rename_agent` | `StorageError` | the driver failure's class |
+| `memory/store.py` `rename_owner` (agent rename, device replacement) | `StorageError` | the driver failure's class |
 
-The last three answer "The failure is recorded in this server's log",
+The last three were found by the pull request's review round. They are
+decided one level further in than the routes, inside store functions a
+route's transaction calls, and they are `ConfigError`s already, so the
+route's own boundary passes them through as they are; an erasure case
+that failed at the writer's open never reached the purge.
+
+The reload and diff rows answer "The failure is recorded in this server's log",
 and the reload's comment said the class was "named by class in the
 event beside this". The event beside it, `mcp_reload`, records the
 refusal's kind as a token; nothing recorded the class. The comment now
@@ -92,6 +101,30 @@ No response body, sentence or status changes. The two sentences that
 promise "the details" are response bodies and stay byte for byte; what
 they point to is now true, and a comment above each says what "the
 details" are.
+
+### The configuration store's refusal leaves with no chain
+
+`ConfigStore._transaction` built its refusal in the `except` arm and
+raised it after, which is the house rule, and its docstring said that
+kept the failure off the refusal. It did not: the refusal reached the
+API with SQLAlchemy's error on its `__context__` and psycopg's under
+that, holding the statement, its bound parameters and the trigger's
+words. The transaction is a generator context manager, and a failure
+in the caller's `with` block is thrown into it by that `with`'s own
+`__exit__`, which is handling the failure while the generator runs; so
+the failure is still the exception being handled at the `raise`,
+however far below the `except` it sits, and Python chains it. The raise
+cannot leave that handling without moving into every one of the
+sixteen callers' `with` blocks, so the refusal is caught as it is
+raised, both links are cleared, and it is re-raised bare, which chains
+nothing. The docstring says why. Nothing that answered or logged a
+refusal walked the chain, so no retained surface carried the value, but
+a handler that walks the objects would have found it. The review round
+raised this as its P1; it had been recorded here as left alone.
+
+No other refusal this change touches has the shape: the memory write,
+the erasure, the three store classifiers, the reload, the diff and the
+store's live reads all raise from an ordinary frame.
 
 ### The OpenAPI descriptions say what the log holds
 
@@ -110,7 +143,7 @@ as a structured attribute the handler reads, or each site emits a typed
 event of its own before raising.
 
 The attribute won on the proportion test. It is one code path: one
-keyword at each of six sites and one read in the handler, with no new
+keyword at each of nine sites and one read in the handler, with no new
 catalog entry, and the reload and diff rewraps join it by passing one
 attribute on. The typed event would have been a new catalog declaration
 (or a widened existing one), an emission at every site, and a second
@@ -157,22 +190,6 @@ not load it. The value is always built on the server side, by
 
 ## What was found and deliberately left
 
-- **The configuration store's refusal carries the driver error on its
-  `__context__`.** `ConfigStore`'s transaction translates a database
-  failure inside a generator context manager, and an exception raised
-  while `__exit__` handles another takes that one as its context,
-  wherever in the generator it is raised; the transaction's docstring
-  says the refusal is raised "so that the exception holding them is not
-  attached to it either", which is not so. Probed against the code
-  before this change: the refusal's `__context__` is SQLAlchemy's
-  `ProgrammingError`, with psycopg's `RaiseException` under it, both
-  holding the planted value. Nothing that answers or logs a refusal
-  walks the chain today (the API handler names a class, the CLI prints
-  the sentence), so no retained surface carries it, but the
-  configuration case below asserts the body and every log record and
-  says in a comment why it does not assert the chain. Left for its own
-  issue: the fix is a restructuring of every store write's transaction,
-  not a line here.
 - **`api_storage_error`'s sentence** says "the configuration API met
   unreadable stored state" for a memory write or an erasure the
   database refused, neither of which is configuration or unreadable.
@@ -210,6 +227,31 @@ that search is the five descriptions above, one OpenAPI description
 saying nothing sent is quoted back in the log (a different claim, and
 true), and comments about other logs.
 
+Every construction of a storage refusal in `src`, found by an AST walk
+over every `.py` file for calls to `StorageError` and its one subclass
+`StoredConfigUnreadableError`, noting whether each sits lexically in an
+`except` arm and passes `cause=` (output read in full; a grep for
+`StorageError(` outside class, `isinstance` and `except` lines agrees,
+16 lines being the 15 `StorageError` calls and one `ApiStorageError`):
+26 constructions, 9 of them in an `except` arm. Before the review
+round's fix, 5 of those 9 had no cause; after it, 2, each kept as it is:
+
+- `memory/store.py` `_write`, `UNWRITABLE`: the agent's own memory
+  writes, answered to a tool call and never through the API's refusal
+  handler, so nothing would read the cause. Its own event,
+  `memory_unwritable`, names the class already.
+- `db/__init__.py` `SCHEMA_NOT_PERMITTED`: a boot or lifespan refusal
+  whose sentence names the remedy, decided by a privilege check, so its
+  class is the classification; it never reaches the API handler.
+
+The other 17, outside an `except` arm: the 11 `StoredConfigUnreadableError`
+refusals, which are about a row's content and whose own class is what
+they are; the 4 `migration_failure` sentences on the boot path (#530
+names the class in the general one); `config/store.py`'s
+`_database_problem`, which `except` arms call; and `config/reload.py`'s
+untyped arm, raised after its `except` with the cause set inside it.
+Both of the last two set the cause.
+
 ## Verification
 
 - Pins first: the three response bodies (memory, erasure, configuration
@@ -236,8 +278,19 @@ true), and comments about other logs.
   (`leaks.renderings`), and, for memory and erasure, everything the
   refusal carries (`leaks.chain`) with no `__cause__` or `__context__`.
   For the configuration write the value is in the trigger's words, the
-  driver error and the bound body; the chain is not asserted there, as
-  recorded above.
+  driver error and the bound body, and the chain is asserted there too
+  since the review round's fix: it failed before the fix, finding the
+  value through `__context__`.
+- The three store classifiers, each driven through the API by a real
+  trigger on the table its statement writes (`memory.state` on delete
+  for the purge, `record.conversations` and `memory.facts` on update
+  for the rename's two halves): the body is the classifier's own
+  sentence, `api_storage_error` names `ProgrammingError`, and the
+  planted value is in no record, not in the body and not on the chain.
+  All three failed before the fix, logging `(StorageError)`. A forged
+  class at each, handed to the statement through a wrapped connection at
+  the runtime's eraser and the store's engine, leaves the line naming
+  `StorageError` with the same sentence.
 - Mutations, each applied to a copy, run against the targeted set and
   restored, eleven in all and every one killed: the handler ignoring
   the cause; each of the four sites spelling
@@ -246,7 +299,12 @@ true), and comments about other logs.
   the erasure reading the wrong local; the memory site holding the
   exception itself (the event refuses to build, so no line is logged);
   `db.failure_class` without its validation; and the diff dropping the
-  cause it was handed.
+  cause it was handed. A second sweep over the review round's fixes,
+  every one killed: each store classifier with the cause removed; the
+  purge reading `exc.orig`; each store classifier spelling the raw
+  class, which survived at the purge until the forged-class cases were
+  added and is killed at all three now; and the transaction keeping the
+  refusal's `__context__`.
 
 ## Files modified
 
@@ -258,6 +316,8 @@ true), and comments about other logs.
 - `vinga-server/src/vinga_server/app.py`
 - `vinga-server/src/vinga_server/memory/api.py`
 - `vinga-server/src/vinga_server/conversations/api.py`
+- `vinga-server/src/vinga_server/conversations/store.py`
+- `vinga-server/src/vinga_server/memory/store.py`
 - `vinga-server/src/vinga_server/events/catalog.py`
 - `vinga-server/tests/unit/test_api_storage_refusals.py` (new)
 - `vinga-server/tests/unit/test_memory_api.py`
