@@ -201,6 +201,10 @@ _UNKNOWN_ENTRY = (
 # by the db classifier's closed set and not by anything the exception
 # says, because a driver's own words carry the statement it ran and the
 # values bound into it, which here are an owner, a fact and a key.
+#
+# The details the second sentence points to are the class of what the
+# database raised: the refusal carries it beside the sentence as its
+# `cause`, and the API's `api_storage_error` line names it (#586).
 _MEMORY_BUSY = (
     "memory's write lock is held by another writer, and nothing was changed. The same "
     "request may be made again"
@@ -229,7 +233,8 @@ MEMORY_PROBLEMS_INSTEAD: dict[int, str] = {
     ),
     500: (
         "Memory cannot be read or written, or the request failed for a reason that is "
-        "not the caller's. The details are in the server's log."
+        "not the caller's. The server's log names the class of what "
+        "failed, and nothing else of it."
     ),
 }
 
