@@ -13,20 +13,15 @@ export switch of its own) is Rafael's to decide and is not planned
 here; neither pull request closes #533.
 
 **Local baseline:** not applicable. Every change is a count, an
-identity or a timing on an exported span; no conversational
+identity, a digest or a timing on an exported span; no conversational
 capability moves.
 
-**Cheapest alternative:** for two of the four pieces this plan builds
-it is already the cheapest change (one `LLM_ATTRIBUTES` entry for the
-first token, one catalog note for `language_confidence`). Two cost
-more than the cheapest thing that would also help, and say what they
-buy; a fifth piece, the fingerprint, is deferred:
+**Cheapest alternative:** for three of the five pieces this plan is
+already the cheapest change (one `LLM_ATTRIBUTES` entry for the first
+token, one field and one attribute for the fingerprint, one catalog
+note for `language_confidence`). Two cost more than the cheapest thing
+that would also help, and say what they buy:
 
-- *The fingerprint.* The cheapest, an unkeyed SHA-256, is a
-  confirmation oracle over prompt content; every keyed shape that meets
-  the issue's "unconditionally" needs a stored installation key. Four
-  review rounds priced it, and it is deferred (decision 3) rather than
-  built at a cost the rest of this plan does not justify.
 
 - *The tool join.* The cheapest would be the provider's call id
   alone, and it is not available: it is far-side bytes, which the
@@ -182,16 +177,45 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
    log line, the catalog's single home for the event; neither appears
    in the `TEMPLATE`. The conventions' `gen_ai.tool.call.id` is not
    used, because its value would be the provider's id.
-3. **No prompt fingerprint in this plan; deferred to Rafael.** The
-   issue asks for one unconditionally, the content and telemetry ADR
-   makes an unkeyed digest of prompt text a confirmation oracle (plan
-   review rounds 2 and 3), and a keyed one is unconditional only with
-   an installation key every deployment holds, which `VINGA_MASTER_KEY`
-   is not (round 4). That leaves three shapes, each a decision about
-   the product rather than this milestone: a stored installation key
-   generated at first boot (a migration, a rotation story), a digest
-   only where a master key is set, or no digest. Raised with Rafael;
-   `prompt_assembled` and the turn span are unchanged here.
+3. **The know-how half gets an unkeyed fingerprint** (Rafael,
+   2026-10-01, after review rounds 2 to 4 had escalated it to a keyed
+   digest and then deferred it). `PromptAssembled` gains
+   `sha256: Sha256` (a new value type, exactly 64 lowercase hex
+   characters): the SHA-256 of the know-how half's text exactly as
+   sent (`half.text`, UTF-8, the whole half including MCP-supplied
+   blocks), computed where the event is built. That rendered text is
+   the one canonical byte sequence (assembly has already trimmed the
+   ends and joined the blocks), so no framing or normalization is
+   added. The turn span carries it as `vinga.prompt.sha256` beside
+   `vinga.prompt.characters`, through `PROMPT_ATTRIBUTES`, and it
+   rides the `prompt_assembled` span event exactly as `characters` and
+   `sources` already do; whether that event keeps its span-event half
+   is #576's question, not this plan's.
+   - **Why unkeyed is within the record.** The content and telemetry
+     ADR bars conversation text, far-side bytes and exception message
+     text from metadata surfaces; operator configuration is not in its
+     content class, and telemetry already exports configuration
+     (agent and entry names, models, hosts, per-block prompt sizes
+     keyed by fragment name). The observability page's "the system
+     prompt with its memory and know-how blocks" is content because
+     the whole assembled request carries conversation history and
+     memory, not because the know-how half alone is. A digest carries
+     none of an MCP block's bytes, so the far-side rule is not engaged
+     either.
+   - **The residual risk, stated rather than engineered away.** A
+     digest of the whole ~3.9 KB half confirms a guess only when the
+     guesser already holds every other byte, so the realistic case is a
+     persona copied from a known template with one personal slot
+     filled in. The observability page says so in one sentence: personal
+     facts belong in memory, which is never digested (decision 6), not
+     in the persona.
+   - **Tested:** the digest of exactly the know-how text; a persona
+     edit that preserves length changes it; two activations on the same
+     prompt carry the same value; a change to MCP-supplied text changes
+     it; the turn span carries it on every turn that agent speaks.
+     Mutation: the digest computed over something other than
+     `half.text` (for example the persona alone) must fail the MCP-text
+     test.
 4. **`language_confidence` says who fills it.** A `note=` on the
    catalog field: faster-whisper reports it when it detected the
    language rather than being pinned to one; the OpenAI-compatible
@@ -384,7 +408,7 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
 
 No new module, seam or config key.
 
-- `events/values.py`: two new value types, `FactIds` and
+- `events/values.py`: three new value types, `Sha256`, `FactIds` and
   `MemorySources`, each one rule in one place.
 - `events/catalog.py`, `events/assembly.py`: fields on `tool_call`'s
   three variants, `PromptAssembled`, `LlmRound` and `ProviderFailed`.
@@ -475,7 +499,7 @@ the implementation doc, per milestone:
 
 - M1: the `llm` observation shows `vinga.llm.first_token_ms`; the tool
   observation shows the invocation id equal to its round's and its
-  position.
+  position; the turn shows `vinga.prompt.sha256`.
 - M2, **blocking**: the round after the `remember` shows the new id in
   `vinga.llm.memory.facts`, and the count and sizes, read back through
   the Langfuse public API as values a query can use (the id array
@@ -507,8 +531,10 @@ the implementation doc, per milestone:
   fields must then be absent or empty consistently with what the model
   received (no ids for facts it never saw); a test covers the failed
   read.
-- **No-leak.** No new string-valued fact: positions and ids are
-  integers, and the invocation is server-minted. No ledger key, no fact text, no prompt byte reaches any
+- **No-leak.** The one new string-valued fact is a hex digest of
+  operator configuration (decision 3, with its residual risk stated);
+  positions and ids are integers, and the invocation is
+  server-minted. No ledger key, no fact text, no prompt byte reaches any
   surface.
 
 ## Standing lenses
@@ -534,12 +560,13 @@ the implementation doc, per milestone:
 
 - `docs/architecture/observability-surfaces.md`, "Exported traces":
   the first token is an attribute of the generation; a tool call names
-  the call by its round and its position in that round; a reply
-  round carries its whole system size,
+  the call by its round and its position in that round; a turn
+  carries the know-how half's SHA-256, with the one-sentence residual
+  risk; a reply round carries its whole system size,
   the memory blocks' sizes and the ids of the facts injected, with the
   reason ids and not a digest, and that an id resolves against the
   store's current state only; the parity rule in one sentence. M1
-  writes the first two, M2 the rest.
+  writes the first three, M2 the rest.
 - `vinga-server/README.md`, if its telemetry or cost table names the
   first-token mark or prompt size (checked, and left alone if not).
 - `docs/reference/events.md` regenerated. No new conventions' key is
@@ -553,7 +580,7 @@ the implementation doc, per milestone:
   through its generator (the drift check alone cannot see a missing
   row, as #536's review found).
 - `changelog.d/533-tool-and-round-attributes.md` (M1: `### Added` the
-  tool call's round and position; `### Changed` the first token from a
+  tool call's round and position, and the prompt digest; `### Changed` the first token from a
   span event to an attribute) and
   `changelog.d/533-memory-half-per-round.md` (M2: `### Added`).
 
@@ -666,6 +693,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    **Evidence:** Decision 3 calls the entire know-how half “operator-authored configuration,” then exports its SHA-256 unconditionally. That premise is false: `prompt.know_how()` includes `ServerInstructions` and `ServerPrompt` text supplied by a connected MCP server (`runtime/prompt.py:262-294, 345-381`), and the module deliberately avoids putting server-chosen prompt names on metadata surfaces (`runtime/prompt.py:304-307`). A deterministic hash is a confirmation oracle, exactly the reason Decision 6 rejects a memory hash. The proposed hash test covers only a persona edit, not remote supplied text.
    **Plan should say instead:** Resolve the trust classification before implementation. Either restrict the unconditional digest to demonstrably operator-owned blocks, put a digest of any server-supplied prompt material behind the content-export policy, or amend the telemetry/content boundary deliberately. Add a sentinel test using an MCP-supplied low-entropy secret that proves it cannot be confirmed from an exported trace when content export is off.
 
+   *Superseded 2026-10-01:* decision 3 is restored as an unkeyed SHA-256 of the whole know-how half, on Rafael's decision after he questioned the premise. The content and telemetry ADR bars conversation text, far-side bytes and exception message text from metadata surfaces, and operator configuration is in none of those classes; a digest of the whole ~3.9 KB half confirms a guess only when every other byte is already known, which is stated as a residual risk in the observability page rather than engineered away with key management. This finding's restriction to authored blocks is withdrawn with it: a digest carries none of an MCP block's bytes.
+
 3. **P2: The memory-fact absent-versus-empty contract has no representable handoff.**
    **Evidence:** Decision 7 requires an absent list when memory is disabled and an empty list after a failed read, but says `_system_prompt` returns only the `Assembled` prompt and “the ids” (`docs/plans/2026-10-01-telemetry-metadata-half.md:215-251`). `PromptMemory` currently represents an unreadable read as the same `NOTHING_REMEMBERED` value used for no facts (`memory/store.py:418-442, 898-945`). A tuple of IDs alone cannot preserve the required distinction.
    **Plan should say instead:** Define the accounting handoff explicitly, for example `memory_facts: tuple[int, ...] | None`, where `None` means no memory read was attempted and `()` means a read produced no injected facts. Thread that single accounting value through successful and failed reply paths.
@@ -690,6 +719,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
 Evidence: Plan Decision 3 calls for an unconditional SHA-256 of persona, fragments, and operator `instructions:` blocks, while rejecting a memory digest for exactly that oracle risk. Those blocks are prompt content and can contain low-entropy sensitive values; exported traces are an off-host metadata surface. [observability-surfaces.md](/tmp/claude-1001/-home-rafa-agents-Develop-projects-vinga/aa462fd6-7d97-495a-affb-5a7676a882e0/scratchpad/wt/533/docs/architecture/observability-surfaces.md:435) says the system prompt is content exported only under `export_llm_input`; the content/telemetry ADR requires source-side exclusion of content.
 What the plan should say instead: retain the unconditional, comparable fingerprint decision, but make it a stable installation-private keyed digest, with explicit key lifecycle and rotation semantics. Add a no-leak test proving that hashing a guessed operator prompt or secret with public SHA-256 cannot reproduce the exported fingerprint.
 
+   *Superseded 2026-10-01:* decision 3 is restored as an unkeyed SHA-256 of the whole know-how half, on Rafael's decision after he questioned the premise. The content and telemetry ADR bars conversation text, far-side bytes and exception message text from metadata surfaces, and operator configuration is in none of those classes; a digest of the whole ~3.9 KB half confirms a guess only when every other byte is already known, which is stated as a residual risk in the observability page rather than engineered away with key management. The finding is rejected in substance: it classified the know-how half as content by reading the observability page's description of the whole assembled request.
+
 2. **P1: The proposed tool-position plumbing loses the only position the plan promises.**
 Evidence: Decision 2 says `ToolExecution.run` merely gains an `invocation` keyword. Today `PipelineRuntime._run_tools` partitions the original `calls` into `plain` and `moves`, then calls `ToolExecution.run(self._turn, plain)`; `ToolExecution.run` and `_run_one` receive only `(slot, call)` ([pipeline.py](/tmp/claude-1001/-home-rafa-agents-Develop-projects-vinga/aa462fd6-7d97-495a-affb-5a7676a882e0/scratchpad/wt/533/vinga-server/src/vinga_server/runtime/pipeline.py:2295), [tool_execution.py](/tmp/claude-1001/-home-rafa-agents-Develop-projects-vinga/aa462fd6-7d97-495a-affb-5a7676a882e0/scratchpad/wt/533/vinga-server/src/vinga_server/runtime/tool_execution.py:444)). Enumerating there produces a position in the partitioned executable list, not in the provider-returned list. The specified “two calls to the same entry” test does not expose this unless a move is interleaved.
 What the plan should say instead: carry an immutable original `call_position` with every execution candidate from the enumeration of `calls` before partitioning, through `_run_tools`, `ToolExecution.run`, `_run_one`, `_tool_called`, and the assembly builders. Add a test with executable calls on both sides of a move, asserting the emitted positions retain the original gaps, plus the content-export correspondence.
@@ -701,6 +732,8 @@ What the plan should say instead: thread `RoundPrompt` into both `watched(...)` 
 4. **P2: The digest’s byte representation is underspecified and can collide for different prompts.**
 Evidence: Decision 3 says eligible blocks are “joined in assembly order” but does not specify delimiters, trimming, or provenance framing. Actual prompt assembly trims end blocks and joins blocks with `"\n\n"` ([prompt.py](/tmp/claude-1001/-home-rafa-agents-Develop-projects-vinga/aa462fd6-7d97-495a-affb-5a7676a882e0/scratchpad/wt/533/vinga-server/src/vinga_server/runtime/prompt.py:514)). Concatenating `["ab", "c"]` and `["a", "bc"]` gives the same digest input despite distinct rendered prompts. The proposed same-length persona-edit test does not catch this.
 What the plan should say instead: define one canonical byte sequence, derived after assembly, with an unambiguous delimiter or length framing for each eligible rendered block. Add a test for a boundary-changing edit with identical concatenation, plus a test covering leading/trailing whitespace normalization.
+
+   *Superseded 2026-10-01:* the input is `half.text` as sent, as this finding's resolution already settled; it carries over to the restored unkeyed digest unchanged.
 
 5. **P2: The final Langfuse fallback contradicts its own acceptance gate.**
 Evidence: The live gate requires `vinga.llm.memory.facts` to arrive as queryable individual values, “not … stringified as one opaque blob,” yet its final fallback is one comma-joined decimal string. That fallback is necessarily one opaque attribute and cannot meet the stated gate.
@@ -718,6 +751,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
 Evidence: Issue #533 §3 requires “a fingerprint, unconditionally.” Plan Decision 3 instead makes `vinga.prompt.digest` absent whenever `VINGA_MASTER_KEY` is unset. `config/secrets.py:146-180` explicitly permits that common deployment state.
 What the plan should say instead: provide a durable installation-private key for every deployment, with storage, rotation, and upgrade behavior specified, or obtain an explicit issue-level decision to weaken the unconditional requirement. Do not silently turn it into a master-key-only feature.
 
+   *Superseded 2026-10-01:* decision 3 is restored as an unkeyed SHA-256 of the whole know-how half, on Rafael's decision after he questioned the premise. The content and telemetry ADR bars conversation text, far-side bytes and exception message text from metadata surfaces, and operator configuration is in none of those classes; a digest of the whole ~3.9 KB half confirms a guess only when every other byte is already known, which is stated as a residual risk in the observability page rather than engineered away with key management. "Unconditionally" is met: the digest needs no key.
+
 2. **P1: The proposed memory-character calculation fails for valid prompts.**
 Evidence: Plan Decision 7 defines `memory_characters` as `len(full.text) - len(half.text)`, guarded by an assertion that `half.text` is a prefix. But `runtime/prompt.py:_assembled` preserves a one-block prompt unchanged while trimming the first block with `lstrip()` when scopes create a second block. Thus `know_how("  persona")` followed by `with_scopes(...memory...)` produces a full prompt that does not begin with `half.text`.
 What the plan should say instead: make prompt assembly return the scope contribution as part of its own result, with an explicit rule for any normalization it performs, or change assembly so appending scopes preserves the cached half byte-for-byte. Add a leading-whitespace one-block regression case.
@@ -733,6 +768,8 @@ What the plan should say instead: add and name a validated memory-attribute help
 5. **P2: The digest violates the plan’s own one-carrier parity rule.**
 Evidence: Adding `digest` to `PromptAssembled` makes it reach the existing `prompt_assembled` span event through `_span_event`, while Decision 3 also puts it on turn-span attributes through `_prompt_attributes` (`telemetry.py:2595-2628`). The plan says newly added trace facts must be span attributes and that a fact should be replaced, not mirrored, when span events are not portable.
 What the plan should say instead: explicitly exclude the digest from the prompt span-event projection while retaining it as a turn attribute, or record and justify an exception to the parity rule. Test the selected carrier, including its absence from the other.
+
+   *Superseded 2026-10-01:* with the digest restored it rides the `prompt_assembled` span event exactly as `characters` and `sources` already do, so it adds no carrier its siblings lack; whether that event keeps its span-event half is #576's question.
 
 6. **P2: The fact-list absence semantics are not pinned through the derived count.**
 Evidence: Decision 7 distinguishes disabled memory (`memory_facts` absent) from an attempted empty or failed read (`memory_facts: []`). Decision 8 derives `memory.fact_count` in telemetry, but the tests only require “no fact list” for memory-off. A straightforward `len(payload.get("memory_facts", []))` implementation exports `0` for disabled memory, erasing the distinction the plan says matters.
