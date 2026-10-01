@@ -230,14 +230,41 @@ between on the request's shape and the model's reading of it.
    call's position); the tool span takes it at its fold, the way the
    `llm` span takes its content by invocation. The `tool_call` event and
    the retained log gain nothing.
-9. **Bounded like every content pair.** The pair counts against the same
-   per-request ceiling and session budget as the round's request; an
-   over-ceiling pair is dropped whole and reported through
-   `llm_input_export_failed`, adding a reason token to
-   `LlmInputExportFailure` only if the existing member cannot say it
-   (decided by reading the closed set at its decision site). A malformed
-   call (no arguments object) exports its raw argument text as the
-   model sent it, since that is what the model sent.
+9. **Bounded like every content pair, with its own lifecycle.**
+   - *Enters:* the tool execution stages the pair immediately after the
+     call returns and immediately before its `tool_call` event is
+     emitted, keyed by the requesting round's invocation and the call's
+     position; its bytes join the session's held total
+     (`LlmInputExport._held`) at staging. A call cancelled before it
+     returns stages nothing, since there is nothing to export.
+   - *Leaves:* when the tool span's fold takes it, which is the same
+     emission that stages it; or it is discarded, and its bytes released,
+     when the fold finds no trace for the session (as `_take_llm_content`
+     discards today), when the session closes with it still held, and at
+     shutdown with the content export's existing close.
+   - *Ceilings:* a pair over the per-request ceiling is dropped whole at
+     staging; when staging would exceed the session budget, held pairs
+     are evicted oldest first across generation and tool pairs alike,
+     the same rule the generation pairs follow today. Every drop and
+     eviction is reported (decision 9a).
+   - A malformed call (no arguments object) exports its raw argument
+     text as the model sent it, since that is what the model sent.
+   - Tested: several tool pairs exhausting the session budget (the
+     oldest evicted first, one report each, the newest attached); a pair
+     whose session has no trace discarded and its bytes released; a
+     session closing with a pair held releases it.
+9a. **The outcome events say which kind of pair.** Rather than make
+   `llm_input_export_failed` say "a generation pair was omitted from its
+   LLM span" about a tool span, both outcome events are generalized
+   once: `llm_input_export_failed` gains `kind`, a closed set
+   (`generation`, `tool_call`) decided where the pair is dropped, and
+   `llm_input_exported` gains `tool_calls`, the count of tool spans that
+   received a complete pair, beside `rounds`, whose meaning is
+   unchanged. Their docstrings, templates and notes are reworded to
+   "content pair" and "span", `docs/reference/events.md` is regenerated,
+   and the event baseline's exact carried-key sets pin both new fields.
+   The observability page's exported-traces sentence that tool arguments
+   and results do not enter spans is rewritten.
 10. **The Collector masks them like the rest.** The two keys join the
     content-masking rules in `deploy/telemetry/collector.yml` beside
     `gen_ai.input.messages` and kin.
@@ -445,10 +472,14 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
 
    **Plan should say instead:** Specify when tool pairs enter and leave the session’s held-byte accounting, their eviction order relative to generation pairs, and cleanup on cancellation, missing traces, session close, and shutdown. Test multiple tool pairs exhausting the session budget, not only one pair exceeding the per-operation ceiling.
 
+   *Resolution:* accepted. Decision 9 now gives the tool pair a lifecycle: staged right after the call returns and before its `tool_call` event, joining the session's held bytes; taken by the tool span's fold in the same emission; discarded and released when there is no trace, when the session closes with it held, and at shutdown; a cancelled call stages nothing; eviction is oldest first across generation and tool pairs. Tests cover budget exhaustion by several tool pairs, the no-trace discard and the close release.
+
 8. **P2: Reusing the export outcome event would make its retained wording and counts false.**
 
    **Evidence:** The plan reports dropped tool pairs through `llm_input_export_failed` but considers only whether its reason token fits (plan lines 185-190`). The event currently says a generation pair was omitted from its LLM span, while `llm_input_exported.rounds` counts actual generation spans (`events/catalog.py:4064-4100`; `events/values.py:1766-1779`). Neither vocabulary describes a tool span. The exported-traces documentation also currently states that tool arguments and results do not enter spans.
 
    **Plan should say instead:** Decide whether tool attachment outcomes get separate metadata events or the existing events are generalized. Define how successful tool attachments are counted, update catalog/value prose and the exported-traces section, regenerate `events.md`, and pin the resulting exact event schema.
+
+   *Resolution:* accepted. New decision 9a generalizes both outcome events once: `llm_input_export_failed` gains a closed `kind` (`generation`, `tool_call`) decided where the pair is dropped, `llm_input_exported` gains `tool_calls` beside an unchanged `rounds`, the prose says "content pair" and "span", `events.md` is regenerated, the event baseline pins both fields, and the observability page's sentence that tool content does not enter spans is rewritten.
 
 **Verdict: not ready.** The once-per-agent requirement and exported-request parity need concrete designs before implementation; the remaining P2 amendments should be resolved in the same plan revision.
