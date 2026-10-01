@@ -22,7 +22,9 @@ for every request) and once inside a repository write.
 import pytest
 from cryptography.fernet import Fernet, MultiFernet
 from sqlalchemy import insert, update
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
+from tests.support.leaks import chain
 from tests.support.stores import holding_the_write_lock, planted, the_lock_held
 from vinga_server.config.loader import (
     ConfigError,
@@ -32,8 +34,8 @@ from vinga_server.config.loader import (
 )
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.secrets import SecretLocation, generate_key, load_keys
-from vinga_server.config.store import ConfigStore
-from vinga_server.db import MIGRATION_BUSY, UNREACHABLE, open_database, schema
+from vinga_server.config.store import ConfigStore, read_live_binding
+from vinga_server.db import MIGRATION_BUSY, UNNAMED_FAILURE, UNREACHABLE, open_database, schema
 
 CLAUDE = SecretLocation.provider("llm", "claude", "api_key")
 
@@ -303,3 +305,52 @@ def test_an_open_that_cannot_take_the_lock_is_a_busy_error(
 
     assert str(caught.value) == MIGRATION_BUSY
     assert str(caught.value) != UNREACHABLE
+
+
+# What the store's own storage refusal says about its cause (#530)
+#
+# The class name and nothing else, rendered by the same `db.failure_name`
+# the migration refusal asks, so the two answer one question one way.
+# Driven through `read_live_binding`, the store's read that takes an
+# engine, with one that refuses at the connect: the store's handler is
+# the subject, and a stand-in engine is the cheapest way to hand it a
+# failure of a chosen class.
+
+
+class _Refusing:
+    """An engine whose every connect raises the failure it was built with."""
+
+    def __init__(self, failure: Exception) -> None:
+        self._failure = failure
+
+    def connect(self) -> object:
+        raise self._failure
+
+
+@pytest.mark.parametrize(
+    ("failure", "named"),
+    [
+        pytest.param(
+            OperationalError("select", {}, Exception("sk-test-0d8a77-never-a-real-credential")),
+            "OperationalError",
+            id="a-real-class",
+        ),
+        pytest.param(
+            type("Forged\nthe configuration is fine", (SQLAlchemyError,), {})(
+                "sk-test-0d8a77-never-a-real-credential"
+            ),
+            UNNAMED_FAILURE,
+            id="a-forged-class-name",
+        ),
+    ],
+)
+def test_a_storage_refusal_names_the_class_and_only_a_lawful_one(
+    failure: Exception, named: str
+) -> None:
+    with pytest.raises(StorageError) as caught:
+        read_live_binding(_Refusing(failure), "aa:bb:cc:dd:ee:ff")  # type: ignore[arg-type]
+
+    assert str(caught.value) == (
+        f"the configuration database could not be read or written ({named})."
+    )
+    assert "sk-test-0d8a77" not in chain(caught.value)

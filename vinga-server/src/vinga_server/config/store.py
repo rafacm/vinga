@@ -119,7 +119,7 @@ from vinga_server.config.transport import (
 # a fact that is not a choice: there is exactly one way to rewrite an
 # agent name in each store.
 from vinga_server.conversations import store as conversation_record
-from vinga_server.db import is_busy, schema
+from vinga_server.db import failure_name, is_busy, schema
 from vinga_server.memory import store as agent_memory
 from vinga_server.memory.scopes import MemoryScope
 
@@ -1612,6 +1612,11 @@ def _database_problem(exc: SQLAlchemyError) -> ConfigError:
     parameters bound to it, and what this module binds into statements
     is the configuration, ciphertexts included. The exception's class
     name is what is worth saying and is all that is said.
+
+    Rendered by `db.failure_name`, the renderer `db.migration_failure`
+    asks too: what a storage refusal may say about its cause is one
+    question, and the two refusals give one answer to it, including
+    for a class whose name is not an identifier and so is not repeated.
     """
     if is_busy(exc):
         return DatabaseBusyError(
@@ -1620,7 +1625,7 @@ def _database_problem(exc: SQLAlchemyError) -> ConfigError:
         )
     return StorageError(
         "the configuration database could not be read or written "
-        f"({type(exc).__name__})."
+        f"({failure_name(exc)})."
     )
 
 
