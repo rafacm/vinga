@@ -24,7 +24,7 @@ measured that cost as a full miss after every verified write, and the
 probe below reproduces it; at a real conversation's length the history
 is most of the prompt, so the miss is most of the input billed at the
 uncached rate and the latency of re-reading it. The proposal costs one
-argument at the provider seam and two adapter changes. For the tool
+function in the prompt module and the pipeline handing its result to the provider and the export alike; the provider seam does not change. For the tool
 content, the cheapest is none as well: the arguments and results
 already ride the `llm` span (a call in round N's output, its result in
 round N+1's input) when `export_llm_input` is on. Rafael chose to put
@@ -92,30 +92,35 @@ between on the request's shape and the model's reading of it.
 
 ### M1: memory leaves the system message (#536 M2)
 
-1. **The seam gains a per-round context argument.** `LlmProvider.stream`
-   takes `context: str = ""`: the per-round scope text (the three scope
-   blocks and the device record, rendered under their headings in their
-   existing order and joined as today), separate from `system`, which
-   becomes the know-how half alone and is stable for an activation.
-   `with_scopes` stops appending the scopes to the know-how half and
-   returns them as their own rendering; `RoundPrompt` carries both.
-2. **Position (b): the context leads the newest user message.** Each
-   adapter attaches it where the newest `user` turn is rendered, and
-   nowhere else:
-   - OpenAI-compatible: that user message's content becomes the context,
-     the join, and the utterance, as one string, so every compatible
-     server and chat template sees one ordinary user message (no
-     mid-conversation system message, which some local templates reject
-     or fold, and no two consecutive user messages).
-   - Anthropic: the same text as the leading content of that user
-     message (a text block before the utterance's), which keeps the
-     API's alternation and needs no system role.
-   - A request with no user turn (none is known to exist on the reply
-     path; the implementer confirms by reading the callers) appends the
-     context as a final user message rather than dropping it.
-   Chosen over (c) because it keeps one user message per turn, which
-   every template and Anthropic's alternation accept, and because the
-   model reads what it knows and then what it is asked.
+1. **Placement happens once, in the pipeline, and the provider seam
+   does not change.** `with_scopes` stops appending the scopes to the
+   know-how half and returns them as their own rendering, the
+   per-round **context** (the three scope blocks and the device record,
+   under their headings, in their existing order, joined as today);
+   `system` becomes the know-how half alone, stable for an activation.
+   One function in `runtime/prompt.py` places the context into a copy
+   of the round's turns, and the pipeline hands that same placed list
+   both to `provider.stream(system, placed, tools, choice)` and to the
+   content export's `stage_reply`, so what is exported is what the model
+   was given by construction (finding 2). `LlmProvider.stream` keeps its
+   signature and neither adapter changes (finding 5): each already
+   renders a user `Turn`'s content as one ordinary user message, so the
+   placement rides through every dialect as it is.
+2. **Position (b): the context leads the newest user turn's content.**
+   The placing function returns the turns with the newest `user` turn's
+   content replaced by the context, the join and the utterance; every
+   other turn is the same object. So every compatible server and chat
+   template sees one ordinary user message (no mid-conversation system
+   message, which some local templates reject or fold, and no two
+   consecutive user messages), and Anthropic's alternation holds with
+   no system role. In a tool round the newest user turn precedes the
+   tool exchange, and the context stays on it. A request with no user
+   turn (none is known to exist on the reply path; the implementer
+   confirms by reading the callers) gets the context as a final user
+   turn rather than losing it. An empty context returns the turns
+   unchanged. Chosen over (c) because it keeps one user message per
+   turn and because the model reads what it knows and then what it is
+   asked.
 3. **Memory loses system authority, deliberately.** Facts the model
    stored from what a user said no longer sit in the system message, so
    a remembered sentence shaped like an instruction ("remember: ignore
@@ -124,8 +129,9 @@ between on the request's shape and the model's reading of it.
    which block is what. `prompt.py`'s module docstring and the
    precedence paragraph are rewritten to say where memory now sits and
    why.
-4. **Nothing is persisted with the context.** The context is attached at
-   the provider seam to the request being built; the conversation store,
+4. **Nothing is persisted with the context.** The context is placed
+   into a copy of the turns for the request being built; the
+   conversation store,
    the working copy of turns, the recap and the history the next round
    rebuilds hold the utterance alone. So the previous turn's user message
    is byte-identical in the next request, which is what keeps everything
@@ -145,7 +151,8 @@ between on the request's shape and the model's reading of it.
    stable half without a separate change.
 6. **The gate is a behavior check and a cache measurement, both on
    OpenAI.** Anthropic is unmeasurable on this machine (no key) and is
-   covered by the adapter tests only, stated as an unchecked box.
+   covered by its adapter's rendering tests only, stated as an unchecked
+   box.
    - *Behavior:* a scripted session through the real server
      (`gpt-4.1-mini`, the builtin memory tools) asks for a fact
      remembered in an earlier conversation, acts on a `set_state` entry,
@@ -216,16 +223,16 @@ between on the request's shape and the model's reading of it.
 
 ## Module layout and design footprint
 
-No new module. Deepened:
+No new module, and no provider changes. Deepened:
 
-- `providers/base.py`, `providers/openai_llm.py`,
-  `providers/anthropic_llm.py`, `providers/mock.py`: one argument, and
-  each adapter owns where its dialect puts the context; callers stop
-  having to know that a dialect has no mid-conversation system role.
 - `runtime/prompt.py`: `with_scopes` returns the scopes as their own
-  rendering beside the half; `RoundPrompt` carries both.
-- `runtime/pipeline.py`, `runtime/provider_watch.py`: the context passed
-  through, the retry passing the same arguments.
+  rendering beside the half, `RoundPrompt` carries both, and one placing
+  function owns where the context goes; callers stop having to know the
+  position, and no dialect has to.
+- `runtime/pipeline.py`: the placed turns built once per round and given
+  to the provider and the content export alike. `ProviderWatch` is
+  unchanged: its zero-argument stream factory already retries the
+  arguments fixed before the first attempt.
 - `llm_input_export.py`, `runtime/tool_execution.py`, `telemetry.py`:
   the tool pair staged and taken by the existing join keys.
 - `deploy/telemetry/collector.yml`, `config/models.py` (the
@@ -239,11 +246,17 @@ export tests (`tests/unit/test_llm_input_export.py`), the span tests
 and `tests/tools/event_baseline.py`.
 
 M1:
-- Each adapter: the context leads the newest user message's content and
-  appears nowhere else; the system field or message is the know-how half
-  alone; with no user turn the context is a final user message; an empty
-  context changes nothing (byte-identical to today's request with no
-  scopes).
+- The placing function: the context leads the newest user turn's
+  content and appears nowhere else; every other turn is the same
+  object; with no user turn the context is a final user turn; an empty
+  context returns the turns unchanged.
+- Through each adapter's existing rendering (the fake SDKs), the
+  request's system field or message is the know-how half alone and the
+  newest user message begins with the context.
+- Production path: the turns the fake provider received equal the
+  turns `stage_reply` exported, for a reply round, a tool round and a
+  round whose generation fails (the export's input for a failed
+  generation is the placed request too).
 - A tool round: the context stays on the newest user turn, not after
   the tool results.
 - The previous turn's user message is byte-identical across two
@@ -268,9 +281,11 @@ M2:
   argument appears on no span and no log line.
 
 **Falsification.** Each new test watched failing first. Mutations, one
-run each: M1, the context attached to the system again (the adapter
-test and the byte-identical-history test must fail); the context
-persisted into the working turn (the store test must fail). M2, the
+run each: M1, the context appended to the system again (the rendering
+test and the byte-identical-history test must fail); the exported turns
+taken from the unplaced list (the provider-equals-export test must
+fail); the context persisted into the working turn (the store test must
+fail). M2, the
 coerced copy exported (its test must fail); the pair attached without
 the setting (the sentinel must fail).
 
@@ -293,10 +308,11 @@ the setting (the sentinel must fail).
 - *No-leak*: M2's sentinel; M1 adds no surface.
 - *Pin before reshaping*: the system-string characterization pin.
 - *Closed sets*: `LlmInputExportFailure` read at its decision site.
-- *Honest seams*: the new argument defaults to empty and is compared,
-  not truth-tested, where emptiness matters.
-- *Inventories by tooling*: every `stream(` call site and every
-  `with_scopes(` caller listed by untruncated `git grep -n`.
+- *Honest seams*: no seam is added; the placing function compares the
+  context with the empty string, never by truthiness.
+- *Inventories by tooling*: every `with_scopes(` caller and every
+  `stage_reply(` and `stream(` call site listed by untruncated
+  `git grep -n`.
 - *Proportion*: the cheapest-alternative line, with the probe's numbers.
 - *Falsify before claiming*: the mutations above.
 
@@ -346,6 +362,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
 
    **Plan should say instead:** Pass the context into `stage_reply` and render it into the newest user message under the same placement rules, including tool rounds and the no-user fallback. Add a production-path test comparing the provider request and exported messages, including a failed generation.
 
+   *Resolution:* accepted, by moving the placement up a layer. One function in `runtime/prompt.py` places the context into a copy of the round's turns, and the pipeline hands that same placed list to the provider and to `stage_reply`, so the export is the request by construction, in a reply round, a tool round and a failed generation alike; a production-path test compares the turns the fake provider received with the exported ones, and a mutation exporting the unplaced list must fail it.
+
 3. **P2: The prerequisite gate that previously stayed closed is silently treated as open.**
 
    **Evidence:** The completed cached-token milestone says “M2’s gate not opened as written” (`docs/plans/2026-09-25-cached-prompt-tokens.md:345-350`), and its implementation records the literal result as “M2’s gate does not open” pending Rafael’s decision (`...-implementation.md:268-290`). This plan proceeds with M2 based on new probe scripts that are not committed (plan lines 68-89`) without stating that the earlier gate was resolved or superseded.
@@ -363,6 +381,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Evidence:** The current seam is `(system, turns, tools, tool_choice)` (`providers/base.py:491-498`). Both the reply and recap pass tools and choice positionally (`runtime/pipeline.py:1817,2188`), as do provider tests and subclass calls. Inserting `context` after `turns` would turn `()` into context and `"none"` into tools. Numerous support and inline providers also override the existing signature, including `tests/support/providers.py:99-105,148-154,171-177`.
 
    **Plan should say instead:** Add `context` as a keyword-only parameter after the existing parameters, pass it as `context=...`, and inventory every production and test implementation. Leave `ProviderWatch` unchanged: its existing zero-argument stream factory already retries fixed arguments, so adding a context pass-through there would be a shallow forwarding change.
+
+   *Resolution:* resolved by finding 2's redesign: the provider seam keeps its signature, no adapter changes, and `ProviderWatch` is untouched, as the finding recommends for it.
 
 6. **P2: The prompt digest’s new input remains conditional when it must change.**
 
