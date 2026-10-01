@@ -720,3 +720,35 @@ Evidence: The live gate requires `vinga.llm.memory.facts` to arrive as queryable
 What the plan should say instead: remove the comma-joined fallback, or explicitly change the contract and prove a delimiter-safe backend query for an individual ID, including IDs such as `1` versus `11`. Keep the typed-array or decimal-string-array alternatives as the only encodings that satisfy the present requirement.
 
 Verdict: **not ready** until the P1 findings are resolved; then ready after the P2 amendments.
+
+## Plan review round 4
+
+Reviewed 2026-10-01 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 4m07s, at commit 4c669b40, plan blob 4af184e1.
+
+---
+
+1. **P1: The fingerprint is not unconditional as the issue requires.**
+Evidence: Issue #533 §3 requires “a fingerprint, unconditionally.” Plan Decision 3 instead makes `vinga.prompt.digest` absent whenever `VINGA_MASTER_KEY` is unset. `config/secrets.py:146-180` explicitly permits that common deployment state.
+What the plan should say instead: provide a durable installation-private key for every deployment, with storage, rotation, and upgrade behavior specified, or obtain an explicit issue-level decision to weaken the unconditional requirement. Do not silently turn it into a master-key-only feature.
+
+2. **P1: The proposed memory-character calculation fails for valid prompts.**
+Evidence: Plan Decision 7 defines `memory_characters` as `len(full.text) - len(half.text)`, guarded by an assertion that `half.text` is a prefix. But `runtime/prompt.py:_assembled` preserves a one-block prompt unchanged while trimming the first block with `lstrip()` when scopes create a second block. Thus `know_how("  persona")` followed by `with_scopes(...memory...)` produces a full prompt that does not begin with `half.text`.
+What the plan should say instead: make prompt assembly return the scope contribution as part of its own result, with an explicit rule for any normalization it performs, or change assembly so appending scopes preserves the cached half byte-for-byte. Add a leading-whitespace one-block regression case.
+
+3. **P2: The key derivation is assigned to the wrong module and lacks a safe key interface.**
+Evidence: The plan’s module layout assigns derivation to `composition.py`, but that file is only the `Composition` resource declaration. The actual composition root is the lifespan in `vinga-server/src/vinga_server/app.py`, which builds `bespoke_runtime_factory`. Meanwhile `config/secrets.py:146-180` exposes only `MultiFernet`, not the newest raw key material required by the specified HMAC derivation.
+What the plan should say instead: name `app.py` as the composition site, add a narrowly scoped secrets API that derives the labelled subkey without exposing key material, and name the factory/runtime constructor and test-fixture plumbing that receive it.
+
+4. **P2: The memory-source attributes cannot be produced by the stated generic fold.**
+Evidence: Decision 8 requires separate keys such as `vinga.llm.memory.sources.state`. The existing generic mapping fold emits any `Kind.SOURCES` value as one deterministic JSON attribute (`telemetry.py:771-793`, `_as_attribute`), while only `_prompt_attributes` has bespoke flattening logic. `LLM_ATTRIBUTES` and `FAILED_PROVIDER_ATTRIBUTES` cannot express a wildcard suffix.
+What the plan should say instead: add and name a validated memory-attribute helper, analogous to `_prompt_attributes`, that flattens only `state`, `memory`, and `device`; compose it into both `_llm_span` and the LLM branch of `_provider_failed`. Test the individual attributes on successful and failed reply spans.
+
+5. **P2: The digest violates the plan’s own one-carrier parity rule.**
+Evidence: Adding `digest` to `PromptAssembled` makes it reach the existing `prompt_assembled` span event through `_span_event`, while Decision 3 also puts it on turn-span attributes through `_prompt_attributes` (`telemetry.py:2595-2628`). The plan says newly added trace facts must be span attributes and that a fact should be replaced, not mirrored, when span events are not portable.
+What the plan should say instead: explicitly exclude the digest from the prompt span-event projection while retaining it as a turn attribute, or record and justify an exception to the parity rule. Test the selected carrier, including its absence from the other.
+
+6. **P2: The fact-list absence semantics are not pinned through the derived count.**
+Evidence: Decision 7 distinguishes disabled memory (`memory_facts` absent) from an attempted empty or failed read (`memory_facts: []`). Decision 8 derives `memory.fact_count` in telemetry, but the tests only require “no fact list” for memory-off. A straightforward `len(payload.get("memory_facts", []))` implementation exports `0` for disabled memory, erasing the distinction the plan says matters.
+What the plan should say instead: specify that `vinga.llm.memory.fact_count` is emitted only when the fact-list field is present, is `0` for an attempted empty read, and is absent when memory was disabled. Test all three states on both event and span projections.
+
+Verdict: **not ready.**
