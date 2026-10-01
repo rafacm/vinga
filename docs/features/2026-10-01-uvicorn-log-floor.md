@@ -128,8 +128,25 @@ or shutdown the lifespan failed, an exception in the application with
 its traceback, an application that returned without answering, a
 frame that is not valid UTF-8, and a graceful shutdown that ran out of
 time; and from the websockets library, a handshake or a frame parser
-that failed. The tests below drive
-one WARNING and one ERROR of these through the floor.
+that failed. The tests below drive one WARNING and one ERROR of these
+through the floor.
+
+What the floor does not cover is what those kept records say. An ERROR
+record with a traceback, such as uvicorn's `Exception in ASGI
+application` or the websockets library's `opening handshake failed`,
+renders the exception's message and its chain as they were raised, and
+this floor does not sanitize them: it decides which levels reach the
+handler, not what a record that reaches it carries. Whether an
+exception on those paths can quote the request line, or anything else
+a client sent, was not established here. The server's own code renders
+no traceback at all: a search of `vinga-server/src` finds no
+`logger.exception` and no `exc_info=True`, and the sites that report a
+failure name its class and say why they do not repeat its message
+(`serving._report_drain`, the reply pipeline, turn-taking, the filler
+runner). So uvicorn's kept tracebacks are an exception to the server's
+own rule rather than an instance of it. They reached the log the same
+way under the INFO floor, so this change neither opens nor closes them,
+and whether to strip them is left as a separate decision.
 
 ### The shape not taken: a filter on the handshake line
 
@@ -188,7 +205,9 @@ used here because it needs a database to start. Through the handler
 - `test_what_uvicorn_says_above_info_still_reaches_the_log`: a request
   that will not parse prints `Invalid HTTP request received.`
   (WARNING), and the raising route prints `Exception in ASGI
-  application` with the exception's own line (ERROR).
+  application` and the exception's class name (ERROR). The exception's
+  message is deliberately not asserted: what a kept traceback carries
+  is the uncovered case above, not a property to pin.
 
 The external-runner boot test's expected `uvicorn.error` level moves
 from INFO to WARNING.
@@ -208,12 +227,6 @@ client would reach.
   which is what `connection open` (the sans-I/O `ServerProtocol`'s line)
   confirms. The template and the argument order are the same in both,
   and in `wsproto_impl.py`, so the finding stands as stated.
-- **ERROR records with tracebacks are kept and were not audited here.**
-  uvicorn's `Exception in ASGI application` and the websockets library's
-  `opening handshake failed` carry a traceback, and the floor keeps them
-  by design. Whether any exception on those paths can quote the request
-  line was not established in this change. It was equally true under the
-  INFO floor.
 - **What the DEBUG-level records narrate is unchanged.** uvicorn's trace
   and the websockets library's frame records were already held by the
   INFO floor, as `test_access_logs.py` documents; WARNING holds them
