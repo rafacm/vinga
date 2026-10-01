@@ -17,6 +17,7 @@ from vinga_server.telemetry import (
     GEN_AI_INPUT_MESSAGES,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_SYSTEM_INSTRUCTIONS,
+    LLM_TOOL_CHOICE,
     LLM_TOOLS,
 )
 
@@ -97,6 +98,54 @@ def test_one_pair_uses_the_standard_message_attributes() -> None:
     assert output[0]["parts"][0]["content"] == "withheld raw output"
     assert output[0]["parts"][1]["arguments"] == {"fact": "tea"}
     assert json.loads(attributes[LLM_TOOLS])[0]["input_schema"]["type"] == "object"
+
+
+# What a round stages is the GenAI conventions' content and nothing
+# else: no backend-specific alias beside it. Langfuse maps the
+# conventions itself, system instructions first, and an alias for the
+# input outranks that mapping and leaves the system prompt out.
+CONVENTIONS = {
+    GEN_AI_SYSTEM_INSTRUCTIONS,
+    GEN_AI_INPUT_MESSAGES,
+    GEN_AI_OUTPUT_MESSAGES,
+    LLM_TOOLS,
+    LLM_TOOL_CHOICE,
+}
+
+
+def _one_round(stage: str) -> dict[str, str]:
+    staged, recorded = exporter()
+    getattr(staged, stage)(
+        "session",
+        invocation="round",
+        agent="poet",
+        system="be concise",
+        turns=[a_turn()],
+        tools=[],
+        choice="none",
+    )
+    staged.observe("round", TextDelta("hi"))
+    staged.finish("round")
+    [(_, attributes)] = recorded.snapshots
+    return attributes
+
+
+@pytest.mark.parametrize("stage", ["stage_reply", "stage_recap"])
+def test_a_round_stages_the_conventions_and_no_alias(stage: str) -> None:
+    attributes = _one_round(stage)
+
+    assert set(attributes) == CONVENTIONS
+    assert not any(name.startswith("langfuse.") for name in attributes)
+    # Byte for byte what the conventions carried before the aliases went.
+    assert attributes[GEN_AI_SYSTEM_INSTRUCTIONS] == (
+        '[{"content":"be concise","type":"text"}]'
+    )
+    assert attributes[GEN_AI_INPUT_MESSAGES] == (
+        '[{"parts":[{"content":"turn the light on","type":"text"}],"role":"user"}]'
+    )
+    assert attributes[GEN_AI_OUTPUT_MESSAGES] == (
+        '[{"parts":[{"content":"hi","type":"text"}],"role":"assistant"}]'
+    )
 
 
 def test_malformed_tool_arguments_remain_in_both_message_sides() -> None:

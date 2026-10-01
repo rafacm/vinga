@@ -10,13 +10,16 @@ real device conversation, the real close ordering, and a real OTLP
 collector on a socket in this process. What that certifies is the
 protobuf a backend actually receives: one observation per logical round,
 on the trace the session was exported under, with the assembled request
-in the field the backend renders as an observation's input.
+under the GenAI conventions' keys alone. No backend alias rides beside
+them: Langfuse derives an observation's input from those keys, system
+instructions first, and an input alias would outrank that mapping.
 
 It is also the whole of what this milestone's live gate could be
 verified as here. The gate itself wants a real backend and asks whether
 an assembled request arrives rendered as an observation's input with
-tool arguments and results present; this asserts the same attributes on
-the same encoding, one hop short of a backend.
+the system prompt first and tool arguments and results present; this
+asserts the same attributes on the same encoding, one hop short of a
+backend.
 
 **The close claim.** Nothing in this file reaches into the server, so
 what carries the staged rounds from a conversation to the exporter is
@@ -134,13 +137,15 @@ async def test_a_conversations_assembled_requests_arrive_as_observations(
     assert written, "the generation was not exported"
     said = attributes(written[0])
 
-    # The request, in the field the backend renders as an observation's
-    # input, carrying both halves of what was assembled: the agent's own
-    # system prompt, and the history the model was given.
+    # The request under the conventions' keys, carrying both halves of
+    # what was assembled: the agent's own system prompt, and the history
+    # the model was given. Nothing else names an observation's input or
+    # output, so the backend maps these, system prompt first.
     assert PROMPT in said["gen_ai.system_instructions"]
     assert HEARD in said["gen_ai.input.messages"]
-    assert HEARD in said["langfuse.observation.input"]
     assert "POET" in said["gen_ai.output.messages"]
+    assert "langfuse.observation.input" not in said
+    assert "langfuse.observation.output" not in said
     # And the facts a reader puts the observations in order by.
     assert said["vinga.llm.round"] == 1
     assert said["vinga.llm.purpose"] == "reply"
@@ -182,7 +187,6 @@ async def test_nothing_of_the_request_is_anywhere_else_on_the_wire(
     assert carrying == [
         ("llm", "gen_ai.system_instructions"),
         ("llm", "gen_ai.output.messages"),
-        ("llm", "langfuse.observation.output"),
     ], carrying
     assert PROMPT not in both_formats(caplog)
 
