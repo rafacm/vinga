@@ -171,6 +171,26 @@ def test_a_seed_ignores_an_ambient_api_url(
         assert _domain(decoy).default_agent is None
 
 
+def _default_interrupt() -> None:
+    """Hand the script SIGINT at its default disposition, whatever this
+    process inherited.
+
+    A non-interactive shell cannot trap a signal that was ignored when
+    it started. A runner started as an asynchronous list
+    (`uv run pytest ... &` from a script) starts with SIGINT ignored, as
+    POSIX requires, and every child inherits that across `exec`. The
+    script's `trap on_interrupt INT` is then silently a no-op, the
+    signal is dropped, and the seeding finishes with status zero, which
+    is the `assert 0 != 0` this case used to fail with. The disposition
+    restored here is the one a terminal's foreground job has, which is
+    the interrupt the script's handler is for.
+
+    Run in the child between fork and exec, where it does nothing but
+    this one call.
+    """
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+
 def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
     tmp_path: Path,
 ) -> None:
@@ -196,6 +216,7 @@ def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
         # Its own process group, so the signal reaches the script the way
         # a shell would send it and not this test runner as well.
         start_new_session=True,
+        preexec_fn=_default_interrupt,
     )
     try:
         _wait_for(lambda: _ready(port), "the seeding server never became ready")
