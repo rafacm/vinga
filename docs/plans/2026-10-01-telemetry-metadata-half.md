@@ -631,3 +631,31 @@ Reviewed 2026-10-01 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    **Plan should say instead:** Set a pass/fail requirement for the supported backend before M2 lands. If integer arrays are not returned and usable through its API, choose and document a portable scalar encoding, update the event type and attribute fold accordingly, and make the live gate block completion rather than merely record the result.
 
 Verdict: **not ready.**
+
+## Plan review round 3
+
+Reviewed 2026-10-01 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 4m22s, at commit a4d42a46, plan blob 071320d8.
+
+---
+
+1. **P1: The unkeyed prompt digest is a content-confirmation oracle.**
+Evidence: Plan Decision 3 calls for an unconditional SHA-256 of persona, fragments, and operator `instructions:` blocks, while rejecting a memory digest for exactly that oracle risk. Those blocks are prompt content and can contain low-entropy sensitive values; exported traces are an off-host metadata surface. [observability-surfaces.md](/tmp/claude-1001/-home-rafa-agents-Develop-projects-vinga/aa462fd6-7d97-495a-affb-5a7676a882e0/scratchpad/wt/533/docs/architecture/observability-surfaces.md:435) says the system prompt is content exported only under `export_llm_input`; the content/telemetry ADR requires source-side exclusion of content.
+What the plan should say instead: retain the unconditional, comparable fingerprint decision, but make it a stable installation-private keyed digest, with explicit key lifecycle and rotation semantics. Add a no-leak test proving that hashing a guessed operator prompt or secret with public SHA-256 cannot reproduce the exported fingerprint.
+
+2. **P1: The proposed tool-position plumbing loses the only position the plan promises.**
+Evidence: Decision 2 says `ToolExecution.run` merely gains an `invocation` keyword. Today `PipelineRuntime._run_tools` partitions the original `calls` into `plain` and `moves`, then calls `ToolExecution.run(self._turn, plain)`; `ToolExecution.run` and `_run_one` receive only `(slot, call)` ([pipeline.py](/tmp/claude-1001/-home-rafa-agents-Develop-projects-vinga/aa462fd6-7d97-495a-affb-5a7676a882e0/scratchpad/wt/533/vinga-server/src/vinga_server/runtime/pipeline.py:2295), [tool_execution.py](/tmp/claude-1001/-home-rafa-agents-Develop-projects-vinga/aa462fd6-7d97-495a-affb-5a7676a882e0/scratchpad/wt/533/vinga-server/src/vinga_server/runtime/tool_execution.py:444)). Enumerating there produces a position in the partitioned executable list, not in the provider-returned list. The specified “two calls to the same entry” test does not expose this unless a move is interleaved.
+What the plan should say instead: carry an immutable original `call_position` with every execution candidate from the enumeration of `calls` before partitioning, through `_run_tools`, `ToolExecution.run`, `_run_one`, `_tool_called`, and the assembly builders. Add a test with executable calls on both sides of a move, asserting the emitted positions retain the original gaps, plus the content-export correspondence.
+
+3. **P2: The failed-watchdog route named in the plan does not carry the new accounting.**
+Evidence: Decision 7a says `reply_stream` passes accounting to `watched`, which passes it to `failed`. But a second first-token timeout calls `self.failed(...)` directly inside `ProviderWatch.reply_stream`, not via `watched` ([provider_watch.py](/tmp/claude-1001/-home-rafa-agents-Develop-projects-vinga/aa462fd6-7d97-495a-affb-5a7676a882e0/scratchpad/wt/533/vinga-server/src/vinga_server/runtime/provider_watch.py:253)). The plan nevertheless claims that this exact failure has prompt accounting.
+What the plan should say instead: thread `RoundPrompt` into both `watched(...)` and the direct retry-exhaustion `self.failed(...)` call, then through `failed`, `assembly.provider_failure`, and `_provider_failed`. Make the watchdog test exercise the direct second-timeout branch, not only a provider-raised stream failure.
+
+4. **P2: The digest’s byte representation is underspecified and can collide for different prompts.**
+Evidence: Decision 3 says eligible blocks are “joined in assembly order” but does not specify delimiters, trimming, or provenance framing. Actual prompt assembly trims end blocks and joins blocks with `"\n\n"` ([prompt.py](/tmp/claude-1001/-home-rafa-agents-Develop-projects-vinga/aa462fd6-7d97-495a-affb-5a7676a882e0/scratchpad/wt/533/vinga-server/src/vinga_server/runtime/prompt.py:514)). Concatenating `["ab", "c"]` and `["a", "bc"]` gives the same digest input despite distinct rendered prompts. The proposed same-length persona-edit test does not catch this.
+What the plan should say instead: define one canonical byte sequence, derived after assembly, with an unambiguous delimiter or length framing for each eligible rendered block. Add a test for a boundary-changing edit with identical concatenation, plus a test covering leading/trailing whitespace normalization.
+
+5. **P2: The final Langfuse fallback contradicts its own acceptance gate.**
+Evidence: The live gate requires `vinga.llm.memory.facts` to arrive as queryable individual values, “not … stringified as one opaque blob,” yet its final fallback is one comma-joined decimal string. That fallback is necessarily one opaque attribute and cannot meet the stated gate.
+What the plan should say instead: remove the comma-joined fallback, or explicitly change the contract and prove a delimiter-safe backend query for an individual ID, including IDs such as `1` versus `11`. Keep the typed-array or decimal-string-array alternatives as the only encodings that satisfy the present requirement.
+
+Verdict: **not ready** until the P1 findings are resolved; then ready after the P2 amendments.
