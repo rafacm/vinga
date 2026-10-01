@@ -273,7 +273,7 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
    carrying none.
 8. **The `llm` span carries it under the round's own names.**
    `vinga.llm.system.characters`, `vinga.llm.memory.characters`,
-   `vinga.llm.system.sources.<provenance>`
+   `vinga.llm.memory.sources.<provenance>` (the three scope blocks only; the know-how half's blocks are the turn span's `vinga.prompt.sources.*`, and the whole total is `vinga.llm.system.characters`, which the children are not meant to sum to)
    and `vinga.llm.memory.facts` (the ids), plus
    `vinga.llm.memory.fact_count`, the length of the id list, derived in
    the fold rather than carried as a second field, because a backend
@@ -541,5 +541,7 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
 7. **P2: `vinga.llm.system.sources.*` falsely presents a partial source inventory as the whole system’s sources.**
    **Evidence:** The plan pairs `vinga.llm.system.characters`, defined as the whole system prompt, with `vinga.llm.system.sources.*`, populated only from `state`, `memory`, and `device` (`docs/plans/...`, lines 188–197 and 209–217). Persona, fragments, and MCP guidance are also system-prompt sources but are deliberately excluded. A backend reader will reasonably expect the children of `system.sources` to account for `system.characters`; they cannot.
    **Plan should say instead:** Name the restricted mapping `vinga.llm.memory.sources.*` or export the complete source inventory under `system.sources.*`. Keep the whole-system total separate and document whether joins are represented by the explicit memory total from finding 1.
+
+   *Resolution:* accepted. The per-round block sizes export as `vinga.llm.memory.sources.<provenance>`, the three scope blocks only, beside `vinga.llm.memory.characters` (finding 1), which is the exact per-round total including joins; `vinga.llm.system.characters` stays the whole prompt with no `system.sources` children, so nothing invites summing a partial inventory to it.
 
 **Verdict:** not ready.
