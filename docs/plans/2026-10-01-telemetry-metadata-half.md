@@ -397,7 +397,9 @@ its precedence and short-circuits every mapping below it, and
 of metadata. vinga writes `langfuse.observation.input` (and `.output`)
 on the `llm` span as "derived compatibility aliases" of the conventions'
 messages, so the list without the system prompt wins. A probe against
-Langfuse Cloud on 2026-10-01 sent one span twice: with the conventions
+Langfuse Cloud on 2026-10-01, which reports itself as server version
+4.48.0 (`/api/public/health`; the newest release, 2026-09-30), sent one
+span twice: with the conventions
 only, the observation's input read back as `[{"role": "system",
 "content": "...persona... ## What you remember..."}, {"role": "user",
 ...}]`; with vinga's alias added, it read back as the user message
