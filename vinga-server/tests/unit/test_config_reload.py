@@ -1756,22 +1756,28 @@ async def test_a_refused_stored_half_keeps_its_type_and_loses_its_words(
             "RuntimeError",
             id="a-failure-with-no-type",
         ),
+        pytest.param(
+            type("Forged\nthe reload is fine", (RuntimeError,), {})(REJECTED),
+            None,
+            id="a-class-that-cannot-be-named",
+        ),
     ],
 )
 async def test_a_refused_reload_keeps_the_class_of_what_failed(
-    raised: Exception, named: str
+    raised: Exception, named: str | None
 ) -> None:
     """The words are replaced and the class of the failure under them is
     kept, because the reload's sentence says the failure is recorded in
     the log and the class is all that line can say (#586). For a storage
     refusal it is the class that refusal was decided from; for a failure
-    the configuration layer has no type for, the failure's own."""
+    the configuration layer has no type for, the failure's own, unless
+    that has a name no line may repeat."""
     apply = reloader(raised)
 
     with pytest.raises(StorageError) as caught:
         await apply()
 
-    assert caught.value.cause == ClassName(named)
+    assert caught.value.cause == (None if named is None else ClassName(named))
     assert REJECTED not in chain(caught.value)
     assert caught.value.__context__ is None
 

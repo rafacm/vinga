@@ -36,6 +36,7 @@ from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.secrets import SecretLocation, generate_key, load_keys
 from vinga_server.config.store import ConfigStore, read_live_binding
 from vinga_server.db import MIGRATION_BUSY, UNNAMED_FAILURE, UNREACHABLE, open_database, schema
+from vinga_server.events.values import ClassName
 
 CLAUDE = SecretLocation.provider("llm", "claude", "api_key")
 
@@ -353,4 +354,8 @@ def test_a_storage_refusal_names_the_class_and_only_a_lawful_one(
     assert str(caught.value) == (
         f"the configuration database could not be read or written ({named})."
     )
+    # And beside the sentence, for the API's log line (#586): the same
+    # name where it may be repeated, and none where it may not.
+    expected = None if named == UNNAMED_FAILURE else ClassName(named)
+    assert caught.value.cause == expected
     assert "sk-test-0d8a77" not in chain(caught.value)
