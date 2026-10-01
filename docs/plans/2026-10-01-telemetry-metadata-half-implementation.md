@@ -264,3 +264,232 @@ both lanes with `-n auto --dist loadfile`:
   count at the plan commit.
 - `uv run pytest tests/census -q`: run last, after this section; its
   result is in the pull request's verification list.
+
+## M1: the round and the tool call
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.286; 2026-10-01.
+
+### What landed
+
+| Decision | Where | Commit |
+| --- | --- | --- |
+| 1, the first token as `vinga.llm.first_token_ms`, the `first_token` span event removed | `telemetry.py` (`LLM_ATTRIBUTES`, `_llm_span`; `FIRST_TOKEN` and `_after` deleted) | `Carry the first token as a round attribute` |
+| 2, `invocation` and `position` on the three `tool_call` variants, mapped by `TOOL_ATTRIBUTES` | `events/catalog.py`, `events/assembly.py`, `runtime/tool_execution.py`, `runtime/pipeline.py`, `telemetry.py`, `docs/reference/events.md` regenerated | `Name the round and place of a tool call on its span` |
+| 2, the exact-payload tests the full lane found | `tests/unit/test_session_tool_events.py`, `tests/unit/test_tts_lookahead.py` | `Pin a tool call's round and place in its line` |
+| 4, the `language_confidence` note | `events/catalog.py`, `docs/reference/events.md` regenerated | `Say which engines report language_confidence` |
+| The `GEN_AI` guard over `TOOL_ATTRIBUTES`, and the row it found missing | `tests/unit/test_conversations_docgen.py`, `conversations/docgen.py`, `docs/reference/conversations-schema.md` regenerated | `Hold the GenAI table to the tool span's mapping too` |
+| The documentation footprint and the changelog fragment | `docs/architecture/observability-surfaces.md`, `changelog.d/533-tool-and-round-attributes.md` | `Document M1 of #533 and tick it` |
+
+### Plan amendment from review round 4
+
+Decision 3, the keyed prompt digest, was withdrawn from the plan by its
+fourth review round while this milestone was being implemented, and
+deferred to Rafael (the plan's decision 3 now says why). It is an
+amendment to the plan, not a deviation from it: none of it was written
+here. No `Digest` value type, no `digest` field on `PromptAssembled`,
+no `vinga.prompt.digest`, no master-key subkey and no composition
+change exist on this branch, and the digest tests, sentinel, mutation
+and live-gate row went with the decision. The branch was rebased onto
+the amended plan (`01d1b11c`) before this section was written.
+
+### Deviations from the plan
+
+One, in how decision 2's position travels.
+
+- **The position is read off the reservation, not threaded as a new
+  value.** The plan says to enumerate `calls` before `_run_tools`
+  partitions them and carry the index "through `_run_tools`,
+  `ToolExecution.run`, `_run_one`, `_tool_called` and the three
+  assembly builders". That enumeration already exists:
+  `ToolExecution.reserve` files every call of a round on the turn's
+  record as a frozen `conversations.records.ToolInvocation` whose
+  `position` is `enumerate(calls)` over the model's own list, before
+  the partition, and `_run_one` already reads that record back by slot
+  (`turn.reserved(slot)`) to classify the call it emits. `executed`
+  replaces the record with `dataclasses.replace`, which keeps the
+  position. So `_tool_called` takes `classified.position`, and a second
+  carrier of the same number beside the slot would be the
+  two-structures-that-must-agree shape the design conventions name.
+  The property the plan asks for holds and is pinned the way it asked:
+  the move-gap test fails under the plan's mutation (below). A side
+  effect is that the span's position is the same number the call's
+  `tool_invocations` row records, which the catalog note states
+  without claiming the row is unique by it (a turn's rounds repeat
+  positions, and the row carries no round).
+- The invocation is threaded exactly as the plan says: `_run_tools`
+  gains it as a parameter, `ToolExecution.run` as a required keyword,
+  `_run_one` and `_tool_called` as an argument, and the builders take
+  `invocation` and `position` keyword-only after their existing
+  defaulted `error_type`, so no existing positional call could shift.
+
+### Resolutions of what the plan left open
+
+- **The tests' home.** The production-path join tests live in
+  `tests/unit/test_telemetry_spans.py` beside the tool-span fold tests,
+  driving a real session (`session_for` with a scripted model) whose
+  events are tapped by an in-memory `Telemetry`, because what they
+  assert is a span attribute.
+- **Which calls the tests use.** `recall` and `set_state`, two
+  builtins, so the spans carry `gen_ai.tool.name` and the n-th exported
+  call can be matched to its span by name; and a refused
+  `switch_agent` (to an agent the board is not bound to) as the move.
+  `set_state` is one of the ordered memory writes and runs before
+  `recall`, so in the content-export test the tool spans end in
+  neither the model's order nor each other's, and the position is the
+  only thing tying each span to its part.
+- **The integration lane's first-token assertion** is now that the
+  mock round carries `vinga.llm.first_token_ms` as an integer and the
+  `llm` span carries no span event, off the wire.
+- **`vinga-server/README.md`**: checked, and left alone. Its
+  "Exporting traces" section names neither the first-token mark nor a
+  prompt size.
+
+### Discoveries
+
+- **The `GEN_AI` guard found a missing row as soon as it was
+  extended.** `TOOL_ATTRIBUTES` has mapped a builtin's `tool` to
+  `gen_ai.tool.name` since #67, and `conversations/docgen.py`'s table
+  never had the row, so the reference's correspondence was incomplete
+  while its drift check stayed green. The parametrized guard failed on
+  exactly that pair before the row was added.
+- **Two provider ids for two calls in one round need not differ.** The
+  scripted model's `call()` helper mints `c-<name>`, so the same-entry
+  test's two calls carry one id, which is the OpenAI-compatible
+  adapter's `call_{index}` fallback in miniature: a join on the
+  provider's id would have named one call twice.
+- **Langfuse stores the new integers as strings.** On the live gate
+  `vinga.tool.call.position` and `vinga.llm.first_token_ms` came back
+  as `"0"`, `"561"`: the observation's `metadata.attributes` holds every
+  attribute as a string, the existing `vinga.llm.round` included. That
+  is the backend's rendering of a scalar, not a property of this
+  change, and it is M2's gate (integer arrays) that has to measure
+  whether it matters; for scalars a string compare is still exact.
+- **Langfuse renamed the tool observations.** The builtin calls
+  arrived as observations named `remember` and `recall`, their
+  `gen_ai.tool.name`, rather than the span's own name `tool`, typed
+  `TOOL`. Only builtins were observed, so what an MCP or device call
+  is named there is not measured.
+
+- **Three tests outside the targeted runs pinned the old shape.** The
+  first full unit lane failed three: two in
+  `tests/unit/test_session_tool_events.py` hold the `tool_call` line's
+  payload to an exact dictionary, and
+  `tests/unit/test_tts_lookahead.py` stubs `_run_tools` by its
+  signature. They are fixed in their own commit rather than folded
+  into the change that broke them, so the decision-2 commit alone is
+  red on those three; the exact payloads now assert the invocation
+  against the round's own `llm_round` record and each call's place
+  (0 and 2 for the two `remember` calls, 1 and 3 for the unnamed ones,
+  0 and 1 for the MCP pair), which makes them production-path pins of
+  the join as well.
+
+### Inventories
+
+By `git grep -n`, untruncated, at `4c669b40` (the plan commit this
+branch started from), counted with `wc -l` and read in full.
+
+- **`first_token`** in `vinga-server/` and `docs/`: 166 lines, 116
+  outside `docs/plans/`. The readers of the span event are five lines:
+  the `FIRST_TOKEN` constant and its `add_event` in `telemetry.py`, and
+  three test assertions (`tests/unit/test_telemetry_spans.py:648,745`,
+  `tests/integration/test_telemetry_export.py:405`). No document read
+  it. The other 111 are the `first_token_ms` event field and turn
+  column (the catalog, assembly, `provider_watch.py`, `turns.py`, the
+  store, the API responses, the migrations and the metrics views'
+  `first_token` stage label), the `llm_first_token_timeout_s` setting
+  (15 lines), the generated references and two dated feature docs and
+  an ADR quoting the field. All of them are about the field or the
+  setting, which this milestone does not change. The expectation from
+  Step 0 (tests only) held.
+- **`tool_call` builder call sites** (`builtin_tool_called(`,
+  `mcp_tool_called(`, `unnamed_tool_called(`): 12 lines, the three
+  definitions, the three production calls in
+  `runtime/tool_execution.py:_tool_called`, the three in
+  `tests/support/telemetry.py:call_tool` and three assertions in
+  `tests/unit/test_event_assembly.py`. All updated.
+- **`ToolExecution.run` call sites**: one production caller,
+  `runtime/pipeline.py:1924` in `_run_tools`, whose one caller is the
+  reply loop with the round's `invocation` in scope; four direct test
+  calls (`tests/unit/test_session_tools.py:1051,1196`,
+  `tests/unit/test_tool_execution.py:115,142`), which now pass a fixed
+  `INVOCATION`.
+
+### Falsification
+
+Each new and changed test was run against `HEAD`'s source first (the
+five changed source files swapped for their committed versions,
+restored by copy and `touch`) and watched failing: the three
+first-token span tests (the no-token case passes before and after, as
+an absence must), the three builder tests, the fold test and all four
+production-path tests (`test_a_tool_span_joins_the_round_that_asked_for_it`,
+`test_a_move_keeps_its_place_in_the_round`,
+`test_the_nth_exported_call_is_the_span_at_position_n`,
+`test_the_provider_s_call_id_reaches_no_metadata_surface`), and the
+extended docgen guard (on the missing `gen_ai.tool.name` row).
+Mutations, one run each, restored by copy-aside, copy-back and
+`touch`:
+
+| Mutation | Result |
+| --- | --- |
+| `LLM_ATTRIBUTES`' `first_token_ms` entry removed | killed: 3 span tests (reply, recap, retry) |
+| Position taken from the partitioned list (`enumerate` over `run`'s `calls`) | killed: the move-gap test and the n-th-exported-call test |
+| Invocation taken from the wrong round (the first round's, for every round) | killed: `test_a_tool_span_joins_the_round_that_asked_for_it` |
+| Not in the plan: the provider's call id passed as the invocation (a credential-shaped id satisfies the invocation syntax) | killed: the no-leak sentinel |
+
+None survived.
+
+### The live gate
+
+Run on agentpi, 2026-10-01 from 03:15:39 to 03:16:19 UTC, from an
+uncommitted driver in the session's scratchpad: a real server in
+process on this branch's tree (at `43dc13df` plus the uncommitted
+documentation), with OpenAI ASR, the OpenAI-compatible LLM on
+`api.openai.com` with `gpt-4.1-mini`, OpenAI TTS, silero VAD, the
+builtin memory tools, and telemetry on with `export_llm_input`,
+exporting directly to the project's Langfuse over OTLP/HTTP. Two
+questions, synthesized with OpenAI TTS and resampled to 16 kHz, were
+sent through the xiaozhi-sdk client on one connection, so one session
+of two turns. Both turns' first rounds called two tools in one round,
+which is the case the position exists for. The observations were read
+back through the Langfuse public API (`GET /api/public/observations`,
+17 observations from the run's start).
+
+| Observation | Id | `vinga.llm.invocation.id` | `vinga.tool.call.position` | `vinga.llm.first_token_ms` |
+| --- | --- | --- | --- | --- |
+| turn 1, `llm` round 1 | `f5cd81f69cef1be2` | `6033c654...` | | absent (tools only) |
+| turn 1, `remember` | `af33cd62f151502a` | `6033c654...` | `0` | |
+| turn 1, `remember` | `b611a2d6fe1ff407` | `6033c654...` | `1` | |
+| turn 1, `llm` round 2 | `edd1616945ed81fd` | `e3ffc5ed...` | | `561` |
+| turn 2, `llm` round 1 | `751bf6c325b9fd87` | `a5331404...` | | absent (tools only) |
+| turn 2, `recall` | `16afc2cb85002626` | `a5331404...` | `0` | |
+| turn 2, `recall` | `b529810692d29bd7` | `a5331404...` | `1` | |
+| turn 2, `llm` round 2 | `493a3151a3a16532` | `c51e8898...` | | `552` |
+
+Every M1 row passes: the speaking rounds carry the first token as an
+attribute and the tool-only rounds carry none; each tool observation
+carries the invocation id of the round that asked for it, equal to
+that round's own, and its position, and the two calls of one round
+differ by position. No observation carries an `events` key. The two
+asking rounds' exported output holds two `call_...` provider ids each,
+and none of the four appears anywhere on a tool observation.
+
+### Lanes
+
+On agentpi, shared with two other implementers' lanes while these ran.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run pytest tests/unit -q -ra -n auto --dist loadfile`, first run:
+  `3 failed, 7698 passed, 19 skipped in 1851.07s (0:30:51)`, the three
+  tests in Discoveries. After their commit:
+  `7701 passed, 19 skipped in 1521.05s (0:25:21)`.
+- `uv run pytest tests/integration -q -ra -n auto --dist loadfile`:
+  `349 passed in 824.15s (0:13:44)`.
+- `python3 scripts/check_doc_links.py .`: 280 files checked, 5 failures,
+  all five in the plan's own "Plan review round 3" record, whose
+  evidence links are absolute paths into the reviewing session's
+  scratch worktree (`/tmp/...`). They come from the plan branch, not
+  from this milestone, and are left for the plan's owner to fix, since
+  the text is a verbatim review record. Nothing this milestone wrote
+  fails the check.
+- `uv run pytest tests/census -q`, run last, after the final prose
+  edit: recorded in the pull request.
