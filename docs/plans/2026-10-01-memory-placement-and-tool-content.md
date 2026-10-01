@@ -483,3 +483,31 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    *Resolution:* accepted. New decision 9a generalizes both outcome events once: `llm_input_export_failed` gains a closed `kind` (`generation`, `tool_call`) decided where the pair is dropped, `llm_input_exported` gains `tool_calls` beside an unchanged `rounds`, the prose says "content pair" and "span", `events.md` is regenerated, the event baseline pins both fields, and the observability page's sentence that tool content does not enter spans is rewritten.
 
 **Verdict: not ready.** The once-per-agent requirement and exported-request parity need concrete designs before implementation; the remaining P2 amendments should be resolved in the same plan revision.
+
+## Plan review round 2
+
+Reviewed 2026-10-01 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1, read-only sandbox, runtime 4m14s, at commit 516de247, plan blob a6e1e317.
+
+---
+
+1. **P1: Chosen placement still invalidates the cache after a memory-tool write.**
+Evidence: Plan Decision 2 puts context at the newest user turn, while `vinga-server/src/vinga_server/runtime/pipeline.py:1888` appends the assistant tool call and tool-result turns after that user turn before the next LLM request. A `remember` write therefore changes the user message before the new assistant/tool exchange, so the next request cannot reuse that exchange as a cached prefix. The plan’s own cache gate measures exactly this next round, and its “tool round” test explicitly preserves the bad placement.
+What the plan should say instead: specify a tool-continuation placement that follows the assistant/tool exchange, including the required OpenAI and Anthropic rendering changes to preserve valid message sequencing. Keep ordinary user rounds simple if desired, but test a verified `remember` write followed by its same-turn continuation and require the cached prefix to include the preceding tool exchange.
+
+2. **P1: The proposed shared session budget for tool pairs cannot occur with synchronous folding.**
+Evidence: Decision 9 says a tool pair is staged immediately before `tool_call`, then consumed by that span’s fold in the same emission, while `vinga-server/src/vinga_server/events/__init__.py:654` dispatches synchronously and `vinga-server/src/vinga_server/telemetry.py:3127` creates the span during that dispatch. Unlike generation pairs, which remain held until a later `llm_round`, a tool pair is released before another tool pair can accumulate. Thus “several tool pairs exhausting the session budget” and cross-kind oldest-first eviction are not testable or real in this design.
+What the plan should say instead: either make tool attachment deliberately deferred, with an explicit ordered post-execution fold and a justified retention budget, or state that immediate tool pairs have only a per-pair ceiling and remove the shared-budget, eviction, and held-on-session-close claims and tests. Add exact assertions for the emitted `rounds` and `tool_calls` counts and for `kind` on each failure path.
+
+3. **P2: The plan promises raw valid arguments that the neutral model no longer retains.**
+Evidence: Decision 7 says arguments are “exactly as the model sent them,” JSON-encoded. But `vinga-server/src/vinga_server/providers/openai_llm.py:96` parses valid JSON into a `dict` and discards the raw string; `vinga-server/src/vinga_server/providers/base.py:370` retain raw text only for malformed arguments. Anthropic likewise supplies parsed input. Re-encoding changes whitespace and can change key order.
+What the plan should say instead: define the field as the reserved neutral claim’s semantic arguments, deterministically JSON-encoded, with malformed calls retaining their raw argument text. Do not claim byte-for-byte provider output unless the plan adds and carries a raw-arguments representation through both adapters, which would conflict with the established neutral-seam boundary.
+
+4. **P2: The tool-content handoff and no-trace release are not concretely plumbed.**
+Evidence: `vinga-server/src/vinga_server/runtime/tool_execution.py:460` has no content-export collaborator; `vinga-server/src/vinga_server/runtime/pipeline.py:709` constructs it without one. Telemetry currently keys content only by invocation, and its no-trace tool route simply returns without consuming anything (`vinga-server/src/vinga_server/telemetry.py:3157`). The plan requires a distinct `(invocation, position)` content slot and explicit consumption on both traced and untraced folds, but does not name those changes.
+What the plan should say instead: name the `PipelineRuntime` to `ToolExecution` wiring, the tool-specific stage/take/discard API, and a `(invocation, position)` key in telemetry. Require `_tool_span` to consume/discard the slot even when the session trace is absent, with tests covering the no-trace path and two positions in one invocation.
+
+5. **P2: Collector masking is asserted without naming its enforced test surfaces.**
+Evidence: Decision 10 adds two content attributes, but `vinga-server/tests/unit/test_telemetry_deploy.py:23` holds the collector’s complete content-key set exactly, and `vinga-server/tests/integration/test_telemetry_fanout.py:43` sends every declared content key through the real collector. Neither is in the plan’s test footprint.
+What the plan should say instead: explicitly update both content-key inventories and the fanout test so a credential- and email-shaped value in each new tool field is masked before both sinks. This is the test that substantiates “like the rest,” rather than merely parsing the changed YAML.
+
+Verdict: **not ready**. Amend the two P1 design contradictions before implementation, then incorporate the P2 plumbing, fidelity, and masking requirements.
