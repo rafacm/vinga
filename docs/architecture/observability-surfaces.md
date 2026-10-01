@@ -243,6 +243,23 @@ server never writes one. The fields are the ones in
 [`reference/events.md`](../reference/events.md), under attribute names
 this module chooses.
 
+A generation's time to its first spoken token is an attribute of the
+generation, `vinga.llm.first_token_ms`, absent on a round that only asked
+for a tool. It used to be a `first_token` span event, and the backend
+this surface exists for ingests no span events, so it never arrived
+there (#533). That was a breaking change to the exported schema, made
+without a deprecation period: a query over the span event reads
+`vinga.llm.first_token_ms` on the `llm` span instead, and where an
+instant is wanted it is the span's start plus that many milliseconds. A
+tool call names the call it ran in two server-minted values: the
+invocation id of the round that asked for it, under the same
+`vinga.llm.invocation.id` key that round's span carries, and
+`vinga.tool.call.position`, its zero-based place in the list of calls
+that round returned, moves included. Together they name exactly one
+call, the n-th tool call of that round's exported output. The
+provider's own call id is not on the span: it is far-side bytes, and it
+stays inside the opt-in LLM input export.
+
 A failed ASR, LLM, TTS or tool operation is the same real stage span with
 OpenTelemetry `ERROR` status, no status description and a safe `error.type`.
 The type is the exception class name at an exception boundary, or the closed
