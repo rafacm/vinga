@@ -593,7 +593,8 @@ variants, so the second to merge rebases and regenerates.
 - [ ] **M1: the round and the tool call.** Decisions 1 to 4, their
   tests and mutations, the M1 rows of the live gate, its documentation
   footprint. One pull request.
-- [ ] **M2: the memory half, per round.** Decisions 5 to 9, their
+- [x] **[M2: the memory half, per round](2026-10-01-telemetry-metadata-half-implementation.md#m2-the-memory-half-per-round)**
+  (PR TBD). Decisions 5 to 9, their
   tests and mutations, the M2 rows of the live gate, its documentation
   footprint. One pull request; neither closes #533.
 
