@@ -2067,6 +2067,10 @@ class Telemetry:
         # other's pair. Held under the generation map's lock, since both
         # are staged and taken by the same two parties.
         self._tool_content: dict[tuple[str, int], dict[str, Any]] = {}
+        # The keys whose pair a `tool_call` fold actually wrote onto a
+        # span, until the stager settles them: what lets the export
+        # count a pair as exported only once it was consumed.
+        self._tool_attached: set[tuple[str, int]] = set()
         self._llm_content_lock = threading.Lock()
         self._held_turns: dict[tuple[str, str], _HeldTurn] = {}
         self._omitted_turns: dict[tuple[str, str], None] = {}
@@ -2297,6 +2301,24 @@ class Telemetry:
         with self._llm_content_lock:
             self._tool_content[(invocation, position)] = dict(attributes)
         return True
+
+    def settle_tool_content(self, invocation: str, position: int) -> bool:
+        """Whether the `tool_call` fold wrote the pair staged under these
+        keys onto its span, releasing whatever is left of it either way.
+
+        Called by the stager right after the event's emission, which
+        folds synchronously. A slot still held means the emission never
+        reached the fold (its construction was refused, or telemetry
+        stopped accepting), and it is discarded here rather than left
+        for shutdown; a slot the untraced path took was discarded there
+        and attached nowhere. Only a fold that wrote it answers True."""
+        key = (invocation, position)
+        with self._llm_content_lock:
+            self._tool_content.pop(key, None)
+            if key in self._tool_attached:
+                self._tool_attached.discard(key)
+                return True
+            return False
 
     def settle_turn(
         self, session: str, utterance: str, attributes: dict[str, Any] | None
@@ -2549,6 +2571,7 @@ class Telemetry:
         with self._llm_content_lock:
             self._llm_content.clear()
             self._tool_content.clear()
+            self._tool_attached.clear()
 
     # --- the fold -----------------------------------------------------
 
@@ -3216,6 +3239,11 @@ class Telemetry:
         if payload.get("is_error") is True:
             span.set_status(self._failed)
         span.end(end_time=end)
+        if len(content) > 0:
+            with self._llm_content_lock:
+                self._tool_attached.add(
+                    (payload["invocation"], payload["position"])
+                )
 
     def _tts_span(self, session: str, emission: Emission) -> None:
         """One sentence's synthesis stream, named for what it is.

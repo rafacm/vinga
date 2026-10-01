@@ -13,6 +13,7 @@ these cases prove is the production one: staged by the call just
 before its `tool_call` event, taken by that event's fold.
 """
 
+import functools
 import json
 import logging
 from collections.abc import Iterator
@@ -26,17 +27,24 @@ from tests.support.events import events as logged_events
 from tests.support.providers import ScriptedLlm
 from tests.support.sessions import call, events_of, run_reply, session_for
 from tests.support.telemetry import (
+    SESSION,
+    Clock,
+    call_tool,
     close_session,
     exporting,
     finish_reply,
     finished,
     open_session,
     released,
+    session_events,
     start_turn,
 )
 from vinga_server.config.models import ServerConfig
 from vinga_server.llm_input_export import LlmInputExport, build_llm_input_export
 from vinga_server.providers.base import ToolCall
+from vinga_server.runtime.tool_execution import ToolExecution
+from vinga_server.runtime.turns import TurnUnderway
+from vinga_server.session_conversations import SessionConversations
 from vinga_server.telemetry import (
     _QUIETING,
     GEN_AI_INPUT_MESSAGES,
@@ -209,6 +217,84 @@ async def test_with_the_setting_off_a_call_s_content_reaches_no_span_or_line(
 
     assert logged_events(caplog, "tool_call")
     assert CREDENTIAL_SHAPED not in both_formats(caplog)
+    spans = finished(telemetry, memory)
+    (tool,) = _tools(spans).values()
+    assert not CONTENT & set(tool)
+    for span in spans:
+        assert CREDENTIAL_SHAPED not in repr(dict(span.attributes)), span.name
+
+
+# --- a refused `tool_call` keeps nothing and claims nothing ------------
+
+# An exception whose class name is not an identifier, so the `tool_call`
+# event naming it as `error.type` refuses to build: the emission is
+# refused and nothing is dispatched to telemetry's fold.
+Unnameable = type("not a class name", (Exception,), {})
+INVOCATION = "0123456789abcdef0123456789abcdef"
+
+
+class Raising:
+    """A source that owns every call and fails each one unnameably."""
+
+    def snapshot(self, agent: str) -> list:
+        return []
+
+    def owns(self, claim: object) -> bool:
+        return True
+
+    async def dispatch(self, claim: object, agent: str) -> tuple[str, bool]:
+        raise Unnameable()
+
+    def timeout_for(self, claim: object) -> float:
+        return 5.0
+
+
+@pytest.mark.usefixtures("refusals_are_expected")
+async def test_a_refused_tool_call_event_reports_failure_and_keeps_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The handoff is settled after the emission rather than assumed:
+    the pair the refused event never consumed is reported as dropped,
+    counted nowhere as exported, and gone, so a later span under the
+    same join keys carries none of it."""
+    telemetry, memory = exporting()
+    exporter = LlmInputExport(telemetry=telemetry)
+    events = session_events(Clock(), telemetry)
+    open_session(events)
+    start_turn(events)
+    conversations = SessionConversations(POET_MAC)
+    active = conversations.activate("poet")
+    execution = ToolExecution(
+        sources=(Raising(),),  # type: ignore[arg-type]
+        device_tools=lambda: [],
+        owner_of=lambda name: None,
+        events=events,
+        conversations=conversations,
+        remembering=lambda: True,
+        stage_content=functools.partial(exporter.stage_tool, SESSION),
+    )
+    turn = TurnUnderway(active.conversation, active.agent, None)
+    asked = ToolCall(id="c-1", name="lamp", arguments={"secret": CREDENTIAL_SHAPED})
+    (slot,) = execution.reserve(turn, [asked])
+
+    with caplog.at_level(logging.INFO):
+        (result,) = await execution.run(turn, [(slot, asked)], invocation=INVOCATION)
+
+    assert result.is_error
+    assert not logged_events(caplog, "tool_call")
+    assert [
+        (record.kind, record.reason)
+        for record in caplog.records
+        if getattr(record, "event", None) == "llm_input_export_failed"
+    ] == [("tool_call", "dropped")]
+    assert not [
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "llm_input_exported"
+    ]
+
+    call_tool(events, invocation=INVOCATION, position=0)
+    finish_reply(events)
     spans = finished(telemetry, memory)
     (tool,) = _tools(spans).values()
     assert not CONTENT & set(tool)
