@@ -378,9 +378,12 @@ M1:
   generation is the placed request too).
 - A tool round: the context stays on the newest user turn, not after
   the tool results.
-- The previous turn's user message is byte-identical across two
-  consecutive requests (pins decision 4), and the conversation store
-  holds the utterance alone.
+- Persistence stores the unplaced utterance; on the next independent
+  user reply, every older user turn is byte-identical to what was sent
+  unplaced (tested after a completed reply), which pins decision 4; and
+  a same-reply continuation after a verified `remember` changes the
+  current placed user message, asserted as such, its cache cost
+  reported by the gate rather than denied.
 - `RoundPrompt` accounting: system characters equal the system the
   provider received; memory characters equal the context it received.
 - Pin before reshaping: a characterization pin of today's assembled
@@ -402,7 +405,7 @@ M2:
 
 **Falsification.** Each new test watched failing first. Mutations, one
 run each: M1, the context appended to the system again (the rendering
-test and the byte-identical-history test must fail); the exported turns
+test and the older-turns-unchanged test must fail); the exported turns
 taken from the unplaced list (the provider-equals-export test must
 fail); the context persisted into the working turn (the store test must
 fail). M2, the
@@ -625,5 +628,7 @@ Reviewed 2026-10-01 by openai/gpt-5.6-terra, thinking high via codex CLI 0.156.1
    Evidence: Decision 4 and its test require the previous user message to be byte-identical across consecutive requests (`plan:162-168`, `plan:352-354`). Decision 2 correctly says a memory-writing tool changes context on that same newest user turn in the continuation request (`plan:143-152`). The pipeline retains that user turn while appending the assistant call and tool results (`pipeline.py:1888-1905`).
 
    Plan should say instead: Specify that persistence preserves the unplaced utterance, and that older user turns are byte-identical on the next independent user reply. Test that case after a completed reply. Separately test that a same-reply continuation after a verified write changes the current placed user message and report its cache cost, rather than asserting impossible equality.
+
+   *Resolution:* accepted as written. The test now pins that persistence keeps the unplaced utterance and that older user turns are byte-identical on the next independent reply, and separately asserts that a same-reply continuation after a write changes the placed user message, with its cost reported by the gate.
 
 Verdict: **not ready.**
