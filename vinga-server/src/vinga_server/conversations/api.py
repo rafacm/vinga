@@ -308,6 +308,10 @@ _NO_SELECTOR = (
 # chosen by the db classifier's closed set and not by anything the
 # exception says, because a driver's own words carry the statement it
 # failed on and the connection string it failed over.
+#
+# The details the second sentence points to are the class of what the
+# database raised: the refusal carries it beside the sentence as its
+# `cause`, and the API's `api_storage_error` line names it (#586).
 _ERASURE_BUSY = (
     "the conversation store's write lock is held by another writer, and nothing was "
     "deleted. The same request may be made again"
@@ -374,7 +378,8 @@ PROBLEMS_INSTEAD: dict[int, str] = {
     ),
     500: (
         "The conversation store cannot be read or written, or the request failed for "
-        "a reason that is not the caller's. The details are in the server's log."
+        "a reason that is not the caller's. The server's log names the class of what "
+        "failed, and nothing else of it."
     ),
 }
 
@@ -396,7 +401,8 @@ THREAD_PROBLEMS_INSTEAD: dict[int, str] = {
     ),
     500: (
         "The conversation store cannot be read or written, or the request failed for "
-        "a reason that is not the caller's. The details are in the server's log."
+        "a reason that is not the caller's. The server's log names the class of what "
+        "failed, and nothing else of it."
     ),
 }
 
@@ -413,7 +419,8 @@ METRICS_PROBLEMS_INSTEAD: dict[int, str] = {
     ),
     500: (
         "The conversation store cannot be read, or the request failed for a reason "
-        "that is not the caller's. The details are in the server's log."
+        "that is not the caller's. The server's log names the class of what "
+        "failed, and nothing else of it."
     ),
 }
 

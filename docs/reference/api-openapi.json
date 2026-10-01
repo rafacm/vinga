@@ -48,7 +48,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -104,7 +104,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -193,7 +193,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -280,7 +280,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -367,7 +367,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -420,7 +420,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -500,7 +500,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -578,7 +578,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -656,7 +656,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -709,7 +709,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -789,7 +789,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -867,7 +867,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -945,7 +945,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -998,7 +998,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1078,7 +1078,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1156,7 +1156,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1234,7 +1234,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1283,7 +1283,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1350,7 +1350,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1403,7 +1403,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1516,7 +1516,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1594,7 +1594,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1672,7 +1672,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1721,7 +1721,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1788,7 +1788,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1835,7 +1835,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1943,7 +1943,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2039,7 +2039,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2138,7 +2138,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2225,7 +2225,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2315,7 +2315,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2405,7 +2405,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2495,7 +2495,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2585,7 +2585,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2675,7 +2675,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2753,7 +2753,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2822,7 +2822,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3023,7 +3023,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3092,7 +3092,7 @@
             }
           },
           "500": {
-            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3316,7 +3316,7 @@
             }
           },
           "500": {
-            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3429,7 +3429,7 @@
             }
           },
           "500": {
-            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3499,7 +3499,7 @@
             }
           },
           "500": {
-            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3577,7 +3577,7 @@
             }
           },
           "500": {
-            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3683,7 +3683,7 @@
             }
           },
           "500": {
-            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3806,7 +3806,7 @@
             }
           },
           "500": {
-            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3876,7 +3876,7 @@
             }
           },
           "500": {
-            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3954,7 +3954,7 @@
             }
           },
           "500": {
-            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4060,7 +4060,7 @@
             }
           },
           "500": {
-            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4233,7 +4233,7 @@
             }
           },
           "500": {
-            "description": "The conversation store cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The conversation store cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4320,7 +4320,7 @@
             }
           },
           "500": {
-            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4407,7 +4407,7 @@
             }
           },
           "500": {
-            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4494,7 +4494,7 @@
             }
           },
           "500": {
-            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4590,7 +4590,7 @@
             }
           },
           "500": {
-            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4658,7 +4658,7 @@
             }
           },
           "500": {
-            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4754,7 +4754,7 @@
             }
           },
           "500": {
-            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4822,7 +4822,7 @@
             }
           },
           "500": {
-            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4923,7 +4923,7 @@
             }
           },
           "500": {
-            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5012,7 +5012,7 @@
             }
           },
           "500": {
-            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5113,7 +5113,7 @@
             }
           },
           "500": {
-            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5202,7 +5202,7 @@
             }
           },
           "500": {
-            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5262,7 +5262,7 @@
             }
           },
           "500": {
-            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5340,7 +5340,7 @@
             }
           },
           "500": {
-            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
             "content": {
               "application/problem+json": {
                 "schema": {

@@ -542,7 +542,8 @@ PROBLEM_DESCRIPTIONS: dict[int, str] = {
     ),
     500: (
         "The stored configuration cannot be read, or the request failed for a reason "
-        "that is not the caller's. The details are in the server's log."
+        "that is not the caller's. The server's log names the class of what "
+        "failed, and nothing else of it."
     ),
     503: (
         "This application has no running server around it, so there is nothing for a "
