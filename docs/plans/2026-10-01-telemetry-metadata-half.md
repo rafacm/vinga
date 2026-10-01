@@ -178,7 +178,15 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
    fact ("the child's name is X") is guessable by hashing candidates.
    Ids join a trace to the local store without disclosing anything to
    whoever holds the trace, which is the property the issue argued
-   for. What a fingerprint would add (did the memory half change
+   for. The join is to the store's CURRENT state and is best effort,
+   and the catalog note and the observability page say so: a corrected
+   fact keeps its id with new text (`memory/store.py:983-1025`), a
+   pruned or deleted one leaves no row, and deletion through the API is
+   a hard delete. What the model actually read at the time is the
+   content export's to carry (`export_llm_input`), not this field's. No
+   row version rides beside each id: it would double the list to answer
+   a historical question the content export already answers for any
+   deployment that wants it. What a fingerprint would add (did the memory half change
    between two rounds) the ids answer for facts and the per-block
    sizes approximate for the ledger; the ledger case a size cannot see,
    a `set_state` that keeps its length, is recorded as the known gap.
@@ -424,7 +432,8 @@ the implementation doc, per milestone:
   the call and the round that asked for it; a turn carries the
   know-how half's digest; a reply round carries its whole system size,
   the memory blocks' sizes and the ids of the facts injected, with the
-  reason ids and not a digest; the parity rule in one sentence. M1
+  reason ids and not a digest, and that an id resolves against the
+  store's current state only; the parity rule in one sentence. M1
   writes the first three, M2 the rest.
 - `vinga-server/README.md`, if its telemetry or cost table names the
   first-token mark or prompt size (checked, and left alone if not).
@@ -471,6 +480,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
 3. **P2: Fact IDs do not provide the stable historical join the plan claims.**
    **Evidence:** The plan says IDs let a trace join back to the local store and answer which facts produced an output (`docs/plans/...`, lines 32–40 and 176–184). Existing facts are mutable under the same ID (`memory/store.py:983-1025`), are deleted by cap pruning (`memory/store.py:1924-1971`), and can be permanently or operator-deleted; the observability contract explicitly says facts last only until corrected and that API deletion is hard deletion (`docs/architecture/observability-surfaces.md`, Memory, lines 183–196). A later lookup can therefore return changed text or no row at all.
    **Plan should say instead:** Describe the IDs as a best-effort correlation to current local state, not historical identity. If historical version identity is required, carry a non-content row version such as the fact’s update timestamp and acknowledge that deleted or superseded content remains unreconstructible without the content export. Add correction, pruning, and hard-deletion tests for the documented behavior.
+
+   *Resolution:* accepted in part. Decision 6 now states that the id join is best effort and to the store's current state (a correction keeps the id with new text, pruning and API deletion leave no row), and the catalog note and the observability page say the same; the historical text is the content export's to carry. Rejected: a per-id row version, which doubles the list to answer a historical question `export_llm_input` already answers, and new correction, prune and delete tests, since those behaviors belong to the memory store and its existing tests pin them; nothing in this plan changes them.
 
 4. **P2: Failed LLM requests lose all proposed per-round memory metadata.**
    **Evidence:** M2 adds fields only to `LlmRound` and threads them only through `reply_round_done` (`docs/plans/...`, lines 185–208). A stream failure emits `ProviderFailed` instead (`runtime/provider_watch.py:134-166,409-458`), and telemetry turns that into the actual failed `llm` span (`telemetry.py:2952-2990`). The existing LLM-content export deliberately finishes and attaches the failed request by invocation, but the planned memory accounting has no equivalent path. The proposed tests cover successful rounds and recaps only.
