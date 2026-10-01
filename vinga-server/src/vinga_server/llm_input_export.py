@@ -1,8 +1,8 @@
-"""Bounded, opt-in GenAI content attached to its generation."""
+"""Bounded, opt-in GenAI content attached to its generation or tool span."""
 
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -23,6 +23,8 @@ from vinga_server.telemetry import (
     GEN_AI_INPUT_MESSAGES,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_SYSTEM_INSTRUCTIONS,
+    GEN_AI_TOOL_CALL_ARGUMENTS,
+    GEN_AI_TOOL_CALL_RESULT,
     LLM_TOOL_CHOICE,
     LLM_TOOLS,
     Telemetry,
@@ -110,6 +112,12 @@ class LlmInputExport:
         self._rounds: dict[str, _Round] = {}
         self._sessions: dict[str, list[str]] = {}
         self._held: dict[str, int] = {}
+        # Per session, the round whose tool pairs are being admitted and
+        # the bytes admitted for it so far. One entry rather than one
+        # per round: a session's rounds run one after another, and a
+        # round's calls all finish before the next round is asked, so a
+        # pair for a new invocation means the previous round is over.
+        self._tool_round: dict[str, tuple[str, int]] = {}
 
     def stage_reply(
         self,
@@ -239,13 +247,71 @@ class LlmInputExport:
             )
         )
 
+    def stage_tool(
+        self,
+        session: str,
+        invocation: str,
+        position: int,
+        arguments: Mapping[str, Any] | str,
+        result: str,
+    ) -> None:
+        """Stage one tool call's pair for the `tool_call` event about to fold.
+
+        Called after the call returned and immediately before its event
+        is emitted, which folds synchronously, so the pair is taken by
+        the tool span within the same emission and is never held beside
+        another (#533). `invocation` and `position` are that event's own
+        join keys.
+
+        `arguments` is the reserved claim's: what the model asked with,
+        not the copy coerced for the far side, encoded the way the
+        round's `tool_call` part encodes it so the two copies of one call
+        read alike; or the model's raw text where it sent no JSON
+        object, the one case the neutral seam keeps text. `result` is
+        exactly what the model was handed back.
+
+        Bounded twice, with nothing truncated: a pair over the
+        per-request ceiling is dropped whole, and so is one that would
+        take a round's admitted tool pairs past that same ceiling,
+        because a round runs its whole call list at once and each pair
+        lands on a span in telemetry's bounded queue.
+        """
+        try:
+            encoded = arguments if isinstance(arguments, str) else _json(dict(arguments))
+            attributes = {
+                GEN_AI_TOOL_CALL_ARGUMENTS: encoded,
+                GEN_AI_TOOL_CALL_RESULT: result,
+            }
+            size = _size(attributes)
+        except Exception:  # noqa: BLE001 - content export never breaks a reply
+            self._failed(session, TOOL_CALL, LlmInputExportFailure.DROPPED)
+            return
+        current = self._tool_round.get(session)
+        admitted = current[1] if current is not None and current[0] == invocation else 0
+        if admitted + size > self._max_content_bytes:
+            self._failed(session, TOOL_CALL, LlmInputExportFailure.DROPPED)
+            return
+        if not self._telemetry.stage_tool_content(session, invocation, position, attributes):
+            self._failed(session, TOOL_CALL, LlmInputExportFailure.DROPPED)
+            return
+        self._tool_round[session] = (invocation, admitted + size)
+        events.emit(
+            lambda: LlmInputExported(
+                session=SessionId(session),
+                rounds=Count(0),
+                tool_calls=Count(1),
+            )
+        )
+
     def session_closed(self, session: str) -> None:
         for invocation in tuple(self._sessions.get(session, ())):
             self._drop(invocation)
+        self._tool_round.pop(session, None)
 
     async def shutdown(self) -> None:
         for session in tuple(self._sessions):
             self.session_closed(session)
+        self._tool_round.clear()
 
     def _drop(self, invocation: str) -> None:
         staged = self._rounds.pop(invocation, None)

@@ -20,6 +20,7 @@ class Exported:
         self.contexts = dict(contexts or {})
         self.accepts = accepts
         self.snapshots: list[tuple[str, dict[str, Any]]] = []
+        self.tool_snapshots: list[tuple[str, int, dict[str, Any]]] = []
         self.discarded: list[str] = []
 
     def stage_llm_content(
@@ -32,6 +33,14 @@ class Exported:
 
     def discard_llm_content(self, invocation: str) -> None:
         self.discarded.append(invocation)
+
+    def stage_tool_content(
+        self, session: str, invocation: str, position: int, attributes: dict[str, Any]
+    ) -> bool:
+        del session
+        if self.accepts:
+            self.tool_snapshots.append((invocation, position, dict(attributes)))
+        return self.accepts
 
 
 def exporting(

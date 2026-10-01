@@ -129,10 +129,12 @@ def test_every_driver_names_a_path_of_its_own() -> None:
     since the requests a session assembled can go the same way (#502),
     which is that same pair on the third post-close surface. And a
     hundred and seven since each turn's clips go to their own turn after
-    the recording (#496), and a clip that did not says so."""
+    the recording (#496), and a clip that did not says so. And a hundred
+    and eight since a tool call's arguments and result go to its own
+    tool span, counted on the same ledger as a second kind (#533)."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 107
+    assert len(set(claimed)) == len(claimed) == 108
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -1008,6 +1010,9 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
         ("TranscriptExportFailed", ("event", "reason", "session")),
     ),
     "vinga_server.llm_input_export:LlmInputExport.finish #1": (
+        ("LlmInputExported", ("event", "rounds", "session", "tool_calls")),
+    ),
+    "vinga_server.llm_input_export:LlmInputExport.stage_tool #1": (
         ("LlmInputExported", ("event", "rounds", "session", "tool_calls")),
     ),
     "vinga_server.llm_input_export:LlmInputExport._failed #1": (

@@ -1754,6 +1754,17 @@ async def drive_llm_input_exported(directory: Path) -> None:
     await exporter.shutdown()
 
 
+async def drive_llm_input_tool_exported(directory: Path) -> None:
+    """A tool call's arguments and result staged for its tool span, the
+    second kind of pair the same ledger counts (#533)."""
+    exporter, recorded = llm_inputs({"s1": AN_LLM_CONTEXT})
+    exporter.stage_tool(
+        "s1", "0123456789abcdef0123456789abcdef", 0, {"fact": "tea"}, "saved"
+    )
+    assert recorded.tool_snapshots
+    await exporter.shutdown()
+
+
 async def drive_llm_input_export_failed(directory: Path) -> None:
     """A session this exporter never saw, so there is no trace to write
     the requests onto and the ledger says so. Decided at admission,
@@ -2289,6 +2300,11 @@ SERVER_DRIVERS: tuple[Driver, ...] = (
     Driver(
         (LLM_INPUT_EXPORT, "LlmInputExport.finish", 1),
         drive_llm_input_exported,
+        "llm_input_exported",
+    ),
+    Driver(
+        (LLM_INPUT_EXPORT, "LlmInputExport.stage_tool", 1),
+        drive_llm_input_tool_exported,
         "llm_input_exported",
     ),
     Driver(
