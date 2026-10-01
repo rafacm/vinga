@@ -373,6 +373,13 @@ SESSION_ID_NAMES = (VINGA_SESSION_ID, SESSION_ID_ALIAS)
 # never reads it; the collaborator joins acknowledged rows to the root by
 # the server-minted utterance id. The Langfuse fields below are derived
 # compatibility aliases for the canonical values.
+#
+# Nothing else writes the input or output field. The `llm` content
+# export (`llm_input_export.py`) writes neither, on purpose (#533): the
+# backend maps the GenAI conventions' messages itself, with
+# `gen_ai.system_instructions` prepended as a system turn, and an input
+# field written beside them outranks that mapping and drops the system
+# prompt. A turn's text has no convention to map, so it keeps its own.
 OBSERVATION_METADATA_PREFIX = "langfuse.observation.metadata."
 OBSERVATION_INPUT = "langfuse.observation.input"
 OBSERVATION_OUTPUT = "langfuse.observation.output"
