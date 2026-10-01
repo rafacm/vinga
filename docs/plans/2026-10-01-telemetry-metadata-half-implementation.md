@@ -286,12 +286,12 @@ both lanes with `-n auto --dist loadfile`:
 Two plan amendments landed on the plan branch while this milestone was
 being implemented, and neither is a deviation from the plan.
 
-- **Withdrawn after review round 4** (`ed495b50`): the keyed digest
+- **Withdrawn after review round 4** (`de6c7be5` on `main`): the keyed digest
   under a subkey of `VINGA_MASTER_KEY` was taken out of the plan and
   deferred to Rafael, since a keyed digest is unconditional only with a
   key every deployment holds. No keyed code had been written here when
   that arrived, so nothing was reverted.
-- **Restored on Rafael's decision** (`acec435b`) as an unkeyed SHA-256
+- **Restored on Rafael's decision** (`683722c5` on `main`) as an unkeyed SHA-256
   of the know-how half as sent, exported as `vinga.prompt.sha256`: the
   content and telemetry ADR bars conversation text, far-side bytes and
   exception text, and operator configuration is none of those. It is
@@ -299,9 +299,12 @@ being implemented, and neither is a deviation from the plan.
   mutation and live-gate row; no key, no master-key subkey and no
   composition change exist on this branch.
 
-The branch was rebased onto each amended plan head in turn (`01d1b11c`,
-then `acec435b`), each time with only the plan file moving underneath
-it.
+The branch was rebased onto each amended plan head in turn, each time
+with only the plan file moving underneath it, and finally onto `main`
+after M2 merged (PR #580), resolving the plan's checklist and this
+file by keeping both milestones' entries and regenerating
+`docs/reference/events.md` and `conversations-schema.md` through their
+generators, which reproduced the merged files byte for byte.
 
 ### Deviations from the plan
 
@@ -400,28 +403,30 @@ One, in how decision 2's position travels.
   0 and 1 for the MCP pair), which makes them production-path pins of
   the join as well.
 
-- **On a 16 KiB-page kernel, the events reference's pipe test now fails
-  for a reason in the test, not the server.**
+- **On a 16 KiB-page kernel, the events reference's pipe test fails
+  for a reason in the test, not the server, and `main` already fails
+  it.**
   `tests/unit/test_event_docs.py::test_a_reader_who_stops_reading_mid_chunk_gets_no_traceback`
   pre-fills a pipe so that exactly the document's whole-buffer part
-  fits, and asserts the pipe ends exactly full. With the digest's two
-  new rows `events.md` is 139,750 bytes, so the pre-fill is 122,880
-  bytes, seven and a half 16 KiB pages on agentpi. Linux merges a write
-  into a pipe's partly filled last page only when the write's sub-page
-  remainder fits beside it, and the child's single large write
-  (remainder 8,678 bytes) does not fit beside 8,192, so it takes whole
-  new pages and stops one 8 KiB half-page short: 253,952 of 262,144,
-  the exact figure the failure reports. Before the digest the document
-  was 139,071 bytes and the pre-fill eight whole pages, and the test
-  passed (measured by swapping the two catalog files back). On a 4 KiB
-  page kernel, which is what CI runs on, 122,880 bytes is thirty whole
-  pages and the merge question never arises, so CI is expected to pass;
-  that is inferred from the arithmetic, not measured. It fails 3 of 3
-  here. The test's construction assumes the pre-fill ends on a page
-  boundary, and M2 will move the document's size again. Not fixed in
-  this milestone: it is a test-construction fault of the same family as
-  #541's, and the remedy (page-aligning the pre-fill, or measuring the
-  merge rule) is a change to that test's design.
+  fits, and asserts the pipe ends exactly full. Since M2 merged,
+  `events.md` on `main` is 140,909 bytes (143,524 with this
+  milestone), so the whole-buffer part is 139,264 bytes and the
+  pre-fill 122,880, seven and a half 16 KiB pages on agentpi. Linux
+  merges a write into a pipe's partly filled last page only when the
+  write's sub-page remainder fits beside it, and the child's single
+  large write does not, so it takes whole new pages and stops one 8 KiB
+  half-page short: 253,952 of 262,144, the exact figure the failure
+  reports. It fails 1 of 1 against `main`'s own catalog (measured by
+  swapping the two catalog files in) and 3 of 3 on this branch; at the
+  plan commit, and on this branch before the digest, the pre-fill was
+  eight whole pages and it passed. On a 4 KiB-page kernel, which is
+  what CI runs on, 122,880 bytes is thirty whole pages and the merge
+  question never arises, so CI is expected to pass; that is inferred
+  from the arithmetic, not measured. Not fixed here: it is a
+  test-construction fault of the same family as #541's, the remedy
+  (page-aligning the pre-fill, or measuring the merge rule) is a change
+  to that test's design, and it reaches `main` whatever this milestone
+  does.
 - **The live gate also answered the plan's "observed, not gated" row.**
   With `export_llm_input` on, a generation observation read back in
   full (`GET /api/public/observations/c6e5aafaf9d407dd`) holds no
@@ -433,7 +438,7 @@ One, in how decision 2's position travels.
 
 ### Inventories
 
-By `git grep -n`, untruncated, at `4c669b40` (the plan commit this
+By `git grep -n`, untruncated, at `8f2efc48` (the plan commit this
 branch started from), counted with `wc -l` and read in full.
 
 - **`first_token`** in `vinga-server/` and `docs/`: 166 lines, 116
@@ -512,9 +517,9 @@ observations were read back through the Langfuse public API
 (`GET /api/public/observations` from each run's start, and one
 generation in full by id).
 
-**Run 1**, 03:15:39 to 03:16:19 UTC, at the tree of `cc78ec18`
-(`43dc13df` then, before the rebase onto the restored plan), with no
-digest. Both turns' first rounds called two tools in one round,
+**Run 1**, 03:15:39 to 03:16:19 UTC, on the tree of what is now
+`0a2018b1`, before the digest and before the rebase onto `main` (so
+without M2). Both turns' first rounds called two tools in one round,
 which is the case the position exists for.
 
 | Observation | Id | `vinga.llm.invocation.id` | `vinga.tool.call.position` | `vinga.llm.first_token_ms` |
@@ -528,7 +533,7 @@ which is the case the position exists for.
 | turn 2, `recall` | `b529810692d29bd7` | `a5331404...` | `1` | |
 | turn 2, `llm` round 2 | `493a3151a3a16532` | `c51e8898...` | | `552` |
 
-**Run 2**, 05:00:00 to 05:00:30 UTC, at `016280dd` (the digest in
+**Run 2**, 05:00:00 to 05:00:30 UTC, on the tree of what is now `4cfd387c`, also before the rebase onto `main` (the digest in
 place). Turn 2 this time called `recall` once in each of two rounds,
 so the same entry appears under two invocations at position 0.
 
@@ -563,21 +568,25 @@ included; see Discoveries.
 
 ### Lanes
 
-On agentpi, shared with two other implementers' lanes while these ran.
+On agentpi, shared with other implementers' lanes while these ran.
+
+On the final tree, rebased onto `main` after M2:
 
 - `uv run ruff check .`: all checks passed.
-- `uv run pytest tests/unit -q -ra -n auto --dist loadfile`, first run:
-  `3 failed, 7698 passed, 19 skipped in 1851.07s (0:30:51)`, the three
-  tests in Discoveries. After their commit:
-  `7701 passed, 19 skipped in 1521.05s (0:25:21)`.
+- `uv run pytest tests/unit -q -ra -n auto --dist loadfile`:
+  `1 failed, 7782 passed, 19 skipped in 870.02s (0:14:30)`. The one
+  failure is the events reference's pipe test on agentpi's 16 KiB
+  pages, which `main` fails too (Discoveries).
 - `uv run pytest tests/integration -q -ra -n auto --dist loadfile`:
-  `349 passed in 824.15s (0:13:44)`.
-- `python3 scripts/check_doc_links.py .`: 280 files checked, 5 failures,
-  all five in the plan's own "Plan review round 3" record, whose
-  evidence links are absolute paths into the reviewing session's
-  scratch worktree (`/tmp/...`). They come from the plan branch, not
-  from this milestone, and are left for the plan's owner to fix, since
-  the text is a verbatim review record. Nothing this milestone wrote
-  fails the check.
+  `349 passed in 296.47s (0:04:56)`.
+- `python3 scripts/check_doc_links.py .`: 282 files checked, 0
+  failures.
 - `uv run pytest tests/census -q`, run last, after the final prose
   edit: recorded in the pull request.
+
+Before the digest was restored and before the rebase, on the plan's
+base: the unit lane's first run was `3 failed, 7698 passed, 19 skipped
+in 1851.07s (0:30:51)` (the three tests in Discoveries) and, after
+their commit, `7701 passed, 19 skipped in 1521.05s (0:25:21)`; the
+integration lane was `349 passed in 824.15s (0:13:44)`. All `-n auto
+--dist loadfile`.
