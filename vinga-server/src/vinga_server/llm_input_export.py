@@ -191,10 +191,12 @@ class LlmInputExport:
         except Exception:  # noqa: BLE001 - content export never breaks a reply
             self._drop(invocation)
             return
-        # Both the canonical output and its direct-Langfuse alias carry the
-        # same bytes. Count each delta once here so a long stream stays O(n),
-        # then let finish render and weigh the one authoritative JSON value.
-        if staged.size + 2 * (staged.output_size + added) > self._max_content_bytes:
+        # The output is written once, under the conventions' key: no alias
+        # repeats it, so each delta is charged once. The raw bytes are a
+        # lower bound on the rendered JSON, which only adds framing and
+        # escapes, so this never drops a pair `finish` would admit; it keeps
+        # a long stream O(n), and `finish` weighs the one authoritative value.
+        if staged.size + staged.output_size + added > self._max_content_bytes:
             self._drop(invocation)
             return
         staged.output_size += added
