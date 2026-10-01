@@ -85,13 +85,35 @@ scratch database at head and a connection to it open, until the second
 run has gone through its whole lifecycle. Then it is released and
 compares. The test asserts both runs returned a name, the names differ,
 each chain gained exactly one revision file, and neither named database
-is in `pg_database` afterwards.
+is in `pg_database` afterwards. If the hold runs out before the second
+run finishes, the first run fails with a sentence saying so rather than
+comparing early, since an expired hold is a race and not the
+interleaving the test claims.
 
 The two existing lifecycle tests now assert the database gone by the
 name `generate` returned rather than by the fixed constant, and the
-domain-chain one also asserts the name's shape: the prefix and a
-non-empty suffix, and a lowercase identifier of at most 63 bytes that
-Postgres neither folds nor truncates.
+domain-chain one also asserts the name's shape: exactly the prefix and
+sixteen lowercase hex digits, and a lowercase identifier of at most 63
+bytes that Postgres neither folds nor truncates.
+
+### Both failure edges of the drop
+
+Where the drop's `finally` sits is the whole of what keeps it safe, and
+two real-Postgres cases pin it from either side:
+
+- `test_a_failed_comparison_still_takes_its_scratch_database_away`
+  makes `alembic.command.revision` raise after the scratch database was
+  made, migrated and connected to, reads the database's name through
+  the connection the command handed Alembic, and asserts the database
+  is gone once the failure has travelled out.
+- `test_a_name_already_taken_is_refused_and_left_alone` pins the random
+  suffix to one drawn in the test (by replacing `secrets.token_hex`),
+  creates that database first, and asserts the command refuses at its
+  `create` with `DuplicateDatabase` and leaves the existing database in
+  place.
+
+Both clean up by the command's prefix afterwards, so a mutant that
+leaks a database does not leave it on the instance.
 
 ## Key parameters
 
@@ -122,13 +144,34 @@ Postgres neither folds nor truncates.
     with no drop first the second `create` meets the first run's
     database.
   - The fix: passed 20 of 20.
-- Removing the drop in the `finally` fails the three tests that ask
+- Removing the drop in the `finally` fails the four tests that ask
   whether the run's database is gone
   (`test_the_scratch_database_is_made_migrated_and_taken_away`,
+  `test_a_failed_comparison_still_takes_its_scratch_database_away`,
   `test_two_runs_at_once_each_keep_their_own_scratch_database`,
   `test_the_memory_chain_autogenerates_against_a_scratch_database`).
   The five databases that mutant left were listed by the prefix and
-  dropped by hand afterwards, which exercised the stated policy.
+  dropped by hand afterwards, which exercised the stated policy; the
+  run's own creation times and no open connections are what said they
+  were that run's and not a concurrent one's.
+- The review round's mutations, each watched failing the case written
+  for it:
+  - the drop moved onto the success path fails
+    `test_a_failed_comparison_still_takes_its_scratch_database_away`
+    only (1 failed, 11 passed);
+  - the `finally` widened around `CREATE` fails
+    `test_a_name_already_taken_is_refused_and_left_alone` only (1
+    failed, 11 passed): the pre-existing database was dropped;
+  - the suffix cut to `token_hex(1)` fails
+    `test_the_scratch_database_is_made_migrated_and_taken_away` on
+    `vinga_autogen_scratch_a0`;
+  - the hold cut to 10 ms, so the second run outlives it: the
+    concurrency case fails 10 of 10 with the hold sentence. Before the
+    hold was checked, the same cut passed 3 of 13 runs silently. Of
+    its 10 failures, the 9 whose output was kept were a `KeyError`
+    (`'config'`, twice bare and seven times inside the storage
+    refusal), which reads as two Alembic runs overlapping in one
+    process and was not traced further; none named the hold.
 - Lanes, from `vinga-server/` on the four-core machine with other
   branches' lanes sharing the same Postgres: `uv run ruff check .`
   clean; the unit lane (`-n 2 --dist loadfile`) `1 failed, 7807
