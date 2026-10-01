@@ -40,7 +40,7 @@ from sqlalchemy import select, update
 
 from tests.support.apps import entered_client
 from tests.support.configs import config_with, world
-from tests.support.leaks import renderings
+from tests.support.leaks import chain, renderings
 from tests.support.problems import refused as refused_body
 from tests.support.providers import BrokenTts, RecordingLlm, ScriptedLlm, built_world
 from tests.support.sessions import agent_providers, call, run_reply, session_for
@@ -72,6 +72,7 @@ from vinga_server.config.secrets import (
 )
 from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database, schema
+from vinga_server.events.values import ClassName
 from vinga_server.filler import FillerClips, build_agent_fillers
 from vinga_server.generation import Generation, Generations
 from vinga_server.logs import JsonFormatter
@@ -1737,6 +1738,41 @@ async def test_a_refused_stored_half_keeps_its_type_and_loses_its_words(
     # raised, which is what "loses its words" means here.
     assert REJECTED not in str(caught.value)
     assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    ("raised", "named"),
+    [
+        pytest.param(
+            StorageError(
+                f"could not read over {REJECTED}", cause=ClassName("OperationalError")
+            ),
+            "OperationalError",
+            id="a-storage-refusal",
+        ),
+        pytest.param(
+            RuntimeError(f"could not connect as {REJECTED}"),
+            "RuntimeError",
+            id="a-failure-with-no-type",
+        ),
+    ],
+)
+async def test_a_refused_reload_keeps_the_class_of_what_failed(
+    raised: Exception, named: str
+) -> None:
+    """The words are replaced and the class of the failure under them is
+    kept, because the reload's sentence says the failure is recorded in
+    the log and the class is all that line can say (#586). For a storage
+    refusal it is the class that refusal was decided from; for a failure
+    the configuration layer has no type for, the failure's own."""
+    apply = reloader(raised)
+
+    with pytest.raises(StorageError) as caught:
+        await apply()
+
+    assert caught.value.cause == ClassName(named)
+    assert REJECTED not in chain(caught.value)
     assert caught.value.__context__ is None
 
 
