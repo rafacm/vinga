@@ -452,10 +452,19 @@ the implementation doc, per milestone:
 - M1: the `llm` observation shows `vinga.llm.first_token_ms`; the tool
   observation shows the invocation id equal to its round's and its
   position; the turn shows `vinga.prompt.authored.sha256`.
-- M2: the round after the `remember` shows the new id in
-  `vinga.llm.memory.facts`, and the count and sizes; whether Langfuse
-  renders an integer array (or the string rendering decision 8 chose)
-  legibly is recorded as observed.
+- M2, **blocking**: the round after the `remember` shows the new id in
+  `vinga.llm.memory.facts`, and the count and sizes, read back through
+  the Langfuse public API as values a query can use (the id array
+  returned with its elements, not dropped, stringified as one opaque
+  blob, or truncated). If integer arrays fail that, the encoding falls
+  back in this order, each re-gated the same way, and the event type,
+  the attribute fold and the catalog note change with it in the same
+  milestone: first an array of decimal strings (the fold's existing
+  string-sequence path), then one comma-joined decimal string. M2's
+  pull request does not open until one encoding passes; which one, and
+  the observation ids, are recorded in the implementation doc. The
+  same readback is taken from the fake-tracer test's OTLP side only as
+  a validity check, since it cannot speak for the backend.
 - Observed, not gated: whether Langfuse renders `gen_ai.system_instructions`
   anywhere when `export_llm_input` is on. This is the open question
   from Step 0's §3 row and it informs the content half's decision; it
@@ -578,6 +587,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    **Plan should say instead:** Commit to a separate closed memory-source mapping, integer-valued `FactIds`, and a sequence fold that preserves homogeneous integers after the declared value type accepts them, with a regression test that existing string `SessionIds` remain unchanged. Also settle the accepted tool-ID grammar and make invocation definitively required on the only production emission path.
 
    *Resolution:* accepted. Settled in the plan: a new closed `MemorySources` mapping (not `PromptSources`, which is know-how-only by design); integer `FactIds` with the `SEQUENCE` fold widened to homogeneous `str` or `int` sequences, `bool` excluded, mixed exporting nothing, and a `SessionIds` regression pin; the tool-call id grammar `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`; and `invocation` required, with the single production emission path named (`_run_one` via `run`, one caller at `pipeline.py:1924`).
+
+   *Resolution:* accepted. The M2 rows of the live gate are now blocking: the id array must come back through the Langfuse public API as usable values, and if integer arrays fail, the encoding falls back to decimal strings, then to one comma-joined string, each re-gated, with the event type, fold and note changed in the same milestone. M2's pull request does not open until one encoding passes.
 
 6. **P2: Removing the first-token event creates an unhandled upgrade break.**
    **Evidence:** Decision 1 deletes the existing precisely timestamped `first_token` event (`docs/plans/...`, lines 113–123), although issue #533 §4 proposed an attribute alongside the event and its common notes call the changes backward compatible. Current OTLP consumers can query or visualize that event (`telemetry.py:2994-3032`). Repository grep can find tests and documentation, but cannot inventory dashboards, alerts, or downstream collectors in running deployments. The changelog entry records the change but supplies no compatibility period or migration guidance.
