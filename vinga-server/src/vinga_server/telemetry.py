@@ -590,8 +590,9 @@ PROVIDER_FACTS = (*PROVIDER_ENTRY_REQUIRED, *PROVIDER_ENTRY_OPTIONAL)
 # `characters` goes on beside them as the total the blocks sum to:
 # without a denominator the parts answer nothing.
 #
-# And `sha256`, the half's fingerprint (#533): the SHA-256 of its text
-# as sent, so whether two sessions ran on the same prompt, and when it
+# And `sha256`, the half's fingerprint (#533): the SHA-256 of its
+# canonical rendering, the bytes it contributes whenever another block
+# follows it, so whether two sessions ran on the same prompt, and when it
 # changed, is a compare on one attribute, including the edit that keeps
 # the length and so leaves every number above where it was.
 PROMPT_PREFIX = "vinga.prompt.sources"

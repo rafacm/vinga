@@ -1002,7 +1002,7 @@ session %s: assembled %d characters of prompt for %s
 | `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `characters` | `COUNT` | yes | no |  |  |
 | `sources` | `SOURCES` | yes | no | keyed by the prompt provenance grammar, with counts for values | Each block's size by provenance: how much of the prompt came from where, never any of the prompt itself. |
-| `sha256` | `ID` | yes | no | the `sha256` syntax | The SHA-256 of the know-how half exactly as the model is sent it, server-shipped guidance included, so two sessions on the same prompt carry the same value and an edit that keeps the length still changes it. A digest confirms a guess only where every other byte of the half is known, which is the case of a persona copied from a known template with one personal slot: personal facts belong in memory, which is never digested. |
+| `sha256` | `ID` | yes | no | the `sha256` syntax | The SHA-256 of the know-how half's canonical rendering, server-shipped guidance included: the bytes the half contributes whenever another block follows it. A lone persona is sent untrimmed when nothing follows it, and its leading whitespace is not part of the fingerprint. Two sessions on the same prompt carry the same value, and an edit that keeps the length still changes it. A digest confirms a guess only where every other byte of the half is known, which is the case of a persona copied from a known template with one personal slot: personal facts belong in memory, which is never digested. |
 
 ### `llm_retry`
 

@@ -292,7 +292,7 @@ being implemented, and neither is a deviation from the plan.
   key every deployment holds. No keyed code had been written here when
   that arrived, so nothing was reverted.
 - **Restored on Rafael's decision** (`683722c5` on `main`) as an unkeyed SHA-256
-  of the know-how half as sent, exported as `vinga.prompt.sha256`: the
+  of the know-how half, exported as `vinga.prompt.sha256`: the
   content and telemetry ADR bars conversation text, far-side bytes and
   exception text, and operator configuration is none of those. It is
   built here exactly as the restored decision says, with its tests,
@@ -340,10 +340,11 @@ One, in how decision 2's position travels.
 
 - **Where the digest is taken.** `Sha256.of(text)` on the new value
   type is the one place a digest is computed (UTF-8, exactly as given),
-  and `_prompt_assembled` hands it `half.text` where the event is
-  built. A digest therefore cannot be built from anything but text, and
-  the type's syntax refuses anything but 64 lowercase hex characters
-  from any other caller.
+  and `_prompt_assembled` hands it `half.canonical` where the event is
+  built (first `half.text`; see the PR review below). A digest
+  therefore cannot be built from anything but text, and the type's
+  syntax refuses anything but 64 lowercase hex characters from any
+  other caller.
 - **The tests' home.** The production-path join tests live in
   `tests/unit/test_telemetry_spans.py` beside the tool-span fold tests,
   driving a real session (`session_for` with a scripted model) whose
@@ -498,6 +499,7 @@ Mutations, one run each, restored by copy-aside, copy-back and
 | Not in the plan: the provider's call id passed as the invocation (a credential-shaped id satisfies the invocation syntax) | killed: the no-leak sentinel |
 | Digest over the persona alone (`half.text.split("\n\n")[0]`) | killed: the MCP-text test and the exact-half test (the persona-edit test passes under it, as it must, since the persona is the half's first block) |
 | Not in the plan: `PROMPT_ATTRIBUTES`' `sha256` entry removed | killed: 3 turn-span tests |
+| After the PR review: the digest taken over raw `half.text` again instead of `half.canonical` | killed: `test_the_digest_is_of_the_half_as_sent_ahead_of_a_scope` |
 
 None survived.
 
@@ -590,3 +592,27 @@ in 1851.07s (0:30:51)` (the three tests in Discoveries) and, after
 their commit, `7701 passed, 19 skipped in 1521.05s (0:25:21)`; the
 integration lane was `349 passed in 824.15s (0:13:44)`. All `-n auto
 --dist loadfile`.
+
+### PR review
+
+One P2 from the external review of PR #581, accepted: the digest
+hashed the cached `half.text`, which for a lone persona keeps its
+leading whitespace, while `_assembled` lstrips that block once a scope
+block follows it. So personas `"   POET"` and `"POET"` sent the model
+byte-identical prompts in every round that reads memory and carried
+different digests. Resolution (the orchestrator's, within decision 3):
+the digest is of the half's canonical rendering, the bytes it
+contributes whenever another block follows it. `Assembled.canonical`
+in `runtime/prompt.py` is that rule's one home, derived by running
+`_assembled` with a stand-in block behind the prompt, so it cannot
+drift from the trimming; for a half of several blocks it is `text`
+exactly, and the one-block byte-equality pin in `_assembled` is
+unchanged, as is everything any prompt sends. The production-path
+regression drives both spellings with a remembered fact and asserts
+equal system strings, a digest equal to the SHA-256 of the know-how
+prefix the provider received, and equal digests; the raw-`half.text`
+mutation fails it. The live gate's digest is unaffected: its persona
+was one block with no leading whitespace, so its canonical rendering
+is its text. Code and test in `Digest the know-how half as it precedes
+a scope`; this wording in `Define the prompt digest by its canonical
+rendering`.
