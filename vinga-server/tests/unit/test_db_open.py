@@ -234,6 +234,44 @@ def test_a_database_that_is_not_there_refuses_the_same_way() -> None:
     assert str(caught.value) == UNREACHABLE
 
 
+@pytest.mark.parametrize(
+    ("settings", "password"),
+    [
+        pytest.param(
+            DatabaseConfig(host="vinga-no-such-host.invalid"),
+            None,
+            id="a-host-name-that-does-not-resolve",
+        ),
+        pytest.param(
+            DatabaseConfig(user="vinga_no_such_role_at_all"),
+            None,
+            id="a-role-the-instance-does-not-have",
+        ),
+        pytest.param(DatabaseConfig(), "not-the-password-9e21b4", id="a-wrong-password"),
+    ],
+)
+def test_every_other_connection_failure_is_the_same_sentence(
+    monkeypatch: pytest.MonkeyPatch, settings: DatabaseConfig, password: str | None
+) -> None:
+    """The rest of what the connection sentence lists, each driven at a
+    real instance: a host that is not there by name, and credentials it
+    does not accept. Every one of them is a connection this server could
+    not make, so each is told to check the five variables.
+
+    `.invalid` is the top-level domain reserved never to resolve, so the
+    name lookup fails at once rather than waiting on a resolver.
+    """
+    if password is not None:
+        monkeypatch.setenv("VINGA_DB_PASSWORD", password)
+
+    with pytest.raises(ConfigError) as caught:
+        open_database(settings)
+
+    assert str(caught.value) == UNREACHABLE
+    assert isinstance(caught.value, StorageError)
+    assert not isinstance(caught.value, DatabaseBusyError)
+
+
 # A schema the role may not create
 #
 # The one migration failure whose answer is a command rather than a
