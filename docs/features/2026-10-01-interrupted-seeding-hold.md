@@ -251,7 +251,9 @@ lets the held script run to the end either way.
   (`vinga_autogen_scratch`, `db/migrations/autogen.py`) and is made and
   dropped `with (force)`, so two lanes sharing one Postgres instance
   can drop it from under each other. The file passed alone afterwards
-  (`9 passed in 128.14s`).
+  (`9 passed in 128.14s`). Filed as #585 and fixed there: each run now
+  makes and drops a database of its own
+  ([`2026-10-01-autogen-scratch-name.md`](2026-10-01-autogen-scratch-name.md)).
 
 ## Files modified
 
