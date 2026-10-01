@@ -235,6 +235,24 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
    already fires per round, which is the reason `_prompt_assembled`'s
    docstring gives for keeping memory off `prompt_assembled`, so it
    holds and the docstring gains one sentence pointing here.
+7a. **A failed reply round carries it too.** A round that fails after
+   its request was assembled is the case where prompt size most often
+   matters (a context-length refusal), and today it emits
+   `provider_failed` instead of `llm_round`. So `ProviderFailed` gains
+   the same optional fields, populated only for an LLM-stage failure of
+   a reply round and absent for every other stage and for a recap. The
+   path: `reply_stream` gains a keyword carrying the round's memory
+   accounting, built once before the stream starts; it hands it to
+   `watched`, which passes it to `failed` beside the `invocation` it
+   already passes; `failed` hands it to `assembly.provider_failure`.
+   The first-token watchdog's retry re-sends arguments fixed before the
+   first attempt (`runtime/pipeline.py:1785-1792`), so a second-attempt
+   failure carries the same accounting, which is correct. The failed
+   `llm` span (`telemetry.py`'s `_provider_failed`) maps the same
+   attributes as decision 8. Tested: a provider failure after the
+   request was assembled, and a watchdog failure on the second
+   attempt, each carrying the accounting; an ASR and a TTS failure
+   carrying none.
 8. **The `llm` span carries it under the round's own names.**
    `vinga.llm.system.characters`, `vinga.llm.memory.characters`,
    `vinga.llm.system.sources.<provenance>`
@@ -486,6 +504,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
 4. **P2: Failed LLM requests lose all proposed per-round memory metadata.**
    **Evidence:** M2 adds fields only to `LlmRound` and threads them only through `reply_round_done` (`docs/plans/...`, lines 185–208). A stream failure emits `ProviderFailed` instead (`runtime/provider_watch.py:134-166,409-458`), and telemetry turns that into the actual failed `llm` span (`telemetry.py:2952-2990`). The existing LLM-content export deliberately finishes and attaches the failed request by invocation, but the planned memory accounting has no equivalent path. The proposed tests cover successful rounds and recaps only.
    **Plan should say instead:** Decide how reply memory accounting reaches an LLM `ProviderFailed` event and span, then name the required changes to `reply_stream`/`watched`/`failed` or an invocation-keyed staging mechanism. Test provider failure after request assembly and the second-watchdog failure.
+
+   *Resolution:* accepted. New decision 7a: `ProviderFailed` gains the same optional fields for an LLM-stage reply-round failure only, threaded `reply_stream` to `watched` to `failed` to `assembly.provider_failure` beside the invocation those already carry, and the failed `llm` span maps them. Tests cover a failure after assembly, a second-attempt watchdog failure, and ASR and TTS failures carrying none.
 
 5. **P2: Several schema decisions are still deferred to implementation.**
    **Evidence:** The plan leaves the tool-ID grammar “to be confirmed,” invocation requiredness conditional on later discovery, the source mapping type conditional on reading a pattern that already explicitly excludes memory, and integer versus decimal-string fact IDs undecided (`docs/plans/...`, lines 126–143, 191–200, 218–224). `PromptSources` confirms that its grammar is intentionally know-how-only (`events/values.py:1113-1138`), while `_as_attribute` currently strips integers from every sequence (`telemetry.py:896-917`). These choices determine the public event and OTLP schemas and cannot safely be implementation notes.
