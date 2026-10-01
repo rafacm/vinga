@@ -11,24 +11,34 @@ which is a hole the providers' own sanitizing cannot reach, so those
 tests drive the real SDK client through a mock transport and look at
 what came out the other end (#137). The database library is the same
 shape one level lower, and its payload sits at INFO rather than DEBUG
-(#124); what serves a device is covered where a real server can be run,
+(#124). uvicorn is the same shape again, with its handshake line at
+INFO: that is driven here through a real uvicorn and a stand-in
+application (#578), and what the server's own application lets through
+while it serves a device is covered where that application can be run,
 in `tests/integration/test_access_logs.py`.
 """
 
+import asyncio
+import contextlib
 import json
 import logging
 import os
 import subprocess
 import sys
 import textwrap
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import httpx
 import pytest
+import uvicorn
+import websockets
+from fastapi import FastAPI, WebSocket
 from openai import AsyncOpenAI
 from sqlalchemy import create_engine, text
 
-from vinga_server import logs
+from vinga_server import logs, serving
+from vinga_server.config import Config
 from vinga_server.config.models import DatabaseConfig, ServerConfig
 
 # Not a real credential, and shaped so a substring check for it cannot
@@ -309,6 +319,154 @@ def test_configure_applies_the_floor(restore_root_logger, restore_vendor_levels)
         assert logging.getLogger(name).level == floor
 
 
+# --- the line uvicorn writes for a websocket handshake (#578) ---------
+
+# Where upstream's convention puts a device's credential, and where a
+# browser has to: in the query of the upgrade request, percent-encoded
+# the way a client sends it. The sentinel itself is what a printed path
+# would carry.
+HANDSHAKE_PATH = f"/xiaozhi/v1/?device-id=aa:bb&authorization=Bearer%20{SENTINEL}"
+
+# Not the server's application, which needs a database to start, but
+# the two answers it gives a handshake, which are all that decides what
+# uvicorn prints: closed before the accept, which uvicorn answers 403
+# and which is how `ws.py` refuses a device; and accepted. A second
+# route raises before either, which is what an application failing
+# looks like from uvicorn.
+FAILURE = "the application failed before its handshake"
+
+
+def handshake_app() -> FastAPI:
+    app = FastAPI()
+
+    @app.websocket("/xiaozhi/v1/")
+    async def conversation(websocket: WebSocket) -> None:
+        if "authorization" not in websocket.headers:
+            await websocket.close()
+            return
+        await websocket.accept()
+        await websocket.close()
+
+    @app.websocket("/broken/")
+    async def broken(websocket: WebSocket) -> None:
+        raise RuntimeError(FAILURE)
+
+    return app
+
+
+@contextlib.asynccontextmanager
+async def uvicorn_serving() -> AsyncIterator[int]:
+    """A real uvicorn serving that application under the configuration a
+    deployment is served with (`serving.uvicorn_config`: its loggers
+    propagating to the root, the access log off), on an ephemeral port,
+    which is what this yields.
+
+    The client is quietened for the length of it: `websockets.client`
+    writes the request line it sends at DEBUG, and what is under test is
+    what the server prints. A line of the server's own is written once
+    uvicorn has stopped, for the reason `OWN_LINE` gives."""
+    served = serving.uvicorn_config(handshake_app(), Config())
+    served.host, served.port = "127.0.0.1", 0
+    server = uvicorn.Server(served)
+    task = asyncio.create_task(server.serve())
+    try:
+        while not server.started:
+            if task.done():
+                task.result()
+            await asyncio.sleep(0.01)
+        with logs.quieted(["websockets.client"], logging.WARNING):
+            yield server.servers[0].sockets[0].getsockname()[1]
+    finally:
+        server.should_exit = True
+        await task
+    logging.getLogger("vinga_server.ws").warning(OWN_LINE)
+
+
+async def handshake(port: int, path: str, **headers: str) -> int:
+    """One upgrade request, and the status it was answered with."""
+    try:
+        async with websockets.connect(
+            f"ws://127.0.0.1:{port}{path}", additional_headers=headers, open_timeout=10
+        ):
+            return 101
+    except websockets.InvalidStatus as refused:
+        return refused.response.status_code
+
+
+async def refused_then_accepted() -> None:
+    """The credential-carrying handshake twice, refused and then
+    accepted. The answers are asserted, so a test that finds nothing
+    printed knows uvicorn really did answer both."""
+    async with uvicorn_serving() as port:
+        assert await handshake(port, HANDSHAKE_PATH) == 403
+        assert await handshake(port, HANDSHAKE_PATH, Authorization="Bearer elsewhere") == 101
+
+
+@pytest.mark.parametrize("log_format", ["text", "json"])
+@pytest.mark.parametrize("level", ["INFO", "DEBUG"])
+async def test_a_handshake_query_is_printed_on_no_line(
+    level: str,
+    log_format: str,
+    capsys: pytest.CaptureFixture[str],
+    restore_root_logger,
+    restore_vendor_levels,
+) -> None:
+    """A credential in the query of an upgrade request, refused and
+    accepted, at the default level and the loudest, in both formats:
+    printed nowhere. Through `logs.configure`'s own handler and a real
+    uvicorn answering real handshakes, because what is claimed is that
+    the line uvicorn composes is not printed, and only a server that
+    composed it can say so."""
+    logs.configure(ServerConfig(log_level=level, log_format=log_format))
+
+    await refused_then_accepted()
+
+    out = printed(capsys)
+    assert OWN_LINE in out
+    assert SENTINEL not in out
+    # The whole line, and the client's address on it, not only the query.
+    assert "WebSocket" not in out
+
+
+async def test_without_the_floor_uvicorn_prints_the_query(
+    capsys: pytest.CaptureFixture[str], restore_root_logger, restore_vendor_levels
+) -> None:
+    """The load-bearing half: the same handshakes with uvicorn left to
+    inherit the server's level print the path with its query, on the
+    refused line and on the accepted one, which is what the test above
+    says is gone."""
+    logs.configure(ServerConfig(log_level="INFO"))
+    logging.getLogger("uvicorn.error").setLevel(logging.NOTSET)
+
+    await refused_then_accepted()
+
+    lines = [line for line in printed(capsys).splitlines() if SENTINEL in line]
+    assert [line.rsplit('" ', 1)[1] for line in lines] == ["403", "[accepted]"]
+
+
+async def test_what_uvicorn_says_above_info_still_reaches_the_log(
+    capsys: pytest.CaptureFixture[str], restore_root_logger, restore_vendor_levels
+) -> None:
+    """What the floor keeps, one line from each level above it: a
+    request that would not parse, which uvicorn reports at WARNING, and
+    an exception in the application, which it reports at ERROR with the
+    traceback. An operator needs both whatever else was held back."""
+    logs.configure(ServerConfig(log_level="INFO"))
+
+    async with uvicorn_serving() as port:
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.write(b"not an http request\r\n\r\n")
+        assert (await reader.read()).startswith(b"HTTP/1.1 400")
+        writer.close()
+        await writer.wait_closed()
+        assert await handshake(port, "/broken/") == 500
+
+    out = printed(capsys)
+    assert "Invalid HTTP request received." in out
+    assert "Exception in ASGI application" in out
+    assert f"RuntimeError: {FAILURE}" in out
+
+
 # --- what the database library is allowed to say (#124) --------------
 
 
@@ -479,7 +637,7 @@ def test_an_external_asgi_runner_gets_the_floor_too(tmp_path: Path) -> None:
     # already effectively was rather than at its INFO floor: without a
     # level to hold them to, the floor makes nothing louder than the
     # process already is.
-    assert levels == {"uvicorn.error": "INFO", "sqlalchemy": "WARNING", "openai": "WARNING"}
+    assert levels == {"uvicorn.error": "WARNING", "sqlalchemy": "WARNING", "openai": "WARNING"}
 
 
 def test_the_boot_that_reads_the_configuration_is_inside_the_floor(tmp_path: Path) -> None:

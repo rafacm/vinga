@@ -83,13 +83,12 @@ _STANDARD_ATTRIBUTES = frozenset(
 # floor and is owned by the module that connects with it. A floor here
 # as well would be a second rule to keep in agreement with that one.
 #
-# INFO for the SDKs and for uvicorn, because what each says at that
-# level is worth keeping and carries none of it: uvicorn's startup and
-# per-connection lines, and the SDKs' notice that a request is being
+# INFO for the SDKs, because what they say at that level is worth
+# keeping and carries none of it: the notice that a request is being
 # retried, which names the endpoint's path and not its query.
 #
-# The HTTP clients and the database are at WARNING, because INFO is
-# where a payload of somebody else's composing starts.
+# The HTTP clients, uvicorn and the database are at WARNING, because
+# INFO is where a payload of somebody else's composing starts.
 #
 # httpx writes one line per request at INFO: the method, the full URL
 # with its query string, and the status. Nothing in it is secret today,
@@ -106,6 +105,40 @@ _STANDARD_ATTRIBUTES = frozenset(
 # worth retaining. httpcore writes nothing above DEBUG today and is held
 # with httpx, so that whatever it ever starts saying at INFO about the
 # same connection is held to the same rule.
+#
+# uvicorn writes one line per websocket handshake at INFO, accepted or
+# refused: the client's address and port, and the request path with its
+# query string verbatim, as `<address>:<port> - "WebSocket <path>?<query>"
+# [accepted]` or `... 403`. No client of this server puts anything in
+# that query, since the firmware and the simulator authenticate in a
+# header. But upstream's convention carries the bearer token there, a
+# browser client has to, because a browser cannot set the header, and a
+# refused handshake prints it as readily as an accepted one, before any
+# code here has run. The address goes with it, which is metadata the
+# access log was turned off for alongside the rest.
+#
+# What holding uvicorn at WARNING loses is the rest of its INFO: the
+# process id at start and at finish, the lifespan's start and
+# completion, `Uvicorn running on <scheme>://<host>:<port>`, the
+# shutdown notices, and the `connection open` and `connection rejected`
+# the websockets library writes through the same logger. A connection's
+# outcome is the events' to say (`auth_rejected`, `session_open`,
+# `session_rejected`); the onboarding banner names the origin a device
+# reaches, which is the listen address unless `server.public_url` or
+# `server.websocket_url` names a better one; and the drain announces the
+# shutdown. What no line says any more is the process id, which is the
+# runtime's to report, and the bind address of a deployment that names
+# its public origin, which is in its own configuration. What the floor
+# keeps is everything at WARNING and above: a bind that failed, a
+# lifespan that failed, an exception in the application with its
+# traceback, a request that would not parse.
+#
+# A filter cutting the query and the address out of the handshake line
+# and keeping the rest was priced against this and rejected. It reads
+# uvicorn's message template and argument order, which three websocket
+# implementations each spell out for themselves, and it needs a pin
+# that fails when an upgrade moves them, all to keep lines nothing here
+# reads.
 #
 # sqlalchemy, because an engine whose logger is enabled for INFO echoes
 # every statement with the parameters bound to it, and those parameters
@@ -127,7 +160,7 @@ VENDOR_LOG_FLOORS: Mapping[str, int] = {
     "httpx": logging.WARNING,
     "openai": logging.INFO,
     "sqlalchemy": logging.WARNING,
-    "uvicorn.error": logging.INFO,
+    "uvicorn.error": logging.WARNING,
 }
 
 
