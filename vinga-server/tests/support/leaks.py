@@ -52,9 +52,16 @@ values. `links` is the traversal under it, every exception reachable
 through `__cause__` and `__context__` both, for a caller that renders
 the exceptions its own way and should not spell a weaker walk to reach
 them.
+
+And `unfloored`, which takes a guard away rather than reading what got
+past one: a test about a request's own logging boundary has to see the
+library narrate when the boundary is gone, and the process-wide floor
+in `logs.py` would otherwise answer in the boundary's place.
 """
 
+import contextlib
 import logging
+from collections.abc import Iterable, Iterator
 
 import pytest
 
@@ -139,3 +146,38 @@ def _held(exc: BaseException) -> str:
         if hasattr(value, "__dict__"):
             parts += [f"{inner_name}={inner!r}" for inner_name, inner in vars(value).items()]
     return "\n".join(parts)
+
+
+@contextlib.contextmanager
+def unfloored(names: Iterable[str]) -> Iterator[None]:
+    """These loggers as a process that lifted the floor off them would
+    have them: the server's floor (`logs.VENDOR_LOG_FLOORS`) does not
+    name them for the length of the block, and each inherits whatever
+    level the capture sets.
+
+    For a test whose subject is a request's own boundary (`logs.quieted`
+    around a call whose URL is a secret) rather than the floor. The floor
+    holds httpx and httpcore at WARNING wherever it has been applied, and
+    a command's entry point applies it before the request, so with the
+    floor in place a removed boundary is one nothing notices. A process
+    that raised the libraries by name, which is the diagnosis `logs.py`
+    leaves open, is the state where the boundary is all that is left,
+    and this puts the loggers in it.
+
+    Their own levels are reset as well as the floor dropped, and put
+    back afterwards, because a level an earlier test left on one of them
+    is process state that would otherwise answer in the boundary's place
+    too, and does so only in some orders.
+    """
+    held = tuple(names)
+    floors = logs.VENDOR_LOG_FLOORS
+    levels = {name: logging.getLogger(name).level for name in held}
+    logs.VENDOR_LOG_FLOORS = {name: floor for name, floor in floors.items() if name not in held}
+    for name in held:
+        logging.getLogger(name).setLevel(logging.NOTSET)
+    try:
+        yield
+    finally:
+        logs.VENDOR_LOG_FLOORS = floors
+        for name, level in levels.items():
+            logging.getLogger(name).setLevel(level)

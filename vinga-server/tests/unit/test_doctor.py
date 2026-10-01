@@ -39,7 +39,7 @@ import pytest
 from fastapi import FastAPI, Request, Response
 from fastapi.testclient import TestClient
 
-from tests.support.leaks import chain
+from tests.support.leaks import chain, unfloored
 from vinga_server import __version__, doctor
 from vinga_server.app import create_app
 from vinga_server.config import Config
@@ -996,11 +996,21 @@ def test_the_probe_leaves_the_supplied_url_in_no_log_record(
     The real client against a real address, because the seam the rest of
     this file replaces would put a different library's logger in the
     way and prove nothing about the shipped one.
+
+    With the server's floor off both libraries and their own levels
+    cleared, so the probe's boundary is the only thing between httpx and
+    the record: a level an earlier case left on either one would
+    otherwise hold the line back in its place, and did, in this file's
+    own order.
     """
     body = DESCRIBE.format(
         websocket="ws://127.0.0.1:8003/xiaozhi/v1/", url="http://127.0.0.1:8003"
     )
-    with _served(body) as address, caplog.at_level(logging.INFO):
+    with (
+        unfloored(("httpx", "httpcore")),
+        _served(body) as address,
+        caplog.at_level(logging.INFO),
+    ):
         assert doctor.main([f"{address}/xiaozhi/ota/{SECRET_SEGMENT}/"]) == 0
 
     assert SECRET_SEGMENT not in caplog.text
