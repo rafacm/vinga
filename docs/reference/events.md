@@ -743,7 +743,7 @@ session %s: heard %.2f s of speech
 | `duration_s` | `FLOAT` | yes | no |  |  |
 | `asr_ms` | `INT` | no | no |  | What the transcription cost, measured where it was run. An interrupting turn carries the latency the barge-in gate measured for its own confirmation, since that is the transcription this turn is answering. |
 | `language` | `ID` | no | no | the `language` syntax | Only engines that detected carry this. |
-| `language_confidence` | `FLOAT` | no | no |  |  |
+| `language_confidence` | `FLOAT` | no | no |  | Filled only by an engine that detected the language rather than being pinned to one: faster-whisper reports it when neither a configured language nor the session's earlier detection pinned the call. The OpenAI-compatible transcription provider never reports one, so an alert on this field never fires there. |
 | `submitted_ms` | `INT` | no | no |  | How much audio the ear was actually SENT, summed over every request this transcription made, which is what a vendor bills on. Not `duration_s`: a clip under an endpoint's floor is never sent and says 0, a clip an echo retry hears twice says twice its length, and an engine that cannot answer leaves it out rather than saying none was sent. Milliseconds because a whole number is what a backend's usage accounting will take, and rounding a short acknowledgement to whole seconds would overstate it by more than its own length. |
 | `provider` | `IDENTIFIER` | no | no |  |  |
 | `type` | `IDENTIFIER` | no | no |  |  |

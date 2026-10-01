@@ -1593,7 +1593,17 @@ class Heard(Variant):
     language: LanguageTag | Absent = value(
         default=ABSENT, note="Only engines that detected carry this."
     )
-    language_confidence: Real | Absent = value(default=ABSENT)
+    language_confidence: Real | Absent = value(
+        default=ABSENT,
+        note=(
+            "Filled only by an engine that detected the language rather "
+            "than being pinned to one: faster-whisper reports it when "
+            "neither a configured language nor the session's earlier "
+            "detection pinned the call. The OpenAI-compatible "
+            "transcription provider never reports one, so an alert on "
+            "this field never fires there."
+        ),
+    )
     submitted_ms: Whole | Absent = value(
         default=ABSENT,
         note=(
