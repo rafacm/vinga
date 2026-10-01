@@ -43,6 +43,7 @@ lifecycle sits behind one sanitized answer: a fixed sentence, no
 exception, exit 1.
 """
 
+import secrets
 import sys
 
 import psycopg
@@ -79,11 +80,36 @@ MAINTENANCE_FAILED = (
     "with `docker compose up -d --wait`"
 )
 
-# The scratch database, made and dropped around one run. Named rather
-# than random so a run that was killed leaves one findable thing behind
-# and the next run reuses the name. Public because the lane asserts it
-# is gone afterwards, which is what makes the command repeatable.
-SCRATCH = "vinga_autogen_scratch"
+# What every scratch database's name starts with. Each run makes its own,
+# this prefix and a random suffix, and drops it in the same `finally`.
+#
+# It used to be one fixed name, dropped `with (force)` before the run and
+# after it, so that a killed run's leftover was reused by the next. That
+# also meant two runs against one instance dropped each other's database
+# mid-use, since `force` terminates the connections first, and two unit
+# lanes from two worktrees sharing the development instance is ordinary.
+# A name of a run's own makes the force safe: it only ever reaches a
+# database that run created.
+#
+# The price is that a run killed before its `finally` (SIGKILL, a lost
+# connection) leaves its database behind, and nothing removes it
+# automatically. A sweep by prefix was considered and rejected: from the
+# catalog alone a dead run's database and a live one are the same thing,
+# and dropping a live one is the bug this name exists to fix. A leftover
+# is found by the prefix and dropped by hand, from any database but
+# itself:
+#
+#     select datname from pg_database where datname like 'vinga\_autogen\_scratch\_%';
+#     drop database "vinga_autogen_scratch_<suffix>" with (force);
+#
+# Public so a caller can recognize the name `generate` hands back.
+SCRATCH_PREFIX = "vinga_autogen_scratch_"
+
+# Random bytes in the suffix, rendered as twice as many lowercase hex
+# digits. Sixty-four bits keeps two runs from ever meeting on one name,
+# and the whole name (38 characters) is a lowercase unquoted identifier
+# well inside Postgres's 63-byte limit, so nothing truncates it.
+_SUFFIX_BYTES = 8
 
 # Where `CREATE DATABASE` and `DROP DATABASE` are issued from. Never the
 # scratch database itself, which cannot be dropped from a connection
@@ -92,8 +118,13 @@ SCRATCH = "vinga_autogen_scratch"
 _MAINTENANCE = "postgres"
 
 
-def generate(message: str, chain: StoreChain) -> None:
-    """Autogenerate one revision against a scratch database at head.
+def generate(message: str, chain: StoreChain) -> str:
+    """Autogenerate one revision against a scratch database at head, and
+    answer the name of that database, which no longer exists by the time
+    the name is returned. It is answered because it is chosen here, per
+    run, and a caller that wants to confirm nothing outlived the run can
+    only ask about the one database that run made: asking about every
+    name with the prefix would also see a concurrent run's.
 
     The connection is resolved ONCE, here, and the two databases this
     command touches are derived from it by replacing the database
@@ -112,28 +143,35 @@ def generate(message: str, chain: StoreChain) -> None:
     in its authority and can carry another in its query.
     """
     configured = connection_url(load_file_config().server.database)
-    scratch = configured.set(database=SCRATCH)
+    name = SCRATCH_PREFIX + secrets.token_hex(_SUFFIX_BYTES)
     maintenance = psycopg.connect(
         _dsn(configured.set(database=_MAINTENANCE)), autocommit=True
     )
     try:
-        maintenance.execute(f'drop database if exists "{SCRATCH}" with (force)')
-        maintenance.execute(f'create database "{SCRATCH}"')
-        engine = open_url(scratch, chain)
+        # No drop first: a name nobody else holds has nothing to clear,
+        # and if it ever did exist, failing here is the right answer,
+        # since the database would be somebody else's.
+        maintenance.execute(f'create database "{name}"')
         try:
-            with engine.connect() as connection:
-                config = AlembicConfig()
-                config.set_main_option("script_location", str(chain.migrations))
-                # The same handover `upgrade_to_head` makes, which is
-                # the only way env.py runs at all.
-                config.attributes["connection"] = connection
-                config.attributes["chain"] = chain
-                command.revision(config, message=message, autogenerate=True)
+            engine = open_url(configured.set(database=name), chain)
+            try:
+                with engine.connect() as connection:
+                    config = AlembicConfig()
+                    config.set_main_option("script_location", str(chain.migrations))
+                    # The same handover `upgrade_to_head` makes, which is
+                    # the only way env.py runs at all.
+                    config.attributes["connection"] = connection
+                    config.attributes["chain"] = chain
+                    command.revision(config, message=message, autogenerate=True)
+            finally:
+                engine.dispose()
         finally:
-            engine.dispose()
+            # Only reached once this run's own `create` succeeded, so
+            # the force can only ever terminate this run's connections.
+            maintenance.execute(f'drop database if exists "{name}" with (force)')
     finally:
-        maintenance.execute(f'drop database if exists "{SCRATCH}" with (force)')
         maintenance.close()
+    return name
 
 
 def _dsn(url: URL) -> str:
