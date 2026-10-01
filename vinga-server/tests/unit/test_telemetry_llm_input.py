@@ -50,8 +50,6 @@ def _open(invocation: str) -> tuple[object, object, object]:
         GEN_AI_OUTPUT_MESSAGES: '[{"parts":[],"role":"assistant"}]',
         LLM_TOOLS: "[]",
         LLM_TOOL_CHOICE: "none",
-        OBSERVATION_INPUT: '[{"parts":[],"role":"user"}]',
-        OBSERVATION_OUTPUT: '[{"parts":[],"role":"assistant"}]',
     }
     assert telemetry.stage_llm_content(SESSION, invocation, attributes)
     return telemetry, memory, emitted
@@ -68,8 +66,10 @@ def test_content_enriches_the_actual_generation_span() -> None:
     assert llm.attributes[GEN_AI_SYSTEM_INSTRUCTIONS]
     assert llm.attributes[GEN_AI_INPUT_MESSAGES]
     assert llm.attributes[GEN_AI_OUTPUT_MESSAGES]
-    assert llm.attributes[OBSERVATION_INPUT]
-    assert llm.attributes[OBSERVATION_OUTPUT]
+    # The fold adds no backend alias of its own: Langfuse maps the
+    # conventions above, and an input alias would outrank that mapping.
+    assert OBSERVATION_INPUT not in llm.attributes
+    assert OBSERVATION_OUTPUT not in llm.attributes
     assert not any(span.name == "llm_input" for span in spans)
 
 

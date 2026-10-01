@@ -24,8 +24,6 @@ from vinga_server.telemetry import (
     GEN_AI_SYSTEM_INSTRUCTIONS,
     LLM_TOOL_CHOICE,
     LLM_TOOLS,
-    OBSERVATION_INPUT,
-    OBSERVATION_OUTPUT,
     Telemetry,
 )
 
@@ -159,7 +157,6 @@ class LlmInputExport:
                 GEN_AI_INPUT_MESSAGES: input_json,
                 LLM_TOOLS: tools_json,
                 LLM_TOOL_CHOICE: choice,
-                OBSERVATION_INPUT: input_json,
             }
             size = _size(attributes)
         except Exception:  # noqa: BLE001 - content export never breaks a reply
@@ -217,7 +214,6 @@ class LlmInputExport:
             attributes = {
                 **staged.attributes,
                 GEN_AI_OUTPUT_MESSAGES: output,
-                OBSERVATION_OUTPUT: output,
             }
             if _size(attributes) > self._max_content_bytes:
                 self._failed(staged.session, LlmInputExportFailure.DROPPED)
