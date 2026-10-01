@@ -394,6 +394,12 @@ TURN_LEGS = "vinga.turn.legs"
 GEN_AI_SYSTEM_INSTRUCTIONS = "gen_ai.system_instructions"
 GEN_AI_INPUT_MESSAGES = "gen_ai.input.messages"
 GEN_AI_OUTPUT_MESSAGES = "gen_ai.output.messages"
+# And for one tool call, on the `tool` span that ran it (#533): what the
+# model asked with and what it was handed back. The conventions' keys,
+# which the backend maps to the tool observation's input and output
+# itself, so no backend-specific copy is written beside them.
+GEN_AI_TOOL_CALL_ARGUMENTS = "gen_ai.tool.call.arguments"
+GEN_AI_TOOL_CALL_RESULT = "gen_ai.tool.call.result"
 LLM_TOOLS = "vinga.llm.tools"
 LLM_TOOL_CHOICE = "vinga.llm.tool_choice"
 
@@ -2055,6 +2061,12 @@ class Telemetry:
         self._retained: dict[str, _Exported] = {}
         self._retained_lock = threading.Lock()
         self._llm_content: dict[str, dict[str, Any]] = {}
+        # A tool call's content, keyed by the two values its `tool_call`
+        # event carries: the round that asked for it and its place in
+        # that round's list, so two calls of one round never take each
+        # other's pair. Held under the generation map's lock, since both
+        # are staged and taken by the same two parties.
+        self._tool_content: dict[tuple[str, int], dict[str, Any]] = {}
         self._llm_content_lock = threading.Lock()
         self._held_turns: dict[tuple[str, str], _HeldTurn] = {}
         self._omitted_turns: dict[tuple[str, str], None] = {}
@@ -2270,6 +2282,21 @@ class Telemetry:
         """Release a snapshot whose operation cannot consume it."""
         with self._llm_content_lock:
             self._llm_content.pop(invocation, None)
+
+    def stage_tool_content(
+        self, session: str, invocation: str, position: int, attributes: dict[str, Any]
+    ) -> bool:
+        """Stage one tool call's allowlisted content for its `tool_call` fold.
+
+        Staged immediately before that event is emitted and taken by its
+        fold within the same emission, so a slot never waits on anything
+        else; refused, like a generation's, where there is no live trace
+        to write it onto."""
+        if not self._accepting or session not in self._sessions:
+            return False
+        with self._llm_content_lock:
+            self._tool_content[(invocation, position)] = dict(attributes)
+        return True
 
     def settle_turn(
         self, session: str, utterance: str, attributes: dict[str, Any] | None
@@ -2521,6 +2548,7 @@ class Telemetry:
         self._release_held_turns()
         with self._llm_content_lock:
             self._llm_content.clear()
+            self._tool_content.clear()
 
     # --- the fold -----------------------------------------------------
 
@@ -3124,6 +3152,13 @@ class Telemetry:
         with self._llm_content_lock:
             return self._llm_content.pop(invocation, {})
 
+    def _take_tool_content(self, invocation: Any, position: Any) -> dict[str, Any]:
+        """Consume the one tool pair addressed by a `tool_call` event."""
+        if not isinstance(invocation, str) or not isinstance(position, int):
+            return {}
+        with self._llm_content_lock:
+            return self._tool_content.pop((invocation, position), {})
+
     def _tool_span(self, session: str, emission: Emission) -> None:
         """One tool call, as a child of the turn that asked for it.
 
@@ -3152,11 +3187,20 @@ class Telemetry:
         a call that ran, and answering that with the one carrier the
         backend ingests nothing of would be this milestone's own finding
         thrown away for the one case where it is hardest to see.
+
+        With `export_llm_input` on, the call's arguments and result were
+        staged under this event's own `invocation` and `position` just
+        before it was emitted (#533). They are taken here on every path,
+        the one without a trace included, where they are discarded, so
+        nothing outlives the emission that staged it.
         """
+        payload = emission.payload
+        content = self._take_tool_content(
+            payload.get("invocation"), payload.get("position")
+        )
         trace = self._sessions.get(session)
         if trace is None:
             return
-        payload = emission.payload
         end = self._at(emission)
         span = self._tracer.start_span(
             TOOL_SPAN,
@@ -3165,6 +3209,7 @@ class Telemetry:
                 **trace.identity,
                 GEN_AI_OPERATION: EXECUTE_TOOL,
                 **_attributes(payload, TOOL_ATTRIBUTES),
+                **content,
             },
             start_time=_before(end, payload.get("duration_ms")),
         )

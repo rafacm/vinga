@@ -1,4 +1,4 @@
-"""Canonical generation content is folded onto the actual LLM span."""
+"""Canonical content is folded onto the actual LLM or tool span."""
 
 from collections.abc import Iterator
 
@@ -7,6 +7,7 @@ import pytest
 from tests.support.telemetry import (
     SESSION,
     Clock,
+    call_tool,
     close_session,
     exporting,
     finish_reply,
@@ -24,6 +25,8 @@ from vinga_server.telemetry import (
     GEN_AI_INPUT_MESSAGES,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_SYSTEM_INSTRUCTIONS,
+    GEN_AI_TOOL_CALL_ARGUMENTS,
+    GEN_AI_TOOL_CALL_RESULT,
     LLM_TOOL_CHOICE,
     LLM_TOOLS,
     OBSERVATION_INPUT,
@@ -169,3 +172,93 @@ def test_a_late_generation_event_discards_its_orphaned_snapshot(
     finish_reply(emitted)
     llm = named(finished(telemetry, memory), "llm")
     assert GEN_AI_INPUT_MESSAGES not in llm.attributes
+
+
+# --- a tool call's content, on the tool span that ran it (#533) --------
+
+
+def _tool_content(arguments: str, result: str) -> dict[str, str]:
+    return {GEN_AI_TOOL_CALL_ARGUMENTS: arguments, GEN_AI_TOOL_CALL_RESULT: result}
+
+
+def _tool_spans(spans: list) -> dict[int, dict]:
+    return {
+        span.attributes["vinga.tool.call.position"]: dict(span.attributes)
+        for span in spans
+        if span.name == "tool"
+    }
+
+
+def test_tool_content_rides_the_span_at_its_own_position() -> None:
+    """Two calls of one round, staged out of order: each span takes the
+    pair staged under its own invocation and position, and a third key
+    nobody emits is never read."""
+    invocation = "6" * 32
+    telemetry, memory = exporting()
+    emitted = session_events(Clock(), telemetry)
+    open_session(emitted)
+    start_turn(emitted)
+    assert telemetry.stage_tool_content(
+        SESSION, invocation, 1, _tool_content('{"query":"coffee"}', "second")
+    )
+    assert telemetry.stage_tool_content(
+        SESSION, invocation, 0, _tool_content('{"query":"tea"}', "first")
+    )
+    call_tool(emitted, name="recall", invocation=invocation, position=0)
+    call_tool(emitted, name="recall", invocation=invocation, position=1)
+    finish_reply(emitted)
+
+    tools = _tool_spans(finished(telemetry, memory))
+    assert tools[0][GEN_AI_TOOL_CALL_ARGUMENTS] == '{"query":"tea"}'
+    assert tools[0][GEN_AI_TOOL_CALL_RESULT] == "first"
+    assert tools[1][GEN_AI_TOOL_CALL_ARGUMENTS] == '{"query":"coffee"}'
+    assert tools[1][GEN_AI_TOOL_CALL_RESULT] == "second"
+    # The conventions' keys alone: Langfuse maps them to the tool
+    # observation's input and output, and an alias would outrank that.
+    assert all(OBSERVATION_INPUT not in tool for tool in tools.values())
+    assert all(OBSERVATION_OUTPUT not in tool for tool in tools.values())
+
+
+def test_a_tool_span_without_staged_content_carries_none() -> None:
+    telemetry, memory = exporting()
+    emitted = session_events(Clock(), telemetry)
+    open_session(emitted)
+    start_turn(emitted)
+    call_tool(emitted, invocation="7" * 32, position=0)
+    finish_reply(emitted)
+
+    (tool,) = _tool_spans(finished(telemetry, memory)).values()
+    assert GEN_AI_TOOL_CALL_ARGUMENTS not in tool
+    assert GEN_AI_TOOL_CALL_RESULT not in tool
+
+
+def test_tool_content_is_refused_without_a_live_session_trace() -> None:
+    telemetry, _ = exporting()
+
+    assert not telemetry.stage_tool_content(
+        SESSION, "8" * 32, 0, _tool_content("{}", "must not survive")
+    )
+
+
+def test_a_tool_call_with_no_trace_discards_its_staged_content() -> None:
+    """Staged while the trace was live, folded after it closed: the fold
+    takes the slot on its no-trace path too, so the same join keys on a
+    later span find nothing."""
+    invocation = "9" * 32
+    telemetry, memory = exporting()
+    emitted = session_events(Clock(), telemetry)
+    open_session(emitted)
+    start_turn(emitted)
+    assert telemetry.stage_tool_content(
+        SESSION, invocation, 0, _tool_content("{}", "must not survive")
+    )
+    close_session(emitted)
+    call_tool(emitted, invocation=invocation, position=0)
+
+    open_session(emitted)
+    start_turn(emitted)
+    call_tool(emitted, invocation=invocation, position=0)
+    finish_reply(emitted)
+
+    (tool,) = _tool_spans(finished(telemetry, memory)).values()
+    assert GEN_AI_TOOL_CALL_RESULT not in tool
