@@ -125,9 +125,11 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
    gains two fields, and `TOOL_ATTRIBUTES` maps them:
    - `call_id: ToolCallId | Absent`, exported as the conventions'
      `gen_ai.tool.call.id`. `ToolCallId` is a new `MachineId`-style
-     value type with a tight syntax (`[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`,
-     to be confirmed against the three id shapes above and widened only
-     with a reason). The provider's id is far-side bytes, and an
+     value type with the syntax `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`,
+     which admits the three id shapes above (`call_...`, `toolu_...`,
+     `call_{index}`) and refuses whitespace, control characters, quotes
+     and anything over 128 characters. Settled here; widening it is a
+     later change with a reason. The provider's id is far-side bytes, and an
      emission whose value fails its type is refused whole, so the
      builder in `events/assembly.py` passes `ABSENT` for an id that
      does not match rather than letting the event fail: a malformed id
@@ -135,12 +137,14 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
    - `invocation: InvocationId`, the server-minted id of the round
      that asked for the call, exported under the same
      `LLM_INVOCATION_ID` key the `llm` span uses, so the join is one
-     key equal on both spans. One fact, one attribute name. Required,
-     not optional: every dispatched call came from a round, and the
-     implementer confirms that by reading where `reserve` and dispatch
-     run (`runtime/pipeline.py:1838`, `runtime/tool_execution.py`). If
-     some path dispatches without a round in hand, the field becomes
-     `| Absent` and the path is named in the implementation doc.
+     key equal on both spans. One fact, one attribute name. Required:
+     the event has one production emission path,
+     `ToolExecution._run_one` (`runtime/tool_execution.py:527-537`),
+     reached only through `ToolExecution.run`, whose one caller is the
+     reply loop (`runtime/pipeline.py:1924`) with the round's
+     `invocation` in scope. `run` gains an `invocation` keyword and
+     passes it down; the implementer's inventory confirms the single
+     call site with an untruncated `git grep -n`.
    Both are metadata: an opaque provider id and a server-minted id.
    They also reach the retained `tool_call` log line, which is the
    catalog's single home for the event; neither appears in the
@@ -220,10 +224,12 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
      `memory`, `device`), from the `Assembled` actually sent, restricted
      to those three provenances, with a block that is not present absent
      from the mapping rather than `0` (so a memory-off round with a
-     device record reports its `device` block); reusing
-     `PromptSources` if its grammar admits the three tokens, otherwise
-     a closed mapping type whose keys are exactly those three, decided
-     by reading `SOURCE_KEY_PATTERN` (`events/values.py:502`);
+     device record reports its `device` block). The type is
+     `MemorySources`, a new closed mapping value type whose keys are
+     exactly the three provenance constants of `runtime/prompt.py` and
+     whose values are character counts; not `PromptSources`, whose
+     grammar is deliberately know-how-only
+     (`events/values.py:1113-1138` and `prompt_assembled`'s note);
    - `memory_facts: FactIds`, the agent and device ids in reading
      order, as a new `ID_LIST`-kind value type modeled on `SessionIds`
      (`events/values.py:772`), whose elements are positive integers.
@@ -264,12 +270,13 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
    know-how half once per agent, and the same name meaning "half" on
    one span and "whole" on another is the ambiguity this repository's
    one-fact-one-name rule exists to prevent. Ids are exported as
-   integers if the attribute fold can carry an integer sequence; since
-   `_as_attribute` keeps only strings (`telemetry.py:914-917`), the
-   implementer either widens the `SEQUENCE` shape to admit the
-   element type the declaration names, or renders ids as decimal
-   strings, choosing by what keeps the declaration the single rule and
-   recording which.
+   integers. `_as_attribute` keeps only the strings of a sequence today
+   (`telemetry.py:914-917`), so its `SEQUENCE` arm is widened to keep a
+   sequence that is homogeneously `str` or homogeneously `int` (a
+   `bool` is not an `int` here), after the declared value type has
+   accepted it as now, and to export nothing for a mixed one. A
+   regression test pins that a `SessionIds` value exports exactly as
+   it does today.
 9. **Bounded.** The id list is bounded by `CORE_LINES` plus the
    device scope's own cap, both named constants in `memory/store.py`;
    the implementer states the bound in the catalog note and adds a
@@ -510,6 +517,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
 5. **P2: Several schema decisions are still deferred to implementation.**
    **Evidence:** The plan leaves the tool-ID grammar “to be confirmed,” invocation requiredness conditional on later discovery, the source mapping type conditional on reading a pattern that already explicitly excludes memory, and integer versus decimal-string fact IDs undecided (`docs/plans/...`, lines 126–143, 191–200, 218–224). `PromptSources` confirms that its grammar is intentionally know-how-only (`events/values.py:1113-1138`), while `_as_attribute` currently strips integers from every sequence (`telemetry.py:896-917`). These choices determine the public event and OTLP schemas and cannot safely be implementation notes.
    **Plan should say instead:** Commit to a separate closed memory-source mapping, integer-valued `FactIds`, and a sequence fold that preserves homogeneous integers after the declared value type accepts them, with a regression test that existing string `SessionIds` remain unchanged. Also settle the accepted tool-ID grammar and make invocation definitively required on the only production emission path.
+
+   *Resolution:* accepted. Settled in the plan: a new closed `MemorySources` mapping (not `PromptSources`, which is know-how-only by design); integer `FactIds` with the `SEQUENCE` fold widened to homogeneous `str` or `int` sequences, `bool` excluded, mixed exporting nothing, and a `SessionIds` regression pin; the tool-call id grammar `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`; and `invocation` required, with the single production emission path named (`_run_one` via `run`, one caller at `pipeline.py:1924`).
 
 6. **P2: Removing the first-token event creates an unhandled upgrade break.**
    **Evidence:** Decision 1 deletes the existing precisely timestamped `first_token` event (`docs/plans/...`, lines 113–123), although issue #533 §4 proposed an attribute alongside the event and its common notes call the changes backward compatible. Current OTLP consumers can query or visualize that event (`telemetry.py:2994-3032`). Repository grep can find tests and documentation, but cannot inventory dashboards, alerts, or downstream collectors in running deployments. The changelog entry records the change but supplies no compatibility period or migration guidance.
