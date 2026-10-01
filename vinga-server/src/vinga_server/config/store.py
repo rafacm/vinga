@@ -1340,9 +1340,22 @@ class ConfigStore:
         """One advisory-locked transaction around the read, the check
         and the persist, with every database failure normalized: the
         library's own message carries the statement and its bound
-        parameters, so it is never quoted, and the refusal is raised
-        outside the handler so that the exception holding them is not
-        attached to it either."""
+        parameters, so it is never quoted, and the refusal leaves with
+        neither link of its chain set, so the exception holding them is
+        not attached to it either.
+
+        Raising after the handler is not enough to get that here, which
+        is why the links are cut by hand below. This is a generator
+        context manager: a failure inside the caller's `with` block is
+        thrown into it by the `with`'s own `__exit__`, which is handling
+        that failure while the generator runs, so the failure is still
+        the exception being handled when the refusal is raised, however
+        far below the `except` the `raise` sits, and Python makes it the
+        refusal's `__context__`. The raise cannot be moved out of that
+        handling without moving it into every caller's `with`, so the
+        refusal is caught as it is raised, its context cleared, and
+        re-raised bare, which chains nothing (#586).
+        """
         problem: ConfigError | None = None
         try:
             with self._engine.begin() as connection:
@@ -1352,7 +1365,12 @@ class ConfigStore:
         except SQLAlchemyError as exc:
             problem = _database_problem(exc)
         if problem is not None:
-            raise problem
+            try:
+                raise problem
+            except ConfigError as refused:
+                refused.__cause__ = None
+                refused.__context__ = None
+                raise
 
 
 def read_live_binding(engine: Engine, mac: str) -> LiveBinding:

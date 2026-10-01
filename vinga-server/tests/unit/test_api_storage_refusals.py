@@ -287,8 +287,14 @@ def test_a_refused_configuration_write_logs_the_class_and_nothing_planted(
     already (#530) and its log line named only `StorageError`, so the
     log said less than the response did. The planted value is in the
     trigger's words, which the driver's error and the SQLAlchemy error
-    wrapping it both carry, and in the statement's bound body."""
-    with refusing_provider_writes():
+    wrapping it both carry, and in the statement's bound body.
+
+    The refusal's chain as well, which is the case that needed it: the
+    store translates the failure inside a generator context manager,
+    where a plain raise after the handler still takes the failure as its
+    `__context__`, because the generator runs while the `with` it serves
+    is handling that failure."""
+    with refusing_provider_writes(), watching(api) as caught:
         with caplog.at_level(logging.DEBUG):
             answer = client.put(
                 "/providers/llm/claude", json={"type": "anthropic", "model": PLANTED}
@@ -299,13 +305,7 @@ def test_a_refused_configuration_write_logs_the_class_and_nothing_planted(
     assert said.getMessage().endswith("(ProgrammingError)")
     assert said.exc_info is None
     _nothing_planted(answer, caplog)
-    # The refusal's own chain is not asserted here, because it does not
-    # hold, and did not before this change: the store translates the
-    # failure in a generator context manager (`ConfigStore`'s
-    # transaction), and an exception raised while `__exit__` handles
-    # another takes that one as its `__context__` wherever in the
-    # generator it is raised. Nothing that answers or logs a refusal
-    # walks the chain today; it is recorded on #586's pull request.
+    _severed(caught)
 
 
 @pytest.mark.parametrize(
