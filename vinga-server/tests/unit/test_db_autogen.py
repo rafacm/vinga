@@ -249,10 +249,18 @@ def test_two_runs_at_once_each_keep_their_own_scratch_database(
 
     def held_revision(config, **options):
         # The first run's thread pauses here, with its connection to its
-        # scratch database open, until the second run has finished.
+        # scratch database open, until the second run has finished. A
+        # wait that ran out would let the first compare while the second
+        # was still going, which is a race and not the interleaving this
+        # case claims, so it fails the first run instead: the failure is
+        # kept as its outcome and the assertion below reports it.
         if threading.current_thread().name == "first":
             holding.set()
-            second_done.wait(timeout=600)
+            if not second_done.wait(timeout=600):
+                raise AssertionError(
+                    "the second run outlived the hold, so the first compared "
+                    "before the second had finished and the interleaving was not met"
+                )
         return compare(config, **options)
 
     monkeypatch.setattr(command, "revision", held_revision)
