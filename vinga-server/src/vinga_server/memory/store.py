@@ -90,6 +90,7 @@ from vinga_server.db import (
     LOCK_TIMEOUT_MS,
     StoreChain,
     advisory_key,
+    failure_class,
     is_busy,
     open_at,
     read_engine,
@@ -1377,7 +1378,9 @@ def purge(connection: Connection, threads: Sequence[str]) -> Purged:
         # owns, the same pair every other write here answers with: a
         # contended delete is retryable and says so.
         problem = (
-            DatabaseBusyError(PURGE_BUSY) if is_busy(exc) else StorageError(PURGE_FAILED)
+            DatabaseBusyError(PURGE_BUSY)
+            if is_busy(exc)
+            else StorageError(PURGE_FAILED, cause=failure_class(exc))
         )
     raise problem
 
@@ -1467,7 +1470,9 @@ def rename_owner(
         # By class and never by message, through the one classifier `db`
         # owns, exactly as `purge` above answers.
         problem = (
-            DatabaseBusyError(RENAME_BUSY) if is_busy(exc) else StorageError(RENAME_FAILED)
+            DatabaseBusyError(RENAME_BUSY)
+            if is_busy(exc)
+            else StorageError(RENAME_FAILED, cause=failure_class(exc))
         )
     if problem is not None:
         raise problem

@@ -117,6 +117,7 @@ from vinga_server.db import (
     LOCK_TIMEOUT_MS,
     StoreChain,
     advisory_key,
+    failure_class,
     is_busy,
     open_at,
     take_the_chain_lock,
@@ -619,7 +620,9 @@ def rename_agent(connection: Connection, old: str, new: str) -> int:
         # owns, which is the pair every other write in this package
         # answers with.
         problem = (
-            DatabaseBusyError(RENAME_BUSY) if is_busy(exc) else StorageError(RENAME_FAILED)
+            DatabaseBusyError(RENAME_BUSY)
+            if is_busy(exc)
+            else StorageError(RENAME_FAILED, cause=failure_class(exc))
         )
     if problem is not None:
         raise problem
