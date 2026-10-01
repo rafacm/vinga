@@ -138,5 +138,7 @@ The 16 KiB cases were run on agentpi (`getconf PAGESIZE` 16384). The
 ## Files modified
 
 - `vinga-server/tests/unit/test_event_docs.py`
+- `vinga-server/tests/census/command-spellings.txt` (regenerated: the
+  docstring no longer quotes `config openapi`, its last mention)
 - `changelog.d/584-pipe-test-page-size.md`
 - `docs/features/2026-10-01-pipe-test-page-size.md`
