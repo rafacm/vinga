@@ -153,18 +153,27 @@ async def test_a_builtin_and_a_name_nobody_publishes_are_reported_as_they_are(
     # what they say rather than by that order.
     called = emitted(caplog, "tool_call")
     assert len(called) == 4
+    # Every call names the round that asked for it, and all four came
+    # from the first one (#533).
+    asking = fields_of(emitted(caplog, "llm_round")[0])["invocation"]
     base = {
         "event": "tool_call",
         "session": said,
         "device": POET_MAC,
         "agent": "poet",
         "conversation": thread,
+        "invocation": asking,
     }
     remembered = [one for one in called if fields_of(one).get("is_error") is False]
     (ran,) = remembered
     assert ran.msg == TOOL_CALL
     assert_timed(ran, (said, "builtin", ' "remember"', ""))
-    assert payload(ran) == base | {"source": "builtin", "tool": "remember", "is_error": False}
+    assert payload(ran) == base | {
+        "source": "builtin",
+        "tool": "remember",
+        "is_error": False,
+        "position": 0,
+    }
 
     refused_builtin = [
         one for one in called if one not in remembered and fields_of(one)["source"] == "builtin"
@@ -177,17 +186,24 @@ async def test_a_builtin_and_a_name_nobody_publishes_are_reported_as_they_are(
         "tool": "remember",
         "is_error": True,
         "error": "tool_error",
+        "position": 2,
     }
 
-    nobody = [one for one in called if fields_of(one)["source"] == "unknown"]
+    # The two it may not name sat at the model's places 1 and 3, and
+    # either may finish first, so each is matched by its place.
+    nobody = sorted(
+        (one for one in called if fields_of(one)["source"] == "unknown"),
+        key=lambda one: payload(one)["position"],
+    )
     assert len(nobody) == 2
-    for one in nobody:
+    for place, one in zip((1, 3), nobody, strict=True):
         assert one.msg == TOOL_CALL
         assert_timed(one, (said, "unknown", "", " and failed"))
         assert payload(one) == base | {
             "source": "unknown",
             "is_error": True,
             "error": "tool_error",
+            "position": place,
         }
 
     builtin_line, unknown_line = unparseable(caplog)
@@ -222,6 +238,7 @@ async def test_a_server_tool_is_reported_by_its_entry(
 
     base = {"session": said, "device": POET_MAC, "agent": "poet", "conversation": thread}
     called = emitted(caplog, "tool_call")
+    asking = fields_of(emitted(caplog, "llm_round")[0])["invocation"]
     (ran,) = [one for one in called if fields_of(one)["is_error"] is False]
     assert ran.msg == TOOL_CALL
     assert_timed(ran, (said, "mcp", ' from entry "tools"', ""))
@@ -230,6 +247,8 @@ async def test_a_server_tool_is_reported_by_its_entry(
         "source": "mcp",
         "entry": "tools",
         "is_error": False,
+        "invocation": asking,
+        "position": 0,
     }
     (refused,) = [one for one in called if fields_of(one)["is_error"] is True]
     assert_timed(refused, (said, "mcp", ' from entry "tools"', " and failed"))
@@ -239,6 +258,8 @@ async def test_a_server_tool_is_reported_by_its_entry(
         "entry": "tools",
         "is_error": True,
         "error": "tool_error",
+        "invocation": asking,
+        "position": 1,
     }
 
     (line,) = unparseable(caplog)
