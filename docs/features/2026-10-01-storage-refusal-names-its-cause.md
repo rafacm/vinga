@@ -208,9 +208,9 @@ surface and is left for its own issue.
   (`ProgrammingError`), and `test_conversations_boot.py`'s newer-build
   case, which asserted the revision was absent and now asserts the
   install-pointing sentence naming it. The rest (tier closure, boot
-  recovery, `config check`) drive a port nothing listens on and keep
-  the connection sentence, and `test_config_refusals.py` asserts a busy
-  refusal is not it.
+  recovery, the `check` command's suite) drive a port nothing listens
+  on and keep the connection sentence, and `test_config_refusals.py`
+  asserts a busy refusal is not it.
 - New cases: a real non-connection failure through `open_at` names
   `CommandError`; a real stamp moved to `9999_from_a_newer_build` is
   told `UNKNOWN_REVISION` naming it and is not `UNREACHABLE`; four
