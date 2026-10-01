@@ -494,9 +494,11 @@ def round_done(
     invocation: str = "11111111111111111111111111111111",
     purpose: str = "reply",
     cache_read_input_tokens: int | None = None,
+    prompt: Any = None,
 ) -> float:
     """One `llm_round`, built through the events' own assembly so the
-    quartet's absence rules are the real ones.
+    quartet's absence rules are the real ones. `prompt` is a reply
+    round's accounting, a `RoundPrompt`, where the case is about it.
 
     `unbuilt` is a provider the registry never stamped (a test's, a
     fixture's), which the catalog answers with four absences rather than
@@ -518,6 +520,7 @@ def round_done(
             invocation,
             purpose,
             cache_read_input_tokens=cache_read_input_tokens,
+            prompt=prompt,
         )
     )
 
@@ -541,9 +544,11 @@ def provider_failed(
     unbuilt: bool = False,
     invocation: str | None = None,
     purpose: str | None = None,
+    prompt: Any = None,
 ) -> float:
     """A provider call that failed, at whichever stage, naming whichever
-    entry it ran on."""
+    entry it ran on, with a failed reply round's `prompt` accounting
+    where the case is about it."""
     provider = FakeProvider(identity=None if unbuilt else (identity or Identity()))
     raised = TimeoutError() if failure is None else failure
     return events.emit(
@@ -560,6 +565,7 @@ def provider_failed(
                 else invocation
             ),
             purpose="reply" if stage == "llm" and purpose is None else purpose,
+            prompt=prompt,
         )
     )
 

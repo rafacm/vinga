@@ -89,7 +89,9 @@ from tests.support.telemetry import (
 )
 from tests.support.wire import speech_pcm
 from vinga_server.events.values import ReplyOutcome
+from vinga_server.memory.store import PromptMemory
 from vinga_server.providers import AsrResult
+from vinga_server.runtime import prompt
 from vinga_server.telemetry import (
     _QUIETING,
     ASR_SPAN,
@@ -1264,6 +1266,131 @@ def test_a_round_carries_its_cached_input_beside_the_input_it_is_part_of() -> No
     assert cached.attributes["gen_ai.usage.cache_read.input_tokens"] == 1536
     assert unsaid.attributes["gen_ai.usage.input_tokens"] == 2000
     assert "gen_ai.usage.cache_read.input_tokens" not in unsaid.attributes
+
+
+# --- a reply round's prompt, on its span (#533) ------------------------
+
+ROUND_PROMPT_KEYS = (
+    "vinga.llm.system.characters",
+    "vinga.llm.memory.characters",
+    "vinga.llm.memory.sources.state",
+    "vinga.llm.memory.sources.memory",
+    "vinga.llm.memory.sources.device",
+    "vinga.llm.memory.facts",
+    "vinga.llm.memory.fact_count",
+)
+
+
+def a_round_prompt(facts: tuple[int, ...] | None) -> prompt.RoundPrompt:
+    """All three scope blocks, so every per-block attribute has a value
+    and the total has two joins between blocks to count."""
+    return prompt.RoundPrompt(
+        prompt.with_scopes(
+            prompt.know_how("POET"),
+            PromptMemory(
+                state="- scene: the tavern",
+                agent="- a fact\n- another",
+                device="- a note",
+                agent_ids=(4, 9),
+                device_ids=(2,),
+            ),
+        ),
+        facts=facts,
+    )
+
+
+def the_round(spans: list) -> dict:
+    (llm,) = spans_of(LLM_SPAN, spans)
+    return {key: llm.attributes[key] for key in ROUND_PROMPT_KEYS if key in llm.attributes}
+
+
+def sizes_of(sent: prompt.RoundPrompt) -> dict:
+    return {
+        "vinga.llm.system.characters": len(sent.text),
+        "vinga.llm.memory.characters": sent.memory_characters,
+        **{
+            f"vinga.llm.memory.sources.{provenance}": characters
+            for provenance, characters in sent.memory_sources.items()
+        },
+    }
+
+
+# The three states of the fact list, and what each puts on the span:
+# the ids and their count, an empty list and a count of zero, and
+# neither where the round read no memory.
+FACT_STATES = [
+    ((4, 9, 2), {"vinga.llm.memory.facts": (4, 9, 2), "vinga.llm.memory.fact_count": 3}),
+    ((), {"vinga.llm.memory.facts": (), "vinga.llm.memory.fact_count": 0}),
+    (None, {}),
+]
+
+
+@pytest.mark.parametrize(("facts", "listed"), FACT_STATES)
+def test_a_round_carries_its_prompt_under_the_round_s_own_names(
+    facts: tuple[int, ...] | None, listed: dict
+) -> None:
+    """Integers in the id list, so a backend filters on the number the
+    store addresses a fact by, and a count beside it, since a backend
+    can filter on a number and not on an array's length. The sizes are
+    there in every state, because the prompt was sent in every state."""
+    sent = a_round_prompt(facts)
+    telemetry, memory = exporting()
+    events = a_turn(Clock(), telemetry)
+
+    round_done(events, prompt=sent)
+    finish_reply(events)
+    close_session(events)
+
+    assert the_round(finished(telemetry, memory)) == sizes_of(sent) | listed
+    assert sizes_of(sent)["vinga.llm.memory.sources.state"] > 0
+
+
+@pytest.mark.parametrize(("facts", "listed"), FACT_STATES)
+def test_a_failed_round_carries_the_prompt_it_was_sending(
+    facts: tuple[int, ...] | None, listed: dict
+) -> None:
+    sent = a_round_prompt(facts)
+    telemetry, memory = exporting()
+    events = a_turn(Clock(), telemetry)
+
+    provider_failed(events, stage="llm", failure=ConnectionRefusedError(), prompt=sent)
+    finish_reply(events, outcome=ReplyOutcome.FAILED, sentences=0)
+    close_session(events)
+
+    assert the_round(finished(telemetry, memory)) == sizes_of(sent) | listed
+
+
+def test_a_recap_and_an_unaccounted_failure_carry_no_prompt_attributes() -> None:
+    telemetry, memory = exporting()
+    events = a_turn(Clock(), telemetry)
+
+    round_done(events, round_=None, purpose="recap", invocation="ab" * 16)
+    provider_failed(events, stage="llm", failure=ConnectionRefusedError())
+    finish_reply(events, outcome=ReplyOutcome.FAILED, sentences=0)
+    close_session(events)
+
+    for llm in spans_of(LLM_SPAN, finished(telemetry, memory)):
+        assert not [key for key in llm.attributes if key in ROUND_PROMPT_KEYS]
+
+
+def test_a_prompt_with_every_scope_at_its_cap_is_still_exported() -> None:
+    """Decision 9's bound, on the span: seventy ids, the agent block's
+    forty and the device scope's thirty, leave whole, in order, with
+    their count."""
+    from vinga_server.memory.store import CORE_LINES, DEVICE_LINES
+
+    ids = tuple(range(1, CORE_LINES + DEVICE_LINES + 1))
+    sent = prompt.RoundPrompt(a_round_prompt(()).sent, facts=ids)
+    telemetry, memory = exporting()
+    events = a_turn(Clock(), telemetry)
+
+    round_done(events, prompt=sent)
+    finish_reply(events)
+    close_session(events)
+
+    carried = the_round(finished(telemetry, memory))
+    assert carried["vinga.llm.memory.facts"] == ids
+    assert carried["vinga.llm.memory.fact_count"] == 70
 
 
 def test_a_stage_with_no_usage_gets_no_priced_spelling_either() -> None:

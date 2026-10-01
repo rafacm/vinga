@@ -84,6 +84,7 @@ from vinga_server.events.values import (
     PROVIDER_ENTRY_OPTIONAL,
     PROVIDER_ENTRY_REQUIRED,
     Kind,
+    MemorySources,
     PromptSources,
     ProviderEntries,
 )
@@ -693,6 +694,29 @@ def _prompt_attributes(payload: dict[str, Any]) -> dict[str, Any]:
     return attributes
 
 
+def _round_prompt_attributes(payload: dict[str, Any]) -> dict[str, Any]:
+    """A reply round's prompt accounting as the attributes its `llm`
+    span carries, or nothing at all.
+
+    The sizes and the ids through the declared-shape gate every other
+    attribute takes, and the per-block sizes through the catalog's own
+    value type, for the reason `_prompt_attributes` gives: the
+    provenance becomes part of an attribute NAME, and `MemorySources` is
+    what holds it to the three scope blocks.
+    """
+    attributes = _attributes(payload, ROUND_PROMPT_ATTRIBUTES)
+    facts = attributes.get(ROUND_PROMPT_ATTRIBUTES["memory_facts"])
+    if facts is not None:
+        attributes[MEMORY_FACT_COUNT] = len(facts)
+    try:
+        sources = MemorySources(payload.get("memory_sources")).carried()
+    except Exception:  # noqa: BLE001 - a payload nobody declared says nothing
+        return attributes
+    for provenance, characters in sources.items():
+        attributes[f"{MEMORY_SOURCES_PREFIX}.{provenance}"] = characters
+    return attributes
+
+
 def _entry_name(stage: str) -> str:
     """The attribute one stage's configured entry name is spelled under.
 
@@ -1095,6 +1119,35 @@ FAILED_PROVIDER_ATTRIBUTES = {
     "invocation": LLM_INVOCATION_ID,
     "purpose": LLM_PURPOSE,
 }
+
+# What a reply round's prompt held (#533), on the `llm` span of a round
+# that finished and of one that failed after its request was built.
+#
+# Under the round's own names and deliberately not the turn span's
+# `vinga.prompt.*`: those describe the know-how half once per agent,
+# and one name meaning the half on one span and the whole on another is
+# the ambiguity the one-fact-one-name rule exists to prevent. So the
+# whole prompt is `vinga.llm.system.characters`, what the scope blocks
+# added (joins included) is `vinga.llm.memory.characters`, and each
+# block is `vinga.llm.memory.sources.<provenance>`, the three scope
+# blocks only, with no `system.sources` children inviting a reader to
+# sum a partial inventory to the total.
+#
+# The fact ids are integers, the numbers the store addresses them by,
+# and their count rides beside them because a backend can filter on a
+# number and not on an array's length. The count is derived from the
+# list this table exported, so it is present exactly when the list is:
+# zero for a round that read memory and injected nothing, absent for a
+# round that read no memory at all.
+ROUND_PROMPT_ATTRIBUTES = {
+    "system_characters": "vinga.llm.system.characters",
+    "memory_characters": "vinga.llm.memory.characters",
+    "memory_facts": "vinga.llm.memory.facts",
+}
+
+MEMORY_SOURCES_PREFIX = "vinga.llm.memory.sources"
+
+MEMORY_FACT_COUNT = "vinga.llm.memory.fact_count"
 
 # The tool span, which is what a `tool_call` becomes instead of the
 # span event it used to be.
@@ -2993,6 +3046,7 @@ class Telemetry:
             # name matters most for: there is no model name on some of
             # these at all.
             attributes[GEN_AI_OPERATION] = CHAT
+            attributes.update(_round_prompt_attributes(payload))
             attributes.update(self._take_llm_content(payload.get("invocation")))
         span = self._tracer.start_span(
             LLM_SPAN if stage == LLM_STAGE else TTS_SPAN,
@@ -3036,6 +3090,7 @@ class Telemetry:
                 **self._context(trace, payload, states=LLM_STAGE),
                 GEN_AI_OPERATION: CHAT,
                 **_attributes(payload, LLM_ATTRIBUTES),
+                **_round_prompt_attributes(payload),
                 **self._take_llm_content(payload.get("invocation")),
             },
             start_time=start,
