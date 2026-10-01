@@ -165,9 +165,15 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
      passes it down; the implementer's inventory confirms the single
      call site with an untruncated `git grep -n`.
    - `position: Whole`, the zero-based index of the call in the list
-     the model returned for that round (`calls` in the reply loop,
-     before any partition of it), exported as
-     `vinga.tool.call.position`. With the invocation it names exactly
+     the model returned for that round (`calls` in the reply loop),
+     exported as `vinga.tool.call.position`. It is fixed by enumerating
+     `calls` BEFORE `_run_tools` partitions them into executable calls
+     and agent moves (`runtime/pipeline.py:2295`), and carried as an
+     immutable value with each execution candidate through
+     `_run_tools`, `ToolExecution.run`, `_run_one`, `_tool_called` and
+     the three assembly builders; enumerating anywhere after the
+     partition would number the executable list instead and silently
+     close the gaps a move leaves. With the invocation it names exactly
      one call: the content export renders a round's tool calls in that
      order, which the implementer confirms against
      `llm_input_export.py` and pins with a test that the n-th
@@ -416,7 +422,9 @@ M1:
 - A tool span carries the invocation id equal to the requesting `llm`
   span's and its position in that round; two calls to the same entry
   in one round differ by position, and two rounds' first calls differ
-  by invocation. With content export on, the n-th exported `tool_call`
+  by invocation. A round of executable calls on both sides of an
+  agent move emits positions that keep the move's gap (0 and 2, not 0
+  and 1). With content export on, the n-th exported `tool_call`
   part of a round is the call whose span carries position n.
 - The no-leak sentinel: a provider call id that is credential-shaped
   and syntactically clean (`sk_live_` followed by 24 alphanumerics) is
@@ -459,7 +467,7 @@ M2:
 first. Mutations, one run each (straight-line logic), reported in the
 implementation doc: M1, the `LLM_ATTRIBUTES` entry removed; the
 position taken from the partitioned list instead of the model's
-(the same-entry-twice test must fail); the digest computed as a plain SHA-256 (the public-hash sentinel
+(the move-gap test must fail); the digest computed as a plain SHA-256 (the public-hash sentinel
 must fail);
 the invocation taken from the wrong round. M2, `_core`'s kept ids
 replaced by `_newest`'s read ids (the byte-cap test must fail); the
@@ -592,6 +600,8 @@ Reviewed 2026-10-01 by openai/gpt-5.6-sol, thinking high via codex CLI 0.156.1, 
    *Resolution:* accepted. Decision 7 now splits the two kinds of field: the sizes describe the prompt actually sent and are present on every completed reply round, memory on or off, so a device block carrying the live record is reported either way; the fact list is present (possibly empty) wherever the round read memory and absent where memory is switched off, and a failed read yields an empty list because the model saw no fact. The memory-off and failed-read tests are rewritten to match.
 
    *Resolution:* accepted, by the first alternative. The premise was wrong: the know-how half holds `server_instructions:` and `server_prompt:` blocks an MCP server supplied. Decision 3 now digests only the operator-authored blocks (`persona`, `fragment:`, `instructions:`), classified by provenance kind with any future kind excluded by default, and exports it as `vinga.prompt.authored.sha256` so the name says what it covers. MCP-supplied text stays visible only as sizes. The tests add the sentinel the finding asks for: a low-entropy value planted in `ServerInstructions` text changes no exported digest, and the mutation that digests the whole half must fail it.
+
+   *Resolution:* accepted. Decision 2 fixes the position by enumerating `calls` before `_run_tools` partitions them, and carries it immutably through `_run_tools`, `ToolExecution.run`, `_run_one`, `_tool_called` and the builders. A new test puts executable calls on both sides of an agent move and asserts the gap survives (0 and 2), and the mutation now targets that test, which the same-entry case could not expose.
 
 3. **P2: Fact IDs do not provide the stable historical join the plan claims.**
    **Evidence:** The plan says IDs let a trace join back to the local store and answer which facts produced an output (`docs/plans/...`, lines 32–40 and 176–184). Existing facts are mutable under the same ID (`memory/store.py:983-1025`), are deleted by cap pruning (`memory/store.py:1924-1971`), and can be permanently or operator-deleted; the observability contract explicitly says facts last only until corrected and that API deletion is hard deletion (`docs/architecture/observability-surfaces.md`, Memory, lines 183–196). A later lookup can therefore return changed text or no row at all.
