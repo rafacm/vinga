@@ -277,7 +277,13 @@ def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
     )
 
     seeding = subprocess.Popen(
-        _with_sigint("SIG_DFL", ["sh", str(SMOKE / "seed.sh")]),
+        # Launched the way the failure this case once had was: with
+        # SIGINT ignored, as a runner started in the background has it,
+        # whatever this run inherited. Every run then reproduces that
+        # condition, a foreground CI run included, and the reset step
+        # inside it is what the case depends on rather than an accident
+        # of how pytest was started.
+        _with_sigint("SIG_IGN", _with_sigint("SIG_DFL", ["sh", str(SMOKE / "seed.sh")])),
         env=environment,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
