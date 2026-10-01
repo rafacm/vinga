@@ -372,7 +372,7 @@ Measured at `c277d023` (`main`'s head on 2026-10-01).
   shows none of them. Under the parity rule that is a gap, and a
   larger one than this plan: it needs a shape decision (zero-length
   child spans, or attributes on the span the event belongs to) for
-  nineteen events. Raised with Rafael as a follow-up issue, not
+  nineteen events. Filed as #576 on 2026-10-01, not
   folded in. Counted at `c277d023` with a script over `catalog()`
   against the `_folds` table, reproduced in the implementation doc.
 - **Langfuse's own time-to-first-token field**
