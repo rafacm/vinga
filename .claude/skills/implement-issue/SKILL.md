@@ -391,8 +391,24 @@ decisions and recorded deviations, and a Verification section as a
 task list with honestly checked and unchecked boxes; an unchecked
 box carries a note saying why it is not yet verifiable; and the
 Attribution line under "Attribution", extended with each review
-round's reviewer as the rounds land. Substitute
-the PR number into the plan's milestone tick once the PR exists.
+round's reviewer as the rounds land.
+
+The order after `gh pr create` is fixed, because the step in the
+middle is the one that gets skipped:
+
+1. `gh pr create` prints the PR number.
+2. **Name the PR in the plan before anything reads the branch.** The
+   implementer ticked the milestone "PR TBD", since no number existed
+   yet; replace it with the linked number in one small commit
+   ("Name Mn's pull request in the plan") and push it. Confirm with
+   `git grep -n "PR TBD" docs/plans/<plan>.md`, which must show no
+   line for this milestone. The #496 run skipped this on all four of
+   its PRs, and every one of the four review rounds then spent a
+   finding on it, which is a fix round paid for a substitution the
+   orchestrator had in hand the moment the PR existed.
+3. Start the external review round, in parallel with the first CI
+   run (below).
+
 **Start the external review round as soon as the PR is pushed, in
 parallel with its first CI run.** A reviewer reads the diff and not the
 run, so the two have no ordering between them; serializing them spent
