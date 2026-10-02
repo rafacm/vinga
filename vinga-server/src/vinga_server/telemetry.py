@@ -2067,10 +2067,13 @@ class Telemetry:
         # other's pair. Held under the generation map's lock, since both
         # are staged and taken by the same two parties.
         self._tool_content: dict[tuple[str, int], dict[str, Any]] = {}
-        # The keys whose pair a `tool_call` fold actually wrote onto a
-        # span, until the stager settles them: what lets the export
-        # count a pair as exported only once it was consumed.
-        self._tool_attached: set[tuple[str, int]] = set()
+        # The keys whose pair a fold actually wrote onto a span, until
+        # the stager settles them: what lets the export count a pair as
+        # exported only once it was consumed. One set for both kinds,
+        # since they are settled by one rule: a generation's key is its
+        # invocation and a tool call's the (invocation, position) pair,
+        # so the two never meet in it.
+        self._attached: set[str | tuple[str, int]] = set()
         self._llm_content_lock = threading.Lock()
         self._held_turns: dict[tuple[str, str], _HeldTurn] = {}
         self._omitted_turns: dict[tuple[str, str], None] = {}
@@ -2282,6 +2285,18 @@ class Telemetry:
             self._llm_content[invocation] = dict(attributes)
         return True
 
+    def settle_llm_content(self, invocation: str) -> bool:
+        """Whether the `llm_round` or `provider_failed` fold wrote the
+        pair staged under this invocation onto its `llm` span, releasing
+        whatever is left of it either way.
+
+        The generation's half of the rule `settle_tool_content` states,
+        and the same implementation: called by the stager right after
+        the round's closing event is emitted, which folds synchronously,
+        so a slot still held here is one that emission never delivered
+        and is discarded now rather than at shutdown (#588)."""
+        return self._settle(self._llm_content, invocation)
+
     def discard_llm_content(self, invocation: str) -> None:
         """Release a snapshot whose operation cannot consume it."""
         with self._llm_content_lock:
@@ -2312,13 +2327,25 @@ class Telemetry:
         stopped accepting), and it is discarded here rather than left
         for shutdown; a slot the untraced path took was discarded there
         and attached nowhere. Only a fold that wrote it answers True."""
-        key = (invocation, position)
+        return self._settle(self._tool_content, (invocation, position))
+
+    def _settle(self, slots: dict[Any, dict[str, Any]], key: str | tuple[str, int]) -> bool:
+        """Release one staged slot and answer whether a fold attached
+        it, for either kind: the one rule both settle calls state."""
         with self._llm_content_lock:
-            self._tool_content.pop(key, None)
-            if key in self._tool_attached:
-                self._tool_attached.discard(key)
+            slots.pop(key, None)
+            if key in self._attached:
+                self._attached.discard(key)
                 return True
             return False
+
+    def _attached_to_span(self, key: str | tuple[str, int], content: dict[str, Any]) -> None:
+        """Record that a fold wrote the pair staged under `key` onto the
+        span it just ended, for the stager's settle to find. A fold that
+        took nothing wrote nothing, and records nothing."""
+        if len(content) > 0:
+            with self._llm_content_lock:
+                self._attached.add(key)
 
     def settle_turn(
         self, session: str, utterance: str, attributes: dict[str, Any] | None
@@ -2571,7 +2598,7 @@ class Telemetry:
         with self._llm_content_lock:
             self._llm_content.clear()
             self._tool_content.clear()
-            self._tool_attached.clear()
+            self._attached.clear()
 
     # --- the fold -----------------------------------------------------
 
@@ -3094,10 +3121,14 @@ class Telemetry:
         if stage not in {LLM_STAGE, TTS_STAGE}:
             self._span_event(session, emission)
             return
+        # Taken on every path, the one without a trace included, where
+        # it is discarded, so nothing outlives the emission it was
+        # staged for.
+        content = (
+            self._take_llm_content(payload.get("invocation")) if stage == LLM_STAGE else {}
+        )
         trace = self._sessions.get(session)
         if trace is None:
-            if stage == LLM_STAGE:
-                self._take_llm_content(payload.get("invocation"))
             return
         end = self._at(emission)
         spoken = _attributes(
@@ -3115,7 +3146,7 @@ class Telemetry:
             # these at all.
             attributes[GEN_AI_OPERATION] = CHAT
             attributes.update(_round_prompt_attributes(payload))
-            attributes.update(self._take_llm_content(payload.get("invocation")))
+            attributes.update(content)
         span = self._tracer.start_span(
             LLM_SPAN if stage == LLM_STAGE else TTS_SPAN,
             context=self._within(trace.turn if trace.turn is not None else trace.span),
@@ -3124,6 +3155,7 @@ class Telemetry:
         )
         span.set_status(self._failed)
         span.end(end_time=end)
+        self._attached_to_span(payload.get("invocation"), content)
         if stage == TTS_STAGE:
             trace.tts_failures_awaiting_stream_end += 1
 
@@ -3147,11 +3179,18 @@ class Telemetry:
         only asked for a tool timed no spoken token and carries no
         attribute, which is a fact about the round rather than a missing
         measurement.
+
+        With `export_llm_input` on, the round's request and output were
+        staged under this event's `invocation` just before it was
+        emitted. They are taken here on every path, the one without a
+        trace included, where they are discarded, and only a pair this
+        fold wrote onto the span is recorded as attached for the
+        stager's settle (#588).
         """
         payload = emission.payload
+        content = self._take_llm_content(payload.get("invocation"))
         trace = self._sessions.get(session)
         if trace is None:
-            self._take_llm_content(payload.get("invocation"))
             return
         end = self._at(emission)
         span = self._tracer.start_span(
@@ -3162,11 +3201,12 @@ class Telemetry:
                 GEN_AI_OPERATION: CHAT,
                 **_attributes(payload, LLM_ATTRIBUTES),
                 **_round_prompt_attributes(payload),
-                **self._take_llm_content(payload.get("invocation")),
+                **content,
             },
             start_time=_before(end, payload.get("duration_ms")),
         )
         span.end(end_time=end)
+        self._attached_to_span(payload.get("invocation"), content)
 
     def _take_llm_content(self, invocation: Any) -> dict[str, Any]:
         """Consume the one snapshot addressed by a generation event."""
@@ -3239,11 +3279,7 @@ class Telemetry:
         if payload.get("is_error") is True:
             span.set_status(self._failed)
         span.end(end_time=end)
-        if len(content) > 0:
-            with self._llm_content_lock:
-                self._tool_attached.add(
-                    (payload["invocation"], payload["position"])
-                )
+        self._attached_to_span((payload.get("invocation"), payload.get("position")), content)
 
     def _tts_span(self, session: str, emission: Emission) -> None:
         """One sentence's synthesis stream, named for what it is.
