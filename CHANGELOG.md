@@ -11,6 +11,10 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 - **The test that bounds the shutdown of a wedged telemetry exporter no longer fails intermittently at teardown** (#593). The bounded shutdown expires by design and leaves its release running on a thread of its own, which gives the SDK's logging quieting back only once the abandoned export is genuinely over. The test set the collector free and returned at once, so on a loaded runner the file's fixture counted the quieting lease before that thread had given it back and reported a leak that was not one. The test now waits for that one completion through the public `Telemetry.release`, on a thread of its own and under a bound, so a release that never finishes fails the test rather than hanging the lane. The fixture's assertion is unchanged, and an audit of the ten test files that check the same lease found no other case that ends with a release still running.
 
+### Security
+
+- **A failure's class name is repeated only when it is an identifier, everywhere the server says one** (#565). Twenty-eight log lines, command-line sentences and error messages name the class of an exception they caught, such as `session <id>: reply failed: <ClassName>`, `the drain failed (<ClassName>)` or the command line's `cannot reach <address>: the request did not complete (<ClassName>)`, and a class name can be any string, line breaks included, so a class named by a remote service could have written a second, forged line into the log. They now name a class only when its name is a Python identifier, which is the rule the structured events already kept, and say `an exception whose class name is not an identifier` in its place otherwise, the phrase the storage refusals have used since #530. Every ordinary class name reads exactly as it did. No dependency the server uses names classes from remote data today, so nothing was exploitable; this closes the path before one does.
+
 ## 2026-10-01
 
 ### Added
