@@ -190,9 +190,15 @@ def _sequence(value: object) -> Sequence[object]:
 # program the server neither ships nor versions, so an image built
 # before a rename would otherwise name a command the CLI beside it no
 # longer has. This side owns the grammar, so this side names the
-# command, and the spelling is then inside the command-spellings
-# census's reach: a rename that missed it fails a test in this
-# checkout rather than reaching an operator through an old image.
+# command, and a rename that missed it fails a test in this checkout
+# rather than reaching an operator through an old image.
+#
+# The test is not the command-spellings census, which reads the tree as
+# text and cannot see a sentence composed from `PROGRAM` (#553). It is
+# `test_every_command_a_table_advises_is_one_this_grammar_has`, the
+# guard `REMEDIES` has, holding every invocation `SPOKEN` quotes below
+# to a row of the registry. `SPOKEN` quotes this constant, so the guard
+# over the table is a guard over every other line that reads it too.
 #
 # One command crosses one of the four boundaries, and this is it. The
 # other three are crossed by a device asking, a process starting and a
