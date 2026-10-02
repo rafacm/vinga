@@ -2399,6 +2399,34 @@ def _advises_a_row(words: tuple[str, ...]) -> bool:
     return program == reach.PROGRAM and row is not None and tuple(rest[: len(row)]) == row
 
 
+# What the guard above must refuse and what it must still accept, held
+# directly, because the tables it reads are all valid and so cannot
+# show a refusal. Written as separate words rather than as a command
+# line, so that none of them is a spelling the command-spellings census
+# would read and hold to the registry.
+ADVISED_OR_NOT = [
+    ("a row with the address it takes", (reach.PROGRAM, "device", "show", "<mac>"), True),
+    ("a word between the program and a real verb", (reach.PROGRAM, "unheard-of", "diff"), False),
+    ("a real row under another program word", ("vinga-server", "diff"), False),
+    ("no row at all", (reach.PROGRAM, "unheard-of"), False),
+]
+
+
+@pytest.mark.parametrize(
+    ("words", "advised"),
+    [(words, advised) for _, words, advised in ADVISED_OR_NOT],
+    ids=[what for what, _, _ in ADVISED_OR_NOT],
+)
+def test_a_row_is_advised_only_from_the_word_after_the_program(
+    words: tuple[str, ...], advised: bool
+) -> None:
+    """The refusal half of the guard, which the real tables never
+    exercise: a verb further along does not make a span a command
+    (#594's review round), and nor does a row behind the wrong program
+    word."""
+    assert _advises_a_row(words) is advised
+
+
 def test_the_remedies_cover_the_whole_vocabulary() -> None:
     """A state with no line here would print the server's sentence
     alone, silently, which is the right answer for a token from a newer
