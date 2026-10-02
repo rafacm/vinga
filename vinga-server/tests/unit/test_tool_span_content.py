@@ -21,11 +21,12 @@ from typing import Any
 
 import pytest
 
-from tests.support.configs import POET_MAC, base_config
+from tests.support.configs import POET_MAC
 from tests.support.events import both_formats
 from tests.support.events import events as logged_events
+from tests.support.llm_input import Unnameable, traced
 from tests.support.providers import ScriptedLlm
-from tests.support.sessions import call, events_of, run_reply, session_for
+from tests.support.sessions import call, run_reply
 from tests.support.telemetry import (
     SESSION,
     Clock,
@@ -71,21 +72,10 @@ def _release() -> Iterator[None]:
     assert _QUIETING.held() == 0
 
 
-def _traced(telemetry: Any, rounds: list[Any], llm_input: Any) -> tuple[Any, Any]:
-    session = session_for(
-        base_config(), POET_MAC, {"poet": ScriptedLlm(rounds)}, llm_input=llm_input
-    )
-    events = events_of(session)
-    events.attach(telemetry.session_tap())
-    open_session(events, providers={}, conversations=session.session_conversations)
-    start_turn(events)
-    return session, events
-
-
 async def _spans(rounds: list[Any], *, export: bool) -> list[Any]:
     telemetry, memory = exporting()
     llm_input = LlmInputExport(telemetry=telemetry) if export else None
-    session, events = _traced(telemetry, rounds, llm_input)
+    session, events = traced(telemetry, ScriptedLlm(rounds), llm_input)
     await run_reply(session, "what do I drink")
     finish_reply(events)
     close_session(events)
@@ -204,9 +194,9 @@ async def test_with_the_setting_off_a_call_s_content_reaches_no_span_or_line(
         {"telemetry": {"enabled": True, "export_llm_input": False}}
     )
     llm_input = build_llm_input_export(off, telemetry=telemetry)
-    session, events = _traced(
+    session, events = traced(
         telemetry,
-        [[call("recall", query=CREDENTIAL_SHAPED)], "Done."],
+        ScriptedLlm([[call("recall", query=CREDENTIAL_SHAPED)], "Done."]),
         llm_input,
     )
 
@@ -226,10 +216,6 @@ async def test_with_the_setting_off_a_call_s_content_reaches_no_span_or_line(
 
 # --- a refused `tool_call` keeps nothing and claims nothing ------------
 
-# An exception whose class name is not an identifier, so the `tool_call`
-# event naming it as `error.type` refuses to build: the emission is
-# refused and nothing is dispatched to telemetry's fold.
-Unnameable = type("not a class name", (Exception,), {})
 INVOCATION = "0123456789abcdef0123456789abcdef"
 
 

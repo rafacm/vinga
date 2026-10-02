@@ -5,7 +5,7 @@ import logging
 
 import pytest
 
-from tests.support.llm_input import a_tool, a_turn, exporting
+from tests.support.llm_input import a_tool, a_turn, exporting, outcomes
 from vinga_server import llm_input_export as export_module
 from vinga_server.boundary import Reach
 from vinga_server.config import ConfigError
@@ -432,20 +432,6 @@ def test_a_lone_surrogate_is_escaped_without_escaping_the_reply() -> None:
 # --- a tool call's pair, for its tool span (#533) ----------------------
 
 
-def _outcomes(caplog: pytest.LogCaptureFixture) -> list[tuple[str, ...]]:
-    """Both outcome events in order, as the fields that distinguish them."""
-    return [
-        (
-            ("exported", record.rounds, record.tool_calls)
-            if record.event == "llm_input_exported"
-            else ("failed", record.kind, record.reason)
-        )
-        for record in caplog.records
-        if getattr(record, "event", None)
-        in {"llm_input_exported", "llm_input_export_failed"}
-    ]
-
-
 def _emitted() -> None:
     """The `tool_call` emission a unit case has no event for."""
 
@@ -484,7 +470,7 @@ def test_a_tool_pair_uses_the_conventions_keys_and_the_part_encoding(
     assert f'"arguments":{attributes[GEN_AI_TOOL_CALL_ARGUMENTS]},' in rendered
     assert json.loads(attributes[GEN_AI_TOOL_CALL_ARGUMENTS]) == arguments
     assert attributes[GEN_AI_TOOL_CALL_RESULT] == 'saved "fact" 7'
-    assert _outcomes(caplog)[0] == TOOL_EXPORTED
+    assert outcomes(caplog)[0] == TOOL_EXPORTED
 
 
 def test_a_malformed_tool_call_exports_its_raw_argument_text() -> None:
@@ -505,7 +491,7 @@ def test_a_tool_pair_over_the_ceiling_is_dropped_and_reported(
         staged.stage_tool("session", "round", 0, {"fact": "tea"}, "x" * 64, _emitted)
 
     assert recorded.tool_snapshots == []
-    assert _outcomes(caplog) == [TOOL_DROPPED]
+    assert outcomes(caplog) == [TOOL_DROPPED]
 
 
 def test_a_tool_pair_telemetry_refuses_is_reported_as_a_tool_call(
@@ -518,7 +504,7 @@ def test_a_tool_pair_telemetry_refuses_is_reported_as_a_tool_call(
         staged.stage_tool("session", "round", 0, {"fact": "tea"}, "saved", _emitted)
 
     assert recorded.tool_snapshots == []
-    assert _outcomes(caplog) == [TOOL_DROPPED]
+    assert outcomes(caplog) == [TOOL_DROPPED]
 
 
 def test_one_round_s_tool_pairs_share_one_ceiling(
@@ -543,7 +529,7 @@ def test_one_round_s_tool_pairs_share_one_ceiling(
         ("busy", 2),
         ("next", 0),
     ]
-    assert _outcomes(caplog) == [
+    assert outcomes(caplog) == [
         TOOL_EXPORTED,
         TOOL_EXPORTED,
         TOOL_EXPORTED,
