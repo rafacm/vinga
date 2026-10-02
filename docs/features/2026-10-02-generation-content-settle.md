@@ -144,7 +144,10 @@ pinned.
   against the unfixed code: both counted `exported 1, 0` where `failed
   generation dropped` was due. They assert no success count, one
   failure, and no content on a later `llm` span under the same
-  invocation, which is the observable form of no retained slot.
+  invocation, which is the observable form of no retained slot. Since
+  the review round below they drive a whole reply through a real
+  session, and also assert that neither the round's content nor the
+  rejected class name reaches either log rendering or stderr.
 - Exactly-once emission is pinned at two levels: the export's `finish`
   with the pair attached, over the ceiling, refused by telemetry and
   never staged; and the watch, for both closing events, with the export
@@ -171,12 +174,36 @@ pinned.
   afterwards (16 passed). `ruff check .` is clean, and the census lane
   ran last.
 
+## Review round
+
+The external review of PR #596 (openai/gpt-5.6-sol at 504b74b2) found
+one P1. The refused `provider_failed` case called `ProviderWatch.failed`
+directly, and production does more after a refused event: the stream's
+guard re-raises the failure, and the reply's catch in
+`runtime/pipeline.py` logs `reply failed: <class name>` from the raw
+`type(exc).__name__`. So the very value `provider_failed` refused to
+carry still reached the retained log, by a route the test never took.
+
+Resolved by test here and by code in #565, which lands first. That log
+line is one of the sites #565 moves onto its validated class-name
+helper, so this branch does not fix it a second time. The refusal
+cases now run a whole reply: `ScriptedLlm` raises an exception placed
+in a round's list, after delivering what came before it, and
+`provider_failed` is refused by a class whose name is a sentinel. On
+this branch alone the `provider_failed` case fails, naming the `reply
+failed` line; on a throwaway branch merging #565's branch (at
+`5613d5fe`) it and the rest of the file pass, along with the five
+sibling content-export modules (78 passed). The throwaway merge was not
+committed. The `llm_round` case passes either way, since nothing on
+that path names a class.
+
 ## Files modified
 
 - `vinga-server/src/vinga_server/telemetry.py`
 - `vinga-server/src/vinga_server/llm_input_export.py`
 - `vinga-server/src/vinga_server/runtime/provider_watch.py`
 - `vinga-server/tests/support/llm_input.py`
+- `vinga-server/tests/support/providers.py`
 - `vinga-server/tests/unit/test_generation_span_content.py` (new)
 - `vinga-server/tests/unit/test_llm_input_export.py`
 - `vinga-server/tests/unit/test_telemetry_llm_input.py`
