@@ -591,17 +591,21 @@ it: there is no local surface behind it that could be off, so it is
 never a no-op, and `server.conversations` and `server.capture` are
 irrelevant to it. It needs no extra and no second credential, because
 the content travels on the actual generation and tool spans over the
-transport the traces already use. A generation's pair finishes
-synchronously immediately before the matching `llm_round` or
-`provider_failed` event creates and ends its `llm` span, and is counted
-in `llm_input_exported`'s `rounds` once it is staged for that span. A
-tool call's pair is staged when the call returns, its `tool_call` event
-is emitted, and the handoff is then settled: it is counted in
-`tool_calls` only once that event's fold wrote it onto the `tool`
-span, and a pair the emission never delivered (a refused construction,
-or no live trace) is discarded there and then rather than held until
-shutdown. Either way `llm_input_exported` means attachment and enqueue
-into the ordinary OTLP processor, not backend acknowledgement. Every
+transport the traces already use. Both kinds of pair are handed over
+by one contract. A generation's pair is staged when its round ends and
+a tool call's when the call returns; the event that closes it
+(`llm_round` or `provider_failed` for a generation, `tool_call` for a
+tool call) is then emitted exactly once, whatever became of the pair,
+and the handoff is settled. The pair is counted, in
+`llm_input_exported`'s `rounds` or `tool_calls`, only once that
+event's fold wrote it onto the `llm` or `tool` span, and a pair the
+emission never delivered (a refused construction, or no live trace) is
+discarded there and then rather than held until shutdown. A round the
+first-token watchdog retried is one round: the retry re-sends the same
+request under the same invocation, and only the event that closes the
+round settles its pair. `llm_input_exported` means attachment and
+enqueue into the ordinary OTLP processor, not backend
+acknowledgement. Every
 omission before that, a pair over a ceiling, refused by telemetry, or
 not consumed by its event, is `llm_input_export_failed`, whose `kind`
 says which span went without. Both outcomes remain metadata-only
