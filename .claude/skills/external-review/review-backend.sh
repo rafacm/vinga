@@ -4,7 +4,7 @@
 # the one decision they share.
 #
 # review_select reads REVIEW_BACKEND (codex, the default, or claude,
-# the quota fallback), REVIEW_MODEL (default gpt-5.6-sol under codex,
+# the quota fallback), REVIEW_MODEL (default gpt-6-sol under codex,
 # claude-opus-5 under claude) and REVIEW_EFFORT (default high), and
 # sets BACKEND, MODEL, EFFORT, PROVIDER and ATTRIBUTION, the last
 # being `<provider>/<model>, thinking <level>`, the attribution string
@@ -19,7 +19,7 @@
 review_select() {
   BACKEND="${REVIEW_BACKEND:-codex}"
   case "$BACKEND" in
-    codex)  MODEL="${REVIEW_MODEL:-gpt-5.6-sol}" ;;
+    codex)  MODEL="${REVIEW_MODEL:-gpt-6-sol}" ;;
     claude) MODEL="${REVIEW_MODEL:-claude-opus-5}" ;;
     *) echo "unknown REVIEW_BACKEND: $BACKEND (codex or claude)" >&2; exit 2 ;;
   esac

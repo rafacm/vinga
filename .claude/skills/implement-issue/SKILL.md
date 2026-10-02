@@ -47,7 +47,7 @@ named agent rather than of "the session". The shape is one string:
 - `model` is the exact id the tool ran, never an alias: the
   orchestrating session's own id (`claude-fable-5-1` at the time of
   writing), the id the agent definition names for a subagent, the
-  id `REVIEW_MODEL` selects for a reviewer (`gpt-5.6-sol`).
+  id `REVIEW_MODEL` selects for a reviewer (`gpt-6-sol`).
 - `level` is the provider's own word for the thinking or reasoning
   effort the run was pinned to, or `n/a` when the tool exposes no
   such setting for that run. It is read from where the tool holds
