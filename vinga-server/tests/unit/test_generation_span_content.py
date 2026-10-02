@@ -184,7 +184,7 @@ def _staged(exporter: LlmInputExport, session: str = SESSION) -> None:
 
 def _rounded(watch: ProviderWatch, turn: TurnUnderway, usage: Usage | None = None) -> None:
     """The round finishing, as the reply reports it."""
-    began = watch_clock()
+    began = asyncio.get_running_loop().time()
     watch.reply_round_done(
         turn, 1, object(), [], began, None, usage, invocation=INVOCATION, prompt=SENT
     )
@@ -201,10 +201,6 @@ def _failed(watch: ProviderWatch, failure: BaseException | None = None) -> None:
         purpose=LlmPurpose.REPLY,
         prompt=SENT,
     )
-
-
-def watch_clock() -> float:
-    return asyncio.get_running_loop().time()
 
 
 @pytest.mark.usefixtures("refusals_are_expected")
