@@ -243,10 +243,25 @@ async def test_the_shutdown_of_a_wedged_exporter_is_bounded() -> None:
     began = time.monotonic()
     try:
         await asyncio.wait_for(telemetry.shutdown(), SHUTDOWN_TIMEOUT_S * 3)
+        took = time.monotonic() - began
     finally:
         collector.released.set()
-    took = time.monotonic() - began
+        # The bound expiring is this case's whole point, so the release
+        # it handed to a thread is still inside the provider, and that
+        # thread gives the SDK's silence back only once the export is
+        # genuinely over. The fixture counts the lease the moment this
+        # returns, so the case waits out that one completion first
+        # (#593). Through `release`, which for a caller that did not
+        # claim the work waits on whoever did. On a daemon thread of
+        # its own and joined under a bound, for `shutdown`'s reason: a
+        # release that never finished would pin a pool thread, and the
+        # default executor joins those at exit, so the lane would hang
+        # rather than fail.
+        finishing = threading.Thread(target=telemetry.release, daemon=True)
+        finishing.start()
+        await asyncio.to_thread(finishing.join, SHUTDOWN_TIMEOUT_S)
 
+    assert not finishing.is_alive(), "the abandoned release never finished"
     assert took < SHUTDOWN_TIMEOUT_S * 2, f"the shutdown waited {took:.1f} s"
 
 
