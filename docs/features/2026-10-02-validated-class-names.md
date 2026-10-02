@@ -185,9 +185,9 @@ changed.
   are not installed; integration `350 passed in 398.49s`. `ruff check`
   clean, and the census lane run last.
 
-## Review round
+## First review round
 
-One external review round (openai/gpt-5.6-sol, at `5613d5fe`) found one
+The first external review round (openai/gpt-5.6-sol, at `5613d5fe`) found one
 P1, and it was right. `failure_name` passed `type(failure).__name__`
 straight to the pattern, and a metaclass decides what `__name__`
 answers. A number made the helper raise `TypeError`, and a lookup that
@@ -213,15 +213,71 @@ a `str` subclass, not only a non-string: a subclass can match the
 pattern and still print a forged line through its own `__format__` and
 `__str__`, and the unfixed helper returned one as the name.
 
-Sentinels for all three shapes (a number, a `str` subclass, a raising
-lookup), each raised and reported from inside an active `except` with
-a credential-shaped message, at the helpers and end to end at the
-relocation site, were watched failing against the unfixed helper (six
-helper cases, both site cases). Four mutations of the fix, one run
+Sentinels, each raised and reported from inside an active `except`
+with a credential-shaped message, were watched failing against the
+unfixed helper: all three shapes (a number, a `str` subclass, a raising
+lookup) at the helpers, six cases, and the number and the raising
+lookup end to end at the relocation site, two cases. The `str`
+subclass joined the site test only in the second round, below; this
+record said otherwise until that round's review caught it. Four mutations of the fix, one run
 each, were all killed: the lookup uncontained (3 failures), the
 plain-string check dropped (6), `isinstance` in place of the exact type
 (3), and `ClassName.of` reading the name raw again (3, the AST guard
-among them). The unit lane was rerun on the fix at `-n 2 --dist loadfile`: `7870 passed, 19 skipped in 1264.86s`.
+among them). The unit lane was rerun on the fix at `-n 2 --dist
+loadfile`: `7870 passed, 19 skipped in 1264.86s`.
+
+## Second review round
+
+A re-review (openai/gpt-5.6-terra, at `d1347338`) found a P1 and a P2,
+and both were right.
+
+**P1: `ClassNames` kept a `str` subclass.** Its joined form splits the
+value into parts and checks each, and splitting a `str` subclass
+answers plain strings, so the parts passed while the object kept was
+the subclass, which `TextValue.carried` handed to logging unchanged.
+Through the real emitter, `McpCallDropped` with
+`ClassNames(<subclass of "Fine">)` rendered `Fine\nFORGED line` in the
+text format and in the JSON message, for one name and for a joined
+pair. `ClassName.__post_init__` now requires a plain `str` before it
+splits, the rule `is_class_name` applies to each part, so the typed
+path and the sentence path stay one definition. The sentinel drives the
+real emitter and both shipped formats and asserts the emission is
+refused by its fixed label and code and nothing forged is rendered;
+watched failing before the fix and against `isinstance` restored (both
+cases, one run).
+
+**The siblings.** Asked to sweep `ClassName`'s `TextValue` siblings for
+the same shape, every one had it: `Identifier`, the `MachineId` family
+(`SessionId`, `ConversationId`, `UtteranceId`, `InvocationId`,
+`Sha256`, `DeviceId`, `LanguageTag`, `EventName`, `ReportedMac`,
+`ActivationCode`), `Descriptor` and `Fragment` all check by
+`isinstance`, validate the characters, and keep the object; an
+`Identifier` of a subclass printed a forged line in the text log. Since
+the fix is one line at the shared base, it was made:
+`TextValue.carried` returns `str.__str__(self.value)`, which is a plain
+copy of a subclass's characters and the value itself otherwise, so what
+is rendered is what was checked and no plain string changes. A
+sentinel through the real emitter pins it, watched failing before the
+fix and against the raw `carried` restored (one run).
+
+Three non-`TextValue` carriers have a related shape and were reported
+rather than changed, since none is a one-line fix at that base:
+`AgentNames` and `SessionIds` check each element through `Identifier`
+and `SessionId` and then carry the tuple's elements as given, so a
+subclass element with its own `__repr__` prints forged inside the list
+rendering (probed for `AgentNames`); and `ConfiguredPath` renders the
+`os.PathLike` object itself, by design. Every one of their values comes
+from this server's configuration or its own minting today.
+
+**P2: the claimed site sentinel was missing.** The relocation site's
+end-to-end test now has the `str`-subclass metaclass beside the other
+two, with the same assertions. It passes at this branch's head because
+the first round closed that path, and fails against that round undone
+(`is_class_name` by `isinstance`, one run), which is what it guards.
+
+The unit lane was rerun on the fix at `-n 2 --dist loadfile`:
+`7874 passed, 19 skipped in 1268.02s`, and the events package's
+`mypy` check reports no issues.
 
 ## What was checked and deliberately left
 
