@@ -2372,6 +2372,14 @@ def test_every_command_a_table_advises_is_one_this_grammar_has(table: str) -> No
     text match to catch it. This is the same guard over each composed
     table: every invocation quoted in one of its lines names a row of
     the registry, read off `COMMANDS` rather than listed.
+
+    The row has to begin at the word after the program word, which
+    `registered` does not ask on its own: it finds a row at any position,
+    because a command line may carry global options in front of its
+    command, and no advice here does. Asked bare, it passed a span whose
+    first word after the program named nothing, on the strength of a
+    real verb further along (#594's review round). What follows the row
+    is an address, which `registered` still checks the row can take.
     """
     quoted = [
         tuple(span.split())
@@ -2379,11 +2387,16 @@ def test_every_command_a_table_advises_is_one_this_grammar_has(table: str) -> No
         for span in re.findall(r"`([^`]+)`", line)
     ]
     assert quoted
-    unregistered = [words for words in quoted if registered(words) is None]
+    unregistered = [words for words in quoted if not _advises_a_row(words)]
     assert unregistered == []
-    # And in the short spelling, which is the one a client of this
-    # grammar answers to.
-    assert all(words[0] == reach.PROGRAM for words in quoted)
+
+
+def _advises_a_row(words: tuple[str, ...]) -> bool:
+    """Whether one quoted invocation is the short program word followed
+    directly by a row of the registry and whatever that row takes."""
+    program, *rest = words
+    row = registered(rest)
+    return program == reach.PROGRAM and row is not None and tuple(rest[: len(row)]) == row
 
 
 def test_the_remedies_cover_the_whole_vocabulary() -> None:
