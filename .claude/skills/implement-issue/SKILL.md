@@ -209,9 +209,12 @@ subagent brief:
 - **No-leak, at every retained surface.** No secret, far-side, or
   untrusted bytes in any message, field, argument, exception text,
   or `__cause__`/`__context__` chain that reaches logs, events,
-  CLI/stderr, or API bodies. Render exception classes, never their
-  words; build the sanitized error in the `except` arm and raise it
-  after the block. Plans name the sentinel tests (plant a
+  CLI/stderr, or API bodies. Render validated class names, never
+  their words: `class_names.failure_name(exc)` in a sentence and
+  `ClassName.of` (or `failure_class`) in an event, never a bare
+  `type(exc).__name__`, since a class can be named anything, line
+  breaks included. Build the sanitized error in the `except` arm and
+  raise it after the block. Plans name the sentinel tests (plant a
   credential-shaped value; assert absence from sentence, args,
   fields, records in both log formats, and any attached consumer).
   The full model is

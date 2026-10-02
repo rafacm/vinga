@@ -12,7 +12,7 @@ The diff under review is in `__DIFF_FILE__` (git diff __BASE__...HEAD). Read it 
 
 - Correctness bugs in the changed code, including concurrency (the database serializes on BEGIN IMMEDIATE with a 10 s busy timeout), error mapping, and boot order.
 - Violations of the plan: a deliverable the milestone claims but the diff does not contain, or a design the plan's review round settled that the diff contradicts.
-- The no-leak contract: no secret, no rejected input value, no library traceback may reach stdout, stderr, a log record, an HTTP response body or header, or an exception chain, on any path the diff adds or touches. This is the highest-priority class of finding.
+- The no-leak contract: no secret, no rejected input value, no library traceback may reach stdout, stderr, a log record, an HTTP response body or header, or an exception chain, on any path the diff adds or touches. A caught exception is rendered by its validated class name (`class_names.failure_name`, or `ClassName` on an event), never by its words and never as a bare `type(exc).__name__`, since a class can be named anything, line breaks included. This is the highest-priority class of finding.
 - Semantics restated outside the repository (`config/store.py` is the semantics layer; handlers and CLI are transport).
 - Tests that would pass with the behavior they claim to pin removed, missing refusal cases, and assertions weaker than the claim in the implementation doc.
 - CI honesty: workflow changes that cannot work as written, drift checks that do not check what they claim.
