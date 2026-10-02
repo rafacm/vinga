@@ -24,8 +24,8 @@ from typing import Any, cast
 import pytest
 
 from tests.support.configs import POET_MAC, watchdog_config
+from tests.support.events import both_formats, only
 from tests.support.events import events as logged_events
-from tests.support.events import only
 from tests.support.llm_input import Unnameable, a_turn, outcomes, traced
 from tests.support.providers import STALL_S, StallingLlm
 from tests.support.sessions import drive_reply, run_reply
@@ -227,6 +227,7 @@ async def test_a_refused_round_event_reports_failure_and_keeps_nothing(
 
     assert not logged_events(caplog, closing)
     assert outcomes(caplog) == DROPPED
+    assert CREDENTIAL_SHAPED not in both_formats(caplog)
 
     round_done(events, invocation=INVOCATION)
     finish_reply(events)
