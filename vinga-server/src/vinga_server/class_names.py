@@ -36,32 +36,60 @@ UNNAMED_FAILURE: Final = "an exception whose class name is not an identifier"
 
 
 def is_class_name(text: str) -> bool:
-    """Whether this text may be repeated as a class name."""
-    return _CLASS_NAME.match(text) is not None
+    """Whether this text may be repeated as a class name.
+
+    A plain `str` and nothing else, before the pattern is asked: a
+    `str` subclass can match it and still print as anything at all,
+    since formatting calls its own `__format__` and `__str__`.
+    """
+    return type(text) is str and _CLASS_NAME.match(text) is not None
+
+
+def class_name_of(failure: BaseException) -> str | None:
+    """The class name of this failure where it may be repeated, or None.
+
+    Total, because it is called from inside the arm that caught the
+    failure, where anything it raised would carry that failure out as
+    its `__context__`, message and all. A metaclass decides what
+    `__name__` answers, so the answer can be a number, a `str` subclass,
+    or a lookup that raises (#565's review round): the first two are
+    refused by `is_class_name`, and the third is contained here and
+    answered with None. `Exception` and not `BaseException`, so a
+    cancellation or an interpreter exit still goes where it was going.
+
+    The one place this server reads a type's name off a failure.
+    `failure_name` below and `events.values.ClassName.of` both ask it,
+    and spelling `type(exc).__name__` anywhere else is what
+    `tests/unit/test_class_name_sites.py` refuses.
+    """
+    try:
+        name = type(failure).__name__
+    except Exception:  # noqa: BLE001 - a report never raises out of its arm
+        return None
+    return name if is_class_name(name) else None
 
 
 def failure_name(failure: BaseException) -> str:
     """The class name a sentence about a failure says, which is the
-    whole of what it says about it, or `UNNAMED_FAILURE` where that
-    name is not one it may repeat.
+    whole of what it says about it, or `UNNAMED_FAILURE` where
+    `class_name_of` has no name to give.
 
     The one way this server puts a caught exception's class into a
     retained log line, a CLI or API sentence, or the message of an
     exception rendered later. A lawful name comes back exactly as
     Python spells it, so a site that moved here says what it said
-    before; only a name that is not an identifier changes, and it
-    changes into the fixed phrase rather than into an exception of its
-    own, because the caller is in the middle of saying that something
-    else failed. Spelling `type(exc).__name__` at a site instead is what
-    `tests/unit/test_class_name_sites.py` refuses.
+    before; anything else changes into the fixed phrase rather than
+    into an exception of its own, because the caller is in the middle
+    of saying that something else failed.
     """
-    name = type(failure).__name__
-    return name if is_class_name(name) else UNNAMED_FAILURE
+    named = class_name_of(failure)
+    return UNNAMED_FAILURE if named is None else named
 
 
 __all__ = [
     "CLASS_NAME_PATTERN",
     "UNNAMED_FAILURE",
+    "class_name_of",
     "failure_name",
     "is_class_name",
 ]

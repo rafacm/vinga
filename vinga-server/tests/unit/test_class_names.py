@@ -12,7 +12,7 @@ import builtins
 import pytest
 
 from vinga_server.class_names import UNNAMED_FAILURE, failure_name, is_class_name
-from vinga_server.events.values import ClassName, EventValueError
+from vinga_server.events.values import ClassName, EventValueError, failure_class
 
 FORGED = type("ghp_Secret\nFORGED line", (Exception,), {})
 
@@ -70,3 +70,99 @@ def test_the_typed_path_and_the_sentence_path_refuse_the_same_names(text: str) -
 def test_the_typed_path_and_the_sentence_path_admit_the_same_names(text: str) -> None:
     assert is_class_name(text)
     assert ClassName(text).carried() == text
+
+
+# --- a class whose name is not even a string --------------------------
+#
+# A metaclass decides what `__name__` answers, so the name can be a
+# number, a `str` subclass with its own idea of how it prints, or a
+# lookup that raises (#565's review round). The helpers are called from
+# inside an `except` arm, where anything they raised would carry the
+# exception being reported as its `__context__`, credential-shaped
+# message and all. So each of these is driven from inside one.
+
+PLANTED = "sk-test-565-never-a-real-credential"
+
+
+class _Printing(str):
+    """A name that is an identifier until somebody prints it."""
+
+    def __str__(self) -> str:
+        return "Fine\nFORGED line"
+
+    def __format__(self, spec: str) -> str:
+        return "Fine\nFORGED line"
+
+
+class _NamedByNumber(type):
+    @property
+    def __name__(cls) -> object:  # type: ignore[override]
+        return 7
+
+
+class _NamedBySubclass(type):
+    @property
+    def __name__(cls) -> object:  # type: ignore[override]
+        return _Printing("Fine")
+
+
+class _NamedByRaising(type):
+    @property
+    def __name__(cls) -> object:  # type: ignore[override]
+        raise RuntimeError(PLANTED)
+
+
+UNNAMEABLE = [
+    pytest.param(_NamedByNumber("Numbered", (Exception,), {}), id="a-number"),
+    pytest.param(_NamedBySubclass("Subclassed", (Exception,), {}), id="a-str-subclass"),
+    pytest.param(_NamedByRaising("Raising", (Exception,), {}), id="a-raising-lookup"),
+]
+
+
+def _reported_from_an_except_arm(kind: type) -> tuple[str, object]:
+    """Both helpers' answers about a failure of this class, asked the
+    way every site asks: inside the arm that caught it.
+
+    Anything either helper raised is turned into a test failure here,
+    naming only its own (builtin) class, because the report pytest
+    would otherwise render walks the chain into the very class whose
+    name cannot be read."""
+    escaped: type[BaseException] | None = None
+    try:
+        raise kind(PLANTED)
+    except Exception as caught:
+        try:
+            return failure_name(caught), failure_class(caught)
+        except Exception as raised:
+            escaped = raised.__class__
+    pytest.fail(f"a helper raised {escaped.__qualname__} while reporting a failure")
+
+
+@pytest.mark.parametrize("kind", UNNAMEABLE)
+def test_a_class_whose_name_is_not_a_plain_string_is_not_said(kind: type) -> None:
+    said, valued = _reported_from_an_except_arm(kind)
+
+    assert said == UNNAMED_FAILURE
+    assert valued is None
+
+
+@pytest.mark.parametrize("kind", UNNAMEABLE)
+def test_the_typed_constructor_refuses_it_as_a_value_refusal(kind: type) -> None:
+    """`ClassName.of` refuses with its own `EventValueError`, the one
+    refusal the emitter's guard reports by a fixed label, rather than
+    with whatever the lookup raised."""
+    failure = kind(PLANTED)
+    refused: BaseException | None = None
+    try:
+        ClassName.of(failure)
+    except BaseException as raised:  # noqa: BLE001 - the class is the assertion
+        refused = raised
+
+    assert refused.__class__ is EventValueError
+    assert PLANTED not in str(refused)
+    assert refused.__context__ is None
+
+
+def test_a_name_that_is_a_str_subclass_is_refused_as_text() -> None:
+    assert not is_class_name(_Printing("Fine"))
+    assert not is_class_name(7)  # type: ignore[arg-type]

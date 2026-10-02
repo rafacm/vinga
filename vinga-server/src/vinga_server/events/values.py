@@ -46,7 +46,7 @@ from enum import Enum, StrEnum
 from functools import cache
 from typing import ClassVar, Final, Literal
 
-from vinga_server.class_names import is_class_name
+from vinga_server.class_names import class_name_of, is_class_name
 from vinga_server.config.models import (
     BOARD_LIMIT,
     CLIENT_ID_LIMIT,
@@ -884,8 +884,17 @@ class ClassName(TextValue):
         takes the exception rather than a string: a site that has to
         spell `type(exc).__name__` is a site one edit away from spelling
         `str(exc)`, and that edit is the leak.
+
+        Read through `class_names.class_name_of`, which never raises,
+        so a class whose name cannot be read or is not a plain string
+        is refused here the way any unlawful name is: as an
+        `EventValueError`, the one refusal the emitter's guard reports
+        by a fixed label, rather than as whatever the lookup raised.
         """
-        return cls(type(failure).__name__)
+        named = class_name_of(failure)
+        if named is None:
+            raise EventValueError("a ClassName is a Python identifier")
+        return cls(named)
 
 
 @dataclass(frozen=True)
@@ -918,9 +927,10 @@ def failure_class(failure: BaseException) -> ClassName | None:
     The value form, for the sites that carry the class beside their
     sentence (`StorageError.cause`, which the API's refusal handler
     logs); `class_names.failure_name` is the same answer spelled for a
-    sentence. Both ask `class_names.is_class_name`, which is what
-    `ClassName` admits by, so the typed path and the plain one cannot
-    disagree about which names are sayable.
+    sentence. Both read the name through `class_names.class_name_of`,
+    so the typed path and the plain one cannot disagree about which
+    names are sayable, and neither raises out of the arm it is asked
+    from.
     """
     try:
         return ClassName.of(failure)
