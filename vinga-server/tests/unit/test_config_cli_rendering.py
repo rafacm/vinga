@@ -2351,19 +2351,31 @@ def test_a_body_whose_state_is_not_a_token_is_not_this_apis_refusal(
     assert REFUSED_DETAIL not in said
 
 
-def test_every_remedy_names_a_command_this_grammar_has() -> None:
+# The tables of advice this client composes from `PROGRAM`, by name:
+# what to run about a refusal, and what to run about a write the server
+# is not serving yet. Read off the tables rather than restated, because
+# what the guard below holds is the commands they quote and not their
+# wording, which is pinned elsewhere and on its own.
+ADVICE: dict[str, Sequence[str]] = {
+    "remedies": tuple(reach.REMEDIES.values()),
+    "spoken": tuple(output.SPOKEN.values()),
+}
+
+
+@pytest.mark.parametrize("table", list(ADVICE))
+def test_every_command_a_table_advises_is_one_this_grammar_has(table: str) -> None:
     """The half the command-spellings census cannot see.
 
     That census reads the tree as text, and these sentences are composed
     from `PROGRAM` rather than written out, so a rename that missed one
     would leave a line here naming a command nothing answers to and no
-    text match to catch it. This is the same guard over the composed
-    table: every invocation quoted in a remedy names a row of the
-    registry, read off `COMMANDS` rather than listed.
+    text match to catch it. This is the same guard over each composed
+    table: every invocation quoted in one of its lines names a row of
+    the registry, read off `COMMANDS` rather than listed.
     """
     quoted = [
         tuple(span.split())
-        for line in reach.REMEDIES.values()
+        for line in ADVICE[table]
         for span in re.findall(r"`([^`]+)`", line)
     ]
     assert quoted
