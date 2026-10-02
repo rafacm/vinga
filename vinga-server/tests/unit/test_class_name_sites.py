@@ -15,12 +15,28 @@ surface: a log line (`device/placement.py`), an exception message
 pinned for a lawful name first, byte for byte, because the sweep that
 moved them must not have changed what an operator reads on any
 ordinary day, and then driven with the forged name.
+
+What keeps the sweep swept is the guard at the end: an AST walk over
+the production package that finds every `type(<x>).__name__` and every
+`<x>.__class__.__name__` (and their `__qualname__` spellings) by shape,
+whatever the variable is called, and holds the set to a written-down
+allowlist. Two deliberate limits, stated rather than discovered later:
+
+- A class reached any other way passes: `kind = type(exc)` and then
+  `kind.__name__` two lines later, or `getattr(type(exc), "__name__")`.
+  Nothing in the package does either, and following a value through
+  assignments is a data-flow analysis rather than a guard.
+- The scan is of the production package. Tests build forged classes on
+  purpose, which is how this file plants the name it checks.
 """
 
+import ast
 import logging
+from pathlib import Path
 
 import pytest
 
+import vinga_server
 from vinga_server.class_names import UNNAMED_FAILURE
 from vinga_server.device.placement import DevicePlacements
 from vinga_server.device_endpoint import close_failed
@@ -114,3 +130,123 @@ def test_a_connection_that_would_not_close_names_a_validated_class(forged: bool)
     )
     assert said is not None
     _clean(said)
+
+
+# --- and nowhere else -------------------------------------------------
+
+
+PACKAGE = Path(vinga_server.__file__).parent
+
+# Every place the package may read a type's name directly, as (file,
+# enclosing definition, the expression whose type is named). The set is
+# held exactly: a new site fails, and so does an entry here that no
+# longer matches anything, because a stale allowlist is worth less than
+# none.
+ALLOWED = {
+    # The two helpers themselves, which is where the reading is meant to
+    # be concentrated. `failure_name` checks the name before saying it,
+    # and `ClassName.of` hands it to a constructor that refuses anything
+    # but an identifier.
+    ("class_names.py", "failure_name", "failure"),
+    ("events/values.py", "ClassName.of", "failure"),
+    # Program types, which #565 puts out of scope: none of these is a
+    # caught exception, and each is a class this server's own code or
+    # its parsers made.
+    #
+    # A configured provider's factory answered something that is not a
+    # provider, and which class it built is the whole of the bug report.
+    ("providers/registry.py", "construct_provider", "provider"),
+    # An event variant naming itself in a catalog refusal.
+    ("events/catalog.py", "Variant.verify", "self"),
+    # An event tap this server's composition attached, named when it
+    # breaks; the exception it raised is deliberately not even bound.
+    ("events/__init__.py", "_offer", "tap"),
+    # The shape a parsed configuration document has where a mapping was
+    # wanted: `dict`, `list`, `str` and the other types a YAML or JSON
+    # parser builds.
+    ("config/loader.py", "_check_config_file", "data"),
+    ("config/store.py", "_readable", "fragment"),
+    ("config/transport.py", "untransportable", "key"),
+    ("config/transport.py", "untransportable", "value"),
+}
+
+NAME_ATTRIBUTES = frozenset({"__name__", "__qualname__"})
+
+
+def type_name_reads(tree: ast.AST) -> list[tuple[str, str, int]]:
+    """Every direct read of a type's name in `tree`, as (enclosing
+    definition, the expression whose type is named, line)."""
+    found: list[tuple[str, str, int]] = []
+
+    def visit(node: ast.AST, scope: tuple[str, ...]) -> None:
+        for child in ast.iter_child_nodes(node):
+            inner = scope
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                inner = (*scope, child.name)
+            if isinstance(child, ast.Attribute) and child.attr in NAME_ATTRIBUTES:
+                of = child.value
+                named: ast.expr | None = None
+                if (
+                    isinstance(of, ast.Call)
+                    and isinstance(of.func, ast.Name)
+                    and of.func.id == "type"
+                    and len(of.args) == 1
+                ):
+                    named = of.args[0]
+                elif isinstance(of, ast.Attribute) and of.attr == "__class__":
+                    named = of.value
+                if named is not None:
+                    found.append((".".join(scope), ast.unparse(named), child.lineno))
+            visit(child, inner)
+
+    visit(tree, ())
+    return found
+
+
+def reads_in_package() -> dict[tuple[str, str, str], list[int]]:
+    reads: dict[tuple[str, str, str], list[int]] = {}
+    for path in sorted(PACKAGE.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for scope, named, line in type_name_reads(tree):
+            key = (path.relative_to(PACKAGE).as_posix(), scope, named)
+            reads.setdefault(key, []).append(line)
+    return reads
+
+
+def test_a_caught_exception_s_class_is_named_only_through_the_helper() -> None:
+    reads = reads_in_package()
+
+    unexplained = {key: lines for key, lines in reads.items() if key not in ALLOWED}
+    assert unexplained == {}, (
+        "name a caught exception's class with class_names.failure_name, or "
+        "explain a program type in ALLOWED"
+    )
+    assert set(reads) == ALLOWED
+    assert all(len(lines) == 1 for lines in reads.values())
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "type(exc).__name__",
+        "type(problem).__qualname__",
+        "exc.__class__.__name__",
+        "self._failure.__class__.__name__",
+        "type(task.exception()).__name__",
+    ],
+)
+def test_the_walk_finds_a_read_by_its_shape_and_not_its_name(spelling: str) -> None:
+    """The variable is anything at all. Matching on a variable's name
+    instead is the weakness #531 found in this repository's own test
+    walkers."""
+    tree = ast.parse(f"def report(exc, problem, task):\n    log({spelling})\n")
+
+    [(scope, _, line)] = type_name_reads(tree)
+
+    assert (scope, line) == ("report", 2)
+
+
+def test_the_walk_ignores_a_name_that_is_not_a_type_s() -> None:
+    tree = ast.parse("logger = getLogger(__name__)\nkind.__name__\ntype(a, b, c).__name__\n")
+
+    assert type_name_reads(tree) == []
