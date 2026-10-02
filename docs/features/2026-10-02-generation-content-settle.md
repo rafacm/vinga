@@ -197,6 +197,16 @@ sibling content-export modules (78 passed). The throwaway merge was not
 committed. The `llm_round` case passes either way, since nothing on
 that path names a class.
 
+#565 merged (PR #597) with more than that throwaway merge saw: a total
+`class_names.class_name_of`, an exact-`str` check in `is_class_name`
+and `ClassName`, and `TextValue.carried()` handing out
+`str.__str__(value)`. This branch was rebased onto `main` after it, and
+both refusal cases pass there with nothing on this branch changed for
+it; the reply's catch now logs `failure_name(exc)`, which renders the
+rejected class as the fixed fallback. Nothing about the dependency
+changed: the site was fixed once, by #565, and this branch carries the
+test.
+
 ## Files modified
 
 - `vinga-server/src/vinga_server/telemetry.py`
