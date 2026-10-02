@@ -68,6 +68,7 @@ from collections.abc import Callable, Collection
 from dataclasses import dataclass, replace
 from typing import Any
 
+from vinga_server.class_names import failure_name
 from vinga_server.config.diff import Loaded, unchanged_providers
 from vinga_server.config.loader import (
     ConfigError,
@@ -468,7 +469,7 @@ class ConfigReload:
             # placeholder consumed is in the log file all the same.
             logger.warning(
                 "a reload could not build the stored world's providers (%s)",
-                type(exc).__name__,
+                failure_name(exc),
             )
             problem = f"{mcp.RELOAD_REFUSED} {exc}"
         raise ProviderRefusedError(problem)

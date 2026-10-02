@@ -58,6 +58,7 @@ from collections.abc import AsyncIterator
 from contextlib import AbstractContextManager, asynccontextmanager
 from dataclasses import dataclass
 
+from vinga_server.class_names import failure_name
 from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
@@ -138,7 +139,7 @@ class DevicePlacements:
         except (StorageError, ConfigError):
             refusal = builtin.DEVICE_MEMORY_UNREACHABLE
         except Exception as exc:
-            logger.warning("a device memory lookup failed: %s", type(exc).__name__)
+            logger.warning("a device memory lookup failed: %s", failure_name(exc))
             refusal = builtin.DEVICE_MEMORY_UNREACHABLE
         raise ValueError(refusal)
 
@@ -200,7 +201,7 @@ class DevicePlacements:
         # and nothing it carries, the rule the bindings view keeps about
         # the same database.
         except Exception as exc:
-            logger.warning("a device relocation failed: %s", type(exc).__name__)
+            logger.warning("a device relocation failed: %s", failure_name(exc))
             refusal = builtin.PLACEMENT_FAILED
         if refusal is not None:
             raise ValueError(refusal)

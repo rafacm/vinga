@@ -48,6 +48,7 @@ from typing import Literal
 from websockets.exceptions import WebSocketException
 from websockets.sync.client import connect
 
+from vinga_server.class_names import failure_name
 from vinga_server.config.loader import ConfigError
 from vinga_server.device.watchdog import HELLO_TIMEOUT_S
 from vinga_server.device_endpoint import REPORTED_WEBSOCKET
@@ -384,7 +385,7 @@ def _opened(target: str, token: str, identity: Identity):
         # Recorded here and raised below, so nothing walking a chain
         # finds the library's exception, its URI or a refused status line
         # behind this sentence.
-        problem = cannot_open(type(exc).__name__)
+        problem = cannot_open(failure_name(exc))
     if opened is None:
         raise ConfigError(problem or cannot_open("no connection"))
     return opened
@@ -623,7 +624,7 @@ def _received(socket, timeout: float, expired: str) -> str | bytes:
     except TimeoutError:
         problem = expired
     except (WebSocketException, OSError, ValueError) as exc:
-        problem = cannot_speak(type(exc).__name__)
+        problem = cannot_speak(failure_name(exc))
     if problem is not None:
         raise ConfigError(problem)
     return got[0]
@@ -636,7 +637,7 @@ def _guarded(act: Callable[[], None]) -> None:
     try:
         act()
     except (WebSocketException, OSError, ValueError) as exc:
-        problem = cannot_speak(type(exc).__name__)
+        problem = cannot_speak(failure_name(exc))
     if problem is not None:
         raise ConfigError(problem)
 

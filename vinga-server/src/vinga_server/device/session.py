@@ -67,6 +67,7 @@ from vinga_server import __version__
 from vinga_server.audio.opus import OpusDecoder
 from vinga_server.build_info import revision
 from vinga_server.capture import CAPTURE_RATE, DeviceFacts
+from vinga_server.class_names import failure_name
 from vinga_server.config.models import (
     CLIENT_ID_LIMIT,
     DEVICE_NAME_LIMIT,
@@ -810,7 +811,7 @@ class DeviceSession:
                 "session %s: %s did not stop cleanly (%s)",
                 self.session_id,
                 step,
-                type(exc).__name__,
+                failure_name(exc),
             )
 
     def _open_duration_s(self) -> float:

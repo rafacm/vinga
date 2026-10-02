@@ -24,6 +24,7 @@ import anthropic
 import httpx
 import openai
 
+from vinga_server.class_names import failure_name
 from vinga_server.config.secrets import stored_provider_secret
 from vinga_server.providers.base import (
     ProviderCallError,
@@ -110,8 +111,8 @@ def call_failure(label: str, exc: BaseException) -> ProviderCallError:
     kind = ProviderCallTimeout if isinstance(exc, REQUEST_TIMEOUTS) else ProviderCallError
     status = _status_code(exc)
     if status is None:
-        return kind(f"{label}: the request failed with {type(exc).__name__}")
-    return kind(f"{label}: the request failed with HTTP {status} ({type(exc).__name__})")
+        return kind(f"{label}: the request failed with {failure_name(exc)}")
+    return kind(f"{label}: the request failed with HTTP {status} ({failure_name(exc)})")
 
 
 def _status_code(exc: BaseException) -> int | None:

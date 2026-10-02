@@ -27,6 +27,8 @@ from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from vinga_server.class_names import failure_name
+
 
 class ProtocolError(ValueError):
     """A payload that cannot be understood as a protocol message."""
@@ -295,7 +297,7 @@ def parse_server_message(text: str | bytes) -> ServerMessage:
         # document around the character it stopped at, and what a SERVER
         # wrote is far-side bytes. Recorded here and raised below, so
         # nothing walking a chain finds the decoder's message behind it.
-        unreadable = f"not valid JSON ({type(exc).__name__})"
+        unreadable = f"not valid JSON ({failure_name(exc)})"
     if unreadable:
         raise ProtocolError(unreadable)
     data = read[0]

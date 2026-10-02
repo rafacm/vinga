@@ -50,6 +50,7 @@ from typing import cast
 
 from vinga_server.boundary import BoundaryRefusal, Reach, check_provider
 from vinga_server.build_info import in_container
+from vinga_server.class_names import failure_name
 from vinga_server.config.entities import provider_label
 from vinga_server.config.models import (
     PROVIDER_STAGES,
@@ -546,7 +547,7 @@ async def dispose(providers: Iterable[Provider]) -> None:
         # until it ends, which is where it already was.
         task.cancel()
     problems = [
-        type(failure).__name__
+        failure_name(failure)
         for task in done
         if not task.cancelled() and (failure := task.exception()) is not None
     ]

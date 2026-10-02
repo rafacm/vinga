@@ -34,6 +34,7 @@ from fastapi import FastAPI
 
 from vinga_server import logs, onboarding
 from vinga_server.app import StartupFailed, create_app, startup_failure, stop_admitting
+from vinga_server.class_names import failure_name
 from vinga_server.composition import Composition
 from vinga_server.config import Config, ConfigError
 from vinga_server.config.boot import load_boot_config
@@ -324,7 +325,7 @@ def _report_drain(task: "asyncio.Task[None]") -> None:
             "the drain failed (%s). What it said is not repeated here, because a "
             "client failing on its way out can quote the endpoint or the credential "
             "its entry names",
-            type(failure).__name__,
+            failure_name(failure),
         )
 
 

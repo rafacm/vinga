@@ -41,6 +41,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from vinga_server.audio.resample import Resampler
+from vinga_server.class_names import failure_name
 from vinga_server.device.boundary import DeviceGone, DeviceOutput
 from vinga_server.events import SessionEvents, logger
 from vinga_server.events.catalog import (
@@ -333,7 +334,7 @@ class FillerRunner:
             # traceback rendered onto the retained log prints the whole
             # chain behind it, and a failure anywhere near provider
             # bytes can carry them in its message (#182).
-            failed = type(exc).__name__
+            failed = failure_name(exc)
         # Reported out here rather than in the arm: inside it the
         # swallowed exception is still the active one, so a logging call
         # that itself failed would escape carrying it as `__context__`,
@@ -508,7 +509,7 @@ class FillerRunner:
             # path gives: a traceback rendered onto the retained log
             # prints the whole chain behind it, and this runs in the arm
             # that catches whatever a provider raised.
-            failed = type(exc).__name__
+            failed = failure_name(exc)
         finally:
             if shown:
                 self._events.emit(

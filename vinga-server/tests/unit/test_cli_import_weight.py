@@ -99,6 +99,15 @@ SOURCE = Path(__file__).resolve().parents[2] / "src" / "vinga_server"
 # annotated-types: the grammar was already paying for every one of them,
 # so what this entry costs is one module object.
 #
+# `class_names` joined them with #565, and it imports `re` and `typing`
+# and nothing of this server. It holds what a caught exception's class
+# may be called, and two modules already on this list say class names:
+# `device_endpoint` in the doctor's and the endpoint commands' failure
+# sentences, and `protocol.messages` in the refusal of a frame that is
+# not JSON. Its other reader is the event vocabulary, which is exactly
+# what this list keeps out, so the rule sits in a leaf both can import
+# rather than beside `ClassName` where only the server could.
+#
 # What is NOT here is the other point of the list: no `store`, so no
 # SQLAlchemy; no `secrets`, so no cryptography; no `api` and no
 # `onboarding`, so no FastAPI; no `db`, so no Alembic. Each of those
@@ -112,6 +121,7 @@ CLI_REACH = frozenset(
         # import back, which is what keeps it below this line.
         "vinga_server.boundary",
         "vinga_server.broken_pipe",
+        "vinga_server.class_names",
         "vinga_server.config",
         "vinga_server.config.cli",
         "vinga_server.config.cli.acts",
