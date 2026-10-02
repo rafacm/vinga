@@ -615,7 +615,13 @@ class TextValue(EventValue):
     value: str
 
     def carried(self) -> str:
-        return self.value
+        # The characters, as a plain `str`. A subclass passes the
+        # `isinstance` checks its type makes and is checked by its
+        # characters, but logging renders the object through its own
+        # `__format__` and `__str__`, so the object would print as
+        # whatever it liked. `str.__str__` answers a plain copy of a
+        # subclass and the value itself otherwise (#565).
+        return str.__str__(self.value)
 
 
 @dataclass(frozen=True)

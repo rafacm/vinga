@@ -214,3 +214,29 @@ def test_a_str_subclass_never_reaches_the_log_as_a_class_name(
         (REFUSAL_MESSAGE, (UNBUILT_LABEL, "construction_failed"))
     ]
 
+
+def test_every_text_value_hands_the_log_the_text_it_checked(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The same shape at the shared base, found while sweeping
+    `ClassName`'s siblings: `Identifier`, the `MachineId` family,
+    `Descriptor` and `Fragment` check a `str` subclass by `isinstance`
+    and kept the object, so the log printed whatever its `__format__`
+    said. `TextValue.carried` now hands on the checked characters as a
+    plain `str`, so what is rendered is what was validated."""
+    with caplog.at_level(logging.DEBUG):
+        ServerEvents(MCP_CHANNEL).emit(
+            lambda: McpCallDropped(
+                entry=Identifier(_Printing("files")),
+                position=Count(1),
+                error=ClassNames("OSError"),
+            )
+        )
+
+    [record] = caplog.records
+    assert record.args == ("files", 1, "OSError")
+    assert type(record.args[0]) is str
+    rendered = "\n".join(
+        formatter.format(record) for formatter in (logging.Formatter(TEXT_FORMAT), JsonFormatter())
+    )
+    assert "FORGED" not in rendered
