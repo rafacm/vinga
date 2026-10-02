@@ -913,10 +913,11 @@ def _answer(response: httpx.Response, address: Address) -> object:
 # command-spellings census, which reads the tree as text and cannot see
 # a sentence composed from `PROGRAM`: measured, by regenerating both
 # manifests after this table landed and finding neither had moved.
-# `test_every_remedy_names_a_command_this_grammar_has` is the same
-# guard over the table, holding every invocation quoted here to a row
-# of the registry, so a rename that missed one fails a test in this
-# checkout rather than reaching an operator through an old image.
+# `test_every_command_a_table_advises_is_one_this_grammar_has` is the
+# same guard over this table and `SPOKEN` alike, holding every
+# invocation quoted in either to a row of the registry, so a rename that
+# missed one fails a test in this checkout rather than reaching an
+# operator through an old image.
 #
 # Every member has a line, because every member is a state with
 # something to run about; `test_the_remedies_cover_the_whole_vocabulary`
