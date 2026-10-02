@@ -48,8 +48,9 @@ from vinga_server.config.responses import RefusalReason
 if TYPE_CHECKING:
     # For the annotation alone. The event vocabulary imports the event
     # catalog, and a configuration client that never logs an event has
-    # no reason to load it; the value is built by `db.failure_class`,
-    # which is on the server's side of that line already.
+    # no reason to load it; the value is built by
+    # `events.values.failure_class`, which only the server's side of
+    # that line calls.
     from vinga_server.events.values import ClassName
 
 CONFIG_ENV_VAR = "VINGA_CONFIG"
@@ -421,11 +422,11 @@ class StorageError(ConfigError):
     and nothing under it.
 
     A validated `ClassName` and never the exception, chosen where the
-    classifying happens (`db.failure_class`), for the reason `reason`
-    is: what a refusal is gets carried beside its sentence rather than
-    recovered from it. The API's refusal handler is what reads it, and
-    nothing that answers a caller does: the sentence, the status and
-    the response body are exactly what they were without it.
+    classifying happens (`events.values.failure_class`), for the reason
+    `reason` is: what a refusal is gets carried beside its sentence
+    rather than recovered from it. The API's refusal handler is what
+    reads it, and nothing that answers a caller does: the sentence, the
+    status and the response body are exactly what they were without it.
     """
 
     def __init__(

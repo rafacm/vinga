@@ -14,7 +14,7 @@ What is held, per route:
   receives is shown not to have moved.
 - **The log names the class of what failed**, which is what "the
   details are in the server's log" promises, rendered through
-  `db.failure_name`'s validation so a class whose name is not an
+  `failure_name`'s validation so a class whose name is not an
   identifier names nothing but the refusal.
 - **Nothing planted travels.** A credential-shaped value sits in the
   failing exception's message, in the statement and parameters it

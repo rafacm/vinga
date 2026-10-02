@@ -163,7 +163,8 @@ from vinga_server.conversations.views import (
     View,
     grouped,
 )
-from vinga_server.db import failure_class, is_busy, read_engine, write_engine
+from vinga_server.db import is_busy, read_engine, write_engine
+from vinga_server.events.values import failure_class
 from vinga_server.memory.store import Purged, purge
 from vinga_server.paging import LIMIT_DEFAULT, LIMIT_MAX, MAX_ROW_ID
 

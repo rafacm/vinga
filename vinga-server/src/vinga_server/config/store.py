@@ -43,6 +43,7 @@ from sqlalchemy import Connection, Engine, Row, Table, delete, insert, select, u
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql.elements import ColumnElement
 
+from vinga_server.class_names import failure_name
 from vinga_server.config import entities
 from vinga_server.config.entities import EntityDescriptor, addressed, entity_location
 from vinga_server.config.loader import (
@@ -119,7 +120,8 @@ from vinga_server.config.transport import (
 # a fact that is not a choice: there is exactly one way to rewrite an
 # agent name in each store.
 from vinga_server.conversations import store as conversation_record
-from vinga_server.db import failure_class, failure_name, is_busy, schema
+from vinga_server.db import is_busy, schema
+from vinga_server.events.values import failure_class
 from vinga_server.memory import store as agent_memory
 from vinga_server.memory.scopes import MemoryScope
 
@@ -1631,13 +1633,14 @@ def _database_problem(exc: SQLAlchemyError) -> ConfigError:
     is the configuration, ciphertexts included. The exception's class
     name is what is worth saying and is all that is said.
 
-    Rendered by `db.failure_name`, the renderer `db.migration_failure`
-    asks too: what a storage refusal may say about its cause is one
-    question, and the two refusals give one answer to it, including
-    for a class whose name is not an identifier and so is not repeated.
+    Rendered by `class_names.failure_name`, the renderer
+    `db.migration_failure` and every other sentence about a failure
+    asks too: what a sentence may say about a failure's cause is one
+    question, and they give one answer to it, including for a class
+    whose name is not an identifier and so is not repeated.
 
     The same class rides beside the sentence as the refusal's `cause`,
-    from `db.failure_class`, because the sentence reaches whoever made
+    from `events.values.failure_class`, because the sentence reaches whoever made
     the request and the API's log line is built from the refusal rather
     than from its words (#586). Without it the log said `StorageError`
     where the body said what failed.
