@@ -60,6 +60,7 @@ from urllib.parse import SplitResult, parse_qsl, urlsplit, urlunsplit
 
 import httpx
 
+from vinga_server.class_names import failure_name
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.printing import parsed_url, printable, shown_url
 from vinga_server.logs import quieted
@@ -409,7 +410,7 @@ def requested(
                 # on its way down.
                 problem = (
                     f"cannot reach {endpoint.shown}: the request did not complete "
-                    f"({type(exc).__name__}). Check that the server is running, that this "
+                    f"({failure_name(exc)}). Check that the server is running, that this "
                     f"is the address it serves, and that the network a device sits on can "
                     f"reach it."
                 )
@@ -450,7 +451,7 @@ def close_failed(client: httpx.Client | None, shown: str) -> str | None:
     except Exception as exc:
         return (
             f"{shown} answered, but the connection to it could not be closed "
-            f"({type(exc).__name__}), so no verdict is printed: a probe that did not "
+            f"({failure_name(exc)}), so no verdict is printed: a probe that did not "
             f"finish cleanly is not one to call an endpoint healthy from. What the "
             f"library said is not repeated here."
         )

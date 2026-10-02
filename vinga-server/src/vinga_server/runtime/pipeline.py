@@ -58,6 +58,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol
 
 from vinga_server.audio.resample import Resampler
+from vinga_server.class_names import failure_name
 from vinga_server.config import Config
 from vinga_server.config.store import LiveDevice
 from vinga_server.conversations.records import (
@@ -1357,7 +1358,7 @@ class PipelineRuntime:
                 # and nothing downstream has to read a message to guess.
                 reply.latch(ReplyOutcome.FAILED)
                 logger.error(
-                    "session %s: reply failed: %s", self.session_id, type(exc).__name__
+                    "session %s: reply failed: %s", self.session_id, failure_name(exc)
                 )
                 # And the user is owed a notice, which they were not
                 # before (#384): a terminally failed reply used to be
@@ -1464,7 +1465,7 @@ class PipelineRuntime:
                 logger.warning(
                     "session %s: the endpointer would not forget the reply: %s",
                     self.session_id,
-                    type(forgetting).__name__,
+                    failure_name(forgetting),
                 )
             # The other end the idle timeout counts from. In the finally,
             # so a reply that failed or was cancelled still resets the
@@ -1548,7 +1549,7 @@ class PipelineRuntime:
             logger.warning(
                 "session %s: the turn recorder failed and was skipped: %s",
                 self.session_id,
-                type(exc).__name__,
+                failure_name(exc),
             )
 
     async def _speak_reply(self, transcript: str, spoken: list[str]) -> None:
@@ -2218,7 +2219,7 @@ class PipelineRuntime:
             logger.warning(
                 "session %s: the recap could not be made: %s",
                 self.session_id,
-                type(exc).__name__,
+                failure_name(exc),
             )
             return None
         except Exception as exc:  # noqa: BLE001 - a failed recap is a fallback
@@ -2228,7 +2229,7 @@ class PipelineRuntime:
             logger.warning(
                 "session %s: the recap could not be made: %s",
                 self.session_id,
-                type(exc).__name__,
+                failure_name(exc),
             )
             return None
         self._watch.recap_round_done(
@@ -2317,7 +2318,7 @@ class PipelineRuntime:
             logger.warning(
                 "session %s: the turn recorder failed and was skipped: %s",
                 self.session_id,
-                type(exc).__name__,
+                failure_name(exc),
             )
             return
         if landed is None:

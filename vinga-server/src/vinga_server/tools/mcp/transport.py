@@ -22,6 +22,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import get_default_environment, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
+from vinga_server.class_names import failure_name
 from vinga_server.config import McpServerConfig, ResolvedValues
 from vinga_server.config.secrets import SecretStore, resolve_mcp_values
 from vinga_server.protocol.mcp import spoken_content
@@ -250,7 +251,7 @@ def _reason(exc: BaseException) -> str:
     "ExceptionGroup" says nothing at all."""
     if isinstance(exc, BaseExceptionGroup):
         return ", ".join(sorted({_reason(sub) for sub in exc.exceptions})) or "ExceptionGroup"
-    return type(exc).__name__
+    return failure_name(exc)
 
 
 def _carries(exc: BaseException, kind: type[BaseException]) -> bool:

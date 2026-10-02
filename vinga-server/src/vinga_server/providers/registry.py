@@ -21,6 +21,7 @@ from types import ModuleType
 
 from pydantic import BaseModel
 
+from vinga_server.class_names import failure_name
 from vinga_server.config import ConfigError
 from vinga_server.config.entities import provider_label
 from vinga_server.config.models import ProviderConfig, spoken_identity
@@ -371,7 +372,7 @@ def construct_provider(
     except (ProviderError, ConfigError):
         raise
     except Exception as exc:
-        failed = type(exc).__name__
+        failed = failure_name(exc)
     if failed is not None:
         raise ProviderError(
             f"{label}: the {config.type} provider would not build "

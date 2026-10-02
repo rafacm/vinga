@@ -28,6 +28,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
+from vinga_server.class_names import failure_name
 from vinga_server.conversations.records import ToolInvocation
 from vinga_server.events import SessionEvents, assembly, logger
 from vinga_server.events.catalog import Variant
@@ -578,7 +579,7 @@ class ToolExecution:
             raise
         except Exception as exc:
             content, is_error = f'the tool "{call.name}" failed: {exc}', True
-            error_type = type(exc).__name__
+            error_type = failure_name(exc)
         elapsed = loop.time() - started
 
         def announce() -> None:

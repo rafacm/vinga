@@ -71,6 +71,7 @@ from typing import Any
 
 from sqlalchemy import ColumnElement, delete, func, select, tuple_, update
 
+from vinga_server.class_names import failure_name
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations.records import StoredTurn
 from vinga_server.conversations.schema import (
@@ -993,7 +994,7 @@ class Reads:
         except Exception as exc:  # noqa: BLE001 - the whole point of the seam
             logger.warning(
                 "a conversation could not be read from the store: %s",
-                type(exc).__name__,
+                failure_name(exc),
             )
             return Unreadable(busy=is_busy(exc))
         finally:
@@ -1018,7 +1019,7 @@ class Reads:
         except Exception as exc:  # noqa: BLE001 - a closing never becomes an answer
             logger.warning(
                 "a conversation store connection could not be closed: %s",
-                type(exc).__name__,
+                failure_name(exc),
             )
 
 

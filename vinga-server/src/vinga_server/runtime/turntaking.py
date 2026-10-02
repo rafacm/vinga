@@ -31,6 +31,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from vinga_server.class_names import failure_name
 from vinga_server.config import ServerConfig
 from vinga_server.device.boundary import PIPELINE_SAMPLE_RATE, DeviceOutput
 from vinga_server.events import SessionEvents, logger
@@ -411,7 +412,7 @@ class TurnTaking:
             # own message and the chain behind it onto the retained
             # log, which is what the observability ADR's no-leak
             # contract forbids (#183).
-            failed = type(exc).__name__
+            failed = failure_name(exc)
         # Reported and cleaned up out here rather than in the arm, the
         # way the device edge raises `DeviceGone` (`device/session.py`)
         # and for the same reason read the other way round: inside the
