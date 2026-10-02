@@ -190,6 +190,32 @@ finding.
    the forged case failed naming the span and the two real tables
    passed. The forged entry was removed by copying the file back.
 
+### Re-review
+
+Reviewed 2026-10-02 by openai/gpt-5.6-terra, thinking high via codex
+CLI 0.156.1, read-only sandbox, runtime 1m59s, at commit a15b1468. One
+finding.
+
+1. **P2: the later-verb fix had no permanent regression test.** The
+   guard's cases read only the real tables, whose entries are all
+   valid, so reverting `_advises_a_row` to a bare `registered` call
+   would still pass both; the forged entry that showed the fix working
+   was removed after the run.
+
+   *Resolution*: adopted.
+   `test_a_row_is_advised_only_from_the_word_after_the_program` holds
+   `_advises_a_row` to four cases in `ADVISED_OR_NOT`: a row with its
+   positional tail is accepted, and a word between the program word
+   and a real verb, a real row under another program word, and a span
+   with no row at all are refused. The words are written as separate
+   strings composed with `PROGRAM`, so none is a spelling the
+   command-spellings census reads; both manifests stayed unmoved.
+   Watched failing: with the check reverted to a bare `registered`
+   call, the middle-word and wrong-program cases failed (2 failed, 4
+   passed); with only the position check dropped, the middle-word case
+   failed (1 failed, 5 passed). Each mutation was restored by copy and
+   touched.
+
 ## Files modified
 
 - `vinga-server/tests/unit/test_config_cli_rendering.py`
