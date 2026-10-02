@@ -174,6 +174,68 @@ def test_a_late_generation_event_discards_its_orphaned_snapshot(
     assert GEN_AI_INPUT_MESSAGES not in llm.attributes
 
 
+@pytest.mark.parametrize("failed", [False, True], ids=["llm_round", "provider_failed"])
+def test_a_settle_answers_true_only_for_a_pair_its_fold_attached(failed: bool) -> None:
+    """The fold that wrote the pair onto its span is what the settle
+    reports, once: a second settle of the same invocation finds nothing,
+    because the first released it (#588)."""
+    invocation = "a" * 32
+    telemetry, _, emitted = _open(invocation)
+
+    if failed:
+        provider_failed(emitted, stage="llm", invocation=invocation)
+    else:
+        round_done(emitted, invocation=invocation)
+
+    assert telemetry.settle_llm_content(invocation)
+    assert not telemetry.settle_llm_content(invocation)
+
+
+def test_a_settle_releases_a_pair_no_event_consumed() -> None:
+    """Staged, and the round's event never reached the fold: the settle
+    answers False and discards the slot there and then, so the same
+    invocation on a later span finds nothing."""
+    invocation = "b" * 32
+    telemetry, memory, emitted = _open(invocation)
+
+    assert not telemetry.settle_llm_content(invocation)
+
+    round_done(emitted, invocation=invocation)
+    finish_reply(emitted)
+    llm = named(finished(telemetry, memory), "llm")
+    assert GEN_AI_INPUT_MESSAGES not in llm.attributes
+    assert not telemetry.settle_llm_content(invocation)
+
+
+@pytest.mark.parametrize("failed", [False, True], ids=["llm_round", "provider_failed"])
+def test_a_pair_folded_with_no_trace_settles_as_not_attached(failed: bool) -> None:
+    """The fold took the slot after the trace closed and wrote it
+    nowhere, so the settle may not count it."""
+    invocation = "c" * 32
+    telemetry, _, emitted = _open(invocation)
+    close_session(emitted)
+
+    if failed:
+        provider_failed(emitted, stage="llm", invocation=invocation)
+    else:
+        round_done(emitted, invocation=invocation)
+
+    assert not telemetry.settle_llm_content(invocation)
+
+
+def test_a_round_without_staged_content_settles_as_not_attached() -> None:
+    """An `llm` span the fold wrote with no pair on it is not an
+    attachment: nothing was taken, so nothing is recorded."""
+    invocation = "d" * 32
+    telemetry, _ = exporting()
+    emitted = session_events(Clock(), telemetry)
+    open_session(emitted)
+    start_turn(emitted)
+    round_done(emitted, invocation=invocation)
+
+    assert not telemetry.settle_llm_content(invocation)
+
+
 # --- a tool call's content, on the tool span that ran it (#533) --------
 
 
