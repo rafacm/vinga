@@ -44,7 +44,13 @@ from tests.support.telemetry import (
     start_turn,
 )
 from vinga_server.config.models import ServerConfig
-from vinga_server.events import SessionEvents
+from vinga_server.events import (
+    CONSTRUCTION_FAILED,
+    REFUSAL_MESSAGE,
+    SESSION_LOGGER,
+    UNBUILT_LABEL,
+    SessionEvents,
+)
 from vinga_server.events.values import LlmPurpose
 from vinga_server.llm_input_export import LlmInputExport, build_llm_input_export
 from vinga_server.providers.base import TextDelta, Usage
@@ -226,7 +232,9 @@ async def test_a_refused_round_event_reports_failure_and_keeps_nothing(
     dropped, counted nowhere as exported, and gone, so a later round
     under the same invocation carries none of it; and neither the
     round's content nor the value the refusal rejected reaches a log
-    line, in either rendering, or stderr (#588)."""
+    line, in either rendering, or stdout or stderr (#588). The refused
+    emission is asserted to have been attempted, so a path that skipped
+    the closing event could not pass for one whose event was refused."""
     failing: list[Any] = (
         [CREDENTIAL_SHAPED, Usage(prompt_tokens=-1, completion_tokens=1)]
         if closing == "llm_round"
@@ -250,8 +258,26 @@ async def test_a_refused_round_event_reports_failure_and_keeps_nothing(
 
     (invocation,) = invocations
     assert not logged_events(caplog, closing)
+    # Attempted and refused, not skipped: the session emitter's one
+    # fixed refusal report, then the export's settle reporting the pair
+    # that emission never delivered. The report's label is the schema's
+    # fixed one for a construction that failed, never the event's name,
+    # so what ties it to the closing event is its channel and its place
+    # immediately before the settle's failure.
+    assert [
+        (record.name, record.msg, record.args)
+        if record.msg == REFUSAL_MESSAGE
+        else getattr(record, "event", None)
+        for record in caplog.records
+        if record.msg == REFUSAL_MESSAGE
+        or getattr(record, "event", None) == "llm_input_export_failed"
+    ] == [
+        (SESSION_LOGGER, REFUSAL_MESSAGE, (UNBUILT_LABEL, CONSTRUCTION_FAILED)),
+        "llm_input_export_failed",
+    ]
     assert outcomes(caplog) == DROPPED
-    retained = both_formats(caplog) + capfd.readouterr().err
+    captured = capfd.readouterr()
+    retained = both_formats(caplog) + captured.out + captured.err
     assert CREDENTIAL_SHAPED not in retained
     assert REJECTED_NAME not in retained
 
