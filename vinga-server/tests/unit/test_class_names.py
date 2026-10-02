@@ -8,11 +8,22 @@ readily as any identifier.
 """
 
 import builtins
+import logging
 
 import pytest
 
 from vinga_server.class_names import UNNAMED_FAILURE, failure_name, is_class_name
-from vinga_server.events.values import ClassName, EventValueError, failure_class
+from vinga_server.events import REFUSAL_MESSAGE, UNBUILT_LABEL, ServerEvents
+from vinga_server.events.catalog import MCP_CHANNEL, McpCallDropped
+from vinga_server.events.values import (
+    ClassName,
+    ClassNames,
+    Count,
+    EventValueError,
+    Identifier,
+    failure_class,
+)
+from vinga_server.logs import TEXT_FORMAT, JsonFormatter
 
 FORGED = type("ghp_Secret\nFORGED line", (Exception,), {})
 
@@ -166,3 +177,40 @@ def test_the_typed_constructor_refuses_it_as_a_value_refusal(kind: type) -> None
 def test_a_name_that_is_a_str_subclass_is_refused_as_text() -> None:
     assert not is_class_name(_Printing("Fine"))
     assert not is_class_name(7)  # type: ignore[arg-type]
+
+
+# --- and the joined form reaches the log as plain text ----------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [pytest.param("Fine", id="one-name"), pytest.param("Fine, Other", id="joined")],
+)
+@pytest.mark.usefixtures("refusals_are_expected")
+def test_a_str_subclass_never_reaches_the_log_as_a_class_name(
+    text: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`ClassNames` splits a joined value into plain strings to check
+    each part, so the check passing said nothing about the object it
+    kept (#565's second review round). Through the real emitter and the
+    log formats this server ships, a name that prints as a forged line
+    is refused, reported by its fixed label, and never rendered."""
+    with caplog.at_level(logging.DEBUG):
+        ServerEvents(MCP_CHANNEL).emit(
+            lambda: McpCallDropped(
+                entry=Identifier("files"),
+                position=Count(1),
+                error=ClassNames(_Printing(text)),
+            )
+        )
+
+    rendered = "\n".join(
+        formatter.format(record)
+        for record in caplog.records
+        for formatter in (logging.Formatter(TEXT_FORMAT), JsonFormatter())
+    )
+    assert "FORGED" not in rendered
+    assert [(record.msg, record.args) for record in caplog.records] == [
+        (REFUSAL_MESSAGE, (UNBUILT_LABEL, "construction_failed"))
+    ]
+
