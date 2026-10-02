@@ -44,6 +44,10 @@ class Exported:
             self.snapshots.append((invocation, dict(attributes)))
         return self.accepts
 
+    def settle_llm_content(self, invocation: str) -> bool:
+        """As though the fold always consumed what was staged."""
+        return any(staged == invocation for staged, _ in self.snapshots)
+
     def discard_llm_content(self, invocation: str) -> None:
         self.discarded.append(invocation)
 

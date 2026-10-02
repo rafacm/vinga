@@ -76,7 +76,8 @@ class ProviderWatch:
     file half that no reload replaces, so a value taken once is the
     same answer at every call. `llm_input` is the post-close export a
     deployment asked for, or None; a round that ends, however it ends,
-    tells it the round is over.
+    tells it the round is over, and hands it the event that says so to
+    emit, so the round's pair is counted only once that event took it.
 
     What a caller hands in per call is what belongs to the call: the
     provider, the invocation, and for a reply round the round number and
@@ -404,26 +405,28 @@ class ProviderWatch:
             None if first_token_at is None else round((first_token_at - began) * 1000)
         )
         inputs, outputs, cached = _reported(usage)
-        if self._llm_input is not None:
-            self._llm_input.finish(invocation)
-        self._events.emit(
-            lambda: assembly.llm_rounded(
-                self._agent(),
-                self._conversation(),
-                "llm",
-                provider,
-                round_,
-                len(working),
-                elapsed,
-                inputs,
-                outputs,
-                first_token_ms,
-                invocation,
-                purpose,
-                cache_read_input_tokens=cached,
-                prompt=prompt,
+
+        def rounded() -> None:
+            self._events.emit(
+                lambda: assembly.llm_rounded(
+                    self._agent(),
+                    self._conversation(),
+                    "llm",
+                    provider,
+                    round_,
+                    len(working),
+                    elapsed,
+                    inputs,
+                    outputs,
+                    first_token_ms,
+                    invocation,
+                    purpose,
+                    cache_read_input_tokens=cached,
+                    prompt=prompt,
+                )
             )
-        )
+
+        self._closing(invocation, rounded)
         return elapsed, first_token_ms, inputs, outputs
 
     def failed(
@@ -464,18 +467,35 @@ class ProviderWatch:
         a class name and nothing else. What the class does not say, the
         fields do: the stage, the entry, its type, and the host.
         """
-        if stage == "llm" and invocation is not None and self._llm_input is not None:
-            self._llm_input.finish(invocation)
-        self._events.emit(
-            lambda: assembly.provider_failure(
-                self._agent(),
-                self._conversation(),
-                stage,
-                provider,
-                exc,
-                elapsed,
-                invocation=invocation,
-                purpose=purpose,
-                prompt=prompt,
+
+        def failure() -> None:
+            self._events.emit(
+                lambda: assembly.provider_failure(
+                    self._agent(),
+                    self._conversation(),
+                    stage,
+                    provider,
+                    exc,
+                    elapsed,
+                    invocation=invocation,
+                    purpose=purpose,
+                    prompt=prompt,
+                )
             )
-        )
+
+        if stage == "llm" and invocation is not None:
+            self._closing(invocation, failure)
+        else:
+            failure()
+
+    def _closing(self, invocation: str, emit: Callable[[], None]) -> None:
+        """Emit the event that closes a generation, through the content
+        export where there is one: the export then owns the emission,
+        calling it exactly once between staging the round's pair and
+        settling it, so the pair is counted only once that event's fold
+        attached it (#588). Without an export the event is emitted here,
+        exactly as it always was."""
+        if self._llm_input is not None:
+            self._llm_input.finish(invocation, emit)
+        else:
+            emit()

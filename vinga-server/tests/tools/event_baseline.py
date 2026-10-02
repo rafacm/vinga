@@ -1749,7 +1749,7 @@ async def drive_llm_input_exported(directory: Path) -> None:
     """
     exporter, recorded = llm_inputs({"s1": AN_LLM_CONTEXT})
     a_staged_round(exporter, "s1")
-    exporter.finish("0123456789abcdef0123456789abcdef")
+    exporter.finish("0123456789abcdef0123456789abcdef", lambda: None)
     assert recorded.snapshots
     await exporter.shutdown()
 
@@ -1776,7 +1776,7 @@ async def drive_llm_input_export_failed(directory: Path) -> None:
     which is why this needs no wait at all."""
     exporter, _ = llm_inputs({}, accepts=False)
     a_staged_round(exporter, "s1")
-    exporter.finish("0123456789abcdef0123456789abcdef")
+    exporter.finish("0123456789abcdef0123456789abcdef", lambda: None)
     await exporter.shutdown()
 
 
