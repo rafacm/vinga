@@ -94,7 +94,8 @@ from vinga_server.config.responses import (
     request_body,
 )
 from vinga_server.conversations.store import erasure_order
-from vinga_server.db import failure_class, is_busy, read_engine, write_engine
+from vinga_server.db import is_busy, read_engine, write_engine
+from vinga_server.events.values import failure_class
 from vinga_server.memory import store
 from vinga_server.memory.scopes import MemoryScope
 from vinga_server.memory.store import MEMORY_CHAIN, NOT_STORABLE, storable

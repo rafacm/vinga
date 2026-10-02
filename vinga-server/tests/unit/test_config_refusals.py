@@ -26,6 +26,7 @@ from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from tests.support.leaks import chain
 from tests.support.stores import holding_the_write_lock, planted, the_lock_held
+from vinga_server.class_names import UNNAMED_FAILURE
 from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
@@ -35,7 +36,7 @@ from vinga_server.config.loader import (
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.secrets import SecretLocation, generate_key, load_keys
 from vinga_server.config.store import ConfigStore, read_live_binding
-from vinga_server.db import MIGRATION_BUSY, UNNAMED_FAILURE, UNREACHABLE, open_database, schema
+from vinga_server.db import MIGRATION_BUSY, UNREACHABLE, open_database, schema
 from vinga_server.events.values import ClassName
 
 CLAUDE = SecretLocation.provider("llm", "claude", "api_key")
@@ -310,7 +311,7 @@ def test_an_open_that_cannot_take_the_lock_is_a_busy_error(
 
 # What the store's own storage refusal says about its cause (#530)
 #
-# The class name and nothing else, rendered by the same `db.failure_name`
+# The class name and nothing else, rendered by the same `failure_name`
 # the migration refusal asks, so the two answer one question one way.
 # Driven through `read_live_binding`, the store's read that takes an
 # engine, with one that refuses at the connect: the store's handler is

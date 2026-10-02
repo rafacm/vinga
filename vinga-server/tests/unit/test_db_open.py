@@ -34,6 +34,7 @@ from tests.support.configs import config_with_agent
 from tests.support.leaks import chain, renderings
 from vinga_server import db, serving
 from vinga_server.app import StartupFailed, create_app
+from vinga_server.class_names import UNNAMED_FAILURE, failure_name
 from vinga_server.config import ConfigError
 from vinga_server.config.loader import DatabaseBusyError, StorageError
 from vinga_server.config.models import DatabaseConfig
@@ -49,13 +50,11 @@ from vinga_server.db import (
     SUPERSEDED_REVISION,
     SUPERSEDED_REVISIONS,
     UNKNOWN_REVISION,
-    UNNAMED_FAILURE,
     UNREACHABLE,
     UNSHAPED_REVISION,
     StoreChain,
     advisory_key,
     connection_url,
-    failure_name,
     migration_failure,
     open_at,
     open_database,

@@ -90,7 +90,6 @@ from vinga_server.db import (
     LOCK_TIMEOUT_MS,
     StoreChain,
     advisory_key,
-    failure_class,
     is_busy,
     open_at,
     read_engine,
@@ -102,7 +101,7 @@ from vinga_server.events.catalog import (
     MemoryUnreadable,
     MemoryUnwritable,
 )
-from vinga_server.events.values import ClassName, Identifier
+from vinga_server.events.values import ClassName, Identifier, failure_class
 from vinga_server.memory import schema
 from vinga_server.memory.schema import FACT_SCOPES, MemoryScope
 

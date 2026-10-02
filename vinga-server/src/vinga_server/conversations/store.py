@@ -117,7 +117,6 @@ from vinga_server.db import (
     LOCK_TIMEOUT_MS,
     StoreChain,
     advisory_key,
-    failure_class,
     is_busy,
     open_at,
     take_the_chain_lock,
@@ -130,7 +129,7 @@ from vinga_server.events.catalog import (
     PruneFailed,
     WriteFailed,
 )
-from vinga_server.events.values import ClassName, Count, SessionId
+from vinga_server.events.values import ClassName, Count, SessionId, failure_class
 
 events = ServerEvents(__name__)
 

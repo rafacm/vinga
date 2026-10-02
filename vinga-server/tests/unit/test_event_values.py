@@ -81,6 +81,7 @@ from vinga_server.events.values import (
     ToolOutcome,
     ToolSource,
     Whole,
+    failure_class,
 )
 from vinga_server.runtime import prompt
 from vinga_server.runtime.turns import TOOL_SOURCES as CLASSIFIED_AS
@@ -144,6 +145,17 @@ def test_a_class_name_is_built_from_the_failure_itself() -> None:
 
     assert named.carried() == "RuntimeError"
     assert str(failure) not in repr(named)
+
+
+def test_a_failure_class_is_the_class_name_or_none_and_never_a_refusal() -> None:
+    """`ClassName.of` with its refusal turned into an answer, for the
+    sites that carry the class beside a sentence they are in the middle
+    of building (#586, #565). A class can be named anything, a line
+    break and a forged log line after it included."""
+    forged = type("ghp_Secret\nFORGED line", (Exception,), {})
+
+    assert failure_class(KeyError("never repeated")) == ClassName("KeyError")
+    assert failure_class(forged("never repeated")) is None
 
 
 def test_a_count_is_zero_or_more_and_never_a_boolean() -> None:

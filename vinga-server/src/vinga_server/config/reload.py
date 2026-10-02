@@ -91,7 +91,7 @@ from vinga_server.config.secrets import EntityKind
 # conversation store reads this package's loader and models and never
 # this module.
 from vinga_server.conversations.store import erasure_order
-from vinga_server.db import failure_class
+from vinga_server.events.values import failure_class
 from vinga_server.filler import Fillers, build_agent_fillers
 from vinga_server.generation import Generation, Generations
 from vinga_server.providers import Built, Provider, ProviderError, build_world

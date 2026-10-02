@@ -46,6 +46,7 @@ from enum import Enum, StrEnum
 from functools import cache
 from typing import ClassVar, Final, Literal
 
+from vinga_server.class_names import is_class_name
 from vinga_server.config.models import (
     BOARD_LIMIT,
     CLIENT_ID_LIMIT,
@@ -534,18 +535,10 @@ SOURCE_KEY_PATTERN = (
 )
 
 
-# A type name, which is what a `CLASS_NAME` admits. Here rather than
-# beside the emitter because it is the `ClassName` value type's own
-# constraint; the emitter imports it back for the untyped path it still
-# serves.
-CLASS_NAME_PATTERN: Final = r"[A-Za-z_][A-Za-z0-9_]*"
-
-_CLASS_NAME = re.compile(rf"\A(?:{CLASS_NAME_PATTERN})\Z")
-
 # How a group of class names renders when a site reports several at
-# once. Beside the pattern above because the joining is part of what a
-# `ClassNames` is; the emitter imports it back for the untyped path it
-# still serves.
+# once. Here because the joining is part of what a `ClassNames` is; what
+# each name in the group may be is `class_names.is_class_name`, the rule
+# every other place a class is said keeps as well.
 CLASS_NAME_SEPARATOR: Final = ", "
 
 
@@ -880,7 +873,7 @@ class ClassName(TextValue):
         if not isinstance(self.value, str):
             raise EventValueError("a ClassName is a string")
         parts = self.value.split(CLASS_NAME_SEPARATOR) if self.JOINED else [self.value]
-        if not all(_CLASS_NAME.match(part) for part in parts):
+        if not all(is_class_name(part) for part in parts):
             raise EventValueError("a ClassName is a Python identifier")
 
     @classmethod
@@ -908,6 +901,31 @@ class ClassNames(ClassName):
     """
 
     JOINED: ClassVar[bool] = True
+
+
+def failure_class(failure: BaseException) -> ClassName | None:
+    """The class name anything this server says about a failure may
+    carry, or None where the class's name is not one it may repeat.
+
+    `ClassName.of` with its refusal turned into an answer. A class can
+    be given any name at all, a line break and a forged log line after
+    it included, and `ClassName` is what admits an identifier and
+    nothing else, so a name it refuses is not said. None rather than an
+    exception of its own, because the caller is usually in the middle
+    of saying that something else failed, and a report that raised
+    while it was being built would lose the sentence it exists to say.
+
+    The value form, for the sites that carry the class beside their
+    sentence (`StorageError.cause`, which the API's refusal handler
+    logs); `class_names.failure_name` is the same answer spelled for a
+    sentence. Both ask `class_names.is_class_name`, which is what
+    `ClassName` admits by, so the typed path and the plain one cannot
+    disagree about which names are sayable.
+    """
+    try:
+        return ClassName.of(failure)
+    except EventValueError:
+        return None
 
 
 @dataclass(frozen=True)
@@ -2057,7 +2075,6 @@ __all__ = [
     "BoardName",
     "CHECK_IN_BODY_LIMIT",
     "CHECK_IN_BODY_TRUNCATED",
-    "CLASS_NAME_PATTERN",
     "CLASS_NAME_SEPARATOR",
     "CaptureDeclined",
     "CaptureWrite",
@@ -2131,4 +2148,5 @@ __all__ = [
     "UnnamedToolSource",
     "UtteranceId",
     "Whole",
+    "failure_class",
 ]

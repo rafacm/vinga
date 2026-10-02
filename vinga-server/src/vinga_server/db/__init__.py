@@ -72,6 +72,7 @@ from alembic.script.revision import ResolutionError
 from alembic.util.exc import CommandError
 from sqlalchemy import URL, Engine, create_engine, event, make_url, text
 
+from vinga_server.class_names import failure_name
 from vinga_server.config.loader import ConfigError, DatabaseBusyError, StorageError
 from vinga_server.config.models import (
     DATABASE_ENV_NAMES,
@@ -80,7 +81,6 @@ from vinga_server.config.models import (
     DatabaseConfig,
 )
 from vinga_server.db import schema
-from vinga_server.events.values import ClassName, EventValueError
 
 # How long a connection waits for another one's lock before it gives up.
 # A CLI write while the server holds the advisory lock is the case this
@@ -211,8 +211,9 @@ MIGRATION_BUSY = (
 # keeps (`config/store.py`): a type name says what went wrong, and the
 # text beside it is the driver's, which can quote the DSN it connected
 # on, the statement it ran and the values bound to that statement. The
-# name is rendered through `failure_name`, so a class whose name is not
-# an identifier cannot write a second line into an operator's terminal.
+# name is rendered through `class_names.failure_name`, so a class
+# whose name is not an identifier cannot write a second line into an
+# operator's terminal.
 #
 # It prescribes nothing, on purpose. What reaches it is a privilege a
 # migration was refused somewhere other than the schema creation, a
@@ -227,11 +228,6 @@ MIGRATION_FAILED = (
     "quote the connection it was made on and the statement it was running, with "
     "the values bound to it"
 )
-
-# What `failure_name` renders in place of a class name it may not
-# repeat. A phrase rather than nothing, so a refusal still says that
-# something was raised, and fixed, so it says nothing about what.
-UNNAMED_FAILURE = "an exception whose class name is not an identifier"
 
 # The revisions a re-cut deleted, named one by one because the set is
 # closed and can never grow: it is the list of what one decision
@@ -679,45 +675,6 @@ def is_busy(exc: BaseException) -> bool:
     return False
 
 
-def failure_class(exc: BaseException) -> ClassName | None:
-    """The class name a storage refusal may carry about its cause, or
-    None where the class's name is not one anything may repeat.
-
-    Rendered through `ClassName`, which is how a failed component's
-    class reaches telemetry, rather than `type(exc).__name__` spelled at
-    the site: a class can be given any name at all, a line break and a
-    forged sentence after it included, and the value type is what
-    admits an identifier and nothing else. A name it refuses is None
-    rather than an exception of its own, because a refusal that raised
-    while it was being built would lose the sentence it exists to say.
-
-    The value form, for the refusals that carry the class beside their
-    sentence (`StorageError.cause`, which the API's refusal handler
-    logs, #586); `failure_name` below is the same answer spelled into a
-    sentence. One validation, so the two cannot disagree about which
-    names are sayable.
-    """
-    try:
-        return ClassName.of(exc)
-    except EventValueError:
-        return None
-
-
-def failure_name(exc: BaseException) -> str:
-    """The class name a storage refusal says about its cause, which is
-    the whole of what it says: `failure_class` spelled for a sentence,
-    with `UNNAMED_FAILURE` where that has no name to give.
-
-    Public because both storage refusals that put the class in their
-    sentence ask it: the migration failure below and the configuration
-    store's read and write failure (`config/store.py`). They answer one
-    question, what a storage refusal may say about its cause, and the
-    answer has one home.
-    """
-    named = failure_class(exc)
-    return UNNAMED_FAILURE if named is None else named.value
-
-
 def migration_failure(exc: Exception) -> ConfigError:
     """What an open that did not migrate is answered with.
 
@@ -936,13 +893,10 @@ __all__ = [
     "UNSHAPED_REVISION",
     "URL_REFUSED",
     "UNKNOWN_REVISION",
-    "UNNAMED_FAILURE",
     "UNREACHABLE",
     "StoreChain",
     "advisory_key",
     "connection_url",
-    "failure_class",
-    "failure_name",
     "is_busy",
     "migration_failure",
     "open_at",
