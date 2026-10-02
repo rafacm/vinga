@@ -74,14 +74,16 @@ async def _built(config: Config, secrets: SecretStore | None) -> ProviderWorld:
 # --- the models -------------------------------------------------------
 
 
-Step = str | list[str | ToolCall | Usage]
+Step = str | list[str | ToolCall | Usage | Exception]
 
 
 class ScriptedLlm(LlmProvider):
     """A model whose every round is written down in advance. A round is
     a sentence to speak, or a list mixing sentences, the tool calls to
     ask for, and the usage a provider that reports one would end with;
-    the last round repeats if the loop asks for more.
+    the last round repeats if the loop asks for more. An exception in
+    the list is raised by the stream where it stands, after whatever
+    came before it was delivered, which is a round failing mid-stream.
 
     No `StreamStarted`: an adapter yields one first and
     `ProviderWatch.reply_stream` consumes it exclusively, so it is not
@@ -107,6 +109,8 @@ class ScriptedLlm(LlmProvider):
         self.seen.append((list(turns), list(tools), tool_choice))
         step = self._rounds[min(len(self.seen) - 1, len(self._rounds) - 1)]
         for item in [step] if isinstance(step, str) else step:
+            if isinstance(item, Exception):
+                raise item
             yield TextDelta(item) if isinstance(item, str) else item
 
 

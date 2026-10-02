@@ -26,8 +26,8 @@ import pytest
 from tests.support.configs import POET_MAC, watchdog_config
 from tests.support.events import both_formats, only
 from tests.support.events import events as logged_events
-from tests.support.llm_input import Unnameable, a_turn, outcomes, traced
-from tests.support.providers import STALL_S, StallingLlm
+from tests.support.llm_input import a_turn, outcomes, traced
+from tests.support.providers import STALL_S, ScriptedLlm, StallingLlm
 from tests.support.sessions import drive_reply, run_reply
 from tests.support.sockets import RecordingSocket
 from tests.support.telemetry import (
@@ -203,33 +203,59 @@ def _failed(watch: ProviderWatch, failure: BaseException | None = None) -> None:
     )
 
 
+# A class whose name the `provider_failed` event refuses, spelled as a
+# sentinel: the name is the value the refusal rejected, so it may reach
+# no retained surface by any other route either.
+REJECTED_NAME = "0REJECTED-CLASS-SENTINEL not a class name"
+Rejected = type(REJECTED_NAME, (Exception,), {})
+
+
 @pytest.mark.usefixtures("refusals_are_expected")
 @pytest.mark.parametrize("closing", ["llm_round", "provider_failed"])
 async def test_a_refused_round_event_reports_failure_and_keeps_nothing(
-    closing: str, caplog: pytest.LogCaptureFixture
+    closing: str,
+    caplog: pytest.LogCaptureFixture,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
-    """The handoff is settled after the emission rather than assumed.
-    `llm_round` refuses a negative token count a provider reported, and
-    `provider_failed` an error class with no nameable name; either way
-    the pair the refused event never consumed is reported as dropped,
-    counted nowhere as exported, and gone, so a later round under the
-    same invocation carries none of it."""
+    """The handoff is settled after the emission rather than assumed,
+    driven through a whole reply so every route the failure takes is
+    the production one. `llm_round` refuses a negative token count the
+    model reported, and `provider_failed` an error class with no
+    nameable name, raised by the stream after the round's output began.
+    Either way the pair the refused event never consumed is reported as
+    dropped, counted nowhere as exported, and gone, so a later round
+    under the same invocation carries none of it; and neither the
+    round's content nor the value the refusal rejected reaches a log
+    line, in either rendering, or stderr (#588)."""
+    failing: list[Any] = (
+        [CREDENTIAL_SHAPED, Usage(prompt_tokens=-1, completion_tokens=1)]
+        if closing == "llm_round"
+        else [CREDENTIAL_SHAPED, Rejected()]
+    )
     telemetry, memory = exporting()
     exporter = LlmInputExport(telemetry=telemetry)
-    watch, events, turn = _watched(telemetry, exporter)
-    _staged(exporter)
+    invocations: list[str] = []
+    stage_reply = exporter.stage_reply
 
-    with caplog.at_level(logging.INFO):
-        if closing == "llm_round":
-            _rounded(watch, turn, Usage(prompt_tokens=-1, completion_tokens=1))
-        else:
-            _failed(watch, Unnameable())
+    def staging(session: str, **round_: Any) -> None:
+        invocations.append(round_["invocation"])
+        stage_reply(session, **round_)
 
+    exporter.stage_reply = staging  # type: ignore[method-assign]
+    session, events = traced(telemetry, ScriptedLlm([failing]), exporter)
+    session.websocket = cast(Any, RecordingSocket())
+
+    with caplog.at_level(logging.DEBUG):
+        await drive_reply(session, UTTERANCE)
+
+    (invocation,) = invocations
     assert not logged_events(caplog, closing)
     assert outcomes(caplog) == DROPPED
-    assert CREDENTIAL_SHAPED not in both_formats(caplog)
+    retained = both_formats(caplog) + capfd.readouterr().err
+    assert CREDENTIAL_SHAPED not in retained
+    assert REJECTED_NAME not in retained
 
-    round_done(events, invocation=INVOCATION)
+    round_done(events, invocation=invocation)
     finish_reply(events)
     spans = finished(telemetry, memory)
     (generation,) = _generations(spans)
