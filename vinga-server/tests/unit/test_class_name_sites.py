@@ -106,10 +106,27 @@ class _NamedByRaising(type):
         raise RuntimeError(PLANTED)
 
 
+class _Printing(str):
+    """A name that is an identifier until somebody prints it."""
+
+    def __str__(self) -> str:
+        return "Fine\nFORGED line"
+
+    def __format__(self, spec: str) -> str:
+        return "Fine\nFORGED line"
+
+
+class _NamedBySubclass(type):
+    @property
+    def __name__(cls) -> object:  # type: ignore[override]
+        return _Printing("Fine")
+
+
 @pytest.mark.parametrize(
     "kind",
     [
         pytest.param(_NamedByNumber("Numbered", (RuntimeError,), {}), id="a-number"),
+        pytest.param(_NamedBySubclass("Subclassed", (RuntimeError,), {}), id="a-str-subclass"),
         pytest.param(_NamedByRaising("Raising", (RuntimeError,), {}), id="a-raising-lookup"),
     ],
 )

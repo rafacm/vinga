@@ -870,7 +870,13 @@ class ClassName(TextValue):
     ARG_KIND: ClassVar[ArgKind] = ArgKind.CLASS_NAME
 
     def __post_init__(self) -> None:
-        if not isinstance(self.value, str):
+        # A plain `str`, checked on the value this type keeps and not on
+        # the parts it checks: splitting a `str` subclass answers plain
+        # strings, so the parts can pass while the object kept, which
+        # is what `carried` hands the log, prints as something else
+        # through its own `__format__` (#565's second review round).
+        # The same rule `class_names.is_class_name` applies to each part.
+        if type(self.value) is not str:
             raise EventValueError("a ClassName is a string")
         parts = self.value.split(CLASS_NAME_SEPARATOR) if self.JOINED else [self.value]
         if not all(is_class_name(part) for part in parts):
