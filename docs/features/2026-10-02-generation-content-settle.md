@@ -207,6 +207,28 @@ rejected class as the fixed fallback. Nothing about the dependency
 changed: the site was fixed once, by #565, and this branch carries the
 test.
 
+## Second review round
+
+The re-review of PR #596 (openai/gpt-5.6-terra at 67addd73) found two
+P2s, both in the end-to-end refusal case.
+
+- **The refusal was not proved attempted.** The case asserted that the
+  closing event was not dispatched, which a path that skipped the
+  emission would satisfy too, and `refusals_are_expected` permits a
+  refusal without requiring one. The case now asserts the session
+  emitter's one refusal report, `REFUSAL_MESSAGE` with `UNBUILT_LABEL`
+  and `construction_failed` on the session channel, immediately
+  followed by the export's `llm_input_export_failed`. The review asked
+  for the report's label to be the closing event, and it cannot be: a
+  construction that failed is reported under the schema's fixed label,
+  by the rule that the report names nothing the failed thunk held, so
+  the channel and the order are what tie it to the closing event. With
+  the emission skipped in `finish`, and separately in `_closing`, both
+  cases fail; the previous version of the case passed under the
+  `finish` mutation.
+- **Stdout was not searched.** The no-leak hunt now reads captured
+  stdout as well as stderr, beside both log renderings.
+
 ## Files modified
 
 - `vinga-server/src/vinga_server/telemetry.py`
