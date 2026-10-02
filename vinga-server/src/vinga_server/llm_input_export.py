@@ -216,11 +216,37 @@ class LlmInputExport:
         else:
             staged.calls.append(event)
 
-    def finish(self, invocation: str) -> None:
-        """Stage the complete pair before the matching event is emitted."""
+    def finish(self, invocation: str, emit: Callable[[], object]) -> None:
+        """Hand a round's complete pair to the `llm_round` or
+        `provider_failed` event `emit` says.
+
+        The tool path's contract (`stage_tool`), for a generation: the
+        pair is completed and staged, `emit` is called exactly once
+        whatever happens to the pair, and the handoff is then settled.
+        The event folds synchronously, so by the time `emit` returns its
+        `llm` span has taken the pair or never will. Only a pair the
+        fold wrote onto the span is counted in `rounds`; one the
+        emission never delivered (a refused construction) is discarded
+        there and then and reported, so no slot waits for shutdown and
+        no count claims an attachment that did not happen (#588).
+
+        Called once per logical round, by whichever event closes it: a
+        first-token retry re-sends the round under the same invocation
+        and finishes nothing, so it stays one round.
+        """
+        session = self._finish(invocation)
+        emit()
+        if session is None:
+            return
+        self._settled(session, GENERATION, self._telemetry.settle_llm_content(invocation))
+
+    def _finish(self, invocation: str) -> str | None:
+        """Complete, bound and stage one round's pair, answering its
+        session once it is staged, or None where there was none or it
+        was dropped and already reported."""
         staged = self._rounds.pop(invocation, None)
         if staged is None:
-            return
+            return None
         self._remove(staged)
         try:
             output = _output(staged.text, staged.calls)
@@ -230,22 +256,16 @@ class LlmInputExport:
             }
             if _size(attributes) > self._max_content_bytes:
                 self._failed(staged.session, GENERATION, LlmInputExportFailure.DROPPED)
-                return
+                return None
         except Exception:  # noqa: BLE001 - content export never breaks a reply
             self._failed(staged.session, GENERATION, LlmInputExportFailure.DROPPED)
-            return
+            return None
         if not self._telemetry.stage_llm_content(
             staged.session, invocation, attributes
         ):
             self._failed(staged.session, GENERATION, LlmInputExportFailure.DROPPED)
-            return
-        events.emit(
-            lambda: LlmInputExported(
-                session=SessionId(staged.session),
-                rounds=Count(1),
-                tool_calls=Count(0),
-            )
-        )
+            return None
+        return staged.session
 
     def stage_tool(
         self,
@@ -285,17 +305,10 @@ class LlmInputExport:
         emit()
         if staged is None:
             return
-        if not self._telemetry.settle_tool_content(invocation, position):
-            self._failed(session, TOOL_CALL, LlmInputExportFailure.DROPPED)
-            return
-        self._tool_round[session] = (invocation, staged)
-        events.emit(
-            lambda: LlmInputExported(
-                session=SessionId(session),
-                rounds=Count(0),
-                tool_calls=Count(1),
-            )
-        )
+        if self._settled(
+            session, TOOL_CALL, self._telemetry.settle_tool_content(invocation, position)
+        ):
+            self._tool_round[session] = (invocation, staged)
 
     def _stage_tool(
         self,
@@ -327,6 +340,22 @@ class LlmInputExport:
             self._failed(session, TOOL_CALL, LlmInputExportFailure.DROPPED)
             return None
         return admitted + size
+
+    def _settled(self, session: str, kind: LlmInputExportKind, attached: bool) -> bool:
+        """Count one pair its span took, under its own kind, or report
+        one it never got: the one ledger rule both kinds settle by.
+        Answers whether it was counted."""
+        if not attached:
+            self._failed(session, kind, LlmInputExportFailure.DROPPED)
+            return False
+        events.emit(
+            lambda: LlmInputExported(
+                session=SessionId(session),
+                rounds=Count(1 if kind is GENERATION else 0),
+                tool_calls=Count(1 if kind is TOOL_CALL else 0),
+            )
+        )
+        return True
 
     def session_closed(self, session: str) -> None:
         for invocation in tuple(self._sessions.get(session, ())):

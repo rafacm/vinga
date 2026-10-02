@@ -41,6 +41,10 @@ def exporter(**bounds: object):
     return LlmInputExport(telemetry=telemetry, **bounds), recorded
 
 
+def _emitted() -> None:
+    """The round's or the call's event, which a unit case has none of."""
+
+
 def test_builder_is_off_by_default() -> None:
     assert (
         build_llm_input_export(ServerConfig.model_validate({}), telemetry=None)
@@ -86,7 +90,7 @@ def test_one_pair_uses_the_standard_message_attributes() -> None:
     )
     staged.observe("invocation", TextDelta("withheld raw output"))
     staged.observe("invocation", call)
-    staged.finish("invocation")
+    staged.finish("invocation", _emitted)
 
     [(identity, attributes)] = recorded.snapshots
     assert identity == "invocation"
@@ -127,7 +131,7 @@ def _one_round(stage: str) -> dict[str, str]:
         choice="none",
     )
     staged.observe("round", TextDelta("hi"))
-    staged.finish("round")
+    staged.finish("round", _emitted)
     [(_, attributes)] = recorded.snapshots
     return attributes
 
@@ -164,7 +168,7 @@ def _streamed(ceiling: int, reply: str) -> list[tuple[str, dict[str, str]]]:
     )
     for start in range(0, len(reply), 100):
         staged.observe("streamed", TextDelta(reply[start : start + 100]))
-    staged.finish("streamed")
+    staged.finish("streamed", _emitted)
     return recorded.snapshots
 
 
@@ -229,7 +233,7 @@ def test_malformed_tool_arguments_remain_in_both_message_sides() -> None:
         choice="auto",
     )
     staged.observe("malformed", malformed)
-    staged.finish("malformed")
+    staged.finish("malformed", _emitted)
 
     [(_, attributes)] = recorded.snapshots
     input_call = json.loads(attributes[GEN_AI_INPUT_MESSAGES])[0]["parts"][0]
@@ -279,7 +283,7 @@ def test_a_live_trace_refusal_drops_the_pair_truthfully(
     )
 
     with caplog.at_level(logging.WARNING):
-        staged.finish("not-staged")
+        staged.finish("not-staged", _emitted)
 
     assert recorded.snapshots == []
     failures = [
@@ -320,7 +324,7 @@ def test_output_growth_drops_the_pair_while_it_streams(
         assert recorded.discarded == ["grows"]
 
         staged.observe("grows", TextDelta("more"))
-        staged.finish("grows")
+        staged.finish("grows", _emitted)
 
     assert recorded.snapshots == []
     assert _dropped(caplog) == [LlmInputExportFailure.DROPPED.value]
@@ -352,7 +356,7 @@ def test_streaming_output_is_rendered_once_at_finish(
         staged.observe("streamed", TextDelta("two UTF-8 bytes: é"))
 
     assert renders == 0
-    staged.finish("streamed")
+    staged.finish("streamed", _emitted)
     assert renders == 1
     assert len(recorded.snapshots) == 1
 
@@ -369,8 +373,8 @@ def test_session_budget_evicts_the_oldest_unfinished_round() -> None:
             tools=[],
             choice="none",
         )
-    staged.finish("first")
-    staged.finish("second")
+    staged.finish("first", _emitted)
+    staged.finish("second", _emitted)
     assert [identity for identity, _ in recorded.snapshots] == ["second"]
 
 
@@ -407,10 +411,45 @@ def test_a_duplicate_invocation_is_rejected_without_replacing_the_first(
     assert [(failure.session, failure.reason) for failure in failures] == [
         ("second-session", LlmInputExportFailure.DROPPED.value)
     ]
-    staged.finish("same")
+    staged.finish("same", _emitted)
     [(_, attributes)] = recorded.snapshots
     assert "original" in attributes[GEN_AI_SYSTEM_INSTRUCTIONS]
     assert "replacement" not in attributes[GEN_AI_SYSTEM_INSTRUCTIONS]
+
+
+@pytest.mark.parametrize(
+    "bounds, accepts, staged",
+    [
+        ({}, True, True),
+        ({"max_request_bytes": 8}, True, True),
+        ({}, False, True),
+        ({}, True, False),
+    ],
+    ids=["attached", "over-ceiling", "refused", "unstaged"],
+)
+def test_the_round_event_is_emitted_once_whatever_becomes_of_the_pair(
+    bounds: dict[str, int], accepts: bool, staged: bool
+) -> None:
+    """The export owns the closing event's emission, so a pair dropped
+    on the way, or never staged at all, must not take the event with it
+    (#588)."""
+    telemetry, _ = exporting(accepts=accepts)
+    export = LlmInputExport(telemetry=telemetry, **bounds)
+    if staged:
+        export.stage_reply(
+            "session",
+            invocation="round",
+            agent=None,
+            system="be concise",
+            turns=[],
+            tools=[],
+            choice="none",
+        )
+    emitted: list[str] = []
+
+    export.finish("round", lambda: emitted.append("llm_round"))
+
+    assert emitted == ["llm_round"]
 
 
 def test_a_lone_surrogate_is_escaped_without_escaping_the_reply() -> None:
@@ -425,15 +464,11 @@ def test_a_lone_surrogate_is_escaped_without_escaping_the_reply() -> None:
         tools=[],
         choice="none",
     )
-    staged.finish("awkward")
+    staged.finish("awkward", _emitted)
     assert len(recorded.snapshots) == 1
 
 
 # --- a tool call's pair, for its tool span (#533) ----------------------
-
-
-def _emitted() -> None:
-    """The `tool_call` emission a unit case has no event for."""
 
 
 TOOL_DROPPED = ("failed", LlmInputExportKind.TOOL_CALL.value, LlmInputExportFailure.DROPPED.value)
@@ -465,7 +500,7 @@ def test_a_tool_pair_uses_the_conventions_keys_and_the_part_encoding(
         choice="auto",
     )
     staged.observe("asking", ToolCall(id="c", name="remember", arguments=arguments))
-    staged.finish("asking")
+    staged.finish("asking", _emitted)
     rendered = recorded.snapshots[0][1][GEN_AI_OUTPUT_MESSAGES]
     assert f'"arguments":{attributes[GEN_AI_TOOL_CALL_ARGUMENTS]},' in rendered
     assert json.loads(attributes[GEN_AI_TOOL_CALL_ARGUMENTS]) == arguments
