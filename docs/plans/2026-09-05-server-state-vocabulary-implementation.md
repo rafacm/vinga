@@ -412,3 +412,39 @@ one fact has one home and everything reads it from there, was true of
 the table and not yet of the two places that fed it. A rule that holds
 at the decision site and not at the call sites is a rule with a bug
 pending.
+
+## Corrections
+
+### 2026-10-02: the census does not hold the composed table (#553)
+
+M2's discovery above, and the plan's bullet it answered, say that
+moving the command to the client's side put the spelling inside the
+command-spellings census's reach, so a verb rename that missed the
+client's table fails a test in the same checkout. That is narrower
+than it reads, and for one of the two commands it was not true. The
+census reads tracked files as text, and the table's invocations are
+composed from `PROGRAM` (`f"{PROGRAM} apply"`, `f"{PROGRAM} diff"`),
+so neither is a spelling in any file. What held `vinga apply` was
+indirect: the comment above `INSTALLS` spells it out, which the census
+reads, and two rendering cases in `test_config_cli_rendering.py` quote
+the line written out and assert it is what the client printed, so a
+renamer who respelled those literals would have found the table still
+saying the old verb. Nothing did the same for `vinga diff`: the quotes
+of it the census guards are prose (four in the CLI guide, and a console
+transcript in `vinga-server/README.md`), which nothing ties to the
+table, and the respelling differential's
+literal of the whole sentence is in a file the census classifies as
+historical and does not hold to the registry. Measured on 2026-10-02 at
+`4f768b16`: with the grammar's `diff` row renamed, no test in the
+census or in the suites that read `SPOKEN` named the table's stale
+`vinga diff`; the failures were tests invoking `diff` itself and the
+manifest's drift, both of which a renamer clears without touching the
+table.
+
+The same claim stood in the comment above `INSTALLS` until #553, which
+replaced it with what does hold the spelling now: the registry guard
+`REMEDIES` already had (#488 M4), run over `SPOKEN` as well, as
+`test_every_command_a_table_advises_is_one_this_grammar_has`. The
+history above is left as it was written;
+`docs/features/2026-10-02-spoken-registry-guard.md` records the
+measurement and why the table stays composed.
