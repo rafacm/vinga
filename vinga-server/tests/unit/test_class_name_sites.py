@@ -94,6 +94,58 @@ async def test_a_failed_relocation_logs_a_validated_class_name(
     _clean(record.getMessage())
 
 
+class _NamedByNumber(type):
+    @property
+    def __name__(cls) -> object:  # type: ignore[override]
+        return 7
+
+
+class _NamedByRaising(type):
+    @property
+    def __name__(cls) -> object:  # type: ignore[override]
+        raise RuntimeError(PLANTED)
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        pytest.param(_NamedByNumber("Numbered", (RuntimeError,), {}), id="a-number"),
+        pytest.param(_NamedByRaising("Raising", (RuntimeError,), {}), id="a-raising-lookup"),
+    ],
+)
+async def test_a_class_whose_name_cannot_be_read_still_gets_the_refusal(
+    kind: type, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A metaclass decides what `__name__` answers (#565's review round).
+    Whatever it answers, the site still refuses with its own sentence,
+    raised outside the arm and so carrying no chain, and logs the fixed
+    phrase. A helper that raised inside the arm would instead escape
+    with the planted failure as its `__context__`."""
+    placements = DevicePlacements(_RefusingStore(kind(PLANTED)))  # type: ignore[arg-type]
+
+    escaped: type[BaseException] | None = None
+    refusal: BaseException | None = None
+    with caplog.at_level(logging.WARNING):
+        try:
+            await placements.relocate("aa:bb:cc:dd:ee:ff", "the kitchen")
+        except ValueError as raised:
+            refusal = raised
+        except Exception as raised:  # noqa: BLE001 - reported by its class below
+            escaped = raised.__class__
+    if escaped is not None:
+        # Outside the arm, and by the escaped class alone: pytest's own
+        # report would walk the chain into the class it cannot name.
+        pytest.fail(f"the relocation escaped with {escaped.__qualname__}")
+
+    assert refusal is not None
+    assert str(refusal) == builtin.PLACEMENT_FAILED
+    assert refusal.__context__ is None
+    assert refusal.__cause__ is None
+    [record] = [r for r in caplog.records if r.name == "vinga_server.device.placement"]
+    assert record.args == (UNNAMED_FAILURE,)
+    _clean(record.getMessage())
+
+
 # --- an exception's message, rendered later ---------------------------
 
 
@@ -143,12 +195,10 @@ PACKAGE = Path(vinga_server.__file__).parent
 # longer matches anything, because a stale allowlist is worth less than
 # none.
 ALLOWED = {
-    # The two helpers themselves, which is where the reading is meant to
-    # be concentrated. `failure_name` checks the name before saying it,
-    # and `ClassName.of` hands it to a constructor that refuses anything
-    # but an identifier.
-    ("class_names.py", "failure_name", "failure"),
-    ("events/values.py", "ClassName.of", "failure"),
+    # The one read the rule is concentrated into. `class_name_of`
+    # contains a lookup that raises and refuses anything but a plain
+    # identifier; `failure_name` and `ClassName.of` both ask it.
+    ("class_names.py", "class_name_of", "failure"),
     # Program types, which #565 puts out of scope: none of these is a
     # caught exception, and each is a class this server's own code or
     # its parsers made.
