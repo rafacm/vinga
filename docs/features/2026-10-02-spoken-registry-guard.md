@@ -162,6 +162,34 @@ reference changed.
   The full unit and integration lanes were not run, since no runtime
   string changed, and are left to CI.
 
+## PR review round
+
+Reviewed 2026-10-02 by openai/gpt-5.6-terra, thinking high via codex
+CLI 0.156.1, read-only sandbox, runtime 3m36s, at commit 4a0e4e5f. One
+finding.
+
+1. **P2: the guard accepted an invalid invocation with a valid verb
+   later in it.** The guard handed the whole quoted span to
+   `tests.support.config_cli.registered`, which looks for a registry
+   row at any word position, so a span with an unknown word between the
+   program word and `diff` passed on the strength of the `diff`. The
+   hole was the old `REMEDIES` guard's too.
+
+   *Resolution*: adopted, in the guard rather than in `registered`.
+   The any-position search is load-bearing for that helper's other
+   callers: it is how a live or wheel test's argv, which can carry
+   global options such as `--api-url` in front of the command, is
+   mapped to its row (`test_cli_live.py` drives `export` that way), and
+   the census's own guard calls it too. The test now asks
+   `_advises_a_row`: the first word is `PROGRAM`, and the row
+   `registered` finds in the rest begins at the rest's first word, so
+   a positional tail such as `<mac>` after `device show` is still
+   checked by `registered` and still allowed. Watched both ways with a
+   temporary forged `ADVICE` entry quoting such a span: against the
+   committed guard all three cases passed, the hole; against the fix
+   the forged case failed naming the span and the two real tables
+   passed. The forged entry was removed by copying the file back.
+
 ## Files modified
 
 - `vinga-server/tests/unit/test_config_cli_rendering.py`
