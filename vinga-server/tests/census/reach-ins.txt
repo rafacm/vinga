@@ -24,6 +24,7 @@ tests/support/sessions.py  _clock  1
 tests/support/sessions.py  _events  2
 tests/support/sessions.py  _generation  3
 tests/support/sessions.py  _in_flight  1
+tests/support/sessions.py  _keep_speech  1
 tests/support/sessions.py  _listen_mode  1
 tests/support/sessions.py  _mac  3
 tests/support/sessions.py  _opened_at  1
@@ -31,7 +32,7 @@ tests/support/sessions.py  _reply  1
 tests/support/sessions.py  _speak  1
 tests/support/sessions.py  _speak_reply  1
 tests/support/sessions.py  _taps  1
-tests/support/sessions.py  _turns  2
+tests/support/sessions.py  _turns  1
 tests/support/sessions.py  _turntaking  1
 tests/support/sessions.py  _utterance  1
 tests/support/stores.py  _engine  2
@@ -161,7 +162,9 @@ tests/unit/test_session_events.py  _speak  1
 tests/unit/test_session_filler.py  _filler  1
 tests/unit/test_session_filler.py  _pause_output  1
 tests/unit/test_session_filler.py  _resume_output  1
+tests/unit/test_session_kept_tools.py  _device_tools  1
 tests/unit/test_session_limits.py  _in_flight  1
+tests/unit/test_session_llm_input.py  _device_tools  1
 tests/unit/test_session_recap.py  _offered  1
 tests/unit/test_session_recap.py  _resumption  2
 tests/unit/test_session_record.py  _device_tools  1
