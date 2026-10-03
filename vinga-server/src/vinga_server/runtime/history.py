@@ -265,7 +265,7 @@ def as_sent(turns: Sequence[Turn], start: int, offered: Collection[str]) -> Sent
                 cleared.append(
                     Cleared(call.name, call.source, call.entry, _size(result.content))
                 )
-                refetchable.add((call.name, canonical_arguments(call.arguments)))
+                refetchable.add(repeat_key(call.name, call.arguments))
                 result = replace(result, content=_cleared(call.name, result.content))
             if call.name not in offered:
                 degraded += 1
@@ -313,6 +313,16 @@ def note_cost(call: ToolCall, result: ToolResult | None) -> int:
     if result is not None and _size(result.content) > MAX_KEPT_RESULT_BYTES:
         result = replace(result, content=_cleared(call.name, result.content))
     return len(_degraded(call, result, ascii_only=True))
+
+
+def repeat_key(name: str, arguments: object) -> tuple[str, str]:
+    """What a call is matched on when asking whether it repeats a past
+    one (#599): its name and its canonical arguments, both in the form
+    the history keeps them (`countable`). A kept call is already in
+    that form and a call the model just made is not, so both sides go
+    through this one function and a lone surrogate cannot make the same
+    call two calls."""
+    return countable(name), canonical_arguments(_countable_value(arguments))
 
 
 def canonical_arguments(arguments: object) -> str:

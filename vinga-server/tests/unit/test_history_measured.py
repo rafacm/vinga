@@ -461,6 +461,26 @@ async def test_a_repeat_whose_arguments_are_ordered_differently_is_a_refetch(
     assert refetches(caplog) == [False, True]
 
 
+async def test_a_repeat_whose_arguments_hold_a_lone_surrogate_is_a_refetch(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The history keeps a call's strings as text UTF-8 can encode, a
+    lone surrogate becoming U+FFFD; the repeat arrives as the model sent
+    it. Both sides of the comparison are put in the kept form, so the
+    same call is still the same call."""
+    first = ToolCall(id="c-1", name=DEVICE_STATUS, arguments={"part": "fan\ud800"})
+    again = ToolCall(id="c-2", name=DEVICE_STATUS, arguments={"part": "fan\ud800"})
+    script = ScriptedLlm([[first], "Fine.", [again], "Still fine."])
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    await with_board(session, a_board("s" * 3072))
+
+    with caplog.at_level(logging.INFO):
+        await run_reply(session, "how is the fan?")
+        await run_reply(session, "and now?")
+
+    assert refetches(caplog) == [False, True]
+
+
 async def test_a_repeat_with_other_arguments_is_not_a_refetch(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
