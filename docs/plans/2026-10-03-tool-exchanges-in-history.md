@@ -682,3 +682,31 @@ Reviewed 2026-10-03 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* accepted, as the upper bound. Q4 charges every kept call at its degraded note's size, which is never smaller than the structured form, through one cost function in `runtime/history.py`; it states the price (a slightly shorter look-back when everything is still offered). The test is in M3's list.
 
 **Verdict:** Ready after the P1 and P2 amendments. The proposed `runtime/history.py` passes the deletion test on its stated responsibilities: removing it would put the cap, completion, ID, and degradation rules back into multiple callers.
+
+## Plan review round 2
+
+Reviewed 2026-10-03 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 7m09s, at commit 70a28858, plan blob 075d11d1.
+
+---
+
+1. **P1 - The offer is still snapshotted per leg, not per request round.**
+   Evidence: Decision 5 requires checking against the current offer on every request (plan D5 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:341`)), but M1 does not change the existing `offer = self._tools.offer(...)` before the loop (pipeline.py (`vinga-server/src/vinga_server/runtime/pipeline.py:1767`)). All four LLM rounds therefore retain the same offer. An MCP reload between tool round 1 and round 2 remains invisible.
+   Plan should say instead: rebuild the `Offer` immediately before every provider request, and use that same per-round snapshot for tool definitions, `as_sent`, coercion, execution, and origin capture. Test an MCP removal between two rounds of one reply, not only between replies.
+
+2. **P1 - Degrading an in-reply invented or removed call leaves no valid continuation message.**
+   Evidence: D5 deliberately degrades a model-invented call in the current reply (plan D5 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:341`)), while D6 drops its tool-result turn when no calls remain structured (plan D6 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:351`)). The next tool-loop request consequently ends with an assistant plain-text note. `anthropic_messages()` emits that unchanged, while its ordinary tool-result continuation is a user message (anthropic_llm.py (`vinga-server/src/vinga_server/providers/anthropic_llm.py:46`)); the hydration contract likewise requires alternating roles. The proposed removed-MCP test occurs between replies, where a new user turn hides this failure.
+   Plan should say instead: define a provider-valid continuation shape for an all-degraded current round, without assigning far-side bytes user authority, and test an unknown call followed by a second LLM round through both provider translators.
+
+3. **P1 - D2 discards completed exchanges, contradicting decision 1.**
+   Evidence: Decision 1 says all tool exchanges stay for the conversation (plan (`docs/plans/2026-10-03-tool-exchanges-in-history.md:233`)), but D2 drops an entire interrupted round even if some calls have results, and also drops malformed calls with their error results (plan D2 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:297`)). D9 repeats the loss on resume (plan D9 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:402`)), and the tests explicitly assert that a completed first call disappears (plan tests (`docs/plans/2026-10-03-tool-exchanges-in-history.md:522`)). `TurnUnderway` already retains each completed result independently (turns.py (`vinga-server/src/vinga_server/runtime/turns.py:242`)).
+   Plan should say instead: retain every call-result pair that completed before cancellation, omitting only uncompleted calls and successful moves. Define a safe retained representation for malformed calls, including what survives resumption when raw malformed arguments were not stored. Add cancellation and malformed-call tests that require the completed error/result exchange on the next request and after resume.
+
+4. **P1 - `kept_round` cannot apply its stated move rule with its stated interface.**
+   Evidence: D1 gives `kept_round(history, preamble, calls, results)` only provider types and says `runtime/history.py` imports only `Turn`, `ToolCall`, and `ToolResult` (plan D1 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:251`)). D2 requires it to distinguish a resultless successful move, which is discarded, from a resultless ordinary call, which makes the round incomplete (plan D2 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:297`)). That distinction exists only in the runtime move vocabulary, as D9 itself recognizes (plan D9 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:405`)).
+   Plan should say instead: make the completion contract explicit. Either let `runtime/history.py` depend on the leaf `tools.names` move set, or pass explicit successful-move slots from `_run_tools`; then test both a successful move and an interrupted non-move with identical missing-result shapes.
+
+5. **P2 - The telemetry routing described cannot put failure facts on failed LLM spans.**
+   Evidence: Q5 says the history fields reach `provider_failed` through `LLM_ATTRIBUTES` (plan (`docs/plans/2026-10-03-tool-exchanges-in-history.md:210`)), but failed spans use `FAILED_PROVIDER_ATTRIBUTES`, not `LLM_ATTRIBUTES` (telemetry.py (`vinga-server/src/vinga_server/telemetry.py:1138`), telemetry.py (`vinga-server/src/vinga_server/telemetry.py:3134`)). The only helper additionally applied on failure is `_round_prompt_attributes`, which currently knows memory fields only.
+   Plan should say instead: name the shared history-attribute helper or both mapping tables explicitly, and require it on successful reply spans, recap spans, and failed LLM spans. Keep the two failure-route tests, but assert the actual OTLP attributes rather than only event fields.
+
+**Verdict: not ready.**
