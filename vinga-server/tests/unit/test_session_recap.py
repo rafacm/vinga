@@ -872,6 +872,11 @@ async def test_a_recap_round_says_llm_round_without_a_round_and_files_nothing(
         "agent": "poet",
         "conversation": thread,
         "turns": 17,
+        # A thread with no tool exchange in it loses nothing on the
+        # way out, and the recap says so in zeros (#599).
+        "cleared_results": 0,
+        "cleared_bytes": 0,
+        "degraded_calls": 0,
         "stage": "llm",
         "provider": "mock",
         "type": "mock",
