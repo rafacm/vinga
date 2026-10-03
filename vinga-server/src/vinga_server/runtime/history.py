@@ -55,9 +55,9 @@ why it is the exception and is bounded like every other result.
 """
 
 import json
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from vinga_server.providers.base import ToolCall, ToolResult, Turn
 
@@ -153,8 +153,10 @@ def kept_round(history: Sequence[Turn], preamble: str, pairs: Sequence[Pair]) ->
     A malformed call is kept as a call with no arguments beside the
     error it was answered with, which is all the conversation store
     holds of it; what the model streamed in place of a JSON object goes
-    no further than the round that streamed it. A result is kept in its
-    `countable` form, so the history holds only text UTF-8 can encode."""
+    no further than the round that streamed it. The call's name, every
+    key and string value in its arguments, however nested, and its
+    result are kept in their `countable` form, so the history holds only
+    text UTF-8 can encode."""
     if not pairs:
         return []
     first = sum(len(turn.tool_calls) for turn in history)
@@ -167,7 +169,8 @@ def kept_round(history: Sequence[Turn], preamble: str, pairs: Sequence[Pair]) ->
             replace(
                 pair.call,
                 id=minted,
-                arguments={} if malformed else pair.call.arguments,
+                name=countable(pair.call.name),
+                arguments={} if malformed else _countable_value(pair.call.arguments),
                 malformed_arguments=None,
                 source=pair.source,
                 entry=pair.entry,
@@ -284,6 +287,18 @@ def countable(text: str) -> str:
     A kept result is stored this way, and every size here is taken of
     this form."""
     return text.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+
+
+def _countable_value(value: Any) -> Any:
+    """A decoded JSON value with every string in it, keys included and
+    however deep, in its `countable` form."""
+    if isinstance(value, str):
+        return countable(value)
+    if isinstance(value, Mapping):
+        return {countable(str(key)): _countable_value(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_countable_value(item) for item in value]
+    return value
 
 
 def _size(content: str) -> int:
