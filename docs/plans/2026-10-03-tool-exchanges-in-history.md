@@ -350,11 +350,19 @@ cut), and it is dropped whole, exactly as the session dropped it; a
 malformed row is dropped from its round as in-session (D2). A turn then
 renders as `user`, per kept round an assistant turn with its calls and
 a tool turn with their results, then the stored reply. `TOOL_NOTE` goes: its only input was the names, which sit under
-the same switch as the results that now render whole. A turn joined
-onto the answer before it (the first turn of a thread a move landed
-on) renders its calls as degraded notes inside the joined text, which
-keeps the joining rule's alternation and is rare enough that structure
-buys nothing there.
+the same switch as the results that now render whole.
+
+A turn joined onto the answer before it (an answer with nothing heard,
+the first turn of a thread a move landed on) keeps its rounds
+structured (finding 4: decision 5 degrades only what is not offered).
+It stays in the same budget unit as the turn before it, and its pieces
+follow that turn's in order. Where that would put an assistant text
+turn directly before an assistant tool-call turn, the text becomes the
+start of the tool-call turn's `content`, joined by a newline, exactly
+as two answers are joined today; so the output still alternates the
+way the joining rule exists to guarantee, and the words stay in the
+order they were said. With no rounds, a joined turn is today's
+newline join, unchanged.
 
 ## Out of scope, with reasons
 
@@ -441,7 +449,8 @@ hydration suite's builders; no new fixtures.
   filtering, drops a round with a non-move null result whole, drops a
   successful move and a malformed call from a kept round, mints ids, charges the as-sent cost to the budget
   (a turn with a 10 KiB result costs its cleared size), renders a
-  joined turn's calls as notes; `threads.py` reads the widened row set
+  joined turn's still-offered call structured, with the answer before it
+  carried as that call's preamble; `threads.py` reads the widened row set
   in id order, two rounds of two calls each written through the store's
   own writer (integration, against Postgres); a reply cancelled after
   the first of two calls completed, then resumed, carries neither call; a resumed session's first
@@ -565,6 +574,8 @@ Reviewed 2026-10-03 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
 4. **P1: The joined-turn exception violates the structured-history decision.**
    **Evidence:** Plan D9 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:289`) degrades every call on a turn joined to the preceding answer, even when the tool is still offered. Issue decision 5 degrades calls *only* when their names are absent from the current offer; the resumed-request criterion requires still-offered calls to remain structured.
    **Plan should say instead:** Preserve structured exchanges while joining that turn to the preceding budget unit. Add a resume test for an answer-only turn that contains a still-offered tool call.
+
+   *Resolution:* accepted. D9 keeps a joined turn's rounds structured inside the preceding unit; an assistant text that would directly precede an assistant tool-call turn becomes the start of its `content`, the same newline join the rule uses for two answers, so alternation holds without degrading anything that is offered. The resume test is in M3's list.
 
 5. **P1: The degraded note gives untrusted bytes an assistant voice.**
    **Evidence:** Plan Q2 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:89`) interpolates the raw tool name and result into assistant content. The phrase “as data and not as instructions” does not contain a result that starts with `)` and follows it with a forged assistant instruction. The adapters (`vinga-server/src/vinga_server/providers/openai_llm.py:61`) will send that content as assistant-authored text.
