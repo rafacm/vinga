@@ -140,12 +140,20 @@ exchanges; before M3 the recap's input has none to degrade.
 
 **Q4. How do kept exchanges count against the resumption budget and
 the text switch?** A stored turn is one budget unit with its exchanges
-inside it, as its tool note is today; the unit's cost is its text plus
-each kept call's name and arguments JSON plus each result at its
-as-sent size (cleared to the note where it is over the cap, since every
-rebuilt result is a past one). The cost function is the history
-module's, so hydration and the cap cannot disagree about a result's
-size. Under text-off the store holds no names, arguments or results, so
+inside it, as its tool note is today. Hydration has no offer, and the
+offer decides whether each call is sent structured or as the longer
+degraded note (finding 8), so each kept call is charged at a documented
+upper bound: the length of its degraded note, which holds the same
+name, arguments and kept result as the structured form plus the fixed
+prefix and the JSON quoting, and so is never shorter. The result inside
+it is at its as-sent size (cleared where it is over the cap, since
+every rebuilt result is a past one). A unit is therefore never cheaper
+than whichever form a later request sends, so a unit that fits always
+fits as sent; the price is that a thread whose tools are all still
+offered is read a little less far back than an exact count would read
+it, by at most the prefix and quoting per call. That cost function is
+`runtime/history.py`'s (`note_cost(call, result)`), so hydration, the
+cap and the note cannot disagree about a size. Under text-off the store holds no names, arguments or results, so
 there is nothing to rebuild; resumption already requires text-on and is
 refused at boot otherwise, so the "session only" branch of decision 4
 is what a text-off deployment already gets: exchanges kept in-session
@@ -514,7 +522,9 @@ hydration suite's builders; no new fixtures.
 - **M3**: hydration groups rows into rounds in id order before
   filtering, drops a round with a non-move null result whole, drops a
   successful move and a malformed call from a kept round, mints ids, charges the as-sent cost to the budget
-  (a turn with a 10 KiB result costs its cleared size), renders a
+  (a turn with a 10 KiB result costs its cleared size), a turn that
+  would fit if priced structured but not at its degraded size is left
+  out with `over_budget` set, renders a
   joined turn's still-offered call structured, with the answer before it
   carried as that call's preamble; `threads.py` reads the widened row set
   in id order, two rounds of two calls each written through the store's
@@ -665,5 +675,7 @@ Reviewed 2026-10-03 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
 8. **P2: The resumption budget is priced before the final representation is known.**
    **Evidence:** Plan Q4 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:116`) promises an as-sent cost, but `hydrated` (`vinga-server/src/vinga_server/conversations/hydration.py:112`) has no current offer. That offer decides whether each exchange is structured or becomes a potentially longer text note; the recap uses an empty offer. The planned tests price a cleared large result but do not test degradation changing whether a turn fits.
    **Plan should say instead:** Charge each unit using the actual representation for its request, or a documented conservative upper bound. Test a turn that fits while structured but exceeds the budget after degradation.
+
+   *Resolution:* accepted, as the upper bound. Q4 charges every kept call at its degraded note's size, which is never smaller than the structured form, through one cost function in `runtime/history.py`; it states the price (a slightly shorter look-back when everything is still offered). The test is in M3's list.
 
 **Verdict:** Ready after the P1 and P2 amendments. The proposed `runtime/history.py` passes the deletion test on its stated responsibilities: removing it would put the cap, completion, ID, and degradation rules back into multiple callers.
