@@ -373,3 +373,32 @@ async def test_a_device_result_holding_a_lone_surrogate_does_not_break_the_next_
     await run_reply(session, "and now?")
 
     assert results_in(script.seen[-1][0]) == ["volume � high"]
+
+
+async def test_a_call_holding_lone_surrogates_degrades_into_text_that_encodes() -> None:
+    """The call's own strings can carry what a device result can: a model
+    may invent a name, and JSON arguments may hold an escaped lone
+    surrogate in a key or a value, nested or not. On the next reply the
+    invented name is degraded into the assistant's text, which has to
+    encode as UTF-8 for the request to be sent at all."""
+    lone = json.loads('"\\ud800"')
+    invented = ToolCall(
+        id="c1",
+        name=f"ghost{lone}",
+        arguments={f"key{lone}": f"value{lone}", "nested": [f"item{lone}", {f"k{lone}": 1}]},
+    )
+    script = ScriptedLlm([[invented], "I could not do that.", "Right."])
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    await run_reply(session, "do it")
+    assert await run_reply(session, "never mind") == ["Right."]
+
+    (turns, _, _) = script.seen[-1]
+    for turn in turns:
+        turn.content.encode("utf-8")
+    (record,) = degraded_records(turns)
+    assert record == {
+        "tool": "ghost�",
+        "arguments": {"key�": "value�", "nested": ["item�", {"k�": 1}]},
+        "result": record["result"],
+        "error": True,
+    }
