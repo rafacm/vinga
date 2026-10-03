@@ -7,6 +7,12 @@ so each test reads it off what a later round's provider saw. The pure
 rules (the cap, the ids, the degraded note) are pinned in
 `test_runtime_history.py`; these are the same rules reached through a
 reply, a barge-in, a failure and a reload.
+
+The last section is the resume (M3): a thread's exchanges written down,
+read back and handed to a session that picks the thread up, whose first
+request is where the rebuilt history is observable. How rows become
+turns is pinned in `test_conversations_hydration.py`, and the read in
+`test_conversations_threads.py`.
 """
 
 import asyncio
@@ -20,9 +26,25 @@ import pytest
 from tests.support.configs import BOTH_MAC, POET_MAC, base_config, registry_config
 from tests.support.device_tools import STATUS, FakeDevice
 from tests.support.providers import ScriptedLlm
-from tests.support.sessions import call, hand_over_to, history, run_reply, session_for
+from tests.support.records import SpyStore, speaking_session
+from tests.support.sessions import (
+    call,
+    drive_reply,
+    hand_over_to,
+    history,
+    run_reply,
+    session_for,
+    talking_thread,
+)
+from tests.support.stores import CONVERSATIONS_MANIFEST as MANIFEST
+from tests.support.stores import StoredThreads, a_backlog, a_candidate
 from tests.support.stores import memory as lane_memory
 from tests.support.tools_mcp import Applying, reading
+from vinga_server.config import Config
+from vinga_server.config.models import DatabaseConfig
+from vinga_server.conversations import threads
+from vinga_server.conversations.records import StoredCall
+from vinga_server.conversations.store import ConversationStore, open_conversations
 from vinga_server.providers import ToolCall, ToolDef, Turn
 from vinga_server.providers.anthropic_llm import anthropic_messages
 from vinga_server.providers.base import LlmEvent, LlmProvider, TextDelta, ToolChoice
@@ -402,3 +424,189 @@ async def test_a_call_holding_lone_surrogates_degrades_into_text_that_encodes() 
         "result": record["result"],
         "error": True,
     }
+
+
+# On resume (M3)
+
+GALAXY = "1f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
+
+# One frame of silence, which the mock ASR answers with its configured
+# transcript.
+UTTERANCE = b"\x00\x00" * 320
+
+
+def resuming() -> Config:
+    return base_config(server={"conversations": {"enabled": True, "resumption": True}})
+
+
+def resumed_from(backlog: Any, seeded: str = "Carrying on.") -> tuple[Any, ScriptedLlm]:
+    """A session whose next reply finds this thread by description and
+    moves onto it, and the model it does it with. The third request is
+    the round seeded on the thread, which is the first one the rebuilt
+    history is sent in."""
+    poet = ScriptedLlm(
+        [
+            [call("resume_conversation", description="the thread")],
+            [call("resume_conversation", conversation=backlog.conversation)],
+            seeded,
+        ]
+    )
+    store = StoredThreads(
+        found={
+            "poet": threads.Candidates(
+                matched=True, found=(a_candidate(backlog.conversation),)
+            )
+        },
+        held={backlog.conversation: backlog},
+    )
+    session = session_for(
+        resuming(), POET_MAC, {"poet": poet}, threads=store, memory=lane_memory()
+    )
+    return session, poet
+
+
+async def test_a_resumed_request_carries_offered_calls_structured_and_others_as_notes() -> None:
+    """The issue's third criterion. The thread remembered a fact in a
+    reply cut before it spoke, then read a lamp through an MCP tool this
+    deployment no longer configures: the first request on the resumed
+    thread carries the first structured, with its result, and the
+    second as the degraded note.
+
+    Through the real Anthropic translator, the cut reply's tool turn
+    and the utterance after it are one user message, and the call is
+    answered in it. The degraded round and the reply after it are two
+    assistant turns in a row, which is D6's shape (a degraded round is
+    not merged into the speech after it) and is the same in a session
+    that never ended."""
+    backlog = a_backlog(
+        GALAXY,
+        said=[("remember the door code", None), ("is the lamp on?", "It is on.")],
+        calls={
+            0: (
+                StoredCall(
+                    position=0,
+                    source="builtin",
+                    name="remember",
+                    arguments={"text": "the door code is 4721"},
+                    result="Saved.",
+                ),
+            ),
+            1: (
+                StoredCall(
+                    position=0,
+                    source="mcp",
+                    entry="home",
+                    name="home__lamp_state",
+                    arguments={},
+                    result="on",
+                ),
+            ),
+        },
+    )
+    session, poet = resumed_from(backlog)
+
+    assert await run_reply(session, "the door code thread") == ["Carrying on."]
+
+    assert talking_thread(session) == GALAXY
+    (turns, offered, _) = poet.seen[2]
+    assert "remember" in {tool.name for tool in offered}
+    assert "home__lamp_state" not in {tool.name for tool in offered}
+    assert [turn.role for turn in turns] == [
+        "user",
+        "assistant",
+        "tool",
+        "user",
+        "assistant",
+        "assistant",
+        "user",
+    ]
+    (kept,) = calls_in(turns)
+    assert (kept.id, kept.name, kept.arguments) == (
+        "h0",
+        "remember",
+        {"text": "the door code is 4721"},
+    )
+    assert results_in(turns) == ["Saved."]
+    (record,) = degraded_records(turns)
+    assert record == {"tool": "home__lamp_state", "arguments": {}, "result": "on", "error": False}
+    paired([poet.seen[2]])
+    messages = anthropic_messages(turns)
+    assert [one["role"] for one in messages] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+        "assistant",
+        "user",
+    ]
+    (used,) = [block for block in messages[1]["content"] if block["type"] == "tool_use"]
+    assert [block["type"] for block in messages[2]["content"]] == ["tool_result", "text"]
+    assert messages[2]["content"][0]["tool_use_id"] == used["id"] == "h0"
+    assert messages[2]["content"][1]["text"] == "is the lamp on?"
+
+
+def written_and_read_back(spy: SpyStore) -> Any:
+    """What a spy was handed, written through the store's own writer
+    and read back the way a resume reads it: the path a thread takes
+    between one session and the next."""
+    store = ConversationStore(DatabaseConfig())
+    store.start()
+    try:
+        store.open_session("s", 100.0, MANIFEST)
+        for _, record in spy.records:
+            store.record_turn("s", record)
+        store.close_session("s", duration_s=1.0, reason="client")
+    finally:
+        store.stop()
+    (conversation,) = {record.conversation for _, record in spy.records}
+    engine = open_conversations(DatabaseConfig())
+    try:
+        with engine.connect() as connection:
+            return threads.backlog(connection, conversation)
+    finally:
+        engine.dispose()
+
+
+async def test_a_cut_round_resumes_with_what_the_session_itself_kept() -> None:
+    """A reply cut after the first of two calls answered: the session
+    sends its next request with that pair and not the other. The same
+    thread written down, read back and resumed in another session sends
+    the same exchange, to the id, because the record the store writes
+    is what the session kept."""
+    device = a_board_with_status("unused")
+    device.silent_methods.add("tools/call")
+    script = ScriptedLlm(
+        [[call("remember", text="the user likes tea"), call(DEVICE_STATUS)], "Tea."]
+    )
+    spy = SpyStore()
+    first, _ = speaking_session(
+        spy, config=base_config(), scripts={"poet": script}, memory=lane_memory()
+    )
+    await with_board(first, device)
+    reply = asyncio.create_task(drive_reply(first, UTTERANCE))
+
+    async def dispatched() -> None:
+        # `remember` runs first and alone, so the board being asked
+        # means the first call has answered.
+        while not any(one.get("method") == "tools/call" for one in device.sent):
+            await asyncio.sleep(0.005)
+
+    await asyncio.wait_for(dispatched(), 10)
+    await cut(reply)
+    await drive_reply(first, UTTERANCE)
+    (sent_next, _, _) = script.seen[-1]
+    assert [one.name for one in calls_in(sent_next)] == ["remember"]
+
+    backlog = written_and_read_back(spy)
+    second, poet = resumed_from(backlog)
+    await run_reply(second, "the tea thread")
+
+    (resumed, _, _) = poet.seen[2]
+    # The cut reply as the first session sent it next, and as the
+    # second session rebuilt it: the utterance, the call that answered,
+    # its result, and nothing of the call still running when it was cut.
+    assert resumed[:3] == sent_next[:3]
+    assert [turn.role for turn in resumed[:3]] == ["user", "assistant", "tool"]
+    assert [one.name for one in calls_in(resumed)] == ["remember"]
+    paired([poet.seen[2]])
+
