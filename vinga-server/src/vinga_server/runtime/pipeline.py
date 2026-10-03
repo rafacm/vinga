@@ -128,7 +128,12 @@ from vinga_server.runtime.outlast import outlast
 from vinga_server.runtime.provider_watch import ProviderWatch
 from vinga_server.runtime.reply_in_flight import ReplyInFlight, SpeakingPass
 from vinga_server.runtime.speech import _Synthesis, speak_after
-from vinga_server.runtime.tool_execution import DEFAULT_TOOL_TIMEOUT_S, Offer, ToolExecution
+from vinga_server.runtime.tool_execution import (
+    DEFAULT_TOOL_TIMEOUT_S,
+    Offer,
+    ToolExecution,
+    cleared_key,
+)
 from vinga_server.runtime.turns import TurnUnderway
 from vinga_server.runtime.turntaking import Confirmation, TurnTaking, Utterance
 from vinga_server.session_conversations import SessionConversations, mint
@@ -1814,8 +1819,13 @@ class PipelineRuntime:
             sent = await self._system_prompt()
             system = sent.text
             # What this round sends of the history, built once and never
-            # touched again, so a watchdog retry resends the same bytes.
-            carried = as_sent(history, start, offered).turns
+            # touched again, so a watchdog retry resends the same bytes;
+            # and what the history lost on the way out, which every
+            # event about this request carries, each cleared result
+            # keyed by the origin its call was made with (#599).
+            outgoing = as_sent(history, start, offered)
+            carried = outgoing.turns
+            lost = outgoing.accounting(cleared_key)
             if self._llm_input is not None:
                 # Staged HERE, where the round is assembled, and
                 # deliberately not inside the partial below. The
@@ -1841,6 +1851,7 @@ class PipelineRuntime:
                     invocation=invocation,
                     round_=self._pass.round,
                     prompt=sent,
+                    history=lost,
                 ):
                     if self._llm_input is not None:
                         self._llm_input.observe(invocation, event)
@@ -1883,6 +1894,7 @@ class PipelineRuntime:
                     usage,
                     invocation=invocation,
                     prompt=sent,
+                    history=lost,
                 )
                 tail = splitter.flush()
                 if tail is not None and not self._withheld(tail, offer):

@@ -34,8 +34,16 @@ from vinga_server.events import SessionEvents, assembly, logger
 from vinga_server.events.catalog import Variant
 from vinga_server.events.values import Fragment
 from vinga_server.providers import ToolCall, ToolDef, ToolResult
+from vinga_server.runtime.history import Cleared
 from vinga_server.runtime.speech import withhold_tool_shaped
-from vinga_server.runtime.turns import BUILTIN, MCP, UNKNOWN, TurnUnderway, tool_source
+from vinga_server.runtime.turns import (
+    BUILTIN,
+    DEVICE,
+    MCP,
+    UNKNOWN,
+    TurnUnderway,
+    tool_source,
+)
 from vinga_server.session_conversations import SessionConversations
 from vinga_server.tools import names
 from vinga_server.tools.arguments import with_lossless_coercions
@@ -231,6 +239,29 @@ def _sentence_withheld(
     if source == MCP and entry is not None:
         return assembly.mcp_sentence_withheld(agent, conversation, entry, characters)
     return assembly.unnamed_sentence_withheld(agent, conversation, source, characters)
+
+
+def cleared_key(cleared: Cleared) -> str:
+    """The key a cleared result is counted under on the events that
+    describe its request (#599): `builtin.<name>`, `mcp.<entry>`,
+    `device` or `unknown`.
+
+    `_tool_called`'s naming policy, read off the same constants, so a
+    cleared result is named the way its `tool_call` named the call that
+    made it: a builtin by this server's own word, an MCP call by the
+    entry an operator configured, and a device tool or an invented name
+    by its namespace alone. The origin is the one the call was
+    classified with when the model made it, carried on the kept call,
+    and never a later offer's: an entry an apply has since removed is
+    still the entry the call reached. A call that carries no origin is
+    `unknown`, which is what an origin nobody recorded is."""
+    if cleared.source == BUILTIN:
+        return f"{BUILTIN}.{cleared.name}"
+    if cleared.source == MCP and cleared.entry is not None:
+        return f"{MCP}.{cleared.entry}"
+    if cleared.source == DEVICE:
+        return DEVICE
+    return UNKNOWN
 
 
 @dataclass(frozen=True)

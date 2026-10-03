@@ -83,6 +83,16 @@ NOTHING_IN_MEMORY = {
 }
 
 
+# What a request whose history held no earlier reply's exchange says
+# about it (#599): nothing cleared and nothing degraded, stated as zeros,
+# with the largest size and the per-tool counts absent.
+NOTHING_CLEARED = {
+    "cleared_results": 0,
+    "cleared_bytes": 0,
+    "degraded_calls": 0,
+}
+
+
 def refused() -> ConnectionRefusedError:
     return ConnectionRefusedError("no route")
 
@@ -174,6 +184,7 @@ async def test_a_round_given_up_says_provider_failed_as_first_token_timeout(
         "type": "mock",
         "purpose": "reply",
         **NOTHING_IN_MEMORY,
+        **NOTHING_CLEARED,
     }
 
 
@@ -239,6 +250,7 @@ async def test_every_reply_round_says_llm_round_and_files_itself_on_the_turn(
             "input_tokens": tokens[0],
             "output_tokens": tokens[1],
             "purpose": "reply",
+            **NOTHING_CLEARED,
         }
     assert len(set(invocations)) == 2
 
@@ -298,6 +310,7 @@ async def test_a_failing_stream_says_provider_failed_at_the_llm_stage(
         **CLOUD,
         "purpose": "reply",
         **NOTHING_IN_MEMORY,
+        **NOTHING_CLEARED,
     }
 
 

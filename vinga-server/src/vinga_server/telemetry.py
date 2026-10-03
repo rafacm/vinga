@@ -83,6 +83,7 @@ from vinga_server.events.catalog import carried_values, catalog, kind_of
 from vinga_server.events.values import (
     PROVIDER_ENTRY_OPTIONAL,
     PROVIDER_ENTRY_REQUIRED,
+    ClearedTools,
     Kind,
     MemorySources,
     PromptSources,
@@ -735,6 +736,28 @@ def _round_prompt_attributes(payload: dict[str, Any]) -> dict[str, Any]:
     return attributes
 
 
+def _history_attributes(payload: dict[str, Any]) -> dict[str, Any]:
+    """What a request's history lost on the way out, as the attributes
+    its `llm` span carries, or nothing at all (#599).
+
+    `_round_prompt_attributes`'s shape, and applied at the same two
+    sites, so a round that finished, a recap and a request that failed
+    carry one set of names: the counts through the declared-shape gate
+    every other attribute takes, and the per-tool counts through the
+    catalog's own value type, because the key becomes part of an
+    attribute NAME and `ClearedTools` is what holds it to the naming
+    policy's four shapes.
+    """
+    attributes = _attributes(payload, HISTORY_ATTRIBUTES)
+    try:
+        tools = ClearedTools(payload.get("cleared_tools")).carried()
+    except Exception:  # noqa: BLE001 - absent, or a payload nobody declared
+        return attributes
+    for key, count in tools.items():
+        attributes[f"{CLEARED_TOOLS_PREFIX}.{key}"] = count
+    return attributes
+
+
 def _entry_name(stage: str) -> str:
     """The attribute one stage's configured entry name is spelled under.
 
@@ -839,8 +862,9 @@ SHAPES: dict[Kind, Shape] = {
     # (`_round_prompt_attributes`), and this row is only what a span
     # event would get, the same deterministic string as its sibling.
     Kind.MEMORY_SOURCES: Shape.JSON,
-    # The per-tool cleared counts (#599), as a span event would get
-    # them, the same deterministic string as their siblings.
+    # The per-tool cleared counts, flattened by the `llm` span itself
+    # (`_history_attributes`) exactly as the scope sizes are; this row
+    # is what a span event would get.
     Kind.CLEARED_TOOLS: Shape.JSON,
     # And the one that is context rather than an attribute: what a
     # session opened against is attached per agent to the spans it
@@ -1177,6 +1201,29 @@ ROUND_PROMPT_ATTRIBUTES = {
 MEMORY_SOURCES_PREFIX = "vinga.llm.memory.sources"
 
 MEMORY_FACT_COUNT = "vinga.llm.memory.fact_count"
+
+# What a request's history lost on the way out (#599), on the `llm` span
+# of a round that finished, of a recap, and of a request that failed
+# after it was built. Its own table rather than rows in
+# `LLM_ATTRIBUTES`, because a failed request's span is built from
+# `FAILED_PROVIDER_ATTRIBUTES`, and a row in one table would reach
+# success spans only; `_history_attributes` reads this one at both
+# sites. Under `vinga.llm.history`, since these describe the history the
+# request carried and not the prompt or the round.
+#
+# `cleared.largest` and the per-tool counts are absent where nothing was
+# cleared, never a zero; the per-tool counts are one attribute per key,
+# `vinga.llm.history.cleared.tools.builtin.<name>`,
+# `.mcp.<entry>`, `.device` and `.unknown`, so a backend filters on a
+# tool without parsing a blob.
+HISTORY_ATTRIBUTES = {
+    "cleared_results": "vinga.llm.history.cleared.count",
+    "cleared_bytes": "vinga.llm.history.cleared.bytes",
+    "cleared_largest": "vinga.llm.history.cleared.largest",
+    "degraded_calls": "vinga.llm.history.degraded.count",
+}
+
+CLEARED_TOOLS_PREFIX = "vinga.llm.history.cleared.tools"
 
 # The tool span, which is what a `tool_call` becomes instead of the
 # span event it used to be.
@@ -3149,6 +3196,7 @@ class Telemetry:
             # these at all.
             attributes[GEN_AI_OPERATION] = CHAT
             attributes.update(_round_prompt_attributes(payload))
+            attributes.update(_history_attributes(payload))
             attributes.update(content)
         span = self._tracer.start_span(
             LLM_SPAN if stage == LLM_STAGE else TTS_SPAN,
@@ -3204,6 +3252,7 @@ class Telemetry:
                 GEN_AI_OPERATION: CHAT,
                 **_attributes(payload, LLM_ATTRIBUTES),
                 **_round_prompt_attributes(payload),
+                **_history_attributes(payload),
                 **content,
             },
             start_time=_before(end, payload.get("duration_ms")),

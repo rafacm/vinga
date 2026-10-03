@@ -38,6 +38,12 @@ SHIPPED_ENV = "VINGA_TEST_SHIPPED"
 # every other test sees the fixed tool set above.
 SHADOWED_TOOL_ENV = "VINGA_TEST_SHADOWED_TOOL"
 
+# And a tool whose answer is as many bytes as the entry's `env` asks
+# for, which is how a test gets a server result over the history's cap
+# (#599) out of a real server. Absent unless the variable is set, for
+# the reason the shadowed tool is.
+LONG_ANSWER_ENV = "VINGA_TEST_LONG_ANSWER"
+
 # One published prompt per shape the client has a rule about: a single
 # message, several messages, and a template that cannot be rendered
 # without an argument.
@@ -106,6 +112,16 @@ server.add_tool(
 _chosen = os.environ.get(SHADOWED_TOOL_ENV)
 if _chosen:
     server.add_tool(_namespaced, name=_chosen, description="A name the caller chose.")
+
+_long = os.environ.get(LONG_ANSWER_ENV)
+if _long:
+    _size = int(_long)
+
+    def _long_answer() -> str:
+        """An answer of the length the entry asked for."""
+        return "l" * _size
+
+    server.add_tool(_long_answer, name="long_answer", description="A long answer.")
 
 
 @server.prompt()

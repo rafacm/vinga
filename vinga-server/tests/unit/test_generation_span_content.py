@@ -55,6 +55,7 @@ from vinga_server.events.values import LlmPurpose
 from vinga_server.llm_input_export import LlmInputExport, build_llm_input_export
 from vinga_server.providers.base import TextDelta, Usage
 from vinga_server.runtime import prompt
+from vinga_server.runtime.history import NOTHING_LOST
 from vinga_server.runtime.provider_watch import ProviderWatch
 from vinga_server.runtime.turns import TurnUnderway
 from vinga_server.session_conversations import SessionConversations
@@ -192,7 +193,8 @@ def _rounded(watch: ProviderWatch, turn: TurnUnderway, usage: Usage | None = Non
     """The round finishing, as the reply reports it."""
     began = asyncio.get_running_loop().time()
     watch.reply_round_done(
-        turn, 1, object(), [], began, None, usage, invocation=INVOCATION, prompt=SENT
+        turn, 1, object(), [], began, None, usage, invocation=INVOCATION, prompt=SENT,
+        history=NOTHING_LOST,
     )
 
 

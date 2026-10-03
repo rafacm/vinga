@@ -71,6 +71,7 @@ from vinga_server.events.values import (
     CheckInBody,
     ClassName,
     ClassNames,
+    ClearedTools,
     ClientId,
     ClipFilingFailure,
     CloseReason,
@@ -1885,6 +1886,47 @@ MEMORY_FACTS_NOTE = (
 )
 
 
+# The notes for what a request's history lost on the way out (#599), one
+# per field and shared by the three variants that carry them: a round
+# that finished, a recap, and a round that failed after its request was
+# built describe one request each, and the reference says the same thing
+# about all three. Earlier replies' tool results over 2 KiB are sent as
+# a note naming the tool and the size ("cleared"), and earlier calls to
+# a tool the request does not offer as a quoted record in the
+# assistant's turn ("degraded"); a reply's own exchanges are sent
+# whole, so these count only what came before it.
+CLEARED_RESULTS_NOTE = (
+    "Past tool results this request carried as the cleared note: the "
+    "results of earlier replies over the 2 KiB cap (2048 UTF-8 bytes), "
+    "each sent as a note naming the tool and the size. Zero when none. "
+    "Present on every reply round and recap; on `provider_failed`, "
+    "present where an LLM request failed after it was built and absent "
+    "on any other failure."
+)
+CLEARED_BYTES_NOTE = (
+    "The cleared results' original sizes summed, in UTF-8 bytes. Zero "
+    "when none."
+)
+CLEARED_LARGEST_NOTE = (
+    "The largest cleared result's original size, in UTF-8 bytes. Absent "
+    "when none was cleared."
+)
+CLEARED_TOOLS_NOTE = (
+    "How many of the cleared results each tool made, keyed under the "
+    "`tool_call` naming policy: `builtin.<name>`, `mcp.<entry>`, "
+    "`device` or `unknown`. The key is the origin the call was "
+    "classified with when the model made it, so a result from an MCP "
+    "entry an apply has since removed is still keyed by that entry. "
+    "Absent when none was cleared."
+)
+DEGRADED_CALLS_NOTE = (
+    "Past tool calls this request carried as the degraded note, a "
+    "quoted record in the assistant's turn, because the request does "
+    "not offer their tool: an MCP reload removed it, the model invented "
+    "the name, or the request offers no tools at all. Zero when none."
+)
+
+
 @dataclass(frozen=True)
 class LlmRound(Variant):
     """A generation call finishes."""
@@ -1921,7 +1963,24 @@ class LlmRound(Variant):
             "generation after a handover is a round of its own."
         )
     )
-    turns: Count = value(note="The cheap proxy for payload size.")
+    turns: Count = value(
+        note=(
+            "The messages the request sent, the cheap proxy for payload "
+            "size. Counts the tool exchanges kept from earlier replies "
+            "as well (#599), an assistant turn per round of calls and a "
+            "tool turn per round of results, so a series that crosses "
+            "that change steps up."
+        )
+    )
+    # Always stated, a zero included: a round's request always went
+    # through the history's cap and its offer check (#599). The two
+    # that describe cleared results are absent when there were none,
+    # and passed explicitly all the same, so a site cannot forget them.
+    cleared_results: Count = value(note=CLEARED_RESULTS_NOTE)
+    cleared_bytes: Count = value(note=CLEARED_BYTES_NOTE)
+    cleared_largest: Count | Absent = value(note=CLEARED_LARGEST_NOTE)
+    cleared_tools: ClearedTools | Absent = value(note=CLEARED_TOOLS_NOTE)
+    degraded_calls: Count = value(note=DEGRADED_CALLS_NOTE)
     duration_ms: Whole = value()
     stage: Identifier = value()
     duration_s: Real = value(carried=False)
@@ -1977,6 +2036,11 @@ class LlmRecap(Variant):
     conversation: ConversationId = value()
     invocation: InvocationId = value()
     turns: Count = value(note="The cheap proxy for payload size.")
+    cleared_results: Count = value(note=CLEARED_RESULTS_NOTE)
+    cleared_bytes: Count = value(note=CLEARED_BYTES_NOTE)
+    cleared_largest: Count | Absent = value(note=CLEARED_LARGEST_NOTE)
+    cleared_tools: ClearedTools | Absent = value(note=CLEARED_TOOLS_NOTE)
+    degraded_calls: Count = value(note=DEGRADED_CALLS_NOTE)
     duration_ms: Whole = value()
     stage: Identifier = value()
     duration_s: Real = value(carried=False)
@@ -2048,6 +2112,15 @@ class ProviderFailed(Variant):
     memory_characters: Count | Absent = value(default=ABSENT, note=MEMORY_CHARACTERS_NOTE)
     memory_sources: MemorySources | Absent = value(default=ABSENT, note=MEMORY_SOURCES_NOTE)
     memory_facts: FactIds | Absent = value(default=ABSENT, note=MEMORY_FACTS_NOTE)
+    # An LLM request that failed after it was built carries what its
+    # history lost on the way out, a reply round or a recap alike, since
+    # a context-length refusal is about exactly that request (#599);
+    # every other failure carries none of it.
+    cleared_results: Count | Absent = value(default=ABSENT, note=CLEARED_RESULTS_NOTE)
+    cleared_bytes: Count | Absent = value(default=ABSENT, note=CLEARED_BYTES_NOTE)
+    cleared_largest: Count | Absent = value(default=ABSENT, note=CLEARED_LARGEST_NOTE)
+    cleared_tools: ClearedTools | Absent = value(default=ABSENT, note=CLEARED_TOOLS_NOTE)
+    degraded_calls: Count | Absent = value(default=ABSENT, note=DEGRADED_CALLS_NOTE)
 
 
 # How a `tool_call` names the call it ran, in the server's own terms

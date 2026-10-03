@@ -80,6 +80,7 @@ from vinga_server.events.values import (
     UtteranceId,
     Whole,
 )
+from vinga_server.runtime.history import NOTHING_LOST
 from vinga_server.session_conversations import SessionConversations
 from vinga_server.telemetry import Telemetry, build_telemetry
 
@@ -510,10 +511,13 @@ def round_done(
     purpose: str = "reply",
     cache_read_input_tokens: int | None = None,
     prompt: Any = None,
+    history: Any = NOTHING_LOST,
 ) -> float:
     """One `llm_round`, built through the events' own assembly so the
     quartet's absence rules are the real ones. `prompt` is a reply
-    round's accounting, a `RoundPrompt`, where the case is about it.
+    round's accounting, a `RoundPrompt`, where the case is about it, and
+    `history` what the request's history lost on the way out, a
+    `HistorySent`, nothing by default.
 
     `unbuilt` is a provider the registry never stamped (a test's, a
     fixture's), which the catalog answers with four absences rather than
@@ -536,6 +540,7 @@ def round_done(
             purpose,
             cache_read_input_tokens=cache_read_input_tokens,
             prompt=prompt,
+            history=history,
         )
     )
 
@@ -560,10 +565,12 @@ def provider_failed(
     invocation: str | None = None,
     purpose: str | None = None,
     prompt: Any = None,
+    history: Any = None,
 ) -> float:
     """A provider call that failed, at whichever stage, naming whichever
     entry it ran on, with a failed reply round's `prompt` accounting
-    where the case is about it."""
+    and a failed request's `history` accounting where the case is about
+    them."""
     provider = FakeProvider(identity=None if unbuilt else (identity or Identity()))
     raised = TimeoutError() if failure is None else failure
     return events.emit(
@@ -581,6 +588,7 @@ def provider_failed(
             ),
             purpose="reply" if stage == "llm" and purpose is None else purpose,
             prompt=prompt,
+            history=history,
         )
     )
 
