@@ -358,3 +358,18 @@ async def test_every_sentence_heard_is_in_the_history_once() -> None:
     assert " ".join(said) == " ".join(spoken)
     assert said == ["Let me look.", "One more.", "All done. Both saved."]
     paired(script.seen)
+
+
+async def test_a_device_result_holding_a_lone_surrogate_does_not_break_the_next_reply() -> None:
+    """JSON allows an escaped lone surrogate, the device channel keeps it
+    as text, and text that cannot be encoded as UTF-8 cannot be measured
+    against the cap. What is kept is the result with the surrogate
+    replaced, so the next reply is sent, and sized, like any other."""
+    script = ScriptedLlm([[call(DEVICE_STATUS)], "Fine.", "Still fine."])
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    await with_board(session, a_board_with_status(json.loads('"volume \\ud800 high"')))
+
+    await run_reply(session, "how is my board?")
+    await run_reply(session, "and now?")
+
+    assert results_in(script.seen[-1][0]) == ["volume � high"]
