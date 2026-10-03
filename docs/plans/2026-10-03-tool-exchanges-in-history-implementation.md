@@ -199,3 +199,44 @@ Not verified locally: the image build and its smoke conversation (CI's
 messages after a tool-only reply, and the joined form) is pinned
 through the real translator but was not sent to the Anthropic API: no
 key on this machine, as in Step 0.
+
+### PR review round 1
+
+Reviewed 2026-10-03 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 7m34s, at commit d3ca5e11.
+
+Three P2 findings, all accepted, each fixed in its own commit with its
+test watched failing first.
+
+1. **P2: `note_cost` undercounted non-ASCII arguments.** It priced the
+   degraded note as sent, which keeps non-ASCII text raw, while the
+   OpenAI translator escapes each such character in a structured
+   call's arguments to six characters (twelve outside the BMP): 294
+   against 609 for 100 CJK characters, so M3's budget could be
+   exceeded. *Resolution:* `bcbfc811`. `note_cost` measures the note
+   serialized with ASCII escaping, which holds the arguments in exactly
+   OpenAI's form and the name and result at least as long as any wire
+   form. Signature unchanged; the value is unchanged for ASCII-only
+   calls and larger otherwise. The test prices CJK, emoji and mixed
+   text against both translators' renderings and the degraded note
+   (2 of 3 cases failed before).
+2. **P2: a lone surrogate in a device result broke every later reply.**
+   JSON accepts an escaped `\ud800`, the device channel keeps it, and
+   `as_sent` raised `UnicodeEncodeError` measuring it. *Resolution:*
+   `57f6e261`. `kept_round` stores a result in the new public
+   `countable` form (lone surrogates to U+FFFD, split pairs joined),
+   and every size the module takes is of that form, so a raw string
+   from elsewhere is measured rather than raised on. Tests: a device
+   result through a real session to the next reply's request, and a
+   module test. Mutations: retention unnormalized (killed, 2), size of
+   the raw text (killed, 1), pairs not joined (killed, 1).
+3. **P2: `docs/concepts.md` claimed conversation-long persistence.**
+   A resumed conversation does not rebuild its exchanges until M3.
+   *Resolution:* `796f71f1`. The bullet says the exchanges last as long
+   as the session and marks the rebuild as decided direction.
+
+Lanes after the fixes, on agentpi at `796f71f1`, both `-n auto --dist
+loadfile`: ruff clean; unit 7940 passed, 19 skipped in 906.84s; integration 350
+passed in 972.29s (four times the earlier run's 240.85s, on a machine
+running M3's lanes beside it); the seven drift checks clean; doc links
+295 files, 0 failures. The census lane ran last, after this
+subsection.
