@@ -55,8 +55,9 @@ why it is the exception and is bounded like every other result.
 """
 
 import json
-from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass, replace
+from collections import Counter
+from collections.abc import Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from typing import Any, NamedTuple
 
 from vinga_server.providers.base import ToolCall, ToolResult, Turn
@@ -115,6 +116,34 @@ class Cleared:
 
 
 @dataclass(frozen=True)
+class HistorySent:
+    """What one request's history lost on the way out, as every event
+    about that request reports it (#599): how many past results went as
+    the cleared note, their original sizes summed and the largest, how
+    many of them each tool made, and how many past calls went as the
+    degraded note.
+
+    Counts, sizes and keys the caller built from each call's own origin;
+    no content, and nothing a far side said or named. Carried beside a
+    round's prompt accounting the way that is, so a round that finished
+    and one that failed say the same thing about the same request.
+
+    The default is a request whose history lost nothing: zero counts,
+    no largest, no keys. That is also what a request whose history holds
+    no exchange at all reports."""
+
+    cleared_results: int = 0
+    cleared_bytes: int = 0
+    cleared_largest: int | None = None
+    cleared_tools: Mapping[str, int] = field(default_factory=dict)
+    degraded_calls: int = 0
+
+
+# A request whose history lost nothing on the way out.
+NOTHING_LOST = HistorySent()
+
+
+@dataclass(frozen=True)
 class Sent:
     """What one request carries of a thread's history, and what was done
     to it on the way.
@@ -141,6 +170,22 @@ class Sent:
         """The largest cleared result's original size, or None when
         nothing was cleared."""
         return max((one.size for one in self.cleared), default=None)
+
+    def accounting(self, key: Callable[[Cleared], str]) -> HistorySent:
+        """This request's facts as its events carry them, each cleared
+        result counted under `key(cleared)`.
+
+        The key is the caller's, because naming a tool is a policy about
+        namespaces and this module knows none: the runtime keys each
+        cleared call from the origin it was classified with when the
+        model made it."""
+        return HistorySent(
+            cleared_results=len(self.cleared),
+            cleared_bytes=self.cleared_bytes,
+            cleared_largest=self.cleared_largest,
+            cleared_tools=dict(Counter(key(one) for one in self.cleared)),
+            degraded_calls=self.degraded,
+        )
 
 
 def kept_round(history: Sequence[Turn], preamble: str, pairs: Sequence[Pair]) -> list[Turn]:

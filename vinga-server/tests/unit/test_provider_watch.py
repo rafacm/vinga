@@ -25,6 +25,7 @@ from vinga_server.memory.store import PromptMemory
 from vinga_server.providers import LlmEvent, StreamStarted, TextDelta, Turn, Usage
 from vinga_server.providers.anthropic_llm import AnthropicLlm
 from vinga_server.runtime import prompt
+from vinga_server.runtime.history import NOTHING_LOST, HistorySent
 from vinga_server.runtime.provider_watch import FirstTokenTimeout, ProviderWatch
 from vinga_server.runtime.turns import TurnUnderway
 from vinga_server.session_conversations import SessionConversations
@@ -105,7 +106,10 @@ async def test_a_stalled_first_token_is_retried_once_and_the_retry_answers() -> 
     provider = Scripted([STALL_S, 0.0])
 
     said = await drained(
-        watch.reply_stream(provider, provider.stream(), invocation="a" * 32, round_=3, prompt=SENT)
+        watch.reply_stream(
+            provider, provider.stream(), invocation="a" * 32, round_=3, prompt=SENT,
+            history=NOTHING_LOST,
+        )
     )
 
     # The announcement is evidence and never content.
@@ -123,7 +127,8 @@ async def test_a_second_stall_gives_up_as_first_token_timeout_and_retries_no_mor
     with pytest.raises(FirstTokenTimeout):
         await drained(
             watch.reply_stream(
-                provider, provider.stream(), invocation="b" * 32, round_=1, prompt=SENT
+                provider, provider.stream(), invocation="b" * 32, round_=1, prompt=SENT,
+                history=NOTHING_LOST,
             )
         )
 
@@ -147,7 +152,8 @@ async def test_a_round_given_up_carries_no_chain_behind_it() -> None:
     with pytest.raises(FirstTokenTimeout) as raised:
         await drained(
             watch.reply_stream(
-                provider, provider.stream(), invocation="b" * 32, round_=1, prompt=SENT
+                provider, provider.stream(), invocation="b" * 32, round_=1, prompt=SENT,
+                history=NOTHING_LOST,
             )
         )
 
@@ -165,7 +171,8 @@ async def test_a_providers_own_timeout_before_the_deadline_passes_through() -> N
     with pytest.raises(TimeoutError) as raised:
         await drained(
             watch.reply_stream(
-                provider, provider.stream(), invocation="c" * 32, round_=1, prompt=SENT
+                provider, provider.stream(), invocation="c" * 32, round_=1, prompt=SENT,
+                history=NOTHING_LOST,
             )
         )
 
@@ -228,7 +235,8 @@ async def test_a_reply_round_is_filed_on_its_turn_and_a_recap_round_is_not() -> 
     usage = Usage(prompt_tokens=12, completion_tokens=4)
 
     watch.reply_round_done(
-        turn, 2, object(), [], began, None, usage, invocation="f" * 32, prompt=SENT
+        turn, 2, object(), [], began, None, usage, invocation="f" * 32, prompt=SENT,
+        history=NOTHING_LOST,
     )
     watch.recap_round_done(object(), [], began, None, usage, invocation="0" * 32)
 
@@ -252,7 +260,8 @@ async def test_a_round_reports_the_cached_share_and_files_the_whole_input() -> N
     usage = Usage(prompt_tokens=2000, completion_tokens=4, cached_prompt_tokens=1536)
 
     watch.reply_round_done(
-        turn, 1, object(), [], began, None, usage, invocation="f" * 32, prompt=SENT
+        turn, 1, object(), [], began, None, usage, invocation="f" * 32, prompt=SENT,
+        history=NOTHING_LOST,
     )
     watch.recap_round_done(object(), [], began, None, usage, invocation="0" * 32)
 
@@ -270,7 +279,8 @@ async def test_a_round_that_reported_no_usage_reports_no_cached_share() -> None:
     began = asyncio.get_running_loop().time()
 
     watch.reply_round_done(
-        turn, 1, object(), [], began, None, None, invocation="f" * 32, prompt=SENT
+        turn, 1, object(), [], began, None, None, invocation="f" * 32, prompt=SENT,
+        history=NOTHING_LOST,
     )
 
     (reply,) = heard.of("llm_round")
@@ -316,7 +326,8 @@ async def test_an_anthropic_round_files_its_cache_reads_on_the_turn() -> None:
     began = asyncio.get_running_loop().time()
 
     watch.reply_round_done(
-        turn, 1, object(), [], began, None, usage, invocation="f" * 32, prompt=SENT
+        turn, 1, object(), [], began, None, usage, invocation="f" * 32, prompt=SENT,
+        history=NOTHING_LOST,
     )
 
     assert turn.input_tokens == 2010
@@ -347,7 +358,8 @@ async def test_a_finished_reply_round_carries_the_prompt_it_sent_and_a_recap_non
     began = asyncio.get_running_loop().time()
 
     watch.reply_round_done(
-        turn, 1, object(), [], began, None, None, invocation="f" * 32, prompt=SENT
+        turn, 1, object(), [], began, None, None, invocation="f" * 32, prompt=SENT,
+        history=NOTHING_LOST,
     )
     watch.recap_round_done(object(), [], began, None, None, invocation="0" * 32)
 
@@ -365,7 +377,8 @@ async def test_a_round_with_memory_off_carries_its_sizes_and_no_fact_list() -> N
     unread = prompt.RoundPrompt(SENT.sent, facts=None)
 
     watch.reply_round_done(
-        turn, 1, object(), [], began, None, None, invocation="f" * 32, prompt=unread
+        turn, 1, object(), [], began, None, None, invocation="f" * 32, prompt=unread,
+        history=NOTHING_LOST,
     )
 
     (reply,) = heard.of("llm_round")
@@ -382,7 +395,8 @@ async def test_a_reply_stream_that_fails_carries_the_prompt_it_was_sending() -> 
     with pytest.raises(ConnectionRefusedError):
         await drained(
             watch.reply_stream(
-                provider, provider.stream(), invocation="b" * 32, round_=1, prompt=SENT
+                provider, provider.stream(), invocation="b" * 32, round_=1, prompt=SENT,
+                history=NOTHING_LOST,
             )
         )
 
@@ -402,7 +416,8 @@ async def test_a_round_given_up_by_the_watchdog_carries_the_prompt_it_was_sendin
     with pytest.raises(FirstTokenTimeout):
         await drained(
             watch.reply_stream(
-                provider, provider.stream(), invocation="b" * 32, round_=1, prompt=SENT
+                provider, provider.stream(), invocation="b" * 32, round_=1, prompt=SENT,
+                history=NOTHING_LOST,
             )
         )
 
@@ -421,3 +436,151 @@ async def test_a_failure_of_another_stage_carries_no_prompt_accounting(stage: st
 
     (failed,) = heard.of("provider_failed")
     assert accounted(failed) == {}
+
+
+# --- what a request's history lost on the way out (#599) -----------------
+
+# A request that cleared two earlier results and degraded one call: the
+# accounting every event about that request hands on unchanged.
+LOST = HistorySent(
+    cleared_results=2,
+    cleared_bytes=5100,
+    cleared_largest=3000,
+    cleared_tools={"device": 1, "mcp.tools": 1},
+    degraded_calls=1,
+)
+LOST_FIELDS = {
+    "cleared_results": 2,
+    "cleared_bytes": 5100,
+    "cleared_largest": 3000,
+    "cleared_tools": {"device": 1, "mcp.tools": 1},
+    "degraded_calls": 1,
+}
+NOTHING_LOST_FIELDS = {"cleared_results": 0, "cleared_bytes": 0, "degraded_calls": 0}
+HISTORY = tuple(LOST_FIELDS)
+
+
+def lost(payload: dict[str, Any]) -> dict[str, Any]:
+    return {field: payload[field] for field in HISTORY if field in payload}
+
+
+class MidStream:
+    """A provider that starts answering and then fails, which is the
+    route a failure takes once the first event has been handed on."""
+
+    def stream(self) -> Callable[[], AsyncIterator[LlmEvent]]:
+        async def make() -> AsyncIterator[LlmEvent]:
+            yield StreamStarted()
+            yield TextDelta("Let me")
+            raise ConnectionResetError("cut")
+
+        return make
+
+
+async def test_a_finished_reply_round_carries_what_its_history_lost() -> None:
+    watch, heard, conversations = a_watch()
+    active = conversations.active
+    assert active is not None
+    turn = TurnUnderway(active.conversation, active.agent, "e" * 32)
+    began = asyncio.get_running_loop().time()
+
+    watch.reply_round_done(
+        turn,
+        1,
+        object(),
+        [],
+        began,
+        None,
+        None,
+        invocation="f" * 32,
+        prompt=SENT,
+        history=LOST,
+    )
+
+    (reply,) = heard.of("llm_round")
+    assert lost(reply) == LOST_FIELDS
+
+
+@pytest.mark.parametrize(
+    ("provider", "raised"),
+    [
+        pytest.param(
+            Scripted([ConnectionRefusedError("no route")]),
+            ConnectionRefusedError,
+            id="as-the-stream-opens",
+        ),
+        pytest.param(MidStream(), ConnectionResetError, id="mid-stream"),
+        pytest.param(Scripted([STALL_S]), FirstTokenTimeout, id="the-watchdog"),
+    ],
+)
+async def test_a_reply_round_that_fails_carries_what_its_history_lost(
+    provider: Any, raised: type[BaseException]
+) -> None:
+    """Every route a round's failure is reported by: the two the stream
+    raises through `watched`, before and after its first event, and
+    `reply_stream`'s own report of the second stall."""
+    watch, heard, _ = a_watch()
+
+    with pytest.raises(raised):
+        await drained(
+            watch.reply_stream(
+                provider,
+                provider.stream(),
+                invocation="b" * 32,
+                round_=1,
+                prompt=SENT,
+                history=LOST,
+            )
+        )
+
+    (failed,) = heard.of("provider_failed")
+    assert failed["error"] == raised.__name__
+    assert lost(failed) == LOST_FIELDS
+
+
+async def test_a_recap_carries_what_its_history_lost_and_nothing_until_handed_any() -> None:
+    """Until a recap's history holds rebuilt exchanges it clears nothing,
+    and says so in zeros; handed an accounting, it carries it."""
+    watch, heard, _ = a_watch()
+    began = asyncio.get_running_loop().time()
+
+    watch.recap_round_done(object(), [], began, None, None, invocation="0" * 32)
+    watch.recap_round_done(object(), [], began, None, None, invocation="1" * 32, history=LOST)
+
+    unhanded, handed = heard.of("llm_round")
+    assert unhanded["purpose"] == handed["purpose"] == "recap"
+    assert lost(unhanded) == NOTHING_LOST_FIELDS
+    assert lost(handed) == LOST_FIELDS
+
+
+async def test_a_recap_that_fails_carries_what_its_history_lost() -> None:
+    watch, heard, _ = a_watch()
+    provider = Scripted([ConnectionRefusedError("no route")])
+
+    with pytest.raises(ConnectionRefusedError):
+        await drained(
+            watch.watched(
+                provider,
+                provider.stream()(),
+                invocation="d" * 32,
+                purpose=LlmPurpose.RECAP,
+                history=LOST,
+            )
+        )
+
+    (failed,) = heard.of("provider_failed")
+    assert failed["purpose"] == "recap"
+    assert lost(failed) == LOST_FIELDS
+    assert accounted(failed) == {}
+
+
+@pytest.mark.parametrize("stage", ["asr", "tts"])
+async def test_a_failure_of_another_stage_carries_no_history(stage: str) -> None:
+    watch, heard, _ = a_watch()
+
+    with pytest.raises(ConnectionRefusedError):
+        async with watch.watching(stage, object()):
+            raise ConnectionRefusedError("no route")
+
+    (failed,) = heard.of("provider_failed")
+    assert lost(failed) == {}

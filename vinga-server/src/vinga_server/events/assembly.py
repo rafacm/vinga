@@ -64,6 +64,7 @@ from vinga_server.events.values import (
     ABSENT,
     Absent,
     ClassName,
+    ClearedTools,
     ConversationId,
     Count,
     FactIds,
@@ -88,6 +89,7 @@ from vinga_server.events.values import (
 )
 
 __all__ = [
+    "HistoryAccounting",
     "RoundAccounting",
     "builtin_sentence_withheld",
     "builtin_tool_called",
@@ -448,6 +450,49 @@ def _accounted(
     )
 
 
+class HistoryAccounting(Protocol):
+    """What one request's history lost on the way out (#599), in the
+    plain numbers its events carry.
+
+    A protocol for the reason `RoundAccounting` is one:
+    `runtime.history.HistorySent` is the production shape and satisfies
+    this by having these five. `cleared_largest` is None and
+    `cleared_tools` empty where nothing was cleared, and both are then
+    absent from the event rather than a zero and an empty mapping.
+    """
+
+    @property
+    def cleared_results(self) -> int: ...
+
+    @property
+    def cleared_bytes(self) -> int: ...
+
+    @property
+    def cleared_largest(self) -> int | None: ...
+
+    @property
+    def cleared_tools(self) -> Mapping[str, int]: ...
+
+    @property
+    def degraded_calls(self) -> int: ...
+
+
+def _history(
+    history: HistoryAccounting,
+) -> tuple[Count, Count, Count | Absent, ClearedTools | Absent, Count]:
+    """A request's history accounting as the five fields every event
+    describing that request carries, in their declared order, derived
+    in this one place so a round that finished, a recap and a request
+    that failed cannot describe one history three ways."""
+    return (
+        Count(history.cleared_results),
+        Count(history.cleared_bytes),
+        ABSENT if history.cleared_largest is None else Count(history.cleared_largest),
+        ClearedTools(dict(history.cleared_tools)) if history.cleared_tools else ABSENT,
+        Count(history.degraded_calls),
+    )
+
+
 def llm_retried(
     agent: str,
     conversation: str,
@@ -488,6 +533,7 @@ def llm_rounded(
     *,
     cache_read_input_tokens: int | None = None,
     prompt: RoundAccounting | None = None,
+    history: HistoryAccounting,
 ) -> Variant:
     """The `llm_round` event for this generation.
 
@@ -499,6 +545,9 @@ def llm_rounded(
     provider's prompt cache served, already a subset when it arrives.
     `prompt` is a reply round's accounting of what it sent, which a
     recap has none of: its prompt is the summarization instruction.
+    `history` is what the request's history lost on the way out, which
+    every generation has, a recap included, since every request's
+    history goes through the same cap and offer check (#599).
     """
     entry, type_, host, model = _entry_fields(provider)
     declared_input = Count(input_tokens) if input_tokens is not None else ABSENT
@@ -510,6 +559,7 @@ def llm_rounded(
         Whole(first_token_ms) if first_token_ms is not None else ABSENT
     )
     declared = LlmPurpose(purpose)
+    cleared, cleared_bytes, largest, tools, degraded = _history(history)
     if declared is LlmPurpose.RECAP:
         if round_ is not None:
             raise ValueError("a recap generation has no reply-local round")
@@ -531,6 +581,11 @@ def llm_rounded(
             cache_read_input_tokens=declared_cached,
             output_tokens=declared_output,
             first_token_ms=declared_first_token,
+            cleared_results=cleared,
+            cleared_bytes=cleared_bytes,
+            cleared_largest=largest,
+            cleared_tools=tools,
+            degraded_calls=degraded,
         )
     if round_ is None:
         raise ValueError("a reply generation has a reply-local round")
@@ -556,6 +611,11 @@ def llm_rounded(
         memory_characters=memory,
         memory_sources=sources,
         memory_facts=facts,
+        cleared_results=cleared,
+        cleared_bytes=cleared_bytes,
+        cleared_largest=largest,
+        cleared_tools=tools,
+        degraded_calls=degraded,
     )
 
 
@@ -656,13 +716,17 @@ def provider_failure(
     invocation: str | None = None,
     purpose: str | None = None,
     prompt: RoundAccounting | None = None,
+    history: HistoryAccounting | None = None,
 ) -> Variant:
     """The `provider_failed` event for this failure.
 
     `prompt` is the accounting of a reply round that failed after its
     request was built, which is where a prompt's size matters most (a
     context-length refusal), and is refused for any other failure: no
-    other stage and no recap sent a reply round's prompt.
+    other stage and no recap sent a reply round's prompt. `history` is
+    what an LLM request that failed after it was built lost of its
+    history on the way out, a reply round's or a recap's (#599), and is
+    refused for any other stage, which sent no history.
 
     The class name is reported and the exception's message is not, which
     the value types make structural rather than careful: `ClassName` is
@@ -682,6 +746,8 @@ def provider_failure(
     """
     if prompt is not None and (stage != "llm" or purpose != LlmPurpose.REPLY):
         raise ValueError("only a reply round's failure carries its prompt's accounting")
+    if history is not None and stage != "llm":
+        raise ValueError("only an LLM request's failure carries its history's accounting")
     outcome = (
         ProviderOutcome.TIMED_OUT
         if isinstance(failure, TimeoutError)
@@ -689,6 +755,9 @@ def provider_failure(
     )
     entry, type_, host, model = _entry_fields(provider)
     system, memory, sources, facts = _accounted(prompt)
+    cleared, cleared_bytes, largest, tools, degraded = (
+        (ABSENT, ABSENT, ABSENT, ABSENT, ABSENT) if history is None else _history(history)
+    )
     return ProviderFailed(
         agent=Identifier(agent),
         conversation=ConversationId(conversation),
@@ -709,4 +778,9 @@ def provider_failure(
         memory_characters=memory,
         memory_sources=sources,
         memory_facts=facts,
+        cleared_results=cleared,
+        cleared_bytes=cleared_bytes,
+        cleared_largest=largest,
+        cleared_tools=tools,
+        degraded_calls=degraded,
     )

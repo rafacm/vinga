@@ -1072,7 +1072,12 @@ session %s: %s round %d took %.2f s over %d turns
 | `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `invocation` | `ID` | yes | no | the `invocation_id` syntax | The server-minted identity of this logical generation. A first-token retry keeps it, and no provider value enters it. |
 | `round` | `INT` | yes | no |  | Counts the whole reply rather than one agent's leg, so the generation after a handover is a round of its own. |
-| `turns` | `COUNT` | yes | no |  | The cheap proxy for payload size. |
+| `turns` | `COUNT` | yes | no |  | The messages the request sent, the cheap proxy for payload size. Counts the tool exchanges kept from earlier replies as well (#599), an assistant turn per round of calls and a tool turn per round of results, so a series that crosses that change steps up. |
+| `cleared_results` | `COUNT` | yes | no |  | Past tool results this request carried as the cleared note: the results of earlier replies over the 2 KiB cap (2048 UTF-8 bytes), each sent as a note naming the tool and the size. Zero when none. Present on every reply round and recap; on `provider_failed`, present where an LLM request failed after it was built and absent on any other failure. |
+| `cleared_bytes` | `COUNT` | yes | no |  | The cleared results' original sizes summed, in UTF-8 bytes. Zero when none. |
+| `cleared_largest` | `COUNT` | no | no |  | The largest cleared result's original size, in UTF-8 bytes. Absent when none was cleared. |
+| `cleared_tools` | `CLEARED_TOOLS` | no | no | keyed by `builtin.<name>`, `mcp.<entry>`, `device` or `unknown`, with counts for values | How many of the cleared results each tool made, keyed under the `tool_call` naming policy: `builtin.<name>`, `mcp.<entry>`, `device` or `unknown`. The key is the origin the call was classified with when the model made it, so a result from an MCP entry an apply has since removed is still keyed by that entry. Absent when none was cleared. |
+| `degraded_calls` | `COUNT` | yes | no |  | Past tool calls this request carried as the degraded note, a quoted record in the assistant's turn, because the request does not offer their tool: an MCP reload removed it, the model invented the name, or the request offers no tools at all. Zero when none. |
 | `duration_ms` | `INT` | yes | no |  |  |
 | `stage` | `IDENTIFIER` | yes | no |  |  |
 | `provider` | `IDENTIFIER` | no | no |  |  |
@@ -1114,6 +1119,11 @@ session %s: %s recap took %.2f s over %d turns
 | `conversation` | `ID` | yes | no | the `conversation_id` syntax |  |
 | `invocation` | `ID` | yes | no | the `invocation_id` syntax |  |
 | `turns` | `COUNT` | yes | no |  | The cheap proxy for payload size. |
+| `cleared_results` | `COUNT` | yes | no |  | Past tool results this request carried as the cleared note: the results of earlier replies over the 2 KiB cap (2048 UTF-8 bytes), each sent as a note naming the tool and the size. Zero when none. Present on every reply round and recap; on `provider_failed`, present where an LLM request failed after it was built and absent on any other failure. |
+| `cleared_bytes` | `COUNT` | yes | no |  | The cleared results' original sizes summed, in UTF-8 bytes. Zero when none. |
+| `cleared_largest` | `COUNT` | no | no |  | The largest cleared result's original size, in UTF-8 bytes. Absent when none was cleared. |
+| `cleared_tools` | `CLEARED_TOOLS` | no | no | keyed by `builtin.<name>`, `mcp.<entry>`, `device` or `unknown`, with counts for values | How many of the cleared results each tool made, keyed under the `tool_call` naming policy: `builtin.<name>`, `mcp.<entry>`, `device` or `unknown`. The key is the origin the call was classified with when the model made it, so a result from an MCP entry an apply has since removed is still keyed by that entry. Absent when none was cleared. |
+| `degraded_calls` | `COUNT` | yes | no |  | Past tool calls this request carried as the degraded note, a quoted record in the assistant's turn, because the request does not offer their tool: an MCP reload removed it, the model invented the name, or the request offers no tools at all. Zero when none. |
 | `duration_ms` | `INT` | yes | no |  |  |
 | `stage` | `IDENTIFIER` | yes | no |  |  |
 | `provider` | `IDENTIFIER` | no | no |  |  |
@@ -1173,6 +1183,11 @@ session %s: %s provider%s %s after %.2f s%s: %s
 | `memory_characters` | `COUNT` | no | no |  | How much of `system_characters` the round's scope blocks added: each block as rendered and the blank line before it. The device block carries the device record as well as the device's notes, so this is the per-round part of the prompt rather than remembered facts alone. |
 | `memory_sources` | `MEMORY_SOURCES` | no | no | keyed by `device`, `memory`, `state`, with counts for values | Each scope block's size by provenance, `state`, `memory` and `device`, with a block that was not sent absent rather than zero. Sizes, never text, and never summing to `system_characters`: the know-how half's blocks are `prompt_assembled.sources`. |
 | `memory_facts` | `ID_LIST` | no | no | each element: the `fact_id` syntax | The ids of the remembered facts the prompt injected, the agent's block then the device's, at most 70 (the agent block's newest 40 and the device scope's cap of 30). Present, and possibly empty, where the round read memory, a read that failed included; absent where the agent's memory is off. The conversation's ledger contributes none. An id joins to the memory store's current state, best effort: a corrected fact keeps its id with new text, and a pruned or deleted one leaves no row. What the model actually read is the LLM input export's to carry. |
+| `cleared_results` | `COUNT` | no | no |  | Past tool results this request carried as the cleared note: the results of earlier replies over the 2 KiB cap (2048 UTF-8 bytes), each sent as a note naming the tool and the size. Zero when none. Present on every reply round and recap; on `provider_failed`, present where an LLM request failed after it was built and absent on any other failure. |
+| `cleared_bytes` | `COUNT` | no | no |  | The cleared results' original sizes summed, in UTF-8 bytes. Zero when none. |
+| `cleared_largest` | `COUNT` | no | no |  | The largest cleared result's original size, in UTF-8 bytes. Absent when none was cleared. |
+| `cleared_tools` | `CLEARED_TOOLS` | no | no | keyed by `builtin.<name>`, `mcp.<entry>`, `device` or `unknown`, with counts for values | How many of the cleared results each tool made, keyed under the `tool_call` naming policy: `builtin.<name>`, `mcp.<entry>`, `device` or `unknown`. The key is the origin the call was classified with when the model made it, so a result from an MCP entry an apply has since removed is still keyed by that entry. Absent when none was cleared. |
+| `degraded_calls` | `COUNT` | no | no |  | Past tool calls this request carried as the degraded note, a quoted record in the assistant's turn, because the request does not offer their tool: an MCP reload removed it, the model invented the name, or the request offers no tools at all. Zero when none. |
 
 ### `tool_call`
 

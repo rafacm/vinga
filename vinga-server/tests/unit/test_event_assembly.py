@@ -50,6 +50,7 @@ from vinga_server.events.catalog import (
     Variant,
 )
 from vinga_server.events.values import (
+    ABSENT,
     ClassName,
     ConversationId,
     Count,
@@ -71,6 +72,7 @@ from vinga_server.events.values import (
 from vinga_server.memory.store import PromptMemory
 from vinga_server.providers.base import ProviderIdentity
 from vinga_server.runtime import prompt
+from vinga_server.runtime.history import NOTHING_LOST
 
 
 @dataclass(frozen=True)
@@ -110,6 +112,7 @@ UNREGISTERED = Stamped()
 
 
 INTERFACE = [
+    "HistoryAccounting",
     "RoundAccounting",
     "builtin_sentence_withheld",
     "builtin_tool_called",
@@ -189,7 +192,18 @@ def test_no_builder_names_an_entry_without_naming_its_type(provider: Stamped) ->
     built = [
         assembly.llm_retried("poet", THREAD, "llm", provider, 2, 0.5),
         assembly.llm_rounded(
-            "poet", THREAD, "llm", provider, 2, 3, 0.5, 140, 12, 220, INVOCATION
+            "poet",
+            THREAD,
+            "llm",
+            provider,
+            2,
+            3,
+            0.5,
+            140,
+            12,
+            220,
+            INVOCATION,
+            history=NOTHING_LOST,
         ),
         assembly.provider_failure(
             "poet",
@@ -255,13 +269,29 @@ def test_a_retry_on_a_provider_with_no_identity_says_less() -> None:
 
 def test_a_round_carries_the_numbers_the_provider_reported() -> None:
     assert assembly.llm_rounded(
-        "poet", THREAD, "llm", CLOUD, 2, 3, 0.5, 140, 12, 220, INVOCATION
+        "poet",
+        THREAD,
+        "llm",
+        CLOUD,
+        2,
+        3,
+        0.5,
+        140,
+        12,
+        220,
+        INVOCATION,
+        history=NOTHING_LOST,
     ) == LlmRound(
         agent=Identifier("poet"),
         conversation=ConversationId(THREAD),
         invocation=InvocationId(INVOCATION),
         round=Whole(2),
         turns=Count(3),
+        cleared_results=Count(0),
+        cleared_bytes=Count(0),
+        cleared_largest=ABSENT,
+        cleared_tools=ABSENT,
+        degraded_calls=Count(0),
         duration_ms=Whole(500),
         stage=Identifier("llm"),
         duration_s=Real(0.5),
@@ -292,6 +322,7 @@ def test_a_round_that_reported_nothing_carries_no_zeroes() -> None:
             None,
             None,
             INVOCATION,
+            history=NOTHING_LOST,
         )
     )
 
@@ -319,6 +350,7 @@ def test_a_round_carries_the_cached_share_of_its_input() -> None:
             220,
             INVOCATION,
             cache_read_input_tokens=1536,
+            history=NOTHING_LOST,
         )
     )
     recap = carried(
@@ -336,6 +368,7 @@ def test_a_round_carries_the_cached_share_of_its_input() -> None:
             INVOCATION,
             "recap",
             cache_read_input_tokens=1536,
+            history=NOTHING_LOST,
         )
     )
 
@@ -361,6 +394,7 @@ def test_nothing_cached_is_a_count_and_an_unsaid_cache_is_absent() -> None:
             220,
             INVOCATION,
             cache_read_input_tokens=0,
+            history=NOTHING_LOST,
         )
     )
     unsaid = carried(
@@ -377,6 +411,7 @@ def test_nothing_cached_is_a_count_and_an_unsaid_cache_is_absent() -> None:
             220,
             INVOCATION,
             cache_read_input_tokens=None,
+            history=NOTHING_LOST,
         )
     )
 
@@ -461,7 +496,19 @@ def test_a_reply_round_carries_its_prompt_accounting() -> None:
 
     payload = carried(
         assembly.llm_rounded(
-            "poet", THREAD, "llm", CLOUD, 1, 1, 0.5, None, None, None, INVOCATION, prompt=sent
+            "poet",
+            THREAD,
+            "llm",
+            CLOUD,
+            1,
+            1,
+            0.5,
+            None,
+            None,
+            None,
+            INVOCATION,
+            prompt=sent,
+            history=NOTHING_LOST,
         )
     )
 
@@ -479,12 +526,14 @@ def test_a_round_that_read_nothing_says_so_and_one_that_read_no_memory_is_silent
         assembly.llm_rounded(
             "poet", THREAD, "llm", CLOUD, 1, 1, 0.5, None, None, None, INVOCATION,
             prompt=a_round_prompt(()),
+            history=NOTHING_LOST,
         )
     )
     unread = carried(
         assembly.llm_rounded(
             "poet", THREAD, "llm", CLOUD, 1, 1, 0.5, None, None, None, INVOCATION,
             prompt=a_round_prompt(None),
+            history=NOTHING_LOST,
         )
     )
 
@@ -501,6 +550,7 @@ def test_a_recap_refuses_a_prompt_accounting() -> None:
         assembly.llm_rounded(
             "poet", THREAD, "llm", CLOUD, None, 1, 0.5, None, None, None, INVOCATION,
             "recap", prompt=a_round_prompt((4,)),
+            history=NOTHING_LOST,
         )
 
 

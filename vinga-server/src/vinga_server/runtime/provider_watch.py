@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 from vinga_server.events import SessionEvents, assembly
 from vinga_server.events.values import LlmPurpose
 from vinga_server.providers import LlmEvent, StreamStarted, Turn, Usage
+from vinga_server.runtime.history import NOTHING_LOST, HistorySent
 from vinga_server.runtime.prompt import RoundPrompt
 from vinga_server.runtime.turns import TurnUnderway
 from vinga_server.session_conversations import SessionConversations
@@ -141,6 +142,7 @@ class ProviderWatch:
         invocation: str,
         purpose: LlmPurpose,
         prompt: RoundPrompt | None = None,
+        history: HistorySent | None = None,
     ) -> AsyncIterator[Any]:
         """An LLM stream, with a failure raised by the stream itself
         reported as that provider's.
@@ -152,7 +154,10 @@ class ProviderWatch:
         closes this generator rather than passing through the guard.
 
         `prompt` is a reply round's accounting, which its failure
-        carries (#533); a recap has none to hand over."""
+        carries (#533); a recap has none to hand over. `history` is what
+        the request's history lost on the way out, which its failure
+        carries too (#599), a reply round's or a recap's: None only
+        where the caller built no history through the cap."""
         started = asyncio.get_running_loop().time()
         iterator = events.__aiter__()
         while True:
@@ -169,6 +174,7 @@ class ProviderWatch:
                     invocation=invocation,
                     purpose=purpose,
                     prompt=prompt,
+                    history=history,
                 )
                 raise
             yield event
@@ -181,6 +187,7 @@ class ProviderWatch:
         invocation: str,
         round_: int,
         prompt: RoundPrompt,
+        history: HistorySent,
     ) -> AsyncIterator[LlmEvent]:
         """An LLM stream whose wait for the first event is bounded.
 
@@ -226,7 +233,9 @@ class ProviderWatch:
         a failure the stream raised, and directly for the second stall,
         which is reported below rather than by the stream (#533). The
         retry re-sends the same arguments, so one accounting is right
-        for both attempts. This is itself the generator a caller iterates, with no
+        for both attempts. `history` is the round's other accounting,
+        what its history lost on the way out (#599), and travels both
+        routes beside `prompt`. This is itself the generator a caller iterates, with no
         second one wrapped around it, so a cancellation lands in the
         wait above rather than in an await added on the way to it."""
         timeout_s = self._first_token_timeout_s
@@ -238,6 +247,7 @@ class ProviderWatch:
                 invocation=invocation,
                 purpose=LlmPurpose.REPLY,
                 prompt=prompt,
+                history=history,
             )
             started = loop.time()
             stalled: float | None = None
@@ -272,6 +282,7 @@ class ProviderWatch:
                         invocation=invocation,
                         purpose=LlmPurpose.REPLY,
                         prompt=prompt,
+                        history=history,
                     )
                     raise failure
                 # The loop variable is read by a thunk the emitter calls
@@ -306,11 +317,12 @@ class ProviderWatch:
         *,
         invocation: str,
         prompt: RoundPrompt,
+        history: HistorySent,
     ) -> None:
         """A round of a reply finished: its `llm_round`, numbered
-        `round_` and carrying the accounting of the `prompt` it sent,
-        and the round filed on `turn`, the record of the turn it belongs
-        to."""
+        `round_` and carrying the accounting of the `prompt` it sent and
+        of what its `history` lost on the way out, and the round filed
+        on `turn`, the record of the turn it belongs to."""
         elapsed, first_token_ms, inputs, outputs = self._rounded(
             provider,
             working,
@@ -321,6 +333,7 @@ class ProviderWatch:
             purpose=LlmPurpose.REPLY,
             round_=round_,
             prompt=prompt,
+            history=history,
         )
         # Counted here rather than where the round starts, so that the
         # turn's rounds, its summed duration and its token totals all
@@ -337,9 +350,16 @@ class ProviderWatch:
         usage: Usage | None,
         *,
         invocation: str,
+        history: HistorySent = NOTHING_LOST,
     ) -> None:
         """A recap's summarization finished: its `llm_round`, with no
-        round number and filed on no turn.
+        round number and filed on no turn, carrying what its `history`
+        lost on the way out (#599).
+
+        `history` defaults to a request whose history lost nothing,
+        which is what a recap sends while the history it summarizes
+        holds no tool exchange; a recap over rebuilt exchanges hands
+        its own accounting in.
 
         A recap is a generation but not a round of the reply, so it
         counts on no record. Its own method rather than a flag on the
@@ -355,6 +375,7 @@ class ProviderWatch:
             invocation=invocation,
             purpose=LlmPurpose.RECAP,
             round_=None,
+            history=history,
         )
 
     def _rounded(
@@ -368,6 +389,7 @@ class ProviderWatch:
         invocation: str,
         purpose: LlmPurpose,
         round_: int | None,
+        history: HistorySent,
         prompt: RoundPrompt | None = None,
     ) -> tuple[float, int | None, int | None, int | None]:
         """One `llm_round` event, which is where a slow reply becomes
@@ -380,7 +402,8 @@ class ProviderWatch:
         against a session median of 1.18 s, and the logs could not say
         whether the payload or the vendor was responsible (#55).
 
-        `turns` is the cheap proxy for payload size, and `round` counts
+        `turns` is the cheap proxy for payload size, the tool exchanges
+        kept from earlier replies included (#599), and `round` counts
         the whole reply rather than one agent's leg, so the generation
         after a handover is a round of its own rather than another
         first round. Token counts appear when the provider reported
@@ -423,6 +446,7 @@ class ProviderWatch:
                     purpose,
                     cache_read_input_tokens=cached,
                     prompt=prompt,
+                    history=history,
                 )
             )
 
@@ -439,11 +463,14 @@ class ProviderWatch:
         invocation: str | None = None,
         purpose: LlmPurpose | None = None,
         prompt: RoundPrompt | None = None,
+        history: HistorySent | None = None,
     ) -> None:
         """One `provider_failed` event, and the sentence that goes with
         it, carrying a failed reply round's `prompt` accounting where
-        there is one. A timeout is worded as one, because where traffic is
-        dropped rather than refused the whole symptom is a wait.
+        there is one, and a failed LLM request's `history` accounting
+        where its history was built (#599). A timeout is worded as one,
+        because where traffic is dropped rather than refused the whole
+        symptom is a wait.
 
         Which failure is a wait is a question of type. Every provider
         raises `ProviderCallTimeout` for its SDK's timeouts and that is
@@ -480,6 +507,7 @@ class ProviderWatch:
                     invocation=invocation,
                     purpose=purpose,
                     prompt=prompt,
+                    history=history,
                 )
             )
 
