@@ -34,7 +34,7 @@ from vinga_server.events import SessionEvents, assembly, logger
 from vinga_server.events.catalog import Variant
 from vinga_server.events.values import Fragment
 from vinga_server.providers import ToolCall, ToolDef, ToolResult
-from vinga_server.runtime.history import Cleared, canonical_arguments
+from vinga_server.runtime.history import Cleared, repeat_key
 from vinga_server.runtime.speech import withhold_tool_shaped
 from vinga_server.runtime.turns import (
     BUILTIN,
@@ -228,7 +228,7 @@ def _refetches(classified: ToolInvocation, refetchable: frozenset[tuple[str, str
     arguments to compare and is never a repeat."""
     if classified.malformed or classified.arguments is None:
         return False
-    return (classified.name, canonical_arguments(classified.arguments)) in refetchable
+    return repeat_key(classified.name, classified.arguments) in refetchable
 
 
 @dataclass(frozen=True)
