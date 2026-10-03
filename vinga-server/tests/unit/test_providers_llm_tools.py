@@ -115,6 +115,34 @@ def test_anthropic_omits_an_empty_preamble() -> None:
     assert [block["type"] for block in message["content"]] == ["tool_use"]
 
 
+def test_anthropic_joins_a_user_turn_onto_the_tool_results_before_it() -> None:
+    """A reply that ran a tool and then spoke nothing, because it failed
+    or was cut, leaves its tool turn last in the thread's history (#599),
+    so the next utterance follows a message that is already the user's.
+    The API wants the roles to alternate, so the utterance joins that
+    message as a text block after the results."""
+    messages = anthropic_messages([*TOOL_EXCHANGE, Turn("user", "and tomorrow?")])
+    assert [message["role"] for message in messages] == ["user", "assistant", "user"]
+    assert messages[-1]["content"] == [
+        {"type": "tool_result", "tool_use_id": "t1", "content": "rain", "is_error": False},
+        {"type": "text", "text": "and tomorrow?"},
+    ]
+
+
+def test_anthropic_joins_two_plain_user_turns_into_one_message() -> None:
+    """The shape a failed reply with no tools leaves: two utterances in a
+    row, which become one message of two text blocks."""
+    assert anthropic_messages([Turn("user", "hello"), Turn("user", "are you there?")]) == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "hello"},
+                {"type": "text", "text": "are you there?"},
+            ],
+        }
+    ]
+
+
 def test_anthropic_tool_definitions_pass_the_schema_through() -> None:
     assert anthropic_tools([WEATHER]) == [
         {

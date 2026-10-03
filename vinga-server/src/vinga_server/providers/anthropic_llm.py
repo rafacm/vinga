@@ -51,6 +51,14 @@ def anthropic_messages(turns: Sequence[Turn]) -> list[dict[str, Any]]:
     tools becomes content blocks, its spoken preamble first and one
     `tool_use` block per call; the turn answering them becomes a user
     message of `tool_result` blocks, which is where this API puts them.
+
+    A user turn that follows a message already the user's joins it as a
+    text block, because this API wants the roles to alternate. The
+    thread's history produces that shape where a reply ran a tool and
+    then said nothing, because it failed or was cut (#599): its tool
+    results are the history's last turn, and the next utterance follows
+    them. Two utterances in a row, which a failed reply with no tools
+    leaves, join the same way.
     """
     messages: list[dict[str, Any]] = []
     for turn in turns:
@@ -78,6 +86,11 @@ def anthropic_messages(turns: Sequence[Turn]) -> list[dict[str, Any]]:
                 for call in turn.tool_calls
             ]
             messages.append({"role": "assistant", "content": blocks})
+        elif turn.role == "user" and messages and messages[-1]["role"] == "user":
+            joined = messages[-1]
+            if isinstance(joined["content"], str):
+                joined["content"] = [{"type": "text", "text": joined["content"]}]
+            joined["content"].append({"type": "text", "text": turn.content})
         else:
             messages.append({"role": turn.role, "content": turn.content})
     return messages
