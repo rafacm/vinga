@@ -246,15 +246,22 @@ def as_sent(turns: Sequence[Turn], start: int, offered: Collection[str]) -> Sent
 
 
 def note_cost(call: ToolCall, result: ToolResult | None) -> int:
-    """How many characters `call` costs as a past exchange: its degraded
-    note, with the result held to the cap. Never less than the
-    structured form of the same call, which holds the same name,
-    arguments and result without the prefix and the quoting, so a
-    budget charged this is never exceeded by whichever form a later
-    request sends."""
+    """How many characters `call` costs as a past exchange, at most,
+    whichever form a later request sends it in: its degraded note, with
+    the result held to the cap, every character outside ASCII counted
+    as its JSON escape.
+
+    The escape is what makes it a bound. The note as sent keeps
+    non-ASCII text raw, but the OpenAI translator sends a structured
+    call's arguments through `json.dumps`, which escapes each such
+    character to six characters (twelve outside the BMP), and an
+    Anthropic `tool_use` input is serialized by its SDK. Escaped, the
+    note holds the name, the arguments in exactly that form and the
+    result, each at least as long as any form of it, plus the prefix,
+    so a budget charged this is never exceeded by the request."""
     if result is not None and _size(result.content) > MAX_KEPT_RESULT_BYTES:
         result = replace(result, content=_cleared(call.name, result.content))
-    return len(_degraded(call, result))
+    return len(_degraded(call, result, ascii_only=True))
 
 
 def canonical_arguments(arguments: object) -> str:
@@ -271,14 +278,14 @@ def _cleared(name: str, content: str) -> str:
     return CLEARED_NOTE.format(name=name, size=_size(content))
 
 
-def _degraded(call: ToolCall, result: ToolResult | None) -> str:
+def _degraded(call: ToolCall, result: ToolResult | None, *, ascii_only: bool = False) -> str:
     record = {
         "tool": call.name,
         "arguments": call.arguments,
         "result": None if result is None else result.content,
         "error": False if result is None else result.is_error,
     }
-    quoted = json.dumps(record, ensure_ascii=False)
+    quoted = json.dumps(record, ensure_ascii=ascii_only)
     for raw, escaped in _LINE_ENDS.items():
         quoted = quoted.replace(raw, escaped)
     return DEGRADED_PREFIX + quoted + DEGRADED_END
