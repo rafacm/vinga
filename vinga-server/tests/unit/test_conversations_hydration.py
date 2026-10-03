@@ -487,11 +487,14 @@ def test_an_answer_joined_after_a_tool_only_turn_follows_its_tool_turn() -> None
     assert texts(answer.turns)[-1] == "Tutor here."
 
 
-def _degraded_size(name: str, arguments: dict[str, Any], result: str, error: bool) -> int:
-    """How long a call's degraded note is, written out from the frame
-    the history module publishes rather than asked of it."""
+def _charged(name: str, arguments: dict[str, Any], result: str, error: bool) -> int:
+    """What one kept call is charged, written out from the frame the
+    history module publishes rather than asked of it: its degraded note
+    with every character outside ASCII as its JSON escape (the bound
+    over both translators' structured forms), and the space that joins
+    a note to the text before it in its turn."""
     record = {"tool": name, "arguments": arguments, "result": result, "error": error}
-    return len(DEGRADED_PREFIX + json.dumps(record, ensure_ascii=False) + DEGRADED_END)
+    return len(DEGRADED_PREFIX + json.dumps(record) + DEGRADED_END) + len(" ")
 
 
 def test_a_large_result_is_charged_at_its_cleared_size() -> None:
@@ -511,7 +514,7 @@ def test_a_large_result_is_charged_at_its_cleared_size() -> None:
         -(
             len("how is my board")
             + len("Fine.")
-            + _degraded_size("self_get_device_status", {}, cleared, False)
+            + _charged("self_get_device_status", {}, cleared, False)
         )
         // ESTIMATED_CHARS_PER_TOKEN
     )
@@ -538,7 +541,7 @@ def test_a_turn_that_would_fit_structured_but_not_as_notes_is_left_out() -> None
     newest = said(2)
     words = len("remember tea") + len("Saved.")
     structured = words + len("remember") + len(json.dumps({"text": "tea"})) + len("Saved.")
-    as_note = words + _degraded_size("remember", {"text": "tea"}, "Saved.", False)
+    as_note = words + _charged("remember", {"text": "tea"}, "Saved.", False)
     room = -(-structured // ESTIMATED_CHARS_PER_TOKEN) + _cost(newest)
     assert room < -(-as_note // ESTIMATED_CHARS_PER_TOKEN) + _cost(newest)
 
@@ -546,6 +549,100 @@ def test_a_turn_that_would_fit_structured_but_not_as_notes_is_left_out() -> None
 
     assert (answer.rendered, answer.over_budget) == (1, True)
     assert answer.turns == (Turn("user", "2" * 8), Turn("assistant", "r2" * 4))
+
+
+def test_each_call_is_charged_its_note_and_the_space_before_it() -> None:
+    """Two calls in one round go to a request that offers neither as
+    two notes in one assistant turn, a space apart, so the space is
+    charged as well as the notes. The reply is padded so that one
+    character more or less moves the rounded token count, which is what
+    makes a missing space observable."""
+    charged = [
+        _charged("remember", {"text": "a"}, "Saved.", False),
+        _charged("remember", {"text": "b"}, "Saved.", False),
+    ]
+    reply = "Saved both."
+    while (len("save two") + len(reply) + sum(charged)) % ESTIMATED_CHARS_PER_TOKEN != 1:
+        reply += "."
+    older = StoredTurn(
+        id=1,
+        heard="save two",
+        reply=reply,
+        calls=(
+            row(0, arguments={"text": "a"}, result="Saved."),
+            row(1, arguments={"text": "b"}, result="Saved."),
+        ),
+    )
+    newest = said(2)
+    tokens = -(-(len("save two") + len(reply) + sum(charged)) // ESTIMATED_CHARS_PER_TOKEN)
+
+    assert hydrated([older, newest], tokens + _cost(newest)).rendered == 2
+    assert hydrated([older, newest], tokens + _cost(newest) - 1).rendered == 1
+    # And at least what the request offering nothing really sends.
+    rebuilt = hydrated([older], PLENTY).turns
+    sent = as_sent(rebuilt, len(rebuilt), frozenset()).turns
+    assert sum(len(turn.content) for turn in sent) <= len("save two") + len(reply) + sum(
+        charged
+    )
+
+
+def test_text_outside_ascii_is_charged_at_its_escaped_size() -> None:
+    """A structured call's arguments can go to a provider JSON-escaped,
+    six characters for each one outside ASCII, which is longer than the
+    note that keeps them raw. The charge is the escaped size, so a
+    budget with room only for the raw note leaves the turn out."""
+    older = StoredTurn(
+        id=1,
+        heard="remember",
+        reply="Saved.",
+        calls=(row(0, arguments={"text": "é" * 40}, result="Saved."),),
+    )
+    newest = said(2)
+    record = {"tool": "remember", "arguments": {"text": "é" * 40}}
+    record |= {"result": "Saved.", "error": False}
+    note = DEGRADED_PREFIX + json.dumps(record, ensure_ascii=False) + DEGRADED_END
+    raw = len("remember") + len("Saved.") + len(note) + len(" ")
+    escaped = len("remember") + len("Saved.") + _charged(
+        "remember", {"text": "é" * 40}, "Saved.", False
+    )
+    # Six characters for each of the forty, where the raw note has one.
+    assert escaped - raw == 5 * 40
+
+    room_for_raw = -(-raw // ESTIMATED_CHARS_PER_TOKEN) + _cost(newest)
+    assert hydrated([older, newest], room_for_raw).rendered == 1
+    fits = -(-escaped // ESTIMATED_CHARS_PER_TOKEN) + _cost(newest)
+    assert hydrated([older, newest], fits).rendered == 2
+    assert hydrated([older, newest], fits - 1).rendered == 1
+
+
+def test_a_result_with_a_lone_surrogate_is_rebuilt_and_priced_like_any_other() -> None:
+    """JSON can carry an escaped lone surrogate and a far side can answer
+    one; the session keeps such a result with U+FFFD in its place. A row
+    holding one is rebuilt in that same form, so measuring and sending
+    it raises nothing."""
+    answer = hydrated(
+        [
+            StoredTurn(
+                id=1,
+                heard="how is my board",
+                reply="Fine.",
+                calls=(
+                    row(
+                        0,
+                        name="self_get_device_status",
+                        source="device",
+                        arguments={},
+                        result=json.loads('"volume \\ud800 high"'),
+                    ),
+                ),
+            )
+        ],
+        PLENTY,
+    )
+
+    assert results_of(answer.turns) == [("h0", "volume \ufffd high")]
+    sent = as_sent(answer.turns, len(answer.turns), frozenset()).turns
+    "".join(turn.content for turn in sent).encode("utf-8")
 
 
 # What a recap checkpoint changes
