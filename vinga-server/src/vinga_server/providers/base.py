@@ -279,12 +279,23 @@ class ToolCall:
     streamed something that is not a JSON object. The call still reaches
     the session, which answers it with an error result: a model that
     mangles its own arguments should be told so and get another round,
-    not crash the reply."""
+    not crash the reply.
+
+    `source` and `entry` are where the runtime routed the call: the
+    namespace its name was classified into and, for an MCP tool, the
+    configured entry that owned it. Set only on a call kept in a
+    thread's history, so that what is said about it later names the
+    origin it had when it was made, and never read by an adapter: both
+    build their wire shapes field by field, so neither reaches a
+    request. Plain strings rather than the runtime's own type, because
+    this module does not import the runtime."""
 
     id: str
     name: str
     arguments: dict[str, Any] = field(default_factory=dict)
     malformed_arguments: str | None = None
+    source: str | None = None
+    entry: str | None = None
 
 
 @dataclass(frozen=True)
