@@ -1789,7 +1789,6 @@ class PipelineRuntime:
         for round_index in range(MAX_TOOL_ROUNDS):
             choice: ToolChoice = "none" if round_index == MAX_TOOL_ROUNDS - 1 else "auto"
             splitter = SentenceSplitter()
-            leg: list[str] = []
             calls: list[ToolCall] = []
             # Where each of those calls is on the turn's record, filled
             # in the moment the calls are known and read after the block
@@ -1860,7 +1859,7 @@ class PipelineRuntime:
                                 if self._withheld(sentence, offer):
                                     continue
                                 speaking = await self._speak_after(
-                                    speaking, sentence, providers.tts, resampler, leg, spoken
+                                    speaking, sentence, providers.tts, resampler, spoken
                                 )
                         case Usage():
                             usage = event
@@ -1888,7 +1887,7 @@ class PipelineRuntime:
                 tail = splitter.flush()
                 if tail is not None and not self._withheld(tail, offer):
                     speaking = await self._speak_after(
-                        speaking, tail, providers.tts, resampler, leg, spoken
+                        speaking, tail, providers.tts, resampler, spoken
                     )
                 # The round ends here, so the lookahead stops here too:
                 # there is no next sentence to overlap with, and the
@@ -2329,9 +2328,7 @@ class PipelineRuntime:
         resampler = Resampler(providers.tts.sample_rate, self._output.output_sample_rate)
         speaking: asyncio.Task[None] | None = None
         try:
-            speaking = await self._speak_after(
-                None, text, providers.tts, resampler, [], spoken
-            )
+            speaking = await self._speak_after(None, text, providers.tts, resampler, spoken)
             await speaking
             speaking = None
         finally:
@@ -2580,7 +2577,6 @@ class PipelineRuntime:
         sentence: str,
         tts: TtsProvider,
         resampler: Resampler,
-        leg: list[str],
         spoken: list[str],
     ) -> asyncio.Task[None]:
         """The lookahead, with this session's failure reporting, its
@@ -2601,7 +2597,7 @@ class PipelineRuntime:
             lambda first_chunk_ms, stream_ms: self._sentence_synthesized(
                 index, len(sentence), tts, first_chunk_ms, stream_ms
             ),
-            lambda synthesis: self._speak_and_record(synthesis, resampler, leg, spoken),
+            lambda synthesis: self._speak(synthesis, resampler, spoken),
         )
 
     def _sentence_synthesized(
@@ -2658,6 +2654,11 @@ class PipelineRuntime:
         ahead and never spoken is counted nowhere at all, which is the
         same rule seen from the other end.
 
+        `spoken` is the reply's list of what was heard, and appending to
+        it here, once the audio is out, is what makes a barge-in leave
+        exactly the heard sentences behind: the history and the turn's
+        record both read it.
+
         The audio arrives from `synthesis`, which may already have some
         or all of it buffered. Resampling and encoding stay here, in
         order, because the resampler and the encoder are stateful and
@@ -2692,21 +2693,6 @@ class PipelineRuntime:
             # that is already done, so cancelling costs nothing.
             synthesis.cancel()
             await synthesis.wait_cancelled()
-        spoken.append(synthesis.sentence)
-
-    async def _speak_and_record(
-        self, synthesis: _Synthesis, resampler: Resampler, leg: list[str], spoken: list[str]
-    ) -> None:
-        """Say a sentence and count it in both places at once: the
-        round's own list, which becomes the turn the model is shown, and
-        the reply's, which becomes the history.
-
-        One call rather than two lists merged at the end of the round,
-        because a barge-in cancels mid-round: merging later loses every
-        sentence of that round, including the ones the user sat through
-        and answered. Whoever speaks next then has no idea what was
-        already said."""
-        await self._speak(synthesis, resampler, leg)
         spoken.append(synthesis.sentence)
 
     def start_reply(self, utterance: Utterance) -> None:
