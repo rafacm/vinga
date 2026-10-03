@@ -117,7 +117,7 @@ async def test_the_memory_writes_run_first_one_at_a_time_and_then_the_rest() -> 
     slots = execution.reserve(turn, calls)
 
     await execution.run(
-        turn, list(zip(slots, calls, strict=True)), invocation=INVOCATION
+        turn, list(zip(slots, calls, strict=True)), invocation=INVOCATION, refetchable=frozenset()
     )
 
     assert journal.journal == [
@@ -146,7 +146,7 @@ async def test_the_results_come_back_in_the_models_order() -> None:
     slots = execution.reserve(turn, calls)
 
     results = await execution.run(
-        turn, list(zip(slots, calls, strict=True)), invocation=INVOCATION
+        turn, list(zip(slots, calls, strict=True)), invocation=INVOCATION, refetchable=frozenset()
     )
 
     assert [(one.tool_call_id, one.content) for one in results] == [

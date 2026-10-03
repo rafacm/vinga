@@ -1221,6 +1221,7 @@ session %s: %s tool%s took %.2f s%s
 | `is_error` | `BOOL` | yes | no |  |  |
 | `invocation` | `ID` | yes | no | the `invocation_id` syntax | The server-minted invocation of the round that asked for this call, the same value its `llm_round` carries, so a call joins its round on one key. Never the provider's own call id. |
 | `position` | `INT` | yes | no |  | Where this call sat in the list of calls its round returned, counted from zero and with moves included, so with `invocation` it names exactly one call, the n-th call of that round's exported output. The same number the call's `tool_invocations` row records. |
+| `refetch` | `BOOL` | yes | no |  | Whether this call repeats, by tool and arguments (compared with their keys sorted), an earlier reply's call whose result the request this call came from carried cleared: evidence that a cleared result was needed again. Grouped by `conversation` it counts re-fetches per conversation, across sessions and resumes. A call whose arguments were not a JSON object is never one. A move (a handover, a new conversation, a resume) emits no `tool_call`, so a repeated move is not counted. |
 | `error` | `CLASS_NAME` | no | no |  |  |
 
 #### Variant 2: `vinga_server.session` at INFO
@@ -1250,6 +1251,7 @@ session %s: %s tool%s took %.2f s%s
 | `is_error` | `BOOL` | yes | no |  |  |
 | `invocation` | `ID` | yes | no | the `invocation_id` syntax | The server-minted invocation of the round that asked for this call, the same value its `llm_round` carries, so a call joins its round on one key. Never the provider's own call id. |
 | `position` | `INT` | yes | no |  | Where this call sat in the list of calls its round returned, counted from zero and with moves included, so with `invocation` it names exactly one call, the n-th call of that round's exported output. The same number the call's `tool_invocations` row records. |
+| `refetch` | `BOOL` | yes | no |  | Whether this call repeats, by tool and arguments (compared with their keys sorted), an earlier reply's call whose result the request this call came from carried cleared: evidence that a cleared result was needed again. Grouped by `conversation` it counts re-fetches per conversation, across sessions and resumes. A call whose arguments were not a JSON object is never one. A move (a handover, a new conversation, a resume) emits no `tool_call`, so a repeated move is not counted. |
 | `error` | `CLASS_NAME` | no | no |  |  |
 
 #### Variant 3: `vinga_server.session` at INFO
@@ -1281,6 +1283,7 @@ session %s: %s tool%s took %.2f s%s
 | `is_error` | `BOOL` | yes | no |  |  |
 | `invocation` | `ID` | yes | no | the `invocation_id` syntax | The server-minted invocation of the round that asked for this call, the same value its `llm_round` carries, so a call joins its round on one key. Never the provider's own call id. |
 | `position` | `INT` | yes | no |  | Where this call sat in the list of calls its round returned, counted from zero and with moves included, so with `invocation` it names exactly one call, the n-th call of that round's exported output. The same number the call's `tool_invocations` row records. |
+| `refetch` | `BOOL` | yes | no |  | Whether this call repeats, by tool and arguments (compared with their keys sorted), an earlier reply's call whose result the request this call came from carried cleared: evidence that a cleared result was needed again. Grouped by `conversation` it counts re-fetches per conversation, across sessions and resumes. A call whose arguments were not a JSON object is never one. A move (a handover, a new conversation, a resume) emits no `tool_call`, so a repeated move is not counted. |
 | `error` | `CLASS_NAME` | no | no |  |  |
 
 ### `tool_arguments_coerced`

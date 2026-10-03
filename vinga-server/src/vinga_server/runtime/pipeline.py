@@ -1929,7 +1929,9 @@ class PipelineRuntime:
                 for call, slot in zip(calls, slots, strict=True)
             ]
             try:
-                switch_to = await self._run_tools(executing, slots, switches_left, invocation)
+                switch_to = await self._run_tools(
+                    executing, slots, switches_left, invocation, outgoing.refetchable
+                )
             finally:
                 # However the round ended: complete, refused part-way by
                 # a failure, or cut by a barge-in with some calls answered
@@ -1951,6 +1953,7 @@ class PipelineRuntime:
         slots: Sequence[int],
         switches_left: int,
         invocation: str,
+        refetchable: frozenset[tuple[str, str]],
     ) -> "_Transition | None":
         """Execute one round of calls, and answer the move that ends the
         leg, if one does. Everything that is not a move is
@@ -1979,7 +1982,13 @@ class PipelineRuntime:
         execution so every `tool_call` names the round that asked for
         it. Where each call sat in the model's list is not handed over:
         the reservation took it before this partition, and the slot is
-        how it is read back (#533)."""
+        how it is read back (#533).
+
+        `refetchable` is what the round's request carried cleared, which
+        each plain call's `tool_call` is checked against (#599). The
+        moves are not: they emit no `tool_call`, and a refused move's
+        result is a sentence this server wrote rather than anything
+        fetched, so it is not what the cap exists to clear."""
         plain = [
             (slots[index], call)
             for index, call in enumerate(calls)
@@ -1988,7 +1997,9 @@ class PipelineRuntime:
         moves = [
             (slots[index], call) for index, call in enumerate(calls) if self._moves(call)
         ]
-        await self._tools.run(self._turn, plain, invocation=invocation)
+        await self._tools.run(
+            self._turn, plain, invocation=invocation, refetchable=refetchable
+        )
 
         transition: _Transition | None = None
         for order, (slot, call) in enumerate(moves):

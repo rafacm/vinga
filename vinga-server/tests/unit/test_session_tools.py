@@ -1070,7 +1070,7 @@ async def test_a_name_that_changes_owner_between_calls_is_refused_not_rerouted(
 
         with caplog.at_level("INFO"):
             (result,) = await execution.run(
-                turn, [(slot, call(name))], invocation=INVOCATION
+                turn, [(slot, call(name))], invocation=INVOCATION, refetchable=frozenset()
             )
     finally:
         await servers.stop_all()
@@ -1217,7 +1217,7 @@ async def test_a_tool_of_an_entry_whose_name_holds_the_separator_is_dispatched()
         assert await run_reply(session, "tell me") == ["The word is rhubarb."]
         (slot,) = execution.reserve(turn, [stalled])
         (timed_out,) = await execution.run(
-            turn, [(slot, stalled)], invocation=INVOCATION
+            turn, [(slot, stalled)], invocation=INVOCATION, refetchable=frozenset()
         )
     finally:
         await servers.stop_all()

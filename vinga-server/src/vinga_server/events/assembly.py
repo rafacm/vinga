@@ -223,6 +223,7 @@ def builtin_tool_called(
     *,
     invocation: str,
     position: int,
+    refetch: bool,
 ) -> Variant:
     """The `tool_call` shape for a builtin: the one branch that names
     its tool, because a builtin's name is this server's own word."""
@@ -234,6 +235,7 @@ def builtin_tool_called(
         is_error=Flag(is_error),
         invocation=InvocationId(invocation),
         position=Whole(position),
+        refetch=Flag(refetch),
         named=QuotedToolName.of(tool),
         duration_s=Real(duration_s),
         outcome=_tool_outcome(is_error),
@@ -251,6 +253,7 @@ def mcp_tool_called(
     *,
     invocation: str,
     position: int,
+    refetch: bool,
 ) -> Variant:
     """The `tool_call` shape for a server tool, which names the entry an
     operator wrote in their YAML and never the far side's own name."""
@@ -262,6 +265,7 @@ def mcp_tool_called(
         is_error=Flag(is_error),
         invocation=InvocationId(invocation),
         position=Whole(position),
+        refetch=Flag(refetch),
         named=FromEntry.of(entry),
         duration_s=Real(duration_s),
         outcome=_tool_outcome(is_error),
@@ -279,6 +283,7 @@ def unnamed_tool_called(
     *,
     invocation: str,
     position: int,
+    refetch: bool,
 ) -> Variant:
     """The `tool_call` shape that names nothing.
 
@@ -300,6 +305,7 @@ def unnamed_tool_called(
         is_error=Flag(is_error),
         invocation=InvocationId(invocation),
         position=Whole(position),
+        refetch=Flag(refetch),
         named=Nothing(""),
         duration_s=Real(duration_s),
         outcome=_tool_outcome(is_error),

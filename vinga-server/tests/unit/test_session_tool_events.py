@@ -173,6 +173,7 @@ async def test_a_builtin_and_a_name_nobody_publishes_are_reported_as_they_are(
         "tool": "remember",
         "is_error": False,
         "position": 0,
+        "refetch": False,
     }
 
     refused_builtin = [
@@ -187,6 +188,7 @@ async def test_a_builtin_and_a_name_nobody_publishes_are_reported_as_they_are(
         "is_error": True,
         "error": "tool_error",
         "position": 2,
+        "refetch": False,
     }
 
     # The two it may not name sat at the model's places 1 and 3, and
@@ -204,6 +206,7 @@ async def test_a_builtin_and_a_name_nobody_publishes_are_reported_as_they_are(
             "is_error": True,
             "error": "tool_error",
             "position": place,
+            "refetch": False,
         }
 
     builtin_line, unknown_line = unparseable(caplog)
@@ -249,6 +252,7 @@ async def test_a_server_tool_is_reported_by_its_entry(
         "is_error": False,
         "invocation": asking,
         "position": 0,
+        "refetch": False,
     }
     (refused,) = [one for one in called if fields_of(one)["is_error"] is True]
     assert_timed(refused, (said, "mcp", ' from entry "tools"', " and failed"))
@@ -260,6 +264,7 @@ async def test_a_server_tool_is_reported_by_its_entry(
         "error": "tool_error",
         "invocation": asking,
         "position": 1,
+        "refetch": False,
     }
 
     (line,) = unparseable(caplog)

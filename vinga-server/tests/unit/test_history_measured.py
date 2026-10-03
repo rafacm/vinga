@@ -26,6 +26,7 @@ and on no span.
 """
 
 import asyncio
+import json
 import logging
 import sys
 from collections.abc import Iterator
@@ -35,8 +36,8 @@ import pytest
 
 from tests.support.configs import POET_MAC, STDIO_SERVER, base_config
 from tests.support.device_tools import STATUS, FakeDevice
-from tests.support.events import events, fields_of, only
-from tests.support.mcp_stdio_server import LONG_ANSWER_ENV
+from tests.support.events import both_formats, events, fields_of, only
+from tests.support.mcp_stdio_server import LONG_ANSWER_ENV, SHADOWED_TOOL_ENV
 from tests.support.providers import ScriptedLlm
 from tests.support.sessions import call, events_of, run_reply, session_for
 from tests.support.telemetry import (
@@ -51,7 +52,7 @@ from tests.support.telemetry import (
 )
 from tests.support.tools_mcp import Applying, reading
 from vinga_server.config import Config
-from vinga_server.providers import ToolResult, Turn
+from vinga_server.providers import ToolCall, ToolResult, Turn
 from vinga_server.runtime.history import (
     NOTHING_LOST,
     Cleared,
@@ -63,7 +64,7 @@ from vinga_server.runtime.history import (
 from vinga_server.runtime.provider_watch import ProviderWatch
 from vinga_server.runtime.tool_execution import cleared_key
 from vinga_server.session_conversations import SessionConversations
-from vinga_server.telemetry import _QUIETING, LLM_INVOCATION_ID, LLM_SPAN
+from vinga_server.telemetry import _QUIETING, LLM_INVOCATION_ID, LLM_SPAN, TOOL_SPAN
 from vinga_server.tools.mcp import McpServers
 
 # A board tool's published name, which is what the model calls it by.
@@ -411,3 +412,161 @@ async def test_a_recap_over_a_cleared_result_carries_it_on_its_record_and_its_sp
         "vinga.llm.history.cleared.tools.device": 1,
         "vinga.llm.history.degraded.count": 1,
     }
+
+
+# --- a call that asks again for what was cleared -------------------------
+
+
+def refetches(caplog: pytest.LogCaptureFixture) -> list[bool]:
+    """Each `tool_call`'s flag, in the order the calls were made."""
+    return [fields_of(record)["refetch"] for record in events(caplog, "tool_call")]
+
+
+async def test_a_repeat_of_a_cleared_call_is_a_refetch_on_its_record_and_its_span(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    script = ScriptedLlm(
+        [[call(DEVICE_STATUS)], "Fine.", [call(DEVICE_STATUS)], "Still fine."]
+    )
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    await with_board(session, a_board("s" * 3072))
+    telemetry, memory, tapped = traced(session)
+
+    with caplog.at_level(logging.INFO):
+        await run_reply(session, "how is my board?")
+        await run_reply(session, "and now?")
+
+    assert refetches(caplog) == [False, True]
+    close_session(tapped)
+    tools = sorted(
+        (span for span in finished(telemetry, memory) if span.name == TOOL_SPAN),
+        key=lambda span: span.start_time,
+    )
+    assert [span.attributes["vinga.tool.refetch"] for span in tools] == [False, True]
+
+
+async def test_a_repeat_whose_arguments_are_ordered_differently_is_a_refetch(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    first = ToolCall(id="c-1", name=DEVICE_STATUS, arguments={"part": "fan", "detail": 2})
+    again = ToolCall(id="c-2", name=DEVICE_STATUS, arguments={"detail": 2, "part": "fan"})
+    script = ScriptedLlm([[first], "Fine.", [again], "Still fine."])
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    await with_board(session, a_board("s" * 3072))
+
+    with caplog.at_level(logging.INFO):
+        await run_reply(session, "how is the fan?")
+        await run_reply(session, "and now?")
+
+    assert refetches(caplog) == [False, True]
+
+
+async def test_a_repeat_with_other_arguments_is_not_a_refetch(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    first = ToolCall(id="c-1", name=DEVICE_STATUS, arguments={"part": "fan"})
+    other = ToolCall(id="c-2", name=DEVICE_STATUS, arguments={"part": "pump"})
+    script = ScriptedLlm([[first], "Fine.", [other], "Still fine."])
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    await with_board(session, a_board("s" * 3072))
+
+    with caplog.at_level(logging.INFO):
+        await run_reply(session, "how is the fan?")
+        await run_reply(session, "and the pump?")
+
+    assert refetches(caplog) == [False, False]
+
+
+async def test_a_repeat_of_a_kept_result_is_not_a_refetch(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The result was under the cap, so the model already had it: asking
+    again is not evidence that a cleared result was needed."""
+    script = ScriptedLlm(
+        [[call(DEVICE_STATUS)], "Fine.", [call(DEVICE_STATUS)], "Still fine."]
+    )
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    await with_board(session, a_board("s" * 2048))
+
+    with caplog.at_level(logging.INFO):
+        await run_reply(session, "how is my board?")
+        await run_reply(session, "and now?")
+
+    assert refetches(caplog) == [False, False]
+
+
+async def test_a_malformed_call_is_never_a_refetch(caplog: pytest.LogCaptureFixture) -> None:
+    """A cleared call with no arguments, then the same tool asked with
+    something that is not a JSON object: there is nothing to compare, so
+    it is not a repeat, even of a call whose arguments were empty."""
+    broken = ToolCall(id="c-2", name=DEVICE_STATUS, malformed_arguments="{part: fan")
+    script = ScriptedLlm([[call(DEVICE_STATUS)], "Fine.", [broken], "Still fine."])
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    await with_board(session, a_board("s" * 3072))
+
+    with caplog.at_level(logging.INFO):
+        await run_reply(session, "how is my board?")
+        await run_reply(session, "and now?")
+
+    assert refetches(caplog) == [False, False]
+
+
+# --- nothing far-side, anywhere -----------------------------------------
+
+# Credential-shaped, and shaped for where each is planted: the result a
+# board answered with, and the name a server publishes a tool under,
+# which has to be a name both LLM APIs accept.
+RESULT_SENTINEL = "sk-live-4f8b2c9e-HISTORY-RESULT-SENTINEL"
+NAME_SENTINEL = "sk_live_4f8b2c9e_history_name_sentinel"
+
+
+async def test_no_cleared_result_and_no_far_side_name_reaches_a_record_or_a_span(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A board result over the cap holding a credential, and a server
+    tool published under a credential, both kept; then the entry is
+    removed, so the next request clears the one and degrades the other,
+    and the model asks the board again. Every fact about that is on the
+    record and the span, and neither planted value is in any rendering
+    of any record, in any record's fields, or in any span's attributes.
+
+    The model was handed both, which is the proof they were in play."""
+    shadowed = f"tools__{NAME_SENTINEL}"
+    running = server_config(**{SHADOWED_TOOL_ENV: NAME_SENTINEL})
+    servers = McpServers.build(running)
+    await servers.start_all()
+    script = ScriptedLlm(
+        [
+            [call(DEVICE_STATUS), call(shadowed)],
+            "Both answered.",
+            [call(DEVICE_STATUS)],
+            "Asked again.",
+        ]
+    )
+    session = session_for(base_config(), POET_MAC, {"poet": script}, mcp_servers=servers)
+    await with_board(session, a_board(f"{RESULT_SENTINEL} " + "s" * 3072))
+    telemetry, memory, tapped = traced(session)
+    try:
+        with caplog.at_level(logging.DEBUG):
+            await run_reply(session, "check both")
+            await Applying(servers, running).apply(reading(base_config()))
+            await run_reply(session, "and again?")
+    finally:
+        await servers.stop_all()
+    close_session(tapped)
+    spans = finished(telemetry, memory)
+
+    handed = repr(script.seen)
+    assert RESULT_SENTINEL in handed and NAME_SENTINEL in handed
+    asked = fields_of(events(caplog, "llm_round")[2])
+    assert history_of(asked)["cleared_tools"] == {"device": 1}
+    assert history_of(asked)["degraded_calls"] == 1
+    assert refetches(caplog)[-1] is True
+
+    for sentinel in (RESULT_SENTINEL, NAME_SENTINEL):
+        assert sentinel not in both_formats(caplog)
+        for record in caplog.records:
+            assert sentinel not in json.dumps(fields_of(record), default=repr)
+            assert sentinel not in repr(record.args)
+        for span in spans:
+            assert sentinel not in repr(dict(span.attributes)), span.name
