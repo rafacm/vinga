@@ -344,6 +344,14 @@ special cases:
   is by spoken description ("a while ago we were talking about this
   topic") and is agent-scoped: an agent finds its own past threads and
   no other agent's, and it can only pick up one it has just offered.
+  The thread it picks up carries the agent's tool exchanges as well as
+  what was said (*implemented today, issue #599*): every call that had
+  its result is rebuilt from the store, round by round, and later
+  replies treat it exactly as they treat one made in the same session,
+  as the tool-exchanges bullet below describes. The exchanges count
+  against the resumption budget, each at no less than the size of the
+  plain-text record it could become, so a thread whose agent used tools
+  is read less far back than one that only talked.
 - **Cost.** "How much has this conversation cost so far" wants cost to
   be a property of the thread. The usage such a number would be read
   from is **implemented today, issue #439**: `record.metrics_tokens_daily`
@@ -414,14 +422,13 @@ The decided semantics, each with its owner:
   deliberately (phrasing that asks for continuation, "ask Nadia about
   this", with the agent asking rather than guessing when the phrasing
   is ambiguous) is the part that remains **decided direction**.
-- **An agent keeps its own tool exchanges.** *Implemented today for
-  the session, issue #599.* Every tool call an agent makes and the
-  result it got stay in its thread's history for as long as the
-  session lasts, builtins, MCP and device tools alike, so a later reply
-  can answer from a fact it saved or a value it read earlier without
-  asking again. A conversation resumed in a later session does not
-  rebuild them yet: the store records every call, and rebuilding the
-  exchanges from it on a resume is **decided direction**. A call is
+- **An agent keeps its own tool exchanges.** *Implemented today, issue
+  #599.* Every tool call an agent makes and the result it got stay in
+  its thread's history for the rest of the conversation, builtins, MCP
+  and device tools alike, so a later reply can answer from a fact it
+  saved or a value it read earlier without asking again. A
+  conversation resumed in a later session rebuilds them from the
+  store, as "Resuming elsewhere" above describes. A call is
   kept as soon as it has its result, even when the reply it belongs to
   is cut short or fails afterwards. In the reply that made a call the
   model sees the result whole; on later replies a result over 2 KiB is

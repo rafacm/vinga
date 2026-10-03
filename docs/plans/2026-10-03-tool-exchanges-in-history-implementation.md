@@ -265,3 +265,422 @@ selection 91 passed in 85.98s; the full unit lane 7941 passed, 19 skipped in
 2686.38s (three times the round 1 run, on a machine running M3's lanes
 beside it). The
 census lane ran last, after this subsection.
+
+## M3: rebuild exchanges on resume
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.288; 2026-10-03.
+
+### What landed
+
+| Decision | Where | Commit |
+| --- | --- | --- |
+| Decision 4, D9, Q4: `StoredCall`, the widened read, rounds rebuilt under the budget, `TOOL_NOTE` retired | `conversations/records.py` (`StoredCall`, `StoredTurn.calls`), `conversations/threads.py` (`backlog`), `conversations/hydration.py`, `tests/unit/test_conversations_hydration.py`, `tests/unit/test_conversations_threads.py` | `Rebuild a resumed thread's tool rounds` |
+| Q3: the recap sent through `as_sent` | `runtime/pipeline.py` (`_summarized`), `tests/support/stores.py` (`a_backlog(calls=...)`), `tests/unit/test_session_recap.py` | `Send the recap its thread's exchanges as notes` |
+| The issue's third criterion, the cut-then-resume comparison, the rebuilt shape through the Anthropic translator | `tests/unit/test_session_kept_tools.py` | `Pin a resumed thread's first request` |
+| Q4's price against M1's reviewed `note_cost`, and `countable` results | `conversations/hydration.py` (`_cost`), `tests/unit/test_conversations_hydration.py` | `Charge each rebuilt call its note bound and join` |
+| Documentation footprint | `docs/concepts.md` (the "Resuming elsewhere" bullet, and the tool-exchanges bullet M1's review scoped to the session widened back), `changelog.d/599-tool-exchanges-in-history.md` | this section's commit |
+
+The branch was cut from M1's head before its review (`81cfca37`) and
+rebased onto the reviewed head (`c6e60ace`) once that review's fixes
+landed: `note_cost` became an ASCII-escaped bound and `kept_round`
+began storing results in their `countable` form. The rebase dropped
+one commit of this branch (`Retire note_cost for the as-sent unit
+price`, which removed `note_cost` before it changed), resolved one
+textual conflict by keeping both sides (M1's lone-surrogate session
+test and this milestone's resume section, both appended to
+`test_session_kept_tools.py`), and added the pricing commit above.
+
+The conversations-schema reference was not regenerated: no generator
+text describes what hydration reads (the `tool_invocations` rows say
+what each column holds, not who reads it), and its drift check is
+clean.
+
+### Deviations from the plan
+
+- **Each call is charged `note_cost` plus one character.** Q4 names
+  `note_cost(call, result)` summed per call. That misses what joins a
+  note to its turn: `as_sent` puts a space between a turn's text and
+  each degraded note, so a round of two calls is one character longer
+  than its two notes (measured: 389 against 388). Small, but it breaks
+  the property the price exists for, that a unit which fit is never
+  exceeded by the form a later request sends. Each kept call is
+  charged `note_cost(call, result) + len(" ")`, the space named once in
+  hydration (`_NOTE_JOIN`) beside what it is for. Before the rebase this
+  branch priced a whole unit as `as_sent` sends it with nothing offered,
+  and removed `note_cost` as unused; M1's review then made `note_cost`
+  count non-ASCII escaped, which the raw as-sent text does not, so that
+  form stopped being the largest and `note_cost` became the right
+  primitive again.
+- **No second `countable` in hydration.** The brief's amendment asked
+  for rebuilt result text to go through `countable`. It does, by
+  `kept_round`, which places every rebuilt round; an explicit call in
+  hydration's own row conversion was added, survived the mutation that
+  removed it, and was therefore not kept. The lone-surrogate hydration
+  test kills the mutation that removes `countable` from `kept_round`.
+- **The store-writer test is in the unit lane.** The plan calls the
+  two-rounds-of-two-calls test "integration, against Postgres". It is
+  `test_the_backlog_reads_every_call_in_the_order_it_was_written` in
+  `tests/unit/test_conversations_threads.py`, beside the backlog test
+  it replaces, because that is where this repository drives the real
+  writer against Postgres: the unit lane provisions a database per
+  worker, and `tests/integration` boots whole deployments. It writes
+  through `ConversationStore.record_turn` and reads with
+  `threads.backlog`, which is the path the plan asks for. The
+  cut-then-resume test does the same round trip from a session's own
+  records.
+- **The recap's clearing facts are M2's.** `HistorySent` does not
+  exist on this base (M1's reviewed head, `c6e60ace`), so `_summarized` builds the `Sent`
+  and uses only its turns; handing its accounting to the recap's
+  `watched` call, and the test that `llm_recap` carries the clearing
+  facts, land with whichever of M2 and M3 merges second, as the plan
+  says. The recap test here asserts the request: no tools, every call
+  degraded, a 3000-byte result cleared inside its note.
+- **The hydration docstring's alternation rule is restated.** "What
+  comes out alternates" no longer holds of the output once a round is
+  a tool turn: a reply cut before it spoke leaves a tool turn followed
+  by the next user turn, in the session and on resume alike. The rule
+  is now that the output opens with the user and an assistant turn
+  never follows another one; a turn that kept an exchange and spoke
+  nothing is a unit ending on its tool turn rather than a hole (before
+  M3 it was a unit too, carried by its tool note). The "Content is what
+  was said and that tools ran" rule is gone, replaced by the rebuild
+  rule.
+- **A joined answer after a tool-only turn** follows that turn's tool
+  turn as a plain assistant turn; only an assistant text directly in
+  front of another assistant turn is folded into it (D9's newline
+  join), which covers both two answers and an answer before a joined
+  turn's round.
+- **The M1 changelog entry's "a resumed conversation does not rebuild
+  its exchanges yet" is removed**, and the M3 entry is a new bullet
+  under `### Changed` in the same fragment.
+
+### Discoveries
+
+- **A degraded past round followed by its reply is two assistant turns
+  in a row, and the Anthropic translator does not join them.** D6
+  leaves adjacent plain assistant turns unmerged, and M1's translator
+  rule joins only user turns. The resumed-request test asserts that
+  shape as D6's (`user, assistant, user, assistant, assistant, user`
+  through `anthropic_messages`). It is not new in M3: a session whose
+  MCP reload removed a tool between replies sends the same shape after
+  M1. What M3 changes is reach, since every resume of a thread whose
+  tool is gone now produces it. Anthropic's handling of consecutive
+  assistant messages was not measured here (no key on this machine);
+  it is a candidate for the same one-rule treatment D3 gave user turns.
+- The unanswered device call in the cut-then-resume test reaches the
+  hydrator as a row with a null result and is dropped there, not in
+  SQL; with the result filter mutated away and an empty result
+  tolerated, it comes back as a degraded note in the resumed request,
+  which is what makes the comparison with the session's own next
+  request fail. The driver reaches the condition.
+
+### Inventories
+
+Untruncated `git grep`, written to a file and counted.
+
+`git grep -n '\.tools\b' -- vinga-server` at `81cfca37`: 213 lines,
+byte-identical at M1's reviewed head `c6e60ace`; at this milestone's
+code: 210. Compared by content with line numbers
+stripped, exactly three lines are gone and none were added, and those
+three are every reader `StoredTurn.tools` had:
+
+- `vinga-server/src/vinga_server/conversations/hydration.py:219` and
+  `:220` (`_assistant`, the tool note);
+- `vinga-server/tests/unit/test_conversations_threads.py:496` (the
+  backlog test, rewritten).
+
+The other 210 are module paths (`vinga_server.tools`, `tests.tools`),
+`TurnRecord.tools` (the writer and the record suites), an `Offer`'s,
+a published listing's or a grant's `tools`, a config entry's, and the
+attribute name `vinga.llm.tools`. The full output at `c6e60ace`:
+
+<details>
+<summary>213 lines</summary>
+
+```text
+vinga-server/README.md:2808:`gen_ai.output.messages`, `vinga.llm.tools` and `vinga.llm.tool_choice`.
+vinga-server/src/vinga_server/app.py:64:from vinga_server.tools.mcp import McpConfigError, McpServers
+vinga-server/src/vinga_server/composition.py:37:from vinga_server.tools.mcp import McpServers
+vinga-server/src/vinga_server/config/models.py:56:from vinga_server.tools import names
+vinga-server/src/vinga_server/config/models.py:3323:    if entry.tools is not None:
+vinga-server/src/vinga_server/config/models.py:3324:        body["tools"] = list(entry.tools)
+vinga-server/src/vinga_server/config/reload.py:99:from vinga_server.tools.mcp import McpServers
+vinga-server/src/vinga_server/config/reload.py:100:from vinga_server.tools.mcp import reload as mcp
+vinga-server/src/vinga_server/conversations/hydration.py:219:    if turn.tools:
+vinga-server/src/vinga_server/conversations/hydration.py:220:        parts.append(TOOL_NOTE.format(names=", ".join(turn.tools)))
+vinga-server/src/vinga_server/conversations/store.py:1756:                self._tool_row(session_id, turn_id, call) for call in item.record.tools
+vinga-server/src/vinga_server/conversations/store.py:1913:            "tool_calls": len(record.tools),
+vinga-server/src/vinga_server/device/placement.py:70:from vinga_server.tools import builtin
+vinga-server/src/vinga_server/device/session.py:124:from vinga_server.tools.device import DeviceToolClient
+vinga-server/src/vinga_server/device/session.py:1237:        return () if self._device_tools is None else self._device_tools.tools()
+vinga-server/src/vinga_server/events/catalog.py:170:MCP_CHANNEL = "vinga_server.tools.mcp"
+vinga-server/src/vinga_server/protocol/mcp.py:11:tools lives in `vinga_server.tools.device`.
+vinga-server/src/vinga_server/runtime/pipeline.py:136:from vinga_server.tools import builtin, names
+vinga-server/src/vinga_server/runtime/pipeline.py:137:from vinga_server.tools.mcp import McpServers
+vinga-server/src/vinga_server/runtime/pipeline.py:138:from vinga_server.tools.source import (
+vinga-server/src/vinga_server/runtime/pipeline.py:1784:        offered = frozenset(tool.name for tool in offer.tools)
+vinga-server/src/vinga_server/runtime/pipeline.py:1834:                    tools=offer.tools,
+vinga-server/src/vinga_server/runtime/pipeline.py:1840:                    functools.partial(providers.llm.stream, system, carried, offer.tools, choice),
+vinga-server/src/vinga_server/runtime/prompt.py:67:from vinga_server.tools import names
+vinga-server/src/vinga_server/runtime/resumption.py:52:from vinga_server.tools import builtin
+vinga-server/src/vinga_server/runtime/tool_execution.py:40:from vinga_server.tools import names
+vinga-server/src/vinga_server/runtime/tool_execution.py:41:from vinga_server.tools.arguments import with_lossless_coercions
+vinga-server/src/vinga_server/runtime/tool_execution.py:42:from vinga_server.tools.source import ToolSource, no_such_tool, withheld
+vinga-server/src/vinga_server/runtime/tool_execution.py:378:            sentence, offer.tools, functools.partial(self._report_withheld, offer.origins)
+vinga-server/src/vinga_server/runtime/turns.py:30:from vinga_server.tools import names
+vinga-server/src/vinga_server/telemetry.py:403:LLM_TOOLS = "vinga.llm.tools"
+vinga-server/src/vinga_server/tools/builtin.py:60:from vinga_server.tools import names
+vinga-server/src/vinga_server/tools/device.py:23:from vinga_server.tools.publish import PublishedTools, publish
+vinga-server/src/vinga_server/tools/device.py:58:        return list(self._published.tools)
+vinga-server/src/vinga_server/tools/device.py:104:            len(self._published.tools),
+vinga-server/src/vinga_server/tools/device.py:105:            ", ".join(tool.name for tool in self._published.tools) or "none",
+vinga-server/src/vinga_server/tools/mcp/__init__.py:37:halves. This `__init__` IS the module `vinga_server.tools.mcp`: it
+vinga-server/src/vinga_server/tools/mcp/__init__.py:154:# `vinga_server.tools.mcp` means what it meant when this was one file.
+vinga-server/src/vinga_server/tools/mcp/manager.py:46:from vinga_server.tools import names
+vinga-server/src/vinga_server/tools/mcp/manager.py:47:from vinga_server.tools.publish import PublishedTools, publish
+vinga-server/src/vinga_server/tools/mcp/manager.py:279:        return list(self._published.tools)
+vinga-server/src/vinga_server/tools/mcp/manager.py:346:        published = {names.unqualified(self._name, tool.name) for tool in self._published.tools}
+vinga-server/src/vinga_server/tools/mcp/manager.py:501:                        for tool in listed.tools
+vinga-server/src/vinga_server/tools/mcp/manager.py:518:                published = len(self._published.tools)
+vinga-server/src/vinga_server/tools/mcp/registry.py:34:from vinga_server.tools import names
+vinga-server/src/vinga_server/tools/mcp/registry.py:171:            return manager.tools()
+vinga-server/src/vinga_server/tools/mcp/registry.py:173:        for tool in manager.tools():
+vinga-server/src/vinga_server/tools/mcp/slice.py:33:from vinga_server.tools import names
+vinga-server/src/vinga_server/tools/mcp/slice.py:67:    if grant.tools is None:
+vinga-server/src/vinga_server/tools/mcp/slice.py:69:    allowed = set(grant.tools)
+vinga-server/src/vinga_server/tools/mcp/slice.py:276:            agent: (None if grant.tools is None else list(grant.tools))
+vinga-server/src/vinga_server/tools/mcp/slice.py:341:            return grant.tools is None or names.unqualified(entry, published) in grant.tools
+vinga-server/src/vinga_server/tools/mcp/slice.py:355:            if grant.server == entry and grant.tools is not None
+vinga-server/src/vinga_server/tools/mcp/slice.py:356:            for name in grant.tools
+vinga-server/src/vinga_server/tools/publish.py:38:from vinga_server.tools import names
+vinga-server/src/vinga_server/tools/source.py:44:from vinga_server.tools import builtin, names
+vinga-server/src/vinga_server/tools/source.py:45:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/census/reach-ins.txt:10:# `uv run python -m tests.tools.reach_ins --by-site`.
+vinga-server/tests/census/test_reach_ins.py:45:from tests.tools.reach_ins import (
+vinga-server/tests/integration/test_startup_failure.py:90:    f"mcp_servers.tools: mcp_servers.tools.env.API_TOKEN: references ${UNSET_VARIABLE}, "
+vinga-server/tests/integration/test_telemetry_fanout.py:54:    "vinga.llm.tools",
+vinga-server/tests/support/device_tools.py:18:from vinga_server.tools.device import DeviceToolClient
+vinga-server/tests/support/isolation.py:67:        "vinga_server.tools",
+vinga-server/tests/support/isolation.py:68:        "vinga_server.tools.names",
+vinga-server/tests/support/providers.py:45:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/support/records.py:32:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/support/sessions.py:63:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/support/tools_mcp.py:47:from vinga_server.tools.mcp import McpServerManager, McpServers
+vinga-server/tests/support/tools_mcp.py:60:MANAGER_LOGGER = "vinga_server.tools.mcp"
+vinga-server/tests/tools/cli_ast_identity.py:20:    uv run python -m tests.tools.cli_ast_identity [<base-commit>]
+vinga-server/tests/tools/cli_fields.py:17:    uv run python -m tests.tools.cli_fields   # the same, as a module
+vinga-server/tests/tools/cli_sections.py:35:    uv run python -m tests.tools.cli_sections
+vinga-server/tests/tools/driver_times.py:12:    uv run python -m tests.tools.driver_times
+vinga-server/tests/tools/driver_times.py:28:from tests.tools.event_baseline import DRIVERS, listening
+vinga-server/tests/tools/event_baseline.py:201:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/tools/event_baseline.py:202:from vinga_server.tools.mcp.reload import ReloadInProgressError
+vinga-server/tests/tools/event_baseline.py:2250:MANAGER = "vinga_server.tools.mcp.manager"
+vinga-server/tests/tools/event_baseline.py:2251:MCP_REGISTRY = "vinga_server.tools.mcp.registry"
+vinga-server/tests/tools/event_baseline.py:2252:RELOAD = "vinga_server.tools.mcp.reload"
+vinga-server/tests/tools/reach_ins.py:22:    uv run python -m tests.tools.reach_ins            # summary
+vinga-server/tests/tools/reach_ins.py:23:    uv run python -m tests.tools.reach_ins --by-site  # file:line per site
+vinga-server/tests/tools/reach_ins.py:24:    uv run python -m tests.tools.reach_ins --json     # the whole census
+vinga-server/tests/tools/reach_ins.py:70:    "# `uv run python -m tests.tools.reach_ins --by-site`.\n"
+vinga-server/tests/tools/utterance.py:16:    uv run python -m tests.tools.utterance
+vinga-server/tests/unit/test_agent_rename_in_flight.py:85:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/unit/test_app_lifespan.py:67:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/unit/test_boundary_contract.py:56:from vinga_server.tools.device import DeviceToolClient
+vinga-server/tests/unit/test_boundary_contract.py:57:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/unit/test_capture_session.py:78:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/unit/test_class_name_sites.py:44:from vinga_server.tools import builtin
+vinga-server/tests/unit/test_cli_import_weight.py:162:        "vinga_server.tools",
+vinga-server/tests/unit/test_cli_import_weight.py:163:        "vinga_server.tools.names",
+vinga-server/tests/unit/test_config_api_runtime.py:72:from vinga_server.tools.mcp import (
+vinga-server/tests/unit/test_config_cli_progress.py:44:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/unit/test_config_cli_rendering.py:80:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/unit/test_config_cli_transport.py:33:import vinga_server.tools.mcp as mcp_module
+vinga-server/tests/unit/test_config_diff_read.py:59:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/unit/test_config_entities.py:182:        "vinga_server.tools",
+vinga-server/tests/unit/test_config_entities.py:183:        "vinga_server.tools.names",
+vinga-server/tests/unit/test_config_reload.py:84:from vinga_server.tools.mcp import RELOAD_REFUSED, McpServers
+vinga-server/tests/unit/test_config_tools.py:11:from vinga_server.tools import names
+vinga-server/tests/unit/test_config_tools.py:309:    return [(grant.server, grant.tools) for grant in config.mcp_for_agent(agent)]
+vinga-server/tests/unit/test_config_url_credential_display.py:80:from vinga_server.tools.mcp import McpConfigError, McpServers
+vinga-server/tests/unit/test_config_url_credential_display.py:81:from vinga_server.tools.mcp import manager as mcp_manager
+vinga-server/tests/unit/test_conversations_session.py:55:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/unit/test_conversations_threads.py:496:    assert found.turns[0].tools == ("remember",)
+vinga-server/tests/unit/test_driver_times.py:17:from tests.tools.driver_times import report, timed
+vinga-server/tests/unit/test_event_baseline.py:49:from tests.tools.event_baseline import (
+vinga-server/tests/unit/test_event_baseline.py:296:            "vinga_server.tools.mcp",
+vinga-server/tests/unit/test_event_baseline.py:1119:    "vinga_server.tools.mcp.manager:McpServerManager._run #1": (
+vinga-server/tests/unit/test_event_baseline.py:1122:    "vinga_server.tools.mcp.manager:McpServerManager._run #2": (
+vinga-server/tests/unit/test_event_baseline.py:1125:    "vinga_server.tools.mcp.manager:McpServerManager._run #3": (
+vinga-server/tests/unit/test_event_baseline.py:1128:    "vinga_server.tools.mcp.manager:McpServerManager._mark_down #1": (
+vinga-server/tests/unit/test_event_baseline.py:1131:    "vinga_server.tools.mcp.manager:McpServerManager._mark_down #2": (
+vinga-server/tests/unit/test_event_baseline.py:1134:    "vinga_server.tools.mcp.registry:McpServers._reachable #1": (
+vinga-server/tests/unit/test_event_baseline.py:1137:    "vinga_server.tools.mcp.reload:_refused #1": (
+vinga-server/tests/unit/test_event_baseline.py:1140:    "vinga_server.tools.mcp.reload:_apply #1": (
+vinga-server/tests/unit/test_event_surface_pins.py:79:from tests.tools.event_baseline import Failing, failing_reply, turned_away
+vinga-server/tests/unit/test_event_surface_pins.py:82:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/unit/test_event_values.py:573:    from vinga_server.tools.mcp import transport
+vinga-server/tests/unit/test_event_values.py:593:    from vinga_server.tools.mcp import reload
+vinga-server/tests/unit/test_events_live_wiring.py:45:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/unit/test_generation_binding.py:30:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/unit/test_mcp_composed_reference.py:43:from vinga_server.tools.mcp import CONNECTED, REDACTED, McpServers
+vinga-server/tests/unit/test_mcp_pending.py:34:from vinga_server.tools.mcp import CONNECTED, McpServers
+vinga-server/tests/unit/test_mcp_status_reflection.py:50:from vinga_server.tools.mcp import CONNECTED, REDACTED, McpServers, transport
+vinga-server/tests/unit/test_mcp_status_reflection.py:64:MANAGER_LOGGER = "vinga_server.tools.mcp"
+vinga-server/tests/unit/test_memory_store.py:60:from vinga_server.tools import builtin
+vinga-server/tests/unit/test_memory_store.py:61:from vinga_server.tools.builtin import (
+vinga-server/tests/unit/test_onboarding_import_weight.py:52:    "vinga_server.tools.mcp",
+vinga-server/tests/unit/test_provider_watch_pins.py:50:from tests.tools.event_baseline import failing_reply
+vinga-server/tests/unit/test_providers_boundary.py:422:        check_mcp_server("mcp_servers.tools", entry, boundary)
+vinga-server/tests/unit/test_providers_boundary.py:425:        check_mcp_server("mcp_servers.tools", entry, boundary)
+vinga-server/tests/unit/test_providers_boundary.py:435:        check_mcp_server("mcp_servers.tools", entry, Reach.HOST)
+vinga-server/tests/unit/test_secret_resolution.py:33:from vinga_server.tools.mcp import McpServerManager
+vinga-server/tests/unit/test_session_conversations.py:47:from vinga_server.tools import builtin
+vinga-server/tests/unit/test_session_conversations.py:793:    assert [invocation.result for invocation in record.tools] == [answer]
+vinga-server/tests/unit/test_session_conversations.py:884:    assert [invocation.name for invocation in asked.tools] == ["resume_conversation"]
+vinga-server/tests/unit/test_session_conversations.py:890:    assert seeded.tools == ()
+vinga-server/tests/unit/test_session_device.py:74:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/unit/test_session_device_location.py:60:from vinga_server.tools import builtin
+vinga-server/tests/unit/test_session_kept_tools.py:30:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/unit/test_session_memory_policy.py:48:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/unit/test_session_recap.py:56:from vinga_server.tools import builtin
+vinga-server/tests/unit/test_session_record.py:78:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/unit/test_session_record.py:129:    assert record.tools == ()
+vinga-server/tests/unit/test_session_record.py:488:    calls = {invocation.position: invocation for invocation in record.tools}
+vinga-server/tests/unit/test_session_record.py:522:    assert all(invocation.duration_ms is not None for invocation in record.tools)
+vinga-server/tests/unit/test_session_record.py:533:    (invocation,) = record.tools
+vinga-server/tests/unit/test_session_record.py:553:    (invocation,) = asked.tools
+vinga-server/tests/unit/test_session_record.py:571:    assert [(invocation.position, invocation.is_error) for invocation in asked.tools] == [
+vinga-server/tests/unit/test_session_record.py:575:    assert "already been handed over" in (asked.tools[1].result or "")
+vinga-server/tests/unit/test_session_record.py:622:    assert [invocation.name for invocation in record.tools] == ["ghost_tool"]
+vinga-server/tests/unit/test_session_record.py:656:    (invocation,) = only_record(spy).tools
+vinga-server/tests/unit/test_session_record.py:676:    (invocation,) = record.tools
+vinga-server/tests/unit/test_session_record.py:741:    assert len(record.tools) == 4
+vinga-server/tests/unit/test_session_tool_events.py:46:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/unit/test_session_tools.py:59:from vinga_server.tools import builtin
+vinga-server/tests/unit/test_session_tools.py:60:from vinga_server.tools.builtin import switch_agent_tool
+vinga-server/tests/unit/test_session_tools.py:61:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/unit/test_session_tools.py:62:from vinga_server.tools.source import DeviceTools, McpTools, ToolSource
+vinga-server/tests/unit/test_session_tools.py:1291:    (invocation,) = only_record(spy).tools
+vinga-server/tests/unit/test_session_withheld.py:40:from vinga_server.tools.mcp import McpServers
+vinga-server/tests/unit/test_session_withheld.py:453:    published = board.client.tools()[0].name
+vinga-server/tests/unit/test_session_withheld.py:519:    published = board.client.tools()[0].name
+vinga-server/tests/unit/test_telemetry_deploy.py:30:    "vinga.llm.tools",
+vinga-server/tests/unit/test_tool_arguments.py:24:from vinga_server.tools.arguments import with_lossless_coercions
+vinga-server/tests/unit/test_tool_execution.py:21:from vinga_server.tools import names
+vinga-server/tests/unit/test_tool_execution.py:185:    assert [tool.name for tool in offer.tools] == [names.REMEMBER, "self_lamp", "home__lamp"]
+vinga-server/tests/unit/test_tool_execution.py:191:    assert dict(offer.schemas) == {tool.name: tool.input_schema for tool in offer.tools}
+vinga-server/tests/unit/test_tool_names.py:6:from vinga_server.tools import names
+vinga-server/tests/unit/test_tools_device.py:28:    assert [tool.name for tool in device.client.tools()] == [
+vinga-server/tests/unit/test_tools_device.py:32:    assert device.client.tools()[0].input_schema == VOLUME["inputSchema"]
+vinga-server/tests/unit/test_tools_device.py:44:    assert [tool.name for tool in device.client.tools()] == [
+vinga-server/tests/unit/test_tools_device.py:61:    assert [tool.name for tool in device.client.tools()] == ["self_a_b"]
+vinga-server/tests/unit/test_tools_device.py:68:    assert [tool.name for tool in device.client.tools()] == ["self_audio_speaker_set_volume"]
+vinga-server/tests/unit/test_tools_device.py:109:    import vinga_server.tools.device as device_module
+vinga-server/tests/unit/test_tools_device.py:115:    assert device.client.tools() == []
+vinga-server/tests/unit/test_tools_mcp.py:38:from vinga_server.tools import names
+vinga-server/tests/unit/test_tools_mcp.py:39:from vinga_server.tools.mcp import (
+vinga-server/tests/unit/test_tools_mcp.py:73:        offered = {tool.name for tool in manager.tools()}
+vinga-server/tests/unit/test_tools_mcp.py:76:        (add,) = [tool for tool in manager.tools() if tool.name == "tools__add"]
+vinga-server/tests/unit/test_tools_mcp.py:109:        assert manager.tools() == []
+vinga-server/tests/unit/test_tools_mcp.py:390:    assert "mcp_servers.tools" in str(excinfo.value)
+vinga-server/tests/unit/test_tools_mcp.py:404:    assert "mcp_servers.tools" in message
+vinga-server/tests/unit/test_tools_mcp.py:496:        offered = {tool.name for tool in manager.tools()}
+vinga-server/tests/unit/test_tools_mcp.py:498:        assert all(names.TOOL_NAME_PATTERN.match(tool.name) for tool in manager.tools())
+vinga-server/tests/unit/test_tools_mcp.py:511:            len(tool.name) <= names.MAX_TOOL_NAME_LENGTH for tool in manager.tools()
+vinga-server/tests/unit/test_tools_mcp.py:513:        assert not [tool for tool in manager.tools() if "bbbb" in tool.name]
+vinga-server/tests/unit/test_tools_mcp.py:1126:        published = len(manager.tools())
+vinga-server/tests/unit/test_tools_mcp.py:1330:        assert [tool.name for tool in servers.manager_of("home").tools()].index(
+vinga-server/tests/unit/test_tools_mcp_http.py:35:from vinga_server.tools.mcp import (
+vinga-server/tests/unit/test_tools_mcp_http.py:43:from vinga_server.tools.mcp import (
+vinga-server/tests/unit/test_tools_mcp_http.py:49:MANAGER_LOGGER = "vinga_server.tools.mcp"
+vinga-server/tests/unit/test_tools_mcp_http.py:151:        offered = {tool.name for tool in manager.tools()}
+vinga-server/tests/unit/test_tools_mcp_http.py:153:        (listed,) = [tool for tool in manager.tools() if tool.name == "tools__add"]
+vinga-server/tests/unit/test_tools_mcp_http.py:179:            assert manager.tools() == []
+vinga-server/tests/unit/test_tools_mcp_http.py:235:            assert {tool.name for tool in manager.tools()} == {
+vinga-server/tests/unit/test_tools_mcp_prompts.py:27:import vinga_server.tools.mcp as mcp_module
+vinga-server/tests/unit/test_tools_mcp_prompts.py:39:from vinga_server.tools.mcp import (
+vinga-server/tests/unit/test_tools_mcp_prompts.py:62:MANAGER_LOGGER = "vinga_server.tools.mcp"
+vinga-server/tests/unit/test_tools_mcp_reload.py:58:from vinga_server.tools.mcp import (
+vinga-server/tests/unit/test_tools_mcp_reload.py:76:from vinga_server.tools.mcp import manager as manager_module
+vinga-server/tests/unit/test_tools_mcp_reload.py:689:        with caplog.at_level(logging.WARNING, logger="vinga_server.tools.mcp"):
+vinga-server/tests/unit/test_tools_publish.py:10:from vinga_server.tools import names
+vinga-server/tests/unit/test_tools_publish.py:11:from vinga_server.tools.publish import publish
+vinga-server/tests/unit/test_tools_publish.py:37:    assert [tool.name for tool in result.tools] == [published]
+vinga-server/tests/unit/test_tools_publish.py:49:    assert publish(listing(bare)).tools
+vinga-server/tests/unit/test_tools_publish.py:50:    assert publish(listing(bare), prefix="server").tools == []
+vinga-server/tests/unit/test_tools_publish.py:57:    assert [tool.name for tool in result.tools] == ["a_b", "a-b"]
+vinga-server/tests/unit/test_tools_publish.py:63:    assert [tool.name for tool in result.tools] == ["___", "kept"]
+vinga-server/tests/unit/test_tools_publish.py:128:    assert [tool.name for tool in result.tools] == ["ha__first", "ha__third"]
+vinga-server/tests/unit/test_tools_publish.py:136:    (tool,) = publish([("do.it", "the description", SCHEMA)], prefix="ha").tools
+```
+
+</details>
+
+### Tests and mutations
+
+The new tests cannot be run against M1's code, which has no
+`StoredCall` and fails them at import, so each was falsified by
+mutation instead, every mutation run once against the suite it
+targets. The pricing rows were run after the rebase, against the
+repriced `_cost`; the rest before it, against code the rebase did not
+change apart from `_cost`:
+
+| Mutation | Outcome |
+| --- | --- |
+| The read ordered by `position` instead of `tool_invocations.id` | killed, 1 (the store-writer backlog test) |
+| Rows filtered before they are grouped into rounds | killed, 1 |
+| Resultless rows kept | killed, 2 (hydration); 1 in the session suite, crashing; 1 there again with the crash tolerated, on the unexecuted call reappearing |
+| Round boundaries ignored | killed, 2 |
+| Ids minted per unit rather than across the history | killed, 1 |
+| The budget charging the structured size | killed, 4 |
+| The budget charging a result's raw size beside its note | killed, 1 |
+| The join space not charged | killed, 2 |
+| The note measured raw rather than escaped (in `note_cost`) | killed, 1 |
+| `note_cost` handed no result | killed, 3 |
+| `countable` dropped from `kept_round` | killed, 1 (the lone-surrogate hydration test) |
+| An explicit `countable` in hydration's row conversion, removed | survived: `kept_round` already applies it, so the call was not kept |
+| A joined turn's calls degraded | killed, 1 |
+| Hydration rebuilding no rounds | killed, 2 (both session tests) |
+| The recap sent with `start=0` | killed, 1 |
+| The recap sent the raw hydrated input | killed, 1 |
+
+One mutation survived, and it is the finding the deviation above
+records: the code it removed was redundant and is not in the branch.
+Budget assertions that moved on the rebase: one,
+`test_a_large_result_is_charged_at_its_cleared_size`, whose expected
+charge gained the one-character join through the shared helper
+(`_charged`, which also counts non-ASCII escaped). Two existing hydration tests pinned the tool note
+and were replaced on purpose
+(`test_the_tools_a_turn_ran_are_named_and_nothing_else_about_them`,
+`test_a_turn_that_only_ran_tools_still_has_an_assistant_half`), and the
+backlog test `test_the_backlog_names_the_tools_a_turn_ran` was rewritten
+to the widened read. Every other existing hydration test, the budget
+walk, holes, joins and milestone head among them, passes unmodified.
+
+### Verification
+
+All on agentpi, from `vinga-server/`, at `f0dd5f6d` (the code as
+committed after the rebase onto `c6e60ace`; this section's commit
+changes only prose):
+
+- `uv run ruff check .`: clean. `uv run mypy` (the events package):
+  no issues in 5 source files.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 7954 passed,
+  19 skipped in 2642.88s, on a machine running M2's lanes beside it.
+  The same lane before the rebase, at `8ad9eb69`: 7946 passed, 19
+  skipped in 1106.08s.
+- `uv run pytest tests/integration -q -n auto --dist loadfile`: 350
+  passed in 411.20s.
+- The eight generated-document checks CI's `integration` job runs
+  (domain, server, conversations schema, metrics views, events,
+  OpenAPI, the CLI reference and its recipes): none drifted.
+- `scripts/check_doc_links.py`: 295 files, 0 failures;
+  `scripts/fold_changelog.py check`: 1 fragment, 0 failures.
+- `uv run pytest tests/census -q`: run last, after this section; its
+  outcome is in the hand-back rather than here.
+
+Not verified locally: the image build and its smoke conversation (CI's
+`image` job), and any live provider. The resumed request's shape
+through the Anthropic translator is pinned but was not sent to the
+Anthropic API (no key on this machine), including the two consecutive
+assistant messages under Discoveries. The recap's clearing facts on
+`llm_recap` wait on M2.
