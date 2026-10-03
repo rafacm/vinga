@@ -114,6 +114,7 @@ refuse a lawful deployment's traffic.
 | `ID_LIST` | A list whose every element is an `ID` of the field's declared syntax, carried as a string, or as an integer where the syntax says so. |
 | `SOURCES` | A mapping from prompt provenance to character counts, keyed by the grammar below. |
 | `MEMORY_SOURCES` | A mapping from the scope blocks a reply round appends to its prompt to their character counts. Every key is a scope provenance, and a block that was not sent is absent rather than zero. |
+| `CLEARED_TOOLS` | A mapping from a tool, keyed under the `tool_call` naming policy, to how many of its past results one request carried cleared. Every value is a count of one or more, and a request that cleared nothing carries no mapping. |
 | `DROP_COUNTS` | A mapping from the reasons a mic frame is discarded to how many frames one second lost to each. Every key is a declared reason and every value a count of one or more. |
 | `PROVIDER_ENTRIES` | A mapping from each bound agent to its pipeline stages, and from a stage to the resolved entry's `name`, `type` and, where the type has them, `host` and `model`. Nothing else off a provider entry reaches it, so no configured option and no credential can. |
 

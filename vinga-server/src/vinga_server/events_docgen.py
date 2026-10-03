@@ -139,6 +139,12 @@ KIND_MEANING: dict[Kind, str] = {
         "to their character counts. Every key is a scope provenance, and a "
         "block that was not sent is absent rather than zero."
     ),
+    Kind.CLEARED_TOOLS: (
+        "A mapping from a tool, keyed under the `tool_call` naming policy, "
+        "to how many of its past results one request carried cleared. "
+        "Every value is a count of one or more, and a request that cleared "
+        "nothing carries no mapping."
+    ),
     Kind.DROP_COUNTS: (
         "A mapping from the reasons a mic frame is discarded to how many "
         "frames one second lost to each. Every key is a declared reason and "
@@ -507,6 +513,11 @@ def _field_constraint(declared: Declared) -> str:
     if kind is Kind.MEMORY_SOURCES:
         scopes = ", ".join(f"`{one}`" for one in sorted(ScopeProvenance))
         return f"keyed by {scopes}, with counts for values"
+    if kind is Kind.CLEARED_TOOLS:
+        return (
+            "keyed by `builtin.<name>`, `mcp.<entry>`, `device` or `unknown`, "
+            "with counts for values"
+        )
     if kind is Kind.DROP_COUNTS:
         reasons = ", ".join(f"`{one}`" for one in sorted(DropReason))
         return f"keyed by {reasons}, with frame counts for values"

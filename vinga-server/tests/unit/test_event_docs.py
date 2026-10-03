@@ -260,6 +260,12 @@ def check_constraint(rendered: str, declared: Any, kind: str, where: str) -> Non
         for scope in sorted(ScopeProvenance):
             assert token(str(scope)) in rendered, f"{where}: scope {scope!r} missing"
         return
+    if kind == "CLEARED_TOOLS":
+        # The four key shapes, which is the naming policy a reader meets
+        # here and nowhere else in the reference.
+        for shape in ("builtin.<name>", "mcp.<entry>", "device", "unknown"):
+            assert f"`{shape}`" in rendered, f"{where}: key shape {shape!r} missing"
+        return
     if kind == "PROVIDER_ENTRIES":
         for name in PROVIDER_ENTRY_REQUIRED + PROVIDER_ENTRY_OPTIONAL:
             assert f"`{name}`" in rendered, f"{where}: entry key {name!r} missing"

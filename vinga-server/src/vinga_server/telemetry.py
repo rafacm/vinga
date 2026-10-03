@@ -839,6 +839,9 @@ SHAPES: dict[Kind, Shape] = {
     # (`_round_prompt_attributes`), and this row is only what a span
     # event would get, the same deterministic string as its sibling.
     Kind.MEMORY_SOURCES: Shape.JSON,
+    # The per-tool cleared counts (#599), as a span event would get
+    # them, the same deterministic string as their siblings.
+    Kind.CLEARED_TOOLS: Shape.JSON,
     # And the one that is context rather than an attribute: what a
     # session opened against is attached per agent to the spans it
     # applies to rather than dumped onto one of them as a blob.
