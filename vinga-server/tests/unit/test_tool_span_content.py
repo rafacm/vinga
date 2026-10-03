@@ -264,7 +264,9 @@ async def test_a_refused_tool_call_event_reports_failure_and_keeps_nothing(
     (slot,) = execution.reserve(turn, [asked])
 
     with caplog.at_level(logging.INFO):
-        (result,) = await execution.run(turn, [(slot, asked)], invocation=INVOCATION)
+        (result,) = await execution.run(
+            turn, [(slot, asked)], invocation=INVOCATION, refetchable=frozenset()
+        )
 
     assert result.is_error
     assert not logged_events(caplog, "tool_call")

@@ -2136,6 +2136,19 @@ TOOL_CALL_INVOCATION_NOTE = (
     "call, the same value its `llm_round` carries, so a call joins its "
     "round on one key. Never the provider's own call id."
 )
+# Whether a call asked again for what a cleared result held (#599), the
+# same on all three shapes because the question is about the history
+# and not about the namespace.
+TOOL_CALL_REFETCH_NOTE = (
+    "Whether this call repeats, by tool and arguments (compared with "
+    "their keys sorted), an earlier reply's call whose result the "
+    "request this call came from carried cleared: evidence that a "
+    "cleared result was needed again. Grouped by `conversation` it "
+    "counts re-fetches per conversation, across sessions and resumes. "
+    "A call whose arguments were not a JSON object is never one. A move "
+    "(a handover, a new conversation, a resume) emits no `tool_call`, "
+    "so a repeated move is not counted."
+)
 TOOL_CALL_POSITION_NOTE = (
     "Where this call sat in the list of calls its round returned, "
     "counted from zero and with moves included, so with `invocation` it "
@@ -2176,6 +2189,7 @@ class BuiltinToolCall(Variant):
     is_error: Flag = value()
     invocation: InvocationId = value(note=TOOL_CALL_INVOCATION_NOTE)
     position: Whole = value(note=TOOL_CALL_POSITION_NOTE)
+    refetch: Flag = value(note=TOOL_CALL_REFETCH_NOTE)
     named: QuotedToolName = value(carried=False)
     duration_s: Real = value(carried=False)
     outcome: ToolOutcome = value(carried=False)
@@ -2214,6 +2228,7 @@ class McpToolCall(Variant):
     is_error: Flag = value()
     invocation: InvocationId = value(note=TOOL_CALL_INVOCATION_NOTE)
     position: Whole = value(note=TOOL_CALL_POSITION_NOTE)
+    refetch: Flag = value(note=TOOL_CALL_REFETCH_NOTE)
     named: FromEntry = value(carried=False)
     duration_s: Real = value(carried=False)
     outcome: ToolOutcome = value(carried=False)
@@ -2253,6 +2268,7 @@ class UnnamedToolCall(Variant):
     is_error: Flag = value()
     invocation: InvocationId = value(note=TOOL_CALL_INVOCATION_NOTE)
     position: Whole = value(note=TOOL_CALL_POSITION_NOTE)
+    refetch: Flag = value(note=TOOL_CALL_REFETCH_NOTE)
     named: Nothing = value(carried=False)
     duration_s: Real = value(carried=False)
     outcome: ToolOutcome = value(carried=False)

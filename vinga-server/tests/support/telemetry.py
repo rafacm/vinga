@@ -629,6 +629,7 @@ def call_tool(
     error_type: str | None = None,
     invocation: str = "11111111111111111111111111111111",
     position: int = 0,
+    refetch: bool = False,
 ) -> float:
     """One `tool_call` in whichever of its three shapes, built through
     the events' own assembly.
@@ -643,7 +644,7 @@ def call_tool(
     and the round it belongs to; `position` is where the call sat in
     that round's list.
     """
-    where = {"invocation": invocation, "position": position}
+    where = {"invocation": invocation, "position": position, "refetch": refetch}
     built = {
         "builtin": lambda: assembly.builtin_tool_called(
             AGENT, CONVERSATION, name, duration_s, is_error, error_type, **where

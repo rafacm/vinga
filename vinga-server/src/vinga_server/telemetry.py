@@ -1286,6 +1286,11 @@ TOOL_ATTRIBUTES = {
     # metadata surface and not even unique within a turn.
     "invocation": LLM_INVOCATION_ID,
     "position": "vinga.tool.call.position",
+    # Whether the call asked again for what an earlier reply's cleared
+    # result held (#599). Per call, so re-fetches per conversation is
+    # this grouped by `vinga.conversation.id`, which survives a session
+    # boundary where a counter held in the session would not.
+    "refetch": "vinga.tool.refetch",
 }
 
 # The per-sentence TTS span. The stream's lifetime is the span's own

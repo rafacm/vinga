@@ -595,7 +595,7 @@ def test_only_a_reply_round_failure_takes_a_prompt_accounting(
 
 def test_a_builtin_call_names_the_tool_this_server_authored() -> None:
     assert assembly.builtin_tool_called(
-        "poet", THREAD, "remember", 0.25, False, invocation=INVOCATION, position=0
+        "poet", THREAD, "remember", 0.25, False, invocation=INVOCATION, position=0, refetch=True
     ) == BuiltinToolCall(
         agent=Identifier("poet"),
         conversation=ConversationId(THREAD),
@@ -604,6 +604,7 @@ def test_a_builtin_call_names_the_tool_this_server_authored() -> None:
         is_error=Flag(False),
         invocation=InvocationId(INVOCATION),
         position=Whole(0),
+        refetch=Flag(True),
         named=QuotedToolName(' "remember"'),
         duration_s=Real(0.25),
         outcome=ToolOutcome.ANSWERED,
@@ -612,7 +613,7 @@ def test_a_builtin_call_names_the_tool_this_server_authored() -> None:
 
 def test_a_server_call_names_the_entry_an_operator_wrote() -> None:
     assert assembly.mcp_tool_called(
-        "poet", THREAD, "tools", 0.25, True, invocation=INVOCATION, position=2
+        "poet", THREAD, "tools", 0.25, True, invocation=INVOCATION, position=2, refetch=False
     ) == McpToolCall(
         agent=Identifier("poet"),
         conversation=ConversationId(THREAD),
@@ -621,6 +622,7 @@ def test_a_server_call_names_the_entry_an_operator_wrote() -> None:
         is_error=Flag(True),
         invocation=InvocationId(INVOCATION),
         position=Whole(2),
+        refetch=Flag(False),
         named=FromEntry(' from entry "tools"'),
         duration_s=Real(0.25),
         outcome=ToolOutcome.FAILED,
@@ -635,7 +637,7 @@ def test_a_call_this_surface_may_not_name_names_only_its_namespace(
     """A device tool's name is the board's vocabulary and an unknown one
     is whatever the model invented, so the shape carries neither."""
     assert assembly.unnamed_tool_called(
-        "poet", THREAD, str(source), 0.25, False, invocation=INVOCATION, position=1
+        "poet", THREAD, str(source), 0.25, False, invocation=INVOCATION, position=1, refetch=True
     ) == UnnamedToolCall(
         agent=Identifier("poet"),
         conversation=ConversationId(THREAD),
@@ -644,6 +646,7 @@ def test_a_call_this_surface_may_not_name_names_only_its_namespace(
         is_error=Flag(False),
         invocation=InvocationId(INVOCATION),
         position=Whole(1),
+        refetch=Flag(True),
         named=Nothing(""),
         duration_s=Real(0.25),
         outcome=ToolOutcome.ANSWERED,

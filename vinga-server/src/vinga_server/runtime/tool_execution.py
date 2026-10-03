@@ -34,7 +34,7 @@ from vinga_server.events import SessionEvents, assembly, logger
 from vinga_server.events.catalog import Variant
 from vinga_server.events.values import Fragment
 from vinga_server.providers import ToolCall, ToolDef, ToolResult
-from vinga_server.runtime.history import Cleared
+from vinga_server.runtime.history import Cleared, canonical_arguments
 from vinga_server.runtime.speech import withhold_tool_shaped
 from vinga_server.runtime.turns import (
     BUILTIN,
@@ -158,6 +158,7 @@ def _tool_called(
     is_error: bool,
     error_type: str | None,
     invocation: str,
+    refetch: bool,
 ) -> Variant:
     """Which of the three `tool_call` shapes describes this call.
 
@@ -175,19 +176,59 @@ def _tool_called(
     Read off the reservation rather than counted here, because by now
     the moves are gone from the list this call arrived in, and a count
     over that would close the gap a move leaves.
+
+    `refetch` is the same on all three: whether the call asks again for
+    what an earlier reply's cleared result held (#599).
     """
-    where = {"invocation": invocation, "position": classified.position}
+    position = classified.position
     if classified.source == BUILTIN:
         return assembly.builtin_tool_called(
-            agent, conversation, classified.name, duration_s, is_error, error_type, **where
+            agent,
+            conversation,
+            classified.name,
+            duration_s,
+            is_error,
+            error_type,
+            invocation=invocation,
+            position=position,
+            refetch=refetch,
         )
     if classified.source == MCP and classified.entry is not None:
         return assembly.mcp_tool_called(
-            agent, conversation, classified.entry, duration_s, is_error, error_type, **where
+            agent,
+            conversation,
+            classified.entry,
+            duration_s,
+            is_error,
+            error_type,
+            invocation=invocation,
+            position=position,
+            refetch=refetch,
         )
     return assembly.unnamed_tool_called(
-        agent, conversation, classified.source, duration_s, is_error, error_type, **where
+        agent,
+        conversation,
+        classified.source,
+        duration_s,
+        is_error,
+        error_type,
+        invocation=invocation,
+        position=position,
+        refetch=refetch,
     )
+
+
+def _refetches(classified: ToolInvocation, refetchable: frozenset[tuple[str, str]]) -> bool:
+    """Whether this call repeats, by name and canonical arguments, a
+    past call whose result the round's request carried cleared (#599).
+
+    Read off the reservation, so the arguments compared are the model's
+    own rather than the execution copy's coerced ones, which is what the
+    history kept of the earlier call too. A malformed call has no
+    arguments to compare and is never a repeat."""
+    if classified.malformed or classified.arguments is None:
+        return False
+    return (classified.name, canonical_arguments(classified.arguments)) in refetchable
 
 
 @dataclass(frozen=True)
@@ -520,6 +561,7 @@ class ToolExecution:
         calls: Sequence[tuple[int, ToolCall]],
         *,
         invocation: str,
+        refetchable: frozenset[tuple[str, str]],
     ) -> list[ToolResult]:
         """Execute one round's calls, none of them a move, each paired
         with the slot it was reserved at. Almost all of them run
@@ -543,18 +585,23 @@ class ToolExecution:
 
         `invocation` is the server-minted id of the round that asked for
         these calls, which every `tool_call` event names so a call joins
-        its round on the key the round's own event carries."""
+        its round on the key the round's own event carries.
+        `refetchable` is the `(name, canonical arguments)` of every past
+        call whose result the round's request carried cleared, which is
+        what each `tool_call` checks its own call against (#599)."""
         answered: dict[int, ToolResult] = {}
         for slot, call in calls:
             if call.name in names.ORDERED_TOOL_NAMES:
-                answered[slot] = await self._run_one(turn, call, slot, invocation)
+                answered[slot] = await self._run_one(
+                    turn, call, slot, invocation, refetchable
+                )
         together = [(slot, call) for slot, call in calls if slot not in answered]
         answered.update(
             zip(
                 (slot for slot, _ in together),
                 await asyncio.gather(
                     *(
-                        self._run_one(turn, call, slot, invocation)
+                        self._run_one(turn, call, slot, invocation, refetchable)
                         for slot, call in together
                     )
                 ),
@@ -568,7 +615,12 @@ class ToolExecution:
         return [answered[slot] for slot, _ in calls]
 
     async def _run_one(
-        self, turn: TurnUnderway, call: ToolCall, slot: int, invocation: str
+        self,
+        turn: TurnUnderway,
+        call: ToolCall,
+        slot: int,
+        invocation: str,
+        refetchable: frozenset[tuple[str, str]],
     ) -> ToolResult:
         """One tool call, bounded and never raising into the loop. Every
         failure becomes an error result: the model explains it in its
@@ -612,6 +664,7 @@ class ToolExecution:
             content, is_error = f'the tool "{call.name}" failed: {exc}', True
             error_type = failure_name(exc)
         elapsed = loop.time() - started
+        refetch = _refetches(classified, refetchable)
 
         def announce() -> None:
             self._events.emit(
@@ -623,6 +676,7 @@ class ToolExecution:
                     is_error,
                     error_type,
                     invocation,
+                    refetch,
                 )
             )
 
