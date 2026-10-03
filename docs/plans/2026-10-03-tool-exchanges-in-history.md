@@ -21,8 +21,8 @@ plan review on exactly this. The cheapest change that removes that cost
 is M1 alone: keep each finished reply's completed tool rounds in the
 thread's history, clearing results over the cap and degrading calls to
 tools no longer offered. It is one module of two pure functions and two
-call sites in the reply loop; the provider seam and the adapters do not
-change. M2 (measuring the cap) and M3 (rebuilding on resume) are
+call sites in the reply loop, plus one coalescing rule in the Anthropic
+adapter (D3); the provider seam does not change. M2 (measuring the cap) and M3 (rebuilding on resume) are
 decisions 3 and 4, each a separate decision Rafael took, and each is
 cut as its own milestone so it can be reviewed, and declined, alone.
 Nothing in the plan is a number to measure ahead of time; the one
@@ -343,8 +343,17 @@ the pipeline notes `len(spoken)` at each commit and the end-of-reply and
 end-of-leg sites append the sentences after that mark, as today only
 when there are any. A reply that only ran tools and was cut before
 speaking leaves its rounds and no closing turn, so the next user turn
-follows a tool turn; that is a shape providers accept (it is the shape
-of every second round), and Step 0's probe sent it.
+follows a tool turn. OpenAI renders that as a `tool` message then a
+`user` message, which Step 0's probe sent and which was accepted.
+Anthropic renders a tool turn as a `user` message of `tool_result`
+blocks, so the next user turn would be a second `user` message in a
+row (round 3, finding 1). M1 therefore adds one rule to
+`anthropic_messages`: a plain user turn that follows a message whose
+role is already `user` is appended to it as a `text` block rather than
+emitted as a message of its own (a plain-string content is first turned
+into a text block). The same rule coalesces two plain user turns, a
+shape a reply that failed before speaking already leaves in-session
+today. Assistant messages and OpenAI's translation do not change.
 The stored record (`_record_turn(spoken)`) is unchanged: the store's
 `reply` stays the whole reply, which is why M3's rebuild puts the
 stored reply after the rebuilt rounds with empty preambles, the same
@@ -405,7 +414,8 @@ beside `_sentence_withheld`'s, which is where the naming policy
 already lives. That keeps `runtime/history.py` free of the tool
 namespaces.
 
-**D8. The re-fetch check rides the existing classification.** The
+**D8. The re-fetch check rides the existing classification, and moves
+are outside it.** The
 round's cleared keys go to `ToolExecution.run` with the invocation it
 already receives; the variant builder sets `refetch` when the call's
 `(name, canonical arguments)` is in the set. Canonical arguments are
@@ -413,6 +423,21 @@ already receives; the variant builder sets `refetch` when the call's
 malformed call never matches. Computed from the history being sent
 rather than remembered, so a resumed conversation's re-fetches count
 the same way.
+
+A refused move is kept in history (D2) and is not measured (round 3,
+finding 2): moves are partitioned out before `ToolExecution.run` and
+emit no `tool_call`, so there is no event to carry the flag. The gap is
+deliberate rather than missed. The re-fetch flag answers whether a
+cleared result was needed, which is evidence for raising a cap that
+exists for bulky fetched data; a refused move's result is a
+server-authored sentence (`builtin.ALREADY_MOVED`, the handover
+refusals naming configured agents), never something the model fetched,
+and in practice orders of magnitude under 2 KiB, so it is not what the
+cap clears. A model repeating a refused move is a different signal (a
+model retrying an action), and measuring it would mean giving moves a
+`tool_call` of their own, which is not this issue. Stated in M2's
+implementation section so a reader of the metric knows what it
+excludes.
 
 **D9. Hydration renders rounds, and the names note retires (M3).**
 `StoredTurn.tools: tuple[str, ...]` becomes `calls:
@@ -478,8 +503,9 @@ newline join, unchanged.
   round to the thread's history through `kept_round(...)` (D2), and
   sends `as_sent(...)`'s turns (to the provider partial, to
   `stage_reply` and to `reply_round_done`); the two end-of-reply sites
-  append only the speech after the last commit (D3). No new seam; `Turn` and the adapters are
-  untouched apart from the docstring.
+  append only the speech after the last commit (D3). No new seam;
+  `Turn` changes only by D7's two optional fields and its docstring.
+  `providers/anthropic_llm.py` gains D3's user-coalescing rule.
 - **M2**: `events/catalog.py` (`LlmRound`, `LlmRecap` and
   `ProviderFailed` gain the five fields, the three `tool_call` variants
   gain `refetch`), `runtime/provider_watch.py` (the `HistorySent` value
@@ -491,8 +517,13 @@ newline join, unchanged.
   Deepens the existing event and span tables; adds no module.
 - **M3**: `conversations/records.py` (`StoredCall`), `threads.py` (the
   widened read), `conversations/hydration.py` (rounds, D9, cost via
-  `history`), `runtime/pipeline.py` (`_summarized` sends `as_sent` of
-  its input against an empty offer). Hydration deepens; nothing is
+  `history`), `runtime/pipeline.py` (`_summarized` sends
+  `as_sent(made.input, start=len(made.input), offered=frozenset())`:
+  `start` is where the current reply's own calls would begin, and a
+  recap has none, so every call is before it and is both cleared at the
+  cap and degraded; round 3, finding 3. The resulting `HistorySent` goes
+  to the recap's `watched` call and the staged recap input is the
+  as-sent turns). Hydration deepens; nothing is
   added.
 
 ## Tests
@@ -571,7 +602,9 @@ hydration suite's builders; no new fixtures.
   arguments; a resumed session's first
   request carries the stored exchange structured and a no-longer-offered
   one degraded (the issue's third criterion); the recap request carries
-  every call degraded and no `tools`.
+  every call degraded and no `tools`, an over-2-KiB stored result
+  cleared inside its degraded note, and the clearing facts on
+  `llm_recap`.
 
 **Falsification.** Each new test is watched failing first, against
 `main` for M1's session tests (which the text-only rule fails), and by
@@ -770,12 +803,18 @@ Reviewed 2026-10-03 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0
 Evidence: Plan D3 says a tool-only interrupted/failed reply leaves a tool turn followed by the next user turn (plan:344-347 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:344`)); D9 rebuilds the same `assistant(tool_use) → tool(result) → user` shape (plan:436-447 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:436`)). `anthropic_messages()` renders a `tool` turn as a `user` tool-result message and renders the following user turn as another `user` message, without coalescing (anthropic_llm.py:57 (`vinga-server/src/vinga_server/providers/anthropic_llm.py:57`)). This violates hydration’s existing alternation invariant (hydration.py:26 (`vinga-server/src/vinga_server/conversations/hydration.py:26`)). M1 nevertheless declares adapters untouched (plan:474-482 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:474`)).
 What the plan should say instead: Specify and implement the Anthropic rendering rule for a text user turn following tool-result blocks, likely appending a text block to that existing user message. Cover both an in-session failed/cancelled tool-only reply followed by a user utterance and the identical resumed-history shape, through the real Anthropic translator. Keep OpenAI’s separate tool then user messages unchanged.
 
+   *Resolution:* accepted. D3 now names the shape and M1 adds one rule to `anthropic_messages`: a plain user turn after a `user` message is appended to it as a `text` block, which also coalesces two plain user turns. OpenAI and assistant messages are unchanged. The translator tests cover the in-session tool-only failed reply followed by an utterance; M3's resume test covers the rebuilt shape through the same translator. The M1 implementer took this by message while implementing.
+
 2. **P1: The proposed re-fetch telemetry cannot observe refused move tools.**
 Evidence: D8 only passes cleared keys into `ToolExecution.run` and adds `refetch` in its existing `tool_call` variant builder (plan:408-415 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:408`)). But `_run_tools` partitions moves out before `ToolExecution.run` (pipeline.py:1951 (`vinga-server/src/vinga_server/runtime/pipeline.py:1951`)); a refused move writes its result directly to `TurnUnderway` (pipeline.py:1962 (`vinga-server/src/vinga_server/runtime/pipeline.py:1962`)) and emits no `tool_call` event. Such a refused move has a result, is retained under D2, can be cleared, and can be repeated. Thus the plan misses a class of “same tool with same arguments after its result was cleared,” contrary to decision 3.
 What the plan should say instead: Define a re-fetch measurement path that covers every completed call-result pair, including locally handled refused moves, rather than only `ToolExecution.run` calls. Name the event/span or round-level field used for that path and test a repeated refused `switch_agent` or resume-selection call after its prior result was cleared.
 
+   *Resolution:* rejected, with the exclusion now stated in D8. A refused move's result is a short server-authored sentence the cap never clears in practice, and the re-fetch flag is evidence about clearing fetched data; covering moves would mean a `tool_call` event for moves, which no part of this issue asks for. M2's implementation section will say what the metric excludes.
+
 3. **P2: Recap does not specify the `start` value required to clear and degrade historical calls.**
 Evidence: `as_sent(turns, start, offered)` treats `start` as where the current reply began (plan:281-289 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:281`)), and D5 only defines it as `len(self._turns)` at `_tool_loop` entry (plan:369-383 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:369`)). M3 merely says `_summarized` calls `as_sent` with an empty offer (plan:492-495 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:492`)). For recap input every exchange is historical: using `len(made.input)` would skip both clearing and degradation, despite Q3 requiring every recap call to be degraded.
 What the plan should say instead: State explicitly that recap calls `as_sent(made.input, start=0, offered=empty)` and forwards that `Sent` accounting to the recap watcher/export path. Retain the recap test, but assert both degradation and cap clearing for an over-2-KiB stored result.
+
+   *Resolution:* accepted as "state it explicitly", with the value corrected. `start` marks where the current reply's own calls begin and everything before it is past, so `start=0` would treat every recap call as current and clear nothing; the recap passes `start=len(made.input)`. M3's layout line now says so, the `HistorySent` reaches the recap's watcher and export, and the recap test asserts both degradation and clearing of an over-2-KiB result.
 
 Verdict: **not ready**.
