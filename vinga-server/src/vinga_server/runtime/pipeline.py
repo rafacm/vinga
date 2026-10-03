@@ -20,9 +20,14 @@ ends in speech. Executing a round's calls is `ToolExecution`'s
 ([tool_execution.py](tool_execution.py)): classifying, reserving,
 coercing, bounding, dispatching and reporting each one. The moves stay
 here, because a move rebinds the conversation and ends the loop.
-History stays text-only: the structured tool turns exist in a working
-copy inside one reply, and what survives is what was actually said
-aloud.
+Each round's calls that have their results are kept in the thread's
+history the moment the round ends, however it ended, so every later
+reply is sent what the agent did as well as what it said (#599). What
+a request carries of those exchanges, the cap on past results and the
+note a call to a tool no longer offered becomes, is
+[history.py](history.py)'s; the history holds each sentence heard
+once, a round's preamble in its own assistant turn and the rest in the
+turn that closes the reply.
 
 A sentence of that reply is spoken unless it is shaped like a call to
 one of the tools the same snapshot offered, which is a model writing
@@ -118,6 +123,7 @@ from vinga_server.providers import (
 )
 from vinga_server.runtime import prompt, resumption
 from vinga_server.runtime.filler_runner import FillerRunner
+from vinga_server.runtime.history import Pair, as_sent, kept_round
 from vinga_server.runtime.outlast import outlast
 from vinga_server.runtime.provider_watch import ProviderWatch
 from vinga_server.runtime.reply_in_flight import ReplyInFlight, SpeakingPass
@@ -1472,8 +1478,7 @@ class PipelineRuntime:
             # clock: the user is owed the full silence before being hung
             # up on either way.
             if spoken:
-                said = " ".join(spoken)
-                self._turns.append(Turn("assistant", said))
+                self._keep_speech(spoken)
                 # What the reply was, not what it said (#120). The count
                 # is the sentences whose audio actually went out, so a
                 # reply cut short by a barge-in reports what the user
@@ -1604,7 +1609,7 @@ class PipelineRuntime:
                 await self._store_recap(transition.recap)
             said = " ".join(spoken) if spoken else None
             if said is not None:
-                self._turns.append(Turn("assistant", said))
+                self._keep_speech(spoken)
                 # This leg's share of the reply, in the same terms
                 # `replied` reports the whole of it: which agent, and how
                 # many sentences of it the user heard. Never the words,
@@ -1620,6 +1625,7 @@ class PipelineRuntime:
                 # is kept here at all.
                 self._pass.spoke = True
                 spoken.clear()
+            self._pass.kept = 0
             # Closed whether or not this agent spoke: a leg that only
             # asked for the move still spent tokens, and the leg is the
             # only place they can be attributed to the agent that spent
@@ -1769,7 +1775,13 @@ class PipelineRuntime:
         # and the origins are what a withheld sentence is named from, so
         # all three have to be this leg's offer (`Offer` says why).
         offer = self._tools.offer(self._agent)
-        working = list(self._turns)
+        # The thread this leg is on, appended to as each round ends, and
+        # where in it this reply's own exchanges begin: everything before
+        # `start` is an earlier reply's, which is what the cap and the
+        # degrade apply to.
+        history = self._turns
+        start = len(history)
+        offered = frozenset(tool.name for tool in offer.tools)
         resampler = Resampler(providers.tts.sample_rate, self._output.output_sample_rate)
         self._output.restart_pacing()
 
@@ -1802,6 +1814,9 @@ class PipelineRuntime:
             # carry its accounting, on success and on failure alike.
             sent = await self._system_prompt()
             system = sent.text
+            # What this round sends of the history, built once and never
+            # touched again, so a watchdog retry resends the same bytes.
+            carried = as_sent(history, start, offered).turns
             if self._llm_input is not None:
                 # Staged HERE, where the round is assembled, and
                 # deliberately not inside the partial below. The
@@ -1816,14 +1831,14 @@ class PipelineRuntime:
                     invocation=invocation,
                     agent=self._agent,
                     system=system,
-                    turns=working,
+                    turns=carried,
                     tools=offer.tools,
                     choice=choice,
                 )
             try:
                 async for event in self._watch.reply_stream(
                     providers.llm,
-                    functools.partial(providers.llm.stream, system, working, offer.tools, choice),
+                    functools.partial(providers.llm.stream, system, carried, offer.tools, choice),
                     invocation=invocation,
                     round_=self._pass.round,
                     prompt=sent,
@@ -1863,7 +1878,7 @@ class PipelineRuntime:
                     self._turn,
                     self._pass.round,
                     providers.llm,
-                    working,
+                    carried,
                     began,
                     first_token_at,
                     usage,
@@ -1892,26 +1907,26 @@ class PipelineRuntime:
                         await speaking
             if not calls:
                 break
-            # Whatever preamble was spoken before the calls is part of
-            # the assistant turn that asked for them.
-            working.append(Turn("assistant", " ".join(leg), tool_calls=tuple(calls)))
             # Here and nowhere else: the reservation has filed the
-            # originals and the line above has put them in the history
-            # this reply is written against, and `_run_tools` has not yet
-            # branched into the move tools, which never reach a dispatch.
-            # So this is the one point every execution path shares, and
-            # the one point where the record's values and the far side's
-            # can part company.
+            # originals, which are what the history will keep, and
+            # `_run_tools` has not yet branched into the move tools,
+            # which never reach a dispatch. So this is the one point
+            # every execution path shares, and the one point where the
+            # record's values and the far side's can part company.
             executing = [
                 self._tools.for_execution(self._turn, call, slot, offer)
                 for call, slot in zip(calls, slots, strict=True)
             ]
-            results, switch_to = await self._run_tools(
-                executing, slots, switches_left, invocation
-            )
+            try:
+                switch_to = await self._run_tools(executing, slots, switches_left, invocation)
+            finally:
+                # However the round ended: complete, refused part-way by
+                # a failure, or cut by a barge-in with some calls answered
+                # and some not. Synchronous, so nothing lands between the
+                # last answer and the history holding it.
+                self._keep_round(history, spoken, calls, slots)
             if switch_to is not None:
                 break
-            working.append(Turn("tool", "", tool_results=tuple(results)))
 
         # Drain the resampler's interpolation tail and the encoder's
         # partial frame, which flushing pads with silence.
@@ -1925,11 +1940,17 @@ class PipelineRuntime:
         slots: Sequence[int],
         switches_left: int,
         invocation: str,
-    ) -> tuple[list[ToolResult], "_Transition | None"]:
-        """Execute one round of calls. Everything that is not a move is
+    ) -> "_Transition | None":
+        """Execute one round of calls, and answer the move that ends the
+        leg, if one does. Everything that is not a move is
         `ToolExecution.run`'s, which says in what order it runs them;
         the moves are resolved here instead, because a successful one
         ends the loop rather than producing a result the model reads.
+
+        What each call answered is filed on the turn's record at its
+        slot, which is where the history reads it back from
+        (`_keep_round`): one place, whether the round finished or was
+        cut part-way.
 
         `slots` says where on the turn's record each of these calls was
         already reserved, index for index with `calls`, which is why
@@ -1956,7 +1977,7 @@ class PipelineRuntime:
         moves = [
             (slots[index], call) for index, call in enumerate(calls) if self._moves(call)
         ]
-        results = await self._tools.run(self._turn, plain, invocation=invocation)
+        await self._tools.run(self._turn, plain, invocation=invocation)
 
         transition: _Transition | None = None
         for order, (slot, call) in enumerate(moves):
@@ -1964,7 +1985,6 @@ class PipelineRuntime:
                 call, switches_left, order, transition is not None
             )
             if refusal is not None:
-                results.append(refusal)
                 # No duration: nothing ran, and the refusal is what the
                 # turn's record shows in place of it.
                 self._turn.executed(slot, refusal.content, refusal.is_error, None)
@@ -1975,7 +1995,51 @@ class PipelineRuntime:
             # and no duration. It stays on the record all the same,
             # because the move is otherwise only implied by the legs it
             # produced.
-        return results, transition
+        return transition
+
+    def _keep_round(
+        self,
+        history: list[Turn],
+        spoken: Sequence[str],
+        calls: Sequence[ToolCall],
+        slots: Sequence[int],
+    ) -> None:
+        """Keep what this round's calls answered in the thread's
+        history, with the speech heard since the last kept round as the
+        preamble of the turn that asked.
+
+        Read off the turn's record rather than handed back by the
+        execution, because the record is filled call by call and a round
+        cut part-way leaves exactly the answered calls there: the same
+        calls the conversation store writes, so a resumed thread and
+        this one keep the same exchanges. A call with no result (the
+        move that ended the leg, a call still running when the reply was
+        cut) is not kept. A round that keeps nothing leaves its preamble
+        to the speech after it, so every sentence heard is in the
+        history once."""
+        pairs = []
+        for call, slot in zip(calls, slots, strict=True):
+            made = self._turn.reserved(slot)
+            if made.result is None:
+                continue
+            answer = ToolResult(tool_call_id=call.id, content=made.result, is_error=made.is_error)
+            pairs.append(Pair(call, answer, made.source, made.entry))
+        kept = kept_round(history, " ".join(spoken[self._pass.kept :]), pairs)
+        if kept:
+            history.extend(kept)
+            self._pass.kept = len(spoken)
+
+    def _keep_speech(self, spoken: Sequence[str]) -> None:
+        """Close the leg's share of the thread's history with what was
+        heard after its last kept round, if anything was.
+
+        The preambles of kept rounds are already in the history, in the
+        turns that asked for the tools, so the closing turn carries only
+        the rest: the whole leg's speech when no round was kept, nothing
+        when the leg's last sentence was the preamble of a kept round."""
+        said = spoken[self._pass.kept :]
+        if said:
+            self._turns.append(Turn("assistant", " ".join(said)))
 
     def _moves(self, call: ToolCall) -> bool:
         """Whether this call is one the loop resolves itself.

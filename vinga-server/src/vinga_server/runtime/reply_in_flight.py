@@ -196,8 +196,15 @@ class SpeakingPass:
     leg because a leg's own list is cleared at every boundary, and set
     as they happen because the withholding is decided a call away, where
     a sentence is matched against the tools one leg offered.
+
+    `kept` is how many of the current leg's spoken sentences the
+    thread's history already holds, as the preambles of the tool rounds
+    kept there (#599). The leg's closing assistant turn carries only
+    what came after them, and the leg boundary that clears the spoken
+    list sets it back to zero.
     """
 
     round: int = 0
     spoke: bool = False
     withheld: bool = False
+    kept: int = 0

@@ -635,8 +635,7 @@ async def run_reply(session: DeviceSession, said: str) -> list[str]:
     session.send_audio = _nothing  # type: ignore[method-assign]
     session.runtime._turns.append(Turn("user", said))
     await session.runtime._speak_reply(said, spoken)
-    if spoken:
-        session.runtime._turns.append(Turn("assistant", " ".join(spoken)))
+    session.runtime._keep_speech(spoken)
     return spoken
 
 

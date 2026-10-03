@@ -41,7 +41,7 @@ import pytest
 from sqlalchemy import select
 
 from tests.support.configs import POET_MAC, base_config, world
-from tests.support.providers import RecordingLlm, ScriptedLlm
+from tests.support.providers import RecordingLlm, ScriptedLlm, results_of
 from tests.support.registry import AGENT, STAGES, store_at
 from tests.support.sessions import agent_providers, call, run_reply, session_for
 from tests.support.stores import memory as lane_memory
@@ -232,12 +232,7 @@ NOTED = "I will remember that."
 def said(script: ScriptedLlm) -> list[str]:
     """What the model was handed back, in the order it asked. The shape
     `test_session_device_location.py` reads a tool result with."""
-    return [
-        result.content
-        for turns, _, _ in script.seen
-        for turn in turns
-        for result in turn.tool_results
-    ]
+    return results_of(script)
 
 # How long a parked write is given to let a swap overtake it, which is
 # the bound the M3 ordering proof uses and for the same reason: long
