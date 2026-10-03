@@ -240,3 +240,28 @@ passed in 972.29s (four times the earlier run's 240.85s, on a machine
 running M3's lanes beside it); the seven drift checks clean; doc links
 295 files, 0 failures. The census lane ran last, after this
 subsection.
+
+### PR review round 2
+
+Reviewed 2026-10-03 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 3m51s, at commit c6e60ace.
+
+1. **P2: a lone surrogate in a kept call's own strings still broke a
+   later degraded request.** Round 1 normalized only the result; a
+   call's name, argument keys and argument values were kept verbatim,
+   and once the call was no longer offered the degraded note put them
+   into the assistant's text with `ensure_ascii=False`, which cannot be
+   encoded as UTF-8. *Resolution:* `c73e660f`. `kept_round` stores the
+   name and every key and string value of the arguments, recursively
+   through mappings, lists and tuples, in the `countable` form. The
+   session test (an invented name, a top-level key and value, a nested
+   list item and a nested key, each holding `\ud800`) failed first with
+   `UnicodeEncodeError`; the next reply now proceeds and every turn of
+   its request encodes. Mutation: normalizing the top level only
+   killed, that test fails.
+
+Lanes after the fix, on agentpi at `c73e660f`, `-n auto --dist
+loadfile`: ruff clean; the `history or kept_tools or session_tools`
+selection 91 passed in 85.98s; the full unit lane 7941 passed, 19 skipped in
+2686.38s (three times the round 1 run, on a machine running M3's lanes
+beside it). The
+census lane ran last, after this subsection.
