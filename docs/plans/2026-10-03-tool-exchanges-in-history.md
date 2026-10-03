@@ -243,7 +243,8 @@ As the issue has them, confirmed by Step 0.
    `tool_invocations`, under the dialogue's token budget, where the
    store records text (Q4).
 5. A call to a tool not offered on this request is degraded to the
-   text note, checked by name against the round's offer on every
+   text note, checked by name against the offer of the leg the request
+   belongs to, on every
    request (Q1, Q2).
 
 ## Smaller decisions
@@ -260,7 +261,8 @@ rule:
 - `as_sent(turns, start, offered) -> Sent`: what one request carries,
   given the thread's history, which by then holds this reply's own
   completed rounds (`turns`), where this reply began (`start`), and the
-  names this round offers.
+  names this leg offers (the `Offer` `_tool_loop` takes once per leg,
+  unchanged; round 2's finding 1 says why).
   `Sent` holds the turns, the clearing facts (count, bytes, largest,
   and the cleared calls' names, which the caller keys from its offer,
   D7), the degraded count, and the set of cleared `(name, canonical
@@ -692,6 +694,8 @@ Reviewed 2026-10-03 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0
 1. **P1 - The offer is still snapshotted per leg, not per request round.**
    Evidence: Decision 5 requires checking against the current offer on every request (plan D5 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:341`)), but M1 does not change the existing `offer = self._tools.offer(...)` before the loop (pipeline.py (`vinga-server/src/vinga_server/runtime/pipeline.py:1767`)). All four LLM rounds therefore retain the same offer. An MCP reload between tool round 1 and round 2 remains invisible.
    Plan should say instead: rebuild the `Offer` immediately before every provider request, and use that same per-round snapshot for tool definitions, `as_sent`, coercion, execution, and origin capture. Test an MCP removal between two rounds of one reply, not only between replies.
+
+   *Resolution:* rejected, with the issue's wording corrected. The issue says the offer is "already computed per round"; at `677fd921` it is computed once per leg (`pipeline.py:1767`), and deliberately: `_tool_loop`'s docstring and `Offer`'s (#391) make the leg one clock for the tools, their schemas, their origins and the memory policy, so a reload between two rounds cannot hand one reply the tools of one configuration and the prompt of another. Within a leg, every call was made against that same offer, so checking past calls against it is checking them against what this request offers: the provider is never handed a call to a tool missing from this request's `tools`, except a name the model invented, which round 2's finding 2 now leaves structured as today. A reload is seen at the next reply's first request, which is what decision 5's "an MCP reload or a config change is covered too" asks for. Re-snapshotting per round would reopen the two-clock problem #391 closed, for a window of seconds. Decision 5's restatement and D1 now say "leg".
 
 2. **P1 - Degrading an in-reply invented or removed call leaves no valid continuation message.**
    Evidence: D5 deliberately degrades a model-invented call in the current reply (plan D5 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:341`)), while D6 drops its tool-result turn when no calls remain structured (plan D6 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:351`)). The next tool-loop request consequently ends with an assistant plain-text note. `anthropic_messages()` emits that unchanged, while its ordinary tool-result continuation is a user message (anthropic_llm.py (`vinga-server/src/vinga_server/providers/anthropic_llm.py:46`)); the hydration contract likewise requires alternating roles. The proposed removed-MCP test occurs between replies, where a new user turn hides this failure.
