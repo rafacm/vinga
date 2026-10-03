@@ -414,6 +414,21 @@ The decided semantics, each with its owner:
   deliberately (phrasing that asks for continuation, "ask Nadia about
   this", with the agent asking rather than guessing when the phrasing
   is ambiguous) is the part that remains **decided direction**.
+- **An agent keeps its own tool exchanges.** *Implemented today, issue
+  #599.* Every tool call an agent makes and the result it got stay in
+  its thread's history for the rest of the conversation, builtins, MCP
+  and device tools alike, so a later reply can answer from a fact it
+  saved or a value it read earlier without asking again. A call is
+  kept as soon as it has its result, even when the reply it belongs to
+  is cut short or fails afterwards. In the reply that made a call the
+  model sees the result whole; on later replies a result over 2 KiB is
+  replaced by a short note naming the tool and the size, which the
+  model can act on by calling the tool again. A past call to a tool the
+  agent is no longer offered (an MCP server removed by a reload, a name
+  the model invented) is turned into a plain-text record of the call
+  and its result, so no provider is handed a call to a tool it was not
+  given. A handover does not carry them: the incoming agent starts
+  clean, as above.
 
 ## Configuration changes arrive as whole worlds
 
