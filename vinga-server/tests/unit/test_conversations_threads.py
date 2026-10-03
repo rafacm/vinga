@@ -33,6 +33,7 @@ from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import threads
 from vinga_server.conversations.records import (
     MilestoneRecord,
+    StoredCall,
     ToolInvocation,
     TurnRecord,
 )
@@ -467,10 +468,17 @@ def test_the_backlog_is_the_thread_oldest_first(stores) -> None:
     ]
 
 
-def test_the_backlog_names_the_tools_a_turn_ran(stores) -> None:
-    """Names, in the order the model issued them, and nothing a call
-    could not be named by: an unnamed call is left out rather than
-    rendered as a blank."""
+def test_the_backlog_reads_every_call_in_the_order_it_was_written(stores) -> None:
+    """Two rounds of two calls, written through the store's own writer,
+    which is the path every row ever stored took: they come back in the
+    order they were reserved, round after round, and not sorted by
+    position, which restarts at zero each round and would put both
+    rounds' first calls ahead of both second ones.
+
+    Nothing is left out on the way: the unnamed call, the unanswered one
+    and the malformed one are all read, because which of them a model
+    is shown again is the hydrator's rule, applied after it has found
+    where each round began."""
     store = stores(retention_days=0)
     store.start()
     store.open_session("a", 100.0, MANIFEST)
@@ -483,8 +491,32 @@ def test_the_backlog_names_the_tools_a_turn_ran(stores) -> None:
             heard="lights",
             reply="Done.",
             tools=(
-                ToolInvocation(position=0, source="builtin", name="remember"),
-                ToolInvocation(position=1, source="unknown", name=None),
+                ToolInvocation(
+                    position=0,
+                    source="builtin",
+                    name="remember",
+                    arguments={"text": "a"},
+                    result="Saved a.",
+                ),
+                ToolInvocation(
+                    position=1,
+                    source="mcp",
+                    entry="home",
+                    name="home__lamp",
+                    arguments={"on": True},
+                    result="On.",
+                ),
+                ToolInvocation(position=0, source="unknown", name=None, result="no such tool"),
+                ToolInvocation(
+                    position=1,
+                    source="builtin",
+                    name="remember",
+                    malformed=True,
+                    arguments={"never": "stored"},
+                    result="not a JSON object",
+                    is_error=True,
+                ),
+                ToolInvocation(position=2, source="device", name="self_get_device_status"),
             ),
         ),
     )
@@ -493,7 +525,33 @@ def test_the_backlog_names_the_tools_a_turn_ran(stores) -> None:
     found = read_backlog(thread("tools"))
 
     assert found is not None
-    assert found.turns[0].tools == ("remember",)
+    assert found.turns[0].calls == (
+        StoredCall(
+            position=0,
+            source="builtin",
+            name="remember",
+            arguments={"text": "a"},
+            result="Saved a.",
+        ),
+        StoredCall(
+            position=1,
+            source="mcp",
+            entry="home",
+            name="home__lamp",
+            arguments={"on": True},
+            result="On.",
+        ),
+        StoredCall(position=0, source="unknown", result="no such tool"),
+        StoredCall(
+            position=1,
+            source="builtin",
+            name="remember",
+            malformed=True,
+            result="not a JSON object",
+            is_error=True,
+        ),
+        StoredCall(position=2, source="device", name="self_get_device_status"),
+    )
 
 
 def test_a_thread_nobody_wrote_has_no_backlog() -> None:
