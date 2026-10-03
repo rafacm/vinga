@@ -8,6 +8,8 @@ the same rules are watched through a reply.
 
 import json
 
+import pytest
+
 from vinga_server.providers import ToolCall, ToolResult, Turn
 from vinga_server.providers.anthropic_llm import anthropic_messages
 from vinga_server.providers.openai_llm import chat_messages
@@ -359,3 +361,35 @@ def test_a_calls_cost_is_its_degraded_note_with_the_result_held_to_the_cap() -> 
     # result together.
     structured = len(call.name) + len(json.dumps(call.arguments)) + len(small.content)
     assert note_cost(call, small) > structured
+
+
+def wire_sizes(call: ToolCall, result: ToolResult) -> dict[str, int]:
+    """What one kept call costs in characters in each form a request can
+    send it: structured through either translator, or degraded."""
+    history = keep([Turn("user", "go")], "", Pair(call, result, "builtin", None))
+    openai = chat_messages("", history)
+    (function,) = [one["function"] for one in openai[1]["tool_calls"]]
+    anthropic = anthropic_messages(history)
+    (use,) = [block for block in anthropic[1]["content"] if block["type"] == "tool_use"]
+    (_, degraded) = as_sent(history, len(history), set()).turns
+    return {
+        "openai": len(function["name"]) + len(function["arguments"]) + len(openai[2]["content"]),
+        # The SDK serializes the input object itself; whichever way it
+        # escapes, it is no longer than the ASCII-escaped form.
+        "anthropic": len(use["name"])
+        + max(len(json.dumps(use["input"])), len(json.dumps(use["input"], ensure_ascii=False)))
+        + len(anthropic[2]["content"][0]["content"]),
+        "degraded": len(degraded.content),
+    }
+
+
+@pytest.mark.parametrize("text", ["界" * 100, "😀" * 50, "tea   é"])
+def test_a_calls_cost_bounds_every_form_it_can_be_sent_in(text: str) -> None:
+    """Non-ASCII arguments are where the forms part company: OpenAI's
+    arguments string escapes every one to six characters (twelve for a
+    character outside the BMP), so a bound priced on the unescaped note
+    undercounts the structured call it stands for."""
+    call = asked(f"look_{text[:3]}", q=text)
+    result = answered("p1", text)
+    sizes = wire_sizes(call, result)
+    assert note_cost(call, result) >= max(sizes.values()), sizes
