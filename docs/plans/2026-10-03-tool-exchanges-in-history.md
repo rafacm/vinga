@@ -340,15 +340,21 @@ does, and Step 0's probe sent ids of its own choosing and was accepted.
 that the request after a commit pairs every call id with exactly one
 result.
 
-**D5. Clearing applies to results before `start`; degrading applies to
-every call.** `start` is `len(self._turns)` when the reply's
-`_tool_loop` began, so a reply's own results are never cleared and a result is
-cleared from the first request of the next reply. Degrading is not
-bounded by `start`: a name the model invented in this reply was not
-offered either, and handing it back structured is what decision 5
-exists to stop. Today such a call is sent back structured with its
-error result; after M1 it is the degraded note with the error, which
-is the same information in a role every provider accepts.
+**D5. Clearing and degrading both apply only before `start`.** `start`
+is `len(self._turns)` when the reply's `_tool_loop` began, so a reply's
+own results are never cleared, a result is cleared from the first
+request of the next reply, and a call is checked against the offer
+from the next reply on. Within the reply that made them, calls are
+sent back structured exactly as today, a name the model invented
+included (round 2, finding 2): degrading a call of the current reply
+would leave its round's request ending on an assistant text note with
+no tool result after it, which has no valid continuation on a provider
+that expects a tool result (or a user message) next, and any role that
+could follow it would put far-side bytes somewhere with more authority
+than a tool result. That shape is already what every invented-name
+reply sends today in its second round. Decision 5 is about past calls,
+and past calls are always followed by a later user turn, so a degraded
+past round always has a valid continuation.
 
 **D6. A round with some calls degraded keeps the rest structured.** The
 assistant turn's `content` becomes its preamble followed by the
@@ -478,8 +484,9 @@ hydration suite's builders; no new fixtures.
   the committed turns; ids are `h<n>` and pair; a result of exactly
   2048 bytes is kept and 2049 cleared (and a multibyte result is
   measured in bytes, not characters); this reply's results are never
-  cleared; an unoffered call becomes the degraded note with its
-  framing, error flag and capped result; a mixed round keeps the
+  cleared; an unoffered call before `start` becomes the degraded note
+  with its framing, error flag and capped result, and the same call
+  after `start` stays structured; a mixed round keeps the
   offered call structured; the cleared keys are canonical.
 - **M1, the session**: the pinning test is rewritten to the new rule
   (`test_history_keeps_the_tool_exchange`); a two-reply session where
@@ -700,6 +707,8 @@ Reviewed 2026-10-03 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0
 2. **P1 - Degrading an in-reply invented or removed call leaves no valid continuation message.**
    Evidence: D5 deliberately degrades a model-invented call in the current reply (plan D5 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:341`)), while D6 drops its tool-result turn when no calls remain structured (plan D6 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:351`)). The next tool-loop request consequently ends with an assistant plain-text note. `anthropic_messages()` emits that unchanged, while its ordinary tool-result continuation is a user message (anthropic_llm.py (`vinga-server/src/vinga_server/providers/anthropic_llm.py:46`)); the hydration contract likewise requires alternating roles. The proposed removed-MCP test occurs between replies, where a new user turn hides this failure.
    Plan should say instead: define a provider-valid continuation shape for an all-degraded current round, without assigning far-side bytes user authority, and test an unknown call followed by a second LLM round through both provider translators.
+
+   *Resolution:* accepted, by removing the shape rather than inventing a continuation for it. D5 now degrades only calls before `start`; the current reply's calls, invented names included, go back structured with their results exactly as they do today, so no request ends on an assistant note. A degraded past round is always followed by a later user turn. The test sends an invented name in reply 1, asserts it is structured with its error result in reply 1's round 2 through both translators, and degraded in reply 2.
 
 3. **P1 - D2 discards completed exchanges, contradicting decision 1.**
    Evidence: Decision 1 says all tool exchanges stay for the conversation (plan (`docs/plans/2026-10-03-tool-exchanges-in-history.md:233`)), but D2 drops an entire interrupted round even if some calls have results, and also drops malformed calls with their error results (plan D2 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:297`)). D9 repeats the loss on resume (plan D9 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:402`)), and the tests explicitly assert that a completed first call disappears (plan tests (`docs/plans/2026-10-03-tool-exchanges-in-history.md:522`)). `TurnUnderway` already retains each completed result independently (turns.py (`vinga-server/src/vinga_server/runtime/turns.py:242`)).
