@@ -704,3 +704,207 @@ through the Anthropic translator is pinned but was not sent to the
 Anthropic API (no key on this machine), including the joined
 assistant messages the deviation above describes. The recap's clearing facts on
 `llm_recap` wait on M2.
+
+## M2: measure the cap
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.288; 2026-10-04.
+
+Cut from M1's head `81cfca37`, in parallel with M3, and rebased onto
+`main` at `c0c91715` once M1 merged as PR #600.
+
+### What landed
+
+| Decision | Where | Commit |
+| --- | --- | --- |
+| Q5: the per-tool mapping as a closed value | `events/values.py` (`ClearedTools`, `Kind.CLEARED_TOOLS`), `events_docgen.py`, `telemetry.py` (`SHAPES` row), `tests/unit/test_event_values.py`, `tests/unit/test_event_docs.py` | `Add the ClearedTools event value` |
+| Q5 and D7: the five facts on `llm_round`, `llm_recap` and the LLM-stage `provider_failed`, by every failure route, and on their `llm` spans; `llm_round.turns`'s note | `runtime/history.py` (`HistorySent`, `NOTHING_LOST`, `Sent.accounting`), `runtime/tool_execution.py` (`cleared_key`), `runtime/pipeline.py` (`_tool_loop`), `runtime/provider_watch.py`, `events/catalog.py`, `events/assembly.py` (`HistoryAccounting`), `telemetry.py` (`HISTORY_ATTRIBUTES`, `CLEARED_TOOLS_PREFIX`, `_history_attributes`), `tests/unit/test_history_measured.py`, `tests/unit/test_provider_watch.py` | `Report what each request's history lost` |
+| D8: `refetch` on the three `tool_call` variants and `vinga.tool.refetch` on the tool span | `events/catalog.py`, `events/assembly.py`, `runtime/tool_execution.py` (`_refetches`, `run`), `runtime/pipeline.py` (`_run_tools`), `telemetry.py` (`TOOL_ATTRIBUTES`), `tests/unit/test_history_measured.py` | `Flag a tool call that re-fetches a cleared result` |
+| The recap pin the unit lane caught | `tests/unit/test_session_recap.py` | `Pin the recap's zero history counts` |
+| Documentation footprint | `docs/architecture/observability-surfaces.md`, `changelog.d/599-history-measured.md` (`### Added`), `docs/reference/events.md` (regenerated in each of the three code commits) | `Document the history facts and the re-fetch flag` |
+
+### What the re-fetch metric excludes (D8)
+
+Moves are not measured. A handover, a new conversation and a resume
+are partitioned out of a round before `ToolExecution.run` and emit no
+`tool_call`, so a model that repeats a refused move after its result
+was cleared produces no `refetch: true` anywhere. The exclusion is the
+plan's round-3 resolution, kept: a refused move's result is a sentence
+this server wrote (`builtin.ALREADY_MOVED`, the handover refusals),
+never data the model fetched and in practice far under 2 KiB, so it is
+not what the cap clears; a model repeating a move is a different signal
+that would need a `tool_call` for moves. A malformed call is never a
+re-fetch either: it has no arguments to compare. Both are stated in the
+field's catalog note, on the observability page and in the changelog.
+
+### Deviations from the plan
+
+- **`HistorySent` lives in `runtime/history.py`**, not beside the watch.
+  The module layout names `provider_watch.py` as what carries it, and
+  it does; it is defined with the `Sent` it is derived from, through
+  `Sent.accounting(key)`, where `key` is the caller's function from a
+  cleared call to its `ClearedTools` key. That keeps D1's promise that
+  the history module knows no tool namespace, and leaves D7's key
+  function (`cleared_key`) in `tool_execution.py` beside
+  `_sentence_withheld`, as the plan places it. `assembly.py` reads it
+  through a `HistoryAccounting` protocol, the shape `RoundAccounting`
+  already has, so the events package imports nothing from `runtime/`.
+- **The recap is plumbed, and `_summarized` is untouched.** M3 is
+  rewriting `_summarized` in parallel and its tree has no `HistorySent`,
+  so `recap_round_done(..., history=...)` defaults to `NOTHING_LOST`
+  and `watched(..., history=...)` to None. Before M3 that default is
+  the truth: a recap's input is hydration's output, which holds no
+  exchange to clear. **Whichever of M2 and M3 merges second wires the
+  recap**: `_summarized` passes `as_sent(...).accounting(cleared_key)`
+  to `recap_round_done` and the same value as `history=` to its
+  `watched` call, and the session-level recap test (a resumed thread
+  with an over-2-KiB stored result, the facts on `llm_recap`) lands
+  with that wiring, as the plan's M2 test list says. What M2 does test
+  of the recap: the watch carries a handed-in accounting onto
+  `llm_recap` and a recap's `provider_failed`, the default is zeros, and
+  a recap request built the way the plan builds it (`start` at the end,
+  no offer) over a constructed thread with a 3 KiB board result reaches
+  the recap's `llm` span as one cleared, one degraded, keyed `device`
+  (`test_a_recap_over_a_cleared_result_carries_it_on_its_record_and_its_span`).
+- **A recap's failure may carry the facts; its prompt accounting still
+  may not.** `provider_failure` refuses `history` for a non-LLM stage
+  only, since the plan has M3 hand the recap's accounting to its
+  `watched` call; `prompt` stays reply-only, as #533 left it.
+- **`cleared_largest` and `cleared_tools` have no default on
+  `llm_round` and `llm_recap`.** They are optional in the schema
+  (absent when nothing was cleared) but every construction states them,
+  so the five fields sit together after `turns` and a builder cannot
+  forget two of them. `provider_failed` declares all five optional
+  with `ABSENT` defaults, at the end, beside the prompt accounting.
+- **`cleared_key` answers `unknown` for an origin nobody recorded**: an
+  MCP source without an entry, or no source at all. Neither comes out
+  of the classifier; a stored row M3 reads could in principle carry
+  either, and `unknown` is the naming policy's word for a name it may
+  not print.
+- **The re-fetch check reads the reservation's arguments**, the model's
+  own values, rather than the execution copy, which may have been
+  coerced to the declared types. That is what the history kept of the
+  earlier call (M1 keeps the model's originals), so the two sides of the
+  comparison are the same kind of value.
+- **`refetchable` is a required argument of `ToolExecution.run`**, and
+  of `PipelineRuntime._run_tools`, rather than defaulting to empty, so
+  a caller that forgets it does not report every call as no re-fetch.
+  The five direct `run` callers in the unit suites pass an empty set,
+  and the lookahead test's `_run_tools` stub takes the new parameter.
+- **The stdio test server gains a `long_answer` tool**, published only
+  when an entry's `env` sets `VINGA_TEST_LONG_ANSWER` to a size, the
+  way `VINGA_TEST_SHADOWED_TOOL` already gates its planted name: no
+  tool the server publishes by default returns more than a few bytes,
+  and the integration lane pins the default tool set.
+- **Test placement.** The session, span and pure tests are one new
+  file, `tests/unit/test_history_measured.py`, to keep this milestone
+  out of the files M3 is editing; the watch's routes extend
+  `test_provider_watch.py` and the value's refusals
+  `test_event_values.py`. Tests changed on purpose: the three
+  `test_provider_watch_pins.py` LLM pins gain the three zero counts,
+  `test_session_recap.py`'s whole-payload `llm_recap` pin gains the
+  same zeros (its own commit, after the unit lane caught it), the five
+  `test_session_tool_events.py` payload pins gain
+  `refetch: False`, `test_event_baseline.py`'s carried shapes gain the
+  new keys (six LLM shapes, three tool shapes), `test_event_assembly.py`'s
+  expected variants gain the fields, and every `reply_stream` and
+  `reply_round_done` call in the watch suites passes `history=`.
+
+No other deviation: the five field names, the six attribute names and
+`ClearedTools`'s four key shapes are the plan's table exactly, and
+`degraded_calls` was kept, as review did not cut it.
+
+### Discoveries
+
+- **A malformed `ClearedTools` key would cost the whole round event,
+  not just the mapping.** The value is built inside the emit thunk, so
+  a key function that produced an invalid shape would have the
+  emitter's guard refuse the `llm_round` as `construction_failed`. The
+  mutation that keyed a board's result by its name produced a lawful
+  shape (`builtin.<name>`) and was killed by value; the guard is what
+  keeps the other kind of key bug from becoming a leak.
+- **Only a removed entry can tell the call's origin from the current
+  offer.** The mutation keying cleared results off the leg's `Offer`
+  survived every test but one: the session test that removes the MCP
+  entry between replies. While the tool is still offered both readings
+  agree, which is why that test has to exist rather than only the pure
+  one.
+- **The `turns` step is visible in the pins.** The second reply's
+  request over one kept round is five messages (user, the asking turn,
+  its tool turn, the answer, user) where it was three before #599;
+  `test_a_round_says_what_its_history_cleared` pins it, and the catalog
+  note says so.
+
+### Tests and mutations
+
+The new tests were run against M1's source first, where all three
+touched suites fail at import (`HistorySent`, `ClearedTools`, the new
+builders' arguments do not exist); behaviour was then pinned by
+mutation. Each mutation was applied to the source, run once against
+the six targeted suites (`test_history_measured.py`,
+`test_provider_watch.py`, `test_event_assembly.py`,
+`test_event_values.py`, `test_provider_watch_pins.py`,
+`test_session_tool_events.py`, 205 tests, `-n 4`), and restored.
+
+| Mutation | Outcome |
+| --- | --- |
+| The pipeline hands the round `NOTHING_LOST` | killed, 3 |
+| `reply_stream` hands `watched` no history (both stream routes) | killed, 6 |
+| The watchdog's own report omits history | killed, 3 |
+| `watched` reports its failure without history | killed, 7 |
+| A recap ignores the history it is handed | killed, 2 |
+| `provider_failure` drops a failure's history | killed, 10 |
+| Keys from the current offer instead of the call's origin | killed, 1 |
+| A board's result keyed by its name | killed, 7 |
+| `cleared_largest` stated as zero when nothing was cleared | killed, 8 |
+| The failure span skips the history attributes | killed, 2 |
+| The round span skips them | killed, 3 |
+| The per-tool counts are not flattened | killed, 5 |
+| `ClearedTools` accepts any string key | killed, 7 |
+| `ClearedTools` accepts a zero | killed, 1 |
+| `refetch` always false | killed, 3 |
+| Canonical arguments not sorted | killed, 1 |
+| A malformed call compared as no arguments | killed, 1 |
+| The pipeline hands the execution no cleared keys | killed, 3 |
+| The tool span drops `refetch` | killed, 1 |
+| The builders ignore `refetch` | killed, 6 |
+
+No mutation survived. The no-leak sentinel
+(`test_no_cleared_result_and_no_far_side_name_reaches_a_record_or_a_span`)
+plants a credential in a cleared board result and in an MCP tool's
+published name, removes the entry so the call is degraded, re-asks the
+board, and asserts both values reached the model and neither reached
+any rendering of any record, any record's fields or any span's
+attributes.
+
+### Verification
+
+On agentpi, from `vinga-server/`, at the code as committed (this
+section's commit changes only prose):
+
+- `uv run ruff check .`: clean. `uv run mypy` (the events package):
+  no issues in 5 source files, at each of the three code commits.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 7977 passed,
+  19 skipped in 909.02s, at `e0c974ac`. The run before it, at the
+  documentation commit, was 1 failed, 7976 passed, 19 skipped in
+  1719.31s: the `llm_recap` whole-payload pin in
+  `test_session_recap.py`, fixed by `Pin the recap's zero history
+  counts` (the machine was shared with other lanes then, hence the
+  time).
+- `uv run pytest tests/integration -q -n auto --dist loadfile`: 350
+  passed in 336.10s, at the documentation commit; the later commit
+  touches one unit test only.
+- The eight generated-document checks CI's `integration` job runs
+  (domain, server, conversations schema, metrics views, events,
+  OpenAPI, the CLI reference region and its recipes): none drifted.
+  `docs/reference/events.md` was regenerated through its generator in
+  each code commit.
+- `python3 scripts/check_doc_links.py .`: 295 files, 0 failures;
+  `scripts/fold_changelog.py check`: 1 fragment, 0 failures.
+- `uv run pytest tests/census -q`: run last, after this section; its
+  outcome is in the hand-back rather than here.
+
+Not verified locally: the image build and its smoke conversation (CI's
+`image` job), any live provider or OTLP backend (the spans are read
+from the SDK's in-memory exporter), and the session-level recap with a
+cleared result, which needs M3's rebuilt exchanges and lands with
+whichever of M2 and M3 merges second.
