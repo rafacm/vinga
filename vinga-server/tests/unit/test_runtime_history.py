@@ -393,3 +393,21 @@ def test_a_calls_cost_bounds_every_form_it_can_be_sent_in(text: str) -> None:
     result = answered("p1", text)
     sizes = wire_sizes(call, result)
     assert note_cost(call, result) >= max(sizes.values()), sizes
+
+
+def test_a_result_that_is_not_valid_unicode_is_kept_countable() -> None:
+    """A lone surrogate becomes U+FFFD when the result is kept; a pair
+    of surrogates written as two characters becomes the one character
+    they spell. Either way the history holds text the cap can measure."""
+    history = keep(
+        [Turn("user", "go")],
+        "",
+        pair(asked("recall", "p1"), "a\ud800b"),
+        pair(asked("recall", "p2"), "\ud83d\ude00"),
+        pair(asked("recall", "p3"), "\udc00" * 2049),
+    )
+    assert results_in(history) == ["a\ufffdb", "😀", "\ufffd" * 2049]
+    assert results_in(as_sent(history, len(history), {"recall"}).turns)[2] == (
+        "(result of recall cleared: 6147 bytes)"
+    )
+    assert note_cost(asked("recall"), answered("p1", "\ud800" * 3000)) > 0

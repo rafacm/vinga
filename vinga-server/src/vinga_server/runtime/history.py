@@ -153,7 +153,8 @@ def kept_round(history: Sequence[Turn], preamble: str, pairs: Sequence[Pair]) ->
     A malformed call is kept as a call with no arguments beside the
     error it was answered with, which is all the conversation store
     holds of it; what the model streamed in place of a JSON object goes
-    no further than the round that streamed it."""
+    no further than the round that streamed it. A result is kept in its
+    `countable` form, so the history holds only text UTF-8 can encode."""
     if not pairs:
         return []
     first = sum(len(turn.tool_calls) for turn in history)
@@ -172,7 +173,9 @@ def kept_round(history: Sequence[Turn], preamble: str, pairs: Sequence[Pair]) ->
                 entry=pair.entry,
             )
         )
-        results.append(replace(pair.result, tool_call_id=minted))
+        results.append(
+            replace(pair.result, tool_call_id=minted, content=countable(pair.result.content))
+        )
     return [
         Turn("assistant", preamble, tool_calls=tuple(calls)),
         Turn("tool", "", tool_results=tuple(results)),
@@ -270,8 +273,21 @@ def canonical_arguments(arguments: object) -> str:
     return json.dumps(arguments, sort_keys=True, separators=(",", ":"))
 
 
+def countable(text: str) -> str:
+    """`text` as text UTF-8 can encode: each lone surrogate replaced by
+    U+FFFD, and a surrogate pair written as two characters joined into
+    the one character it spells.
+
+    A Python string can hold a lone surrogate and JSON can carry one
+    (an escaped `ud800` parses), so a far side's answer can arrive as
+    text with no UTF-8 form, which cannot be measured against the cap.
+    A kept result is stored this way, and every size here is taken of
+    this form."""
+    return text.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+
+
 def _size(content: str) -> int:
-    return len(content.encode("utf-8"))
+    return len(countable(content).encode("utf-8"))
 
 
 def _cleared(name: str, content: str) -> str:
