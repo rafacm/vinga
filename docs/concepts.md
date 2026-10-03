@@ -414,11 +414,14 @@ The decided semantics, each with its owner:
   deliberately (phrasing that asks for continuation, "ask Nadia about
   this", with the agent asking rather than guessing when the phrasing
   is ambiguous) is the part that remains **decided direction**.
-- **An agent keeps its own tool exchanges.** *Implemented today, issue
-  #599.* Every tool call an agent makes and the result it got stay in
-  its thread's history for the rest of the conversation, builtins, MCP
-  and device tools alike, so a later reply can answer from a fact it
-  saved or a value it read earlier without asking again. A call is
+- **An agent keeps its own tool exchanges.** *Implemented today for
+  the session, issue #599.* Every tool call an agent makes and the
+  result it got stay in its thread's history for as long as the
+  session lasts, builtins, MCP and device tools alike, so a later reply
+  can answer from a fact it saved or a value it read earlier without
+  asking again. A conversation resumed in a later session does not
+  rebuild them yet: the store records every call, and rebuilding the
+  exchanges from it on a resume is **decided direction**. A call is
   kept as soon as it has its result, even when the reply it belongs to
   is cut short or fails afterwards. In the reply that made a call the
   model sees the result whole; on later replies a result over 2 KiB is
