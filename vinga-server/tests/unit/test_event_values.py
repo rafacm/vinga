@@ -40,6 +40,7 @@ from vinga_server.events.values import (
     CaptureWrite,
     ClassName,
     ClassNames,
+    ClearedTools,
     ClientId,
     CloseReason,
     ConfiguredPath,
@@ -317,6 +318,37 @@ def test_memory_sources_refuse_anything_but_a_scope_block_size(refused: object) 
         MemorySources(refused)  # type: ignore[arg-type]
 
 
+def test_cleared_tools_carry_counts_under_the_four_naming_shapes() -> None:
+    """A builtin by its name and an MCP call by its entry, each behind
+    its namespace, so a builtin and an entry sharing a word stay apart;
+    a board's tool and an invented name by the namespace alone (#599)."""
+    counted = {"builtin.remember": 2, "mcp.remember": 1, "device": 3, "unknown": 1}
+    assert ClearedTools(counted).carried() == counted
+
+
+@pytest.mark.parametrize(
+    "refused",
+    [
+        pytest.param({}, id="empty"),
+        pytest.param({"remember": 1}, id="no namespace"),
+        pytest.param({"tools__secret_word": 1}, id="a published name"),
+        pytest.param({"device.self_get_device_status": 1}, id="a board name"),
+        pytest.param({"unknown.ghost": 1}, id="an invented name"),
+        pytest.param({"builtin.": 1}, id="a blank name"),
+        pytest.param({"mcp.  ": 1}, id="a blank entry"),
+        pytest.param({"device": 0}, id="a zero"),
+        pytest.param({"device": True}, id="a bool"),
+        pytest.param({"device": -1}, id="a negative"),
+        pytest.param({"device": 1.0}, id="a float"),
+        pytest.param({4: 1}, id="a key that is not a string"),
+        pytest.param("device", id="not a mapping"),
+    ],
+)
+def test_cleared_tools_refuse_anything_but_a_count_by_naming_shape(refused: object) -> None:
+    with pytest.raises(EventValueError):
+        ClearedTools(refused)  # type: ignore[arg-type]
+
+
 def test_fact_ids_carry_a_list_of_positive_integers() -> None:
     """Integers on the record and on the span, so a backend filters on
     the number a store addresses a fact by; empty is lawful, since a
@@ -423,6 +455,7 @@ REFUSING = (
     ("agent names", lambda: AgentNames((SENTINEL, "  "))),
     ("prompt sources", lambda: PromptSources({SENTINEL: 1})),
     ("memory sources", lambda: MemorySources({SENTINEL: 1})),
+    ("cleared tools", lambda: ClearedTools({SENTINEL: 1})),
     ("fact ids", lambda: FactIds((SENTINEL,))),
     ("fragment", lambda: FromEntry(SENTINEL)),
 )

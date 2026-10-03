@@ -99,6 +99,10 @@ class Kind(Enum):
     # grammar is the know-how half's by design, and this is the half it
     # deliberately excludes.
     MEMORY_SOURCES = "memory_sources"
+    # A mapping from the naming policy's keys for a tool (a builtin's
+    # name, an MCP entry, `device`, `unknown`) to how many of its past
+    # results one request carried cleared (#599).
+    CLEARED_TOOLS = "cleared_tools"
     # A mapping from the closed set of reasons a mic frame is discarded
     # to how many frames one second of the session lost to each.
     DROP_COUNTS = "drop_counts"
@@ -1373,6 +1377,57 @@ class MemorySources(EventValue):
         return dict(self.value)
 
 
+@dataclass(frozen=True)
+class ClearedTools(EventValue):
+    """How many past results one request carried as the cleared note,
+    by the tool that made them (#599).
+
+    Keyed under the `tool_call` naming policy, from the origin the call
+    was classified with when the model made it: `builtin.<name>`,
+    `mcp.<entry>`, `device` or `unknown`. Nothing far-side becomes a
+    key, which is what makes a mapping lawful here at all, and the key
+    is what a span attribute name is built from. Every value is a count
+    of one or more, and a request that cleared nothing carries no
+    mapping rather than an empty one.
+    """
+
+    KIND: ClassVar[Kind] = Kind.CLEARED_TOOLS
+
+    value: dict[str, int]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.value, dict):
+            raise EventValueError("ClearedTools is a mapping")
+        if not self.value:
+            raise EventValueError("ClearedTools counts at least one tool")
+        for key, held in self.value.items():
+            if not isinstance(key, str) or not _a_cleared_tool(key):
+                raise EventValueError(
+                    "a ClearedTools key is builtin.<name>, mcp.<entry>, device or unknown"
+                )
+            if isinstance(held, bool) or not isinstance(held, int) or held < 1:
+                raise EventValueError("a ClearedTools value is a count of one or more")
+
+    def carried(self) -> dict[str, int]:
+        return dict(self.value)
+
+
+def _a_cleared_tool(key: str) -> bool:
+    """Whether `key` is one of the four shapes a cleared tool is named
+    by, which are the four the `tool_call` naming policy allows: a
+    builtin by its own name and an MCP call by the entry an operator
+    configured, each behind its namespace so a builtin and an entry
+    sharing a word stay apart, and the two namespaces whose names this
+    surface may not print as the bare namespace. Read off `ToolSource`
+    rather than spelled again, so the shapes are that set's."""
+    if key in (ToolSource.DEVICE, ToolSource.UNKNOWN):
+        return True
+    return any(
+        key.startswith(f"{namespace}.") and key.removeprefix(f"{namespace}.").strip()
+        for namespace in (ToolSource.BUILTIN, ToolSource.MCP)
+    )
+
+
 # --- the closed sets, as types ----------------------------------------
 #
 # A token used to be a string a site wrote and a set a registry
@@ -2103,6 +2158,7 @@ __all__ = [
     "CheckInBody",
     "ClassName",
     "ClassNames",
+    "ClearedTools",
     "ClientId",
     "ClipFilingFailure",
     "CloseReason",
