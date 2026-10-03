@@ -7,6 +7,7 @@ from typing import Any, cast
 import pytest
 
 from tests.support.configs import POET_MAC, base_config, watchdog_config
+from tests.support.device_tools import STATUS, FakeDevice
 from tests.support.events import both_formats, only
 from tests.support.llm_input import exporting
 from tests.support.providers import ScriptedLlm, StallingLlm
@@ -215,3 +216,39 @@ async def test_tool_content_reaches_only_the_generation_snapshot(
         for _, attributes in telemetry.snapshots
     )
     assert RESULT_SENTINEL not in both_formats(caplog)
+
+
+async def test_a_later_reply_exports_the_history_it_sent_with_the_result_cleared() -> None:
+    """What the content export stages is the history as the request
+    carried it (#599): a large result is whole in the reply that made
+    it and the cleared note on the next, on the trace as on the wire."""
+    big = RESULT_SENTINEL + "x" * 3000
+    device = FakeDevice([{"tools": [STATUS]}])
+    device.call_results[STATUS["name"]] = {
+        "content": [{"type": "text", "text": big}],
+        "isError": False,
+    }
+    await device.client.discover()
+    exporter, telemetry = staging()
+    script = ScriptedLlm([[call("self_get_device_status")], "Fine.", "Still fine."])
+    session = session_for(base_config(), POET_MAC, {"poet": script}, llm_input=exporter)
+    # White-box, as the tool-loop suite does it: a board's tools arrive
+    # from a discovery run over a socket these sessions do not have.
+    session._device_tools = device.client
+
+    await run_reply(session, "how is the board?")
+    await run_reply(session, "and now?")
+
+    inputs = [attributes[GEN_AI_INPUT_MESSAGES] for _, attributes in telemetry.snapshots]
+    assert len(inputs) == 3
+    assert RESULT_SENTINEL in inputs[1]
+    assert RESULT_SENTINEL not in inputs[2]
+    responses = [
+        part["response"]
+        for message in json.loads(inputs[2])
+        for part in message["parts"]
+        if part.get("type") == "tool_call_response"
+    ]
+    assert responses == [
+        f"(result of self_get_device_status cleared: {len(big.encode())} bytes)"
+    ]
