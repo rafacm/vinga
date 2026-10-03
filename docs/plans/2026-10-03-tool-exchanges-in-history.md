@@ -196,13 +196,15 @@ As the issue has them, confirmed by Step 0.
 `runtime/history.py`.** Two pure functions, the two halves of one
 rule:
 
-- `committed(working, start, heard_after) -> list[Turn]`: what a
-  finished reply (or leg) leaves in its thread's history. The completed
-  rounds of `working[start:]` in order, then the speech heard after the
-  last of them, as one assistant turn when non-empty.
+- `kept_round(history, preamble, calls, results) -> list[Turn]`: what
+  one completed round adds to its thread's history (D2), with its ids
+  minted against the history it is appended to (D4). Empty when nothing
+  in the round is kept, and then the preamble is the caller's to carry
+  forward as heard speech (D3).
 - `as_sent(turns, start, offered) -> Sent`: what one request carries,
-  given the thread's history plus this reply's rounds (`turns`), where
-  this reply began (`start`), and the names this round offers.
+  given the thread's history, which by then holds this reply's own
+  completed rounds (`turns`), where this reply began (`start`), and the
+  names this round offers.
   `Sent` holds the turns, the clearing facts (count, bytes, largest,
   and the cleared calls' names, which the caller keys from its offer,
   D7), the degraded count, and the set of cleared `(name, canonical
@@ -211,7 +213,8 @@ rule:
 What callers stop knowing: the cap, both notes, which results are
 "past", how a degraded call folds into the assistant turn, how call ids
 are minted, and what counts as a completed round. The pipeline calls
-each once; hydration (M3) and the recap (M3) call `as_sent` and the
+`kept_round` where a round completes and `as_sent` where a request is
+built; hydration (M3) and the recap (M3) call `as_sent` and the
 size function. Deletion test: inlined into `_tool_loop`, the rules
 would sit in the 2,878-line pipeline beside the speech lookahead and
 be testable only through a scripted session, which is how the
@@ -220,21 +223,44 @@ text-only rule ended up pinned by a session test. A module in
 policy about history, not a wire format; it imports only `Turn`,
 `ToolCall` and `ToolResult`.
 
-**D2. A completed round is a call with its result.** A round is kept
-when both its assistant turn and its tool turn exist; a call is kept
-when it has a result. So a round cut by a barge-in mid-execution is not
-kept (its results never arrived), and the move call that ended a leg
-is not kept (a successful move has no result) while that round's other
-calls, which ran and answered, are. The same rule rebuilds from the
-store in M3 (a row with a null `result` is dropped), so in-session and
-resumed history agree. A round's preamble is kept with its calls even
-when the round is dropped: it was heard, and folds into the next kept
-assistant text in order.
+**D2. A round is committed the moment it completes, straight into the
+thread's history.** Plan review round 1 (finding 1) found that the two
+`Turn("assistant", said)` sites cannot see `working`, which is local to
+`_tool_loop`, and that the reply site appends nothing when nothing was
+spoken. So there is no commit at the end at all: `_tool_loop` stops
+keeping a private `working` copy and appends each completed round to
+`self._turns` (the active thread's history) at the point it would have
+appended the tool turn to `working`, in the same synchronous stretch
+with no await between the results arriving and the append. What a
+cancellation, a provider failure in a later round, or a silent reply
+leaves behind is therefore exactly the rounds that completed, with no
+second path to forget: a `remember` that ran in round 1 of a reply whose
+round 2 failed is in the history, which is the case the issue exists
+for. The two end-of-reply sites keep appending only speech (D3).
+
+A round is complete when every call that is not a move has its result.
+Of a completed round, every call with a result is kept and the
+successful move that ended a leg is not (it has no result; a refused
+move has its error result and is kept). A malformed call is not kept
+either: its raw bytes are not what the store holds, so keeping it would
+make in-session and resumed history differ (finding 3), and the error
+the model was told about it belongs to the reply that made it. A round
+cut by a barge-in or a failure part-way through execution has no tool
+turn and is not kept at all, even where some of its calls had answered
+(the store will hold those answers; M3's rule, D9, drops that round on
+resume as well). A round left with no kept call commits nothing, and
+its preamble, which was heard, joins the speech that follows (D3).
 
 **D3. Every sentence heard appears once.** Today the one assistant turn
 is `" ".join(spoken)`, preambles included. With rounds kept, a round's
 preamble lives in its own assistant turn's `content`, and the closing
-assistant turn carries only what was heard after the last kept round.
+assistant turn carries only what was heard after the last kept round:
+the pipeline notes `len(spoken)` at each commit and the end-of-reply and
+end-of-leg sites append the sentences after that mark, as today only
+when there are any. A reply that only ran tools and was cut before
+speaking leaves its rounds and no closing turn, so the next user turn
+follows a tool turn; that is a shape providers accept (it is the shape
+of every second round), and Step 0's probe sent it.
 The stored record (`_record_turn(spoken)`) is unchanged: the store's
 `reply` stays the whole reply, which is why M3's rebuild puts the
 stored reply after the rebuilt rounds with empty preambles, the same
@@ -248,12 +274,17 @@ sends no ids gets `call_0` minted by the adapter for every round, so
 two kept rounds would carry the same id; and the provider's id is
 far-side bytes that the #533 work keeps off retained surfaces, so it
 should not persist for a conversation either. M3 mints the same shape
-for rebuilt calls. The working copy within one reply keeps the
-provider's ids, so the round in flight is byte-identical to today.
+for rebuilt calls. Because a round is committed when it completes
+(D2), the next round of the same reply already carries the minted ids;
+an id only pairs a call with its result, which the minted pair still
+does, and Step 0's probe sent ids of its own choosing and was accepted.
+`h<n>` matches Anthropic's `^[a-zA-Z0-9_-]+$` id pattern. The tests pin
+that the request after a commit pairs every call id with exactly one
+result.
 
 **D5. Clearing applies to results before `start`; degrading applies to
-every call.** `start` is `len(history)` when the reply's `_tool_loop`
-copied it, so a reply's own results are never cleared and a result is
+every call.** `start` is `len(self._turns)` when the reply's
+`_tool_loop` began, so a reply's own results are never cleared and a result is
 cleared from the first request of the next reply. Degrading is not
 bounded by `start`: a name the model invented in this reply was not
 offered either, and handing it back structured is what decision 5
@@ -318,9 +349,11 @@ buys nothing there.
 - **M1**: new `runtime/history.py` (D1), whose callers stop knowing
   the cap, the notes, the id minting and the completed-round rule.
   `runtime/pipeline.py` deepens nothing and loses the text-only rule:
-  `_tool_loop` sends `as_sent(...)`'s turns (to the provider partial,
-  to `stage_reply` and to `reply_round_done`) and both commit sites
-  call `committed(...)`. No new seam; `Turn` and the adapters are
+  `_tool_loop` drops its private `working` copy, appends each completed
+  round to the thread's history through `kept_round(...)` (D2), and
+  sends `as_sent(...)`'s turns (to the provider partial, to
+  `stage_reply` and to `reply_round_done`); the two end-of-reply sites
+  append only the speech after the last commit (D3). No new seam; `Turn` and the adapters are
   untouched apart from the docstring.
 - **M2**: `events/catalog.py` (`LlmRound` gains five fields, the three
   `tool_call` variants gain `refetch`), `events/values.py`
@@ -360,8 +393,13 @@ hydration suite's builders; no new fixtures.
   tool result is whole in reply 1's second round and cleared in reply
   2; an MCP tool removed between replies (the registry replaced, the
   way `test_session_tools` already swaps an MCP registry) arrives as
-  the degraded note; a barge-in mid-execution leaves no call in
-  history; a move leg keeps its plain calls and not the move.
+  the degraded note; a barge-in mid-execution leaves no call of that
+  round in history; a reply whose round 1 ran `remember` and whose
+  round 2 provider call failed, speaking nothing, leaves round 1 in
+  history and the next reply's request carries it; a barge-in after
+  round 1 completed and before any speech does the same; a move leg
+  keeps its plain calls and not the move; every request after a commit
+  pairs each call id with exactly one result.
 - **M1, the export**: the staged `llm` input is the as-sent turns, so
   the content export shows the cleared note and not the full result on
   a later reply.
@@ -483,6 +521,8 @@ Reviewed 2026-10-03 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
 1. **P1: The commit sites cannot access the tool rounds they must save.**
    **Evidence:** Plan D1 and M1 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:195`) call `committed(working, ...)` at the reply and move commit sites. `working` is local to `_tool_loop` (`vinga-server/src/vinga_server/runtime/pipeline.py:1772`); the commit sites are outside it, and the reply site appends history only when `spoken` is nonempty (pipeline.py:1474 (`vinga-server/src/vinga_server/runtime/pipeline.py:1474`)).
    **Plan should say instead:** Define how completed rounds reach both commit sites, including when `_tool_loop` is cancelled, and commit completed tool exchanges even when no sentence was spoken. Test a tool-only failed reply as well as a barge-in.
+
+   *Resolution:* accepted. There is no end-of-reply commit any more: D2 now commits each round into the thread's history at the moment it completes, in the synchronous stretch after its results arrive, so cancellation, a later failure and a silent reply all leave exactly the completed rounds. `working` goes; the end sites append only the speech after the last commit (D3); D4 says what the minted ids mean for the next round of the same reply. Tests add the tool-only failed reply and the barge-in before speech.
 
 2. **P1: Sorting by position destroys round order on resume.**
    **Evidence:** Plan D9 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:289`) keeps the read “ordered by turn and position” while treating `position == 0` as a new round. `reserve` (`vinga-server/src/vinga_server/runtime/tool_execution.py:412`) restarts position at zero each round; the current query (`vinga-server/src/vinga_server/conversations/threads.py:877`) sorts all zeros before all ones.
