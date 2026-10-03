@@ -685,7 +685,7 @@ the commit body; a survivor is reported as a finding about the test.
 
 ## Milestones
 
-- [x] **[M1: keep completed tool rounds in history](2026-10-03-tool-exchanges-in-history-implementation.md#m1-keep-completed-tool-rounds-in-history)** (PR TBD). Decisions 1, 2
+- [x] **[M1: keep completed tool rounds in history](2026-10-03-tool-exchanges-in-history-implementation.md#m1-keep-completed-tool-rounds-in-history)** ([PR #600](https://github.com/rafacm/vinga/pull/600)). Decisions 1, 2
   and 5 (D1 to D6, and D7's two `ToolCall` fields, filled in at commit):
   `runtime/history.py`, the per-round commit and the per-round
   `as_sent`, the export staging the as-sent turns, the
