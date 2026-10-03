@@ -124,6 +124,7 @@ tests/unit/test_event_enforcement_sentinels.py  _mic  1
 tests/unit/test_event_surface_pins.py  _device_tools  2
 tests/unit/test_event_typed_emit.py  _report  1
 tests/unit/test_event_values.py  _disable  1
+tests/unit/test_history_measured.py  _device_tools  1
 tests/unit/test_llm_input_export.py  _output  1
 tests/unit/test_missing_server_half.py  _derived_url  1
 tests/unit/test_missing_server_half.py  _from_an_installed_half  2
