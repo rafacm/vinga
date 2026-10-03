@@ -40,7 +40,7 @@ from vinga_server.config import store as config_store
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import schema as record_schema
 from vinga_server.conversations import threads
-from vinga_server.conversations.records import StoredTurn
+from vinga_server.conversations.records import StoredCall, StoredTurn
 from vinga_server.conversations.store import open_conversations
 from vinga_server.db import (
     DOMAIN_CHAIN,
@@ -383,6 +383,7 @@ def a_backlog(
     incomplete: bool = False,
     milestone: Any = None,
     first_id: int = 1,
+    calls: Mapping[int, Sequence[StoredCall]] | None = None,
 ) -> Any:
     """One thread as the store hands it back.
 
@@ -391,14 +392,22 @@ def a_backlog(
     say which ids it means. `milestone` is the checkpoint standing in
     front of them, and the pair is written the way the store answers it:
     where there is a checkpoint, `said` is what came after its coverage.
+    `calls` holds the tool rows of the turns that made any, keyed by
+    the turn's index in `said`, in the order the store reads them.
     """
+    made = calls or {}
     return threads.Backlog(
         conversation=conversation,
         agent=agent,
         incomplete=incomplete,
         milestone=milestone,
         turns=tuple(
-            StoredTurn(id=first_id + index, heard=heard, reply=reply)
+            StoredTurn(
+                id=first_id + index,
+                heard=heard,
+                reply=reply,
+                calls=tuple(made.get(index, ())),
+            )
             for index, (heard, reply) in enumerate(said)
         ),
     )

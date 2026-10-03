@@ -24,6 +24,7 @@ round seeded on the other side of the move.
 """
 
 import asyncio
+import json
 import logging
 import re
 from collections.abc import AsyncIterator
@@ -46,13 +47,14 @@ from tests.support.sessions import (
 from tests.support.stores import StoredThreads, a_backlog, a_milestone
 from vinga_server.boundary import Reach
 from vinga_server.config import Config
-from vinga_server.conversations.records import Acknowledgement
+from vinga_server.conversations.records import Acknowledgement, StoredCall
 from vinga_server.device.boundary import DeviceGone
 from vinga_server.device.session import DeviceSession
 from vinga_server.events.values import ReplyOutcome
 from vinga_server.providers import TtsProvider
 from vinga_server.runtime import pipeline as pipeline_module
 from vinga_server.runtime import resumption as resumption_module
+from vinga_server.runtime.history import DEGRADED_END, DEGRADED_PREFIX
 from vinga_server.tools import builtin
 
 GALAXY = "1f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
@@ -738,6 +740,77 @@ async def test_the_summarization_round_is_staged_as_a_recap_round() -> None:
     assert recap["invocation"] == invocation
     assert sum(record.rounds or 0 for record in kept.turns) == 2
     await staging.shutdown()
+
+
+def _degraded(turns: Any) -> list[dict[str, Any]]:
+    """Every degraded note in these turns, as the JSON object it
+    quotes, after checking the note is one line."""
+    found = []
+    for turn in turns:
+        for part in turn.content.split(DEGRADED_PREFIX)[1:]:
+            body = part.split(DEGRADED_END + " ")[0].removesuffix(DEGRADED_END)
+            found.append(json.loads(body))
+        assert len(turn.content.splitlines()) <= 1
+    return found
+
+
+async def test_the_recap_is_sent_every_tool_exchange_as_a_note_and_no_tools() -> None:
+    """What the thread's tools did is part of what happened, so the
+    summarizer reads it; it is offered no tools, so every call goes as
+    the degraded note, and a result over the cap is cleared inside its
+    note as it would be on any later request (#599, Q3)."""
+    big = "m" * 3000
+    store = a_long_thread(
+        calls={
+            6: (
+                StoredCall(
+                    position=0,
+                    source="builtin",
+                    name="remember",
+                    arguments={"text": "the door code is 4721"},
+                    result="Saved.",
+                ),
+            ),
+            7: (
+                StoredCall(
+                    position=0,
+                    source="mcp",
+                    entry="home",
+                    name="home__status",
+                    arguments={},
+                    result=big,
+                ),
+            ),
+        }
+    )
+    voice = RecordingTts()
+    kept = Kept().watching(voice)
+    session, poet = consenting(voice, store, kept)
+
+    await drive_reply(session, UTTERANCE)
+
+    # The recap was made and spoken, so the summarization round ran.
+    assert voice.asked[0] == RECAP
+    (turns, tools, choice) = poet.seen[1]
+    assert (tools, choice) == ([], "none")
+    assert turns[-1].content == pipeline_module.RECAP_REQUEST
+    assert [one for turn in turns for one in turn.tool_calls] == []
+    assert [one for turn in turns for one in turn.tool_results] == []
+    assert _degraded(turns) == [
+        {
+            "tool": "remember",
+            "arguments": {"text": "the door code is 4721"},
+            "result": "Saved.",
+            "error": False,
+        },
+        {
+            "tool": "home__status",
+            "arguments": {},
+            "result": "(result of home__status cleared: 3000 bytes)",
+            "error": False,
+        },
+    ]
+    assert big not in repr(turns)
 
 
 # What the summarization round says, to the log

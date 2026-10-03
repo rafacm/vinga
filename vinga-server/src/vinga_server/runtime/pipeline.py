@@ -2227,11 +2227,21 @@ class PipelineRuntime:
         the same thing to the caller, which is that there is no recap to
         speak. A cancellation is not one of them and passes through,
         because a barge-in ends the reply rather than the recap.
+
+        The thread's tool exchanges go too, because what an agent saved
+        or read is part of what happened, and they go the way every
+        request sends a history (#599): through `as_sent`, with nothing
+        offered, since this round offers no tools, and with every
+        exchange before `start`, since a recap has no calls of its own.
+        So every call is the degraded note and every result over the
+        cap is cleared inside it, and no provider is handed a call to a
+        tool it was not given.
         """
         assert self._providers is not None
         providers = self._providers
         said: list[str] = []
-        turns = [*made.input, Turn("user", RECAP_REQUEST)]
+        sent = as_sent(made.input, start=len(made.input), offered=frozenset())
+        turns = [*sent.turns, Turn("user", RECAP_REQUEST)]
         invocation = uuid.uuid4().hex
         loop = asyncio.get_running_loop()
         began = loop.time()
