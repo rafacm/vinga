@@ -162,8 +162,9 @@ by M1 and never rebuilt.
 **Q5. Event and attribute names for decision 3.** Under the parity rule
 every new fact is a typed event field that the telemetry layer maps to
 a span attribute, never a span event. The per-round clearing facts are
-fields of `llm_round`, so they land on the `llm` span through
-`LLM_ATTRIBUTES` like every other round fact; the re-fetch is a field
+fields of `llm_round` (and of two more events, below), so they land on
+the `llm` span through their own attribute table and helper (below);
+the re-fetch is a field
 of the three `tool_call` variants, so it lands on the tool span:
 
 | Event field | Span attribute | Meaning |
@@ -221,6 +222,21 @@ that failed say the same thing about the same request. On
 stage and for a failure before the request was built; on the other two
 they are always present (zero counts, absent `largest` and
 `cleared_tools`, when nothing was cleared).
+
+On the span side (round 2, finding 5), the five fields do NOT go into
+`LLM_ATTRIBUTES`: a failed request's `llm` span is built from
+`FAILED_PROVIDER_ATTRIBUTES` (`telemetry.py`, the `provider_failed`
+branch), so a row in one table would reach success spans only. They get
+their own table, `HISTORY_ATTRIBUTES`, and one helper,
+`_history_attributes(payload)`, which maps the four scalar fields and
+expands `ClearedTools` under its prefix through the value type, exactly
+the shape of `_round_prompt_attributes`. The helper is applied at the
+two sites that helper already is: `_llm_span`, which builds both the
+reply round's span and the recap's (`llm_recap` is a variant of the
+`llm_round` event), and the LLM-stage branch of the failure span. The
+tests assert the exported OTLP attributes on all three spans (a
+finished reply round, a recap, and a failure by each route), not only
+the event fields.
 
 `llm_round`'s `turns` field, documented as "the cheap proxy for payload
 size", now counts tool turns too. Its note is amended to say so; the
@@ -739,5 +755,7 @@ Reviewed 2026-10-03 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0
 5. **P2 - The telemetry routing described cannot put failure facts on failed LLM spans.**
    Evidence: Q5 says the history fields reach `provider_failed` through `LLM_ATTRIBUTES` (plan (`docs/plans/2026-10-03-tool-exchanges-in-history.md:210`)), but failed spans use `FAILED_PROVIDER_ATTRIBUTES`, not `LLM_ATTRIBUTES` (telemetry.py (`vinga-server/src/vinga_server/telemetry.py:1138`), telemetry.py (`vinga-server/src/vinga_server/telemetry.py:3134`)). The only helper additionally applied on failure is `_round_prompt_attributes`, which currently knows memory fields only.
    Plan should say instead: name the shared history-attribute helper or both mapping tables explicitly, and require it on successful reply spans, recap spans, and failed LLM spans. Keep the two failure-route tests, but assert the actual OTLP attributes rather than only event fields.
+
+   *Resolution:* accepted. Q5 names `HISTORY_ATTRIBUTES` and `_history_attributes(payload)`, applied where `_round_prompt_attributes` already is: `_llm_span` (reply and recap) and the LLM-stage failure branch. The tests assert exported span attributes on all three, the failure by both routes.
 
 **Verdict: not ready.**
