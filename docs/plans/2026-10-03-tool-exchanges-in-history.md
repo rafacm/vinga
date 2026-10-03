@@ -191,6 +191,23 @@ resume, so it would be wrong exactly where the question is asked; the
 flag is per call and the aggregation is a query over the event store or
 the backend.
 
+The same five facts ride every event that describes a request whose
+history went through `as_sent` (finding 6), with the same field names
+and the same attribute names on its `llm` span: `llm_round`, the
+LLM-stage `provider_failed` by both of its failure routes (a request
+that was assembled and then failed, a context-length refusal included,
+cleared exactly what a successful one would have), and `llm_recap`
+(the recap request carries cleared and degraded history after M3). They
+travel the way `RoundPrompt` already does: `as_sent`'s accounting is
+one value (`HistorySent`, the counts and the per-key mapping, no
+content) handed to `ProviderWatch.reply_stream`, `watched` and
+`reply_round_done` beside `prompt`, so a round that finished and one
+that failed say the same thing about the same request. On
+`provider_failed` the fields are optional and absent for a non-LLM
+stage and for a failure before the request was built; on the other two
+they are always present (zero counts, absent `largest` and
+`cleared_tools`, when nothing was cleared).
+
 `llm_round`'s `turns` field, documented as "the cheap proxy for payload
 size", now counts tool turns too. Its note is amended to say so; the
 number keeps meaning messages sent.
@@ -411,8 +428,10 @@ newline join, unchanged.
   `stage_reply` and to `reply_round_done`); the two end-of-reply sites
   append only the speech after the last commit (D3). No new seam; `Turn` and the adapters are
   untouched apart from the docstring.
-- **M2**: `events/catalog.py` (`LlmRound` gains five fields, the three
-  `tool_call` variants gain `refetch`), `events/values.py`
+- **M2**: `events/catalog.py` (`LlmRound`, `LlmRecap` and
+  `ProviderFailed` gain the five fields, the three `tool_call` variants
+  gain `refetch`), `runtime/provider_watch.py` (the `HistorySent` value
+  carried beside `prompt` on all three paths), `events/values.py`
   (`ClearedTools`), `telemetry.py` (the table rows and the
   `ClearedTools` prefix expansion beside `MEMORY_SOURCES_PREFIX`),
   `runtime/tool_execution.py` (the key function, D7, and the re-fetch
@@ -459,8 +478,15 @@ hydration suite's builders; no new fixtures.
 - **M1, the export**: the staged `llm` input is the as-sent turns, so
   the content export shows the cleared note and not the full result on
   a later reply.
-- **M2**: field and attribute pins on `llm_round` and the `llm` span
-  (zero and absent shapes included), `ClearedTools` validation
+- **M2**: field and attribute pins on `llm_round`, `llm_recap` and the
+  LLM-stage `provider_failed`, and on their `llm` spans (zero and absent
+  shapes included); a provider refusing a round after assembly (the
+  scripted provider raising a context-length-shaped failure) carries the
+  round's clearing facts on `provider_failed`, by the stream-open route
+  and by the mid-stream route; a recap over a thread with a cleared
+  result carries it on `llm_recap` (this test lands in M3 if M3 merges
+  second, since only M3 gives the recap exchanges, and the plan names
+  it in whichever milestone merges later); `ClearedTools` validation
   (rejects an unknown key shape, a zero, a bool), the key mapping per
   namespace with a device tool named like a builtin; `refetch` true for
   a repeated call after its result was cleared, true when the repeat
@@ -611,6 +637,8 @@ Reviewed 2026-10-03 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
 6. **P2: Clearing metrics omit requests that fail and recap requests.**
    **Evidence:** Plan Q5 and M2 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:129`) add fields only to `LlmRound`. A failed request emits `ProviderFailed` (`vinga-server/src/vinga_server/events/catalog.py:1997`), and a recap that the plan says carries cleared results emits `LlmRecap` (`vinga-server/src/vinga_server/events/catalog.py:1970`). Both have `llm` spans.
    **Plan should say instead:** Carry clearing facts on those event variants and their spans, or explicitly narrow “per round” and explain why these requests are excluded. Test a context-length failure after request assembly and a recap containing cleared results.
+
+   *Resolution:* accepted. Q5 now puts the five facts on `llm_round`, `llm_recap` and the LLM-stage `provider_failed` (both failure routes), carried as one `HistorySent` value the way `RoundPrompt` is. M2's tests add the post-assembly failure on both routes and the recap with a cleared result, the latter landing with whichever of M2 and M3 merges second.
 
 7. **P2: The clearing breakdown loses an MCP entry when its tool disappears.**
    **Evidence:** Plan D7 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:274`) derives metric keys from the *current* `Offer`; Q5 assigns every unoffered call to `unoffered`. After an MCP reload, the prior entry is absent from that offer, although the issue requires the configured MCP entry to identify which tool was cleared. The store already records `source` and `entry` (`vinga-server/src/vinga_server/conversations/records.py:57`), but planned `StoredCall` omits them.
