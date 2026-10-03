@@ -759,3 +759,23 @@ Reviewed 2026-10-03 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0
    *Resolution:* accepted. Q5 names `HISTORY_ATTRIBUTES` and `_history_attributes(payload)`, applied where `_round_prompt_attributes` already is: `_llm_span` (reply and recap) and the LLM-stage failure branch. The tests assert exported span attributes on all three, the failure by both routes.
 
 **Verdict: not ready.**
+
+## Plan review round 3
+
+Reviewed 2026-10-03 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 3m47s, at commit 33f586a2, plan blob 99c9d5d5.
+
+---
+
+1. **P1: Silent tool replies produce invalid Anthropic role adjacency.**
+Evidence: Plan D3 says a tool-only interrupted/failed reply leaves a tool turn followed by the next user turn (plan:344-347 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:344`)); D9 rebuilds the same `assistant(tool_use) → tool(result) → user` shape (plan:436-447 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:436`)). `anthropic_messages()` renders a `tool` turn as a `user` tool-result message and renders the following user turn as another `user` message, without coalescing (anthropic_llm.py:57 (`vinga-server/src/vinga_server/providers/anthropic_llm.py:57`)). This violates hydration’s existing alternation invariant (hydration.py:26 (`vinga-server/src/vinga_server/conversations/hydration.py:26`)). M1 nevertheless declares adapters untouched (plan:474-482 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:474`)).
+What the plan should say instead: Specify and implement the Anthropic rendering rule for a text user turn following tool-result blocks, likely appending a text block to that existing user message. Cover both an in-session failed/cancelled tool-only reply followed by a user utterance and the identical resumed-history shape, through the real Anthropic translator. Keep OpenAI’s separate tool then user messages unchanged.
+
+2. **P1: The proposed re-fetch telemetry cannot observe refused move tools.**
+Evidence: D8 only passes cleared keys into `ToolExecution.run` and adds `refetch` in its existing `tool_call` variant builder (plan:408-415 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:408`)). But `_run_tools` partitions moves out before `ToolExecution.run` (pipeline.py:1951 (`vinga-server/src/vinga_server/runtime/pipeline.py:1951`)); a refused move writes its result directly to `TurnUnderway` (pipeline.py:1962 (`vinga-server/src/vinga_server/runtime/pipeline.py:1962`)) and emits no `tool_call` event. Such a refused move has a result, is retained under D2, can be cleared, and can be repeated. Thus the plan misses a class of “same tool with same arguments after its result was cleared,” contrary to decision 3.
+What the plan should say instead: Define a re-fetch measurement path that covers every completed call-result pair, including locally handled refused moves, rather than only `ToolExecution.run` calls. Name the event/span or round-level field used for that path and test a repeated refused `switch_agent` or resume-selection call after its prior result was cleared.
+
+3. **P2: Recap does not specify the `start` value required to clear and degrade historical calls.**
+Evidence: `as_sent(turns, start, offered)` treats `start` as where the current reply began (plan:281-289 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:281`)), and D5 only defines it as `len(self._turns)` at `_tool_loop` entry (plan:369-383 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:369`)). M3 merely says `_summarized` calls `as_sent` with an empty offer (plan:492-495 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:492`)). For recap input every exchange is historical: using `len(made.input)` would skip both clearing and degradation, despite Q3 requiring every recap call to be degraded.
+What the plan should say instead: State explicitly that recap calls `as_sent(made.input, start=0, offered=empty)` and forwards that `Sent` accounting to the recap watcher/export path. Retain the recap test, but assert both degradation and cap clearing for an over-2-KiB stored result.
+
+Verdict: **not ready**.
