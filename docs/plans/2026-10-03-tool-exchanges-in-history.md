@@ -321,12 +321,35 @@ the same way.
 `StoredTurn.tools: tuple[str, ...]` becomes `calls:
 tuple[StoredCall, ...]` (`position`, `name`, `arguments`, `result`,
 `is_error`, `malformed`), read by `threads.py` from the same query
-widened to those columns, still ordered by turn and position, still
-filtered to rows the store could name. A turn renders as `user`, then
-per round (a new round at `position == 0`) an assistant turn with the
-kept calls and a tool turn with their results, then the stored reply.
-Malformed calls are dropped (the store keeps no raw arguments to send
-back). `TOOL_NOTE` goes: its only input was the names, which sit under
+widened to those columns.
+
+The read orders by turn and then by `tool_invocations.id`, never by
+`position` (finding 2): `position` restarts at zero every round, so
+sorting on it would put every round's first call ahead of every second
+call. The id is the insertion order, and the writer inserts a turn's
+rows in one `executemany` from `record.tools`, which `TurnUnderway.reserve`
+appends in reservation order, round after round
+(`conversations/store.py`, the `_tool_row` list comprehension). That is
+true of every row already stored, so no migration and no new column;
+an integration test pins it with two rounds of two calls each. The
+name filter the read has today moves out of SQL: every row is read,
+because dropping an unnamed row first could remove the `position == 0`
+that marks a round's start (finding 3).
+
+Hydration then groups the rows into rounds (a new round at each
+`position == 0` in id order) and only then applies D2's rule, so the
+resumed history is the in-session one. A round is kept when every row
+in it that is not a successful move has a result, a name and well-formed
+arguments; a successful move is a row whose name is one of the move
+tools (`switch_agent`, `new_conversation`, `resume_conversation` naming
+a conversation, read from `tools/names.py` as `_moves` reads them) and
+whose result is null, and it is dropped from its kept round. A round
+with any other null result is a round cut during execution (the
+reservation filed every call, and only some were filled before the
+cut), and it is dropped whole, exactly as the session dropped it; a
+malformed row is dropped from its round as in-session (D2). A turn then
+renders as `user`, per kept round an assistant turn with its calls and
+a tool turn with their results, then the stored reply. `TOOL_NOTE` goes: its only input was the names, which sit under
 the same switch as the results that now render whole. A turn joined
 onto the answer before it (the first turn of a thread a move landed
 on) renders its calls as degraded notes inside the joined text, which
@@ -414,11 +437,14 @@ hydration suite's builders; no new fixtures.
   result and in an MCP tool's far-side name appears in neither event
   format, any record arg, nor any span attribute. The generated event
   reference regenerates.
-- **M3**: hydration renders rounds from `position`, drops malformed and
-  resultless calls, mints ids, charges the as-sent cost to the budget
+- **M3**: hydration groups rows into rounds in id order before
+  filtering, drops a round with a non-move null result whole, drops a
+  successful move and a malformed call from a kept round, mints ids, charges the as-sent cost to the budget
   (a turn with a 10 KiB result costs its cleared size), renders a
   joined turn's calls as notes; `threads.py` reads the widened row set
-  in order (integration, against Postgres); a resumed session's first
+  in id order, two rounds of two calls each written through the store's
+  own writer (integration, against Postgres); a reply cancelled after
+  the first of two calls completed, then resumed, carries neither call; a resumed session's first
   request carries the stored exchange structured and a no-longer-offered
   one degraded (the issue's third criterion); the recap request carries
   every call degraded and no `tools`.
@@ -528,9 +554,13 @@ Reviewed 2026-10-03 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    **Evidence:** Plan D9 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:289`) keeps the read “ordered by turn and position” while treating `position == 0` as a new round. `reserve` (`vinga-server/src/vinga_server/runtime/tool_execution.py:412`) restarts position at zero each round; the current query (`vinga-server/src/vinga_server/conversations/threads.py:877`) sorts all zeros before all ones.
    **Plan should say instead:** Read calls in their insertion order, using `tool_invocations.id`, then use position to identify boundaries within that order. Test multiple rounds with more than one call each, including stored rows created before the upgrade.
 
+   *Resolution:* accepted. D9 orders by turn and `tool_invocations.id`, and cites why that is reservation order for every row ever written (one `executemany` over `record.tools`, appended by `reserve`), so rows stored before the upgrade read the same way and need no migration. The integration test writes two rounds of two calls through the store's own writer, which is the path pre-upgrade rows took.
+
 3. **P1: A stored result does not prove its interrupted round was complete.**
    **Evidence:** Plan D2 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:223`) drops a round cut during execution, but D9 drops only rows with null results. Calls are reserved before execution (`vinga-server/src/vinga_server/runtime/pipeline.py:1869`) and filled individually (`vinga-server/src/vinga_server/runtime/turns.py:247`). A barge-in after one of two calls completes leaves one result in the store but no tool turn in `working`. Dropping the null row can also erase a `position == 0` boundary.
    **Plan should say instead:** Group rows into rounds before filtering, define how incomplete rounds and successful moves are distinguished, and make resumed history match the in-session rule. Test cancellation after the first of two calls completes, then resume that thread.
+
+   *Resolution:* accepted. D9 reads every row, groups by `position == 0` in id order, and only then filters: a successful move is a move tool's row with a null result and is dropped from its round; any other null result marks a round cut during execution, dropped whole as the session drops it (D2). Malformed calls are dropped in both places now (D2 changed to match). The test cancels a reply after the first of two calls completes, then resumes the thread and asserts neither call is in the request.
 
 4. **P1: The joined-turn exception violates the structured-history decision.**
    **Evidence:** Plan D9 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:289`) degrades every call on a turn joined to the preceding answer, even when the tool is still offered. Issue decision 5 degrades calls *only* when their names are absent from the current offer; the resumed-request criterion requires still-offered calls to remain structured.
