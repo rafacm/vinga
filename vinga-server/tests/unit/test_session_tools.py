@@ -208,17 +208,31 @@ async def test_the_round_cap_ends_the_reply_in_speech() -> None:
     assert len(script.seen) == pipeline_module.MAX_TOOL_ROUNDS
 
 
-async def test_history_keeps_the_speech_and_not_the_tool_exchange() -> None:
-    script = ScriptedLlm([[call("ghost_tool")], "It did not work."])
-    session = session_for(base_config(), POET_MAC, {"poet": script})
-    await run_reply(session, "do it")
+async def test_history_keeps_the_tool_exchange() -> None:
+    """The rule the text-only history was pinned by, turned round (#599):
+    the call and its result are in the history the next reply is sent,
+    structured, beside what was said, under ids the runtime minted."""
+    script = ScriptedLlm([[call("remember", text="the user likes tea")], "Noted."])
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=lane_memory())
+    await run_reply(session, "remember I like tea")
 
-    assert await history(session, script) == [
-        Turn("user", "do it"),
-        Turn("assistant", "It did not work."),
+    kept = await history(session, script)
+    assert [turn.role for turn in kept] == ["user", "assistant", "tool", "assistant"]
+    assert kept[0] == Turn("user", "remember I like tea")
+    (made,) = kept[1].tool_calls
+    assert (made.id, made.name, made.arguments, made.source) == (
+        "h0",
+        "remember",
+        {"text": "the user likes tea"},
+        "builtin",
+    )
+    (result,) = kept[2].tool_results
+    assert result.tool_call_id == "h0" and not result.is_error
+    # The same result the model read inside the reply that made it.
+    assert [r.content for turn in script.seen[1][0] for r in turn.tool_results] == [
+        result.content
     ]
-    # The structured turns existed, but only inside the reply.
-    assert any(turn.tool_calls for turns, _, _ in script.seen for turn in turns)
+    assert kept[3] == Turn("assistant", "Noted.")
 
 
 async def test_switch_agent_is_offered_only_where_there_is_somewhere_to_go() -> None:
@@ -763,8 +777,10 @@ async def test_a_forgotten_fact_is_brought_back_through_the_tool_that_undoes_it(
 
     assert await run_reply(session, "no, put that back") == ["It is back."]
 
+    # Read off the last request, which since #599 carries the first
+    # reply's exchange as well as its own: each result once.
     forgotten, restored = [
-        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+        result for turn in script.seen[-1][0] for result in turn.tool_results
     ]
     assert not forgotten.is_error and not restored.is_error
     assert restored.content == "Brought back: the user is vegetarian"
@@ -1364,9 +1380,8 @@ async def test_only_the_quoted_json_true_forgets_a_fact_for_good(
     assert facts(store) == ""
     await run_reply(session, "no, put that back")
 
-    _, restored = [
-        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
-    ]
+    # The last request carries the first reply's exchange too (#599).
+    _, restored = [result for turn in script.seen[-1][0] for result in turn.tool_results]
     assert restored.is_error is erased
     assert facts(store) == ("" if erased else "- the user is vegetarian")
 

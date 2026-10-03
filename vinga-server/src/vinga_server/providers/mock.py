@@ -211,7 +211,12 @@ class MockLlm(LlmProvider):
         # session sees from a cloud provider.
         yield StreamStarted()
         last_user = next((turn.content for turn in reversed(turns) if turn.role == "user"), "")
-        results = [result for turn in turns for result in turn.tool_results]
+        # This reply's results only: the ones after the utterance it is
+        # answering. An earlier reply's stay in the history it is handed
+        # (#599), and reading them would take every later utterance for
+        # the second beat of a flow that already finished.
+        asked = max((at for at, turn in enumerate(turns) if turn.role == "user"), default=-1)
+        results = [result for turn in turns[asked + 1 :] for result in turn.tool_results]
         answered = " ".join(result.content for result in results)
 
         if self._seen(turns) or tool_choice == "none":

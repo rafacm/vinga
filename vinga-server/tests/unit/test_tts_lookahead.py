@@ -354,9 +354,8 @@ async def test_lookahead_stops_at_the_end_of_a_round() -> None:
 
     async def run_tools(
         calls: Any, slots: Any, switches_left: int, invocation: str
-    ) -> tuple[list[Any], None]:
+    ) -> None:
         ran_at.append(asyncio.get_running_loop().time())
-        return [], None
 
     # White-box: what is being timed is where the tool round sits
     # between two sentences' audio, and a real round would have its own

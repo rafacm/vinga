@@ -125,11 +125,17 @@ def errors_of(script: ScriptedLlm) -> list[bool]:
 
 
 def _tool_results(script: ScriptedLlm) -> list[ToolResult]:
-    """Every tool result in what `seen` recorded: each round, each turn
-    of it, each result of that turn, in that order. One walk, so the two
-    reads above cannot come to disagree about the shape they read."""
+    """Every tool result in what `seen` recorded, each once: the results
+    a round was handed back to answer, which are its request's last
+    turn when that turn is a tool turn. Earlier results ride every later
+    request as part of the thread's history (#599), so reading every
+    turn would count each of them again per request. One walk, so the
+    two reads above cannot come to disagree about the shape they read."""
     return [
-        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+        result
+        for turns, _, _ in script.seen
+        if turns and turns[-1].tool_results
+        for result in turns[-1].tool_results
     ]
 
 

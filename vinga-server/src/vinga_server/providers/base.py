@@ -381,11 +381,15 @@ ToolChoice = Literal["auto", "none"]
 class Turn:
     """One conversation turn as the LLM stage sees it.
 
-    The two tool fields are empty for everything the session keeps:
-    persistent history is plain text, and the structured turns exist
-    only in the working copy inside one reply. An assistant turn that
-    asked for tools carries `tool_calls`; the turn answering them has
-    role "tool" and carries `tool_results`."""
+    An assistant turn that asked for tools carries `tool_calls`; the
+    turn answering them has role "tool" and carries `tool_results`. A
+    thread's history keeps both for the rest of the conversation
+    (#599): every call of a round that has its result is kept the
+    moment it answered, under an id the runtime minted, and what a
+    later request carries of it is `runtime/history.py`'s to decide (a
+    result over 2 KiB cleared on every later reply, a call to a tool no
+    longer offered turned into a plain-text note). A handover still
+    starts the incoming agent clean, because its thread is its own."""
 
     role: str  # "user", "assistant", or "tool"
     content: str
