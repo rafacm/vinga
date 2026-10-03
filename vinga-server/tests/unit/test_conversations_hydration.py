@@ -12,22 +12,34 @@ what a conversation is resumed into. And it says what it could not
 bring: the turns it could not read anywhere in the thread, and whether
 there were more of them than the budget had room for.
 
-The last two sections are the recap's. A checkpoint is a head that
-truncation may not reach, and the range a rebuilt context actually read
-is what a checkpoint is allowed to claim it covers.
+The section on tool exchanges is #599's: a turn's calls come back as
+the rounds the session kept, priced at the largest form a later request
+can send them in. The last two sections are the recap's. A checkpoint
+is a head that truncation may not reach, and the range a rebuilt
+context actually read is what a checkpoint is allowed to claim it
+covers.
 
 Sizes are written as characters and read as tokens through
 `ESTIMATED_CHARS_PER_TOKEN`, so a budget in this file is arithmetic
 rather than a guess about a tokenizer.
 """
 
+import json
+from typing import Any
+
 from vinga_server.conversations.hydration import (
     ESTIMATED_CHARS_PER_TOKEN,
     MILESTONE_NOTE,
-    TOOL_NOTE,
     hydrated,
 )
-from vinga_server.conversations.records import StoredTurn
+from vinga_server.conversations.records import StoredCall, StoredTurn
+from vinga_server.providers import Turn
+from vinga_server.runtime.history import (
+    CLEARED_NOTE,
+    DEGRADED_END,
+    DEGRADED_PREFIX,
+    as_sent,
+)
 
 # A budget nothing in this file reaches, for the cases that are not
 # about truncation.
@@ -67,26 +79,6 @@ def test_the_thread_comes_back_oldest_first() -> None:
     assert roles(answer.turns) == ["user", "assistant"] * 3
     assert texts(answer.turns)[0] == "1" * 8
     assert texts(answer.turns)[-1] == "r3" * 4
-
-
-def test_the_tools_a_turn_ran_are_named_and_nothing_else_about_them() -> None:
-    """Names only: arguments and results are the largest thing a thread
-    holds and the least use to a model picking it up again."""
-    answer = hydrated(
-        [StoredTurn(heard="lights", reply="Done.", tools=("switch_agent", "remember"))],
-        PLENTY,
-    )
-
-    assert texts(answer.turns)[1] == "Done.\n" + TOOL_NOTE.format(
-        names="switch_agent, remember"
-    )
-
-
-def test_a_turn_that_only_ran_tools_still_has_an_assistant_half() -> None:
-    answer = hydrated([StoredTurn(heard="lights", tools=("remember",))], PLENTY)
-
-    assert roles(answer.turns) == ["user", "assistant"]
-    assert texts(answer.turns)[1] == TOOL_NOTE.format(names="remember")
 
 
 def test_a_turn_with_no_stored_text_is_a_gap_and_is_counted() -> None:
@@ -260,6 +252,300 @@ def test_the_same_rows_answer_the_same_way_twice() -> None:
     units = [said(index) for index in range(6)]
 
     assert hydrated(units, 40) == hydrated(units, 40)
+
+
+# A turn's tool exchanges (#599)
+
+
+def row(
+    position: int,
+    name: str | None = "remember",
+    result: str | None = "Saved.",
+    source: str = "builtin",
+    **fields: Any,
+) -> StoredCall:
+    """One `tool_invocations` row as the store reads it back. Arguments
+    default to one naming the position, so two calls of one tool can be
+    told apart."""
+    fields.setdefault("arguments", {"text": f"fact {position}"})
+    return StoredCall(position=position, source=source, name=name, result=result, **fields)
+
+
+def calls_of(turns) -> list[tuple[str, str, dict[str, Any]]]:
+    return [(one.id, one.name, one.arguments) for turn in turns for one in turn.tool_calls]
+
+
+def results_of(turns) -> list[tuple[str, str]]:
+    return [(one.tool_call_id, one.content) for turn in turns for one in turn.tool_results]
+
+
+def test_a_turns_calls_come_back_as_the_rounds_they_were_made_in() -> None:
+    """Two rounds of two calls, in the order the store wrote them: each
+    round is an assistant turn asking and a tool turn answering, before
+    the reply, and every call and result carries the id the session
+    would have minted for it."""
+    answer = hydrated(
+        [
+            StoredTurn(
+                id=1,
+                heard="save four things",
+                reply="All four saved.",
+                calls=(
+                    row(0, arguments={"text": "a"}, result="Saved a."),
+                    row(1, arguments={"text": "b"}, result="Saved b."),
+                    row(0, arguments={"text": "c"}, result="Saved c."),
+                    row(1, arguments={"text": "d"}, result="Saved d."),
+                ),
+            )
+        ],
+        PLENTY,
+    )
+
+    assert roles(answer.turns) == ["user", "assistant", "tool", "assistant", "tool", "assistant"]
+    assert [len(turn.tool_calls) for turn in answer.turns] == [0, 2, 0, 2, 0, 0]
+    assert calls_of(answer.turns) == [
+        ("h0", "remember", {"text": "a"}),
+        ("h1", "remember", {"text": "b"}),
+        ("h2", "remember", {"text": "c"}),
+        ("h3", "remember", {"text": "d"}),
+    ]
+    assert results_of(answer.turns) == [
+        ("h0", "Saved a."),
+        ("h1", "Saved b."),
+        ("h2", "Saved c."),
+        ("h3", "Saved d."),
+    ]
+    # The rounds carry no preamble: the reply after them is the whole of
+    # what was heard, said once.
+    assert texts(answer.turns)[1:] == ["", "", "", "", "All four saved."]
+    # Where the runtime routed each call travels with it.
+    assert {(one.source, one.entry) for turn in answer.turns for one in turn.tool_calls} == {
+        ("builtin", None)
+    }
+
+
+def test_ids_count_on_across_turns() -> None:
+    """The next call the resumed session keeps is minted after these,
+    so no id can repeat across the join."""
+    answer = hydrated(
+        [
+            StoredTurn(id=1, heard="one", reply="Done.", calls=(row(0),)),
+            StoredTurn(id=2, heard="two", reply="Done.", calls=(row(0), row(1))),
+        ],
+        PLENTY,
+    )
+
+    assert [one[0] for one in calls_of(answer.turns)] == ["h0", "h1", "h2"]
+    assert [one[0] for one in results_of(answer.turns)] == ["h0", "h1", "h2"]
+
+
+def test_rows_are_grouped_into_rounds_before_any_is_left_out() -> None:
+    """The second round's first call never answered. Left out after the
+    grouping, it still says where that round began; left out before it,
+    the round's other call would fold into the first round."""
+    answer = hydrated(
+        [
+            StoredTurn(
+                id=1,
+                heard="go",
+                reply="Done.",
+                calls=(
+                    row(0, arguments={"text": "a"}),
+                    row(1, arguments={"text": "b"}),
+                    row(0, name="self_get_device_status", source="device", result=None),
+                    row(1, arguments={"text": "d"}),
+                ),
+            )
+        ],
+        PLENTY,
+    )
+
+    assert [[one.arguments for one in turn.tool_calls] for turn in answer.turns] == [
+        [],
+        [{"text": "a"}, {"text": "b"}],
+        [],
+        [{"text": "d"}],
+        [],
+        [],
+    ]
+
+
+def test_a_call_with_no_result_or_no_name_is_not_rebuilt() -> None:
+    """A successful move answered nothing, a call a cut left running
+    never answered, and a row with no name has nothing to be called by.
+    None comes back, and a round left with nothing renders nothing."""
+    answer = hydrated(
+        [
+            StoredTurn(
+                id=1,
+                heard="go to the tutor",
+                reply="One moment.",
+                calls=(
+                    row(0, name="switch_agent", result=None, arguments={"agent": "tutor"}),
+                    row(1, name="self_get_device_status", source="device", result=None),
+                    row(2, name=None, source="unknown", result="no tool called that"),
+                ),
+            )
+        ],
+        PLENTY,
+    )
+
+    assert roles(answer.turns) == ["user", "assistant"]
+    assert texts(answer.turns) == ["go to the tutor", "One moment."]
+
+
+def test_a_malformed_call_comes_back_with_no_arguments_and_its_error() -> None:
+    """What the store kept of it: no arguments, because the model's
+    bytes were not an object, and the error the model was answered
+    with. The same shape the session itself keeps."""
+    answer = hydrated(
+        [
+            StoredTurn(
+                id=1,
+                heard="remember this",
+                reply="Let me try that again.",
+                calls=(
+                    row(
+                        0,
+                        arguments=None,
+                        malformed=True,
+                        is_error=True,
+                        result="The arguments were not a JSON object.",
+                    ),
+                ),
+            )
+        ],
+        PLENTY,
+    )
+
+    (kept,) = [one for turn in answer.turns for one in turn.tool_calls]
+    assert (kept.name, kept.arguments, kept.malformed_arguments) == ("remember", {}, None)
+    (result,) = [one for turn in answer.turns for one in turn.tool_results]
+    assert result.is_error
+    assert result.content == "The arguments were not a JSON object."
+
+
+def test_a_turn_that_only_ran_tools_ends_on_its_tool_turn() -> None:
+    """A reply cut before it spoke kept its exchange, and that is not a
+    hole: what it did comes back, and the next utterance follows the
+    tool turn exactly as it did in the session."""
+    answer = hydrated(
+        [
+            StoredTurn(id=1, heard="remember tea", calls=(row(0),)),
+            StoredTurn(id=2, heard="what do I like?", reply="Tea."),
+        ],
+        PLENTY,
+    )
+
+    assert roles(answer.turns) == ["user", "assistant", "tool", "user", "assistant"]
+    assert (answer.rendered, answer.skipped) == (2, 0)
+
+
+def test_a_joined_turns_calls_stay_structured_after_the_answer_before_it() -> None:
+    """The first turn of a thread a move landed on, which ran a tool
+    before it answered. Its call stays a call, and the answer it follows
+    starts that call's assistant turn rather than standing as a second
+    assistant message in a row."""
+    answer = hydrated(
+        [
+            StoredTurn(id=1, heard="what is out there", reply="Galaxies."),
+            StoredTurn(
+                id=2,
+                reply="We were talking about galaxies.",
+                calls=(row(0, name="recall", arguments={"query": "galaxies"}, result="M31."),),
+            ),
+            StoredTurn(id=3, heard="go on", reply="Billions of them."),
+        ],
+        PLENTY,
+    )
+
+    assert roles(answer.turns) == ["user", "assistant", "tool", "assistant", "user", "assistant"]
+    asking = answer.turns[1]
+    assert asking.content == "Galaxies."
+    assert [(one.id, one.name) for one in asking.tool_calls] == [("h0", "recall")]
+    assert texts(answer.turns)[3] == "We were talking about galaxies."
+    assert (answer.rendered, answer.skipped) == (3, 0)
+    # And a request that still offers the tool sends it structured: only
+    # an unoffered call is ever turned into a note.
+    sent = as_sent(answer.turns, len(answer.turns), {"recall"}).turns
+    assert [(one.id, one.name) for one in sent[1].tool_calls] == [("h0", "recall")]
+    assert sent[1].content == "Galaxies."
+
+
+def test_an_answer_joined_after_a_tool_only_turn_follows_its_tool_turn() -> None:
+    """The joined answer's text comes after the round it follows, where
+    an assistant turn may stand."""
+    answer = hydrated(
+        [
+            StoredTurn(id=1, heard="remember tea", calls=(row(0),)),
+            StoredTurn(id=2, reply="Tutor here."),
+        ],
+        PLENTY,
+    )
+
+    assert roles(answer.turns) == ["user", "assistant", "tool", "assistant"]
+    assert texts(answer.turns)[-1] == "Tutor here."
+
+
+def _degraded_size(name: str, arguments: dict[str, Any], result: str, error: bool) -> int:
+    """How long a call's degraded note is, written out from the frame
+    the history module publishes rather than asked of it."""
+    record = {"tool": name, "arguments": arguments, "result": result, "error": error}
+    return len(DEGRADED_PREFIX + json.dumps(record, ensure_ascii=False) + DEGRADED_END)
+
+
+def test_a_large_result_is_charged_at_its_cleared_size() -> None:
+    """A 10 KiB result goes to every later request as the cleared note,
+    so that is what the budget charges, inside the call's degraded note:
+    the turn fits a budget sized for that, beside the newest one."""
+    big = "s" * 10_240
+    older = StoredTurn(
+        id=1,
+        heard="how is my board",
+        reply="Fine.",
+        calls=(row(0, name="self_get_device_status", source="device", arguments={}, result=big),),
+    )
+    newest = said(2)
+    cleared = CLEARED_NOTE.format(name="self_get_device_status", size=10_240)
+    charged = -(
+        -(
+            len("how is my board")
+            + len("Fine.")
+            + _degraded_size("self_get_device_status", {}, cleared, False)
+        )
+        // ESTIMATED_CHARS_PER_TOKEN
+    )
+
+    answer = hydrated([older, newest], charged + _cost(newest))
+
+    assert (answer.rendered, answer.over_budget) == (2, False)
+    # Rebuilt whole: clearing it is the request's to do, when one is made.
+    assert results_of(answer.turns) == [("h0", big)]
+    assert hydrated([older, newest], charged + _cost(newest) - 1).rendered == 1
+
+
+def test_a_turn_that_would_fit_structured_but_not_as_notes_is_left_out() -> None:
+    """Hydration does not know what a later request will offer, so it
+    charges every call as the note an unoffered one becomes, which is
+    the larger form. A budget with room for the structured call's name,
+    arguments and result, and not for the note, leaves the turn out."""
+    older = StoredTurn(
+        id=1,
+        heard="remember tea",
+        reply="Saved.",
+        calls=(row(0, arguments={"text": "tea"}, result="Saved."),),
+    )
+    newest = said(2)
+    words = len("remember tea") + len("Saved.")
+    structured = words + len("remember") + len(json.dumps({"text": "tea"})) + len("Saved.")
+    as_note = words + _degraded_size("remember", {"text": "tea"}, "Saved.", False)
+    room = -(-structured // ESTIMATED_CHARS_PER_TOKEN) + _cost(newest)
+    assert room < -(-as_note // ESTIMATED_CHARS_PER_TOKEN) + _cost(newest)
+
+    answer = hydrated([older, newest], room)
+
+    assert (answer.rendered, answer.over_budget) == (1, True)
+    assert answer.turns == (Turn("user", "2" * 8), Turn("assistant", "r2" * 4))
 
 
 # What a recap checkpoint changes

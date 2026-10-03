@@ -36,9 +36,12 @@ class StoredTurn:
 
     Both text halves are optional because both are under the text
     switch: a deployment that stores no text stores the turn and none of
-    the words in it. `tools` carries the names of the calls that turn
-    made, in the order the model issued them, with the ones the store
-    could not name already left out.
+    the words in it. `calls` is every call that turn made, one per
+    `tool_invocations` row, in the order they were reserved: round after
+    round, and within a round as the model issued them. Nothing is left
+    out here, an unnamed or unanswered call included, because which of
+    them a model is shown again is the hydrator's rule and a row dropped
+    on the way could be the one that marks where a round began.
 
     `id` is the row's own, and it travels because a recap has to say
     which turns it actually read: a checkpoint records the first and the
@@ -50,7 +53,37 @@ class StoredTurn:
     id: int = 0
     heard: str | None = None
     reply: str | None = None
-    tools: tuple[str, ...] = ()
+    calls: tuple["StoredCall", ...] = ()
+
+
+@dataclass(frozen=True)
+class StoredCall:
+    """One `tool_invocations` row, on its way back out to the hydrator.
+
+    The row's own columns and nothing derived from them. `position`
+    restarts at zero with every round of a reply, so a reader holding
+    the rows in the order they were written (their ids) finds each
+    round's start at a zero; read in `position` order instead, every
+    round's first call would come before every round's second.
+
+    `name`, `arguments` and `result` are under the text switch and null
+    with it off. `arguments` is null for a malformed call too, which
+    `malformed` says: the model streamed something that was not a JSON
+    object and the store kept none of it. `result` is null where the
+    call answered nothing, which is a successful move or a call a cut
+    left unexecuted. `source` and `entry` are where the runtime routed
+    the call when it was made, and survive text-off because this
+    deployment chose them.
+    """
+
+    position: int
+    source: str
+    entry: str | None = None
+    name: str | None = None
+    arguments: dict[str, Any] | None = None
+    result: str | None = None
+    is_error: bool = False
+    malformed: bool = False
 
 
 @dataclass(frozen=True)
@@ -329,6 +362,7 @@ __all__ = [
     "Acknowledgement",
     "MilestoneRecord",
     "SessionTurns",
+    "StoredCall",
     "StoredTurn",
     "ToolInvocation",
     "TurnLeg",

@@ -73,7 +73,7 @@ from sqlalchemy import ColumnElement, delete, func, select, tuple_, update
 
 from vinga_server.class_names import failure_name
 from vinga_server.config.models import DatabaseConfig
-from vinga_server.conversations.records import StoredTurn
+from vinga_server.conversations.records import StoredCall, StoredTurn
 from vinga_server.conversations.schema import (
     conversation_milestones,
     conversations,
@@ -851,8 +851,18 @@ def backlog(connection: Any, conversation: str) -> Backlog | None:
     Four statements rather than a join. A thread's turns are read in one
     order and its calls in another, and a join would answer one row per
     call with the turn's text repeated on each of them, which for a long
-    thread is the dialogue several times over on the wire for a handful
-    of names.
+    thread is the dialogue several times over on the wire.
+
+    Every call is read, in the order it was written: by turn, then by
+    its row id. Not by `position`, which restarts at zero with each
+    round of a reply, so ordering on it would put every round's first
+    call ahead of every round's second; the id is the order the writer
+    inserted a turn's calls in, which is the order they were reserved,
+    round after round, and that holds of every row ever stored. Nothing
+    is filtered here either, an unnamed or unanswered call included:
+    which calls a model is shown again is the hydrator's rule, and a row
+    dropped before it ran could be the zero that says where a round
+    began.
     """
     found = connection.execute(
         select(conversations.c.agent, conversations.c.incomplete).where(
@@ -872,20 +882,34 @@ def backlog(connection: Any, conversation: str) -> Backlog | None:
         .where(*criteria)
         .order_by(turns.c.id)
     ).all()
-    called: dict[int, list[str]] = {}
-    for turn_id, name in connection.execute(
-        select(tool_invocations.c.turn, tool_invocations.c.name)
-        .where(
-            tool_invocations.c.turn.in_(select(turns.c.id).where(*criteria)),
-            # A call the store could not name is left out rather than
-            # rendered as a blank: the name is null under text-off and
-            # for a call whose own name never parsed, and neither is
-            # something to tell a model ran.
-            tool_invocations.c.name.is_not(None),
+    called: dict[int, list[StoredCall]] = {}
+    for row in connection.execute(
+        select(
+            tool_invocations.c.turn,
+            tool_invocations.c.position,
+            tool_invocations.c.source,
+            tool_invocations.c.entry,
+            tool_invocations.c.name,
+            tool_invocations.c.arguments,
+            tool_invocations.c.result,
+            tool_invocations.c.is_error,
+            tool_invocations.c.malformed,
         )
-        .order_by(tool_invocations.c.turn, tool_invocations.c.position)
+        .where(tool_invocations.c.turn.in_(select(turns.c.id).where(*criteria)))
+        .order_by(tool_invocations.c.turn, tool_invocations.c.id)
     ):
-        called.setdefault(turn_id, []).append(name)
+        called.setdefault(row.turn, []).append(
+            StoredCall(
+                position=row.position,
+                source=row.source,
+                entry=row.entry,
+                name=row.name,
+                arguments=row.arguments,
+                result=row.result,
+                is_error=bool(row.is_error),
+                malformed=bool(row.malformed),
+            )
+        )
     return Backlog(
         conversation=conversation,
         agent=found.agent,
@@ -896,7 +920,7 @@ def backlog(connection: Any, conversation: str) -> Backlog | None:
                 id=row.id,
                 heard=row.heard,
                 reply=row.reply,
-                tools=tuple(called.get(row.id, ())),
+                calls=tuple(called.get(row.id, ())),
             )
             for row in spoken
         ),
