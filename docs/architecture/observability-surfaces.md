@@ -304,6 +304,35 @@ effort: a corrected fact keeps its id with new text, and a pruned or deleted
 one leaves no row, so what the model actually read is the LLM input export's to
 carry. A recap's prompt holds no memory and carries none of these.
 
+Every generation, a recap included, and an LLM request that failed after it
+was built, a context-length refusal included, also says what its history lost
+on the way out (#599). An agent's tool exchanges stay in the history it is sent
+for the rest of the conversation; a result an earlier reply received is sent as
+a note naming the tool and its size once it is over 2 KiB, and an earlier call
+to a tool the request does not offer is sent as a quoted record in the
+assistant's turn. `vinga.llm.history.cleared.count` and
+`vinga.llm.history.cleared.bytes` count the cleared results and their original
+UTF-8 sizes, `vinga.llm.history.cleared.largest` is the largest of them,
+`vinga.llm.history.cleared.tools.<key>` counts them per tool, and
+`vinga.llm.history.degraded.count` counts the degraded calls. The three counts
+are zero rather than absent when nothing was lost, and the other two are
+absent. The per-tool key follows the `tool_call` naming policy,
+`builtin.<name>`, `mcp.<entry>`, `device` or `unknown`, and is the origin the
+call was classified with when the model made it, so a result from an MCP entry
+an apply has since removed is still keyed by that entry. A tool span carries
+`vinga.tool.refetch`, true when the call repeats, by tool and by arguments
+compared with their keys sorted, an earlier reply's call whose result its
+round's request carried cleared: the evidence that a cleared result was needed
+again. Grouped by `vinga.conversation.id` it counts re-fetches per
+conversation, across sessions and resumes, which a counter held in a session
+could not. A call whose arguments were not a JSON object is never a re-fetch,
+and the moves (a handover, a new conversation, a resume) produce no tool span,
+so a repeated move is not counted: a refused move's result is a sentence this
+server wrote, never data the cap exists to clear. `vinga.llm.turns` counts the
+kept tool turns too, so a series crossing that change steps up. All of it is
+counts, sizes and the naming policy's keys: no result, no argument and no
+far-side tool name.
+
 **Serves.** Needs 1 and 5.
 
 **Retention and access.** **The collector's
