@@ -67,11 +67,14 @@ per provider would be exact for one of them and wrong for the rest, and
 what the number is for is deciding how far back to read rather than
 what a request will cost. Hydration does not know what a later request
 will offer, and the offer decides whether each call goes structured or
-as the longer degraded note, so a unit is charged as a request offering
-no tools would send it: every call as its note, every result held to
-the cap. That is never smaller than whatever a later request sends, so
-a unit that fit still fits; the price is reading a thread whose tools
-are all still offered a little less far back than an exact count would.
+as the degraded note, so each kept call is charged at the bound
+`runtime.history.note_cost` states for both: its degraded note, the
+result held to the cap and every character outside ASCII counted as
+its JSON escape, plus the one space that joins a note to whatever
+precedes it in its turn. That is never smaller than whatever a later
+request sends, so a unit that fit still fits; the price is reading a
+thread whose tools are all still offered a little less far back than
+an exact count would.
 
 **A checkpoint is a pinned head, never a unit.** Where a thread has a
 recap milestone, its text goes in front of everything as one assistant
@@ -86,7 +89,7 @@ from dataclasses import dataclass, replace
 
 from vinga_server.conversations.records import StoredCall, StoredTurn
 from vinga_server.providers import ToolCall, ToolResult, Turn
-from vinga_server.runtime.history import Pair, as_sent, kept_round
+from vinga_server.runtime.history import Pair, kept_round, note_cost
 
 # How many characters of stored text are counted as one token.
 #
@@ -170,10 +173,11 @@ def hydrated(
     because the first message a provider is handed is the user's.
     Neither is a hole: nothing about that turn was lost.
 
-    A unit is charged as a request offering no tools would send it,
-    every call as its degraded note and every result held to the cap
-    (`runtime.history.as_sent` with nothing offered), which is the
-    largest form any later request can send it in.
+    A unit is charged its words and, for each kept call, the bound
+    `runtime.history.note_cost` gives (the degraded note, the result
+    held to the cap, non-ASCII counted escaped) and the space that joins
+    a note to the text before it: never less than any form a later
+    request can send it in.
 
     `milestone` is the text of the thread's latest recap checkpoint, and
     its caller has already left out the turns that checkpoint covers. It
@@ -288,7 +292,11 @@ def _kept(call: StoredCall) -> bool:
 def _pair(call: StoredCall) -> Pair:
     """One kept row as the call and result the history holds. Its id is
     minted where the round is placed; a malformed call has no arguments,
-    because the store kept none of what the model streamed."""
+    because the store kept none of what the model streamed. The result
+    is placed by `kept_round`, which keeps it in its `countable` form as
+    the session does, so a row holding text UTF-8 cannot encode is
+    measured and sent like any other rather than raising where the
+    session would not."""
     assert call.name is not None and call.result is not None
     arguments = {} if call.malformed or call.arguments is None else call.arguments
     return Pair(
@@ -323,12 +331,24 @@ def _rendered(heard: str, pieces: Sequence[_Piece], before: Sequence[Turn]) -> l
     return out
 
 
+# What joins a degraded note to the text before it in its turn, which
+# `as_sent` adds to the turn and `note_cost` does not count.
+_NOTE_JOIN = " "
+
+
 def _cost(unit: tuple[str, Sequence[_Piece]]) -> int:
-    """What this unit is charged: the unit as a request offering no
-    tools would send it, which degrades every call and holds every
-    result to the cap, and which no other request exceeds."""
+    """What this unit is charged: its text, and each kept call at its
+    note's bound and the space before it, which no request exceeds."""
     messages = _rendered(*unit, ())
-    return _tokens(as_sent(messages, len(messages), frozenset()).turns)
+    answers = {
+        result.tool_call_id: result for turn in messages for result in turn.tool_results
+    }
+    characters = sum(len(message.content) for message in messages) + sum(
+        note_cost(call, answers.get(call.id)) + len(_NOTE_JOIN)
+        for turn in messages
+        for call in turn.tool_calls
+    )
+    return -(-characters // ESTIMATED_CHARS_PER_TOKEN)
 
 
 def _tokens(messages: Sequence[Turn]) -> int:
