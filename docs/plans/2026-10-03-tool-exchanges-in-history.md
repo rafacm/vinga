@@ -473,3 +473,43 @@ the commit body; a survivor is reported as a finding about the test.
   `StoredCall`, the widened thread read, hydration rendering rounds
   under the budget, the recap sent degraded, the concepts resumption
   bullet. Stacks on M1, independent of M2; closes #599.
+
+## Plan review round
+
+Reviewed 2026-10-03 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 5m05s, at commit 71af06b1, plan blob 898683fe.
+
+---
+
+1. **P1: The commit sites cannot access the tool rounds they must save.**
+   **Evidence:** Plan D1 and M1 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:195`) call `committed(working, ...)` at the reply and move commit sites. `working` is local to `_tool_loop` (`vinga-server/src/vinga_server/runtime/pipeline.py:1772`); the commit sites are outside it, and the reply site appends history only when `spoken` is nonempty (pipeline.py:1474 (`vinga-server/src/vinga_server/runtime/pipeline.py:1474`)).
+   **Plan should say instead:** Define how completed rounds reach both commit sites, including when `_tool_loop` is cancelled, and commit completed tool exchanges even when no sentence was spoken. Test a tool-only failed reply as well as a barge-in.
+
+2. **P1: Sorting by position destroys round order on resume.**
+   **Evidence:** Plan D9 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:289`) keeps the read “ordered by turn and position” while treating `position == 0` as a new round. `reserve` (`vinga-server/src/vinga_server/runtime/tool_execution.py:412`) restarts position at zero each round; the current query (`vinga-server/src/vinga_server/conversations/threads.py:877`) sorts all zeros before all ones.
+   **Plan should say instead:** Read calls in their insertion order, using `tool_invocations.id`, then use position to identify boundaries within that order. Test multiple rounds with more than one call each, including stored rows created before the upgrade.
+
+3. **P1: A stored result does not prove its interrupted round was complete.**
+   **Evidence:** Plan D2 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:223`) drops a round cut during execution, but D9 drops only rows with null results. Calls are reserved before execution (`vinga-server/src/vinga_server/runtime/pipeline.py:1869`) and filled individually (`vinga-server/src/vinga_server/runtime/turns.py:247`). A barge-in after one of two calls completes leaves one result in the store but no tool turn in `working`. Dropping the null row can also erase a `position == 0` boundary.
+   **Plan should say instead:** Group rows into rounds before filtering, define how incomplete rounds and successful moves are distinguished, and make resumed history match the in-session rule. Test cancellation after the first of two calls completes, then resume that thread.
+
+4. **P1: The joined-turn exception violates the structured-history decision.**
+   **Evidence:** Plan D9 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:289`) degrades every call on a turn joined to the preceding answer, even when the tool is still offered. Issue decision 5 degrades calls *only* when their names are absent from the current offer; the resumed-request criterion requires still-offered calls to remain structured.
+   **Plan should say instead:** Preserve structured exchanges while joining that turn to the preceding budget unit. Add a resume test for an answer-only turn that contains a still-offered tool call.
+
+5. **P1: The degraded note gives untrusted bytes an assistant voice.**
+   **Evidence:** Plan Q2 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:89`) interpolates the raw tool name and result into assistant content. The phrase “as data and not as instructions” does not contain a result that starts with `)` and follows it with a forged assistant instruction. The adapters (`vinga-server/src/vinga_server/providers/openai_llm.py:61`) will send that content as assistant-authored text.
+   **Plan should say instead:** Specify an escaped, clearly delimited representation for every interpolated far-side field, state its remaining authority risk, and test adversarial result and name strings through both provider translators.
+
+6. **P2: Clearing metrics omit requests that fail and recap requests.**
+   **Evidence:** Plan Q5 and M2 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:129`) add fields only to `LlmRound`. A failed request emits `ProviderFailed` (`vinga-server/src/vinga_server/events/catalog.py:1997`), and a recap that the plan says carries cleared results emits `LlmRecap` (`vinga-server/src/vinga_server/events/catalog.py:1970`). Both have `llm` spans.
+   **Plan should say instead:** Carry clearing facts on those event variants and their spans, or explicitly narrow “per round” and explain why these requests are excluded. Test a context-length failure after request assembly and a recap containing cleared results.
+
+7. **P2: The clearing breakdown loses an MCP entry when its tool disappears.**
+   **Evidence:** Plan D7 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:274`) derives metric keys from the *current* `Offer`; Q5 assigns every unoffered call to `unoffered`. After an MCP reload, the prior entry is absent from that offer, although the issue requires the configured MCP entry to identify which tool was cleared. The store already records `source` and `entry` (`vinga-server/src/vinga_server/conversations/records.py:57`), but planned `StoredCall` omits them.
+   **Plan should say instead:** Preserve the call-time trusted origin in session history and hydration, and use it for the clearing breakdown. Test a cleared MCP result after that entry is removed.
+
+8. **P2: The resumption budget is priced before the final representation is known.**
+   **Evidence:** Plan Q4 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:116`) promises an as-sent cost, but `hydrated` (`vinga-server/src/vinga_server/conversations/hydration.py:112`) has no current offer. That offer decides whether each exchange is structured or becomes a potentially longer text note; the recap uses an empty offer. The planned tests price a cleared large result but do not test degradation changing whether a turn fits.
+   **Plan should say instead:** Charge each unit using the actual representation for its request, or a documented conservative upper bound. Test a turn that fits while structured but exceeds the budget after degradation.
+
+**Verdict:** Ready after the P1 and P2 amendments. The proposed `runtime/history.py` passes the deletion test on its stated responsibilities: removing it would put the cap, completion, ID, and degradation rules back into multiple callers.
