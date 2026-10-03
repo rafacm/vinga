@@ -59,10 +59,30 @@ def anthropic_messages(turns: Sequence[Turn]) -> list[dict[str, Any]]:
     results are the history's last turn, and the next utterance follows
     them. Two utterances in a row, which a failed reply with no tools
     leaves, join the same way.
+
+    An assistant turn that follows a plain assistant message joins it
+    too, which the history produces when a past round's every call was
+    degraded into a note (#599): that round is a plain assistant turn,
+    and the reply after it, or the next round that still asks for a
+    tool, is another. A plain one is appended as a text block; one that
+    asks for tools takes the message's text as its leading blocks, in
+    front of its own preamble and its `tool_use` blocks. The history
+    keeps its turns apart; only this rendering joins them. A message
+    that asks for tools is never followed by another assistant turn,
+    since the history drops a tool turn only where no call is left to
+    answer, so nothing here joins onto one.
     """
     messages: list[dict[str, Any]] = []
     for turn in turns:
-        if turn.tool_results:
+        if turn.role == "assistant" and messages and _plain_assistant(messages[-1]):
+            said = messages.pop()
+            blocks = _text_blocks(said["content"])
+            if turn.tool_calls:
+                blocks += _asking(turn)
+            else:
+                blocks += _text_blocks(turn.content)
+            messages.append({"role": "assistant", "content": blocks})
+        elif turn.tool_results:
             messages.append(
                 {
                     "role": "user",
@@ -78,14 +98,7 @@ def anthropic_messages(turns: Sequence[Turn]) -> list[dict[str, Any]]:
                 }
             )
         elif turn.tool_calls:
-            blocks: list[dict[str, Any]] = []
-            if turn.content:
-                blocks.append({"type": "text", "text": turn.content})
-            blocks += [
-                {"type": "tool_use", "id": call.id, "name": call.name, "input": call.arguments}
-                for call in turn.tool_calls
-            ]
-            messages.append({"role": "assistant", "content": blocks})
+            messages.append({"role": "assistant", "content": _asking(turn)})
         elif turn.role == "user" and messages and messages[-1]["role"] == "user":
             joined = messages[-1]
             if isinstance(joined["content"], str):
@@ -94,6 +107,35 @@ def anthropic_messages(turns: Sequence[Turn]) -> list[dict[str, Any]]:
         else:
             messages.append({"role": turn.role, "content": turn.content})
     return messages
+
+
+def _asking(turn: Turn) -> list[dict[str, Any]]:
+    """A turn that asked for tools as content blocks: its spoken
+    preamble, if any, then one `tool_use` block per call."""
+    return [
+        *_text_blocks(turn.content),
+        *(
+            {"type": "tool_use", "id": call.id, "name": call.name, "input": call.arguments}
+            for call in turn.tool_calls
+        ),
+    ]
+
+
+def _text_blocks(content: str | list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Message content as text blocks, with nothing for an empty string,
+    which the API refuses as a block."""
+    if isinstance(content, list):
+        return list(content)
+    return [{"type": "text", "text": content}] if content else []
+
+
+def _plain_assistant(message: dict[str, Any]) -> bool:
+    """Whether this is an assistant message that asks for no tool, which
+    is the one an assistant turn after it may join."""
+    if message["role"] != "assistant":
+        return False
+    content = message["content"]
+    return isinstance(content, str) or all(block["type"] == "text" for block in content)
 
 
 def anthropic_tools(tools: Sequence[ToolDef]) -> list[dict[str, Any]]:

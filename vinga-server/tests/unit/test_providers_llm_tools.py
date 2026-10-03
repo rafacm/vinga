@@ -54,6 +54,7 @@ from vinga_server.providers.openai_llm import (
     chat_tools,
     tool_call_from_fragments,
 )
+from vinga_server.runtime.history import DEGRADED_PREFIX, Pair, as_sent, kept_round
 
 WEATHER = ToolDef(
     name="weather__forecast",
@@ -140,6 +141,82 @@ def test_anthropic_joins_two_plain_user_turns_into_one_message() -> None:
                 {"type": "text", "text": "are you there?"},
             ],
         }
+    ]
+
+
+def test_anthropic_joins_two_plain_assistant_turns_into_one_message() -> None:
+    """A past round whose every call was degraded is a plain assistant
+    turn, and the reply that followed it is another (#599, D6 keeps them
+    apart in the history). The API wants the roles to alternate, so the
+    second joins the first as a text block."""
+    assert anthropic_messages(
+        [Turn("user", "hello"), Turn("assistant", "Noted."), Turn("assistant", "Anything else?")]
+    ) == [
+        {"role": "user", "content": "hello"},
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "Noted."},
+                {"type": "text", "text": "Anything else?"},
+            ],
+        },
+    ]
+
+
+def no_tool_call_turn_is_followed_by_an_assistant_turn(turns: list[Turn]) -> None:
+    """D6's invariant, which the translator relies on rather than
+    handles: a tool turn is dropped only when no structured call is left
+    in the turn before it, so a turn that still asks for tools is always
+    answered before anything else the assistant says."""
+    for asking, after in zip(turns, turns[1:], strict=False):
+        if asking.tool_calls:
+            assert after.role == "tool", turns
+
+
+def test_anthropic_joins_a_degraded_round_onto_the_structured_round_after_it() -> None:
+    """Two past rounds: the first called a tool this request no longer
+    offers and is the degraded note, a plain assistant turn; the second
+    called one still offered and stays structured. The note becomes the
+    leading text of the tool-call message, so the roles alternate and
+    every tool use is answered in the message after it. OpenAI's
+    translation keeps the two assistant messages it was given."""
+    history = [Turn("user", "check the lamp and save it")]
+    history += kept_round(
+        history,
+        "Checking.",
+        [Pair(ToolCall(id="p1", name="home__lamp"), ToolResult("p1", "on"), "mcp", "home")],
+    )
+    history += kept_round(
+        history,
+        "",
+        [
+            Pair(
+                ToolCall(id="p2", name="remember", arguments={"text": "lamp on"}),
+                ToolResult("p2", "Saved."),
+                "builtin",
+                None,
+            )
+        ],
+    )
+    history.append(Turn("user", "thanks"))
+    sent = as_sent(history, len(history), {"remember"}).turns
+    no_tool_call_turn_is_followed_by_an_assistant_turn(sent)
+    assert [turn.role for turn in sent] == ["user", "assistant", "assistant", "tool", "user"]
+
+    messages = anthropic_messages(sent)
+
+    assert [message["role"] for message in messages] == ["user", "assistant", "user"]
+    blocks = messages[1]["content"]
+    assert [block["type"] for block in blocks] == ["text", "tool_use"]
+    assert blocks[0]["text"].startswith("Checking. " + DEGRADED_PREFIX)
+    assert blocks[1]["id"] == "h1"
+    assert [block.get("tool_use_id") for block in messages[2]["content"]] == ["h1", None]
+    assert [message["role"] for message in chat_messages("", sent)][-5:] == [
+        "user",
+        "assistant",
+        "assistant",
+        "tool",
+        "user",
     ]
 
 

@@ -472,12 +472,11 @@ async def test_a_resumed_request_carries_offered_calls_structured_and_others_as_
     thread carries the first structured, with its result, and the
     second as the degraded note.
 
-    Through the real Anthropic translator, the cut reply's tool turn
-    and the utterance after it are one user message, and the call is
-    answered in it. The degraded round and the reply after it are two
-    assistant turns in a row, which is D6's shape (a degraded round is
-    not merged into the speech after it) and is the same in a session
-    that never ended."""
+    The history keeps the degraded round and the reply after it as two
+    assistant turns (D6). Through the real Anthropic translator the
+    roles alternate all the same: the cut reply's tool turn and the
+    utterance after it are one user message answering the call, and
+    the degraded note and the stored reply are one assistant message."""
     backlog = a_backlog(
         GALAXY,
         said=[("remember the door code", None), ("is the lamp on?", "It is on.")],
@@ -531,18 +530,14 @@ async def test_a_resumed_request_carries_offered_calls_structured_and_others_as_
     assert record == {"tool": "home__lamp_state", "arguments": {}, "result": "on", "error": False}
     paired([poet.seen[2]])
     messages = anthropic_messages(turns)
-    assert [one["role"] for one in messages] == [
-        "user",
-        "assistant",
-        "user",
-        "assistant",
-        "assistant",
-        "user",
-    ]
+    assert [one["role"] for one in messages] == ["user", "assistant"] * 2 + ["user"]
     (used,) = [block for block in messages[1]["content"] if block["type"] == "tool_use"]
     assert [block["type"] for block in messages[2]["content"]] == ["tool_result", "text"]
     assert messages[2]["content"][0]["tool_use_id"] == used["id"] == "h0"
     assert messages[2]["content"][1]["text"] == "is the lamp on?"
+    assert [block["type"] for block in messages[3]["content"]] == ["text", "text"]
+    assert messages[3]["content"][0]["text"].startswith(DEGRADED_PREFIX)
+    assert messages[3]["content"][1]["text"] == "It is on."
 
 
 def written_and_read_back(spy: SpyStore) -> Any:
