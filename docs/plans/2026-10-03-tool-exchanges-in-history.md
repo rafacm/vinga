@@ -170,11 +170,17 @@ of the three `tool_call` variants, so it lands on the tool span:
 `cleared_tools` is a closed `EventValue` (`ClearedTools`, the shape of
 `MemorySources`): every key is one of `builtin.<name>` (a builtin's own
 name), `mcp.<entry>` (the configured MCP entry), `device`, or
-`unoffered` (a call this round's offer no longer names, invented names
-included, since the offer that would have named it is gone), every
-value a positive count. The origin is read off the round's `Offer`
-(`Offer.origins`), the same frozen provenance a withheld sentence is
-named from; nothing far-side becomes a key. The prefixes keep a builtin
+`unknown` (a name the model invented), every value a positive count:
+the four shapes of the `tool_call` naming policy, from the closed
+`ToolSource` set. The origin is the call's own, captured when it was
+made rather than read off a later offer (finding 7): an MCP entry that
+an apply has since removed is still named as the entry the call
+reached, which is the question "which tools were cleared" asks. In
+session it is the classification `ToolExecution.reserve` already took
+(`ToolInvocation.source` and `.entry`, read back with
+`TurnUnderway.reserved(slot)`) and `kept_round` stores on the kept
+call; on resume it is the stored row's `source` and `entry`. Nothing
+far-side becomes a key. The prefixes keep a builtin
 and an MCP entry that share a word apart.
 
 `degraded_calls` is the one fact not in decision 3's list. It is one
@@ -343,12 +349,19 @@ turn. Adjacent plain assistant turns are not merged: two assistant
 messages in a row is a shape a failed reply already produces today, and
 merging would be a second rule about speech.
 
-**D7. The per-origin keys are the caller's.** `as_sent` returns the
-cleared calls' names; the pipeline, which holds the round's `Offer`,
-maps each to its `ClearedTools` key. That keeps `runtime/history.py`
-free of the tool namespaces, and the naming policy where it already
-lives (`tool_execution.py`), as a small function beside
-`_sentence_withheld`'s.
+**D7. A kept call carries its own origin, and the keys are the
+caller's.** `ToolCall` gains two optional fields, `source` and `entry`,
+documented as where the runtime routed the call, set only when a call
+is kept in history and never read by an adapter (both translators
+build their wire shapes field by field, so an added field cannot reach
+a request; a test pins that for both). Plain strings rather than the
+runtime's `Origin`, because `providers/` does not import `runtime/`.
+`StoredCall` carries the same two from the row. `as_sent` returns the
+cleared calls' `(name, source, entry)`; the pipeline maps each to its
+`ClearedTools` key with one small function in `tool_execution.py`
+beside `_sentence_withheld`'s, which is where the naming policy
+already lives. That keeps `runtime/history.py` free of the tool
+namespaces.
 
 **D8. The re-fetch check rides the existing classification.** The
 round's cleared keys go to `ToolExecution.run` with the invocation it
@@ -488,7 +501,9 @@ hydration suite's builders; no new fixtures.
   second, since only M3 gives the recap exchanges, and the plan names
   it in whichever milestone merges later); `ClearedTools` validation
   (rejects an unknown key shape, a zero, a bool), the key mapping per
-  namespace with a device tool named like a builtin; `refetch` true for
+  namespace with a device tool named like a builtin, and a cleared MCP
+  result still keyed `mcp.<entry>` after that entry was removed from the
+  configuration; `refetch` true for
   a repeated call after its result was cleared, true when the repeat
   orders the same arguments differently, and false for a repeat of a
   result that was kept. A
@@ -545,7 +560,8 @@ the commit body; a survivor is reported as a finding about the test.
 - **No-leak**: no new surface carries content. The cleared note and
   the degraded note go only to the model and to the opt-in content
   export that already carries tool results. Every metric is a count, a
-  size, or a naming-policy key built from `Offer.origins`; the
+  size, or a naming-policy key built from the call's own classified
+  origin; the
   sentinel test in M2 plants a credential-shaped value in a far-side
   name and a result.
 - **Pin before reshaping**: the in-round shape is unchanged (D4), and
@@ -553,8 +569,8 @@ the commit body; a survivor is reported as a finding about the test.
   tests that pin the text-only rule, which change on purpose and are
   named in the PR.
 - **Closed sets mapped to decision sites**: `ClearedTools` keys come
-  from `Origin.source`, whose set is the classifier's; `unoffered` is
-  decided where the offer lookup misses.
+  from the source `ToolExecution._classified` decided when the call was
+  reserved, whose set is the classifier's (`ToolSource`).
 - **Honest seams**: `as_sent` takes the offered names as an argument
   rather than reading a registry, so an MCP reload is tested by
   passing a different set.
@@ -643,6 +659,8 @@ Reviewed 2026-10-03 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
 7. **P2: The clearing breakdown loses an MCP entry when its tool disappears.**
    **Evidence:** Plan D7 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:274`) derives metric keys from the *current* `Offer`; Q5 assigns every unoffered call to `unoffered`. After an MCP reload, the prior entry is absent from that offer, although the issue requires the configured MCP entry to identify which tool was cleared. The store already records `source` and `entry` (`vinga-server/src/vinga_server/conversations/records.py:57`), but planned `StoredCall` omits them.
    **Plan should say instead:** Preserve the call-time trusted origin in session history and hydration, and use it for the clearing breakdown. Test a cleared MCP result after that entry is removed.
+
+   *Resolution:* accepted. D7 adds `source` and `entry` to a kept `ToolCall` (from the reservation's classification) and to `StoredCall` (from the row), and the keys are built from them; `unoffered` is gone and the fourth key is the naming policy's own `unknown`. The removed-entry test is in M2's list.
 
 8. **P2: The resumption budget is priced before the final representation is known.**
    **Evidence:** Plan Q4 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:116`) promises an as-sent cost, but `hydrated` (`vinga-server/src/vinga_server/conversations/hydration.py:112`) has no current offer. That offer decides whether each exchange is structured or becomes a potentially longer text note; the recap uses an empty offer. The planned tests price a cleared large result but do not test degradation changing whether a turn fits.
