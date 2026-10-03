@@ -382,8 +382,8 @@ the same way.
 
 **D9. Hydration renders rounds, and the names note retires (M3).**
 `StoredTurn.tools: tuple[str, ...]` becomes `calls:
-tuple[StoredCall, ...]` (`position`, `name`, `arguments`, `result`,
-`is_error`, `malformed`), read by `threads.py` from the same query
+tuple[StoredCall, ...]` (`position`, `source`, `entry`, `name`,
+`arguments`, `result`, `is_error`, `malformed`), read by `threads.py` from the same query
 widened to those columns.
 
 The read orders by turn and then by `tool_invocations.id`, never by
@@ -574,10 +574,12 @@ the commit body; a survivor is reported as a finding about the test.
   origin; the
   sentinel test in M2 plants a credential-shaped value in a far-side
   name and a result.
-- **Pin before reshaping**: the in-round shape is unchanged (D4), and
-  the existing tool-loop suites stay green unmodified apart from the
-  tests that pin the text-only rule, which change on purpose and are
-  named in the PR.
+- **Pin before reshaping**: the first round of a reply is
+  byte-identical to today; later rounds of the same reply now carry
+  minted ids and the degraded form of invented names (D4, D5), which
+  changes on purpose. The existing tool-loop suites stay green
+  unmodified apart from the tests that pin the text-only rule or those
+  two shapes, which change on purpose and are listed in the PR.
 - **Closed sets mapped to decision sites**: `ClearedTools` keys come
   from the source `ToolExecution._classified` decided when the call was
   reserved, whose set is the classifier's (`ToolSource`).
@@ -612,8 +614,9 @@ the commit body; a survivor is reported as a finding about the test.
 ## Milestones
 
 - [ ] **M1: keep completed tool rounds in history.** Decisions 1, 2
-  and 5 (D1 to D6): `runtime/history.py`, the two commit sites and the
-  per-round `as_sent`, the export staging the as-sent turns, the
+  and 5 (D1 to D6, and D7's two `ToolCall` fields, filled in at commit):
+  `runtime/history.py`, the per-round commit and the per-round
+  `as_sent`, the export staging the as-sent turns, the
   pinning test and the three documents above. The behavior change, alone
   in review.
 - [ ] **M2: measure the cap.** Decision 3 (Q5, D7, D8): five
