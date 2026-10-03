@@ -183,3 +183,25 @@ Rafael.
 - [ ] **M1: memory is read once per conversation.** Decisions 1 to 6,
   their tests and mutations, the gate, the documentation footprint. One
   pull request; it closes #536.
+
+## Plan review round
+
+Reviewed 2026-10-03 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 5m13s, at commit d5a83f2f, plan blob 5f930cf6.
+
+---
+
+1. **P1: Tool results do not survive into the next reply.** Evidence: the plan says memory tool results remain in history (`docs/plans/2026-10-03-memory-per-conversation.md:50`). The runtime keeps structured tool turns only in a reply-local `working` copy (`vinga-server/src/vinga_server/runtime/pipeline.py:1772`); an existing test explicitly confirms they are absent from later history (`vinga-server/tests/unit/test_session_tools.py:211`). With a frozen snapshot, a later reply can receive neither the new fact nor the result that announced it. **The plan should specify how memory changes remain visible across independent replies**, including corrections and removals, and test the provider’s actual request on a later reply whose user utterance and spoken answer do not repeat the changed value.
+
+2. **P2: A failed first read becomes a conversation-long empty snapshot.** Evidence: `MemoryStore._read` reports a failure by class and returns `NOTHING_REMEMBERED` (`vinga-server/src/vinga_server/memory/store.py:681`); the plan caches the resulting `RoundPrompt` until activation or rebind (`docs/plans/2026-10-03-memory-per-conversation.md:62`). A short database outage would therefore make memory disappear for the rest of a long conversation, even after recovery. **The plan should distinguish a successful empty read from a failed read**, keep the current safe empty reply on failure, and retry snapshot construction on a later reply. Test failure followed by recovery.
+
+3. **P2: Hard deletion gains an undocumented future disclosure path.** Evidence: the plan defers operator changes until the next conversation and claims nothing new reaches a surface (`docs/plans/2026-10-03-memory-per-conversation.md:84`). Today the operator API is the hard-deletion door (`docs/architecture/observability-surfaces.md:183`), while enabled LLM input export sends each round’s prompt outward (`docs/architecture/observability-surfaces.md:541`). A frozen prompt can send a *new copy* of a deleted secret on every later round. **The plan should state this consequence and give operators a concrete way to stop an affected live conversation before deleting sensitive content**, then test the documented behavior with export enabled.
+
+4. **P2: The proposed framing can be absent or give the wrong precedence.** Evidence: `with_scopes` returns the know-how half unchanged when all scope blocks are empty (`vinga-server/src/vinga_server/runtime/prompt.py:528`), but the plan requires its new snapshot sentence only when a memory block exists (`docs/plans/2026-10-03-memory-per-conversation.md:116`). Its gate starts with empty memory. Also, a memory-policy change rebuilds the snapshot mid-conversation (`docs/plans/2026-10-03-memory-per-conversation.md:91`), making “as it stood when this conversation started” false; older history updates need not outrank that new snapshot. **The plan should define framing for an empty snapshot and describe precedence relative to the snapshot’s actual capture time.** Test both an initially empty conversation and an off-to-on policy apply.
+
+5. **P2: The documentation footprint leaves live claims false.** Evidence: `docs/concepts.md` promises a renamed or moved device is reflected in the very next reply (`docs/concepts.md:170`). The event catalog and its generated reference call memory a per-round read (`vinga-server/src/vinga_server/events/catalog.py:2720`); the design guide describes the same clock (`docs/architecture/design-guide.md:205`). None is in the plan’s documentation footprint. **The milestone should update current-facing clock and device-freshness claims and regenerate the event reference**; historical plans can remain historical.
+
+6. **P2: One required falsification cannot fail as specified.** Evidence: the plan requires both a `(agent, conversation)` check at read time and explicit rebind invalidation (`docs/plans/2026-10-03-memory-per-conversation.md:62`), then says removing rebind invalidation *must* fail the rebind test (`docs/plans/2026-10-03-memory-per-conversation.md:121`). The key check would rebuild on that rebind, so the test should still pass. **The plan should assign rebind safety to one mechanism and test its removal**, or name a same-key scenario in which explicit invalidation has a distinct effect.
+
+**Verdict: not ready.** The plan’s across-reply behavior depends on history that the runtime deliberately does not retain.
+
+**Status (2026-10-03):** finding 1 (tool results do not survive into the next reply) is the premise this plan relied on, and it is false today. Rafael decided to revise that rule first, as #599; this plan resumes once #599 has landed, and findings 2 to 6 are resolved then.
