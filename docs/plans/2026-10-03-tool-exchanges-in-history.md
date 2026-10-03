@@ -253,9 +253,13 @@ As the issue has them, confirmed by Step 0.
 `runtime/history.py`.** Two pure functions, the two halves of one
 rule:
 
-- `kept_round(history, preamble, calls, results) -> list[Turn]`: what
-  one completed round adds to its thread's history (D2), with its ids
-  minted against the history it is appended to (D4). Empty when nothing
+- `kept_round(history, preamble, pairs) -> list[Turn]`: what one
+  round's completed pairs add to its thread's history (D2), each pair a
+  call, its result and the call's `source` and `entry`, with ids minted
+  against the history it is appended to (D4). Which pairs are complete
+  is the caller's to decide (the pipeline knows which calls answered,
+  M3's hydration reads it off the rows), so the module needs no move
+  vocabulary (round 2, finding 4). Empty when nothing
   in the round is kept, and then the preamble is the caller's to carry
   forward as heard speech (D3).
 - `as_sent(turns, start, offered) -> Sent`: what one request carries,
@@ -279,7 +283,7 @@ be testable only through a scripted session, which is how the
 text-only rule ended up pinned by a session test. A module in
 `runtime/` rather than `providers/` because the rule is the runtime's
 policy about history, not a wire format; it imports only `Turn`,
-`ToolCall` and `ToolResult`.
+`ToolCall` and `ToolResult` (and `json`).
 
 **D2. A round is committed the moment it completes, straight into the
 thread's history.** Plan review round 1 (finding 1) found that the two
@@ -296,18 +300,24 @@ second path to forget: a `remember` that ran in round 1 of a reply whose
 round 2 failed is in the history, which is the case the issue exists
 for. The two end-of-reply sites keep appending only speech (D3).
 
-A round is complete when every call that is not a move has its result.
-Of a completed round, every call with a result is kept and the
-successful move that ended a leg is not (it has no result; a refused
-move has its error result and is kept). A malformed call is not kept
-either: its raw bytes are not what the store holds, so keeping it would
-make in-session and resumed history differ (finding 3), and the error
-the model was told about it belongs to the reply that made it. A round
-cut by a barge-in or a failure part-way through execution has no tool
-turn and is not kept at all, even where some of its calls had answered
-(the store will hold those answers; M3's rule, D9, drops that round on
-resume as well). A round left with no kept call commits nothing, and
-its preamble, which was heard, joins the speech that follows (D3).
+The unit kept is the completed pair, not the complete round (round 2,
+finding 3, which is decision 1 read literally): every call that has a
+result is kept, and nothing else is. A successful move has no result
+and is not kept; a refused move has its error result and is. A round
+cut by a barge-in or a failure part-way through execution keeps the
+pairs that had answered: `_run_tools` is wrapped so that on
+`CancelledError` the pipeline commits, synchronously and before
+re-raising, the pairs whose slot the turn record shows executed
+(`TurnUnderway.reserved(slot)` after `executed(...)` filled it), with
+the record's result as the result. The record is what the store
+writes, so the session keeps exactly what a later resume will rebuild,
+by construction rather than by two rules agreeing. A malformed call is
+kept too, as a structured call with `arguments={}` and its error
+result: the store holds no raw arguments, so `{}` is the one
+representation both the session and a resume can produce, and the
+error result already tells the model its arguments were not a JSON
+object. A round with no completed pair commits nothing, and its
+preamble, which was heard, joins the speech that follows (D3).
 
 **D3. Every sentence heard appears once.** Today the one assistant turn
 is `" ".join(spoken)`, preambles included. With rounds kept, a round's
@@ -409,17 +419,14 @@ that marks a round's start (finding 3).
 
 Hydration then groups the rows into rounds (a new round at each
 `position == 0` in id order) and only then applies D2's rule, so the
-resumed history is the in-session one. A round is kept when every row
-in it that is not a successful move has a result, a name and well-formed
-arguments; a successful move is a row whose name is one of the move
-tools (`switch_agent`, `new_conversation`, `resume_conversation` naming
-a conversation, read from `tools/names.py` as `_moves` reads them) and
-whose result is null, and it is dropped from its kept round. A round
-with any other null result is a round cut during execution (the
-reservation filed every call, and only some were filled before the
-cut), and it is dropped whole, exactly as the session dropped it; a
-malformed row is dropped from its round as in-session (D2). A turn then
-renders as `user`, per kept round an assistant turn with its calls and
+resumed history is the in-session one: a row is kept when it has a
+result and a name. A row with a null result (a successful move, or a
+call a cut left unexecuted) is dropped, and no move vocabulary is
+needed to tell the two apart, since neither is kept (round 2, finding
+4). A malformed row is kept with `arguments={}` and its error result,
+as in-session (D2). A round with no kept row renders nothing. A turn
+then renders as `user`, per non-empty round an assistant turn with its
+calls and
 a tool turn with their results, then the stored reply. `TOOL_NOTE` goes: its only input was the names, which sit under
 the same switch as the results that now render whole.
 
@@ -498,8 +505,12 @@ hydration suite's builders; no new fixtures.
   tool result is whole in reply 1's second round and cleared in reply
   2; an MCP tool removed between replies (the registry replaced, the
   way `test_session_tools` already swaps an MCP registry) arrives as
-  the degraded note; a barge-in mid-execution leaves no call of that
-  round in history; a reply whose round 1 ran `remember` and whose
+  the degraded note; a barge-in after the first of two calls completed
+  keeps the first pair and not the second on the next reply's request;
+  a malformed call's error exchange is on the next reply's request with
+  `{}` arguments; an invented name stays structured with its error in
+  its own reply's round 2 (both translators) and is degraded on the
+  next reply; a reply whose round 1 ran `remember` and whose
   round 2 provider call failed, speaking nothing, leaves round 1 in
   history and the next reply's request carries it; a barge-in after
   round 1 completed and before any speech does the same; a move leg
@@ -529,8 +540,8 @@ hydration suite's builders; no new fixtures.
   format, any record arg, nor any span attribute. The generated event
   reference regenerates.
 - **M3**: hydration groups rows into rounds in id order before
-  filtering, drops a round with a non-move null result whole, drops a
-  successful move and a malformed call from a kept round, mints ids, charges the as-sent cost to the budget
+  filtering, keeps every row with a result (a malformed one with `{}`),
+  drops every row without one, mints ids, charges the as-sent cost to the budget
   (a turn with a 10 KiB result costs its cleared size), a turn that
   would fit if priced structured but not at its degraded size is left
   out with `over_budget` set, renders a
@@ -538,7 +549,10 @@ hydration suite's builders; no new fixtures.
   carried as that call's preamble; `threads.py` reads the widened row set
   in id order, two rounds of two calls each written through the store's
   own writer (integration, against Postgres); a reply cancelled after
-  the first of two calls completed, then resumed, carries neither call; a resumed session's first
+  the first of two calls completed, then resumed, carries the first
+  pair and not the second, matching what the session itself sent next;
+  a malformed call's error exchange survives a resume with `{}`
+  arguments; a resumed session's first
   request carries the stored exchange structured and a no-longer-offered
   one degraded (the issue's third criterion); the recap request carries
   every call degraded and no `tools`.
@@ -714,9 +728,13 @@ Reviewed 2026-10-03 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0
    Evidence: Decision 1 says all tool exchanges stay for the conversation (plan (`docs/plans/2026-10-03-tool-exchanges-in-history.md:233`)), but D2 drops an entire interrupted round even if some calls have results, and also drops malformed calls with their error results (plan D2 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:297`)). D9 repeats the loss on resume (plan D9 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:402`)), and the tests explicitly assert that a completed first call disappears (plan tests (`docs/plans/2026-10-03-tool-exchanges-in-history.md:522`)). `TurnUnderway` already retains each completed result independently (turns.py (`vinga-server/src/vinga_server/runtime/turns.py:242`)).
    Plan should say instead: retain every call-result pair that completed before cancellation, omitting only uncompleted calls and successful moves. Define a safe retained representation for malformed calls, including what survives resumption when raw malformed arguments were not stored. Add cancellation and malformed-call tests that require the completed error/result exchange on the next request and after resume.
 
+   *Resolution:* accepted. D2's unit is now the completed pair: on cancellation of `_run_tools` the pipeline commits, before re-raising, every pair the turn record shows executed, using the record's result, so the session keeps what the store will hold. A malformed call is kept as `arguments={}` with its error result in both places. D9 keeps every row with a result. The cancellation and malformed tests are in M1's and M3's lists, both for the next request and after resume.
+
 4. **P1 - `kept_round` cannot apply its stated move rule with its stated interface.**
    Evidence: D1 gives `kept_round(history, preamble, calls, results)` only provider types and says `runtime/history.py` imports only `Turn`, `ToolCall`, and `ToolResult` (plan D1 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:251`)). D2 requires it to distinguish a resultless successful move, which is discarded, from a resultless ordinary call, which makes the round incomplete (plan D2 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:297`)). That distinction exists only in the runtime move vocabulary, as D9 itself recognizes (plan D9 (`docs/plans/2026-10-03-tool-exchanges-in-history.md:405`)).
    Plan should say instead: make the completion contract explicit. Either let `runtime/history.py` depend on the leaf `tools.names` move set, or pass explicit successful-move slots from `_run_tools`; then test both a successful move and an interrupted non-move with identical missing-result shapes.
+
+   *Resolution:* accepted, and dissolved by finding 3's resolution. With the completed pair as the unit, a call without a result is never kept whatever it is, so nothing has to tell a successful move from an interrupted call. `kept_round` now takes completed pairs and leaves completion to its caller (D1); D9 keeps a row exactly when it has a result. The test the finding asks for stays, as one shape: a successful move and an interrupted ordinary call, both resultless, are both absent.
 
 5. **P2 - The telemetry routing described cannot put failure facts on failed LLM spans.**
    Evidence: Q5 says the history fields reach `provider_failed` through `LLM_ATTRIBUTES` (plan (`docs/plans/2026-10-03-tool-exchanges-in-history.md:210`)), but failed spans use `FAILED_PROVIDER_ATTRIBUTES`, not `LLM_ATTRIBUTES` (telemetry.py (`vinga-server/src/vinga_server/telemetry.py:1138`), telemetry.py (`vinga-server/src/vinga_server/telemetry.py:3134`)). The only helper additionally applied on failure is `_round_prompt_attributes`, which currently knows memory fields only.
