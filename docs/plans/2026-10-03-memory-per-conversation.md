@@ -458,3 +458,27 @@ Reviewed 2026-10-04 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): accepted. M1's checklist entry now lists decisions 1 to 8, each named.
 
 **Verdict: ready after the P1/P2 amendments.**
+
+## Plan review round 3
+
+Reviewed 2026-10-04 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 5m31s, at commit d0c28d6e, plan blob 13e88ca2.
+
+---
+
+1. **P1: Permanent model forget bypasses the deletion guarantee.**
+   Evidence: decision 7 publishes only the four operator API erase routes and explicitly tests that the model’s own `forget` does not change the revision (plan, decision 7 and Tests (`docs/plans/2026-10-03-memory-per-conversation.md:184`)). But `forget(permanently=true)` is offered as “erase it outright” (builtin.py (`vinga-server/src/vinga_server/tools/builtin.py:288`)) and executes a SQL `DELETE` (store.py (`vinga-server/src/vinga_server/memory/store.py:1096`)). A snapshot in another session, or the same session’s next leg, can therefore keep sending and exporting the deleted fact indefinitely.
+   Plan should say instead: permanent model forget is a hard deletion and increments the same revision after its transaction commits; ordinary soft forget remains non-invalidating. Test a permanent model forget with `export_llm_input` enabled in both the originating and a concurrent live session.
+
+2. **P1: The retained-tool-history premise fails for legal large memory changes.**
+   Evidence: the plan says no memory-write answer approaches the 2 KiB history-result cap (plan (`docs/plans/2026-10-03-memory-per-conversation.md:59`)), and relies on each result as the sole post-snapshot update channel (decision 2 (`docs/plans/2026-10-03-memory-per-conversation.md:107`)). In fact, agent facts allow up to 64 KiB and state entries up to 4 KiB (store.py (`vinga-server/src/vinga_server/memory/store.py:130`), store.py (`vinga-server/src/vinga_server/memory/store.py:1150`)); `restore_memory` returns the restored text only in its result (builtin.py (`vinga-server/src/vinga_server/tools/builtin.py:842`)). Later replies replace results above 2 KiB with a cleared note (history.py (`vinga-server/src/vinga_server/runtime/history.py:42`), history.py (`vinga-server/src/vinga_server/runtime/history.py:263`)). After restoring a large fact absent from the frozen snapshot, the model no longer receives that fact.
+   Plan should say instead: choose and document a bounded, lossless-enough update representation for every memory mutation, or constrain the supported mutation size to the retained-history limit. Add tests for a >2 KiB `set_state`, `forget`, and especially `restore_memory` followed by an independent reply.
+
+3. **P1: Revision sampling does not linearize deletion against a cached request.**
+   Evidence: the plan samples and compares the revision only at a leg’s first round (decision 1 (`docs/plans/2026-10-03-memory-per-conversation.md:79`)), while its interleaving test covers only a deletion between device and memory reads (Tests (`docs/plans/2026-10-03-memory-per-conversation.md:276`)). With an already cached snapshot, the key can validate at revision `r`, the API thread can commit a deletion and publish `r+1`, and the pipeline can still send the old prompt before the provider call. This contradicts “hard deletion reaches the next reply” (decision 4 (`docs/plans/2026-10-03-memory-per-conversation.md:144`)).
+   Plan should say instead: define the deletion/request linearization point and either synchronize publication through request construction or narrow the guarantee to requests whose validation begins after publication. Add a controlled interleaving after a cached-key hit and before the provider receives the request.
+
+4. **P2: Always-present framing needs a policy input the assembler does not have.**
+   Evidence: decision 3 requires framing for an enabled-but-empty memory snapshot, while memory-off must still omit memory (plan (`docs/plans/2026-10-03-memory-per-conversation.md:111`)). Current `with_scopes(half, scopes, device)` has no policy parameter and returns `half` for empty scopes (prompt.py (`vinga-server/src/vinga_server/runtime/prompt.py:498`)); memory-on-empty and memory-off-without-device present identical inputs. The preview route has the same split, returning early when memory is off (app.py (`vinga-server/src/vinga_server/app.py:1158`)).
+   Plan should say instead: make the enabled/framing decision an explicit input to the pure renderer, pass it from both `_system_prompt` and prompt preview, and specify its provenance/accounting. Test enabled-empty, disabled-empty, enabled preview, and disabled preview separately.
+
+**Verdict: not ready.**
