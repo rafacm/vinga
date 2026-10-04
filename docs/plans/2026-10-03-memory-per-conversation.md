@@ -206,19 +206,24 @@ it.
    join decision 4's stated cost: seen from the next conversation.
 
    What the revision cannot reach, stated on the observability page's
-   deletion section rather than left implied (review round 1, finding
-   3): if this session's model itself wrote the fact (`remember` in this
-   conversation), its own call and answer are in this conversation's
-   history since #599, and the history is not memory. Hard-deleting the
-   fact stops it being sent as memory from the next round, and the
-   tool exchange that wrote it keeps being sent, and exported when
-   `export_llm_input` is on, until the session ends; a resumed thread
-   rebuilds it from `tool_invocations`, which a thread deletion removes.
-   The operator's way to stop both is the existing one: delete the
+   deletion section rather than left implied (review rounds 1 and 2,
+   finding 3 and finding 6): any memory tool exchange this session's
+   model made that carries the fact's text is in the conversation's
+   history since #599, and the history is not memory. That is a
+   `remember` or `update_memory` that wrote it, a `recall` whose answer
+   listed it, a `forget` or `restore_memory` answer quoting it.
+   Hard-deleting the fact stops it being sent as memory from the next
+   reply; those exchanges keep being sent, and exported when
+   `export_llm_input` is on, for as long as the live session holds the
+   history, and a resumed thread rebuilds them from `tool_invocations`.
+   The page gives the operator the order that prevents another
+   disclosure: first end the live session (today that means the device
+   disconnecting or a server restart; there is no API that ends one
+   session, which the page says plainly), then delete the
    conversation's thread (`vinga conversation delete`), which removes
-   its stored turns and calls, and end the live session (the device
-   disconnecting, or a server restart). The page says this in that
-   order.
+   its stored turns and calls so no resume can rebuild them, then
+   hard-delete the fact. Deleting the thread first would leave the live
+   session's copy to be sent and exported again.
 8. **The metadata half's accounting stays truthful.** Every round still
    reports the size and fact ids of the prompt it actually sent; with a
    frozen snapshot they repeat until the snapshot is rebuilt, which is
@@ -277,8 +282,9 @@ the memory tool tests, and the event baseline.
   the memory API between two replies: the next round's exported system
   prompt no longer carries it and its ids leave the round's
   `memory_facts` (review round 1, finding 3); the model's own earlier
-  `remember` exchange for it, if any, is still in the exported history,
-  which is the documented behavior.
+  `remember` exchange and a `recall` answer that listed it are still in
+  the exported history, which is the documented behavior (review round
+  2, finding 6).
 - A read that fails (the store's reader raising) sends the safe empty
   blocks on that round and is not cached: the next leg reads again,
   and once the store recovers its snapshot holds the facts (failure
@@ -374,9 +380,14 @@ when they were written.
 
 ## Milestones
 
-- [ ] **M1: memory is read once per conversation.** Decisions 1 to 6,
-  their tests and mutations, the gate, the documentation footprint. One
-  pull request; it closes #536.
+- [ ] **M1: memory is read once per conversation.** Decisions 1 to 8,
+  all of them deliverables of this one milestone (review round 2,
+  finding 7): the keyed snapshot read at a leg's first round, the
+  framing and the re-read note, the stated cost, the memory switch's
+  clock, completeness of both reads, the erasure revision and its four
+  publication points with the deletion guidance on the observability
+  page, and the per-round accounting; their tests and mutations, the
+  gate, the documentation footprint. One pull request; it closes #536.
 
 ## Plan review round
 
@@ -440,6 +451,10 @@ Reviewed 2026-10-04 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
 
 6. **P2: The deletion guidance describes too narrow a history path and an unsafe action order.** Evidence: decision 7 discusses only a fact this session wrote with `remember`, then tells the operator to delete the thread and end the live session “in that order” (plan:166 (`docs/plans/2026-10-03-memory-per-conversation.md:166`)). A retained `recall` result can also contain the fact (builtin.py:889 (`vinga-server/src/vinga_server/tools/builtin.py:889`)); deleting the stored thread leaves the live history available for another exported round. **Amendment:** document all retained exchanges that can carry deleted content, and say to stop the live session before deleting its stored thread when the aim is to prevent another disclosure. Test a prior `recall` as well as `remember`.
 
+   *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): accepted. Decision 7's guidance now names every memory tool exchange that can carry the text (`remember`, `update_memory`, `recall`, `forget`, `restore_memory`) and gives the order that prevents another disclosure: end the live session first (stating there is no API for that today), then delete the thread, then the fact. The export test includes a prior `recall`.
+
 7. **P2: The only milestone omits two required decisions.** Evidence: M1 explicitly includes “Decisions 1 to 6” yet says its PR closes #536 (plan:310 (`docs/plans/2026-10-03-memory-per-conversation.md:310`)). Decisions 7 and 8 require operator freshness and truthful round accounting. **Amendment:** make both explicit M1 deliverables with their tests and documentation.
+
+   *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): accepted. M1's checklist entry now lists decisions 1 to 8, each named.
 
 **Verdict: ready after the P1/P2 amendments.**
