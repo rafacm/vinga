@@ -431,6 +431,23 @@ WriterDep = Annotated[
 ]
 
 
+def _erased_publisher(request: Request) -> Callable[[], None]:
+    """How a hard deletion through this door is published to the
+    conversations running in this process (#536, decision 7): the
+    memory store's own `erased`, handed over by the composition, and
+    nothing at all for an application with no server around it.
+
+    Called by the four erase routes after their transaction has
+    committed and only when it removed something, which is why the
+    callable rather than a transaction is what a route resolves.
+    """
+    runtime: ApiRuntime = request.app.state.api_runtime
+    return runtime.memory_erased
+
+
+ErasedDep = Annotated[Callable[[], None], Depends(_erased_publisher)]
+
+
 def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]]) -> None:
     """The six reads and the seven writes, registered on the application
     that is both mounted and rendered.
@@ -607,32 +624,39 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         response_model=MemoryErasure,
         responses=problems(401, 404, 409, 422, 500, instead=MEMORY_PROBLEMS_INSTEAD),
     )
-    def erase_agent_fact(name: str, id: FactId, writer: WriterDep) -> dict[str, int]:
+    def erase_agent_fact(
+        name: str, id: FactId, writer: WriterDep, erased: ErasedDep
+    ) -> dict[str, int]:
         """Erase one thing an agent remembers.
 
         A hard delete, held facts included, and nothing here keeps it
         for an undo: the soft forgetting an agent does belongs to the
         conversation that spoke it, and this door is correction and
-        audit rather than that flow. What is removed is gone at the next
-        reply's prompt.
+        audit rather than that flow. What is removed is gone from the
+        prompt of every conversation's next leg, live ones included: the
+        deletion is published to them once it has committed (#536).
         """
-        return _erased(writer, MemoryScope.AGENT, _addressable(name), id)
+        return _erased(writer, erased, MemoryScope.AGENT, _addressable(name), id)
 
     @api.delete(
         "/memory/devices/{mac}/facts/{id}",
         response_model=MemoryErasure,
         responses=problems(401, 404, 409, 422, 500, instead=MEMORY_PROBLEMS_INSTEAD),
     )
-    def erase_device_fact(mac: str, id: FactId, writer: WriterDep) -> dict[str, int]:
+    def erase_device_fact(
+        mac: str, id: FactId, writer: WriterDep, erased: ErasedDep
+    ) -> dict[str, int]:
         """Erase one of a board's notes, under the same rules."""
-        return _erased(writer, MemoryScope.DEVICE, _mac(mac), id)
+        return _erased(writer, erased, MemoryScope.DEVICE, _mac(mac), id)
 
     @api.delete(
         "/memory/agents/{name}/facts",
         response_model=MemoryErasure,
         responses=problems(401, 409, 422, 500, instead=MEMORY_PROBLEMS_INSTEAD),
     )
-    def erase_agent_memory(name: str, writer: WriterDep) -> dict[str, int]:
+    def erase_agent_memory(
+        name: str, writer: WriterDep, erased: ErasedDep
+    ) -> dict[str, int]:
         """Erase everything one agent remembers, in one transaction.
 
         Addressed at an owner rather than at a row, so an agent with
@@ -641,17 +665,19 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         agent's rows, and the ones a conversation still speaking an old
         name wrote after a rename, have no other way out.
         """
-        return _cleared(writer, MemoryScope.AGENT, _addressable(name))
+        return _cleared(writer, erased, MemoryScope.AGENT, _addressable(name))
 
     @api.delete(
         "/memory/devices/{mac}/facts",
         response_model=MemoryErasure,
         responses=problems(401, 409, 422, 500, instead=MEMORY_PROBLEMS_INSTEAD),
     )
-    def erase_device_memory(mac: str, writer: WriterDep) -> dict[str, int]:
+    def erase_device_memory(
+        mac: str, writer: WriterDep, erased: ErasedDep
+    ) -> dict[str, int]:
         """Erase every note about one board, in one transaction, which
         is what a board leaving a household needs."""
-        return _cleared(writer, MemoryScope.DEVICE, _mac(mac))
+        return _cleared(writer, erased, MemoryScope.DEVICE, _mac(mac))
 
     @api.get(
         "/memory/conversations/{conversation}/state",
@@ -756,13 +782,18 @@ def _corrected(
 
 def _erased(
     writer: Callable[[], AbstractContextManager[Connection]],
+    erased: Callable[[], None],
     scope: MemoryScope,
     owner: str,
     fact_id: str,
 ) -> dict[str, int]:
     """One addressed deletion, whichever scope asked. Addressed and not
     there is a 404 rather than an erasure of nothing: a caller that
-    named one fact meant that fact."""
+    named one fact meant that fact.
+
+    Published once `_written` has returned, which is after the
+    transaction committed: a refusal raises before it, so a 404 and a
+    storage failure publish nothing."""
 
     number = _fact_id(fact_id)
 
@@ -772,20 +803,26 @@ def _erased(
             raise UnknownEntityError(_UNKNOWN_FACT)
         return taken
 
-    return {"facts": _written(writer, erasing)}
+    taken = _written(writer, erasing)
+    erased()
+    return {"facts": taken}
 
 
 def _cleared(
     writer: Callable[[], AbstractContextManager[Connection]],
+    erased: Callable[[], None],
     scope: MemoryScope,
     owner: str,
 ) -> dict[str, int]:
-    """One whole scope emptied, whichever scope asked."""
-    return {
-        "facts": _written(
-            writer, lambda connection: store.erase_facts(connection, scope, owner)
-        )
-    }
+    """One whole scope emptied, whichever scope asked, and published
+    after the commit only where it took something: an owner with
+    nothing stored costs no live conversation a re-read."""
+    taken = _written(
+        writer, lambda connection: store.erase_facts(connection, scope, owner)
+    )
+    if taken:
+        erased()
+    return {"facts": taken}
 
 
 def _cleared_state(connection: Connection, conversation: str, key: str | None) -> int:

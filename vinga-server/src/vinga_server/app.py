@@ -729,6 +729,12 @@ async def _build_composition(
         # same hub the sessions above emit into is what the stream route
         # subscribes a reader to (#342).
         live=live,
+        # And how a hard deletion through the memory routes reaches the
+        # conversations this process is running (#536): the same store
+        # every session reads its prompt from, so a deleted fact leaves
+        # a live conversation's prompt at its next leg. One replica
+        # (#316) is what makes one process's store the whole of it.
+        memory_erased=memory.erased,
     )
     # And the handle onto the runtime the API reads it from, installed
     # here because this is where that runtime exists. Registered after

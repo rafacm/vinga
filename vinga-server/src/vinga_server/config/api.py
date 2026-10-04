@@ -941,6 +941,11 @@ class ApiRuntime:
     erasures: Callable[[], contextlib.AbstractContextManager[Connection]]
     memory: Callable[[], Iterator[Connection]]
     memory_writes: Callable[[], contextlib.AbstractContextManager[Connection]]
+    # How a hard deletion through the memory routes is published to the
+    # conversations this process is running (#536): the store's own
+    # `erased`, handed over by the composition, and a no-op for an
+    # application with no server around it, which runs no conversation.
+    memory_erased: Callable[[], None]
     loaded_agents: ServableAgents
     pending: PendingDevices
     mcp_servers: McpStatusSource | None
@@ -1091,6 +1096,7 @@ def build_api_runtime(
     identity: RuntimeInfo | None = None,
     live: LiveEvents | None = None,
     keepalive_s: float = KEEPALIVE_S,
+    memory_erased: Callable[[], None] | None = None,
 ) -> ApiRuntime:
     """What a request to this application resolves out of the server
     around it, assembled.
@@ -1129,6 +1135,7 @@ def build_api_runtime(
         # what has accrued.
         memory=memory.reader(database),
         memory_writes=lambda: memory.writing(database),
+        memory_erased=_nothing_erased if memory_erased is None else memory_erased,
         loaded_agents=_nothing_servable if loaded_agents is None else loaded_agents,
         pending=pending if pending is not None else _empty_pending(),
         mcp_servers=mcp_servers,
@@ -1145,6 +1152,11 @@ def build_api_runtime(
 def _empty_pending() -> PendingDevices:
     """A table for an application built without a server around it."""
     return PendingDevices()
+
+
+def _nothing_erased() -> None:
+    """Where an application with no server around it publishes a hard
+    deletion, which is nowhere: it runs no conversation to tell."""
 
 
 def _nothing_servable() -> frozenset[str]:

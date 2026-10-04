@@ -1070,6 +1070,31 @@ def test_a_binding_written_through_the_api_is_live_at_the_next_check_in(
     assert body["websocket"]["token"]
 
 
+def test_a_hard_deletion_through_the_api_is_published_to_the_sessions_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The composition hands the mounted API the memory store every
+    session reads its prompt from, as where a hard deletion is
+    published (#536): erasing a fact through the API moves that store's
+    erasure revision, which is what makes a live conversation drop the
+    fact at its next leg."""
+    monkeypatch.setenv(API_SECRET_ENV, TOKEN)
+    app = create_app(recording_config())
+
+    with TestClient(app) as client:
+        memory: MemoryStore = app.state.composition.memory
+        number = asyncio.run(
+            memory.add(MemoryScope.AGENT, "poet", "the door code is 4321", agent="poet")
+        )
+        before = memory.erasures
+        erased = client.delete(
+            f"{API_MOUNT_PATH}/memory/agents/poet/facts/{number}", headers=BEARER
+        )
+
+        assert erased.status_code == 200, erased.text
+        assert memory.erasures == before + 1
+
+
 def test_the_mounted_api_holds_the_engine_only_while_the_server_serves(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
