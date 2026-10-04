@@ -968,3 +968,28 @@ Reviewed 2026-10-04 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    to `unknown`, which is why the check is in both places; `cleared_key`
    skipping the check was killed, 3 failures and an error (the value
    refused the event).
+
+### PR review round 2
+
+Reviewed 2026-10-04 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 4m35s, at commit cfa3fde1.
+
+1. **P1: tool failures render arbitrary exception text.** The dispatch's
+   failure arm in `ToolExecution` builds the model-facing result as
+   `the tool "<name>" failed: <exc>`, which is persisted and, since
+   M1, re-sent on later replies; the review asked for
+   `failure_name(exc)` only and a forged-message sentinel.
+
+   *Resolution:* not fixed in this milestone, recorded rather than
+   silently left. The line is on `main` unchanged since `295f799a`
+   (2026-09-23, #482); M2's diff only adds the `refetch` computation
+   after it. The text is a tool result handed to the model (failures
+   are results the model phrases, per `ToolResult`'s docstring) and
+   already reached the model and `tool_invocations.result` under the
+   text switch before #599; no metadata surface carries it, the
+   `tool_call` event naming the class through `failure_name` only.
+   What #599 changed is that the model keeps seeing it on later
+   replies, capped at 2 KiB. Whether a raw exception message should
+   reach the model at all is a separate decision, raised with the
+   maintainer as a candidate follow-up issue. Resolution by the
+   orchestrator (anthropic/claude-opus-5-5, thinking medium); PR #602
+   merged after CI went green on `cfa3fde1`.
