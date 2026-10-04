@@ -1862,14 +1862,20 @@ SYSTEM_CHARACTERS_NOTE = (
 )
 MEMORY_CHARACTERS_NOTE = (
     "How much of `system_characters` the round's scope blocks added: "
-    "each block as rendered and the blank line before it. The device "
-    "block carries the device record as well as the device's notes, so "
-    "this is the per-round part of the prompt rather than remembered "
-    "facts alone."
+    "each block as rendered and the blank line before it, the memory "
+    "section's framing sentence included. The device block carries the "
+    "device record as well as the device's notes, so this is the part of "
+    "the prompt read into the conversation's snapshot rather than "
+    "remembered facts alone. The snapshot is read once per agent "
+    "activation on a conversation and kept, so every round repeats the "
+    "same value until it is read again."
 )
 MEMORY_SOURCES_NOTE = (
     "Each scope block's size by provenance, `state`, `memory` and "
-    "`device`, with a block that was not sent absent rather than zero. "
+    "`device`, with a block that was not sent absent rather than zero; "
+    "the framing sentence is counted in the block it opens, and an agent "
+    "that may remember with nothing saved is sent a `memory` block "
+    "saying so. "
     "Sizes, never text, and never summing to `system_characters`: the "
     "know-how half's blocks are `prompt_assembled.sources`."
 )
@@ -1877,8 +1883,9 @@ MEMORY_FACTS_NOTE = (
     "The ids of the remembered facts the prompt injected, the agent's "
     "block then the device's, at most 70 (the agent block's newest 40 "
     "and the device scope's cap of 30). Present, and possibly empty, "
-    "where the round read memory, a read that failed included; absent "
-    "where the agent's memory is off. The conversation's ledger "
+    "where the round's prompt was built from a memory read, a read that "
+    "failed included; absent where the agent's memory is off. Repeated "
+    "by every round that sends the same snapshot. The conversation's ledger "
     "contributes none. An id joins to the memory store's current state, "
     "best effort: a corrected fact keeps its id with new text, and a "
     "pruned or deleted one leaves no row. What the model actually read "
@@ -2810,8 +2817,8 @@ PROMPT_ASSEMBLED = declare(
     "prompt_assembled",
     note=(
         "The know-how half of a prompt is assembled and cached. The "
-        "per-round memory read is deliberately not part of it, which "
-        "is why `memory` is not one of the provenance forms."
+        "memory section is deliberately not part of it, which is why "
+        "`memory` is not one of the provenance forms."
     ),
     variants=(PromptAssembled,),
 )
@@ -3657,7 +3664,7 @@ class MemoryUnreadable(Variant):
     LEVEL: ClassVar[int] = logging.WARNING
     TEMPLATE: ClassVar[str] = (
         "could not read %s memory for agent %s (%s); it remembers nothing of it "
-        "this round"
+        "until a read succeeds"
     )
     ARGS: ClassVar[tuple[str, ...]] = ("scope", "agent", "error")
 
@@ -4532,8 +4539,9 @@ PROVIDER_REACHES_LOOPBACK = declare(
 MEMORY_UNREADABLE = declare(
     "memory_unreadable",
     note=(
-        "One scope of an agent's memory could not be read, so the agent "
-        "remembers nothing of it this round. Said once per scope the read "
+        "One scope of an agent's memory could not be read, so the prompt "
+        "it was read for carries nothing of it and nothing is kept: the "
+        "conversation's next leg reads again. Said once per scope the read "
         "could not answer, since a read that serves a whole prompt answers "
         "three of them."
     ),
@@ -4546,9 +4554,8 @@ MEMORY_UNWRITABLE = declare(
         "A change an agent asked for could not be stored, so nothing was "
         "changed. The write path's own event, beside the read path's "
         "above: the two fail differently and answer "
-        "differently. A read that fails is contained (the agent "
-        "remembers nothing of that scope this round and the reply "
-        "happens), while a "
+        "differently. A read that fails is contained (the prompt it was "
+        "for carries nothing of that scope and the reply happens), while a "
         "write that fails is a sanitized refusal the model reads out, "
         "so this is where an operator learns what the database actually "
         "said, by class name and never by message."

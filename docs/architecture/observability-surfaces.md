@@ -195,11 +195,54 @@ it and a board swap having moved a device's, and every deletion through
 it is a hard delete. No read-only SQL: `vinga_ro` is granted nothing on
 this schema, so the API is the surface.
 
+**What a hard deletion stops, and what it does not.** A conversation
+keeps the memory its prompt was built from (see the status below), so
+a deletion is published to every conversation this process is running:
+the four erase routes publish theirs once the transaction has
+committed and removed something, and so does an agent's own `forget`
+with `permanently` set. A leg of a reply whose snapshot is checked
+after the deletion was published never sends the fact; a leg already
+checked may send it once more in the rounds it has left. That is the
+whole guarantee, and it covers the prompt only. Any memory tool
+exchange the live session's model made that carries the fact's text is
+in that conversation's history, and the history is not memory: the
+`remember` or `update_memory` that wrote it, a `recall` whose answer
+listed it, a `forget` or `restore_memory` answer quoting it. Those keep
+being sent to the model, and exported when `export_llm_input` is on,
+for as long as the live session holds the history, and a resumed thread
+rebuilds them from its stored tool calls. So the order that prevents
+another disclosure is: first end the live session, which today means
+the device disconnecting or the server restarting, since there is no
+API that ends one session; then delete the conversation's thread
+(`vinga conversation delete`), which removes its stored turns and calls
+so no resume can rebuild them; then hard-delete the fact. Deleting the
+thread first leaves the live session's copy to be sent and exported
+again.
+
 **Status.** Landed (#314, scopes and editing #83). The schema is
 unconditional and is migrated at every boot, because an empty table is
 not a memory; whether a given agent reaches any of it is that agent's
 own `memory` section, on unless it says otherwise, and one switched off
-is offered no tool and injected no scope. Storage never leaves the
+is offered no tool and injected no scope.
+
+What a prompt carries of memory is read once per conversation (#536):
+when an agent starts speaking on a conversation, the three scopes and
+the device record are read together and kept for every later round and
+reply, so the conversation's system prompt stays byte-identical and a
+memory write no longer costs the provider's prompt cache. The memory
+section says when it was read, and that the results of the memory
+tools after that point are newer: what this conversation's own model
+writes reaches it as those results. What it costs is stated rather
+than hidden: a fact saved, or a device moved, during the conversation
+by another live session's model, by an operator's correction or by an
+operator's device change is seen from the next conversation, not the
+next reply. A hard deletion is the exception and reaches the next leg,
+as the retention paragraph above says. The snapshot is read again
+where the agent is activated again (a handover, back included), where
+the conversation changes, where the agent's memory setting changes,
+where a hard deletion was published, and where one of this session's
+memory writes answered with more than the history will send back; a
+read that failed is never kept. Storage never leaves the
 deployment's own database; as prompt content it follows the active LLM
 provider's reach exactly as the transcript and the persona do, which is
 what `server.data_boundary` is the guard for, and a device note
@@ -288,14 +331,16 @@ A reply round's generation, finished or failed after its request was built,
 also says what its system prompt held, under the round's own names rather than
 the turn's `vinga.prompt.*` (which describe the know-how half once per agent):
 `vinga.llm.system.characters` is the whole prompt the round sent,
-`vinga.llm.memory.characters` is what the per-round blocks added to it,
-the blank lines joining them included, and
+`vinga.llm.memory.characters` is what the memory section added to it,
+its framing and the blank lines joining its blocks included, and
 `vinga.llm.memory.sources.<state|memory|device>` is each of those blocks, a
 block that was not sent being absent. They are present whatever the agent's
 memory setting, since the device block carries the device record as well as
-its notes. `vinga.llm.memory.facts` lists the ids of the remembered facts the
-prompt injected, as integers, with `vinga.llm.memory.fact_count` beside it:
-empty and zero where the round read memory and injected nothing, a failed read
+its notes, and every round of a conversation repeats them until its memory is
+read again, since that is what each round was sent (#536).
+`vinga.llm.memory.facts` lists the ids of the remembered facts the prompt
+injected, as integers, with `vinga.llm.memory.fact_count` beside it: empty and
+zero where the memory read behind the prompt injected nothing, a failed read
 included, and both absent where the agent's memory is off. Ids rather than a
 digest, because a digest of a short personal fact is a confirmation oracle
 (hash the guesses and compare) and an id discloses nothing to whoever holds the
@@ -537,8 +582,9 @@ alone, `gen_ai.system_instructions`, `gen_ai.input.messages` and
 every backend reads the same keys. Langfuse derives the observation's
 input and output from them itself and shows the system prompt as the
 first message of the input, a `system` turn holding the know-how
-blocks and the memory blocks that round read; it is the prompt each
-round actually sent, since memory is read per round. Until #533 the span also carried Langfuse's own
+blocks and the memory blocks the conversation's snapshot holds; it is
+the prompt each round actually sent, the same snapshot repeated until
+the conversation's memory is read again (#536). Until #533 the span also carried Langfuse's own
 input and output fields as copies of the messages, and Langfuse reads
 those first, so the system prompt never reached it; they are no longer
 written.

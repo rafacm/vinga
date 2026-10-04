@@ -420,7 +420,7 @@ class PromptMemory:
     once and each already rendered.
 
     A value rather than three calls, because the reply path pays for one
-    off-loop hop per round and three would cost three; and rendered
+    off-loop hop per read and three would cost three; and rendered
     rather than raw, because the shapes behind these blocks are this
     module's business and the assembly's business is the text.
 
@@ -497,8 +497,8 @@ class StoreClosed(Exception):
 
     Not a sentence anybody reads. It travels as a class name on the
     events this module emits, and every seam contains it exactly as it
-    contains a database that is not there: a read answers with no memory
-    this round, a write refuses with `UNWRITABLE`, and a cleanup takes
+    contains a database that is not there: a read answers with no memory,
+    incomplete and so never kept, a write refuses with `UNWRITABLE`, and a cleanup takes
     nothing. A shutdown is not a failure a model should be given
     different words for.
     """
@@ -745,15 +745,15 @@ class MemoryStore:
         exception would leave as a traceback under "reply failed", and a
         psycopg failure quotes the DSN it tried, which carries a
         password in its authority. A database this server cannot read
-        means the agent remembers nothing of these scopes this round, and
-        the reply happens. What is logged is the class of the failure and
+        means the agent remembers nothing of these scopes in the prompt
+        this read was for, and the reply happens. What is logged is the class of the failure and
         never the message, which is the rule the MCP layer's reason
         tokens and the thread reads already follow.
 
         One connection for whatever the caller asked, and one report per
         scope it asked about. A read that answers three scopes takes one
         connection because the reply path pays for one off-loop hop per
-        round, and a statement that fails poisons the transaction the
+        prompt read, and a statement that fails poisons the transaction the
         other two would have run in, so all of them are lost together and
         all of them are said. A scope that rendered empty with nothing
         said about it would be indistinguishable from a scope with
@@ -971,8 +971,9 @@ class MemoryStore:
         trip.
 
         One connection for every scope it reaches: the reply path takes
-        exactly one off-loop hop per round, and a read per scope would
-        take three. The blocks come back rendered and in reading order,
+        exactly one off-loop hop per read, which is once per conversation
+        while its snapshot holds (#536), and a read per scope would take
+        three. The blocks come back rendered and in reading order,
         and what the assembly does with them is its own business.
 
         Contained scope by scope in what it costs a reply: a database
@@ -1198,7 +1199,7 @@ class MemoryStore:
         rather than enforced by a trim. Dropping a key to make room would
         make every entry a guess about whether it is still there, and
         growing past the byte bound would put an unbounded ledger into
-        every round's prompt.
+        every prompt that reads it.
 
         Whether the ledger is over its bound is decided inside the
         transaction, under the chain's lock, so the count this write is
@@ -1989,8 +1990,8 @@ def _newest(
     Bounded in the statement rather than sliced after it, which is the
     two-tier shape made real: the agent scope holds up to `MAX_LINES`
     facts and the block injects the newest few of them, so reading the
-    whole scope to render forty lines would spend on every round exactly
-    what the split exists to save.
+    whole scope to render forty lines would spend on every prompt read
+    exactly what the split exists to save.
 
     Newest by which rows are taken and oldest-first in how they read,
     which is not a contradiction: what falls out of the block is what
@@ -2091,8 +2092,8 @@ def _core(newest: Sequence[tuple[int, str]]) -> tuple[str, tuple[int, ...]]:
     below one fact because dropping it would lose it; this drops
     nothing, and a fact longer than the whole block is still stored,
     still looked up and still corrected by its id. Keeping it here
-    instead would put a block over its cap into every round's prompt,
-    which is the one thing the cap exists to prevent.
+    instead would put a block over its cap into every prompt that reads
+    it, which is the one thing the cap exists to prevent.
     """
     kept = list(newest)
     while kept and len(_rendered(kept).encode("utf-8")) > CORE_BYTES:

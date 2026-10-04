@@ -86,8 +86,8 @@ class MemoryContext:
 
     `record` is which record that is, and `filing` is what can hold it
     still. A read may use `device` as it stands, because a read one
-    round out of date is the staleness every per-round read here
-    already has; a WRITE asks `filing`, which resolves the address again
+    call out of date is the staleness every read here already has; a
+    WRITE asks `filing`, which resolves the address again
     and keeps a swap from moving it between the answer and the row. A
     runtime with no store composes neither, and then `device` is the
     board this session is talking to, which is exactly right, because a

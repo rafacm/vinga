@@ -379,8 +379,8 @@ def reference() -> str:
         "",
         *_paragraph(
             "`memory` is deliberately not among them. `prompt_assembled` reports "
-            "the cached know-how half of the prompt and excludes the per-round "
-            "memory read, so a `memory` key is a violation like any unknown "
+            "the cached know-how half of the prompt and excludes the memory "
+            "section, so a `memory` key is a violation like any unknown "
             "prefix, even though it is a provenance token elsewhere in the prompt "
             "assembly."
         ),

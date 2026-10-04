@@ -210,8 +210,9 @@ already carries a round's numbers, while the route assembles a fresh
 preview that reads memory as a new session would rather than
 reporting the half a live session has cached. Nor does the module own
 the two clocks. The pipeline caches the know-how half in
-`_activate_agent` and appends memory per round; the API's
-`_prompt_preview` builds both on the spot. What is centralized is the
+`_activate_agent` and appends the memory section it read once per
+activation on a conversation, kept while its snapshot's key holds
+(#536); the API's `_prompt_preview` builds both on the spot. What is centralized is the
 rule: for the same inputs, the block order, the joining and the
 accounting are computed in one place, so two surfaces that differ are
 showing different moments rather than different arithmetic.
