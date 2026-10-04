@@ -68,17 +68,23 @@ Measured at `677fd921` (`main` on 2026-10-03).
 
 ## Decisions
 
-1. **One snapshot per agent activation on a conversation.** The
-   `RoundPrompt` (device record, the three scopes, the fact ids the
-   metadata half reports) is built at the first round after the agent
-   is activated or the session rebinds to another conversation, and
-   reused for every later round of that activation on that
-   conversation. It is invalidated, and rebuilt at the next round, by
-   exactly two events: `_activate_agent` (which also rebuilds the
-   know-how half, so the system prompt changes there anyway) and the
-   conversation rebind. Keyed by the pair it belongs to (agent,
-   conversation), checked where it is read, so a missed invalidation
-   cannot serve one conversation another's ledger.
+1. **One snapshot per agent activation on a conversation, valid by
+   its key and nothing else.** The `RoundPrompt` (device record, the
+   three scopes, the fact ids the metadata half reports) is built at
+   the first round after the agent is activated or the session rebinds
+   to another conversation, and reused for every later round while it
+   stays valid. Validity has exactly one mechanism (review round 1,
+   finding 6): the snapshot carries the key it was built under, and
+   `_system_prompt` reuses it only when that key equals the current
+   one. There are no invalidation calls to forget. The key is four
+   values, each with its own reason and its own test:
+   - an **activation counter**, bumped by `_activate_agent` (so a
+     handover, and a handover back to the same agent on the same
+     conversation, rebuilds, as the know-how half already does);
+   - the **conversation id** (so a rebind to another thread rebuilds
+     and one thread's ledger is never served on another);
+   - the **memory policy** the snapshot was built under (decision 5);
+   - the store's **operator revision** (decision 7).
 2. **What the model writes mid-conversation reaches it as the messages
    it already is.** No re-read and no added message: each memory tool's
    result in the history states the change. Decision 3 tells the model
@@ -122,9 +128,11 @@ the memory tool tests, and the event baseline.
   per round (a counting fake).
 - A handover and a conversation rebind each rebuild the snapshot: the
   next round's system prompt reflects a write made before them.
-- A snapshot built for one (agent, conversation) is never served for
-  another, even with the invalidation deliberately skipped (the key
-  check).
+- Each key component has a test of its own in which only that
+  component changes: a handover away and back to the same agent on the
+  same conversation (activation counter), a rebind (conversation), a
+  policy apply (decision 5), an operator write (decision 7); each
+  rebuilds, and nothing else does.
 - The framing: the state heading no longer claims to be current, and
   the snapshot sentence is present whenever a memory block is.
 - The round accounting repeats the snapshot's fact ids and sizes until
@@ -132,9 +140,10 @@ the memory tool tests, and the event baseline.
 
 **Falsification.** Each new test watched failing first. Mutations, one
 run each: the snapshot re-read every round (the byte-identical and
-read-count tests must fail); the rebind invalidation removed (the
-rebind test must fail); the key check removed with the invalidation
-also removed (the cross-conversation test must fail).
+read-count tests must fail); and each key component dropped from the
+key in turn (exactly that component's test must fail, which is the
+point of one mechanism: removing a component has a distinct, observable
+effect).
 
 ## The gate (blocking)
 
@@ -215,6 +224,8 @@ Reviewed 2026-10-03 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
 5. **P2: The documentation footprint leaves live claims false.** Evidence: `docs/concepts.md` promises a renamed or moved device is reflected in the very next reply (`docs/concepts.md:170`). The event catalog and its generated reference call memory a per-round read (`vinga-server/src/vinga_server/events/catalog.py:2720`); the design guide describes the same clock (`docs/architecture/design-guide.md:205`). None is in the plan’s documentation footprint. **The milestone should update current-facing clock and device-freshness claims and regenerate the event reference**; historical plans can remain historical.
 
 6. **P2: One required falsification cannot fail as specified.** Evidence: the plan requires both a `(agent, conversation)` check at read time and explicit rebind invalidation (`docs/plans/2026-10-03-memory-per-conversation.md:62`), then says removing rebind invalidation *must* fail the rebind test (`docs/plans/2026-10-03-memory-per-conversation.md:121`). The key check would rebuild on that rebind, so the test should still pass. **The plan should assign rebind safety to one mechanism and test its removal**, or name a same-key scenario in which explicit invalidation has a distinct effect.
+
+   *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): accepted. Decision 1 now has one mechanism, the key, with no invalidation calls. The key is an activation counter, the conversation id, the memory policy and the store's operator revision; each component has a test in which only it changes, and the falsification drops each component in turn, so each mutation has exactly one test that must fail.
 
 **Verdict: not ready.** The plan’s across-reply behavior depends on history that the runtime deliberately does not retain.
 
