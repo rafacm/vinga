@@ -89,7 +89,7 @@ it.
    a move); every later round of the leg sends the leg's snapshot
    unchanged whatever happens meanwhile (review round 2, finding 1). So
    a snapshot is always read before anything this leg's model does, and
-   its capture point is never in the middle of a leg's tool exchanges. There are no invalidation calls to forget. The key is four
+   its capture point is never in the middle of a leg's tool exchanges. There are no invalidation calls to forget. The key is five
    values, each with its own reason and its own test:
    - an **activation counter**, bumped by `_activate_agent` (so a
      handover, and a handover back to the same agent on the same
@@ -103,18 +103,40 @@ it.
      while the reads are in flight leaves the snapshot keyed with the
      older revision, so the next leg's first round finds the key stale
      and reads again. The reads may have caught the erasure or not;
-     either way the stale key guarantees a re-read after it.
+     either way the stale key guarantees a re-read after it;
+   - a session-local **oversized-write counter**, bumped when a memory
+     tool call in this session that changes memory (`remember`,
+     `update_memory`, `forget`, `restore_memory`, `set_state`,
+     `clear_state`, `set_device_location`) answers with a result over
+     `runtime/history.py`'s `MAX_KEPT_RESULT_BYTES` (review round 3,
+     finding 2). Decision 2 relies on the answer staying in the
+     history, and #599 clears an answer over that cap on later replies,
+     so such a change would otherwise reach the model through neither
+     the history nor the frozen snapshot. Facts may be far larger than
+     the cap (agent facts up to 64 KiB, state entries up to 4 KiB), and
+     `restore_memory` returns the restored text only in its answer.
+     The next leg rebuilds instead; the cap is read from `history.py`,
+     never restated.
 2. **What the model writes mid-conversation reaches it as the messages
    it already is.** No re-read and no added message: each memory tool's
-   result in the history states the change. Decision 3 tells the model
-   so.
+   result in the history states the change, as long as that answer
+   fits under #599's kept-result cap; one that does not forces a
+   rebuild at the next leg (decision 1's fifth key component). Decision
+   3 tells the model so.
 3. **The framing says when the snapshot was taken, and is always
    there.** The state block's heading stops claiming to be current.
    Wherever the agent may remember, the prompt carries a memory section
    even when every block is empty (review round 1, finding 4: today
    `with_scopes` returns the know-how half unchanged when all blocks
    are empty, so a conversation that starts with nothing saved would
-   carry no framing at all); empty, it says nothing is saved yet. Its
+   carry no framing at all); empty, it says nothing is saved yet.
+   Memory-on-and-empty and memory-off present the same blocks, so the
+   policy becomes an explicit input of the pure renderer (review round
+   3, finding 4): `with_scopes(half, scopes, device, remembering)`,
+   passed from both `_system_prompt` and the prompt preview route in
+   `app.py`, which today returns early when memory is off. The framing
+   text is part of the memory section, so it counts toward
+   `memory_characters`, and it adds no provenance key. Its
    one framing sentence ties precedence to the snapshot's actual
    capture point rather than to the conversation's start: what it
    shows is memory as it stood when it was read; memory tool results
@@ -148,7 +170,14 @@ it.
    by a different live session's model, or by an operator's correction
    or device change, is seen from this session's next conversation,
    not its next reply. A hard deletion is not in that cost; decision 7
-   makes it reach the next reply. An appended
+   makes it reach the next leg, with a stated boundary (review round 3,
+   finding 3): the guarantee is that a leg whose key validation begins
+   after the erasure is published never sends the fact. A leg that had
+   already validated its snapshot when the erasure was published may
+   send it in its remaining rounds; locking request construction
+   against the API's erasure to close that window of one leg is not
+   worth a lock on every round's path. The observability page states
+   the boundary in these terms. An appended
    update message for other sessions' writes is a possible later step,
    not this plan.
 5. **The memory switch keeps its own clock.** Whether the agent may
@@ -197,10 +226,13 @@ it.
    `store.erase_fact` and `store.erase_facts`) call it after the
    writer's transaction has committed and only when it removed
    something, through a callable the composition hands `ApiRuntime`
-   (the same store instance every session reads). Nothing else bumps
-   it: no model write, no correction through the API, no device change,
-   no thread erasure, so none of them costs a live conversation its
-   cache. One process is enough for this to be complete: the server
+   (the same store instance every session reads). The model's own
+   `forget` with `permanently=true` is a hard deletion too (it runs a
+   SQL `DELETE`), and bumps the same revision after its transaction
+   commits (review round 3, finding 1); a soft forget does not. Nothing
+   else bumps it: no other model write, no correction through the API,
+   no device change, no thread erasure, so none of them costs a live
+   conversation its cache. One process is enough for this to be complete: the server
    runs one replica, as its topology ADR records (#316), and the API
    and every session share it. Operator corrections and device changes
    join decision 4's stated cost: seen from the next conversation.
@@ -268,6 +300,21 @@ the memory tool tests, and the event baseline.
   round 2, finding 1).
 - The round accounting repeats the snapshot's fact ids and sizes until
   a rebuild.
+- A permanent model `forget` with `export_llm_input` on: the next leg
+  of the session that made it, and of a concurrent live session, no
+  longer send or export the fact in the system prompt; a soft forget
+  leaves the revision alone (review round 3, finding 1).
+- A `set_state` over the kept-result cap (its limit is 4 KiB), a large
+  `forget` answer and a `restore_memory` of a large fact, each followed
+  by an independent reply: the change still reaches the request,
+  through the rebuilt snapshot; a small write rebuilds nothing (review
+  round 3, finding 2).
+- A deletion published after a leg's cached-key validation and before
+  its provider call: that leg may still send the fact, the next leg
+  does not (review round 3, finding 3).
+- The renderer's policy input: memory on and empty renders the section
+  and its framing, memory off renders none, and the preview route
+  does the same with memory on and off (review round 3, finding 4).
 - The erasure revision moves on each of the four erase routes when they
   remove something, and stays put on an erase that removed nothing, on
   an API correction, on a device rename through the config API, on a
@@ -301,7 +348,7 @@ run each: the snapshot re-read every round (the byte-identical and
 read-count tests must fail); and each key component dropped from the
 key in turn (exactly that component's test must fail, which is the
 point of one mechanism: removing a component has a distinct, observable
-effect).
+effect). The oversized-write counter is in that list too.
 
 ## The gate (blocking)
 
@@ -469,16 +516,24 @@ Reviewed 2026-10-04 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0
    Evidence: decision 7 publishes only the four operator API erase routes and explicitly tests that the model’s own `forget` does not change the revision (plan, decision 7 and Tests (`docs/plans/2026-10-03-memory-per-conversation.md:184`)). But `forget(permanently=true)` is offered as “erase it outright” (builtin.py (`vinga-server/src/vinga_server/tools/builtin.py:288`)) and executes a SQL `DELETE` (store.py (`vinga-server/src/vinga_server/memory/store.py:1096`)). A snapshot in another session, or the same session’s next leg, can therefore keep sending and exporting the deleted fact indefinitely.
    Plan should say instead: permanent model forget is a hard deletion and increments the same revision after its transaction commits; ordinary soft forget remains non-invalidating. Test a permanent model forget with `export_llm_input` enabled in both the originating and a concurrent live session.
 
+   *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): accepted. Decision 7 now counts the model's `forget(permanently=true)` as a hard deletion that bumps the erasure revision after commit; a soft forget does not. The test runs with export on, in the originating and a concurrent session.
+
 2. **P1: The retained-tool-history premise fails for legal large memory changes.**
    Evidence: the plan says no memory-write answer approaches the 2 KiB history-result cap (plan (`docs/plans/2026-10-03-memory-per-conversation.md:59`)), and relies on each result as the sole post-snapshot update channel (decision 2 (`docs/plans/2026-10-03-memory-per-conversation.md:107`)). In fact, agent facts allow up to 64 KiB and state entries up to 4 KiB (store.py (`vinga-server/src/vinga_server/memory/store.py:130`), store.py (`vinga-server/src/vinga_server/memory/store.py:1150`)); `restore_memory` returns the restored text only in its result (builtin.py (`vinga-server/src/vinga_server/tools/builtin.py:842`)). Later replies replace results above 2 KiB with a cleared note (history.py (`vinga-server/src/vinga_server/runtime/history.py:42`), history.py (`vinga-server/src/vinga_server/runtime/history.py:263`)). After restoring a large fact absent from the frozen snapshot, the model no longer receives that fact.
    Plan should say instead: choose and document a bounded, lossless-enough update representation for every memory mutation, or constrain the supported mutation size to the retained-history limit. Add tests for a >2 KiB `set_state`, `forget`, and especially `restore_memory` followed by an independent reply.
+
+   *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): accepted by rebuilding rather than by a second representation. Decision 1 gains a fifth key component, a session-local counter bumped when a memory-changing tool's answer exceeds `history.py`'s cap, so the next leg reads the store again; decision 2 states the condition. The three tests are in the list.
 
 3. **P1: Revision sampling does not linearize deletion against a cached request.**
    Evidence: the plan samples and compares the revision only at a leg’s first round (decision 1 (`docs/plans/2026-10-03-memory-per-conversation.md:79`)), while its interleaving test covers only a deletion between device and memory reads (Tests (`docs/plans/2026-10-03-memory-per-conversation.md:276`)). With an already cached snapshot, the key can validate at revision `r`, the API thread can commit a deletion and publish `r+1`, and the pipeline can still send the old prompt before the provider call. This contradicts “hard deletion reaches the next reply” (decision 4 (`docs/plans/2026-10-03-memory-per-conversation.md:144`)).
    Plan should say instead: define the deletion/request linearization point and either synchronize publication through request construction or narrow the guarantee to requests whose validation begins after publication. Add a controlled interleaving after a cached-key hit and before the provider receives the request.
 
+   *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): accepted as the narrowing. The guarantee now reads: a leg whose validation begins after the erasure is published never sends the fact; an already validated leg may send it in its remaining rounds. A lock on every round's path to close one leg's window is priced and declined. The interleaving test is in the list, and the observability page states the boundary.
+
 4. **P2: Always-present framing needs a policy input the assembler does not have.**
    Evidence: decision 3 requires framing for an enabled-but-empty memory snapshot, while memory-off must still omit memory (plan (`docs/plans/2026-10-03-memory-per-conversation.md:111`)). Current `with_scopes(half, scopes, device)` has no policy parameter and returns `half` for empty scopes (prompt.py (`vinga-server/src/vinga_server/runtime/prompt.py:498`)); memory-on-empty and memory-off-without-device present identical inputs. The preview route has the same split, returning early when memory is off (app.py (`vinga-server/src/vinga_server/app.py:1158`)).
    Plan should say instead: make the enabled/framing decision an explicit input to the pure renderer, pass it from both `_system_prompt` and prompt preview, and specify its provenance/accounting. Test enabled-empty, disabled-empty, enabled preview, and disabled preview separately.
+
+   *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): accepted. Decision 3 makes the policy an explicit `remembering` input of `with_scopes`, passed from `_system_prompt` and the preview route; the framing counts toward `memory_characters` with no new provenance key. The four tests are in the list.
 
 **Verdict: not ready.**
