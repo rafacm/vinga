@@ -427,7 +427,7 @@ when they were written.
 
 ## Milestones
 
-- [x] **[M1: memory is read once per conversation](2026-10-03-memory-per-conversation-implementation.md#m1-memory-is-read-once-per-conversation)** (PR TBD). Decisions 1 to 8,
+- [x] **[M1: memory is read once per conversation](2026-10-03-memory-per-conversation-implementation.md#m1-memory-is-read-once-per-conversation)** ([PR #603](https://github.com/rafacm/vinga/pull/603)). Decisions 1 to 8,
   all of them deliverables of this one milestone (review round 2,
   finding 7): the keyed snapshot read at a leg's first round, the
   framing and the re-read note, the stated cost, the memory switch's
