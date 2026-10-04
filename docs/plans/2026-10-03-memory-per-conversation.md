@@ -162,7 +162,19 @@ it.
    1, finding 2). `read_for_prompt` therefore states which it was:
    `PromptMemory` gains `complete: bool` (true by default; the failure
    path returns a `NOTHING_REMEMBERED` that says `complete=False`), and
-   the device record read says the same where it can fail. A round whose
+   so does the device record read (review round 2, finding 5).
+   `DeviceBindings.record_now` today answers `LiveDevice | None` and
+   falls back to the served configuration's record when the database
+   read fails, which a caller cannot tell from a real answer.
+   `resolve_record` (its one async caller, `pipeline.py`'s device read
+   for the prompt) gains a result that carries the same record it
+   returns today, fallback included, beside `complete: bool`, false
+   exactly on the arm that fell back because the read failed. The
+   record the prompt uses is unchanged in every case; only whether the
+   snapshot may be kept changes. A snapshot is kept only when both
+   reads were complete, and the device read is still made, and still
+   decides, when the agent's memory is off (the device block is part
+   of the prompt either way). A round whose
    read was incomplete sends exactly what it sends today (the safe
    empty blocks, the reply happens) and caches nothing, so the next
    leg's first round reads again (decision 1: reads happen only
@@ -268,9 +280,13 @@ the memory tool tests, and the event baseline.
   `remember` exchange for it, if any, is still in the exported history,
   which is the documented behavior.
 - A read that fails (the store's reader raising) sends the safe empty
-  blocks on that round and is not cached: the next round reads again,
+  blocks on that round and is not cached: the next leg reads again,
   and once the store recovers its snapshot holds the facts (failure
-  then recovery, review round 1, finding 2). An empty memory that read
+  then recovery, review round 1, finding 2). The same for a device
+  read that fell back to the served configuration: that leg sends the
+  fallback record, the next leg reads again and the snapshot then
+  holds the stored record, with memory on and with memory off (review
+  round 2, finding 5). An empty memory that read
   successfully IS cached (a read-count test), so the two are told
   apart.
 
@@ -419,6 +435,8 @@ Reviewed 2026-10-04 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): accepted by narrowing rather than wiring every door, which the proportion test favors. Only hard deletion publishes, because a deleted fact being re-sent is the problem round 1 raised; corrections, device changes and thread erasure join decision 4's stated next-conversation cost. Decision 7 names the one publication point (the four erase routes in `memory/api.py`, after commit and only when something was removed, through a callable the composition hands `ApiRuntime`, bumping `MemoryStore`'s erasure revision). The test checks each erase route moves it and that every other write class, the model's relocation included, leaves it alone.
 
 5. **P2: Device-read failure cannot currently be distinguished from its fallback.** Evidence: decision 6 says the device read reports completeness (plan:141 (`docs/plans/2026-10-03-memory-per-conversation.md:141`)), but `resolve_record` returns only `LiveDevice | None`; `record_now` silently uses the served-world fallback when the database read fails (device/bindings.py:364 (`vinga-server/src/vinga_server/device/bindings.py:364`)). A transient failure could freeze that fallback even if the later memory read succeeds. The proposed failure test exercises only the memory reader. **Amendment:** specify a device-read result that carries completeness without losing the existing fallback, and test device failure followed by recovery, including with agent memory switched off.
+
+   *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): accepted. Decision 6 now has `resolve_record` return the same record as today, fallback included, beside `complete`, false only on the arm that fell back because the read failed; a snapshot is kept only when both reads completed. The test covers device failure then recovery with memory on and off.
 
 6. **P2: The deletion guidance describes too narrow a history path and an unsafe action order.** Evidence: decision 7 discusses only a fact this session wrote with `remember`, then tells the operator to delete the thread and end the live session “in that order” (plan:166 (`docs/plans/2026-10-03-memory-per-conversation.md:166`)). A retained `recall` result can also contain the fact (builtin.py:889 (`vinga-server/src/vinga_server/tools/builtin.py:889`)); deleting the stored thread leaves the live history available for another exported round. **Amendment:** document all retained exchanges that can carry deleted content, and say to stop the live session before deleting its stored thread when the aim is to prevent another disclosure. Test a prior `recall` as well as `remember`.
 
