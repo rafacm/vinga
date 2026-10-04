@@ -97,7 +97,13 @@ it.
    - the **conversation id** (so a rebind to another thread rebuilds
      and one thread's ledger is never served on another);
    - the **memory policy** the snapshot was built under (decision 5);
-   - the store's **operator revision** (decision 7).
+   - the **erasure revision** (decision 7), sampled before the
+     snapshot's reads begin and stored with it, never replaced by a
+     later value (review round 2, finding 3): an erasure that commits
+     while the reads are in flight leaves the snapshot keyed with the
+     older revision, so the next leg's first round finds the key stale
+     and reads again. The reads may have caught the erasure or not;
+     either way the stale key guarantees a re-read after it.
 2. **What the model writes mid-conversation reaches it as the messages
    it already is.** No re-read and no added message: each memory tool's
    result in the history states the change. Decision 3 tells the model
@@ -138,10 +144,11 @@ it.
 4. **What is given up, stated where the contract was.** The
    `_system_prompt` and `with_scopes` docstrings, and the observability
    page's memory section, say the clock is per activation now and what
-   that costs: a fact saved or a device moved by a different live
-   session's model during this conversation is seen from this session's
-   next conversation, not its next reply. An operator's change is not
-   in that cost; decision 7 makes it reach the next round. An appended
+   that costs: a fact saved or a device moved during this conversation
+   by a different live session's model, or by an operator's correction
+   or device change, is seen from this session's next conversation,
+   not its next reply. A hard deletion is not in that cost; decision 7
+   makes it reach the next reply. An appended
    update message for other sessions' writes is a possible later step,
    not this plan.
 5. **The memory switch keeps its own clock.** Whether the agent may
@@ -162,18 +169,29 @@ it.
    there); the first complete read becomes the snapshot. A short outage
    therefore costs the replies it lasts, rather than the rest of the
    conversation.
-7. **An operator's change reaches the next round.** The operator doors
-   (the memory API's writes and hard deletions in `memory/api.py`, a
-   device-record change through the config API, a thread purge) bump a
-   process-wide **operator revision** on the store after their write
-   commits; the model's own writes through the memory tools do not, so
-   they cost the cache nothing. The revision is part of the snapshot's
-   key (decision 1), so the next round of every live conversation
-   rebuilds its snapshot from the store as it now is. One process is
-   enough for this to be complete: the server runs one replica, as its
-   topology ADR records (#316), and the API and every session share
-   that process. What remains stale is only a write made by another
-   live session's model, decision 4's stated cost.
+7. **A hard deletion reaches the next reply; other operator changes
+   reach the next conversation.** Review round 2 (finding 4) priced the
+   general version: every operator door (memory API writes, device
+   record changes through the config store, which the model's own
+   relocation also uses, thread erasure through its own listener)
+   would need its own publication point and its own exclusion of model
+   writes. The problem round 1 raised is narrower than that: a deleted
+   fact being sent, and exported, again. So only hard deletion
+   publishes. `MemoryStore` gains an **erasure revision**, an integer
+   held in the process-wide store instance with `erased()` to bump it
+   and a property to read it. The four erase routes in `memory/api.py`
+   (`erase_agent_fact`, `erase_device_fact`, `erase_agent_memory`,
+   `erase_device_memory`, which share the two helpers around
+   `store.erase_fact` and `store.erase_facts`) call it after the
+   writer's transaction has committed and only when it removed
+   something, through a callable the composition hands `ApiRuntime`
+   (the same store instance every session reads). Nothing else bumps
+   it: no model write, no correction through the API, no device change,
+   no thread erasure, so none of them costs a live conversation its
+   cache. One process is enough for this to be complete: the server
+   runs one replica, as its topology ADR records (#316), and the API
+   and every session share it. Operator corrections and device changes
+   join decision 4's stated cost: seen from the next conversation.
 
    What the revision cannot reach, stated on the observability page's
    deletion section rather than left implied (review round 1, finding
@@ -212,8 +230,8 @@ the memory tool tests, and the event baseline.
 - Each key component has a test of its own in which only that
   component changes: a handover away and back to the same agent on the
   same conversation (activation counter), a rebind (conversation), a
-  policy apply (decision 5), an operator write (decision 7); each
-  rebuilds, and nothing else does.
+  policy apply (decision 5), a hard deletion (decision 7); each
+  rebuilds at the next leg, and nothing else does.
 - The framing: the state heading no longer claims to be current; the
   memory section and its framing sentence are present whenever the
   agent may remember, including a conversation that starts with
@@ -233,6 +251,16 @@ the memory tool tests, and the event baseline.
   round 2, finding 1).
 - The round accounting repeats the snapshot's fact ids and sizes until
   a rebuild.
+- The erasure revision moves on each of the four erase routes when they
+  remove something, and stays put on an erase that removed nothing, on
+  an API correction, on a device rename through the config API, on a
+  thread erasure, and on the model's own `forget` and
+  `set_device_location` (review round 2, finding 4).
+- An erasure committed while a snapshot's reads are in flight (a
+  controlled interleaving: the fake reader bumps the revision between
+  the device read and the memory read) leaves that snapshot keyed with
+  the older revision, and the next leg reads again (review round 2,
+  finding 3).
 - With `export_llm_input` on, an operator hard-deleting a fact through
   the memory API between two replies: the next round's exported system
   prompt no longer carries it and its ids leave the round's
@@ -384,7 +412,11 @@ Reviewed 2026-10-04 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
 
 3. **P1: The revision key needs an ordering rule around the reads.** Evidence: the plan promises that hard deletion leaves the next round’s prompt (plan:153 (`docs/plans/2026-10-03-memory-per-conversation.md:153`)), while `_system_prompt` awaits a device read and then a memory read (pipeline.py:2562 (`vinga-server/src/vinga_server/runtime/pipeline.py:2562`)). If the revision is captured *after* those reads, a deletion can commit between the read and key capture; stale content is then cached under the new revision. **Amendment:** specify that the key’s revision is sampled before either read and never replaced by a later value, or retry when it changes during construction. Add a controlled interleaving test with a deletion.
 
+   *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): accepted as the first option. Decision 1's key samples the erasure revision before the reads and keeps it, so a deletion during the reads leaves a stale key and a re-read at the next leg. The interleaving test bumps the revision between the device read and the memory read.
+
 4. **P2: Operator revision publication needs named integration points.** Evidence: memory API writes use `ApiRuntime.memory_writes`, not `MemoryStore` (memory/api.py:415 (`vinga-server/src/vinga_server/memory/api.py:415`)); device config writes use another store, whose relocation path the model also uses (config/api.py:2765 (`vinga-server/src/vinga_server/config/api.py:2765`), config/store.py:1036 (`vinga-server/src/vinga_server/config/store.py:1036`)); thread erasure publishes through its own listener path. The plan names these doors but does not say how each publishes only after commit while excluding model writes. Its single operator-write test cannot establish that coverage. **Amendment:** name the callback wiring and publication point for each door, including thread purge and device record changes, and test each class of write plus a model relocation that must leave the revision unchanged.
+
+   *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): accepted by narrowing rather than wiring every door, which the proportion test favors. Only hard deletion publishes, because a deleted fact being re-sent is the problem round 1 raised; corrections, device changes and thread erasure join decision 4's stated next-conversation cost. Decision 7 names the one publication point (the four erase routes in `memory/api.py`, after commit and only when something was removed, through a callable the composition hands `ApiRuntime`, bumping `MemoryStore`'s erasure revision). The test checks each erase route moves it and that every other write class, the model's relocation included, leaves it alone.
 
 5. **P2: Device-read failure cannot currently be distinguished from its fallback.** Evidence: decision 6 says the device read reports completeness (plan:141 (`docs/plans/2026-10-03-memory-per-conversation.md:141`)), but `resolve_record` returns only `LiveDevice | None`; `record_now` silently uses the served-world fallback when the database read fails (device/bindings.py:364 (`vinga-server/src/vinga_server/device/bindings.py:364`)). A transient failure could freeze that fallback even if the later memory read succeeds. The proposed failure test exercises only the memory reader. **Amendment:** specify a device-read result that carries completeness without losing the existing fallback, and test device failure followed by recovery, including with agent memory switched off.
 
