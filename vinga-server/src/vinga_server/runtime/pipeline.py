@@ -72,6 +72,7 @@ from vinga_server.conversations.records import (
     TurnRecorder,
     TurnStore,
 )
+from vinga_server.device.bindings import RecordNow
 from vinga_server.device.boundary import (
     PIPELINE_SAMPLE_RATE,
     DeviceGone,
@@ -283,17 +284,19 @@ class DeviceRecords(Protocol):
     """The device record, as a reply reads it.
 
     Named here rather than imported because this is the side that says
-    what it needs: one question, asked once per round, about the record
-    this conversation attached to at its connect rather than about a
-    MAC. It answers None rather than raising, both for a record that is
-    gone and for a database that could not be read. What answers it in a
+    what it needs: one question, asked where a conversation's prompt
+    snapshot is read, about the record this conversation attached to at
+    its connect rather than about a MAC. It answers rather than raising,
+    a record of None for one that is gone, and for a database that could
+    not be read the served world's record with `complete=False`, so a
+    fallback is rendered and never kept (#536). What answers it in a
     server is `device.bindings.DeviceBindings`, which is also where a
     failed read is logged and fallen back from; a runtime built without
     one is a runtime whose replies say nothing about the device, which
     is what every deployment sent before there was a record to read.
     """
 
-    async def resolve_record(self, attached: LiveDevice) -> LiveDevice | None: ...
+    async def resolve_record(self, attached: LiveDevice) -> RecordNow: ...
 
 
 class AgentNotAllowed(ValueError):
@@ -847,7 +850,7 @@ class PipelineRuntime:
         where a board with no record has always filed its facts and
         where a runtime composed without a store files all of them.
         """
-        record = await self._device_record()
+        record = (await self._device_record()).record
         return builtin.MemoryContext(
             device=self._device if record is None else record.mac,
             conversation=self._conversation,
@@ -2559,7 +2562,7 @@ class PipelineRuntime:
         """
         assert self._know_how is not None and self._agent is not None
         assert self._conversation is not None
-        record = await self._device_record()
+        record = (await self._device_record()).record
         if not self._remembering_now():
             return prompt.RoundPrompt(
                 prompt.with_scopes(self._know_how, NOTHING_REMEMBERED, record), facts=None
@@ -2574,7 +2577,7 @@ class PipelineRuntime:
             prompt.with_scopes(self._know_how, scopes, record), facts=scopes.facts
         )
 
-    async def _device_record(self) -> LiveDevice | None:
+    async def _device_record(self) -> RecordNow:
         """What this conversation is speaking through, as the record it
         attached to stands right now.
 
@@ -2585,14 +2588,16 @@ class PipelineRuntime:
         binds the same board again, and #449's M4 parts them on purpose
         by moving a MAC to another record.
 
-        None wherever there is nothing to ask or nobody to ask: a
-        runtime composed without the view, a board that had no record at
-        its connect, and a record that has since been deleted. Off the
+        A record of None wherever there is nothing to ask or nobody to
+        ask: a runtime composed without the view, a board that had no
+        record at its connect, and a record that has since been deleted.
+        Each of those is a complete answer; only a view that could not
+        read its database answers incomplete. Off the
         event loop, because the view reads a database and every live
         conversation in this process shares that loop.
         """
         if self._devices is None or self._attached is None:
-            return None
+            return RecordNow(None)
         return await self._devices.resolve_record(self._attached)
 
     def _withheld(self, sentence: str, offer: Offer) -> bool:

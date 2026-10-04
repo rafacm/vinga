@@ -789,7 +789,9 @@ def test_the_record_is_read_live_like_the_binding() -> None:
         with store_at() as store:
             store.relocate_device(DEVICE_MAC, "the hallway")
 
-        moved = bindings.record_now(attached)
+        read = bindings.record_now(attached)
+        moved = read.record
+        assert read.complete
         assert moved is not None and moved.location == "the hallway"
         # And it is the same record throughout, which is what a reader
         # of these two facts is entitled to assume.
@@ -847,7 +849,8 @@ def test_a_re_created_device_is_not_the_record_a_conversation_attached_to() -> N
             store.bind_device(DEVICE_MAC, ["assistant"])
             store.rename_device(DEVICE_MAC, "Kitchen Speaker")
 
-        assert bindings.record_now(attached) is None
+        assert bindings.record_now(attached).record is None
+        assert bindings.record_now(attached).complete
         # And a connect happening now attaches to the new record, which
         # is what makes the two answers different questions.
         fresh = bindings.attachment_for(DEVICE_MAC).record
@@ -870,6 +873,10 @@ def test_a_failed_record_read_falls_back_to_the_served_world(
         devices={
             DEVICE_MAC: {
                 "agents": ["assistant"],
+                # An identity, so the re-read is addressed and reaches
+                # the database: a record without one is answered by the
+                # served world whatever the engine would have said.
+                "id": "a" * 32,
                 "name": "Kitchen Speaker",
                 "location": "the kitchen",
             }
@@ -880,10 +887,15 @@ def test_a_failed_record_read_falls_back_to_the_served_world(
     with caplog.at_level(logging.WARNING):
         attachment = bindings.attachment_for(DEVICE_MAC)
         assert attachment.record is not None
-        record = bindings.record_now(attachment.record)
+        read = bindings.record_now(attachment.record)
 
+    record = read.record
     assert record is not None
     assert (record.name, record.location) == ("Kitchen Speaker", "the kitchen")
+    # The same record a successful read would have rendered from this
+    # world, said to be a fallback, so a conversation keeping its prompt
+    # for longer than one round does not keep this one (#536).
+    assert not read.complete
     text, objects = _rendered(caplog.records)
     assert SENTINEL not in text
     assert objects and objects[0]["event"] == "device_bindings_unreadable"
@@ -935,7 +947,10 @@ def test_a_snapshot_that_replaced_the_record_answers_nothing() -> None:
         # re-bind leave behind, said in a composed world.
         replaced = DeviceBindings.snapshot_only(world(composed("b" * 32, "Hallway")))
 
-        assert replaced.record_now(attached) is None
+        assert replaced.record_now(attached).record is None
+        # A world with no database IS the authority, so its answer is
+        # complete, gone record included.
+        assert replaced.record_now(attached).complete
     finally:
         bindings.dispose()
 

@@ -197,6 +197,22 @@ class Attachment:
     record: LiveDevice | None
 
 
+@dataclass(frozen=True)
+class RecordNow:
+    """The record a conversation attached to, as one read answered it:
+    the record (None where it is gone or there never was one), and
+    whether the read answered rather than fell back.
+
+    The record is what a prompt renders in every case, fallback
+    included; `complete` is false exactly where the database could not
+    be read and the served world answered instead, which the record
+    alone cannot say (#536, decision 6).
+    """
+
+    record: LiveDevice | None
+    complete: bool = True
+
+
 class DeviceBindings:
     """The live view of the `devices` rows and `default_agent`.
 
@@ -361,21 +377,23 @@ class DeviceBindings:
             _snapshot_record(self._generations.current().config, normalized),
         )
 
-    async def resolve_record(self, attached: LiveDevice) -> LiveDevice | None:
+    async def resolve_record(self, attached: LiveDevice) -> "RecordNow":
         """`record_now`, awaited off the event loop.
 
-        What the reply path calls, and it calls it on every round: a
-        device that was moved between two replies has moved for the
-        second of them. The rule `resolve` states holds here with one
-        more reason behind it: this read happens while a person is
-        waiting for an answer, so running it inline would put a query in
-        front of every other conversation this process is holding, once
-        per round rather than once per connect.
+        What the reply path calls when it builds the prompt a
+        conversation keeps (#536): once at the first round of a leg
+        whose snapshot has to be read, and again at the next leg's
+        first round while a read keeps failing. The rule `resolve`
+        states holds here with one more reason behind it: this read
+        happens while a person is waiting for an answer, so running it
+        inline would put a query in front of every other conversation
+        this process is holding.
         """
         return await asyncio.to_thread(self.record_now, attached)
 
-    def record_now(self, attached: LiveDevice) -> LiveDevice | None:
-        """The record a conversation attached to, as it stands now.
+    def record_now(self, attached: LiveDevice) -> "RecordNow":
+        """The record a conversation attached to, as it stands now, and
+        whether the database is what said so.
 
         Addressed by the identity rather than by the MAC, which is the
         whole of what the stable id is for: a MAC says where a board is
@@ -386,46 +404,38 @@ class DeviceBindings:
         address; re-reading by id hands it the record it has been
         speaking through, or nothing.
 
-        None means that record is gone, and a reply says no more about
-        its device than one that never had a record. The alternative is
-        going on saying something that stopped being true.
+        A record of None means that record is gone, and a reply says no
+        more about its device than one that never had a record. The
+        alternative is going on saying something that stopped being
+        true.
 
         The same fallback `names_for` keeps, and for the same reason
         rather than for symmetry: a `/data` hiccup mid-conversation must
         not make an agent stop knowing what it is speaking through. What
         the served world answers is what boot read, so it is right until
         somebody writes, and a write it has not heard about is staleness
-        in one round's prompt rather than a device that forgot its own
-        name.
-        """
-        stored, answered = self._stored_record(attached)
-        if answered:
-            return stored
-        return _snapshot_reread(self._generations.current().config, attached)
-
-    def _stored_record(self, attached: LiveDevice) -> tuple[LiveDevice | None, bool]:
-        """The attached record as the database holds it now, and whether
-        the database is what answered.
-
-        The second half is the same distinction `_stored` draws and is
-        read the other way round here, because the two callers want
-        different things from it: a binding falls back whenever it has
-        no row, since a default agent stands behind every unbound
-        device; a record falls back only when nothing was read, since a
-        database that answered "that record is gone" has answered.
+        in one prompt rather than a device that forgot its own name. That
+        arm, and only that one, answers `complete=False`: the record is
+        the same one either way, and what changes is that a caller
+        keeping it for a conversation (#536) knows not to keep a
+        fallback. A view with no database behind it, or a record with no
+        identity to read by, answers from the served world because that
+        IS the authority, so its answer is complete.
         """
         if self._engine is None or attached.id is None:
-            return None, False
+            return RecordNow(_snapshot_reread(self._generations.current().config, attached))
         problem: Exception | None = None
         try:
-            return read_live_device_by_id(self._engine, attached.id), True
+            return RecordNow(read_live_device_by_id(self._engine, attached.id))
         # Deliberately everything, the reason `_stored` gives: what is
         # being protected is a conversation in flight, and no failure of
         # this read is worth ending one over.
         except Exception as exc:
             problem = exc
         self._warn(attached.mac, problem)
-        return None, False
+        return RecordNow(
+            _snapshot_reread(self._generations.current().config, attached), complete=False
+        )
 
     def _attached(self, mac: str) -> tuple[LiveAttachment | None, bool]:
         """Both halves as the database holds them, and whether the
@@ -550,4 +560,4 @@ def _snapshot_reread(config: "Config", attached: LiveDevice) -> LiveDevice | Non
     return record
 
 
-__all__ = ["Attachment", "BoundNames", "DeviceAgents", "DeviceBindings"]
+__all__ = ["Attachment", "BoundNames", "DeviceAgents", "DeviceBindings", "RecordNow"]
