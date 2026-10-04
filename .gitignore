@@ -38,6 +38,13 @@ deploy/telemetry/.env
 mise.toml
 .mcp.json
 .claude/worktrees/
+
+# Branch work happens in worktrees under `worktrees/`, one per branch,
+# so the main checkout stays on `main`; each worktree's lane, mutation
+# and gate logs go in its own `.logs/`, so two agents working in
+# parallel can never write the same file.
+/worktrees/
+.logs/
 .claude/settings.local.json
 # IDE project metadata (one .iml was committed before this line existed).
 .idea/

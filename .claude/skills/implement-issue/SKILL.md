@@ -23,9 +23,19 @@ retargeting discipline under "Merging".
 - `export GH_REPO=rafacm/vinga`, and still pass
   `--repo rafacm/vinga` on every `gh` call (AGENTS.md says why the
   flag stays even with the export).
-- All branch work happens in `git worktree`s under the session
-  scratchpad, never in the main checkout: another session may hold
-  it, and worktrees are what let milestones proceed in parallel.
+- All branch work happens in `git worktree`s under `worktrees/` at
+  the repository root, never in the main checkout, which stays on
+  `main`: another session may hold it, and worktrees are what let
+  milestones proceed in parallel. One worktree per branch, named
+  after it without the `feature/` or `fix/` prefix:
+  `git worktree add -b feature/599-m1-keep-tool-rounds
+  worktrees/599-m1-keep-tool-rounds <base>`. A branch carries its
+  issue number when it has one (`feature/<issue>-<slug>`, a
+  milestone's `feature/<issue>-m<n>-<slug>`), and a slug naming its
+  purpose when it has none. `worktrees/` is git-ignored. Not the
+  session scratchpad: that lives under `/tmp`, so a reboot takes
+  every worktree in it, and it is shared by every agent the session
+  starts.
 - Read in full before planning: the issue (its decisions are
   settled and not re-litigated unless Step 0 finds their premise
   has moved; its open questions are the plan's to resolve),
@@ -293,9 +303,9 @@ address each finding with its own amendment commit, appending a
 
 One `milestone-implementer` subagent per milestone (the agent
 definition in `.claude/agents/`, which pins the model and the
-effort its attribution string reports), each in its own
-scratchpad worktree, on a branch stacked on the previous
-milestone's branch.
+effort its attribution string reports), each in its own worktree
+under `worktrees/`, on a branch stacked on the previous milestone's
+branch.
 
 **Launch milestone N+1's subagent when N's PR OPENS, not when it
 merges.** The trigger is an instant, stated here because the property
@@ -345,6 +355,14 @@ The subagent's brief states, verbatim where possible:
   `uv run pytest tests/integration -q`, and the doc drift checks,
   all from `vinga-server/`; anything unverifiable locally (the
   image, the smoke lane) stated plainly, never claimed.
+- Every log the subagent writes (test lanes, mutation runs, a gate)
+  goes under `.logs/` in its own worktree, and every lane line it
+  reports is quoted from one of those files. `.logs/` is
+  git-ignored. Never a shared directory: on #599 two milestones
+  built in parallel wrote their unit lanes to the same scratchpad
+  file name, both totalled the same number of tests, and one PR then
+  quoted the other branch's run, which took a correction on #601
+  after it had merged.
 - `PYTHONDONTWRITEBYTECODE=1` outside pytest (the stale-bytecode
   trap in AGENTS.md).
 - No pushes and no GitHub commands from subagents.
