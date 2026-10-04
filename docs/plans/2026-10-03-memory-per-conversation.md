@@ -99,10 +99,12 @@ Measured at `677fd921` (`main` on 2026-10-03).
 4. **What is given up, stated where the contract was.** The
    `_system_prompt` and `with_scopes` docstrings, and the observability
    page's memory section, say the clock is per activation now and what
-   that costs: a fact saved or a device moved by a different session, or
-   by an operator, during this conversation is seen from this session's
-   next conversation, not its next reply. An appended update message
-   for those changes is a possible later step, not this plan.
+   that costs: a fact saved or a device moved by a different live
+   session's model during this conversation is seen from this session's
+   next conversation, not its next reply. An operator's change is not
+   in that cost; decision 7 makes it reach the next round. An appended
+   update message for other sessions' writes is a possible later step,
+   not this plan.
 5. **The memory switch keeps its own clock.** Whether the agent may
    remember (`_remembering_now`) is still resolved per reply for the
    tools; the snapshot follows the value it was built under, and the
@@ -132,6 +134,21 @@ Measured at `677fd921` (`main` on 2026-10-03).
    topology ADR records (#316), and the API and every session share
    that process. What remains stale is only a write made by another
    live session's model, decision 4's stated cost.
+
+   What the revision cannot reach, stated on the observability page's
+   deletion section rather than left implied (review round 1, finding
+   3): if this session's model itself wrote the fact (`remember` in this
+   conversation), its own call and answer are in this conversation's
+   history since #599, and the history is not memory. Hard-deleting the
+   fact stops it being sent as memory from the next round, and the
+   tool exchange that wrote it keeps being sent, and exported when
+   `export_llm_input` is on, until the session ends; a resumed thread
+   rebuilds it from `tool_invocations`, which a thread deletion removes.
+   The operator's way to stop both is the existing one: delete the
+   conversation's thread (`vinga conversation delete`), which removes
+   its stored turns and calls, and end the live session (the device
+   disconnecting, or a server restart). The page says this in that
+   order.
 8. **The metadata half's accounting stays truthful.** Every round still
    reports the size and fact ids of the prompt it actually sent; with a
    frozen snapshot they repeat until the snapshot is rebuilt, which is
@@ -161,6 +178,12 @@ the memory tool tests, and the event baseline.
   the snapshot sentence is present whenever a memory block is.
 - The round accounting repeats the snapshot's fact ids and sizes until
   a rebuild.
+- With `export_llm_input` on, an operator hard-deleting a fact through
+  the memory API between two replies: the next round's exported system
+  prompt no longer carries it and its ids leave the round's
+  `memory_facts` (review round 1, finding 3); the model's own earlier
+  `remember` exchange for it, if any, is still in the exported history,
+  which is the documented behavior.
 - A read that fails (the store's reader raising) sends the safe empty
   blocks on that round and is not cached: the next round reads again,
   and once the store recovers its snapshot holds the facts (failure
@@ -226,7 +249,9 @@ Rafael.
 
 - `runtime/pipeline.py` and `runtime/prompt.py` docstrings (decision 4).
 - `docs/architecture/observability-surfaces.md`: the memory section's
-  clock, and the content-export sentence that memory "is read per round".
+  clock, the content-export sentence that memory "is read per round",
+  and the deletion section's statement of what a hard deletion stops
+  and what it does not (decision 7).
 - `changelog.d/536-memory-per-conversation.md` under `### Changed`.
 
 ## Milestones
@@ -250,6 +275,8 @@ Reviewed 2026-10-03 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): accepted as decision 6. `PromptMemory` says whether its read completed; an incomplete read sends today's safe empty blocks and is never cached, so the next round retries and the first complete read becomes the snapshot. Tests cover failure then recovery, and a successful empty read being cached.
 
 3. **P2: Hard deletion gains an undocumented future disclosure path.** Evidence: the plan defers operator changes until the next conversation and claims nothing new reaches a surface (`docs/plans/2026-10-03-memory-per-conversation.md:84`). Today the operator API is the hard-deletion door (`docs/architecture/observability-surfaces.md:183`), while enabled LLM input export sends each round’s prompt outward (`docs/architecture/observability-surfaces.md:541`). A frozen prompt can send a *new copy* of a deleted secret on every later round. **The plan should state this consequence and give operators a concrete way to stop an affected live conversation before deleting sensitive content**, then test the documented behavior with export enabled.
+
+   *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): accepted, and narrowed rather than only documented. Decision 7 bumps an in-process operator revision on every operator write, hard deletion included, and the snapshot's key carries it, so a deleted fact leaves the prompt and the export from the next round (one replica, per the topology ADR, makes an in-process signal complete). What it cannot reach is stated on the observability page: an exchange this session's model wrote stays in the session's history and export until the session ends, and the operator's way to stop it is deleting the thread and ending the session. Tested with export enabled.
 
 4. **P2: The proposed framing can be absent or give the wrong precedence.** Evidence: `with_scopes` returns the know-how half unchanged when all scope blocks are empty (`vinga-server/src/vinga_server/runtime/prompt.py:528`), but the plan requires its new snapshot sentence only when a memory block exists (`docs/plans/2026-10-03-memory-per-conversation.md:116`). Its gate starts with empty memory. Also, a memory-policy change rebuilds the snapshot mid-conversation (`docs/plans/2026-10-03-memory-per-conversation.md:91`), making “as it stood when this conversation started” false; older history updates need not outrank that new snapshot. **The plan should define framing for an empty snapshot and describe precedence relative to the snapshot’s actual capture time.** Test both an initially empty conversation and an off-to-on policy apply.
 
