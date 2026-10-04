@@ -108,7 +108,31 @@ Measured at `677fd921` (`main` on 2026-10-03).
    tools; the snapshot follows the value it was built under, and the
    snapshot is rebuilt if that value changes between replies (a config
    apply), so the blocks and the offered tools cannot disagree.
-6. **The metadata half's accounting stays truthful.** Every round still
+6. **A failed read is never kept.** `MemoryStore._read` answers a
+   database it cannot read with `NOTHING_REMEMBERED`, the same value as
+   an empty memory, and says so only on the event stream (review round
+   1, finding 2). `read_for_prompt` therefore states which it was:
+   `PromptMemory` gains `complete: bool` (true by default; the failure
+   path returns a `NOTHING_REMEMBERED` that says `complete=False`), and
+   the device record read says the same where it can fail. A round whose
+   read was incomplete sends exactly what it sends today (the safe
+   empty blocks, the reply happens) and caches nothing, so the next
+   round reads again; the first complete read becomes the snapshot. A
+   short outage therefore costs the rounds it lasts, as it does today,
+   rather than the rest of the conversation.
+7. **An operator's change reaches the next round.** The operator doors
+   (the memory API's writes and hard deletions in `memory/api.py`, a
+   device-record change through the config API, a thread purge) bump a
+   process-wide **operator revision** on the store after their write
+   commits; the model's own writes through the memory tools do not, so
+   they cost the cache nothing. The revision is part of the snapshot's
+   key (decision 1), so the next round of every live conversation
+   rebuilds its snapshot from the store as it now is. One process is
+   enough for this to be complete: the server runs one replica, as its
+   topology ADR records (#316), and the API and every session share
+   that process. What remains stale is only a write made by another
+   live session's model, decision 4's stated cost.
+8. **The metadata half's accounting stays truthful.** Every round still
    reports the size and fact ids of the prompt it actually sent; with a
    frozen snapshot they repeat until the snapshot is rebuilt, which is
    what the model received.
@@ -137,6 +161,12 @@ the memory tool tests, and the event baseline.
   the snapshot sentence is present whenever a memory block is.
 - The round accounting repeats the snapshot's fact ids and sizes until
   a rebuild.
+- A read that fails (the store's reader raising) sends the safe empty
+  blocks on that round and is not cached: the next round reads again,
+  and once the store recovers its snapshot holds the facts (failure
+  then recovery, review round 1, finding 2). An empty memory that read
+  successfully IS cached (a read-count test), so the two are told
+  apart.
 
 **Falsification.** Each new test watched failing first. Mutations, one
 run each: the snapshot re-read every round (the byte-identical and
@@ -216,6 +246,8 @@ Reviewed 2026-10-03 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): resolved by #599, merged as PRs #600 to #602. Memory tool calls and their answers now stay in the history, structured, for the rest of the session and are rebuilt on resume; "Where this starts from" says so. The test the finding asks for is added: a later reply's provider request, after a turn whose utterance and spoken answer do not repeat the value, carries the `remember`, `set_state` and `forget` exchanges that changed it, while the system prompt is byte-identical to the snapshot's.
 
 2. **P2: A failed first read becomes a conversation-long empty snapshot.** Evidence: `MemoryStore._read` reports a failure by class and returns `NOTHING_REMEMBERED` (`vinga-server/src/vinga_server/memory/store.py:681`); the plan caches the resulting `RoundPrompt` until activation or rebind (`docs/plans/2026-10-03-memory-per-conversation.md:62`). A short database outage would therefore make memory disappear for the rest of a long conversation, even after recovery. **The plan should distinguish a successful empty read from a failed read**, keep the current safe empty reply on failure, and retry snapshot construction on a later reply. Test failure followed by recovery.
+
+   *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): accepted as decision 6. `PromptMemory` says whether its read completed; an incomplete read sends today's safe empty blocks and is never cached, so the next round retries and the first complete read becomes the snapshot. Tests cover failure then recovery, and a successful empty read being cached.
 
 3. **P2: Hard deletion gains an undocumented future disclosure path.** Evidence: the plan defers operator changes until the next conversation and claims nothing new reaches a surface (`docs/plans/2026-10-03-memory-per-conversation.md:84`). Today the operator API is the hard-deletion door (`docs/architecture/observability-surfaces.md:183`), while enabled LLM input export sends each round’s prompt outward (`docs/architecture/observability-surfaces.md:541`). A frozen prompt can send a *new copy* of a deleted secret on every later round. **The plan should state this consequence and give operators a concrete way to stop an affected live conversation before deleting sensitive content**, then test the documented behavior with export enabled.
 
