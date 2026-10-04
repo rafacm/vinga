@@ -16,6 +16,7 @@ times it was asked, through a counting wrapper over the public read.
 """
 
 import contextlib
+import json
 from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from typing import Any, cast
 
@@ -751,27 +752,66 @@ def exported(recorded: Any, attribute: str) -> list[str]:
     return [attributes[attribute] for _, attributes in recorded.snapshots]
 
 
+def carried(recorded: Any) -> list[tuple[str, str, str]]:
+    """Every tool call and answer the last exported request's history
+    held, as (part type, tool or id, its text), read out of the export's
+    own JSON so a test asserts what left rather than a rendering of its
+    own."""
+    messages = json.loads(exported(recorded, GEN_AI_INPUT_MESSAGES)[-1])
+    out = []
+    for message in messages:
+        for part in message.get("parts", []):
+            if part.get("type") == "tool_call":
+                out.append(("tool_call", part["name"], json.dumps(part["arguments"])))
+            elif part.get("type") == "tool_call_response":
+                out.append(("tool_call_response", part["id"], part["response"]))
+    return out
+
+
+def held_in_history(recorded: Any) -> None:
+    """The documented limit (review round 2, finding 6): the model's own
+    `remember` that wrote the fact, and the `recall` answer that listed
+    it, are history rather than memory and are still exported."""
+    parts = carried(recorded)
+    assert any(
+        kind == "tool_call" and name == "remember" and SECRET in text
+        for kind, name, text in parts
+    ), parts
+    assert any(kind == "tool_call" and name == "recall" for kind, name, _ in parts), parts
+    answers = [text for kind, _, text in parts if kind == "tool_call_response"]
+    assert sum(SECRET in text for text in answers) >= 2, answers
+
+
+def remembering_then_recalling(*after: str) -> ScriptedLlm:
+    """A model that stores the fact itself, in a real `remember`
+    exchange, and looks it up in a later reply, so a `recall` answer
+    lists it: the two exchanges a deletion cannot reach."""
+    return ScriptedLlm(
+        [
+            [call("remember", text=SECRET)],
+            "Noted.",
+            [call("recall", query="door code")],
+            "It is 4721.",
+            *after,
+        ]
+    )
+
+
 async def test_an_operator_deletion_leaves_the_export_and_the_history_keeps_its_copy(
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Review round 1, finding 3, and round 2, finding 6: with
-    `export_llm_input` on, an operator hard-deletes a fact through the
-    memory API between two replies. The next round's exported system
-    prompt no longer carries it and its id leaves the round's
-    `memory_facts`; the model's own earlier `remember` exchange and a
-    `recall` answer that listed it are still in the exported history,
-    which is the documented behavior (the history is not memory)."""
+    `export_llm_input` on, the model remembers a fact itself and later
+    recalls it; the conversation reads its memory again (a handover
+    back), so the fact is in the system prompt; then an operator
+    hard-deletes it through the memory API. The next round's exported
+    system prompt no longer carries it and its id leaves the round's
+    `memory_facts`; the model's own `remember` exchange and the `recall`
+    answer that listed it are still in the exported history, which is
+    the documented behavior (the history is not memory)."""
     store = lane_memory()
-    held = await store.add(MemoryScope.AGENT, "poet", SECRET, agent="poet")
     exporter, recorded = staging()
-    script = ScriptedLlm(
-        [
-            [call("recall", query="door code")],
-            "Noted.",
-            "Nothing more.",
-        ]
-    )
+    script = remembering_then_recalling("Nothing more.")
     session = session_for(
         base_config(), POET_MAC, {"poet": script}, memory=store, llm_input=exporter
     )
@@ -779,48 +819,62 @@ async def test_an_operator_deletion_leaves_the_export_and_the_history_keeps_its_
     api.state.api_runtime.memory_erased = store.erased
 
     with caplog.at_level("INFO"):
+        await run_reply(session, "remember the door code")
+        (held,) = store.read_for_prompt("poet", None, None).agent_ids
+        hand_over_to(session, "poet")
         await run_reply(session, "what is the door code?")
+        before = exported(recorded, GEN_AI_SYSTEM_INSTRUCTIONS)[-1]
         client = TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"})
         erased = client.delete(f"/memory/agents/poet/facts/{held}")
         assert erased.status_code == 200, erased.text
         await run_reply(session, "anything else?")
 
-    systems = exported(recorded, GEN_AI_SYSTEM_INSTRUCTIONS)
-    assert SECRET in systems[0]
-    assert SECRET not in systems[-1]
+    assert SECRET in before
+    assert SECRET not in exported(recorded, GEN_AI_SYSTEM_INSTRUCTIONS)[-1]
     rounds = [one for one in caplog.records if getattr(one, "event", None) == "llm_round"]
-    assert held in rounds[0].memory_facts
+    assert held in rounds[-2].memory_facts
     assert held not in rounds[-1].memory_facts
-    assert SECRET in exported(recorded, GEN_AI_INPUT_MESSAGES)[-1]
+    held_in_history(recorded)
 
 
 async def test_a_permanent_forget_leaves_both_live_conversations_prompts() -> None:
-    """Plan review round 3, amendment 1: the model's permanent forget is
-    a hard deletion, so the next leg of the session that made it, and of
-    a concurrent live session holding the same fact, no longer sends or
-    exports the fact in its system prompt."""
+    """Plan review round 3, amendment 1, with both sessions exporting
+    (external review round 1, finding 3): the model's permanent forget
+    is a hard deletion, so the next leg of the session that made it, and
+    of a concurrent live session holding the same fact, no longer sends
+    or exports the fact in its system prompt. The concurrent session
+    remembered the fact itself and recalled it, and those two exchanges
+    stay in its exported history."""
     store = lane_memory()
-    doomed = await store.add(MemoryScope.AGENT, "poet", SECRET, agent="poet")
     exporter, recorded = staging()
+    other_exporter, other_recorded = staging()
+    other = remembering_then_recalling("Hello again.")
+    concurrent = session_for(
+        base_config(), POET_MAC, {"poet": other}, memory=store, llm_input=other_exporter
+    )
+    await run_reply(concurrent, "remember the door code")
+    (doomed,) = store.read_for_prompt("poet", None, None).agent_ids
+    hand_over_to(concurrent, "poet")
+    await run_reply(concurrent, "what is the door code?")
+    holding = exported(other_recorded, GEN_AI_SYSTEM_INSTRUCTIONS)[-1]
+
     forgetting = ScriptedLlm(
         [[call("forget", id=doomed, permanently=True)], "Gone for good.", "Yes."]
     )
-    other = ScriptedLlm(["Hello.", "Hello again."])
     originating = session_for(
         base_config(), POET_MAC, {"poet": forgetting}, memory=store, llm_input=exporter
     )
-    concurrent = session_for(base_config(), POET_MAC, {"poet": other}, memory=store)
-
-    await run_reply(concurrent, "hello")
     await run_reply(originating, "forget the door code for good")
     await run_reply(originating, "is it gone?")
     await run_reply(concurrent, "and now?")
 
-    assert SECRET in other.systems[0]
-    assert SECRET not in other.systems[1]
+    assert SECRET in holding
+    assert SECRET not in exported(other_recorded, GEN_AI_SYSTEM_INSTRUCTIONS)[-1]
+    assert SECRET not in exported(recorded, GEN_AI_SYSTEM_INSTRUCTIONS)[-1]
     assert SECRET in forgetting.systems[0]
     assert SECRET not in forgetting.systems[2]
-    assert SECRET not in exported(recorded, GEN_AI_SYSTEM_INSTRUCTIONS)[-1]
+    assert SECRET not in other.systems[-1]
+    held_in_history(other_recorded)
 
 
 async def test_the_device_scope_is_read_for_the_record_the_snapshot_holds() -> None:
