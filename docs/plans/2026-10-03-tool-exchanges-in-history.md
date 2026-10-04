@@ -691,7 +691,7 @@ the commit body; a survivor is reported as a finding about the test.
   `as_sent`, the export staging the as-sent turns, the
   pinning test and the three documents above. The behavior change, alone
   in review.
-- [x] **[M2: measure the cap](2026-10-03-tool-exchanges-in-history-implementation.md#m2-measure-the-cap)** (PR TBD). Decision 3 (Q5, D7, D8): five
+- [x] **[M2: measure the cap](2026-10-03-tool-exchanges-in-history-implementation.md#m2-measure-the-cap)** ([PR #602](https://github.com/rafacm/vinga/pull/602)). Decision 3 (Q5, D7, D8): five
   `llm_round` fields and their `llm` span attributes, `ClearedTools`,
   the tool span's `refetch`, the observability page. Stacks on M1.
 - [x] **[M3: rebuild exchanges on resume](2026-10-03-tool-exchanges-in-history-implementation.md#m3-rebuild-exchanges-on-resume)** ([PR #601](https://github.com/rafacm/vinga/pull/601)). Decision 4 (Q3, Q4, D9):
