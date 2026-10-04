@@ -146,7 +146,8 @@ so none needed a corrective commit.
   result that stated it. The unit test pins the note's placement; the
   live behavior the plan hoped the framing would produce, for an
   absence, is not there. A correction (a value present in both) was
-  not probed live, since the rig has one agent and no handover.
+  probed live after the PR review asked for it, with the same result:
+  see the handover-back probe below.
 - **The device record is read by memory tool calls as well as by the
   prompt.** `_memory_context` resolves the address a device's facts are
   filed under on every memory tool call; that read stays per call and
@@ -306,6 +307,59 @@ The branch answers every gating probe `main` answers, and differs only
 on the concurrent session's fact mid-conversation, which is the stated
 cost. The observation probe is the first discovery above.
 
+**The handover-back precedence probe** (the plan's test list; run live
+after external review round 1, finding 2). A copy of the rig
+(`gate/handback.py`) adds a second agent, the keeper, bound to the same
+board after the guide, with a line in each persona telling it to hand
+over with `switch_agent` when the visitor asks for the other. One
+connection, four turns: (1) "Please remember that my appointment at the
+garden is on Monday", which the guide stores with `remember`; (2) "Can
+I speak to the keeper, please?", a handover; then, while the keeper
+holds the floor, an operator correction through `vinga memory set` of
+that fact to "The user's appointment at the garden is on Thursday.";
+(3) "Thank you. Please put me back through to the guide.", the
+handover back onto the guide's own thread; (4) "When is my
+appointment?". The correction is an operator's and not another
+agent's because agent memory is per agent, so the keeper cannot write
+the guide's fact; and it is a correction rather than a hard delete plus
+re-add because the handover back reads memory again whatever moved it,
+so a committed correction is in the snapshot the guide is sent from
+turn 3 on. The rig records every request the model was sent, which
+confirms it: on the branch the guide's final request held the memory
+section read at the note, `- The user's appointment at the garden is
+on Thursday.`, with `(memory re-read here)` at index 5 of 11 turns,
+after the `remember` exchange that said Monday (indexes 1 and 2) and
+before the handover seed. `main` was run too, because it makes the
+comparison meaningful: it re-reads memory every round, so its prompt
+also held Thursday, with no framing and no note. Fresh database per
+run, all three scopes listed empty before and after, runs
+2026-10-04 06:04 to 06:11 CEST (`gate/handback-tables.txt`).
+
+| Run | Answer to "When is my appointment?" | Prompt held | Re-read note in the history |
+| --- | --- | --- | --- |
+| branch h1 | "Your appointment at the garden is on Monday." | Thursday, framed at the note | yes, index 5 of 11 |
+| branch h2 | "Your appointment at the garden is on Monday." | Thursday, framed at the note | yes, index 5 of 11 |
+| branch h3 | "Your appointment at the garden is on Monday." | Thursday, framed at the note | yes, index 5 of 11 |
+| main h1 | "Your appointment at the garden is on Monday." | Thursday, no framing | none |
+| main h2 | "Your appointment at the garden is on Monday." | Thursday, no framing | none |
+| main h3 | "Your appointment at the garden is on Monday." | Thursday, no framing | none |
+
+**Finding: gpt-4.1-mini prefers the older tool result over the
+snapshot, 0 of 3 on the branch.** The framing and the note were in
+place exactly as decision 3 specifies, and the model answered from its
+own `remember` exchange rather than from the corrected memory. It is
+not a regression: `main`, whose prompt also held the corrected value on
+every round, answered Monday in all three runs as well, so the model
+weighs a tool result in its history above the system prompt whether or
+not the prompt says when it was read. Since #599 that exchange is in the
+history on both arms. The framing was not tuned in response, as the
+brief directs; whether to try another wording, a different note, or to
+accept it is Rafael's decision. One side observation, the same on both
+arms: answering the handover seed, the guide called `switch_agent`
+again (refused, one move per reply) and then introduced itself as the
+keeper, reading the last request in its own thread, "Can I speak to the
+keeper", as still open.
+
 ### Verification
 
 From `vinga-server/` on agentpi, logs in the session's log directory
@@ -332,3 +386,50 @@ From `vinga-server/` on agentpi, logs in the session's log directory
   recorded on the pull request.
 - Not verified: anything on a board, and the gate on a model other than
   gpt-4.1-mini.
+
+### PR review round 1
+
+Reviewed 2026-10-04 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 5m13s, at commit 2c99dc40
+
+1. **P1: a legal large restore disappears from the next request.** A
+   restored fact over the agent block's 4 KiB cap is left out of the
+   rebuilt snapshot, and its `restore_memory` answer over 2 KiB is
+   cleared on later replies, so neither carries its text.
+
+   *Resolution* (the coordinator, on the PR): rejected, no code change.
+   The block's cap (`CORE_BYTES = 4096`, enforced by `_core`) already
+   kept a fact over 4 KiB out of every prompt on `main`; `recall` is
+   its path, and the cleared note names the tool so the model calls it
+   again, which #599's `refetch` measures. A second representation for
+   oversized facts would be a change to the block's cap, a separate
+   decision.
+
+2. **P2: the promised handover precedence probe was not run.** The
+   unit test scripts its answer and checks only the prompt and the
+   note's place; the plan's test list asks for the model's choice.
+
+   *Resolution:* run live, three times on the branch and three on
+   `main`, as recorded under the gate above. The model answered from
+   the older tool result in all six runs; reported as a finding, the
+   framing untouched. Recorded in this section's commit.
+
+3. **P2: the deletion export tests omit two claimed paths.** The
+   operator-deletion test preloaded the fact and only recalled it, and
+   the permanent-forget test gave the concurrent session no exporter.
+
+   *Resolution:* fixed in `5a003f1c`. Both tests now have the model
+   store the fact in a real `remember` exchange and recall it later,
+   assert that the fact leaves every exported system prompt after the
+   deletion (both sessions' for the permanent forget), and that the
+   `remember` and `recall` exchanges are still in the exported history.
+   One mutation each: dropping the erasure revision from the key fails
+   both, the permanent-forget test at the concurrent session's export;
+   not keeping a round's exchanges fails both at the history assertion.
+
+Lanes after the round's fixes, from `vinga-server/`, logs in
+`m536-logs/r1-*`: `uv run ruff check .`, all checks passed
+(`r1-ruff.log`); the unit lane, 8053 passed, 19 skipped in 906.58s
+(`r1-unit.log`); the integration lane, 350 passed in 216.45s
+(`r1-integration.log`); `python3 scripts/check_doc_links.py .`, 297
+files, 0 failures (`r1-doc-links.log`); the census lane last, after
+this section's last edit (`r1-census.log`).
