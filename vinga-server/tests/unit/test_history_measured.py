@@ -14,9 +14,9 @@ The pure half is asked of its two owners directly: the counting is
 `tool_execution.cleared_key`'s. Everything else is driven through the
 scripted-session harness, so it is the pipeline's own wiring that has to
 carry each fact, read off the records a consumer reads and the spans an
-exporter exports. A recap is driven through the watch by hand instead,
-because until a recap's history holds rebuilt exchanges nothing a
-session does can hand it a cleared one; the watch's own routes are in
+exporter exports. A recap over a resumed thread is driven through a
+session in `test_session_recap.py`; here it is built by hand and handed
+to the watch, and the watch's own routes are in
 `test_provider_watch.py`.
 
 Counts, sizes and naming-policy keys only: the last case plants
@@ -371,9 +371,9 @@ async def test_a_recap_over_a_cleared_result_carries_it_on_its_record_and_its_sp
     """A recap's request is built the way the plan sends it, every
     exchange past and no tool offered, over a thread holding a board
     result of 3 KiB; what it lost reaches `llm_recap` and the recap's
-    `llm` span through the watch. Driven by hand rather than through a
-    session, because until hydration rebuilds exchanges no recap a
-    session makes has one to clear."""
+    `llm` span through the watch. Built by hand, so the thread is
+    exactly one board result; the same through a resumed session is
+    `test_session_recap.py`'s."""
     telemetry, memory = exporting()
     tapped = session_events(Clock(), telemetry)
     open_session(tapped, providers={})

@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 from vinga_server.events import SessionEvents, assembly
 from vinga_server.events.values import LlmPurpose
 from vinga_server.providers import LlmEvent, StreamStarted, Turn, Usage
-from vinga_server.runtime.history import NOTHING_LOST, HistorySent
+from vinga_server.runtime.history import HistorySent
 from vinga_server.runtime.prompt import RoundPrompt
 from vinga_server.runtime.turns import TurnUnderway
 from vinga_server.session_conversations import SessionConversations
@@ -350,16 +350,15 @@ class ProviderWatch:
         usage: Usage | None,
         *,
         invocation: str,
-        history: HistorySent = NOTHING_LOST,
+        history: HistorySent,
     ) -> None:
         """A recap's summarization finished: its `llm_round`, with no
         round number and filed on no turn, carrying what its `history`
         lost on the way out (#599).
 
-        `history` defaults to a request whose history lost nothing,
-        which is what a recap sends while the history it summarizes
-        holds no tool exchange; a recap over rebuilt exchanges hands
-        its own accounting in.
+        `history` is the recap's own accounting, required like a reply
+        round's: a recap's request goes through the same cap and offer
+        check, so it always has one, zeros included.
 
         A recap is a generation but not a round of the reply, so it
         counts on no record. Its own method rather than a flag on the

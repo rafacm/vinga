@@ -238,7 +238,9 @@ async def test_a_reply_round_is_filed_on_its_turn_and_a_recap_round_is_not() -> 
         turn, 2, object(), [], began, None, usage, invocation="f" * 32, prompt=SENT,
         history=NOTHING_LOST,
     )
-    watch.recap_round_done(object(), [], began, None, usage, invocation="0" * 32)
+    watch.recap_round_done(
+        object(), [], began, None, usage, invocation="0" * 32, history=NOTHING_LOST
+    )
 
     assert turn.rounds == 1
     assert (turn.input_tokens, turn.output_tokens) == (12, 4)
@@ -263,7 +265,9 @@ async def test_a_round_reports_the_cached_share_and_files_the_whole_input() -> N
         turn, 1, object(), [], began, None, usage, invocation="f" * 32, prompt=SENT,
         history=NOTHING_LOST,
     )
-    watch.recap_round_done(object(), [], began, None, usage, invocation="0" * 32)
+    watch.recap_round_done(
+        object(), [], began, None, usage, invocation="0" * 32, history=NOTHING_LOST
+    )
 
     assert (turn.input_tokens, turn.output_tokens) == (2000, 4)
     reply, recap = heard.of("llm_round")
@@ -361,7 +365,9 @@ async def test_a_finished_reply_round_carries_the_prompt_it_sent_and_a_recap_non
         turn, 1, object(), [], began, None, None, invocation="f" * 32, prompt=SENT,
         history=NOTHING_LOST,
     )
-    watch.recap_round_done(object(), [], began, None, None, invocation="0" * 32)
+    watch.recap_round_done(
+        object(), [], began, None, None, invocation="0" * 32, history=NOTHING_LOST
+    )
 
     reply, recap = heard.of("llm_round")
     assert accounted(reply) == SENT_ACCOUNTING
@@ -538,14 +544,18 @@ async def test_a_reply_round_that_fails_carries_what_its_history_lost(
     assert lost(failed) == LOST_FIELDS
 
 
-async def test_a_recap_carries_what_its_history_lost_and_nothing_until_handed_any() -> None:
-    """Until a recap's history holds rebuilt exchanges it clears nothing,
-    and says so in zeros; handed an accounting, it carries it."""
+async def test_a_recap_carries_what_its_history_lost_zeros_included() -> None:
+    """A recap whose history lost nothing says so in zeros; one that
+    cleared and degraded says how much."""
     watch, heard, _ = a_watch()
     began = asyncio.get_running_loop().time()
 
-    watch.recap_round_done(object(), [], began, None, None, invocation="0" * 32)
-    watch.recap_round_done(object(), [], began, None, None, invocation="1" * 32, history=LOST)
+    watch.recap_round_done(
+        object(), [], began, None, None, invocation="0" * 32, history=NOTHING_LOST
+    )
+    watch.recap_round_done(
+        object(), [], began, None, None, invocation="1" * 32, history=LOST
+    )
 
     unhanded, handed = heard.of("llm_round")
     assert unhanded["purpose"] == handed["purpose"] == "recap"
