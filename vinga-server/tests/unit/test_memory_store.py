@@ -1043,7 +1043,22 @@ async def test_the_prompt_read_answers_all_three_scopes() -> None:
 async def test_the_prompt_read_of_an_empty_memory_is_three_empty_blocks() -> None:
     store = memory()
 
-    assert store.read_for_prompt("poet", "aa:bb", THREAD) == store_module.NOTHING_REMEMBERED
+    read = store.read_for_prompt("poet", "aa:bb", THREAD)
+    assert read == store_module.NOTHING_REMEMBERED
+    assert read.complete
+
+
+async def test_a_prompt_read_that_failed_renders_empty_and_says_it_is_incomplete() -> None:
+    """#536, decision 6: an unreadable database renders exactly as an
+    empty memory, so the reply over it is the reply over nothing, and
+    the read says it did not answer, so a caller keeping reads for a
+    conversation can refuse to keep this one. An empty read that did
+    answer is the other half, above."""
+    read = memory_that_cannot_read().read_for_prompt("poet", "aa:bb", THREAD)
+
+    assert read == store_module.NOTHING_READ
+    assert not read.complete
+    assert (read.state, read.agent, read.device, read.facts) == ("", "", "", ())
 
 
 async def test_a_prompt_read_with_no_device_and_no_thread_reads_one_scope(
@@ -1068,7 +1083,7 @@ async def test_a_prompt_read_with_no_device_and_no_thread_reads_one_scope(
 
     with caplog.at_level("WARNING"):
         assert memory_that_cannot_read().read_for_prompt("poet", None, None) == (
-            store_module.NOTHING_REMEMBERED
+            store_module.NOTHING_READ
         )
     assert {record.scope for record in events(caplog, "memory_unreadable")} == {"agent"}
 
@@ -1141,7 +1156,7 @@ def test_a_prompt_read_that_fails_loses_every_scope_and_says_so(
     store = memory_that_cannot_read()
 
     with caplog.at_level("WARNING"):
-        assert store.read_for_prompt("poet", "aa:bb", THREAD) == store_module.NOTHING_REMEMBERED
+        assert store.read_for_prompt("poet", "aa:bb", THREAD) == store_module.NOTHING_READ
 
     reported = events(caplog, "memory_unreadable")
     assert {record.scope for record in reported} == {"conversation", "agent", "device"}
@@ -2301,7 +2316,7 @@ async def test_nothing_of_a_connection_reaches_a_surface_a_model_or_an_operator_
             # nothing; only the writes refuse.
             assert injected(store) == ""
             assert unreadable.read_for_prompt("poet", "aa:bb", THREAD) == (
-                store_module.NOTHING_REMEMBERED
+                store_module.NOTHING_READ
             )
             assert unreadable.recall("poet", "aa:bb", "cheese") == ""
             assert store.sweep() == store_module.NOTHING_PURGED
@@ -2392,7 +2407,7 @@ async def test_nothing_a_caller_offered_is_repeated_back_by_a_refusal(
         # And the two reads, which refuse nobody and answer empty.
         assert unreadable.recall("poet", "aa:bb", SPOKEN) == ""
         assert unreadable.read_for_prompt("poet", "aa:bb", THREAD) == (
-            store_module.NOTHING_REMEMBERED
+            store_module.NOTHING_READ
         )
 
     # Every sentence is one this module declared, by equality.
