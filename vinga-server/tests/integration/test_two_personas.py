@@ -45,7 +45,9 @@ def two_persona_config() -> Config:
             "vad": {"mock": {"type": "mock"}},
         },
         # The half the two personas share; each names only what differs.
-        agent_defaults={"asr": "mock", "vad": "mock"},
+        # Memory off, so the mock's `{system}` echo is the persona alone:
+        # an agent that may remember is sent a memory section (#536).
+        agent_defaults={"asr": "mock", "vad": "mock", "memory": {"enabled": False}},
         agents={
             "poet": {"prompt": "POET", "llm": "verse", "tts": "tenor"},
             "tutor": {"prompt": "TUTOR", "llm": "lesson", "tts": "alto"},

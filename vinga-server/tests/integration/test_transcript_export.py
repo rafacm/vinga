@@ -80,7 +80,9 @@ def exporting_config() -> Config:
             },
             "vad": {"mock": {"type": "mock"}},
         },
-        agent_defaults={"asr": "mock", "vad": "mock"},
+        # Memory off, so the mock's `{system}` echo is the persona alone:
+        # an agent that may remember is sent a memory section (#536).
+        agent_defaults={"asr": "mock", "vad": "mock", "memory": {"enabled": False}},
         agents={
             "poet": {"prompt": "POET", "llm": "handover", "tts": "tenor"},
             "tutor": {"prompt": "TUTOR", "llm": "plain", "tts": "alto"},

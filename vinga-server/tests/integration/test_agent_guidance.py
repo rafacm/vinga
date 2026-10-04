@@ -217,9 +217,12 @@ async def test_the_api_reads_back_the_prompt_the_model_was_given(
 
     assert answered.status_code == 200, answered.text
     body = answered.json()
+    # And the memory section an agent that may remember is sent,
+    # nothing saved (#536).
     assert [block["provenance"] for block in body["blocks"]] == [
         "persona",
         f"instructions:{ENTRY}",
+        "memory",
     ]
     # Every block the surface reports is in what the model was given,
     # with the whitespace collapsed by the trip through the speaker,
@@ -284,6 +287,7 @@ async def test_a_servers_own_guidance_is_spoken_only_where_the_entry_opted_in(
     assert [block["provenance"] for block in answered.json()["blocks"]] == [
         "persona",
         "server_instructions:trusted",
+        "memory",
     ]
     # Spoken once, by the entry that opted in, although both entries are
     # the same server shipping the same sentence.
@@ -497,9 +501,9 @@ async def test_one_session_across_a_reload_a_switch_and_a_memory_write(
     after a reload speaks the guidance the reload applied. A session
     already holding a half keeps it, so a later reload's guidance is not
     in its next reply, and neither is what a reconnect captured in the
-    meantime. And memory keeps the clock it always had, so a fact
-    written by something else while this conversation is running is in
-    that same reply.
+    meantime. And memory keeps the same clock since #536, read at the
+    activation and kept, so a fact written by something else while this
+    conversation is running is not in its next reply either.
     """
     fact = "the user is vegetarian"
     monkeypatch.setenv(SHIPPED_TEXT_ENV, FIRST_SHIPPED)
@@ -562,10 +566,11 @@ async def test_one_session_across_a_reload_a_switch_and_a_memory_write(
             assert "Ask three times." not in third
             assert FIRST_SHIPPED in third
             assert SECOND_SHIPPED not in third
-            # And the memory block is not cached with it: the fact
-            # written between the two replies is in this one, which is
-            # the contract this feature deliberately did not move.
-            assert fact in third
+            # And the memory section has the conversation's clock since
+            # #536: read when gamma was activated, and kept, so a fact a
+            # concurrent session wrote between the two replies reaches
+            # gamma's next conversation rather than this reply.
+            assert fact not in third
             assert fact not in second
 
             # One socket and one session throughout: the switches were

@@ -123,7 +123,9 @@ def switching_config(target: str) -> Config:
             },
             "vad": {"mock": {"type": "mock"}},
         },
-        agent_defaults={"asr": "mock", "vad": "mock"},
+        # Memory off, so the mock's `{system}` echo is the persona alone:
+        # an agent that may remember is sent a memory section (#536).
+        agent_defaults={"asr": "mock", "vad": "mock", "memory": {"enabled": False}},
         agents={
             "poet": {"prompt": "POET", "llm": "handover", "tts": "tenor"},
             "tutor": {"prompt": "TUTOR", "llm": "plain", "tts": "alto"},
@@ -158,9 +160,11 @@ async def test_a_fact_remembered_in_one_conversation_reaches_the_next(
     serve, simulate
 ) -> None:
     # The reply quotes the system prompt it was handed, so the injected
-    # facts are visible in what the device hears. The second
-    # conversation remembers the same fact again, which is what makes
-    # its two copies proof that the first one survived the disconnect.
+    # facts are visible in what the device hears. Memory is read once per
+    # conversation (#536), before the write: the first conversation's
+    # prompt holds no copy, the model having the write as its tool
+    # result, and the second's holds the one the store kept, which is
+    # what proves it survived the disconnect.
     fact = "the user is vegetarian"
     config = one_agent(
         {
@@ -183,8 +187,8 @@ async def test_a_fact_remembered_in_one_conversation_reaches_the_next(
         second, _ = await simulate(port, DEVICE_MAC)
 
     assert stored.splitlines() == [f"- {fact}"]
-    assert spoken(first).count(fact) == 1
-    assert spoken(second).count(fact) == 2
+    assert spoken(first).count(fact) == 0
+    assert spoken(second).count(fact) == 1
 
 
 def household_config(opening: str) -> Config:
