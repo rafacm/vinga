@@ -694,7 +694,7 @@ the commit body; a survivor is reported as a finding about the test.
 - [ ] **M2: measure the cap.** Decision 3 (Q5, D7, D8): five
   `llm_round` fields and their `llm` span attributes, `ClearedTools`,
   the tool span's `refetch`, the observability page. Stacks on M1.
-- [x] **[M3: rebuild exchanges on resume](2026-10-03-tool-exchanges-in-history-implementation.md#m3-rebuild-exchanges-on-resume)** (PR TBD). Decision 4 (Q3, Q4, D9):
+- [x] **[M3: rebuild exchanges on resume](2026-10-03-tool-exchanges-in-history-implementation.md#m3-rebuild-exchanges-on-resume)** ([PR #601](https://github.com/rafacm/vinga/pull/601)). Decision 4 (Q3, Q4, D9):
   `StoredCall`, the widened thread read, hydration rendering rounds
   under the budget, the recap sent degraded, the concepts resumption
   bullet. Stacks on M1, independent of M2; closes #599.
