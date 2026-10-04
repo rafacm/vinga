@@ -278,11 +278,16 @@ census lane ran last, after this subsection.
 | Q3: the recap sent through `as_sent` | `runtime/pipeline.py` (`_summarized`), `tests/support/stores.py` (`a_backlog(calls=...)`), `tests/unit/test_session_recap.py` | `Send the recap its thread's exchanges as notes` |
 | The issue's third criterion, the cut-then-resume comparison, the rebuilt shape through the Anthropic translator | `tests/unit/test_session_kept_tools.py` | `Pin a resumed thread's first request` |
 | Q4's price against M1's reviewed `note_cost`, and `countable` results | `conversations/hydration.py` (`_cost`), `tests/unit/test_conversations_hydration.py` | `Charge each rebuilt call its note bound and join` |
+| Anthropic roles alternate after a degraded round (the discovery below, fixed) | `providers/anthropic_llm.py` (`anthropic_messages`), `tests/unit/test_providers_llm_tools.py`, `tests/unit/test_session_kept_tools.py` | `Join consecutive assistant turns for Anthropic` |
 | Documentation footprint | `docs/concepts.md` (the "Resuming elsewhere" bullet, and the tool-exchanges bullet M1's review scoped to the session widened back), `changelog.d/599-tool-exchanges-in-history.md` | this section's commit |
 
-The branch was cut from M1's head before its review (`81cfca37`) and
-rebased onto the reviewed head (`c6e60ace`) once that review's fixes
-landed: `note_cost` became an ASCII-escaped bound and `kept_round`
+The branch was cut from M1's head before its review (`81cfca37`),
+rebased onto the head after its first review round (`c6e60ace`) once
+that round's fixes landed, and again onto M1's final head (`1f90cce7`,
+which added `Keep a call's own strings as encodable text`); the second
+rebase conflicted only where both sides appended, in
+`test_session_kept_tools.py` and in this document, and both were
+resolved by keeping both sides. At the first rebase: `note_cost` became an ASCII-escaped bound and `kept_round`
 began storing results in their `countable` form. The rebase dropped
 one commit of this branch (`Retire note_cost for the as-sent unit
 price`, which removed `note_cost` before it changed), resolved one
@@ -350,6 +355,21 @@ clean.
   front of another assistant turn is folded into it (D9's newline
   join), which covers both two answers and an answer before a joined
   turn's round.
+- **The Anthropic translator joins consecutive assistant turns.** The
+  plan says adjacent plain assistant turns are not merged (D6), and the
+  history still keeps them apart; only `anthropic_messages` joins them,
+  the way M1 (D3) joins user turns. An assistant turn after a plain
+  assistant message is appended to it as a text block; one that asks
+  for tools takes that message's text as its leading blocks, before
+  its own preamble and its `tool_use` blocks. An assistant message
+  that asks for tools is never followed by another assistant turn,
+  because `as_sent` drops a tool turn only where no structured call is
+  left in the turn before it; the translator relies on that rather
+  than handling it, and the new translator test asserts it over
+  `as_sent`'s output. OpenAI's translation is unchanged, and pinned so
+  in the same test. Commit `Join consecutive assistant turns for
+  Anthropic`; the changelog's Anthropic bullet says assistant turns
+  join too.
 - **The M1 changelog entry's "a resumed conversation does not rebuild
   its exchanges yet" is removed**, and the M3 entry is a new bullet
   under `### Changed` in the same fragment.
@@ -357,16 +377,15 @@ clean.
 ### Discoveries
 
 - **A degraded past round followed by its reply is two assistant turns
-  in a row, and the Anthropic translator does not join them.** D6
-  leaves adjacent plain assistant turns unmerged, and M1's translator
-  rule joins only user turns. The resumed-request test asserts that
-  shape as D6's (`user, assistant, user, assistant, assistant, user`
-  through `anthropic_messages`). It is not new in M3: a session whose
-  MCP reload removed a tool between replies sends the same shape after
-  M1. What M3 changes is reach, since every resume of a thread whose
-  tool is gone now produces it. Anthropic's handling of consecutive
-  assistant messages was not measured here (no key on this machine);
-  it is a candidate for the same one-rule treatment D3 gave user turns.
+  in a row, and M1's Anthropic translator sent them as two assistant
+  messages.** D6 leaves adjacent plain assistant turns unmerged in the
+  history, and M1's translator rule joined only user turns. It is not
+  new in M3: a session whose MCP reload removed a tool between replies
+  sends the same shape after M1. What M3 changed is reach, since every
+  resume of a thread whose tool is gone produces it. The first version
+  of the resumed-request test asserted the shape as D6's; on the
+  orchestrator's instruction it is now fixed in M3, in its own commit
+  (see the deviation below), and the test asserts alternating roles.
 - The unanswered device call in the cut-then-resume test reaches the
   hydrator as a row with a null result and is dropped there, not in
   SQL; with the result filter mutated away and an empty result
@@ -637,6 +656,7 @@ change apart from `_cost`:
 | The note measured raw rather than escaped (in `note_cost`) | killed, 1 |
 | `note_cost` handed no result | killed, 3 |
 | `countable` dropped from `kept_round` | killed, 1 (the lone-surrogate hydration test) |
+| The Anthropic assistant join disabled | killed, 3 (both new translator tests and the resumed-request test) |
 | An explicit `countable` in hydration's row conversion, removed | survived: `kept_round` already applies it, so the call was not kept |
 | A joined turn's calls degraded | killed, 1 |
 | Hydration rebuilding no rounds | killed, 2 (both session tests) |
@@ -658,18 +678,18 @@ walk, holes, joins and milestone head among them, passes unmodified.
 
 ### Verification
 
-All on agentpi, from `vinga-server/`, at `f0dd5f6d` (the code as
-committed after the rebase onto `c6e60ace`; this section's commit
-changes only prose):
+All on agentpi, from `vinga-server/`, at `238aacff` (the code as
+committed after the second rebase, onto `1f90cce7`, and the Anthropic
+assistant join; this section's commit changes only prose):
 
 - `uv run ruff check .`: clean. `uv run mypy` (the events package):
   no issues in 5 source files.
-- `uv run pytest tests/unit -q -n auto --dist loadfile`: 7954 passed,
-  19 skipped in 2642.88s, on a machine running M2's lanes beside it.
-  The same lane before the rebase, at `8ad9eb69`: 7946 passed, 19
-  skipped in 1106.08s.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 7984 passed,
+  19 skipped in 1193.30s. Earlier runs of the same lane: at `8ad9eb69`
+  before any rebase, 7946 passed in 1106.08s; at `f0dd5f6d` after the
+  first, 7954 passed in 2642.88s with M2's lanes running beside it.
 - `uv run pytest tests/integration -q -n auto --dist loadfile`: 350
-  passed in 411.20s.
+  passed in 404.34s.
 - The eight generated-document checks CI's `integration` job runs
   (domain, server, conversations schema, metrics views, events,
   OpenAPI, the CLI reference and its recipes): none drifted.
@@ -681,6 +701,6 @@ changes only prose):
 Not verified locally: the image build and its smoke conversation (CI's
 `image` job), and any live provider. The resumed request's shape
 through the Anthropic translator is pinned but was not sent to the
-Anthropic API (no key on this machine), including the two consecutive
-assistant messages under Discoveries. The recap's clearing facts on
+Anthropic API (no key on this machine), including the joined
+assistant messages the deviation above describes. The recap's clearing facts on
 `llm_recap` wait on M2.
