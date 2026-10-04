@@ -233,6 +233,10 @@ def test_a_history_that_lost_nothing_says_nothing_was_lost() -> None:
         # nothing rather than guessed at.
         ("mcp", None, "tools__secret_word", "unknown"),
         (None, None, "remember", "unknown"),
+        # A stored origin no configuration or builtin could have made:
+        # unknown rather than a key, and rather than a refused event.
+        ("mcp", "bad\nX-Secret: rejected", "home__status", "unknown"),
+        ("builtin", None, "not_a_builtin", "unknown"),
     ],
 )
 def test_a_cleared_result_is_keyed_under_the_tool_call_naming_policy(

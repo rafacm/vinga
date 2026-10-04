@@ -320,9 +320,10 @@ def test_memory_sources_refuse_anything_but_a_scope_block_size(refused: object) 
 
 def test_cleared_tools_carry_counts_under_the_four_naming_shapes() -> None:
     """A builtin by its name and an MCP call by its entry, each behind
-    its namespace, so a builtin and an entry sharing a word stay apart;
-    a board's tool and an invented name by the namespace alone (#599)."""
-    counted = {"builtin.remember": 2, "mcp.remember": 1, "device": 3, "unknown": 1}
+    its namespace, so an entry an operator called `device` stays apart
+    from the board's tools; a board's tool and an invented name by the
+    namespace alone (#599)."""
+    counted = {"builtin.remember": 2, "mcp.device": 1, "device": 3, "unknown": 1}
     assert ClearedTools(counted).carried() == counted
 
 
@@ -336,6 +337,13 @@ def test_cleared_tools_carry_counts_under_the_four_naming_shapes() -> None:
         pytest.param({"unknown.ghost": 1}, id="an invented name"),
         pytest.param({"builtin.": 1}, id="a blank name"),
         pytest.param({"mcp.  ": 1}, id="a blank entry"),
+        # Only this server's own builtin names, and only an entry name
+        # the configuration would accept: what follows the namespace
+        # becomes part of a span attribute NAME (#599, PR #602 review).
+        pytest.param({"builtin.not_a_builtin": 1}, id="a builtin nobody wrote"),
+        pytest.param({"mcp.bad\nX-Secret: rejected": 1}, id="an entry no config accepts"),
+        pytest.param({"mcp.remember": 1}, id="an entry with a builtin's name"),
+        pytest.param({"mcp.self": 1}, id="an entry with the board's prefix"),
         pytest.param({"device": 0}, id="a zero"),
         pytest.param({"device": True}, id="a bool"),
         pytest.param({"device": -1}, id="a negative"),
