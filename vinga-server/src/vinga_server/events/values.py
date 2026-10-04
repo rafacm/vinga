@@ -55,6 +55,7 @@ from vinga_server.config.models import (
     PROVIDER_STAGES,
 )
 from vinga_server.memory.scopes import MemoryScope
+from vinga_server.tools.names import BUILTIN_TOOL_NAMES, is_valid_entry_name
 
 # --- what a value may be ----------------------------------------------
 
@@ -1416,16 +1417,27 @@ def _a_cleared_tool(key: str) -> bool:
     """Whether `key` is one of the four shapes a cleared tool is named
     by, which are the four the `tool_call` naming policy allows: a
     builtin by its own name and an MCP call by the entry an operator
-    configured, each behind its namespace so a builtin and an entry
-    sharing a word stay apart, and the two namespaces whose names this
-    surface may not print as the bare namespace. Read off `ToolSource`
-    rather than spelled again, so the shapes are that set's."""
+    configured, each behind its namespace so an entry called `device`
+    stays apart from the board's tools, and the two namespaces whose
+    names this surface may not print as the bare namespace. Read off
+    `ToolSource` rather than spelled again, so the shapes are that
+    set's.
+
+    What follows a namespace becomes part of a span attribute NAME, so
+    it is held to its namespace's own rule rather than to "not blank": a
+    builtin's name is one of the names this server authors
+    (`BUILTIN_TOOL_NAMES`), and an entry is a name the configuration
+    would accept for an MCP server (`is_valid_entry_name`, the check the
+    configuration itself runs). A stored row can hold any bytes in
+    either column, and a key built from one that fails is refused here
+    rather than exported (#599, PR #602 review)."""
     if key in (ToolSource.DEVICE, ToolSource.UNKNOWN):
         return True
-    return any(
-        key.startswith(f"{namespace}.") and key.removeprefix(f"{namespace}.").strip()
-        for namespace in (ToolSource.BUILTIN, ToolSource.MCP)
-    )
+    builtin = key.removeprefix(f"{ToolSource.BUILTIN}.")
+    if builtin != key:
+        return builtin in BUILTIN_TOOL_NAMES
+    entry = key.removeprefix(f"{ToolSource.MCP}.")
+    return entry != key and is_valid_entry_name(entry)
 
 
 # --- the closed sets, as types ----------------------------------------

@@ -295,10 +295,24 @@ def cleared_key(cleared: Cleared) -> str:
     classified with when the model made it, carried on the kept call,
     and never a later offer's: an entry an apply has since removed is
     still the entry the call reached. A call that carries no origin is
-    `unknown`, which is what an origin nobody recorded is."""
-    if cleared.source == BUILTIN:
+    `unknown`, which is what an origin nobody recorded is.
+
+    So is one no configuration and no builtin could have produced. A
+    resumed thread's origins are read off stored rows, which can hold
+    any bytes, and the key becomes part of a span attribute name: a
+    builtin-sourced name that is not one of this server's builtins, or
+    an entry the configuration's own entry-name rule refuses, is
+    counted as `unknown` rather than keyed by its bytes. The rules are
+    the ones `ClearedTools` holds a key to, read from the same place
+    (`tools/names.py`), so a key built here is never one the value
+    refuses, which would cost the whole event (#599, PR #602 review)."""
+    if cleared.source == BUILTIN and cleared.name in names.BUILTIN_TOOL_NAMES:
         return f"{BUILTIN}.{cleared.name}"
-    if cleared.source == MCP and cleared.entry is not None:
+    if (
+        cleared.source == MCP
+        and cleared.entry is not None
+        and names.is_valid_entry_name(cleared.entry)
+    ):
         return f"{MCP}.{cleared.entry}"
     if cleared.source == DEVICE:
         return DEVICE

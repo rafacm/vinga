@@ -901,6 +901,74 @@ async def test_the_recap_says_what_its_history_lost_on_its_record_and_its_span(
     }
 
 
+# An origin no configuration and no builtin could have produced, as a
+# stored row can still hold one: an entry carrying a line break and a
+# header-shaped line, and a builtin-sourced name nobody wrote.
+FORGED_ENTRY = "bad\nX-Secret: rejected"
+FORGED_BUILTIN = "not_a_builtin_sk_live_9e2c"
+
+
+async def test_a_stored_origin_no_config_could_make_is_keyed_unknown_and_kept_off(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Hydration reads a stored call's origin as the row has it, and the
+    key a cleared result is counted under becomes part of a span
+    attribute NAME. So an origin that fails the rule its namespace has
+    (a configured entry name, a builtin's own name) is counted as
+    `unknown`, and its bytes reach no record and no span, neither as an
+    attribute's name nor as its value (#599, PR #602 review)."""
+    store = a_long_thread(
+        calls={
+            6: (
+                StoredCall(
+                    position=0,
+                    source="mcp",
+                    entry=FORGED_ENTRY,
+                    name="bad__status",
+                    arguments={},
+                    result="m" * 3000,
+                ),
+            ),
+            7: (
+                StoredCall(
+                    position=0,
+                    source="builtin",
+                    name=FORGED_BUILTIN,
+                    arguments={},
+                    result="b" * 2500,
+                ),
+            ),
+        }
+    )
+    voice = RecordingTts()
+    session, _ = consenting(voice, store, Kept().watching(voice))
+    telemetry, memory = exporting()
+    tapped = events_of(session)
+    tapped.attach(telemetry.session_tap())
+    open_session(tapped, providers={}, conversations=session.session_conversations)
+    try:
+        with caplog.at_level(logging.DEBUG):
+            await drive_reply(session, UTTERANCE)
+        close_session(tapped)
+        spans = finished(telemetry, memory)
+    finally:
+        released()
+    assert _QUIETING.held() == 0
+
+    recap = fields_of(_recap_of(caplog, "llm_round"))
+    assert (recap["cleared_results"], recap["cleared_tools"]) == (2, {"unknown": 2})
+    assert recap["degraded_calls"] == 2
+    for planted in ("X-Secret", "rejected", FORGED_BUILTIN):
+        assert planted not in both_formats(caplog)
+        for record in caplog.records:
+            assert planted not in json.dumps(fields_of(record), default=repr)
+            assert planted not in repr(record.args)
+        for span in spans:
+            for key, held in dict(span.attributes).items():
+                assert planted not in key, span.name
+                assert planted not in repr(held), (span.name, key)
+
+
 # What the summarization round says, to the log
 #
 # Pinned before provider watching moved out of the runtime (#482, M2),

@@ -515,8 +515,9 @@ def _field_constraint(declared: Declared) -> str:
         return f"keyed by {scopes}, with counts for values"
     if kind is Kind.CLEARED_TOOLS:
         return (
-            "keyed by `builtin.<name>`, `mcp.<entry>`, `device` or `unknown`, "
-            "with counts for values"
+            "keyed by `builtin.<name>` (one of the builtins' own names), "
+            "`mcp.<entry>` (a name the configuration accepts for an MCP entry), "
+            "`device` or `unknown`, with counts for values"
         )
     if kind is Kind.DROP_COUNTS:
         reasons = ", ".join(f"`{one}`" for one in sorted(DropReason))
