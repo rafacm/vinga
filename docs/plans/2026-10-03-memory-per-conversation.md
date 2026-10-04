@@ -89,13 +89,33 @@ Measured at `677fd921` (`main` on 2026-10-03).
    it already is.** No re-read and no added message: each memory tool's
    result in the history states the change. Decision 3 tells the model
    so.
-3. **The framing says when the snapshot was taken.** The state block's
-   heading stops claiming to be current, and the memory section gains
-   one sentence: what it shows is as it stood when this conversation
-   started, and anything saved, changed or forgotten in the
-   conversation since is more recent and wins. The headings stay
-   constants in `runtime/prompt.py`; the exact wording is the
-   implementer's, checked by the behavior gate.
+3. **The framing says when the snapshot was taken, and is always
+   there.** The state block's heading stops claiming to be current.
+   Wherever the agent may remember, the prompt carries a memory section
+   even when every block is empty (review round 1, finding 4: today
+   `with_scopes` returns the know-how half unchanged when all blocks
+   are empty, so a conversation that starts with nothing saved would
+   carry no framing at all); empty, it says nothing is saved yet. Its
+   one framing sentence ties precedence to the snapshot's actual
+   capture point rather than to the conversation's start: what it
+   shows is memory as it stood when it was read; memory tool results
+   that come after that point in the conversation are newer and win,
+   and those before it are already reflected in it.
+
+   The capture point is visible to the model. A snapshot built at the
+   start of a conversation, or after a handover (which starts clean),
+   has nothing before it but the user's first words, so the start is
+   the point. A snapshot built while the thread already has history (a
+   rebind onto a resumed thread, a policy apply, an operator's change,
+   the first complete read after a failed one) is marked: the pipeline
+   inserts one fixed note in the assistant's voice, `(memory re-read
+   here)`, into the thread's history immediately before the newest user
+   turn, and the framing sentence names that note as the point. A
+   rebuild already changes the system prompt, so the provider cache is
+   lost at that round either way, and the note changes only the
+   history's tail. The note is a constant in `runtime/prompt.py` with
+   the headings; the framing's exact wording is the implementer's,
+   checked by the behavior gate.
 4. **What is given up, stated where the contract was.** The
    `_system_prompt` and `with_scopes` docstrings, and the observability
    page's memory section, say the clock is per activation now and what
@@ -174,8 +194,14 @@ the memory tool tests, and the event baseline.
   same conversation (activation counter), a rebind (conversation), a
   policy apply (decision 5), an operator write (decision 7); each
   rebuilds, and nothing else does.
-- The framing: the state heading no longer claims to be current, and
-  the snapshot sentence is present whenever a memory block is.
+- The framing: the state heading no longer claims to be current; the
+  memory section and its framing sentence are present whenever the
+  agent may remember, including a conversation that starts with
+  nothing saved (review round 1, finding 4); a snapshot built on a
+  fresh conversation inserts no note, and one built with history (a
+  rebind onto a resumed thread, and an off-to-on policy apply
+  mid-conversation) inserts exactly one `(memory re-read here)` before
+  the newest user turn.
 - The round accounting repeats the snapshot's fact ids and sizes until
   a rebuild.
 - With `export_llm_input` on, an operator hard-deleting a fact through
@@ -210,8 +236,8 @@ empty before and after:
   ordinary rounds (mean write-followed cached share at least 0.8, at
   most one full miss across its writes), while `main`'s reproduce the
   miss.
-- **Behavior:** three sessions each: a fact remembered two turns
-  earlier is used; a `set_state` value changed mid-conversation is used
+- **Behavior:** three sessions each, the first of them starting with
+  memory empty: a fact remembered two turns earlier is used; a `set_state` value changed mid-conversation is used
   in its new form, not the snapshot's; a fact `forget`-ten
   mid-conversation is not asserted as true; and a fact saved by a
   second, concurrent session is NOT expected mid-conversation and IS
@@ -279,6 +305,8 @@ Reviewed 2026-10-03 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): accepted, and narrowed rather than only documented. Decision 7 bumps an in-process operator revision on every operator write, hard deletion included, and the snapshot's key carries it, so a deleted fact leaves the prompt and the export from the next round (one replica, per the topology ADR, makes an in-process signal complete). What it cannot reach is stated on the observability page: an exchange this session's model wrote stays in the session's history and export until the session ends, and the operator's way to stop it is deleting the thread and ending the session. Tested with export enabled.
 
 4. **P2: The proposed framing can be absent or give the wrong precedence.** Evidence: `with_scopes` returns the know-how half unchanged when all scope blocks are empty (`vinga-server/src/vinga_server/runtime/prompt.py:528`), but the plan requires its new snapshot sentence only when a memory block exists (`docs/plans/2026-10-03-memory-per-conversation.md:116`). Its gate starts with empty memory. Also, a memory-policy change rebuilds the snapshot mid-conversation (`docs/plans/2026-10-03-memory-per-conversation.md:91`), making “as it stood when this conversation started” false; older history updates need not outrank that new snapshot. **The plan should define framing for an empty snapshot and describe precedence relative to the snapshot’s actual capture time.** Test both an initially empty conversation and an off-to-on policy apply.
+
+   *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): accepted. Decision 3 renders the memory section whenever the agent may remember, empty included, and ties precedence to the capture point rather than the conversation's start; a snapshot built while the thread has history is marked by one fixed `(memory re-read here)` note before the newest user turn, which the framing names. Tests cover an initially empty conversation and an off-to-on policy apply, and the gate's first behavior session starts empty.
 
 5. **P2: The documentation footprint leaves live claims false.** Evidence: `docs/concepts.md` promises a renamed or moved device is reflected in the very next reply (`docs/concepts.md:170`). The event catalog and its generated reference call memory a per-round read (`vinga-server/src/vinga_server/events/catalog.py:2720`); the design guide describes the same clock (`docs/architecture/design-guide.md:205`). None is in the plan’s documentation footprint. **The milestone should update current-facing clock and device-freshness claims and regenerate the event reference**; historical plans can remain historical.
 
