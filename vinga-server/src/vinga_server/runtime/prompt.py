@@ -14,15 +14,18 @@ the guidance of each MCP entry it is granted) is assembled once per
 activation, at session open and
 again at an agent switch, and cached for the life of that activation:
 nothing about it is recomputed per reply and nothing is fetched while
-it is assembled. The **memory blocks** keep the clock the first of them
-already had, read on every round and appended to the cached half,
-because that read predates this module and its per-reply freshness is a
-contract today's code documents: a fact remembered in one session is
-known to a concurrent one on its next reply, and a note written in one
-round is read in the next. What the device IS rides that same per-round
-clock and is read separately from memory: a device moved between two
-replies has moved for the second of them, and an agent that may not
-remember anything still has to know what it is speaking through.
+it is assembled. The **memory section** has a clock of its own since
+#536: read once when an agent starts speaking on a conversation, and
+kept for every later round and reply while the snapshot's key holds,
+so a conversation's system prompt stays byte-identical and the
+provider's prompt cache survives a memory write. What the model writes
+in the meantime reaches it as the tool results it already is, and the
+section's framing says those are newer; what anything else writes (a
+concurrent session, an operator's correction, a device moved) is seen
+from the next conversation, a hard deletion excepted, which reaches the
+next leg. What the device IS is read beside memory, into the same
+snapshot, and separately from it: an agent that may not remember
+anything still has to know what it is speaking through.
 
 Everything here is a pure function over text. What each caller needs
 beyond the prompt itself is the accounting: which block came from

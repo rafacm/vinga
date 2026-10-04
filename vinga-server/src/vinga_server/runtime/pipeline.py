@@ -124,7 +124,7 @@ from vinga_server.providers import (
 )
 from vinga_server.runtime import prompt, resumption
 from vinga_server.runtime.filler_runner import FillerRunner
-from vinga_server.runtime.history import Pair, as_sent, kept_round
+from vinga_server.runtime.history import Pair, as_sent, cleared_later, kept_round
 from vinga_server.runtime.outlast import outlast
 from vinga_server.runtime.provider_watch import ProviderWatch
 from vinga_server.runtime.reply_in_flight import ReplyInFlight, SpeakingPass
@@ -315,6 +315,48 @@ def _not_allowed(name: str, agents: Sequence[str]) -> AgentNotAllowed:
     )
 
 
+# The note a memory read with history behind it leaves in the thread
+# (#536), as one object so the runtime finds its own by identity.
+_REREAD = Turn("assistant", prompt.REREAD_NOTE)
+
+
+@dataclass(frozen=True)
+class _SnapshotKey:
+    """What a conversation's prompt snapshot is valid for, and the one
+    mechanism that decides whether it still is (#536).
+
+    Five values, each with its own reason. `activation` is bumped by
+    every agent activation, so a handover, and a handover back to the
+    same agent on the same thread, reads again, as the know-how half is
+    assembled again. `conversation` is the thread, so a rebind never
+    serves one thread's ledger on another. `remembering` is the memory
+    switch the snapshot was built under, so a config apply that turns it
+    reads again and the blocks never disagree with the offered tools.
+    `erasures` is the memory store's erasure revision, sampled before
+    the reads began and never replaced by a later value, so a hard
+    deletion published while they were in flight still makes the next
+    leg read again. `oversized` counts this session's memory writes whose
+    answers the history will send cleared, so a change the model's own
+    tool result will not carry into the next reply reaches it through
+    the snapshot instead.
+    """
+
+    activation: int
+    conversation: str
+    remembering: bool
+    erasures: int
+    oversized: int
+
+
+@dataclass(frozen=True)
+class _Snapshot:
+    """The prompt a conversation's legs are sent, and the key it was
+    read under. Kept only when both reads behind it completed."""
+
+    key: _SnapshotKey
+    sent: prompt.RoundPrompt
+
+
 @dataclass(frozen=True)
 class _Recapped:
     """A recap that has been made and not yet spoken.
@@ -467,9 +509,15 @@ class PipelineRuntime:
       written by `_tool_loop` alone where it takes the tool offer and
       read through `_remembering_now` by the builtin source's offer and
       dispatch, by tool execution before it answers a call at all, and
-      by `_system_prompt`. A field rather than an argument
-      because those two readers are on two clocks, and one field is what
-      makes them one answer.
+      by `_system_prompt`, whose snapshot key carries it. A field rather
+      than an argument because those readers are on two clocks, and one
+      field is what makes them one answer.
+    - `_snapshot`, `_activations` and `_oversized`: the prompt a
+      conversation is sent and the key it was read under (#536), written
+      by `_system_prompt` alone and only after reads that completed; the
+      activation count, bumped by `_activate_agent`; and the count of
+      this session's memory writes whose answers the history will send
+      cleared, bumped by `_keep_round`.
     - `_agent`: a read of `conversations` rather than a field, because
       both sides of the boundary attribute events to whoever is talking,
       so the device session's conversations are the one place it can
@@ -538,10 +586,11 @@ class PipelineRuntime:
         self._memory = memory
         # How a reply asks what device it is speaking through, and None
         # for a runtime composed without one, which sends the prompts it
-        # sent before a device had a name. Asked per round beside the
-        # memory read rather than captured at the activation: the name
-        # is stable, the location is not, and the tool that moves a
-        # device is reached from inside the conversation it moves.
+        # sent before a device had a name. Asked beside the memory read,
+        # when a conversation's prompt snapshot is read (#536), and by
+        # each memory tool call for the address its facts are filed
+        # under: the record can move under a conversation that is still
+        # talking, and an id is what keeps the answer this session's.
         self._devices = devices
         # And the record this conversation attached to, resolved by the
         # edge in the same snapshot the binding came from and never
@@ -631,6 +680,18 @@ class PipelineRuntime:
         # here for the life of it. Nothing about it is recomputed per
         # reply; what is, is the memory block appended to it.
         self._know_how: prompt.Assembled | None = None
+        # The prompt a conversation is sent, read once at the first
+        # round of the first leg that needs it and kept, with the key it
+        # was read under, for every later leg that finds the same key
+        # (#536). None until the first leg reads it, and whenever no
+        # read has completed since the session opened. Compared
+        # `is not None` at the one site that reads it.
+        self._snapshot: _Snapshot | None = None
+        # The two key components this runtime counts itself: every
+        # activation, and every memory write of this session whose
+        # answer the history will send cleared (`_keep_round`).
+        self._activations = 0
+        self._oversized = 0
         # The speaking pass now running, or the last one to have run:
         # its round count and whether any sentence of it went out or was
         # withheld ([reply_in_flight.py](reply_in_flight.py)). Replaced
@@ -639,13 +700,14 @@ class PipelineRuntime:
         # here too, since no pass has run and it has counted nothing.
         self._pass = SpeakingPass()
         # Whether the agent speaking may reach memory, resolved once per
-        # reply where the tool snapshot is taken and read from there by
-        # the tools it offers and by every round's injected blocks. One
-        # clock for both halves, so a reload landing mid-reply cannot
-        # hand one reply the old policy's tools and the new policy's
-        # prompt. None until the first reply resolves it, because there
-        # is no honest value before then: an agent is what the policy is
-        # about, and nothing asks this outside a reply.
+        # leg where the tool snapshot is taken and read from there by
+        # the tools it offers and by the prompt snapshot's key, which
+        # reads memory again when the answer changed (#536). One clock
+        # for both halves, so a reload landing mid-reply cannot hand one
+        # reply the old policy's tools and the new policy's prompt. None
+        # until the first reply resolves it, because there is no honest
+        # value before then: an agent is what the policy is about, and
+        # nothing asks this outside a reply.
         self._remembering: bool | None = None
         # The language the ASR provider asked this session to reuse
         # (`AsrResult.lock_language`). Session-scoped on purpose: the
@@ -1102,6 +1164,11 @@ class PipelineRuntime:
         # conversation. The conversations' rule, and one call, so no
         # reader can see this agent beside the previous one's thread.
         self.conversations.activate(name)
+        # Counted where the half is rebuilt, and for the same reason:
+        # the memory snapshot is per activation on a conversation, so
+        # an agent handed the floor reads its memory again, even when
+        # it is the agent and the thread that held it before (#536).
+        self._activations += 1
         self._providers = self._agent_providers[name]
         config = self._world_of(name)
         self._know_how = prompt.know_how(
@@ -1125,13 +1192,13 @@ class PipelineRuntime:
 
         Memory is deliberately outside it. This fires where the
         know-how half is actually assembled, once per activation, while
-        memory is read per round; emitting per round would double a
-        round's log volume for a number that moves slowly, and
-        `llm_round` already carries that round's token counts. The
-        inspection surface reads memory fresh and answers its size on
-        demand. The per-round half rides `llm_round` itself instead, an
-        event that already fires per round (#533): the whole system
-        size, the scope blocks' sizes and the ids of the facts injected.
+        the memory section is read into a conversation's snapshot on its
+        own key (#536) and is not this event's to report. The inspection
+        surface reads memory fresh and answers its size on demand. What
+        each round was sent rides `llm_round` itself instead, an event
+        that already fires per round (#533): the whole system size, the
+        scope blocks' sizes and the ids of the facts injected, repeated
+        by every round that sends the same snapshot.
         """
         self._events.emit(
             lambda: PromptAssembled(
@@ -1769,11 +1836,12 @@ class PipelineRuntime:
 
         The memory policy is resolved on the same line as the snapshot,
         and that is the whole of what makes it one clock. It decides two
-        things on two clocks otherwise: which tools this reply offers,
-        taken once here, and which blocks each round's prompt carries,
-        assembled per round below. A reload landing between them would
-        hand one reply the tools of one policy and the prompt of the
-        other, which is a reply nobody configured."""
+        things otherwise decided apart: which tools this leg offers,
+        taken once here, and whether the prompt this leg is sent holds a
+        memory section, which the prompt snapshot's key compares (#536).
+        A reload landing between them would hand one reply the tools of
+        one policy and the prompt of the other, which is a reply nobody
+        configured."""
         assert self._providers is not None
         providers = self._providers
         self._remembering = self._resolved_memory()
@@ -1788,6 +1856,18 @@ class PipelineRuntime:
         # `start` is an earlier reply's, which is what the cap and the
         # degrade apply to.
         history = self._turns
+        # The prompt every round of this leg is sent, decided here and
+        # nowhere else (#536): read again only where the snapshot's key
+        # moved, and otherwise the one kept since the leg that read it.
+        # At the leg's first round and before anything of the leg exists,
+        # so what memory was read is always read before anything this
+        # leg's model does, and a deletion landing between two of its
+        # rounds reaches the next leg rather than the middle of this one.
+        # Before `start`, because a read with history behind it marks its
+        # point in that history, ahead of the turn that opened the leg.
+        # Kept whole rather than as its text: every round's events carry
+        # its accounting, on success and on failure alike.
+        sent = await self._system_prompt(history)
         start = len(history)
         offered = frozenset(tool.name for tool in offer.tools)
         resampler = Resampler(providers.tts.sample_rate, self._output.output_sample_rate)
@@ -1815,11 +1895,6 @@ class PipelineRuntime:
             usage: Usage | None = None
             self._pass.round += 1
             invocation = uuid.uuid4().hex
-            # Resolved before the request is built, and per round rather
-            # than per reply, because that is the memory block's clock.
-            # Kept whole rather than as its text: the round's events
-            # carry its accounting, on success and on failure alike.
-            sent = await self._system_prompt()
             system = sent.text
             # What this round sends of the history, built once and never
             # touched again, so a watchdog retry resends the same bytes;
@@ -2049,6 +2124,15 @@ class PipelineRuntime:
                 continue
             answer = ToolResult(tool_call_id=call.id, content=made.result, is_error=made.is_error)
             pairs.append(Pair(call, answer, made.source, made.entry))
+            # A write whose answer the next reply will be sent cleared:
+            # the change it states would reach neither that reply's
+            # history nor its kept snapshot, so the snapshot's key moves
+            # and the next leg reads memory again (#536, plan review
+            # round 3). The writes are the names whose order is their
+            # meaning, which is every write a conversation makes to
+            # something that outlives the round.
+            if call.name in names.ORDERED_TOOL_NAMES and cleared_later(made.result):
+                self._oversized += 1
         kept = kept_round(history, " ".join(spoken[self._pass.kept :]), pairs)
         if kept:
             history.extend(kept)
@@ -2501,88 +2585,145 @@ class PipelineRuntime:
             )
         return None
 
-    async def _system_prompt(self) -> prompt.RoundPrompt:
-        """The prompt this round is sent: the half cached at activation,
-        plus everything memory holds for it and everything the device
-        record says, both as they stand right now.
+    async def _system_prompt(self, history: list[Turn]) -> prompt.RoundPrompt:
+        """The prompt every round of the leg starting now is sent: the
+        half cached at activation, plus what memory and the device
+        record held when this conversation's snapshot was read.
+
+        Read once per agent activation on a conversation and kept
+        (#536), rather than read on every round. The snapshot is reused
+        while its key (`_SnapshotKey`) equals the one this leg computes,
+        and read again where it does not, which is the whole of its
+        validity: there is no invalidation call anywhere to forget. This
+        is called once per leg, at its first round, so the key is
+        compared and a snapshot read only there, and every later round
+        of the leg sends what this answered whatever happens meanwhile.
+
+        What that costs, stated where the per-round contract used to be:
+        a fact saved or a device moved during this conversation by a
+        different live session's model, or by an operator's correction
+        or device change, is seen from this session's next conversation
+        rather than its next reply. What this session's own model writes
+        reaches it as the tool result it already is, kept in the history
+        (#599) and named as newer than the snapshot by the framing; a
+        write whose answer the history will send cleared moves the key
+        instead. A hard deletion is not in the cost: it moves the
+        erasure revision, and the next leg whose key is computed after
+        it was published reads again. A leg already validated may send
+        a deleted fact once more in its remaining rounds. What it
+        buys is a system prompt that stays byte-identical across the
+        rounds and replies of a conversation, so a memory write no
+        longer costs the round after it the provider's prompt cache.
 
         Answered with what the round's events need to account for it
-        (#533): the assembled prompt and the ids of the facts it holds.
-        Whether memory was read is known only here, so this is where the
-        fact list is chosen to be None (not read: the agent's memory is
-        off) or the read's ids, which are empty where it read nothing
-        and where the read failed, since the model then saw no fact.
+        (#533): the assembled prompt and the ids of the facts it holds,
+        repeated by every round that sends it, which is what the model
+        received. Whether memory was read is known only here, so this is
+        where the fact list is chosen to be None (not read: the agent's
+        memory is off) or the read's ids, which are empty where it read
+        nothing and where the read failed, since the model then saw no
+        fact.
 
-        The half is not rebuilt here. What this adds is the scope blocks,
-        which keep the clock the memory block has always had: read on
-        every round, so a fact remembered in one session is known to a
-        concurrent one on its next reply and a note written in one round
-        is read in the next, which is a contract that predates this
-        split.
+        A read that did not complete is never kept. The memory read
+        answers `complete=False` where the database could not be read
+        and the device read where it fell back to the served world;
+        either way this leg sends exactly what such a read always sent
+        (the empty blocks with no memory section, the fallback record)
+        and nothing is cached, so the next leg reads again and the first
+        complete read becomes the snapshot. A short outage costs the
+        legs it lasts rather than the rest of the conversation.
 
-        One read for all three scopes rather than three, which is what
-        keeps the cost of this line where it was: it is a database round
-        trip and runs in a worker thread rather than on the loop every
-        live conversation shares, exactly as the file read before it did.
-        It takes no advisory lock, so it never waits on a `remember` in
-        flight. It is resolved before the request is built, which is what
-        lets the assembler stay a pure function of the text it is handed.
+        Where the thread already holds turns before the one that opened
+        this leg, a complete memory read places `REREAD_NOTE` in the
+        history immediately before that turn, taking any earlier one
+        out, and the framing names it as the point memory stands at:
+        every tool exchange before it predates the read and every one
+        after it follows. With nothing before the opening turn the start
+        is the point and nothing is placed. Decided from the history
+        alone, never from what moved the key, since a handover back
+        resumes a thread with everything it held.
 
-        An agent whose memory section is off is read nothing of memory,
-        and that read does not happen: there is no block to assemble
-        from it, and a round trip whose answer is thrown away is a cost
-        every round of every reply would pay for nothing. The answer is
-        this reply's rather than the world's, so the blocks and the
-        offered tools cannot disagree inside one reply.
-
-        The device record is not on that switch. What a device is
-        called is not a remembered thing, and an agent that may not
-        remember anything still has to know what it is speaking
-        through, so the record is read whether or not memory is. It is
-        read here rather than at the activation for the reason the
-        scopes are: a device relocated between two replies has moved for
-        the second of them, and the activation may be an hour of
-        conversation behind.
-
-        The two reads used to be started together, and are not any more,
-        because one of them is now the other's address. A device's facts
-        are filed under a MAC, a board swap moves the record and its
-        facts to another one in one transaction (#449, M4), and a memory
-        read addressed by the MAC this session dialled would answer with
-        an empty device scope for the rest of the conversation. So the
-        record is read first and its address is what the scopes are read
-        under. What that costs is one round trip inside the turnaround a
-        person is listening to, on a primary key, against the same
-        database; what it buys is that a conversation does not lose what
-        the room told it because somebody changed the hardware.
-
-        The fallback is the session's own address, which is where a
-        board with no record has always filed its facts and where a
-        runtime with no view files all of them.
+        One read for all three scopes rather than three, off the event
+        loop, taking no advisory lock, so it never waits on a
+        `remember` in flight. An agent whose memory is off is read
+        nothing of memory. The device record is read whether or not
+        memory is, since what a device is called is not a remembered
+        thing, and it is read first because a device's facts are filed
+        under the MAC its record stands at now (#449, M4), with this
+        session's own address as the fallback.
         """
         assert self._know_how is not None and self._agent is not None
         assert self._conversation is not None
-        record = (await self._device_record()).record
-        if not self._remembering_now():
-            return prompt.RoundPrompt(
+        # Sampled before either read begins and kept with the snapshot:
+        # an erasure committing while the reads are in flight leaves this
+        # key behind the store's revision, so the next leg reads again
+        # whether or not these reads caught it.
+        key = _SnapshotKey(
+            activation=self._activations,
+            conversation=self._conversation,
+            remembering=self._remembering_now(),
+            erasures=self._memory.erasures,
+            oversized=self._oversized,
+        )
+        held = self._snapshot
+        if held is not None and held.key == key:
+            return held.sent
+        device = await self._device_record()
+        record = device.record
+        if not key.remembering:
+            sent = prompt.RoundPrompt(
                 prompt.with_scopes(
                     self._know_how, NOTHING_REMEMBERED, record, remembering=False
                 ),
                 facts=None,
             )
-        scopes = await asyncio.to_thread(
-            self._memory.read_for_prompt,
-            self._agent,
-            self._device if record is None else record.mac,
-            self._conversation,
-        )
-        # A read that did not answer renders as it always has, the
-        # empty blocks with no memory section over them: a section saying
-        # nothing is saved would be a claim about memory nobody read.
-        return prompt.RoundPrompt(
-            prompt.with_scopes(self._know_how, scopes, record, remembering=scopes.complete),
-            facts=scopes.facts,
-        )
+            complete = device.complete
+        else:
+            scopes = await asyncio.to_thread(
+                self._memory.read_for_prompt,
+                self._agent,
+                self._device if record is None else record.mac,
+                self._conversation,
+            )
+            # A read that did not answer renders as it always has, the
+            # empty blocks with no memory section over them: a section
+            # saying nothing is saved would be a claim about memory
+            # nobody read, and there is no read point to mark.
+            marked = scopes.complete and self._mark_read(history)
+            sent = prompt.RoundPrompt(
+                prompt.with_scopes(
+                    self._know_how,
+                    scopes,
+                    record,
+                    remembering=scopes.complete,
+                    marked=marked,
+                ),
+                facts=scopes.facts,
+            )
+            complete = device.complete and scopes.complete
+        if complete:
+            self._snapshot = _Snapshot(key, sent)
+        return sent
+
+    @staticmethod
+    def _mark_read(history: list[Turn]) -> bool:
+        """Put `REREAD_NOTE` into the thread's history immediately before
+        the turn that opened this leg, if anything precedes that turn,
+        and answer whether it did.
+
+        One note at a time: an earlier one marks a snapshot that is no
+        longer being sent, and two would leave the model choosing which
+        point the framing means, so it is taken out first. The note is
+        this runtime's own turn, found by identity, so nothing a model
+        said can be mistaken for it, and it lives only in the session's
+        history: the store never records it, and a resumed thread is
+        marked again by the read its first leg makes.
+        """
+        history[:] = [turn for turn in history if turn is not _REREAD]
+        if len(history) < 2:
+            return False
+        history.insert(len(history) - 1, _REREAD)
+        return True
 
     async def _device_record(self) -> RecordNow:
         """What this conversation is speaking through, as the record it

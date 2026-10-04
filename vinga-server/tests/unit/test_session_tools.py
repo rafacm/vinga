@@ -455,11 +455,12 @@ async def test_a_remembered_fact_is_in_the_next_replys_prompt() -> None:
     assert system.startswith("POET")
 
 
-async def test_a_fact_forgotten_mid_reply_is_out_of_the_next_rounds_prompt() -> None:
-    """The clock the memory blocks have always kept, on the tool that
-    takes something away: the know-how half is cached for the activation
-    and the scopes are read every round, so a fact forgotten in one round
-    of a reply is gone from the round after it, inside the same reply.
+async def test_a_fact_forgotten_mid_reply_reaches_the_next_round_as_its_result() -> None:
+    """The tool that takes something away, under the snapshot's clock
+    (#536): memory is read once for the conversation, so the round after
+    a `forget` is sent the same system prompt, still holding the fact,
+    and the change reaches it as the result the removal answered, which
+    the framing names as newer than the snapshot.
 
     The removal answers with the words it took, which is what the agent
     then says out loud so the user can ask for them back.
@@ -475,7 +476,7 @@ async def test_a_fact_forgotten_mid_reply_is_out_of_the_next_rounds_prompt() -> 
 
     asked, after = script.systems
     assert "the user is vegetarian" in asked
-    assert "vegetarian" not in after
+    assert after == asked
     (result,) = [
         result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
     ]
@@ -510,9 +511,15 @@ async def test_a_device_fact_reaches_the_next_agent_on_that_device() -> None:
 
     assert await run_reply(session, "the kettle here is loud") == ["Hello from the tutor."]
 
-    # The poet's own next round carries both, under two headings.
-    assert "the kettle is loud" in poet.systems[-1]
-    assert "the user is vegetarian" in poet.systems[-1]
+    # The poet's own next round is sent both as the results that
+    # stored them, the snapshot it read at the start having held neither
+    # (#536).
+    stored = [
+        result.content for turn in poet.seen[-1][0] for result in turn.tool_results
+    ]
+    assert any("the kettle is loud" in one for one in stored)
+    assert any("the user is vegetarian" in one for one in stored)
+    assert poet.systems[-1] == poet.systems[0]
     # The tutor is sent the place's note and not the poet's own memory,
     # which is the scope separation from both sides at once.
     (handed,) = tutor.systems

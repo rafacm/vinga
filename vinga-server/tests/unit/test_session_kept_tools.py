@@ -49,6 +49,7 @@ from vinga_server.providers import ToolCall, ToolDef, Turn
 from vinga_server.providers.anthropic_llm import anthropic_messages
 from vinga_server.providers.base import LlmEvent, LlmProvider, TextDelta, ToolChoice
 from vinga_server.runtime.history import DEGRADED_END, DEGRADED_PREFIX
+from vinga_server.runtime.prompt import REREAD_NOTE
 from vinga_server.tools.mcp import McpServers
 
 # A board tool's published name, which is what the model calls it by.
@@ -354,7 +355,11 @@ async def test_a_move_leg_keeps_its_plain_calls_and_not_the_move() -> None:
 
     hand_over_to(session, "poet")
     kept = await history(session, poet)
-    assert [turn.role for turn in kept] == ["user", "assistant", "tool"]
+    # The handover back read the poet's memory again, with its thread
+    # holding turns, so the note marking that read closes what came
+    # before the probe (#536).
+    assert [turn.role for turn in kept] == ["user", "assistant", "tool", "assistant"]
+    assert kept[-1].content == REREAD_NOTE
     assert kept[1].content == "One moment."
     assert [one.name for one in kept[1].tool_calls] == ["remember"]
     paired(poet.seen)
@@ -510,6 +515,10 @@ async def test_a_resumed_request_carries_offered_calls_structured_and_others_as_
     (turns, offered, _) = poet.seen[2]
     assert "remember" in {tool.name for tool in offered}
     assert "home__lamp_state" not in {tool.name for tool in offered}
+    # The move onto the thread read memory again with the thread's
+    # history behind the seed, so the note marking that read sits
+    # immediately before the seed, after everything the thread held
+    # (#536).
     assert [turn.role for turn in turns] == [
         "user",
         "assistant",
@@ -517,8 +526,11 @@ async def test_a_resumed_request_carries_offered_calls_structured_and_others_as_
         "user",
         "assistant",
         "assistant",
+        "assistant",
         "user",
     ]
+    assert turns[-2].content == REREAD_NOTE
+    assert [turn.content for turn in turns].count(REREAD_NOTE) == 1
     (kept,) = calls_in(turns)
     assert (kept.id, kept.name, kept.arguments) == (
         "h0",
@@ -535,9 +547,10 @@ async def test_a_resumed_request_carries_offered_calls_structured_and_others_as_
     assert [block["type"] for block in messages[2]["content"]] == ["tool_result", "text"]
     assert messages[2]["content"][0]["tool_use_id"] == used["id"] == "h0"
     assert messages[2]["content"][1]["text"] == "is the lamp on?"
-    assert [block["type"] for block in messages[3]["content"]] == ["text", "text"]
+    assert [block["type"] for block in messages[3]["content"]] == ["text", "text", "text"]
     assert messages[3]["content"][0]["text"].startswith(DEGRADED_PREFIX)
     assert messages[3]["content"][1]["text"] == "It is on."
+    assert messages[3]["content"][2]["text"] == REREAD_NOTE
 
 
 def written_and_read_back(spy: SpyStore) -> Any:
