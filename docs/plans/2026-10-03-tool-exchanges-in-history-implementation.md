@@ -719,6 +719,7 @@ Cut from M1's head `81cfca37`, in parallel with M3, and rebased onto
 | Q5: the per-tool mapping as a closed value | `events/values.py` (`ClearedTools`, `Kind.CLEARED_TOOLS`), `events_docgen.py`, `telemetry.py` (`SHAPES` row), `tests/unit/test_event_values.py`, `tests/unit/test_event_docs.py` | `Add the ClearedTools event value` |
 | Q5 and D7: the five facts on `llm_round`, `llm_recap` and the LLM-stage `provider_failed`, by every failure route, and on their `llm` spans; `llm_round.turns`'s note | `runtime/history.py` (`HistorySent`, `NOTHING_LOST`, `Sent.accounting`), `runtime/tool_execution.py` (`cleared_key`), `runtime/pipeline.py` (`_tool_loop`), `runtime/provider_watch.py`, `events/catalog.py`, `events/assembly.py` (`HistoryAccounting`), `telemetry.py` (`HISTORY_ATTRIBUTES`, `CLEARED_TOOLS_PREFIX`, `_history_attributes`), `tests/unit/test_history_measured.py`, `tests/unit/test_provider_watch.py` | `Report what each request's history lost` |
 | D8: `refetch` on the three `tool_call` variants and `vinga.tool.refetch` on the tool span | `events/catalog.py`, `events/assembly.py`, `runtime/tool_execution.py` (`_refetches`, `run`), `runtime/pipeline.py` (`_run_tools`), `telemetry.py` (`TOOL_ATTRIBUTES`), `tests/unit/test_history_measured.py` | `Flag a tool call that re-fetches a cleared result` |
+| After the rebase: one key for a repeat, in the history's own form | `runtime/history.py` (`repeat_key`), `runtime/tool_execution.py` (`_refetches`), `tests/unit/test_history_measured.py` | `Match a repeated call in the history's own form` |
 | The recap pin the unit lane caught | `tests/unit/test_session_recap.py` | `Pin the recap's zero history counts` |
 | Documentation footprint | `docs/architecture/observability-surfaces.md`, `changelog.d/599-history-measured.md` (`### Added`), `docs/reference/events.md` (regenerated in each of the three code commits) | `Document the history facts and the re-fetch flag` |
 
@@ -790,6 +791,11 @@ field's catalog note, on the observability page and in the changelog.
   a caller that forgets it does not report every call as no re-fetch.
   The five direct `run` callers in the unit suites pass an empty set,
   and the lookahead test's `_run_tools` stub takes the new parameter.
+- **The changelog entry is a fragment of its own**,
+  `changelog.d/599-history-measured.md`. M1's fragment was folded into
+  `CHANGELOG.md` on `main` before this branch was rebased, so the
+  `### Added` block written into it moved to a new file rather than
+  resurrecting the folded one.
 - **The stdio test server gains a `long_answer` tool**, published only
   when an entry's `env` sets `VINGA_TEST_LONG_ANSWER` to a size, the
   way `VINGA_TEST_SHADOWED_TOOL` already gates its planted name: no
@@ -833,6 +839,16 @@ No other deviation: the five field names, the six attribute names and
   its tool turn, the answer, user) where it was three before #599;
   `test_a_round_says_what_its_history_cleared` pins it, and the catalog
   note says so.
+
+- **The rebase found a disagreement M1's review introduced.** PR #600
+  made `kept_round` keep a call's name and arguments in their
+  `countable` form (a lone surrogate becomes U+FFFD), so the cleared
+  calls' keys were built from normalized strings while the re-fetch
+  check compared the model's raw ones, and a repeat whose arguments
+  held a lone surrogate read as no re-fetch. `repeat_key` is now the
+  one function both sides go through. The test that pins it failed on
+  the rebased tree before the fix (`[False, False]` for
+  `[False, True]`).
 
 ### Tests and mutations
 
@@ -878,21 +894,20 @@ attributes.
 
 ### Verification
 
-On agentpi, from `vinga-server/`, at the code as committed (this
-section's commit changes only prose):
+On agentpi, from `vinga-server/`, after the rebase onto `main`
+(`c0c91715`), at `6eb807b5`, the code as committed (the commit that
+records this changes only prose):
 
 - `uv run ruff check .`: clean. `uv run mypy` (the events package):
-  no issues in 5 source files, at each of the three code commits.
-- `uv run pytest tests/unit -q -n auto --dist loadfile`: 7977 passed,
-  19 skipped in 909.02s, at `e0c974ac`. The run before it, at the
-  documentation commit, was 1 failed, 7976 passed, 19 skipped in
-  1719.31s: the `llm_recap` whole-payload pin in
+  no issues in 5 source files.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 7984 passed,
+  19 skipped in 1193.30s. Before the rebase, at the recap pin's commit,
+  it was 7977 passed, 19 skipped in 909.02s; the run before that one
+  failed only the `llm_recap` whole-payload pin in
   `test_session_recap.py`, fixed by `Pin the recap's zero history
-  counts` (the machine was shared with other lanes then, hence the
-  time).
+  counts`.
 - `uv run pytest tests/integration -q -n auto --dist loadfile`: 350
-  passed in 336.10s, at the documentation commit; the later commit
-  touches one unit test only.
+  passed in 312.16s.
 - The eight generated-document checks CI's `integration` job runs
   (domain, server, conversations schema, metrics views, events,
   OpenAPI, the CLI reference region and its recipes): none drifted.
