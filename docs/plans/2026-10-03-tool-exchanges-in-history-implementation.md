@@ -935,3 +935,36 @@ written to a log of its own:
 Not verified locally: the image build and its smoke conversation (CI's
 `image` job), any live provider or OTLP backend (the spans are read
 from the SDK's in-memory exporter).
+
+### PR review round 1
+
+Reviewed 2026-10-04 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 4m57s, at commit a80ba50e.
+
+1. **P1: invalid tool origins became telemetry keys.** `ClearedTools`
+   accepted any nonblank suffix after `builtin.` or `mcp.`, and a
+   resumed thread's origins are read off stored rows unchanged, so a
+   stored entry holding `bad\nX-Secret: rejected` was keyed by those
+   bytes and exported inside a span attribute name by
+   `_history_attributes`. The review asked for builtin suffixes checked
+   against the builtin names, MCP suffixes against the configured
+   entry-name rule, an invalid stored origin mapped to `unknown`, and a
+   sentinel test through hydration.
+
+   *Resolution:* accepted, in `6e3ad3c2`. The value type and
+   `cleared_key` both read their rule from `tools/names.py`:
+   `BUILTIN_TOOL_NAMES` for a builtin, and `is_valid_entry_name`, the
+   check the configuration runs on an `mcp_servers` key, for an entry.
+   The catalog's `Identifier` rule (non-blank once stripped) accepts the
+   planted entry, so it could not be the guard. `ClearedTools` refuses
+   any other key; `cleared_key` maps an origin failing either rule to
+   `unknown` rather than letting the value refuse the whole event. The
+   new tests failed before the fix (seven of them). The sentinel
+   (`test_a_stored_origin_no_config_could_make_is_keyed_unknown_and_kept_off`)
+   recaps a thread over a forged entry and a builtin-sourced name
+   nobody wrote, finds both under `unknown`, and finds neither in any
+   record or any span attribute name or value. Mutations: the value
+   accepting any suffix was killed by the four value tests while the
+   sentinel stayed green, since `cleared_key` already maps the origin
+   to `unknown`, which is why the check is in both places; `cleared_key`
+   skipping the check was killed, 3 failures and an error (the value
+   refused the event).
