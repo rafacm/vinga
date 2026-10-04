@@ -486,6 +486,7 @@ def a_round_prompt(facts: tuple[int, ...] | None) -> prompt.RoundPrompt:
         prompt.with_scopes(
             prompt.know_how("POET"),
             PromptMemory(state="- a: b", agent="- a fact", device="", agent_ids=(4,)),
+            remembering=True,
         ),
         facts=facts,
     )

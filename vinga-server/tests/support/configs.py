@@ -24,7 +24,7 @@ from typing import Any
 import yaml
 
 from vinga_server.config import Config, compose_config, load_file_config
-from vinga_server.config.models import DOMAIN_KEYS
+from vinga_server.config.models import DOMAIN_KEYS, MemoryPolicy
 from vinga_server.config.secrets import SecretStore
 from vinga_server.filler import FallbackClip, FillerClips
 from vinga_server.generation import Generation, Generations
@@ -153,6 +153,21 @@ def base_config(**overrides: object) -> Config:
             | overrides
         )
     )
+
+
+def forgetful(config: Config) -> Config:
+    """The same configuration with every agent's memory switched off.
+
+    For the suites about something other than memory that identify an
+    agent by the mock model's `{system}` echo: an agent that may
+    remember is sent a memory section after its persona (#536), and the
+    echo would read that out as three more sentences. Off, the prompt is
+    the persona and the reply is the one sentence those suites count.
+    """
+    config.agent_defaults.memory = MemoryPolicy(enabled=False)
+    for agent in config.agents.values():
+        agent.memory = None
+    return config
 
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"

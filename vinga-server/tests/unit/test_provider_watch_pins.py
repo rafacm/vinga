@@ -35,6 +35,7 @@ import pytest
 
 from tests.support.configs import BOTH_MAC, POET_MAC, base_config, watchdog_config
 from tests.support.events import fields_of, only
+from tests.support.prompts import EMPTY_SECTION, FRAMED, nothing_saved
 from tests.support.providers import STALL_S, ScriptedLlm, StallingLlm, Unreachable
 from tests.support.records import recording_session
 from tests.support.sessions import (
@@ -49,7 +50,7 @@ from tests.support.sessions import (
 from tests.support.sockets import QuietSocket
 from tests.tools.event_baseline import failing_reply
 from vinga_server.providers import AsrResult, Usage
-from vinga_server.runtime.prompt import MEMORY_HEADING
+from vinga_server.runtime.prompt import JOIN, MEMORY_HEADING
 
 # The utterance the direct drives hand a reply: 20 ms of silence, which
 # the mock ASR answers whatever it holds.
@@ -73,12 +74,13 @@ CLOUD = {
 }
 
 # What a failed reply round says about the prompt it was sending, for
-# the lane's agent with nothing remembered: its persona, no scope block,
-# and a read that injected nothing (#533).
+# the lane's agent with nothing remembered: its persona, the memory
+# section saying nothing is saved (#536), and a read that injected
+# nothing (#533).
 NOTHING_IN_MEMORY = {
-    "system_characters": len("POET"),
-    "memory_characters": 0,
-    "memory_sources": {},
+    "system_characters": len(nothing_saved("POET")),
+    "memory_characters": len(JOIN + EMPTY_SECTION),
+    "memory_sources": {"memory": len(EMPTY_SECTION)},
     "memory_facts": [],
 }
 
@@ -231,9 +233,9 @@ async def test_every_reply_round_says_llm_round_and_files_itself_on_the_turn(
         # The second round is sent the fact the first one remembered,
         # under the id the store gave it (#533).
         facts = fields.pop("memory_facts")
-        block = f"{MEMORY_HEADING}\n- tea"
-        assert fields.pop("memory_sources") == ({} if number == 1 else {"memory": len(block)})
-        added = 0 if number == 1 else len("\n\n") + len(block)
+        block = EMPTY_SECTION if number == 1 else f"{FRAMED}{MEMORY_HEADING}\n- tea"
+        assert fields.pop("memory_sources") == {"memory": len(block)}
+        added = len("\n\n") + len(block)
         assert fields.pop("memory_characters") == added
         assert fields.pop("system_characters") == len("POET") + added
         assert facts == [] if number == 1 else (

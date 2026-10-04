@@ -36,6 +36,7 @@ from tests.support.configs import (
     config_with_agent,
 )
 from tests.support.events import both_formats
+from tests.support.prompts import nothing_saved
 from tests.support.providers import RecordingLlm, ScriptedLlm
 from tests.support.sessions import (
     agent_providers,
@@ -773,7 +774,7 @@ async def test_a_session_refuses_an_agent_its_device_is_not_bound_to() -> None:
     # and the half the next round is sent is still the tutor's.
     assert talking(session) == "tutor"
     await run_reply(session, "who am I talking to?")
-    assert llm.systems == [know_how(config.prompt_for_agent("tutor")).text]
+    assert llm.systems == [nothing_saved(know_how(config.prompt_for_agent("tutor")).text)]
 
 
 def test_a_device_with_no_agent_is_turned_away() -> None:

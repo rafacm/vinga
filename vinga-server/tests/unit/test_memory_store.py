@@ -30,6 +30,7 @@ import pytest
 
 from tests.support.events import both_formats, events, only
 from tests.support.leaks import chain
+from tests.support.prompts import nothing_saved
 from tests.support.stores import (
     STORED,
     a_planted_credential,
@@ -1974,12 +1975,15 @@ async def test_remembered_facts_reach_the_model_through_the_prompt() -> None:
     conversation's ledger is one conversation's."""
     store = memory()
     half = prompt.know_how("POET")
-    assert prompt.with_scopes(half, store.read_for_prompt("poet", None, THREAD)).text == "POET"
+    empty = prompt.with_scopes(
+        half, store.read_for_prompt("poet", None, THREAD), remembering=True
+    ).text
+    assert empty == nothing_saved("POET")
 
     await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
     await store.set_state(THREAD, "scene", "the tavern", agent="poet")
     assembled = prompt.with_scopes(
-        half, store.read_for_prompt("poet", None, THREAD)
+        half, store.read_for_prompt("poet", None, THREAD), remembering=True
     ).text
     assert assembled.startswith("POET")
     assert f"{prompt.MEMORY_HEADING}\n- the user is vegetarian" in assembled
@@ -1990,8 +1994,9 @@ async def test_remembered_facts_reach_the_model_through_the_prompt() -> None:
         prompt.with_scopes(
             prompt.know_how("TUTOR"),
             store.read_for_prompt("tutor", None, OTHER_THREAD),
+            remembering=True,
         ).text
-        == "TUTOR"
+        == nothing_saved("TUTOR")
     )
 
 

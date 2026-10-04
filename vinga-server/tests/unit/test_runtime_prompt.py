@@ -37,6 +37,13 @@ def remembered(facts: str) -> PromptMemory:
 
 MAC = "aa:bb:cc:dd:ee:ff"
 
+# The sentence that opens the memory section of an agent that may
+# remember, read at the conversation's start, and the blank line after
+# it (#536). The assembler's own constants, so a wording change moves
+# these tests with it rather than breaking them for a reason nobody
+# meant.
+FRAMED = prompt.FRAMING_AT_START + prompt.JOIN
+
 PERSONAS = ["POET", "", "   ", "  You are a poet.  \n", "line\n\nline"]
 
 FACTS = ["", "- the user is vegetarian", "- one\n- two"]
@@ -44,12 +51,31 @@ FACTS = ["", "- the user is vegetarian", "- one\n- two"]
 
 @pytest.mark.parametrize("persona", PERSONAS)
 @pytest.mark.parametrize("facts", FACTS)
-def test_with_no_guidance_the_prompt_is_byte_for_byte_the_old_one(
+def test_with_no_guidance_the_prompt_is_byte_for_byte_the_old_one_framed(
     persona: str, facts: str
 ) -> None:
-    assembled = prompt.with_scopes(prompt.know_how(persona), remembered(facts))
+    """The old append, with the one thing #536 added in front of the
+    facts: the framing that says when memory was read, and where
+    nothing is saved, the sentence saying so instead of no block."""
+    assembled = prompt.with_scopes(prompt.know_how(persona), remembered(facts), remembering=True)
 
-    assert assembled.text == previously(persona, facts)
+    section = f"{prompt.MEMORY_HEADING}\n{facts}" if facts else prompt.NOTHING_SAVED
+    assert assembled.text == f"{persona}\n\n{FRAMED}{section}".strip()
+
+
+@pytest.mark.parametrize("persona", PERSONAS)
+def test_an_agent_that_may_not_remember_is_sent_its_persona_byte_for_byte(
+    persona: str,
+) -> None:
+    """The other half of the old pin, which is still the old function:
+    with memory off and no device, the prompt is the persona untouched,
+    whatever the scopes hold."""
+    for facts in FACTS:
+        assembled = prompt.with_scopes(
+            prompt.know_how(persona), remembered(facts), remembering=False
+        )
+
+        assert assembled.text == previously(persona, "")
 
 
 def test_the_order_is_persona_then_guidance_then_memory() -> None:
@@ -62,6 +88,7 @@ def test_the_order_is_persona_then_guidance_then_memory() -> None:
             ],
         ),
         remembered("- the user is vegetarian"),
+        remembering=True,
     )
 
     assert assembled.text == (
@@ -73,7 +100,7 @@ def test_the_order_is_persona_then_guidance_then_memory() -> None:
         "Guidance for using the tools whose names begin with weather__:\n"
         "Give temperatures in Celsius.\n"
         "\n"
-        f"{prompt.MEMORY_HEADING}\n"
+        f"{FRAMED}{prompt.MEMORY_HEADING}\n"
         "- the user is vegetarian"
     )
 
@@ -92,6 +119,7 @@ def test_the_fragments_sit_between_the_persona_and_the_guidance() -> None:
             [prompt.Guidance("home", "Ask before unlocking the door.")],
         ),
         remembered("- the user is vegetarian"),
+        remembering=True,
     )
 
     assert assembled.text == (
@@ -104,7 +132,7 @@ def test_the_fragments_sit_between_the_persona_and_the_guidance() -> None:
         "Guidance for using the tools whose names begin with home__:\n"
         "Ask before unlocking the door.\n"
         "\n"
-        f"{prompt.MEMORY_HEADING}\n"
+        f"{FRAMED}{prompt.MEMORY_HEADING}\n"
         "- the user is vegetarian"
     )
     assert [block.provenance for block in assembled.blocks] == [
@@ -132,6 +160,7 @@ def test_a_fragment_is_injected_byte_for_byte() -> None:
             [prompt.Guidance("home", "Ask first.")],
         ),
         remembered("- a fact"),
+        remembering=True,
     )
 
     assert assembled.blocks[1].text == written
@@ -164,7 +193,9 @@ def test_a_fragment_obeys_the_rules_every_block_obeys(
     reported nowhere. Milestone 1 pinned this over personas and
     guidance; a new block type has to be inside it rather than beside
     it."""
-    assembled = prompt.with_scopes(prompt.know_how(persona, fragments), remembered(facts))
+    assembled = prompt.with_scopes(
+        prompt.know_how(persona, fragments), remembered(facts), remembering=True
+    )
 
     assert "\n\n".join(block.text for block in assembled.blocks) == assembled.text
     assert assembled.characters == sum(assembled.sizes().values()) + 2 * (
@@ -265,6 +296,7 @@ def test_an_ordinary_block_carries_no_name() -> None:
             guidance=[prompt.Guidance("home", "G")],
         ),
         remembered("- a fact"),
+        remembering=True,
     )
 
     assert [block.name for block in assembled.blocks] == [None, None, None, None]
@@ -309,7 +341,9 @@ def test_the_prompt_is_the_blocks_and_nothing_else(
     block reports is a byte the model is sent."""
     for assembled in (
         prompt.know_how(persona, guidance=guidance),
-        prompt.with_scopes(prompt.know_how(persona, guidance=guidance), remembered(facts)),
+        prompt.with_scopes(
+            prompt.know_how(persona, guidance=guidance), remembered(facts), remembering=True
+        ),
     ):
         assert "\n\n".join(block.text for block in assembled.blocks) == assembled.text
         assert assembled.characters == sum(assembled.sizes().values()) + 2 * (
@@ -330,7 +364,9 @@ def test_no_block_holds_whitespace_the_prompt_does_not(
     written, which is the persona standing alone: trimming it would be
     this module editing the value it was handed, and it is what the
     byte-equality pin holds."""
-    assembled = prompt.with_scopes(prompt.know_how(persona, guidance=guidance), remembered(facts))
+    assembled = prompt.with_scopes(
+        prompt.know_how(persona, guidance=guidance), remembered(facts), remembering=True
+    )
     if len(assembled.blocks) == 1:
         assert assembled.text == assembled.blocks[0].text
         return
@@ -345,12 +381,13 @@ def test_every_block_carries_its_provenance_and_its_size() -> None:
     assembled = prompt.with_scopes(
         prompt.know_how("POET", guidance=[prompt.Guidance("home", "H")]),
         remembered("- a fact"),
+        remembering=True,
     )
 
     assert assembled.sizes() == {
         "persona": len("POET"),
         "instructions:home": len(prompt.guidance_heading("home")) + len("\nH"),
-        "memory": len(prompt.MEMORY_HEADING) + len("\n- a fact"),
+        "memory": len(FRAMED) + len(prompt.MEMORY_HEADING) + len("\n- a fact"),
     }
     assert assembled.characters == len(assembled.text)
     for block in assembled.blocks:
@@ -361,10 +398,10 @@ def test_an_agent_with_no_prompt_of_its_own_contributes_no_block() -> None:
     """The prompt does not begin with a blank line, and the blocks do
     not claim one: a block is what the model receives, and this one
     would be nothing."""
-    assembled = prompt.with_scopes(prompt.know_how(""), remembered("- a fact"))
+    assembled = prompt.with_scopes(prompt.know_how(""), remembered("- a fact"), remembering=True)
 
     assert [block.provenance for block in assembled.blocks] == ["memory"]
-    assert assembled.text.startswith(prompt.MEMORY_HEADING)
+    assert assembled.text.startswith(prompt.FRAMING_AT_START)
     assert assembled.text == assembled.blocks[0].text
 
 
@@ -375,15 +412,61 @@ def test_the_know_how_half_is_the_persona_alone_without_guidance() -> None:
     assert prompt.know_how("POET").text == "POET"
 
 
-def test_memory_that_is_empty_leaves_the_cached_half_alone() -> None:
-    """Identity, not equality: the half is cached per activation and a
-    round that remembers nothing must not rebuild it. All three scopes
-    empty is the same answer as no memory at all, which is what every
-    deployment has until an agent uses one."""
+def test_an_agent_that_may_not_remember_leaves_the_cached_half_alone() -> None:
+    """Identity, not equality: the half is cached per activation, and an
+    agent whose memory is off, on a board with no record, is sent it
+    untouched. No memory section, not even an empty one, and none of
+    whatever scopes it was handed (#536, round three's fourth
+    amendment)."""
     half = prompt.know_how("POET", guidance=[prompt.Guidance("home", "H")])
 
-    assert prompt.with_scopes(half, remembered("")) is half
-    assert prompt.with_scopes(half, PromptMemory("", "", "")) is half
+    assert prompt.with_scopes(half, remembered(""), remembering=False) is half
+    assert prompt.with_scopes(half, PromptMemory("", "", ""), remembering=False) is half
+    assert (
+        prompt.with_scopes(
+            half, PromptMemory("- a: b", "- a fact", "- a note"), remembering=False
+        )
+        is half
+    )
+
+
+def test_an_agent_that_may_remember_is_framed_even_with_nothing_saved() -> None:
+    """Plan review round 1, finding 4: a conversation that starts with
+    nothing saved still carries the framing, so the model knows what the
+    results of its memory tools are newer than. The section is one
+    `memory` block saying nothing is saved, framing first, and it counts
+    as what the scopes added."""
+    half = prompt.know_how("POET")
+
+    assembled = prompt.with_scopes(half, PromptMemory("", "", ""), remembering=True)
+
+    assert assembled.text == f"POET\n\n{FRAMED}{prompt.NOTHING_SAVED}"
+    assert [block.provenance for block in assembled.blocks] == ["persona", "memory"]
+    round_ = prompt.RoundPrompt(assembled, facts=())
+    assert round_.memory_characters == len(assembled.text) - len("POET")
+
+
+def test_a_snapshot_read_with_history_names_the_note_as_its_point() -> None:
+    """Where the conversation already held turns when memory was read,
+    the pipeline places `REREAD_NOTE` in the history and the framing
+    names it, rather than the start, as the point memory stands at."""
+    assembled = prompt.with_scopes(
+        prompt.know_how("POET"), remembered("- a fact"), remembering=True, marked=True
+    )
+
+    assert assembled.text == (
+        f"POET\n\n{prompt.FRAMING_AT_NOTE}\n\n{prompt.MEMORY_HEADING}\n- a fact"
+    )
+    assert prompt.REREAD_NOTE in prompt.FRAMING_AT_NOTE
+    assert prompt.REREAD_NOTE not in prompt.FRAMING_AT_START
+
+
+def test_the_state_heading_no_longer_claims_to_be_current() -> None:
+    """A snapshot cannot keep a claim to be current: what the model set
+    since is in its history and is newer. The ledger still outranks the
+    blocks below it, which is a claim the snapshot can keep."""
+    assert "current" not in prompt.STATE_HEADING
+    assert "precedence" in prompt.STATE_HEADING
 
 
 # The three scopes, in the order they take precedence in
@@ -405,12 +488,13 @@ def test_the_three_blocks_are_appended_in_their_order_of_precedence() -> None:
             agent="- the user is vegetarian",
             device="- the kitchen speaker is the loud one",
         ),
+        remembering=True,
     )
 
     assert assembled.text == (
         "You are the house assistant.\n"
         "\n"
-        f"{prompt.STATE_HEADING}\n"
+        f"{FRAMED}{prompt.STATE_HEADING}\n"
         "- scene: the tavern\n"
         "\n"
         f"{prompt.MEMORY_HEADING}\n"
@@ -434,11 +518,12 @@ def test_each_scope_is_counted_under_a_token_of_its_own() -> None:
     assembled = prompt.with_scopes(
         prompt.know_how("POET"),
         PromptMemory(state="- a: b", agent="- a fact", device="- a note"),
+        remembering=True,
     )
 
     assert assembled.sizes() == {
         "persona": len("POET"),
-        "state": len(prompt.STATE_HEADING) + len("\n- a: b"),
+        "state": len(FRAMED) + len(prompt.STATE_HEADING) + len("\n- a: b"),
         "memory": len(prompt.MEMORY_HEADING) + len("\n- a fact"),
         "device": len(prompt.DEVICE_HEADING) + len("\n- a note"),
     }
@@ -463,7 +548,7 @@ def test_a_scope_with_nothing_in_it_renders_no_block(
     """A heading over nothing is a heading the model has to make sense
     of. Absence is the honest rendering of an empty scope, and it is what
     keeps a deployment using one of the three from paying for three."""
-    assembled = prompt.with_scopes(prompt.know_how("POET"), scopes)
+    assembled = prompt.with_scopes(prompt.know_how("POET"), scopes, remembering=True)
 
     assert [block.provenance for block in assembled.blocks] == expected
     assert assembled.text == "\n\n".join(block.text for block in assembled.blocks)
@@ -508,11 +593,13 @@ def test_a_named_device_is_introduced_above_its_notes() -> None:
         prompt.know_how("You are the house assistant."),
         PromptMemory(state="", agent="", device="- the speaker here is the loud one"),
         named(location="the kitchen"),
+        remembering=True,
     )
 
     assert assembled.text == (
         "You are the house assistant.\n"
         "\n"
+        f"{FRAMED}"
         "You are speaking through a device called Kitchen Speaker, which is in "
         "the kitchen.\n"
         "\n"
@@ -526,7 +613,10 @@ def test_a_device_with_nothing_remembered_is_introduced_alone() -> None:
     """No heading over a heading's worth of nothing: a deployment that
     has never told a device anything sends the sentence and stops."""
     assembled = prompt.with_scopes(
-        prompt.know_how("POET"), PromptMemory(state="", agent="", device=""), named()
+        prompt.know_how("POET"),
+        PromptMemory(state="", agent="", device=""),
+        named(),
+        remembering=False,
     )
 
     assert assembled.text == (
@@ -542,12 +632,14 @@ def test_the_whole_device_section_is_counted_under_one_token() -> None:
         prompt.know_how("POET"),
         PromptMemory(state="", agent="", device="- a note"),
         named(location="the kitchen"),
+        remembering=True,
     )
 
     introduction = prompt.device_introduction("Kitchen Speaker", "the kitchen")
     assert assembled.sizes() == {
         "persona": len("POET"),
-        "device": len(introduction)
+        "device": len(FRAMED)
+        + len(introduction)
         + len("\n\n")
         + len(prompt.DEVICE_HEADING)
         + len("\n- a note"),
@@ -561,8 +653,8 @@ def test_a_device_with_no_record_sends_what_it_always_sent() -> None:
     scopes = PromptMemory(state="", agent="", device="- a note")
 
     assert (
-        prompt.with_scopes(prompt.know_how("POET"), scopes, None).text
-        == prompt.with_scopes(prompt.know_how("POET"), scopes).text
+        prompt.with_scopes(prompt.know_how("POET"), scopes, None, remembering=True).text
+        == prompt.with_scopes(prompt.know_how("POET"), scopes, remembering=True).text
     )
 
 
@@ -574,6 +666,7 @@ def test_the_device_block_stays_last_of_the_three() -> None:
         prompt.know_how("POET"),
         PromptMemory(state="- scene: the tavern", agent="- a fact", device="- a note"),
         named(),
+        remembering=True,
     )
 
     assert [block.provenance for block in assembled.blocks] == [
@@ -614,9 +707,12 @@ def test_a_board_nobody_has_named_is_not_introduced_by_its_placeholder() -> None
     """
     scopes = PromptMemory(state="", agent="", device="- a note")
 
-    assembled = prompt.with_scopes(prompt.know_how("POET"), scopes, unnamed())
+    assembled = prompt.with_scopes(prompt.know_how("POET"), scopes, unnamed(), remembering=True)
 
-    assert assembled.text == prompt.with_scopes(prompt.know_how("POET"), scopes).text
+    assert (
+        assembled.text
+        == prompt.with_scopes(prompt.know_how("POET"), scopes, remembering=True).text
+    )
 
 
 def test_a_board_nobody_has_named_still_says_where_it_is() -> None:
@@ -627,6 +723,7 @@ def test_a_board_nobody_has_named_still_says_where_it_is() -> None:
         prompt.know_how("POET"),
         PromptMemory(state="", agent="", device=""),
         unnamed("the kitchen"),
+        remembering=False,
     )
 
     assert assembled.text == "POET\n\nYou are speaking through a device in the kitchen."
@@ -646,15 +743,16 @@ def test_a_round_prompt_counts_what_the_scopes_added_joins_included() -> None:
     sent = prompt.with_scopes(
         prompt.know_how("POET"),
         PromptMemory(state="- a: b", agent="- a fact", device="", agent_ids=(7,)),
+        remembering=True,
     )
     round_ = prompt.RoundPrompt(sent, facts=(7,))
 
-    added = f"\n\n{prompt.STATE_HEADING}\n- a: b\n\n{prompt.MEMORY_HEADING}\n- a fact"
+    added = f"\n\n{FRAMED}{prompt.STATE_HEADING}\n- a: b\n\n{prompt.MEMORY_HEADING}\n- a fact"
     assert round_.text == sent.text == "POET" + added
     assert round_.system_characters == len(sent.text)
     assert round_.memory_characters == len(added)
     assert round_.memory_sources == {
-        "state": len(f"{prompt.STATE_HEADING}\n- a: b"),
+        "state": len(f"{FRAMED}{prompt.STATE_HEADING}\n- a: b"),
         "memory": len(f"{prompt.MEMORY_HEADING}\n- a fact"),
     }
     assert round_.memory_characters > sum(round_.memory_sources.values())
@@ -668,11 +766,11 @@ def test_a_round_prompt_counts_the_scopes_as_sent_after_a_trimmed_persona() -> N
     is not a prefix of the round's prompt. The count is of the scope
     blocks as rendered, which is the tail of what was sent."""
     half = prompt.know_how("  You are a poet.  \n")
-    sent = prompt.with_scopes(half, remembered("- a fact"))
+    sent = prompt.with_scopes(half, remembered("- a fact"), remembering=True)
     round_ = prompt.RoundPrompt(sent, facts=())
 
     assert not sent.text.startswith(half.text)
-    tail = f"\n\n{prompt.MEMORY_HEADING}\n- a fact"
+    tail = f"\n\n{FRAMED}{prompt.MEMORY_HEADING}\n- a fact"
     assert sent.text.endswith(tail)
     assert round_.memory_characters == len(tail)
 
@@ -680,16 +778,18 @@ def test_a_round_prompt_counts_the_scopes_as_sent_after_a_trimmed_persona() -> N
 def test_a_round_prompt_over_a_blank_persona_counts_no_join() -> None:
     """With nothing before the first scope block there is no blank line
     before it either, so the whole prompt is the scopes' contribution."""
-    sent = prompt.with_scopes(prompt.know_how(""), remembered("- a fact"))
+    sent = prompt.with_scopes(prompt.know_how(""), remembered("- a fact"), remembering=True)
     round_ = prompt.RoundPrompt(sent, facts=())
 
-    assert sent.text == f"{prompt.MEMORY_HEADING}\n- a fact"
+    assert sent.text == f"{FRAMED}{prompt.MEMORY_HEADING}\n- a fact"
     assert round_.memory_characters == len(sent.text)
 
 
 def test_a_round_prompt_with_no_scopes_added_nothing() -> None:
     half = prompt.know_how("POET")
-    round_ = prompt.RoundPrompt(prompt.with_scopes(half, remembered("")), facts=None)
+    round_ = prompt.RoundPrompt(
+        prompt.with_scopes(half, remembered(""), remembering=False), facts=None
+    )
 
     assert round_.system_characters == len("POET")
     assert round_.memory_characters == 0
@@ -701,7 +801,10 @@ def test_a_round_prompt_reports_a_device_record_with_memory_off() -> None:
     """The device record rides the device block whatever the memory
     setting, so a round that read no memory still reports it."""
     sent = prompt.with_scopes(
-        prompt.know_how("POET"), PromptMemory(state="", agent="", device=""), named()
+        prompt.know_how("POET"),
+        PromptMemory(state="", agent="", device=""),
+        named(),
+        remembering=False,
     )
     round_ = prompt.RoundPrompt(sent, facts=None)
 

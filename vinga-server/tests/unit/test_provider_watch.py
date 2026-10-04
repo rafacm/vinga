@@ -41,6 +41,7 @@ SENT = prompt.RoundPrompt(
     prompt.with_scopes(
         prompt.know_how("POET"),
         PromptMemory(state="", agent="- a fact", device="", agent_ids=(4,)),
+        remembering=True,
     ),
     facts=(4,),
 )

@@ -45,7 +45,7 @@ from typing import Any, cast
 
 import pytest
 
-from tests.support.configs import BOTH_MAC, POET_MAC, base_config
+from tests.support.configs import BOTH_MAC, POET_MAC, base_config, forgetful
 from tests.support.events import events, only
 from tests.support.providers import (
     EARS,
@@ -99,7 +99,9 @@ def quartet(record: Any) -> tuple[Any, ...]:
 def labelled(asr: Any, tts: Any, config: Config | None = None) -> Any:
     """A session whose ears and voice are the entries this test stamped,
     on a socket that lets a reply run all the way through speaking."""
-    settings = base_config() if config is None else config
+    # Memory off, so the mock's `{system}` echo is the persona and the
+    # reply the one sentence these records are counted over (#536).
+    settings = forgetful(base_config()) if config is None else config
     session = device_session(
         settings,
         POET_MAC,

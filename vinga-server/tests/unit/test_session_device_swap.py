@@ -41,6 +41,7 @@ import pytest
 from sqlalchemy import select
 
 from tests.support.configs import POET_MAC, base_config, world
+from tests.support.prompts import nothing_saved
 from tests.support.providers import RecordingLlm, ScriptedLlm, results_of
 from tests.support.registry import AGENT, STAGES, store_at
 from tests.support.sessions import agent_providers, call, run_reply, session_for
@@ -144,7 +145,7 @@ async def test_a_board_swapped_mid_conversation_is_still_this_conversation_s_dev
             store.replace_device(POET_MAC, FRESH_MAC)
         await run_reply(session, "where are you")
 
-    assert llm.systems[0] == f"POET\n\n{device_introduction(NAME, LOCATION)}"
+    assert llm.systems[0] == nothing_saved("POET", device_introduction(NAME, LOCATION))
     assert llm.systems[1] == llm.systems[0]
 
 
@@ -169,7 +170,7 @@ async def test_a_swap_that_moves_a_record_away_does_not_hand_over_a_new_one() ->
             store.rename_device(POET_MAC, "Somebody Else's Speaker")
         await run_reply(session, "where are you")
 
-    assert llm.systems[1] == f"POET\n\n{device_introduction(NAME, LOCATION)}"
+    assert llm.systems[1] == nothing_saved("POET", device_introduction(NAME, LOCATION))
 
 
 async def test_the_tool_still_writes_the_record_after_its_board_was_swapped() -> None:

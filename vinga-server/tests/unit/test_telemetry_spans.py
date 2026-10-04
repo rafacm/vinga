@@ -1530,6 +1530,7 @@ def a_round_prompt(facts: tuple[int, ...] | None) -> prompt.RoundPrompt:
                 agent_ids=(4, 9),
                 device_ids=(2,),
             ),
+            remembering=True,
         ),
         facts=facts,
     )

@@ -55,7 +55,7 @@ from vinga_server.events.values import ConfiguredPath
 from vinga_server.filler import build_agent_fillers
 from vinga_server.generation import Generation, Generations
 from vinga_server.llm_input_export import build_llm_input_export
-from vinga_server.memory.store import MemoryStore, open_memory, purge
+from vinga_server.memory.store import NOTHING_REMEMBERED, MemoryStore, open_memory, purge
 from vinga_server.providers import ProviderError, build_world
 from vinga_server.registry import SessionRegistry
 from vinga_server.runtime import prompt
@@ -1161,14 +1161,18 @@ def _prompt_preview(
             config.fragments_for_agent(agent),
             servers.guidance_for_agent(agent),
         )
-        # An agent whose memory section is off is sent no block, so this
-        # shows none and reads nothing, exactly as a reply of that
-        # agent's does. A preview that showed the facts anyway would be
-        # showing a prompt this deployment does not send.
+        # An agent whose memory section is off is sent no memory
+        # section, so this shows none and reads nothing, exactly as a
+        # reply of that agent's does. A preview that showed the facts
+        # anyway would be showing a prompt this deployment does not send.
         if not config.memory_for_agent(agent).enabled:
-            return half
+            return prompt.with_scopes(half, NOTHING_REMEMBERED, remembering=False)
+        # One that may remember is shown the section a conversation
+        # starting now would be sent, framing included and read at the
+        # start (#536), even where nothing is saved. A read that did not
+        # answer is shown as a reply over it is sent: no section.
         scopes = await asyncio.to_thread(memory.read_for_prompt, agent, None, None)
-        return prompt.with_scopes(half, scopes)
+        return prompt.with_scopes(half, scopes, remembering=scopes.complete)
 
     return assemble
 

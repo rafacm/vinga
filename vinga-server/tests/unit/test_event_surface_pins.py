@@ -54,6 +54,7 @@ from tests.support.configs import (
     STDIO_SERVER,
     base_config,
     config_with_agent,
+    forgetful,
 )
 from tests.support.device_tools import FakeDevice
 from tests.support.events import events, only
@@ -527,8 +528,9 @@ async def a_credentialled_reply(
 
     At DEBUG, because `sentence_synthesized` is a DEBUG event and a run
     at the default level would hunt through a record that was never
-    written."""
-    config = base_config()
+    written. Memory off, so the mock's `{system}` echo is the persona and
+    the reply one sentence (#536)."""
+    config = forgetful(base_config())
     stages = {
         "asr": IdentifiedAsr(EARS) if asr is None else asr,
         "tts": IdentifiedTts(VOICE) if tts is None else tts,

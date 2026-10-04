@@ -2565,7 +2565,10 @@ class PipelineRuntime:
         record = (await self._device_record()).record
         if not self._remembering_now():
             return prompt.RoundPrompt(
-                prompt.with_scopes(self._know_how, NOTHING_REMEMBERED, record), facts=None
+                prompt.with_scopes(
+                    self._know_how, NOTHING_REMEMBERED, record, remembering=False
+                ),
+                facts=None,
             )
         scopes = await asyncio.to_thread(
             self._memory.read_for_prompt,
@@ -2573,8 +2576,12 @@ class PipelineRuntime:
             self._device if record is None else record.mac,
             self._conversation,
         )
+        # A read that did not answer renders as it always has, the
+        # empty blocks with no memory section over them: a section saying
+        # nothing is saved would be a claim about memory nobody read.
         return prompt.RoundPrompt(
-            prompt.with_scopes(self._know_how, scopes, record), facts=scopes.facts
+            prompt.with_scopes(self._know_how, scopes, record, remembering=scopes.complete),
+            facts=scopes.facts,
         )
 
     async def _device_record(self) -> RecordNow:

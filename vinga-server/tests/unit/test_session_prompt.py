@@ -19,6 +19,7 @@ import pytest
 
 from tests.support.configs import BOTH_MAC, POET_MAC, base_config
 from tests.support.events import events
+from tests.support.prompts import EMPTY_SECTION, FRAMED, nothing_saved
 from tests.support.providers import CountingServers, RecordingLlm, ScriptedLlm
 from tests.support.sessions import call, run_reply, session_with, talking_thread
 from tests.support.stores import memory as lane_memory
@@ -28,11 +29,13 @@ from vinga_server.events.catalog import MEMORY_FACTS_NOTE
 from vinga_server.memory.store import (
     CORE_LINES,
     DEVICE_LINES,
+    NOTHING_REMEMBERED,
     MemoryScope,
     MemoryStore,
     PromptMemory,
 )
 from vinga_server.runtime.prompt import (
+    JOIN,
     MEMORY_HEADING,
     STATE_HEADING,
     Guidance,
@@ -42,6 +45,7 @@ from vinga_server.runtime.prompt import (
     know_how,
     server_instructions_heading,
     server_prompt_heading,
+    with_scopes,
 )
 
 GUIDANCE = "Ask before unlocking the door."
@@ -127,7 +131,10 @@ async def test_the_model_receives_exactly_the_blocks_that_are_reported(
     expected = know_how(
         config.prompt_for_agent("poet"), config.fragments_for_agent("poet"), guidance
     )
-    assert system == expected.text
+    # The round adds the memory section an agent that may remember is
+    # always sent (#536), assembled by the same module.
+    assert system == with_scopes(expected, NOTHING_REMEMBERED, remembering=True).text
+    assert system.startswith(expected.text)
     assert assembled.characters == expected.characters
     assert assembled.sources == expected.sizes()
     # And these really are the inputs that make a lazy assembler lie:
@@ -140,14 +147,14 @@ async def test_the_model_receives_exactly_the_blocks_that_are_reported(
 
 async def test_an_agent_granted_nothing_is_sent_its_persona_alone() -> None:
     """The byte-equality case, seen from the session: with no guidance
-    and no memory, the prompt is the agent's prompt field and nothing
-    else."""
+    and nothing saved, the prompt is the agent's prompt field and the
+    memory section saying nothing is saved (#536), and nothing else."""
     llm = RecordingLlm()
     session = session_with(CountingServers(), {"poet": llm})
 
     await run_reply(session, "hello")
 
-    assert llm.systems == ["POET"]
+    assert llm.systems == [nothing_saved("POET")]
 
 
 # The fragments an agent includes
@@ -176,7 +183,7 @@ async def test_an_included_fragment_reaches_the_model() -> None:
 
     await run_reply(session, "hello")
 
-    assert llm.systems == [f"POET\n\n{FRAGMENT}"]
+    assert llm.systems == [nothing_saved(f"POET\n\n{FRAGMENT}")]
 
 
 async def test_an_agent_that_includes_nothing_is_sent_its_persona_alone() -> None:
@@ -189,7 +196,7 @@ async def test_an_agent_that_includes_nothing_is_sent_its_persona_alone() -> Non
 
     await run_reply(session, "hello")
 
-    assert llm.systems == ["POET"]
+    assert llm.systems == [nothing_saved("POET")]
 
 
 async def test_activation_logs_the_fragment_beside_the_persona(
@@ -214,7 +221,7 @@ async def test_activation_logs_the_fragment_beside_the_persona(
         "fragment:household": len(FRAGMENT),
         "instructions:home": len(guidance_heading("home")) + len(f"\n{GUIDANCE}"),
     }
-    assert assembled.characters == len(system)
+    assert assembled.characters == len(system) - len(JOIN + EMPTY_SECTION)
 
 
 # The memory clock, which did not move
@@ -331,11 +338,12 @@ async def test_a_lookup_happens_off_the_event_loop(
     assert all(where != threading.get_ident() for where in lookups)
 
 
-async def test_an_agent_that_remembers_nothing_gets_no_memory_block() -> None:
+async def test_an_agent_that_remembers_nothing_is_told_nothing_is_saved() -> None:
     """There is no session without a store any more (#314), and an empty
     store is what a deployment that has stored nothing has: the half the
-    activation assembled is the whole prompt, with no thread hop's worth
-    of block appended to it."""
+    activation assembled, then the memory section saying nothing is saved
+    yet, framing first, so the model knows what its memory tools'
+    results are newer than (#536, plan review round 1, finding 4)."""
     config = base_config()
     llm = RecordingLlm()
     servers = CountingServers()
@@ -347,9 +355,9 @@ async def test_an_agent_that_remembers_nothing_gets_no_memory_block() -> None:
     # a rebuild is what asks the registry, and it was asked at the
     # activation and not again.
     assert llm.systems == [
-        know_how(
-            config.prompt_for_agent("poet"), config.fragments_for_agent("poet")
-        ).text
+        nothing_saved(
+            know_how(config.prompt_for_agent("poet"), config.fragments_for_agent("poet")).text
+        )
     ]
     assert servers.asked == ["poet"]
 
@@ -738,7 +746,7 @@ async def test_the_scopes_are_counted_as_sent_after_a_persona_that_was_trimmed(
 
     (system,) = llm.systems
     (rounded,) = events(caplog, "llm_round")
-    tail = f"\n\n{MEMORY_HEADING}\n- the user is vegetarian"
+    tail = f"\n\n{FRAMED}{MEMORY_HEADING}\n- the user is vegetarian"
     assert system == "POET" + tail
     assert rounded.memory_characters == len(tail)
     assert rounded.system_characters == len(system)
@@ -757,7 +765,7 @@ async def test_the_digest_is_of_the_half_as_sent_ahead_of_a_scope(
     spellings."""
     store = lane_memory()
     await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
-    tail = f"\n\n{MEMORY_HEADING}\n- the user is vegetarian"
+    tail = f"\n\n{FRAMED}{MEMORY_HEADING}\n- the user is vegetarian"
     digests: list[str] = []
     systems: list[str] = []
     for persona in ("   POET", "POET"):

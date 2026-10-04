@@ -28,6 +28,7 @@ from collections.abc import AsyncIterator, Callable, Sequence
 import pytest
 
 from tests.support.configs import BOTH_MAC, POET_MAC, base_config, world
+from tests.support.prompts import FRAMED, nothing_saved
 from tests.support.providers import ScriptedLlm
 from tests.support.sessions import agent_providers, call, run_reply, session_for
 from tests.support.stores import memory as lane_memory
@@ -45,6 +46,7 @@ from vinga_server.providers import (
     ToolDef,
     Turn,
 )
+from vinga_server.runtime.prompt import MEMORY_HEADING
 from vinga_server.tools.mcp import McpServers
 
 FACT = "the user is vegetarian"
@@ -248,7 +250,20 @@ async def test_the_preview_honours_the_section_of_the_agent_it_renders() -> None
     preview = _prompt_preview(world(config), McpServers({}), store)
 
     assert (await preview("poet")).text == "POET"
-    assert FACT in (await preview("tutor")).text
+    assert (await preview("tutor")).text == f"TUTOR\n\n{FRAMED}{MEMORY_HEADING}\n- {FACT}"
+
+
+async def test_the_preview_frames_an_agent_that_may_remember_with_nothing_saved() -> None:
+    """Plan review round 3's fourth amendment, on the operator's side:
+    the preview passes the agent's memory switch to the assembler, so an
+    agent that may remember is previewed with the memory section a
+    conversation starting now would carry, saying nothing is saved, and
+    one that may not is previewed with none."""
+    config = paired(poet=OFF)
+    preview = _prompt_preview(world(config), McpServers({}), lane_memory())
+
+    assert (await preview("poet")).text == "POET"
+    assert (await preview("tutor")).text == nothing_saved("TUTOR")
 
 
 # Inheritance, in the shape every nested section has

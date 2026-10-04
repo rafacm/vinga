@@ -87,9 +87,41 @@ MEMORY_HEADING = "You remember these facts about past conversations:"
 # it outranks it. Neither names the other by heading, so a deployment
 # with only one of them still reads as a whole sentence.
 STATE_HEADING = (
-    "The current state of this conversation. When anything below disagrees with "
-    "this, this is current:"
+    "What this conversation has noted. When anything below disagrees with this, "
+    "this takes precedence:"
 )
+
+# What the pipeline puts into a thread's history, in the assistant's
+# voice and immediately before the turn that opened the leg, when a
+# conversation's memory is read while the thread already holds turns
+# (#536). It marks the one point the memory section was read at, which
+# the framing below names: every tool exchange before it predates the
+# read, and every one after it follows it.
+REREAD_NOTE = "(memory re-read here)"
+
+# The one sentence that opens the memory section, in the two forms its
+# capture point takes. Memory is read once when an agent starts speaking
+# on a conversation and kept for it (#536), so the section is memory as
+# it stood when it was read, and the model has to be told which of the
+# memory tool results in the history are newer than it. A section read
+# with nothing before the turn that opened the leg was read at the
+# start; one read with history before it was read at the note.
+FRAMING_AT_START = (
+    "What follows is memory as it was read when this conversation started, so a "
+    "memory tool result later in the conversation is newer and takes precedence "
+    "over it."
+)
+FRAMING_AT_NOTE = (
+    f"What follows is memory as it was read at the {REREAD_NOTE} note in this "
+    "conversation, so a memory tool result after that note is newer and takes "
+    "precedence over it, and one before the note is already reflected in it."
+)
+
+# What the memory section says where every scope is empty, so the
+# framing is never absent for an agent that may remember: a conversation
+# that starts with nothing saved still has to be told what its memory
+# tools' results are newer than.
+NOTHING_SAVED = "Nothing is saved in memory yet."
 
 DEVICE_HEADING = (
     "Notes about this device and its household. The conversation and the remembered "
@@ -496,26 +528,47 @@ def _guidance_block(block: GuidanceBlock) -> Block:
 
 
 def with_scopes(
-    half: Assembled, scopes: "PromptMemory", device: "LiveDevice | None" = None
+    half: Assembled,
+    scopes: "PromptMemory",
+    device: "LiveDevice | None" = None,
+    *,
+    remembering: bool,
+    marked: bool = False,
 ) -> Assembled:
-    """The cached know-how half with everything this round knows about
-    its world appended, which is the prompt one round is sent.
+    """The cached know-how half with everything a conversation's memory
+    snapshot holds about its world appended, which is the prompt every
+    round of a leg is sent.
 
-    Read per round rather than per activation, so a fact remembered in
-    one session is known to a concurrent one on its next reply, a note
-    written in one round is read in the next, and a device moved between
-    two replies has moved for the second of them. Both values are passed
-    in rather than read here: each read is a database round trip and
-    belongs off the event loop, and this stays a pure function of what it
-    is handed.
+    Read once per agent activation on a conversation rather than per
+    round (#536): the caller reads memory and the device record when it
+    builds the snapshot and keeps this answer for as long as the
+    snapshot's key holds. What the model writes in the meantime reaches
+    it as the tool results it already is, which the framing tells it.
+    Both values are passed in rather than read here: each read is a
+    database round trip and belongs off the event loop, and this stays a
+    pure function of what it is handed.
+
+    `remembering` says whether the agent may reach memory, and is
+    explicit because the two answers render differently even when every
+    scope is empty. True renders the memory section: the scope blocks,
+    the first of them opened by the framing sentence, and where every
+    scope is empty a `memory` block saying nothing is saved yet, so the
+    framing is present whenever the agent may remember. False renders
+    no memory section at all, whatever `scopes` holds, and leaves the
+    device's introduction alone, since what a device is called is not a
+    remembered thing. `marked` says the snapshot was read with history
+    already in the thread, where the framing names the `REREAD_NOTE`
+    the caller placed rather than the conversation's start.
+
+    The framing is counted in whichever scope block it opens, so the
+    accounting stays the scope blocks and nothing else: it is part of
+    the memory section and adds no provenance of its own.
 
     Three blocks in one fixed order, which is also their precedence: what
-    this conversation is currently doing, what the agent knows about the
-    user, what the place knows. A scope holding nothing contributes no
-    block at all, so a deployment whose agents use none of this sends
-    exactly what it sent before there were scopes, byte for byte, and one
-    that uses only the ledger gets one block rather than three headings
-    over two empty ones.
+    this conversation has noted, what the agent knows about the user,
+    what the place knows. A scope holding nothing contributes no block,
+    so one that uses only the ledger gets one block rather than three
+    headings over two empty ones.
 
     `device` is the record behind the MAC this conversation is on, and
     None where there is no record or no device at all. It joins the
@@ -525,17 +578,24 @@ def with_scopes(
     does not come from memory, which is what lets an agent whose memory
     is switched off still be told what it is speaking through.
     """
+    if not remembering:
+        introduced = _device_block(device, "")
+        return half if introduced is None else _assembled([*half.blocks, introduced])
+    saved = any((scopes.state, scopes.agent, scopes.device))
     blocks = [
         block
         for block in (
             _scope_block(STATE, STATE_HEADING, scopes.state),
-            _scope_block(MEMORY, MEMORY_HEADING, scopes.agent),
+            _scope_block(MEMORY, MEMORY_HEADING, scopes.agent)
+            if saved
+            else Block(MEMORY, NOTHING_SAVED),
             _device_block(device, scopes.device),
         )
         if block is not None
     ]
-    if not blocks:
-        return half
+    framing = FRAMING_AT_NOTE if marked else FRAMING_AT_START
+    first = blocks[0]
+    blocks[0] = Block(first.provenance, f"{framing}{JOIN}{first.text}")
     return _assembled([*half.blocks, *blocks])
 
 
@@ -646,11 +706,15 @@ __all__ = [
     "DEVICE",
     "DEVICE_HEADING",
     "FRAGMENT",
+    "FRAMING_AT_NOTE",
+    "FRAMING_AT_START",
     "INSTRUCTIONS",
     "JOIN",
     "MEMORY",
     "MEMORY_HEADING",
+    "NOTHING_SAVED",
     "PERSONA",
+    "REREAD_NOTE",
     "SCOPES",
     "SERVER_INSTRUCTIONS",
     "SERVER_PROMPT",

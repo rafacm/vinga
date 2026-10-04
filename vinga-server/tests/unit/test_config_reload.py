@@ -42,6 +42,7 @@ from tests.support.apps import entered_client
 from tests.support.configs import config_with, world
 from tests.support.leaks import chain, renderings
 from tests.support.problems import refused as refused_body
+from tests.support.prompts import nothing_saved
 from tests.support.providers import BrokenTts, RecordingLlm, ScriptedLlm, built_world
 from tests.support.sessions import agent_providers, call, run_reply, session_for
 from tests.support.stores import memory as lane_memory
@@ -1457,14 +1458,14 @@ async def test_the_preview_and_the_comparison_agree_with_an_activation() -> None
 
     pending = await diff()
     assert pending.agents.prompt.changed == ("assistant",)
-    assert (await preview("assistant")).text == "BEFORE"
+    assert (await preview("assistant")).text == nothing_saved("BEFORE")
 
     await reload.apply()
 
     settled = await diff()
     assert settled.agents.prompt.changed == ()
     assembled = await preview("assistant")
-    assert assembled.text == "AFTER"
+    assert assembled.text == nothing_saved("AFTER")
     await run_reply(talking_to(running, generations), "hello")
     assert llm.systems[-1] == assembled.text
 
