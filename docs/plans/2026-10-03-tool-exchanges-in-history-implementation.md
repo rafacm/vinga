@@ -720,8 +720,9 @@ lane.
 
 **Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.288; 2026-10-04.
 
-Cut from M1's head `81cfca37`, in parallel with M3, and rebased onto
-`main` at `c0c91715` once M1 merged as PR #600.
+Cut from M1's head `81cfca37`, in parallel with M3, rebased onto
+`main` at `c0c91715` once M1 merged as PR #600, and again at `45c214ed`
+once M3 merged as PR #601. Merging second, M2 wires the recap.
 
 ### What landed
 
@@ -732,6 +733,7 @@ Cut from M1's head `81cfca37`, in parallel with M3, and rebased onto
 | D8: `refetch` on the three `tool_call` variants and `vinga.tool.refetch` on the tool span | `events/catalog.py`, `events/assembly.py`, `runtime/tool_execution.py` (`_refetches`, `run`), `runtime/pipeline.py` (`_run_tools`), `telemetry.py` (`TOOL_ATTRIBUTES`), `tests/unit/test_history_measured.py` | `Flag a tool call that re-fetches a cleared result` |
 | After the rebase: one key for a repeat, in the history's own form | `runtime/history.py` (`repeat_key`), `runtime/tool_execution.py` (`_refetches`), `tests/unit/test_history_measured.py` | `Match a repeated call in the history's own form` |
 | The recap pin the unit lane caught | `tests/unit/test_session_recap.py` | `Pin the recap's zero history counts` |
+| Merging second: the recap's accounting wired | `runtime/pipeline.py` (`_summarized`), `runtime/provider_watch.py` (`recap_round_done`), `tests/unit/test_session_recap.py`, `tests/unit/test_provider_watch.py` | `Hand the recap its own history accounting` |
 | Documentation footprint | `docs/architecture/observability-surfaces.md`, `changelog.d/599-tool-history-measured.md` (`### Added`), `docs/reference/events.md` (regenerated in each of the three code commits) | `Document the history facts and the re-fetch flag` |
 
 ### What the re-fetch metric excludes (D8)
@@ -760,23 +762,23 @@ field's catalog note, on the observability page and in the changelog.
   `_sentence_withheld`, as the plan places it. `assembly.py` reads it
   through a `HistoryAccounting` protocol, the shape `RoundAccounting`
   already has, so the events package imports nothing from `runtime/`.
-- **The recap is plumbed, and `_summarized` is untouched.** M3 is
-  rewriting `_summarized` in parallel and its tree has no `HistorySent`,
-  so `recap_round_done(..., history=...)` defaults to `NOTHING_LOST`
-  and `watched(..., history=...)` to None. Before M3 that default is
-  the truth: a recap's input is hydration's output, which holds no
-  exchange to clear. **Whichever of M2 and M3 merges second wires the
-  recap**: `_summarized` passes `as_sent(...).accounting(cleared_key)`
-  to `recap_round_done` and the same value as `history=` to its
-  `watched` call, and the session-level recap test (a resumed thread
-  with an over-2-KiB stored result, the facts on `llm_recap`) lands
-  with that wiring, as the plan's M2 test list says. What M2 does test
-  of the recap: the watch carries a handed-in accounting onto
-  `llm_recap` and a recap's `provider_failed`, the default is zeros, and
-  a recap request built the way the plan builds it (`start` at the end,
-  no offer) over a constructed thread with a 3 KiB board result reaches
-  the recap's `llm` span as one cleared, one degraded, keyed `device`
-  (`test_a_recap_over_a_cleared_result_carries_it_on_its_record_and_its_span`).
+- **The recap was plumbed first and wired last.** While M2 and M3 ran
+  in parallel, M3 was rewriting `_summarized` and its tree had no
+  `HistorySent`, so M2 gave `recap_round_done` a `NOTHING_LOST` default
+  and left `_summarized` alone. M3 merged first (PR #601), so after the
+  second rebase M2 wired it (`Hand the recap its own history
+  accounting`): `_summarized` hands `as_sent(...).accounting(cleared_key)`
+  to the recap's `watched` stream, to its own timeout report and to
+  `recap_round_done`, whose `history` is now required, as
+  `reply_round_done`'s is. The session test the plan names,
+  `test_the_recap_says_what_its_history_lost_on_its_record_and_its_span`
+  in `test_session_recap.py`, resumes a thread with a `remember` call
+  and a 3000-byte MCP result and finds one cleared result keyed
+  `mcp.home`, two degraded calls, and the matching span attributes; it
+  failed with all zeros before the wiring, and the mutation handing the
+  recap an empty accounting was killed (1). The two recap failure pins
+  in that file gain the three zero counts. The hand-built recap test in
+  `test_history_measured.py` stays, as the unit-sized version.
 - **A recap's failure may carry the facts; its prompt accounting still
   may not.** `provider_failure` refuses `history` for a non-LLM stage
   only, since the plan has M3 hand the recap's accounting to its
@@ -905,20 +907,21 @@ attributes.
 
 ### Verification
 
-On agentpi, from `vinga-server/`, after the rebase onto `main`
-(`c0c91715`), at `6eb807b5`, the code as committed (the commit that
-records this changes only prose):
+On agentpi, from `vinga-server/`, after the second rebase onto `main`
+(`45c214ed`, M3 merged), at `5e5d3c3e`, the code as committed (the
+commit that records this changes only prose); each lane's output was
+written to a log of its own:
 
 - `uv run ruff check .`: clean. `uv run mypy` (the events package):
   no issues in 5 source files.
-- `uv run pytest tests/unit -q -n auto --dist loadfile`: 7984 passed,
-  19 skipped in 1193.30s. Before the rebase, at the recap pin's commit,
-  it was 7977 passed, 19 skipped in 909.02s; the run before that one
-  failed only the `llm_recap` whole-payload pin in
-  `test_session_recap.py`, fixed by `Pin the recap's zero history
-  counts`.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 8001 passed,
+  19 skipped in 879.38s. Earlier runs, before M3 was on `main`: 7984
+  passed, 19 skipped at `22c858f1`; 7977 passed at the recap pin's
+  commit before the first rebase, and the run before that one failed
+  only the `llm_recap` whole-payload pin in `test_session_recap.py`,
+  fixed by `Pin the recap's zero history counts`.
 - `uv run pytest tests/integration -q -n auto --dist loadfile`: 350
-  passed in 312.16s.
+  passed in 228.99s.
 - The eight generated-document checks CI's `integration` job runs
   (domain, server, conversations schema, metrics views, events,
   OpenAPI, the CLI reference region and its recipes): none drifted.
@@ -931,6 +934,4 @@ records this changes only prose):
 
 Not verified locally: the image build and its smoke conversation (CI's
 `image` job), any live provider or OTLP backend (the spans are read
-from the SDK's in-memory exporter), and the session-level recap with a
-cleared result, which needs M3's rebuilt exchanges and lands with
-whichever of M2 and M3 merges second.
+from the SDK's in-memory exporter).
