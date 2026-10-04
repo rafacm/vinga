@@ -269,6 +269,37 @@ async def test_the_memory_read_happens_off_the_event_loop(
     assert all(where != threading.get_ident() for where in reads)
 
 
+async def test_two_rounds_of_one_reply_are_each_read_their_own_memory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """What two rounds send today, pinned before #536 moves the read:
+    each round of a reply reads memory again, so the round after a
+    `remember` is sent a prompt that holds the new fact, at the cost of
+    a second read and of a system prompt that differs from the first
+    round's."""
+    store = lane_memory()
+    reads: list[str] = []
+    real = MemoryStore.read_for_prompt
+
+    def read(
+        self: MemoryStore, agent: str, device: str | None, conversation: str | None
+    ) -> PromptMemory:
+        reads.append(agent)
+        return real(self, agent, device, conversation)
+
+    monkeypatch.setattr(MemoryStore, "read_for_prompt", read)
+    script = ScriptedLlm([[call("remember", text="the user is vegetarian")], "Noted."])
+    session = session_with(CountingServers(), {"poet": script}, memory=store)
+
+    await run_reply(session, "remember that I am vegetarian")
+
+    first, second = script.systems
+    assert "the user is vegetarian" not in first
+    assert "the user is vegetarian" in second
+    assert first != second
+    assert len(reads) == 2
+
+
 async def test_a_lookup_happens_off_the_event_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
