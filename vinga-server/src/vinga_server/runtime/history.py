@@ -13,7 +13,9 @@ What callers stop knowing: how a kept call's id is minted and what a
 malformed one keeps, the cap and its note, which results are past, and
 how a call to a tool no longer offered folds into the assistant's turn.
 The runtime calls `kept_round` where a round ends and `as_sent` where a
-request is built, and nothing else.
+request is built, and asks `cleared_later` of a memory write's answer,
+since a conversation's prompt snapshot has to be rebuilt where the
+answer that states a change will not reach the next reply (#536).
 
 **What is kept is every call that has its result.** A round's calls are
 answered one by one, and a barge-in or a failure can cut a round with
@@ -261,7 +263,7 @@ def as_sent(turns: Sequence[Turn], start: int, offered: Collection[str]) -> Sent
         carried: dict[str, ToolResult] = {}
         for call in turn.tool_calls:
             result = results.pop(call.id, None)
-            if result is not None and _size(result.content) > MAX_KEPT_RESULT_BYTES:
+            if result is not None and cleared_later(result.content):
                 cleared.append(
                     Cleared(call.name, call.source, call.entry, _size(result.content))
                 )
@@ -296,6 +298,16 @@ def as_sent(turns: Sequence[Turn], start: int, offered: Collection[str]) -> Sent
     return Sent(sent, tuple(cleared), degraded, frozenset(refetchable))
 
 
+def cleared_later(content: str) -> bool:
+    """Whether a result this long is sent as the cleared note on every
+    reply after the one that made it: over `MAX_KEPT_RESULT_BYTES` in
+    UTF-8, measured in its `countable` form. The one test `as_sent`
+    applies, named so a caller that has to know in advance (#536: a
+    memory write whose answer will not survive into the next reply)
+    asks this rather than restating the cap."""
+    return _size(content) > MAX_KEPT_RESULT_BYTES
+
+
 def note_cost(call: ToolCall, result: ToolResult | None) -> int:
     """How many characters `call` costs as a past exchange, at most,
     whichever form a later request sends it in: its degraded note, with
@@ -310,7 +322,7 @@ def note_cost(call: ToolCall, result: ToolResult | None) -> int:
     note holds the name, the arguments in exactly that form and the
     result, each at least as long as any form of it, plus the prefix,
     so a budget charged this is never exceeded by the request."""
-    if result is not None and _size(result.content) > MAX_KEPT_RESULT_BYTES:
+    if result is not None and cleared_later(result.content):
         result = replace(result, content=_cleared(call.name, result.content))
     return len(_degraded(call, result, ascii_only=True))
 

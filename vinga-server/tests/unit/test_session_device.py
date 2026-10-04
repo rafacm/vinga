@@ -287,19 +287,20 @@ def a_named_board(name: str = NAME) -> str:
     return minted
 
 
-async def test_a_device_moved_between_two_rounds_is_moved_for_the_next_reply() -> None:
-    """The milestone's own promise, and the one thing here that cannot
-    be established by reading the call site: an operator (and, from M3,
-    the agent itself) relocates a board while a conversation is
-    happening, and the very next reply knows.
+async def test_an_operator_s_move_reaches_the_next_conversation_not_the_next_reply() -> None:
+    """The clock the device record keeps since #536: it is read with
+    memory, once per agent activation on a conversation, so an operator
+    relocating a board while a conversation is happening is seen from
+    that board's next conversation, and the conversation in flight goes
+    on being sent the prompt it read. That is the stated cost of keeping
+    a conversation's system prompt byte-identical; the agent's own
+    relocation reaches its next reply as the tool's answer instead.
 
     The session is built against a view with a real engine behind it,
     which is the shape `app.py` composes, and the write goes through the
-    repository the way every other device write does. The activation
-    happened before the write, so a record captured there would answer
-    the old location forever; the half is asserted unbuilt for the same
-    reason the memory suite asserts it, because a rebuild would be the
-    other way this could pass.
+    repository the way every other device write does. The half is
+    asserted unbuilt, and the next conversation is a session opened over
+    the same view after the write.
     """
     a_named_board()
 
@@ -323,20 +324,33 @@ async def test_a_device_moved_between_two_rounds_is_moved_for_the_next_reply() -
         with store_at() as store:
             store.relocate_device(POET_MAC, LOCATION)
         await run_reply(session, "where are you")
+        fresh = RecordingLlm()
+        opened = session_for(
+            config,
+            POET_MAC,
+            cast(Any, {"poet": fresh}),
+            generations=world(
+                config, providers=agent_providers(config, cast(Any, {"poet": fresh}))
+            ),
+            devices=bindings,
+        )
+        await run_reply(opened, "where are you")
     finally:
         bindings.dispose()
 
     assert llm.systems[0] == nothing_saved("POET", device_introduction(NAME, None))
-    assert llm.systems[1] == nothing_saved("POET", device_introduction(NAME, LOCATION))
+    assert llm.systems[1] == llm.systems[0]
+    assert fresh.systems == [nothing_saved("POET", device_introduction(NAME, LOCATION))]
     # And the activation's half was never rebuilt to notice it: a
     # rebuild is what asks the registry, and it was asked once.
     assert servers.asked == ["poet"]
 
 
-async def test_a_renamed_device_is_renamed_for_the_next_reply() -> None:
+async def test_a_renamed_device_is_renamed_for_the_next_conversation() -> None:
     """The same clock, for the fact an operator changes rather than a
-    conversation: a rename lands in the next prompt and the id under it
-    does not move, which is what the record's identity is for."""
+    conversation: a rename lands in the next conversation's prompt, not
+    in the conversation in flight (#536), and the id under it does not
+    move, which is what the record's identity is for."""
     before = a_named_board()
 
     config = base_config()
@@ -358,11 +372,24 @@ async def test_a_renamed_device_is_renamed_for_the_next_reply() -> None:
             store.rename_device(POET_MAC, "Hallway Speaker")
             after = store.read_device(POET_MAC).entry.id
         await run_reply(session, "and now")
+        fresh = RecordingLlm()
+        opened = session_for(
+            config,
+            POET_MAC,
+            cast(Any, {"poet": fresh}),
+            generations=world(
+                config, providers=agent_providers(config, cast(Any, {"poet": fresh}))
+            ),
+            devices=bindings,
+        )
+        await run_reply(opened, "hello")
     finally:
         bindings.dispose()
 
     assert NAME in llm.systems[0]
-    assert "Hallway Speaker" in llm.systems[1]
+    assert llm.systems[1] == llm.systems[0]
+    (system,) = fresh.systems
+    assert "Hallway Speaker" in system
     assert after == before
 
 
@@ -418,19 +445,21 @@ async def test_a_re_bound_board_does_not_rename_a_conversation_in_flight() -> No
     finally:
         bindings.dispose()
 
+    # The conversation in flight goes on being sent the prompt it read
+    # (#536), never the new record's name.
     assert llm.systems[0] == nothing_saved("POET", device_introduction(NAME, None))
-    assert llm.systems[1] == nothing_saved("POET")
+    assert llm.systems[1] == llm.systems[0]
     assert "Hallway Speaker" not in llm.systems[1]
     assert fresh.systems == [nothing_saved("POET", device_introduction("Hallway Speaker", None))]
 
 
-async def test_the_record_is_read_once_a_round_and_off_the_event_loop(
+async def test_the_record_is_read_once_per_conversation_and_off_the_event_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A read on the loop would stop every other conversation in this
-    process for the length of a query, once per round of every reply,
-    and a second read per round would double what a reply pays for
-    knowing where it is."""
+    process for the length of a query. And it is read with memory, once
+    for the conversation's snapshot (#536): a reply of two rounds, and a
+    second reply after it, read it once between them."""
     ran: list[int] = []
     real = DeviceBindings.record_now
 
@@ -443,9 +472,10 @@ async def test_the_record_is_read_once_a_round_and_off_the_event_loop(
     session = session_for(named_config(), POET_MAC, {"poet": script})
 
     await run_reply(session, "hello")
+    await run_reply(session, "again")
 
-    assert len(script.seen) == 2, "the reply did not run two rounds"
-    assert len(ran) == 2, "the record was not read exactly once per round"
+    assert len(script.seen) == 3, "the replies did not run three rounds"
+    assert len(ran) == 1, "the record was not read exactly once for the conversation"
     assert all(where != threading.get_ident() for where in ran)
 
 

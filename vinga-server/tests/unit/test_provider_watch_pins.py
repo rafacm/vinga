@@ -35,7 +35,7 @@ import pytest
 
 from tests.support.configs import BOTH_MAC, POET_MAC, base_config, watchdog_config
 from tests.support.events import fields_of, only
-from tests.support.prompts import EMPTY_SECTION, FRAMED, nothing_saved
+from tests.support.prompts import EMPTY_SECTION, nothing_saved
 from tests.support.providers import STALL_S, ScriptedLlm, StallingLlm, Unreachable
 from tests.support.records import recording_session
 from tests.support.sessions import (
@@ -50,7 +50,7 @@ from tests.support.sessions import (
 from tests.support.sockets import QuietSocket
 from tests.tools.event_baseline import failing_reply
 from vinga_server.providers import AsrResult, Usage
-from vinga_server.runtime.prompt import JOIN, MEMORY_HEADING
+from vinga_server.runtime.prompt import JOIN
 
 # The utterance the direct drives hand a reply: 20 ms of silence, which
 # the mock ASR answers whatever it holds.
@@ -230,17 +230,16 @@ async def test_every_reply_round_says_llm_round_and_files_itself_on_the_turn(
         invocation = fields.pop("invocation")
         assert isinstance(invocation, str) and MINTED.match(invocation)
         invocations.append(invocation)
-        # The second round is sent the fact the first one remembered,
-        # under the id the store gave it (#533).
+        # Both rounds are sent the prompt the leg read at its start and
+        # account for it alike (#536): the fact the first one remembered
+        # reaches the second as the tool result in its history, not as
+        # a block.
         facts = fields.pop("memory_facts")
-        block = EMPTY_SECTION if number == 1 else f"{FRAMED}{MEMORY_HEADING}\n- tea"
-        assert fields.pop("memory_sources") == {"memory": len(block)}
-        added = len("\n\n") + len(block)
+        assert fields.pop("memory_sources") == {"memory": len(EMPTY_SECTION)}
+        added = len("\n\n") + len(EMPTY_SECTION)
         assert fields.pop("memory_characters") == added
         assert fields.pop("system_characters") == len("POET") + added
-        assert facts == [] if number == 1 else (
-            len(facts) == 1 and isinstance(facts[0], int) and facts[0] > 0
-        )
+        assert facts == []
         assert fields == {
             "event": "llm_round",
             **the_pair(session),

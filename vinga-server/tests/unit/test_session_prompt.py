@@ -5,10 +5,12 @@ about is the two clocks. The know-how half (the persona, the fragments
 the agent includes and the guidance of the entries it is granted) is
 assembled once per
 activation and cached, so a reply never rebuilds it and an agent switch
-always does. The memory blocks keep the clock the first of them has
-always had, read per round, and moved off the event loop rather than
-moved in time; the ledger a conversation keeps is read on that same
-clock, so what one round wrote down is what the next round is sent.
+always does. The memory section has the same clock since #536: read
+once per agent activation on a conversation, off the event loop, and
+kept while its key holds, so what the model writes reaches it as its
+tool results and what anything else writes reaches the next
+conversation. The key, the note and the failures are
+`test_session_memory_snapshot.py`.
 """
 
 import asyncio
@@ -21,7 +23,7 @@ from tests.support.configs import BOTH_MAC, POET_MAC, base_config
 from tests.support.events import events
 from tests.support.prompts import EMPTY_SECTION, FRAMED, nothing_saved
 from tests.support.providers import CountingServers, RecordingLlm, ScriptedLlm
-from tests.support.sessions import call, run_reply, session_with, talking_thread
+from tests.support.sessions import call, hand_over_to, run_reply, session_with, talking_thread
 from tests.support.stores import memory as lane_memory
 from tests.support.stores import memory_that_cannot_read
 from vinga_server.config import Config
@@ -224,10 +226,15 @@ async def test_activation_logs_the_fragment_beside_the_persona(
     assert assembled.characters == len(system) - len(JOIN + EMPTY_SECTION)
 
 
-# The memory clock, which did not move
+# The memory clock, which is the conversation's since #536
 
 
-async def test_a_fact_remembered_between_replies_is_in_the_next_one() -> None:
+async def test_a_fact_another_session_saves_is_seen_from_the_next_conversation() -> None:
+    """The stated cost of keeping a conversation's prompt (#536,
+    decision 4): a fact saved by anything but this session's own model,
+    here a concurrent session writing to the same agent's memory, is not
+    in the next reply of the conversation in flight, and is in the first
+    reply of the next one."""
     store = lane_memory()
     llm = RecordingLlm()
     servers = CountingServers()
@@ -236,11 +243,15 @@ async def test_a_fact_remembered_between_replies_is_in_the_next_one() -> None:
     await run_reply(session, "hello")
     await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
     await run_reply(session, "again")
+    later = RecordingLlm()
+    await run_reply(session_with(CountingServers(), {"poet": later}, memory=store), "hi")
 
     assert "the user is vegetarian" not in llm.systems[0]
-    assert "the user is vegetarian" in llm.systems[1]
-    # And the half was not rebuilt to notice it: rebuilding is what asks
-    # the registry, and it was asked once.
+    assert llm.systems[1] == llm.systems[0]
+    (opened,) = later.systems
+    assert "the user is vegetarian" in opened
+    # And the half was not rebuilt either: rebuilding is what asks the
+    # registry, and it was asked once.
     assert servers.asked == ["poet"]
 
 
@@ -276,14 +287,14 @@ async def test_the_memory_read_happens_off_the_event_loop(
     assert all(where != threading.get_ident() for where in reads)
 
 
-async def test_two_rounds_of_one_reply_are_each_read_their_own_memory(
+async def test_two_rounds_of_one_reply_are_sent_the_memory_read_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """What two rounds send today, pinned before #536 moves the read:
-    each round of a reply reads memory again, so the round after a
-    `remember` is sent a prompt that holds the new fact, at the cost of
-    a second read and of a system prompt that differs from the first
-    round's."""
+    """The pin of what two rounds sent before #536, inverted with it:
+    memory is read once, at the leg's first round, and the round after a
+    `remember` is sent the same system prompt byte for byte, so the
+    provider's prompt cache survives the write. The new fact reaches
+    that round as the result the `remember` answered, in its history."""
     store = lane_memory()
     reads: list[str] = []
     real = MemoryStore.read_for_prompt
@@ -302,9 +313,12 @@ async def test_two_rounds_of_one_reply_are_each_read_their_own_memory(
 
     first, second = script.systems
     assert "the user is vegetarian" not in first
-    assert "the user is vegetarian" in second
-    assert first != second
-    assert len(reads) == 2
+    assert second == first
+    assert len(reads) == 1
+    (result,) = [
+        one.content for one in script.seen[1][0][-1].tool_results
+    ]
+    assert "the user is vegetarian" in result
 
 
 async def test_a_lookup_happens_off_the_event_loop(
@@ -362,35 +376,7 @@ async def test_an_agent_that_remembers_nothing_is_told_nothing_is_saved() -> Non
     assert servers.asked == ["poet"]
 
 
-# The ledger's clock, which is the memory block's
-
-
-async def test_a_note_set_between_rounds_is_in_the_next_prompt() -> None:
-    """The ledger is read on the same clock the facts are, so what one
-    round wrote down is what the next round is sent. A set, a change and
-    a clear each land in the following prompt, and none of them rebuilds
-    the half."""
-    store = lane_memory()
-    llm = RecordingLlm()
-    servers = CountingServers()
-    session = session_with(servers, {"poet": llm}, memory=store)
-    thread = talking_thread(session)
-    assert thread is not None
-
-    await run_reply(session, "hello")
-    await store.set_state(thread, "scene", "the tavern", agent="poet")
-    await run_reply(session, "where are we")
-    await store.set_state(thread, "scene", "the docks", agent="poet")
-    await run_reply(session, "and now")
-    await store.clear_state(thread, "scene", agent="poet")
-    await run_reply(session, "and now")
-
-    assert STATE_HEADING not in llm.systems[0]
-    assert f"{STATE_HEADING}\n- scene: the tavern" in llm.systems[1]
-    assert f"{STATE_HEADING}\n- scene: the docks" in llm.systems[2]
-    assert STATE_HEADING not in llm.systems[3]
-    # And the cached half was never rebuilt to notice any of it.
-    assert servers.asked == ["poet"]
+# The ledger's clock, which is the memory section's
 
 
 async def test_a_fresh_activation_starts_with_an_empty_ledger() -> None:
@@ -660,16 +646,21 @@ def with_poet(poet: dict[str, object]) -> Config:
     )
 
 
-async def test_a_round_after_a_remember_names_the_new_fact_and_counts_its_prompt(
+async def test_every_round_repeats_the_snapshot_s_accounting_until_it_is_read_again(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """The round the issue asks about: the one after a `remember`
-    carries the new fact's id, read off the store rather than assumed.
-    The sizes are asserted against the string the model was handed, and
-    the second round has two scope blocks, so the blank line between
-    them is part of what has to add up."""
+    """#536, decision 8: a round reports the prompt it actually sent,
+    so with the snapshot kept the round after a `remember` repeats the
+    first round's fact ids and sizes, the new fact being in its history
+    rather than its prompt. The sizes are asserted against the string
+    the model was handed, two scope blocks and the framing included. A
+    read the key asks for (here an activation) is where the new fact's
+    id joins the list."""
     store = lane_memory()
-    script = ScriptedLlm([[call("remember", text="the user is vegetarian")], "Noted."])
+    known = await store.add(MemoryScope.AGENT, "poet", "the user likes tea", agent="poet")
+    script = ScriptedLlm(
+        [[call("remember", text="the user is vegetarian")], "Noted.", "Hello again."]
+    )
     session = session_with(CountingServers(), {"poet": script}, memory=store)
     thread = talking_thread(session)
     assert thread is not None
@@ -677,15 +668,24 @@ async def test_a_round_after_a_remember_names_the_new_fact_and_counts_its_prompt
 
     with caplog.at_level("INFO"):
         await run_reply(session, "remember that I am vegetarian")
+        hand_over_to(session, "poet")
+        await run_reply(session, "hello")
 
-    (remembered,) = store.read_for_prompt("poet", None, None).agent_ids
-    before, after = events(caplog, "llm_round")
-    assert before.memory_facts == []
-    assert after.memory_facts == [remembered]
-    for rounded, system in zip((before, after), script.systems, strict=True):
+    remembered = next(
+        one for one in store.read_for_prompt("poet", None, None).agent_ids if one != known
+    )
+    before, after, reread = events(caplog, "llm_round")
+    assert before.memory_facts == after.memory_facts == [known]
+    assert reread.memory_facts == [known, remembered]
+    for rounded, system in zip((before, after, reread), script.systems, strict=True):
         assert rounded.system_characters == len(system)
         assert system.startswith("POET\n\n")
         assert rounded.memory_characters == len(system) - len("POET")
+    assert script.systems[1] == script.systems[0]
+    assert (after.memory_characters, after.memory_sources) == (
+        before.memory_characters,
+        before.memory_sources,
+    )
     assert set(after.memory_sources) == {"state", "memory"}
     assert after.memory_characters == sum(after.memory_sources.values()) + 2 * len("\n\n")
 
