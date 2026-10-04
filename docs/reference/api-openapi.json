@@ -4936,7 +4936,7 @@
       },
       "delete": {
         "summary": "Erase Agent Fact",
-        "description": "Erase one thing an agent remembers.\n\nA hard delete, held facts included, and nothing here keeps it\nfor an undo: the soft forgetting an agent does belongs to the\nconversation that spoke it, and this door is correction and\naudit rather than that flow. What is removed is gone at the next\nreply's prompt.",
+        "description": "Erase one thing an agent remembers.\n\nA hard delete, held facts included, and nothing here keeps it\nfor an undo: the soft forgetting an agent does belongs to the\nconversation that spoke it, and this door is correction and\naudit rather than that flow. What is removed is gone from the\nprompt of every conversation's next leg, live ones included: the\ndeletion is published to them once it has committed (#536).",
         "operationId": "erase_agent_fact_memory_agents__name__facts__id__delete",
         "parameters": [
           {

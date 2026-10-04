@@ -571,6 +571,45 @@ class MemoryStore:
         # for, not a row this store loops over.
         self._dead: set[str] = set()
         self._graves = threading.Lock()
+        # How many hard deletions this process has published (#536,
+        # decision 7), and the lock a publication takes: the operator
+        # API's erase routes publish from request threads and the
+        # model's permanent `forget` from a worker thread, while a
+        # session reads the count on the event loop.
+        self._erasures = 0
+        self._erasing = threading.Lock()
+
+    @property
+    def erasures(self) -> int:
+        """The erasure revision: how many hard deletions of facts have
+        been published in this process.
+
+        Part of the key a conversation's prompt snapshot is kept under
+        (#536), sampled before that snapshot's reads begin, so a fact
+        hard-deleted while a conversation is live leaves its prompt at
+        that conversation's next leg rather than at its next
+        conversation. One process is all there is to tell: the server
+        runs one replica (#316), and the API and every session share
+        this store.
+
+        Nothing but a hard deletion moves it: a correction, a soft
+        forget, a ledger write, a device change and a thread's erasure
+        all leave it alone, so none of them costs a live conversation
+        its prompt cache. Those reach the next conversation instead.
+        """
+        return self._erasures
+
+    def erased(self) -> None:
+        """Publish one hard deletion, after its transaction committed
+        and only when it removed something.
+
+        Called by the operator API's four erase routes, through the
+        callable the composition hands it, and by the model's own
+        permanent `forget` here. A publication with nothing behind it
+        would only cost every live conversation a re-read.
+        """
+        with self._erasing:
+            self._erasures += 1
 
     def close(self) -> None:
         """Stop admitting calls, and let go of both connection pools
@@ -1127,7 +1166,16 @@ class MemoryStore:
             # Nothing thread-keyed happens: the row is erased rather than
             # held, so no conversation owns anything afterwards and the
             # erasure of one cannot be undone by this.
-            return self._written(agent, (scope,), work)
+            #
+            # And it is a hard deletion, so it is published once the
+            # transaction has committed, exactly as the operator's are:
+            # every live conversation holding this fact in its prompt
+            # snapshot reads again at its next leg (#536). A refusal
+            # raises out of `_written` before this line, so a forget that
+            # removed nothing publishes nothing.
+            forgotten = self._written(agent, (scope,), work)
+            self.erased()
+            return forgotten
         return self._thread_keyed(
             conversation, lambda: self._written(agent, (scope,), work)
         )
