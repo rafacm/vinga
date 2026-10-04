@@ -721,7 +721,7 @@ Cut from M1's head `81cfca37`, in parallel with M3, and rebased onto
 | D8: `refetch` on the three `tool_call` variants and `vinga.tool.refetch` on the tool span | `events/catalog.py`, `events/assembly.py`, `runtime/tool_execution.py` (`_refetches`, `run`), `runtime/pipeline.py` (`_run_tools`), `telemetry.py` (`TOOL_ATTRIBUTES`), `tests/unit/test_history_measured.py` | `Flag a tool call that re-fetches a cleared result` |
 | After the rebase: one key for a repeat, in the history's own form | `runtime/history.py` (`repeat_key`), `runtime/tool_execution.py` (`_refetches`), `tests/unit/test_history_measured.py` | `Match a repeated call in the history's own form` |
 | The recap pin the unit lane caught | `tests/unit/test_session_recap.py` | `Pin the recap's zero history counts` |
-| Documentation footprint | `docs/architecture/observability-surfaces.md`, `changelog.d/599-history-measured.md` (`### Added`), `docs/reference/events.md` (regenerated in each of the three code commits) | `Document the history facts and the re-fetch flag` |
+| Documentation footprint | `docs/architecture/observability-surfaces.md`, `changelog.d/599-tool-history-measured.md` (`### Added`), `docs/reference/events.md` (regenerated in each of the three code commits) | `Document the history facts and the re-fetch flag` |
 
 ### What the re-fetch metric excludes (D8)
 
@@ -792,7 +792,7 @@ field's catalog note, on the observability page and in the changelog.
   The five direct `run` callers in the unit suites pass an empty set,
   and the lookahead test's `_run_tools` stub takes the new parameter.
 - **The changelog entry is a fragment of its own**,
-  `changelog.d/599-history-measured.md`. M1's fragment was folded into
+  `changelog.d/599-tool-history-measured.md`. M1's fragment was folded into
   `CHANGELOG.md` on `main` before this branch was rebased, so the
   `### Added` block written into it moved to a new file rather than
   resurrecting the folded one.
