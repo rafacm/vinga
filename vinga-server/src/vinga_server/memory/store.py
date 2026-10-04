@@ -436,6 +436,14 @@ class PromptMemory:
     disagree: the agent block's ids are the lines its byte cap kept, not
     every fact the read took. The ledger has none, since its entries are
     keyed by model-written text rather than by an id.
+
+    `complete` says whether the read answered, which the blocks alone
+    cannot: a database this store could not read renders exactly as an
+    empty memory, on purpose, so a reply over it is the reply over
+    nothing, and the event stream is the only other place the failure
+    is said. A caller that keeps what it read for longer than one round
+    (#536) has to tell the two apart, since keeping a failure would
+    make memory vanish for as long as it kept it.
     """
 
     state: str
@@ -443,6 +451,7 @@ class PromptMemory:
     device: str
     agent_ids: tuple[int, ...] = ()
     device_ids: tuple[int, ...] = ()
+    complete: bool = True
 
     @property
     def facts(self) -> tuple[int, ...]:
@@ -456,6 +465,11 @@ class PromptMemory:
 # assembled over an unreadable database has to be the reply assembled
 # over an empty one.
 NOTHING_REMEMBERED = PromptMemory(state="", agent="", device="")
+
+# And what a prompt read answers when the database could not be read:
+# the same three empty blocks, so the prompt is the one assembled over
+# an empty memory, saying beside them that the read did not answer.
+NOTHING_READ = PromptMemory(state="", agent="", device="", complete=False)
 
 
 class _Refused(Exception):
@@ -923,10 +937,13 @@ class MemoryStore:
         and what the assembly does with them is its own business.
 
         Contained scope by scope in what it costs a reply: a database
-        this server cannot read means the agent remembers nothing this
-        round and the reply happens, and every scope that was reached
-        for and lost says so, so an empty block is never silence about a
-        failure.
+        this server cannot read means the agent remembers nothing in the
+        prompt this read was for and the reply happens, and every scope
+        that was reached for and lost says so, so an empty block is
+        never silence about a failure. The answer is then
+        `NOTHING_READ`, which renders as `NOTHING_REMEMBERED` and says
+        it is incomplete, so a caller that keeps a read does not keep
+        that one.
 
         The agent's block is the core rather than the whole of the
         scope, and the whole of it is never read here: the scope holds a
@@ -962,9 +979,7 @@ class MemoryStore:
                 device_ids=device_ids,
             )
 
-        return self._read(
-            agent, _reaching(device, conversation), read, NOTHING_REMEMBERED
-        )
+        return self._read(agent, _reaching(device, conversation), read, NOTHING_READ)
 
     def recall(self, agent: str, device: str, query: str) -> str:
         """Every active fact this agent can reach whose words contain
@@ -2230,6 +2245,7 @@ __all__ = [
     "MORE_MATCHED",
     "NOTHING_TO_LOOK_FOR",
     "NOTHING_PURGED",
+    "NOTHING_READ",
     "NOTHING_REMEMBERED",
     "NOTHING_TO_REMEMBER",
     "NOT_A_FACT_SCOPE",
