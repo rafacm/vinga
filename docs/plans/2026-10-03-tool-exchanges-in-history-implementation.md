@@ -279,7 +279,7 @@ census lane ran last, after this subsection.
 | The issue's third criterion, the cut-then-resume comparison, the rebuilt shape through the Anthropic translator | `tests/unit/test_session_kept_tools.py` | `Pin a resumed thread's first request` |
 | Q4's price against M1's reviewed `note_cost`, and `countable` results | `conversations/hydration.py` (`_cost`), `tests/unit/test_conversations_hydration.py` | `Charge each rebuilt call its note bound and join` |
 | Anthropic roles alternate after a degraded round (the discovery below, fixed) | `providers/anthropic_llm.py` (`anthropic_messages`), `tests/unit/test_providers_llm_tools.py`, `tests/unit/test_session_kept_tools.py` | `Join consecutive assistant turns for Anthropic` |
-| Documentation footprint | `docs/concepts.md` (the "Resuming elsewhere" bullet, and the tool-exchanges bullet M1's review scoped to the session widened back), `changelog.d/599-tool-exchanges-in-history.md` | this section's commit |
+| Documentation footprint | `docs/concepts.md` (the "Resuming elsewhere" bullet, and the tool-exchanges bullet M1's review scoped to the session widened back), `changelog.d/599-tool-exchanges-on-resume.md` (its own fragment: M1's was folded into `CHANGELOG.md` when PR #600 merged, so the rebase onto `main` moved M3's entries, and the assistant-join entry that had amended M1's Anthropic bullet, into a new fragment rather than editing the folded text) | this section's commit |
 
 The branch was cut from M1's head before its review (`81cfca37`),
 rebased onto the head after its first review round (`c6e60ace`) once
