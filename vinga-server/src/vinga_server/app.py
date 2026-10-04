@@ -560,9 +560,11 @@ async def _build_composition(
     # has one home rather than a second one here.
     #
     # The bindings view goes in for the same reason it exists at all: a
-    # reply asks it what device it is speaking through, on every round,
-    # because an operator or a conversation can move a device while the
-    # conversation is happening. One view for both questions, so there
+    # conversation asks it what device it is speaking through when it
+    # reads its prompt snapshot (#536), and a memory tool asks it where
+    # the device's facts are filed, because an operator or a
+    # conversation can move a device while the conversation is
+    # happening. One view for both questions, so there
     # is one engine over those rows and one place a failed read of them
     # is logged and fallen back from.
     #

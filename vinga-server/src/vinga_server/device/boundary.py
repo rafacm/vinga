@@ -283,7 +283,7 @@ class DeviceOutput(Protocol):
 # fifth: it is resolved once, at the connect, in the same snapshot the
 # binding came from, and everything the conversation later reads about
 # its device is addressed by the identity in it. A runtime that looked
-# the record up per round by the MAC it is talking to would be asking
+# the record up by the MAC it is talking to would be asking
 # "which record stands at this address now", and an operator who
 # deleted and re-bound a board would have moved a conversation to
 # another device's name and place. None is a board with no record to

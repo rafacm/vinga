@@ -21,8 +21,8 @@ repository can do on its own:
 - **It addresses the record by its id.** A conversation attached to a
   record at its connect, and the MAC that record stands at can be
   deleted and bound again, or moved to another record, while the
-  conversation is still talking. That is the same rule the per-round
-  read keeps, one direction later.
+  conversation is still talking. That is the same rule the
+  conversation's own record read keeps, one direction later.
 - **It translates.** The repository's refusals are written for an
   operator at a command line: they name a command to run, a document to
   edit or a field to correct. Whoever is in the room can do none of

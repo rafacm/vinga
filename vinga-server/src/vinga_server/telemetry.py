@@ -857,7 +857,7 @@ SHAPES: dict[Kind, Shape] = {
     # place for prose to hide.
     Kind.SOURCES: Shape.JSON,
     Kind.DROP_COUNTS: Shape.JSON,
-    # The per-round scope sizes, which no span event carries today: the
+    # A round's scope sizes, which no span event carries today: the
     # `llm` span flattens them into one attribute per block itself
     # (`_round_prompt_attributes`), and this row is only what a span
     # event would get, the same deterministic string as its sibling.

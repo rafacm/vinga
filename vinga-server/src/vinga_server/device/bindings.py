@@ -17,9 +17,10 @@ and it stops there.
 
 It answers one more question off the same rows, added by #449 and kept
 here rather than given a view of its own: what the device behind a MAC
-is called and where it stands. The reply path asks it on every round,
-because a device that was moved between two replies has moved for the
-second of them, and a second live view of one table would be a second
+is called and where it stands. The reply path asks it when a
+conversation's prompt snapshot is read (#536) and when a memory tool
+needs the address its facts are filed under, and a second live view of
+one table would be a second
 engine, a second fallback and a second thing to dispose. It is
 deliberately a separate read from the binding's: the binding decides
 whether a board is served at all and its statement is pinned byte for

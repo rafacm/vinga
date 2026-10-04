@@ -1130,7 +1130,8 @@ class ConfigStore:
 
         A conversation in flight follows the record rather than the
         address, and nothing here has to arrange it: it attached to an
-        id at its connect and re-reads that id every round (#449, M2),
+        id at its connect and re-reads that id whenever it reads its
+        prompt snapshot or files a memory (#449, M2; #536),
         and the tool that may move it writes by id too (M3). What the
         board on the other end of that conversation is is a separate
         question, and the honest answer is that a swap does not reach
@@ -1490,7 +1491,8 @@ def read_live_device_by_id(engine: Engine, device_id: str) -> LiveDevice | None:
     """One record as it stands now, addressed by the identity a
     conversation attached to, or None where that record is gone.
 
-    The read a reply makes on every round, and it is by id rather than
+    The read a conversation makes for its prompt snapshot and its memory
+    tools, and it is by id rather than
     by MAC for the reason the id exists. A MAC is where a board is
     standing: delete the device and bind the same board again and the
     MAC answers a different record, and #449's M4 moves a MAC to another

@@ -362,7 +362,7 @@ class Assembled:
 
     Both halves of the split live in this one type. `know_how` answers
     with the cached half, and `with_scopes` answers with that half plus
-    the blocks this round's memory holds, so what a session hands the
+    the blocks a conversation's memory snapshot holds, so what a session hands the
     model and what the inspection surface reports are the same shape
     built by the same code.
     """
@@ -393,7 +393,7 @@ class Assembled:
         Not always `text`. A lone persona is handed over untouched, and
         once a scope block follows it `_assembled` trims its leading
         whitespace, so `"   POET"` and `"POET"` reach the model as the
-        same bytes in every round that reads memory and must carry the
+        same bytes in every prompt that carries a scope block and must carry the
         same digest. Derived by running the same assembly with a block
         behind it and keeping what this prompt became, rather than by a
         second copy of the trimming that could drift from the first. A
@@ -412,8 +412,8 @@ class RoundPrompt:
     about the same prompt (#533).
 
     `facts` is the ids of the facts the scope blocks injected, agent
-    block then device block. None where this round did not read memory
-    at all, because the agent's memory is off, and empty where it read
+    block then device block. None where this round's prompt holds no
+    memory read at all, because the agent's memory is off, and empty where it read
     and injected nothing, a read that failed included: the two are
     different facts, and only the caller knows whether a read was
     attempted, so it is chosen there rather than inferred here.

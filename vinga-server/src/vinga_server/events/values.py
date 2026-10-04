@@ -95,8 +95,9 @@ class Kind(Enum):
     ID_LIST = "id_list"
     # A mapping from prompt provenance to character counts.
     SOURCES = "sources"
-    # A mapping from the three per-round scope blocks of a reply's prompt
-    # to character counts. Beside `SOURCES` rather than inside it: that
+    # A mapping from the three scope blocks of a reply round's prompt
+    # (the memory section, read once per conversation since #536) to
+    # character counts. Beside `SOURCES` rather than inside it: that
     # grammar is the know-how half's by design, and this is the half it
     # deliberately excludes.
     MEMORY_SOURCES = "memory_sources"
@@ -517,7 +518,7 @@ GRAMMARS: dict[str, Grammar] = {
 # --- the provenance grammar of `prompt_assembled.sources` -------------
 #
 # The know-how half only. `prompt_assembled` deliberately reports the
-# cached half of the prompt and excludes the per-round memory read, so
+# cached half of the prompt and excludes the memory section, so
 # `memory` is refused here like any unknown prefix, even though it is a
 # provenance token elsewhere in the prompt assembly.
 

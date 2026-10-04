@@ -225,8 +225,8 @@ class DeviceSession:
         # same snapshot as the binding (#449 M2). Kept here because two
         # things written at the open read it: the session row's name
         # column and `session_open`'s field. What a ROUND renders is the
-        # runtime's own per-round read, not this; this is the record as
-        # it stood when somebody started talking.
+        # runtime's own read into its prompt snapshot (#536), not this;
+        # this is the record as it stood when somebody started talking.
         self._device_record: LiveDevice | None = None
         self._device_facts = device_facts if device_facts is not None else DeviceFacts()
         self.session_id = uuid.uuid4().hex

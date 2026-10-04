@@ -167,11 +167,14 @@ distinct on purpose:
   because two devices in one room is normal. Binding a board creates
   its record and calls it `Device <mac>` until somebody names it, so
   no onboarding flow asks for a name the operator does not yet have.
-  Both are read on every round of every reply and put in the agent's
-  prompt, in the same block as what is remembered about the device, so
-  an agent can say which speaker it is and where it stands, and a board
-  renamed or moved mid-conversation is renamed or moved for the very
-  next thing that is said. A board still called `Device <mac>` is not
+  Both are read when an agent starts speaking on a conversation, with
+  its memory, and put in the agent's prompt for the rest of that
+  conversation, in the same block as what is remembered about the
+  device, so an agent can say which speaker it is and where it stands.
+  A board an operator renames or moves mid-conversation is renamed or
+  moved for that board's next conversation rather than the next thing
+  said in this one, which is what keeps a conversation's prompt the
+  same from reply to reply. A board still called `Device <mac>` is not
   introduced by that name, so an agent says nothing about a device
   nobody has named or placed rather than reading a MAC address aloud.
   The spelling is reserved for the board whose MAC it is, which is what
@@ -180,6 +183,9 @@ distinct on purpose:
   **A conversation changes the location, and only the location**, with
   the `set_device_location` tool: somebody says the speaker has been
   moved to the office and the record says so from the very next reply.
+  The agent is told by the tool's answer, which stays in the
+  conversation, and the device block in its prompt follows at the next
+  read of its memory, which at the latest is the next conversation.
   Anyone talking to a device may move it, which is deliberately the
   same trust boundary as talking to it at all, and the tool writes
   through the same repository an operator's command writes through, so
