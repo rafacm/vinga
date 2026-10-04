@@ -45,6 +45,13 @@ from tests.support.sessions import (
     with_device,
 )
 from tests.support.stores import StoredThreads, a_backlog, a_milestone
+from tests.support.telemetry import (
+    close_session,
+    exporting,
+    finished,
+    open_session,
+    released,
+)
 from vinga_server.boundary import Reach
 from vinga_server.config import Config
 from vinga_server.conversations.records import Acknowledgement, StoredCall
@@ -55,6 +62,7 @@ from vinga_server.providers import TtsProvider
 from vinga_server.runtime import pipeline as pipeline_module
 from vinga_server.runtime import resumption as resumption_module
 from vinga_server.runtime.history import DEGRADED_END, DEGRADED_PREFIX
+from vinga_server.telemetry import _QUIETING, LLM_INVOCATION_ID, LLM_SPAN
 from vinga_server.tools import builtin
 
 GALAXY = "1f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
@@ -813,6 +821,86 @@ async def test_the_recap_is_sent_every_tool_exchange_as_a_note_and_no_tools() ->
     assert big not in repr(turns)
 
 
+async def test_the_recap_says_what_its_history_lost_on_its_record_and_its_span(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A resumed thread whose stored exchanges include a 3 KiB server
+    result: the recap clears it and degrades both calls, since it
+    offers no tools, and `llm_recap` and the recap's `llm` span say so
+    (#599, decision 3), keyed by the entry the stored call reached."""
+    store = a_long_thread(
+        calls={
+            6: (
+                StoredCall(
+                    position=0,
+                    source="builtin",
+                    name="remember",
+                    arguments={"text": "the door code is 4721"},
+                    result="Saved.",
+                ),
+            ),
+            7: (
+                StoredCall(
+                    position=0,
+                    source="mcp",
+                    entry="home",
+                    name="home__status",
+                    arguments={},
+                    result="m" * 3000,
+                ),
+            ),
+        }
+    )
+    voice = RecordingTts()
+    session, _ = consenting(voice, store, Kept().watching(voice))
+    telemetry, memory = exporting()
+    tapped = events_of(session)
+    tapped.attach(telemetry.session_tap())
+    open_session(tapped, providers={}, conversations=session.session_conversations)
+    try:
+        with caplog.at_level(logging.INFO):
+            await drive_reply(session, UTTERANCE)
+        close_session(tapped)
+        spans = finished(telemetry, memory)
+    finally:
+        released()
+    assert _QUIETING.held() == 0
+
+    recap = fields_of(_recap_of(caplog, "llm_round"))
+    assert {
+        field: recap.get(field)
+        for field in (
+            "cleared_results",
+            "cleared_bytes",
+            "cleared_largest",
+            "cleared_tools",
+            "degraded_calls",
+        )
+    } == {
+        "cleared_results": 1,
+        "cleared_bytes": 3000,
+        "cleared_largest": 3000,
+        "cleared_tools": {"mcp.home": 1},
+        "degraded_calls": 2,
+    }
+    (span,) = [
+        one
+        for one in spans
+        if one.name == LLM_SPAN and one.attributes[LLM_INVOCATION_ID] == recap["invocation"]
+    ]
+    assert {
+        key: held
+        for key, held in dict(span.attributes).items()
+        if key.startswith("vinga.llm.history.")
+    } == {
+        "vinga.llm.history.cleared.count": 1,
+        "vinga.llm.history.cleared.bytes": 3000,
+        "vinga.llm.history.cleared.largest": 3000,
+        "vinga.llm.history.cleared.tools.mcp.home": 1,
+        "vinga.llm.history.degraded.count": 2,
+    }
+
+
 # What the summarization round says, to the log
 #
 # Pinned before provider watching moved out of the runtime (#482, M2),
@@ -936,6 +1024,11 @@ async def test_a_recap_that_ran_long_says_provider_failed_as_a_timeout(
         "provider": "mock",
         "type": "mock",
         "purpose": "recap",
+        # A request that failed after it was built says what its
+        # history lost, a recap's included (#599): here nothing.
+        "cleared_results": 0,
+        "cleared_bytes": 0,
+        "degraded_calls": 0,
     }
 
 
@@ -977,6 +1070,9 @@ async def test_a_recap_stream_that_failed_says_provider_failed_as_its_class(
         "provider": "mock",
         "type": "mock",
         "purpose": "recap",
+        "cleared_results": 0,
+        "cleared_bytes": 0,
+        "degraded_calls": 0,
     }
 
 

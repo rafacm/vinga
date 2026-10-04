@@ -2258,12 +2258,16 @@ class PipelineRuntime:
         exchange before `start`, since a recap has no calls of its own.
         So every call is the degraded note and every result over the
         cap is cleared inside it, and no provider is handed a call to a
-        tool it was not given.
+        tool it was not given. What that cost the history is the
+        recap's accounting, which its `llm_recap` carries and, by
+        whichever route, its failure does too, keyed the way a reply
+        round's is.
         """
         assert self._providers is not None
         providers = self._providers
         said: list[str] = []
         sent = as_sent(made.input, start=len(made.input), offered=frozenset())
+        lost = sent.accounting(cleared_key)
         turns = [*sent.turns, Turn("user", RECAP_REQUEST)]
         invocation = uuid.uuid4().hex
         loop = asyncio.get_running_loop()
@@ -2293,6 +2297,7 @@ class PipelineRuntime:
                     providers.llm.stream(RECAP_INSTRUCTION, turns, (), "none"),
                     invocation=invocation,
                     purpose=LlmPurpose.RECAP,
+                    history=lost,
                 ):
                     if self._llm_input is not None:
                         self._llm_input.observe(invocation, event)
@@ -2311,6 +2316,7 @@ class PipelineRuntime:
                     loop.time() - began,
                     invocation=invocation,
                     purpose=LlmPurpose.RECAP,
+                    history=lost,
                 )
             logger.warning(
                 "session %s: the recap could not be made: %s",
@@ -2335,6 +2341,7 @@ class PipelineRuntime:
             first_token_at,
             usage,
             invocation=invocation,
+            history=lost,
         )
         text = "".join(said).strip()
         return text or None
