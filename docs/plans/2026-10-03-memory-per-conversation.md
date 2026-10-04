@@ -84,7 +84,12 @@ it.
    stays valid. Validity has exactly one mechanism (review round 1,
    finding 6): the snapshot carries the key it was built under, and
    `_system_prompt` reuses it only when that key equals the current
-   one. There are no invalidation calls to forget. The key is four
+   one. The key is compared, and a snapshot built, only at the first
+   round of a leg (the first round of a reply, and the first round after
+   a move); every later round of the leg sends the leg's snapshot
+   unchanged whatever happens meanwhile (review round 2, finding 1). So
+   a snapshot is always read before anything this leg's model does, and
+   its capture point is never in the middle of a leg's tool exchanges. There are no invalidation calls to forget. The key is four
    values, each with its own reason and its own test:
    - an **activation counter**, bumped by `_activate_agent` (so a
      handover, and a handover back to the same agent on the same
@@ -110,15 +115,21 @@ it.
    that come after that point in the conversation are newer and win,
    and those before it are already reflected in it.
 
-   The capture point is visible to the model. A snapshot built at the
-   start of a conversation, or after a handover (which starts clean),
-   has nothing before it but the user's first words, so the start is
-   the point. A snapshot built while the thread already has history (a
-   rebind onto a resumed thread, a policy apply, an operator's change,
-   the first complete read after a failed one) is marked: the pipeline
-   inserts one fixed note in the assistant's voice, `(memory re-read
-   here)`, into the thread's history immediately before the newest user
-   turn, and the framing sentence names that note as the point. A
+   The capture point is visible to the model, and whether it needs
+   marking is decided from the thread's actual history, never from
+   what caused the rebuild (review round 2, finding 2: a handover back
+   to an agent resumes that agent's thread with its history, so "a
+   handover starts clean" is not a rule the marker may rely on). A
+   snapshot is built at a leg's first round, when the history ends with
+   the turn that opened the leg (the user's words, or a move's seed).
+   If nothing precedes that turn, the start is the point and no note is
+   added. If anything does, the pipeline inserts one fixed note in the
+   assistant's voice, `(memory re-read here)`, into the thread's history
+   immediately before that opening turn, and the framing sentence names
+   that note as the point. Since the snapshot is read before the leg's
+   first round and nothing of the leg exists yet, every tool exchange
+   before the note predates the read and every one after it follows
+   the read, which is the precedence the framing states. A
    rebuild already changes the system prompt, so the provider cache is
    lost at that round either way, and the note changes only the
    history's tail. The note is a constant in `runtime/prompt.py` with
@@ -147,9 +158,10 @@ it.
    the device record read says the same where it can fail. A round whose
    read was incomplete sends exactly what it sends today (the safe
    empty blocks, the reply happens) and caches nothing, so the next
-   round reads again; the first complete read becomes the snapshot. A
-   short outage therefore costs the rounds it lasts, as it does today,
-   rather than the rest of the conversation.
+   leg's first round reads again (decision 1: reads happen only
+   there); the first complete read becomes the snapshot. A short outage
+   therefore costs the replies it lasts, rather than the rest of the
+   conversation.
 7. **An operator's change reaches the next round.** The operator doors
    (the memory API's writes and hard deletions in `memory/api.py`, a
    device-record change through the config API, a thread purge) bump a
@@ -209,7 +221,16 @@ the memory tool tests, and the event baseline.
   fresh conversation inserts no note, and one built with history (a
   rebind onto a resumed thread, and an off-to-on policy apply
   mid-conversation) inserts exactly one `(memory re-read here)` before
-  the newest user turn.
+  the newest user turn; a handover away and back to an agent whose
+  thread has history inserts the note too, and the gate-style probe
+  (a value corrected between the two activations) shows the model
+  preferring the snapshot over the older tool result before the note
+  (review round 2, finding 2); an operator hard deletion landing
+  between a memory tool's result and the same reply's continuation
+  round changes nothing in that reply (the leg keeps its snapshot) and
+  takes effect at the next reply's first round, with the note placed
+  before that reply's user turn, after the earlier exchange (review
+  round 2, finding 1).
 - The round accounting repeats the snapshot's fact ids and sizes until
   a rebuild.
 - With `export_llm_input` on, an operator hard-deleting a fact through
@@ -355,7 +376,11 @@ Reviewed 2026-10-04 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
 
 1. **P1: The re-read marker can put an older tool result after the snapshot boundary.** Evidence: the plan places `(memory re-read here)` immediately before the newest user turn (plan, decision 3 (`docs/plans/2026-10-03-memory-per-conversation.md:113`)). A tool exchange can follow that user turn before the next round (pipeline.py:1819 (`vinga-server/src/vinga_server/runtime/pipeline.py:1819`), pipeline.py:1930 (`vinga-server/src/vinga_server/runtime/pipeline.py:1930`)). If an operator changes or deletes memory between those rounds, the old exchange appears *after* the marker and falsely outranks the new snapshot under the plan’s own framing. **Amendment:** place the boundary at the actual read point in the outgoing history. Test an operator correction and hard deletion between a memory tool’s result and the same reply’s continuation request.
 
+   *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): accepted by moving the read rather than the marker. Decision 1 now builds or replaces a snapshot only at a leg's first round, before anything of the leg exists, and later rounds of the leg keep it; so the read point is always just before the leg's opening turn, which is where decision 3 places the note, and no exchange can sit after the note while predating the read. A failed read is therefore retried at the next leg rather than the next round (decision 6 updated). The test drives a hard deletion between a tool result and the same reply's continuation.
+
 2. **P1: A handover back does not start with clean history.** Evidence: the plan exempts handovers from the re-read marker because they “start clean” (plan:113 (`docs/plans/2026-10-03-memory-per-conversation.md:113`)), but `SessionConversations.activate` resumes that agent’s existing conversation and history (session_conversations.py:176 (`vinga-server/src/vinga_server/session_conversations.py:176`)). The plan itself requires rebuilding on a handover back. **Amendment:** decide whether a marker is needed from the thread’s actual history, including on return to an agent, and test precedence as well as the rebuilt system prompt.
+
+   *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): accepted. Decision 3 now decides the note from the history alone: if anything precedes the leg's opening turn, the note goes in, whatever caused the rebuild. The handover-back test checks the note and the model's precedence, not only the system prompt.
 
 3. **P1: The revision key needs an ordering rule around the reads.** Evidence: the plan promises that hard deletion leaves the next round’s prompt (plan:153 (`docs/plans/2026-10-03-memory-per-conversation.md:153`)), while `_system_prompt` awaits a device read and then a memory read (pipeline.py:2562 (`vinga-server/src/vinga_server/runtime/pipeline.py:2562`)). If the revision is captured *after* those reads, a deletion can commit between the read and key capture; stale content is then cached under the new revision. **Amendment:** specify that the key’s revision is sampled before either read and never replaced by a later value, or retry when it changes during construction. Add a controlled interleaving test with a deletion.
 
