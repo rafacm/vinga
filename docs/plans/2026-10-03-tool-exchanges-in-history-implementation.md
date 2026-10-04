@@ -705,6 +705,17 @@ Anthropic API (no key on this machine), including the joined
 assistant messages the deviation above describes. The recap's clearing facts on
 `llm_recap` wait on M2.
 
+### PR review round 1
+
+Reviewed 2026-10-04 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 5m05s, at commit e3278145.
+
+No findings; verdict mergeable as is.
+
+A correction was posted on PR #601: the M3 implementer's unit-lane line
+was read from a `unit3.log` that M2's implementer also wrote, and the
+surviving file was M2's, so CI's unit job is the evidence for M3's unit
+lane.
+
 ## M2: measure the cap
 
 **Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.288; 2026-10-04.
