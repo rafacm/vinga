@@ -25,6 +25,7 @@ messages). The placement change, per-turn retrieval and pgvector were
 measured and are not pursued.
 
 **Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.286; 2026-10-03.
+Revised after #599 landed by anthropic/claude-opus-5-5, thinking medium; Claude Code 2.1.288; 2026-10-04.
 
 ## Where this starts from
 
@@ -47,6 +48,14 @@ Measured at `677fd921` (`main` on 2026-10-03).
 - A session can also rebind to another conversation without changing
   agent (`pipeline.py` around 1722, the `transition.conversation`
   path), which changes the ledger scope.
+- **Since #599 (merged 2026-10-04, PRs #600 to #602), tool exchanges
+  stay in the history an agent is sent**: every call that answered is
+  committed into the thread's history as it answers, sent structured on
+  every later reply of the session (results over 2 KiB cleared to a
+  note, which no memory write's answer approaches), and rebuilt from
+  `tool_invocations` when a thread is resumed. This is what review
+  round 1's finding 1 found missing, and it is now the mechanism
+  decision 2 relies on.
 - Every memory write the model makes leaves a tool message in the
   history that states what changed: `remember` answers
   `Remembered [<id>]: <text>`, `forget` answers `Forgot [<id>]: ...`,
@@ -105,7 +114,10 @@ the memory tool tests, and the event baseline.
 
 - A second round of the same reply, and a second reply on the same
   conversation, send a byte-identical system prompt even after a
-  `remember`, a `forget`, a `set_state` and a device rename in between.
+  `remember`, a `forget`, a `set_state` and a `set_device_location` by
+  the model in between, and the later reply's request carries those
+  four exchanges structured although neither the utterance nor the
+  spoken answer repeats the values (review round 1, finding 1).
 - The memory store is read once per activation on a conversation, not
   per round (a counting fake).
 - A handover and a conversation rebind each rebuild the snapshot: the
@@ -191,6 +203,8 @@ Reviewed 2026-10-03 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
 ---
 
 1. **P1: Tool results do not survive into the next reply.** Evidence: the plan says memory tool results remain in history (`docs/plans/2026-10-03-memory-per-conversation.md:50`). The runtime keeps structured tool turns only in a reply-local `working` copy (`vinga-server/src/vinga_server/runtime/pipeline.py:1772`); an existing test explicitly confirms they are absent from later history (`vinga-server/tests/unit/test_session_tools.py:211`). With a frozen snapshot, a later reply can receive neither the new fact nor the result that announced it. **The plan should specify how memory changes remain visible across independent replies**, including corrections and removals, and test the provider’s actual request on a later reply whose user utterance and spoken answer do not repeat the changed value.
+
+   *Resolution* (2026-10-04, anthropic/claude-opus-5-5, thinking medium): resolved by #599, merged as PRs #600 to #602. Memory tool calls and their answers now stay in the history, structured, for the rest of the session and are rebuilt on resume; "Where this starts from" says so. The test the finding asks for is added: a later reply's provider request, after a turn whose utterance and spoken answer do not repeat the value, carries the `remember`, `set_state` and `forget` exchanges that changed it, while the system prompt is byte-identical to the snapshot's.
 
 2. **P2: A failed first read becomes a conversation-long empty snapshot.** Evidence: `MemoryStore._read` reports a failure by class and returns `NOTHING_REMEMBERED` (`vinga-server/src/vinga_server/memory/store.py:681`); the plan caches the resulting `RoundPrompt` until activation or rebind (`docs/plans/2026-10-03-memory-per-conversation.md:62`). A short database outage would therefore make memory disappear for the rest of a long conversation, even after recovery. **The plan should distinguish a successful empty read from a failed read**, keep the current safe empty reply on failure, and retry snapshot construction on a later reply. Test failure followed by recovery.
 
