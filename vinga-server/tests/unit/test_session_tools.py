@@ -28,11 +28,13 @@ from tests.support.configs import (
     STDIO_SERVER,
     TUTOR_TONE,
     base_config,
+    forgetful,
     registry_config,
 )
 from tests.support.device_tools import VOLUME, FakeDevice
 from tests.support.events import both_formats, events, fields_of, only
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
+from tests.support.prompts import nothing_saved
 from tests.support.providers import ScriptedLlm
 from tests.support.records import only_record, recording_session
 from tests.support.sessions import (
@@ -295,7 +297,7 @@ async def test_a_successful_switch_hands_over_to_the_other_agent() -> None:
     assert await run_reply(session, "get me the tutor") == ["Tutor here, hello."]
     assert talking(session) == "tutor"
     # Talking as the tutor means being sent the tutor's prompt.
-    assert tutor.systems == ["TUTOR"]
+    assert tutor.systems == [nothing_saved("TUTOR")]
 
     # The new agent saw its own thread and nothing else, which since
     # #190 is a thread that did not exist a moment ago: the seed telling
@@ -1123,6 +1125,8 @@ async def test_a_device_bound_to_two_agents_is_answered_in_the_new_voice() -> No
             "tutor": {"prompt": "TUTOR", "llm": "poetic", "tts": "alto"},
         },
     )
+    # Memory off, so the `{system}` echo is the tutor's persona alone.
+    forgetful(config)
     with TestClient(create_app(config)) as client:
         with connect(client, device_id=BOTH_MAC) as websocket:
             shake_hands(websocket)
@@ -1160,7 +1164,7 @@ async def test_a_reload_between_replies_changes_what_the_next_one_may_reach() ->
 
 
 async def test_a_hello_without_mcp_gets_no_device_tool_client() -> None:
-    with TestClient(create_app(base_config())) as client:
+    with TestClient(create_app(forgetful(base_config()))) as client:
         with connect(client, device_id=POET_MAC) as websocket:
             websocket.send_text(json.dumps(dict(DEVICE_HELLO, features={})))
             websocket.receive_text()

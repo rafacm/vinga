@@ -21,7 +21,15 @@ from typing import Any, cast
 
 import pytest
 
-from tests.support.configs import BOTH_MAC, DELAY_MS, POET_MAC, SPEECH, base_config, masked_config
+from tests.support.configs import (
+    BOTH_MAC,
+    DELAY_MS,
+    POET_MAC,
+    SPEECH,
+    base_config,
+    forgetful,
+    masked_config,
+)
 from tests.support.events import events, only
 from tests.support.providers import BrokenTts, ScriptedLlm, StallingLlm, built_world
 from tests.support.sessions import (
@@ -115,7 +123,9 @@ async def test_a_slow_reply_is_masked_at_the_threshold(
 
 
 async def test_a_fast_reply_plays_no_filler(caplog: pytest.LogCaptureFixture) -> None:
-    session = await masked_session(masked_config(delay_ms=500.0), POET_MAC)
+    # Memory off, so the mock's `{system}` echo is the persona and the
+    # reply the one sentence counted below (#536).
+    session = await masked_session(forgetful(masked_config(delay_ms=500.0)), POET_MAC)
     with caplog.at_level("INFO"):
         await drive_reply(session, UTTERANCE)
 

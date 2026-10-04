@@ -55,6 +55,7 @@ import pytest
 
 from tests.support.configs import BOTH_MAC, DEVICE_MAC, POET_MAC, base_config, world
 from tests.support.events import events
+from tests.support.prompts import FRAMED, nothing_saved
 from tests.support.providers import CountingServers, RecordingLlm, ScriptedLlm, built_world
 from tests.support.registry import AGENT, STAGES, store_at
 from tests.support.sessions import agent_providers, call, run_reply, session_for
@@ -117,20 +118,21 @@ async def test_the_agent_is_told_what_it_is_speaking_through() -> None:
     await run_reply(session, "hello")
 
     (system,) = llm.systems
-    assert system == f"POET\n\n{device_introduction(NAME, LOCATION)}"
+    assert system == nothing_saved("POET", device_introduction(NAME, LOCATION))
 
 
 async def test_a_device_nobody_has_named_sends_the_prompt_it_always_sent() -> None:
     """The byte-equality case from the session's side: the lane's own
     configuration binds its boards with the agent-list shorthand, which
     names nobody, and those sessions send exactly what they sent before
-    a device had a record."""
+    a device had a record, the memory section an agent that may remember
+    carries (#536) aside."""
     llm = RecordingLlm()
     session = session_for(base_config(), POET_MAC, {"poet": llm})
 
     await run_reply(session, "hello")
 
-    assert llm.systems == ["POET"]
+    assert llm.systems == [nothing_saved("POET")]
 
 
 async def test_the_notes_about_a_device_sit_under_its_introduction() -> None:
@@ -146,7 +148,8 @@ async def test_the_notes_about_a_device_sit_under_its_introduction() -> None:
 
     (system,) = llm.systems
     assert system == (
-        f"POET\n\n{device_introduction(NAME, LOCATION)}\n\n{DEVICE_HEADING}\n- {NOTE}"
+        f"POET\n\n{FRAMED}{device_introduction(NAME, LOCATION)}"
+        f"\n\n{DEVICE_HEADING}\n- {NOTE}"
     )
 
 
@@ -252,7 +255,7 @@ async def test_a_bound_board_nobody_has_named_sends_what_it_always_sent() -> Non
     finally:
         bindings.dispose()
 
-    assert llm.systems == ["POET"]
+    assert llm.systems == [nothing_saved("POET")]
 
 
 # The clock, which is the round's
@@ -323,8 +326,8 @@ async def test_a_device_moved_between_two_rounds_is_moved_for_the_next_reply() -
     finally:
         bindings.dispose()
 
-    assert llm.systems[0] == f"POET\n\n{device_introduction(NAME, None)}"
-    assert llm.systems[1] == f"POET\n\n{device_introduction(NAME, LOCATION)}"
+    assert llm.systems[0] == nothing_saved("POET", device_introduction(NAME, None))
+    assert llm.systems[1] == nothing_saved("POET", device_introduction(NAME, LOCATION))
     # And the activation's half was never rebuilt to notice it: a
     # rebuild is what asks the registry, and it was asked once.
     assert servers.asked == ["poet"]
@@ -415,10 +418,10 @@ async def test_a_re_bound_board_does_not_rename_a_conversation_in_flight() -> No
     finally:
         bindings.dispose()
 
-    assert llm.systems[0] == f"POET\n\n{device_introduction(NAME, None)}"
-    assert llm.systems[1] == "POET"
+    assert llm.systems[0] == nothing_saved("POET", device_introduction(NAME, None))
+    assert llm.systems[1] == nothing_saved("POET")
     assert "Hallway Speaker" not in llm.systems[1]
-    assert fresh.systems == [f"POET\n\n{device_introduction('Hallway Speaker', None)}"]
+    assert fresh.systems == [nothing_saved("POET", device_introduction("Hallway Speaker", None))]
 
 
 async def test_the_record_is_read_once_a_round_and_off_the_event_loop(

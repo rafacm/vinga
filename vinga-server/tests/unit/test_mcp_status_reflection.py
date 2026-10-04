@@ -410,7 +410,7 @@ async def test_what_a_server_ships_reaches_no_operator_surface(
         assert blocks["server_prompt:weather:1"]["name"].startswith(REDACTED)
     else:
         assert [block.entry for block in guidance] == ["weather"]
-        assert set(blocks) == {"persona", "instructions:weather"}
+        assert set(blocks) == {"persona", "instructions:weather", "memory"}
 
     for surface in (json.dumps(status), printed, json.dumps(answered), shown):
         assert SENTINEL not in surface

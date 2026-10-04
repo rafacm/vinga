@@ -694,6 +694,7 @@ def test_the_blocks_and_the_total_are_the_assemblers_own(database: DatabaseConfi
     assembled = prompt.with_scopes(
         prompt.know_how("POET", guidance=[Guidance("home", "Ask first.")]),
         remembered("- a fact"),
+        remembering=True,
     )
 
     with serving(database, None, agent_prompt=previewing(assembled)) as client:
@@ -762,6 +763,7 @@ def test_a_fragment_is_counted_on_the_surface_under_its_own_provenance(
             [Guidance("home", "Ask first.")],
         ),
         remembered("- a fact"),
+        remembering=True,
     )
 
     with serving(database, None, agent_prompt=previewing(assembled)) as client:
@@ -840,9 +842,12 @@ def test_a_running_server_hands_its_own_assembly_to_the_api(
 
         assert answered.status_code == 200, answered.text
         body = answered.json()
+        # And the memory section an agent that may remember is sent,
+        # nothing saved, as a session opening now would be (#536).
         assert [block["provenance"] for block in body["blocks"]] == [
             "persona",
             "instructions:tools",
+            "memory",
         ]
         assert body["blocks"][0]["text"] == "A"
         assert "Ask first." in body["blocks"][1]["text"]
