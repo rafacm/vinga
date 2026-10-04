@@ -29,7 +29,15 @@ Revised after #599 landed by anthropic/claude-opus-5-5, thinking medium; Claude 
 
 ## Where this starts from
 
-Measured at `677fd921` (`main` on 2026-10-03).
+Measured at `677fd921` (`main` on 2026-10-03), and re-verified at
+`62fa62d4` (2026-10-04, after #599): the reply loop still calls
+`_system_prompt` on every round (`pipeline.py:1819`, the method at
+`pipeline.py:2501`, its store read at `:2568`), so the premise holds;
+line numbers below are from the first measurement and have shifted.
+`with_scopes` has a second caller, the operator's prompt preview
+(`app.py:1164`), which reads memory as a new session would; decision 3's
+always-present memory section reaches it too, and its tests move with
+it.
 
 - `PipelineRuntime._system_prompt` (`runtime/pipeline.py:2400-2477`)
   runs on every round (its one caller is the reply loop,
