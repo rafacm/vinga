@@ -330,7 +330,7 @@ class _SnapshotKey:
     same agent on the same thread, reads again, as the know-how half is
     assembled again. `conversation` is the thread, so a rebind never
     serves one thread's ledger on another. `remembering` is the memory
-    switch the snapshot was built under, so a config apply that turns it
+    switch the snapshot was built under, so an apply that turns it
     reads again and the blocks never disagree with the offered tools.
     `erasures` is the memory store's erasure revision, sampled before
     the reads began and never replaced by a later value, so a hard
