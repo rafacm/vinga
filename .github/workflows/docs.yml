@@ -83,6 +83,17 @@ jobs:
       - name: Internal links and anchors
         run: python3 scripts/check_doc_links.py .
 
+      # Every Run and Use page describes vinga as it is today: no issue
+      # or pull request reference and no "decided direction" marker.
+      # The pages are the ones the Run vinga and Use vinga sections of
+      # docs/README.md link, so a page joins the check in the commit
+      # that adds it to a door. Like the step above it needs only the
+      # checkout. The server workflow's unit job runs the same
+      # invocation, because a Run or Use page under that workflow's
+      # paths changes in pull requests this workflow never sees.
+      - name: Run and Use pages carry no issues or direction
+        run: python3 scripts/check_run_use_pages.py .
+
       # A branch may not edit CHANGELOG.md. It adds
       # changelog.d/<issue>-<slug>.md, and the fold workflow moves the
       # text into the dated section after the merge; two branches
