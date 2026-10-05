@@ -67,11 +67,12 @@ disagreement is settled.
 
 Two things the contract deliberately leaves open. The database is
 bring-your-own, so nothing under [`../deploy/`](../deploy/) starts one
-or backs one up; `pg_dump` and the restore rehearsal are in the README
-section above. And a configuration file is optional: every key of the
-server half has a default and an environment override, so a container
-with nothing mounted at `/config` serves on those, which is what both
-lanes here do.
+or backs one up; `pg_dump` and the restore rehearsal are in
+[Backing up and restoring the database](run/backups.md). And a
+configuration file is optional: every key of the server half has a
+default and an environment override, so a container with nothing
+mounted at `/config` serves on those, which is what both lanes here
+do.
 
 ## One replica
 
