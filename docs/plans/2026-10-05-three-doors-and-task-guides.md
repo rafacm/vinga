@@ -207,7 +207,13 @@ handling by importing them rather than copying them, since the two must
 agree on what a link is. Its unit tests sit beside the link checker's,
 in `vinga-server/tests/unit/test_check_run_use_pages.py`, and run in the
 server workflow's unit lane. The script itself also runs as a step of
-the server workflow's `unit` job, beside lint. A Run or Use page under
+the server workflow's `unit` job, beside lint. That workflow defaults
+every step to `working-directory: vinga-server`, where neither
+`scripts/` nor `docs/` exists, so the step overrides it with
+`working-directory: .` and runs the same invocation as `docs.yml`,
+`python3 scripts/check_run_use_pages.py .`; the M2 PR's first server
+workflow run is the test of that exact step, and the PR quotes it. A
+Run or Use page under
 the server workflow's paths (`vinga-server/README.md` until M3d moves it
 to the Develop door, and any page a later door links under
 `vinga-server/`) changes in pull requests `docs.yml` never sees, so a
@@ -1007,6 +1013,8 @@ Reviewed 2026-10-05 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0
 1. **P1: The server-workflow invocation cannot run from its declared working directory.**
 Evidence: plan D3 says the server unit job runs `python3 scripts/check_run_use_pages.py .`; `.github/workflows/vinga-server.yml:84-86` sets that job's default directory to `vinga-server/`, where neither `scripts/` nor the repository-root `docs/` exists.
 Instead: specify a root-working-directory step, or invoke `python3 ../scripts/check_run_use_pages.py ..`, and test that exact invocation.
+
+   *Resolution:* Accepted. D3 now gives the server-workflow step `working-directory: .`, overriding the workflow's `vinga-server` default, so both workflows run the identical invocation; M2's first server-workflow run is the test of that step and the PR quotes it.
 
 2. **P1: The secret-argument sweep misses credential-bearing URLs.**
 Evidence: D8a scans only variables named `KEY`, `SECRET`, `TOKEN`, or `PASSWORD`, but the M3a source has `psql "$ADMIN_URL"` at `vinga-server/README.md:3507,3751`; the same unsafe form remains in `docs/deployment.md:192`. The plan itself calls a database URL secret at README:3490-3493, and shell expansion makes its password part of `psql`'s argument vector.
