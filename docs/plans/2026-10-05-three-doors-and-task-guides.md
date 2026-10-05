@@ -140,8 +140,9 @@ records the recommendation that #611 link it rather than keep a second
 list (two lists that must agree are one list with a bug pending). That
 is a note for #611's plan, not an edit to #611.
 
-**Q2. How M3 splits.** Four PRs, M3a to M3d, each moving whole README
-sections (table below) and each leaving the README coherent: its "On
+**Q2. How M3 splits.** Four PRs, M3a to M3d, each moving the README's move
+units (whole sections, or numbered runs of paragraphs where the table
+splits a section; table and Tests below) and each leaving the README coherent: its "On
 this page" list and every remaining cross-reference point at wherever
 the moved sections now live. Measured sizes of what each moves: M3a 959
 README lines, M3b 1,115, M3c 883, M3d 1,138. One PR moving 4,000 lines
@@ -582,99 +583,151 @@ Pages are this plan's modules; the reader is the caller.
   lane runs it locally; no other milestone needs the integration lane,
   and each PR says so rather than claiming it.
 - **M3's coverage check, per PR.** A move is checked by showing that
-  every paragraph of each removed section reached the destination the
-  table names for it, as many times as it occurred, and that nothing of
-  it stayed behind; not by reading 4,000 lines. Each M3 PR writes a
-  mapping file (one `heading<TAB>destination` line per section it
-  moves, the heading as the README spells it at the base), runs this
-  from its worktree, writes the output under `.logs/`, and quotes it in
-  the PR body. The output names a paragraph by its section, its
-  position and a short digest and never by its bytes, so a credential
-  somebody once pasted into the README is not republished into a log or
-  a PR body by the tool that audits the move:
+  every paragraph of each move unit reached the destination the table
+  names for it, as many times as the units name it, and that nothing of
+  it stayed behind; not by reading 4,000 lines. A move unit is a
+  heading's section, or a numbered run of its paragraphs where the table
+  splits one section between guides (the `## Tools` section, L621-1362,
+  goes to three guides with no heading at two of its cuts; the deployment
+  database subsection, L3480-3677, to five). Each M3 PR writes a mapping
+  file, one unit per line, `LINE<TAB>DESTINATION` or
+  `LINE<TAB>FIRST-LAST<TAB>DESTINATION` with `LINE` the heading's line
+  at the PR's base and the paragraph numbers read off `--list`; runs the
+  script from its worktree; keeps the mapping and the output under
+  `.logs/`; and quotes the output in the PR body. The output names a
+  mapping row, a paragraph position, a source line and a digest, and
+  never a byte of the README, headings included:
 
   ```python
   # coverage.py OLD_README NEW_README MAPPING
-  # MAPPING: one "heading<TAB>destination" line per moved section.
-  # Every paragraph of a moved section (its subsections included) must
-  # occur in its destination at least as often as it occurred there,
-  # and must not occur in NEW_README more often than the unmoved part of
-  # OLD_README holds it. Headings compare without their #s, so a
-  # demoted heading still matches. Prints totals and each failure by
-  # section, position and the first 12 hex digits of its SHA-256.
+  # coverage.py OLD_README --list LINE
+  #
+  # MAPPING has one move unit per line: "LINE<TAB>DESTINATION", or
+  # "LINE<TAB>FIRST-LAST<TAB>DESTINATION". LINE is the 1-based line of a
+  # heading in OLD_README; the unit is that heading's section (its own
+  # paragraphs and those of deeper headings, up to the next heading as
+  # shallow), or only its paragraphs FIRST to LAST (1-based, inclusive,
+  # the heading being paragraph 1). Every paragraph of a unit must occur
+  # in its destination at least as often as the units name it, and none
+  # may occur in NEW_README more often than the paragraphs no unit names
+  # hold it. Headings compare without their #s, so a demoted heading
+  # still matches. --list prints the paragraphs of the section at LINE.
+  #
+  # Output names a mapping row, a paragraph position, a source line and
+  # the first 12 hex digits of a SHA-256, never any bytes of the README,
+  # headings included: whatever a README paragraph ever held is not
+  # republished into a log or a PR body by the tool that audits its move.
   import hashlib
   import sys
   from collections import Counter
 
+
   def paragraphs(text):
-      out, buf, fence = [], [], False
-      for line in text.splitlines():
+      out, buf, start, fence = [], [], 0, False
+      for n, line in enumerate(text.splitlines(), 1):
           if line.lstrip().startswith(("```", "~~~")):
               fence = not fence
           if not line.strip() and not fence:
               if buf:
-                  out.append(buf)
+                  out.append((start, buf))
                   buf = []
           else:
+              if not buf:
+                  start = n
               buf.append(line)
       if buf:
-          out.append(buf)
-      return [" ".join(" ".join(b).lstrip("#").split()) for b in out], out
+          out.append((start, buf))
+      return [(s, " ".join(" ".join(b).lstrip("#").split()), b) for s, b in out]
 
-  def sections(text):
-      # Every heading names a section: its own paragraphs plus those of
-      # the deeper headings under it, up to the next heading as shallow.
-      flat, raw = paragraphs(text)
-      depths = [
-          len(b[0]) - len(b[0].lstrip("#")) if b[0].startswith("#") else 0
-          for b in raw
-      ]
-      result = {}
-      for i, depth in enumerate(depths):
-          if depth:
-              j = i + 1
-              while j < len(flat) and not 0 < depths[j] <= depth:
-                  j += 1
-              result[flat[i]] = flat[i:j]
-      return result
 
-  old_text = open(sys.argv[1], encoding="utf-8").read()
-  new_counts = Counter(paragraphs(open(sys.argv[2], encoding="utf-8").read())[0])
-  old_secs = sections(old_text)
-  moves = [line.split("\t") for line in open(sys.argv[3], encoding="utf-8").read().splitlines() if line]
-  kept = Counter(paragraphs(old_text)[0])
-  for heading, _ in moves:
-      kept.subtract(old_secs[heading])
+  def depth(block):
+      first = block[0]
+      return len(first) - len(first.lstrip("#")) if first.startswith("#") else 0
+
+
+  def section(paras, line):
+      starts = [s for s, _, _ in paras]
+      i = starts.index(line)
+      d = depth(paras[i][2])
+      if not d:
+          raise SystemExit(f"line {line} is not a heading")
+      j = i + 1
+      while j < len(paras) and not 0 < depth(paras[j][2]) <= d:
+          j += 1
+      return paras[i:j]
+
+
+  def digest(text):
+      return hashlib.sha256(text.encode()).hexdigest()[:12]
+
+
+  old = paragraphs(open(sys.argv[1], encoding="utf-8").read())
+  if sys.argv[2] == "--list":
+      for pos, (start, norm, _) in enumerate(section(old, int(sys.argv[3])), 1):
+          print(f"paragraph {pos}: line {start}, {digest(norm)}")
+      raise SystemExit(0)
+
+  new_counts = Counter(n for _, n, _ in paragraphs(open(sys.argv[2], encoding="utf-8").read()))
+  units = []
+  for row, line in enumerate(open(sys.argv[3], encoding="utf-8").read().splitlines(), 1):
+      if not line.strip():
+          continue
+      fields = line.split("\t")
+      sec = section(old, int(fields[0]))
+      if len(fields) == 3:
+          first, last = (int(x) for x in fields[1].split("-"))
+          chosen = list(enumerate(sec, 1))[first - 1 : last]
+      else:
+          chosen = list(enumerate(sec, 1))
+      units.append((row, fields[-1], chosen))
+
+  kept = Counter(n for _, n, _ in old)
+  claimed = Counter()
+  for _, _, chosen in units:
+      for _, (start, norm, _) in chosen:
+          kept[norm] -= 1
+          claimed[start] += 1
+  total = findings = 0
+  for start, count in claimed.items():
+      if count > 1:
+          findings += 1
+          print(f"- line {start}: named by {count} units")
   dests = {}
-  total = failures = 0
-  for heading, dest in moves:
-      have = dests.setdefault(dest, Counter(paragraphs(open(dest, encoding="utf-8").read())[0]))
-      for i, para in enumerate(old_secs[heading], 1):
+  for row, dest, chosen in units:
+      have = dests.setdefault(
+          dest, Counter(n for _, n, _ in paragraphs(open(dest, encoding="utf-8").read()))
+      )
+      for pos, (start, norm, _) in chosen:
           total += 1
-          digest = hashlib.sha256(para.encode()).hexdigest()[:12]
-          if have[para] > 0:
-              have[para] -= 1
+          tag = f"row {row}, paragraph {pos} (line {start}, {digest(norm)})"
+          if have[norm] > 0:
+              have[norm] -= 1
           else:
-              failures += 1
-              print(f"- not verbatim in {dest}: {heading[:40]} #{i} {digest}")
-          if new_counts[para] > kept[para]:
-              failures += 1
-              print(f"- left behind in the README: {heading[:40]} #{i} {digest}")
-  print(f"{total} paragraphs moved, {failures} findings")
+              findings += 1
+              print(f"- {tag}: not verbatim in {dest}")
+          if new_counts[norm] > max(kept[norm], 0):
+              findings += 1
+              print(f"- {tag}: left behind in the README")
+  print(f"{len(units)} units, {total} paragraphs moved, {findings} findings")
   ```
 
-  `OLD_README` is `git show <base>:vinga-server/README.md`. A heading
-  is printed (truncated) because it is the README's own structure and
-  the mapping file already names it. Every "not verbatim" line is a
-  paragraph the PR edited on purpose (a rewritten link, a replaced
-  table, a reworded future claim, a new order), and the PR body says
-  what each became; those paragraphs are not proved by this check and
-  need the reviewer's reading in the diff. A "left behind" line is a
-  defect unless the PR body explains it. M3a runs the script once
-  against two planted faults before trusting it (one copy of a
-  paragraph that occurs twice in a moved section deleted from its
-  destination, and a moved section also left in the README) and
-  records that each produced its finding.
+  `OLD_README` is `git show <base>:vinga-server/README.md`. Every "not
+  verbatim" line is a paragraph the PR edited on purpose (a rewritten
+  link, a replaced table, a reworded future claim, a new order), and the
+  PR body says what each became; those paragraphs are not proved by this
+  check and need the reviewer's reading in the diff. A "left behind" or
+  "named by" line is a defect unless the PR body explains it.
+
+  The script was run before this plan was amended, against the README
+  at `3073d08b`: splitting `## Tools` into five units across three
+  destinations reported 68 paragraphs moved and 0 findings; deleting
+  one paragraph from a split unit's destination reported exactly that
+  paragraph; a section whose heading held a credential-shaped sentinel
+  reported its findings with the sentinel absent from the output (0
+  matches); and two overlapping units reported each shared paragraph as
+  named twice. M3a reruns those four planted faults with the copy it
+  uses, plus a moved section also left in the README, and records that
+  each produced its finding.
 
 ## Risks
 
@@ -888,6 +941,8 @@ Instead: make it an immutable dated record of formerly-unowned direction, retain
 2. **P1: The coverage audit cannot represent the planned README moves.**
 Evidence: the Tests section's `coverage.py` maps one Markdown heading to one destination via `old_secs[heading]`. But the M3 table splits the single `## Tools` section at `vinga-server/README.md:621` into `tools-and-mcp.md`, `memory.md`, then `tools-and-mcp.md` again, with no intervening heading until line 1031. It similarly splits the deployment database subsection among several guides. Repeating `Tools` in the mapping makes the script require the whole section in every destination.
 Instead: define auditable move units below heading level, using explicit start/end paragraph digests or stable source-boundary markers, and add a planted test for a split unit missing from one destination. Update Q2's "whole README sections" claim to match those units.
+
+   *Resolution:* Accepted. The audit now works on move units: a heading's section, or a numbered run of its paragraphs (`LINE<TAB>FIRST-LAST<TAB>DESTINATION`) where a section is split between guides, with a `--list` mode giving each paragraph's position, source line and digest. Units naming the same paragraph twice are reported. Q2 says move units rather than whole sections. Run against the real README: a five-unit split of `## Tools` across three destinations reported 0 findings, and a paragraph deleted from a split unit's destination was reported.
 
 3. **P1: The amended audit process still leaks source text.**
 Evidence: although the plan says the coverage audit never prints source bytes, its code prints `heading[:40]`. A heading is source text and can contain an accidentally pasted credential. D8a and D8c also require "full" grep hit lists in `.logs/`, which ordinarily reproduce matching source lines. This reintroduces the exact no-leak failure the digest change was meant to remove.
