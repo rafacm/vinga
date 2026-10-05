@@ -1,17 +1,163 @@
 # vinga documentation
 
+Three doors, by what you came to do. **Run vinga** is for whoever
+deploys and operates a server, **Use vinga** for whoever talks to a
+device, and **Develop vinga** for whoever changes the code, a person
+or a coding agent working for one. The generated
+[Reference](#reference) is shared between them rather than repeated
+in each. [Where knowledge lives](#where-knowledge-lives) says which
+page holds each kind of knowledge, and [Authority](#authority) says
+what each class of page may claim.
+
+## Run vinga
+
+- [**Getting Started**](../README.md#getting-started): the path from
+  nothing to a board answering a server on your own computer.
+- [**deployment.md**](deployment.md): from a published image to a
+  deployment that stays up, in a Docker Compose lane and a Kubernetes
+  lane, with the artifacts under [`../deploy/`](../deploy/) that
+  implement it.
+- [**deploy/postgres-init.sql**](../deploy/postgres-init.sql): the one
+  thing a deployment runs against its own Postgres before the server
+  does; its header says what the executor needs and why rerunning it
+  is safe.
+- [**vinga-server**](../vinga-server/README.md): the server in full:
+  every provider option, the two halves of the configuration, the
+  security defaults, running it in a container, and onboarding a
+  device.
+- [**system-overview.md**](system-overview.md): one conversation turn
+  from the wake word to the spoken reply, each concept explained
+  before its acronym is used.
+- [**concepts.md**](concepts.md): the domain model from the user's
+  point of view: device, agent, binding, conversation, session, and
+  the decided semantics that connect them (wake word, switching,
+  memory, meta capabilities, the help agent). Deliberately ahead of
+  the code, and explicit about it: every section opens with its
+  status, each decided direction names the issue that owns it, and a
+  direction with no owner says so rather than borrowing authority
+  from the page.
+- [**glossary.md**](glossary.md): the concepts, techniques, and
+  technologies the project is built on, one short definition each.
+- [**Reference**](#reference): every command, configuration key, API
+  route, event and stored table, generated from the code.
+
+## Use vinga
+
+- [**devices/**](devices/): one guide per board vinga targets,
+  describing the hardware in front of you. These guides are also the
+  knowledge source the planned built-in help agent reads to explain
+  the device it is speaking through, which is why they are reviewable
+  markdown rather than prompt text.
+- [**The common page**](devices/README.md): what every board running
+  the upstream firmware shares: listening modes, networks, getting a
+  board onto your server, and what the device answers by voice.
+- [**Waveshare ESP32-S3-Touch-LCD-1.54**](devices/waveshare-esp32-s3-touch-lcd-1.54.md):
+  the board vinga is developed on, and the one guide written in full.
+- [**Waveshare ESP32-S3-ePaper-1.54**](devices/waveshare-esp32-s3-epaper-1.54.md):
+  a stub 🚧, read from the upstream board support code.
+- [**Waveshare ESP32-S3-Touch-AMOLED-2.16**](devices/waveshare-esp32-s3-touch-amoled-2.16.md):
+  a stub 🚧, brought up far enough to learn what its guide records.
+- [**devices/flashing.md**](devices/flashing.md): writing the firmware
+  over USB, the one procedure that is the same on every board.
+- [**concepts.md**](concepts.md): what a device, an agent, a binding
+  and a conversation are.
+- [**glossary.md**](glossary.md): one short definition per word vinga
+  uses, with pointers for going deeper.
+
+## Develop vinga
+
+- [**AGENTS.md**](../AGENTS.md): the commands, the workflow, and the
+  design, writing and documentation conventions every change follows,
+  whoever or whatever makes it.
+- [**architecture/**](architecture/README.md): the index for where the
+  boundaries are and what a change is held to, organized by the
+  question you arrived with; the promises, the guidelines, the design
+  and CLI guides and the observability map are behind it.
+- [**architecture/diagrams/**](architecture/diagrams/README.md): every
+  diagram, indexed by the question it answers, a directory per
+  authoring tool.
+- [**system-overview.md**](system-overview.md): one conversation turn
+  end to end, the walk the diagrams illustrate.
+- [**vinga-esp32**](../vinga-esp32/README.md): the thin firmware
+  customization and the boards it targets.
+- [**xiaozhi-notes.md**](xiaozhi-notes.md): the device↔server protocol,
+  key by key, and the upstream projects it came from. Read this first
+  for anything protocol-related.
+- [**related-projects.md**](related-projects.md): neighbouring voice
+  assistant and agent projects, and the projects vinga is built from,
+  with the license terms left in
+  [`THIRD_PARTY_LICENSES.md`](../THIRD_PARTY_LICENSES.md).
+- [**conversational-quality-regression-suite.md**](conversational-quality-regression-suite.md):
+  why field tests exist and how a test round is set up and analyzed.
+- [**architecture/cli-guide-audit.md**](architecture/cli-guide-audit.md):
+  the 2026-08-24 walk of four published CLI guides the CLI guide's
+  practices were dispositioned from.
+- [**adr/**](adr/README.md): one immutable record per decision that
+  was hard to reverse, surprising without context, and the result of a
+  real trade-off.
+- [**plans/**](plans/): one dated file per accepted plan, each with an
+  `-implementation` companion whose sections the plan's milestone
+  checklist links; the first is
+  [vinga-server v1](plans/2026-08-02-samtal-server-v1.md) ·
+  [implementation notes](plans/2026-08-02-samtal-server-v1-implementation.md).
+- [**features/**](features/): one dated doc per significant change made
+  outside any plan.
+- [**CHANGELOG.md**](../CHANGELOG.md): every notable change, by date.
+- [**Reference**](#reference): the same generated pages the Run door
+  reads.
+
+## Reference
+
+Generated from the code and diffed by CI, so none of it can come to
+describe a server this repository does not build:
+[`reference/`](reference/), shared by every door.
+
+- [**reference/cli.md**](reference/cli.md): the configuration CLI,
+  from installing it to rebuilding a deployment whose server will not
+  boot, and every command's own help page.
+- [**reference/domain-config.md**](reference/domain-config.md): every
+  field of the domain half of the configuration.
+- [**reference/server-config.md**](reference/server-config.md): every
+  key of the server half, the `server:` section of the YAML file, with
+  its type, default, bounds and the combinations refused at boot.
+- [**reference/api-openapi.json**](reference/api-openapi.json): the
+  configuration API's contract, which an install carrying the client
+  alone reads instead of asking a server.
+- [**reference/events.md**](reference/events.md): the structured
+  events, which are this server's observability surface.
+- [**reference/conversations-schema.md**](reference/conversations-schema.md):
+  the conversation store's tables.
+- [**reference/metrics-views.md**](reference/metrics-views.md): the
+  named aggregate views over that store, one section per view.
+
+## Where knowledge lives
+
+Each kind of knowledge has one home, and the other pages link it
+rather than restate it. A home that does not exist yet names the issue
+that builds it.
+
+| Kind | Home | Reaches a person through | Reaches a coding agent through |
+| --- | --- | --- | --- |
+| **Facts**: what a key means, its default, bounds and refusals | the models' `Field(description=)` and the entity descriptor registry | the generated [Reference](#reference) | `vinga schema`, `vinga reference`, `--help` |
+| **Concepts**: what the nouns are and how they relate | [`concepts.md`](concepts.md) and [`glossary.md`](glossary.md) | the Run and Use doors | the same pages |
+| **Device behavior** | [`devices/`](devices/), one guide per board; the browser client's guide is #613 | the Use door | the same guides |
+| **State**: what this deployment has, what is missing, the next command | `vinga info` reports which deployment this is and how much of each kind is configured; a readiness model that names what is missing is #611 | `vinga info` | `vinga info` |
+| **Procedures**: how to do one task | the Run door's pages today; one task guide per task is #609 | the Run door | the same pages; the coding-agent guide's index is #611 |
+| **Direction**: decided, not built | its owning issue or record; unowned direction is marked as such on [`concepts.md`](concepts.md) until #609 gives it a Develop-door page | the Develop door | not read |
+
+## Authority
+
 Two questions place a page. **What may it claim?** is authority, and
 the seven classes below answer it. **Who is it for?** is audience,
 and it decides only where a page is listed and how it is written:
 **user-facing documentation** describes vinga to somebody running it
-(the READMEs, the board guides, and the reference section below),
-**working notes** are how this project thinks and what it decided
-(the research notes, the architecture pages, and the record).
+or talking to a device (the Run and Use doors, and the reference
+section above), **working notes** are how this project thinks and what
+it decided (the Develop door's architecture pages, research notes and
+record).
 Audience never settles authority. A working note does not outrank a
 user-facing page by being a working note, and a page is not
 authoritative for being written for the person running vinga.
-
-## Authority
 
 Seven classes, covering every page under `docs/`, the three READMEs,
 [`../AGENTS.md`](../AGENTS.md) and the changelog. The set is closed:
@@ -100,184 +246,6 @@ they send you to is the one that says it.
 these too, and only that: the promises and the guidelines it used to
 hold are now the two pages above, and the path stays because dated
 records link it.
-
-## Start here
-
-- [**The project overview**](../README.md): what vinga is, the hardware
-  it targets, and the seven-step path from a container to a board that
-  answers.
-- [**system-overview.md**](system-overview.md): one conversation turn
-  from the wake word to the spoken reply, with the diagrams and each
-  concept explained before its acronym is used.
-- [**vinga-server**](../vinga-server/README.md): the server in full.
-  Every provider option, the two halves of the configuration, the
-  security defaults, running it in a container, and onboarding a device.
-- [**vinga-esp32**](../vinga-esp32/README.md): the thin firmware
-  customization and the boards it targets.
-- [**devices/**](devices/README.md): the per-board guides, described
-  under [Board guides](#board-guides) below.
-- [**deployment.md**](deployment.md): the worked path from a published
-  image to a running deployment, in a Docker Compose lane and a
-  Kubernetes lane, plus optional direct Jaeger and processed Jaeger plus
-  Langfuse telemetry paths. The contract both deployment lanes implement
-  as a table of links into the section that owns each fact, the artifacts under
-  [`../deploy/`](../deploy/) that implement it, the routing boundary a
-  public deployment draws, the provisioning transaction an upgrade
-  reruns, and how to tell that it worked. The server README stays the
-  authority for the contract itself; this is the page that walks it.
-- [**deploy/postgres-init.sql**](../deploy/postgres-init.sql): the one
-  thing a deployment runs against its own Postgres before the server
-  does. It creates the three schemas the server owns, `domain`,
-  `record` and `memory`, and the read-only role the conversation record
-  is read through, and its header says what the executor needs and why
-  the file is safe to run again after a reset or after a release that
-  adds a schema. The `docker-compose.yml`
-  at the repository root runs the same file against the database it
-  starts, whether that is the development one alone or the pair a trial
-  runs.
-
-## Reference
-
-What each thing means and what each command does, for somebody
-configuring a deployment. Everything under [`reference/`](reference/)
-that says it is generated is rendered from the code and diffed by CI, so
-it cannot come to describe a server this repository does not build.
-
-- [**reference/cli.md**](reference/cli.md): the configuration CLI.
-  Installing it (a client on a workstation, a checkout, the image), the
-  two spellings, reaching a deployment and the token it carries, writing
-  a whole deployment in one document, rebuilding one whose server will
-  not boot, and every command's own help page.
-- [**reference/domain-config.md**](reference/domain-config.md): every
-  field of the domain half, generated from the models.
-- [**reference/server-config.md**](reference/server-config.md): every
-  key of the server half, the `server:` section of the YAML file, with
-  its type, default, bounds and the combinations refused at boot,
-  generated from the same models. `config.example.yaml` is the
-  annotated starting point; this is the complete contract.
-- [**reference/api-openapi.json**](reference/api-openapi.json): the
-  configuration API's contract, generated from the routes. It is what an
-  install carrying the client alone reads instead of asking a server.
-- [**reference/events.md**](reference/events.md): the structured events,
-  which are this server's observability surface, generated from the
-  declarations.
-- [**reference/conversations-schema.md**](reference/conversations-schema.md):
-  the conversation store's tables, generated from the metadata.
-- [**reference/metrics-views.md**](reference/metrics-views.md): the named
-  aggregate views over that store, one section per view with its
-  question, its columns, its denominator and what telemetry-off does to
-  it, generated from the view declarations.
-- [**concepts.md**](concepts.md): the domain model from the user's
-  point of view: device, agent, binding, conversation, session, and
-  the decided semantics that connect them (wake word, switching,
-  memory, meta capabilities, the help agent). Deliberately ahead of
-  the code, and explicit about it: every section opens with its
-  status, each decided direction names the issue that owns it, and a
-  direction with no owner says so rather than borrowing authority
-  from the page.
-- [**glossary.md**](glossary.md): the concepts, techniques, and
-  technologies the project is built on, one short definition each with
-  pointers for going deeper.
-
-## Board guides
-
-[**devices/**](devices/README.md) holds one user-facing guide per board
-vinga targets, describing the hardware in front of the user: which
-button starts and stops a conversation, how long to hold PWR to power
-off, whether a wake word is enabled and which word it is, the commands
-the device answers by voice, what the display shows, and the board's
-known quirks. Its common page carries what every board running the
-upstream firmware shares, so a guide covers only what is specific to
-its board, and [`devices/flashing.md`](devices/flashing.md) carries
-the one procedure that is the same on all of them, writing the
-firmware over USB. Only the Touch-LCD-1.54 guide is written in full;
-the other two are stubs marked 🚧 that grow as those boards reach
-working status.
-Each section says whether its facts are read from the upstream board
-support code, verified in hands-on use, or not verified at all. These
-guides are also the knowledge source the planned built-in help agent
-reads to explain the device it is speaking through, which is why they
-are reviewable markdown rather than prompt text.
-
-## Architecture
-
-Where the boundaries are, and what a change is held to. Issues hold
-evidence, ADRs hold decisions, plans hold execution, and these pages
-hold direction and standard.
-
-- [**architecture/**](architecture/README.md): the index for that
-  corpus, organized by the question you arrived with. Designing a
-  feature or deciding direction, splitting a file or naming an
-  interface, adding a command, placing a datum, and understanding a
-  conversation end to end: each routes to the page that answers it,
-  and the promises, the guidelines, the design and CLI guides, the
-  observability map and the diagrams are behind it.
-
-### Diagrams
-
-The diagrams live under
-[**architecture/diagrams/**](architecture/diagrams/README.md), one
-index over a directory per authoring tool.
-`architecture/diagrams/excalidraw/` holds the hand-drawn pair, whose
-editable originals are scenes of the same names in the team workspace
-and whose committed files are exports kept in sync by hand, so flag
-them when a pipeline change makes them stale.
-`architecture/diagrams/plantuml/` holds three whose source is text
-here and whose renders come from a command, so they cannot drift
-unnoticed: what leaves the host, the ordering inside one turn, and
-the barge-in decision.
-
-## Research notes
-
-- [**xiaozhi-notes.md**](xiaozhi-notes.md): the device↔server protocol,
-  key by key, and the upstream projects it came from. Read this first
-  for anything protocol-related. Its sections say which of four things
-  each is: maintained protocol facts, corrected as the wire moves and
-  carrying an explicit statement of which upstream commits and which
-  observed firmware versions they were last read against; dated field
-  observations; the historical reading of the upstream server; and
-  licensing evidence. Board procedures and board behavior are not here,
-  they are in [`devices/`](devices/README.md).
-- [**related-projects.md**](related-projects.md): the neighbouring voice
-  assistant and agent projects, and the projects vinga is built from.
-  For an alternative: what it is, where it overlaps, where vinga is
-  deliberately different, and what vinga borrows. For a dependency: what
-  it is and why vinga touches it, with the license terms left in
-  [`THIRD_PARTY_LICENSES.md`](../THIRD_PARTY_LICENSES.md). Entries are
-  added as a project is actually read, never assumed.
-- [**conversational-quality-regression-suite.md**](conversational-quality-regression-suite.md):
-  why field tests exist, the shape of a conversation turn, what a test
-  round needs before anyone leaves the desk and what it yields, and the
-  three layers findings age in (instrument, interaction, calibration).
-  The starting point for setting up and analyzing a field-test round.
-
-## The record
-
-What was decided, what was planned, and what each change did. These are
-working notes: they report what was true when they were written, and
-they are not rewritten when the code moves on.
-
-**Plans.** One file per accepted plan under [`plans/`](plans/), named
-with a `YYYY-MM-DD-` prefix, each with a companion `-implementation` doc
-recording deviations, resolved open questions, and discoveries. A plan's
-milestone checklist doubles as its milestone descriptions: each ticked
-item links to its implementation-doc section, so a fresh session can
-resume from the repository alone. The first of them is
-[**vinga-server v1**](plans/2026-08-02-samtal-server-v1.md) ·
-[implementation notes](plans/2026-08-02-samtal-server-v1-implementation.md),
-architecture and milestones M0 to M7, from package skeleton to a
-published container image.
-
-**Features.** [`features/`](features/) holds a doc per significant change
-made outside any active plan, same date-prefix naming, covering Problem,
-Changes, Key parameters, Verification, and Files modified. Milestone work
-under a plan is documented by that plan's implementation doc and its pull
-request instead.
-
-**Decisions.** [`adr/`](adr/README.md) holds one architecture decision
-record per decision that is hard to reverse, surprising without context,
-and the result of a real trade-off. Records are immutable and
-date-prefixed; conventions are in [`adr/README.md`](adr/README.md).
 
 ## Conventions
 
