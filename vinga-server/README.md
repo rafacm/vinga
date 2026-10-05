@@ -1617,9 +1617,9 @@ state to be in and an illegitimate one to serve from.
 and the way back is to rebuild the store rather than to operate on it:
 stop the server, delete the database, boot clean, import the export
 taken while the deployment was healthy (`import -f`), re-enter the
-credentials that export listed, and apply. That is [When the server
-will not start](#when-the-server-will-not-start), in the deployment
-notes.
+credentials that export listed, and apply. That is
+[Recovering a deployment that will not start](../docs/run/recovering-a-deployment.md),
+in the task guides.
 
 Every field of the domain half is documented in
 [`../docs/reference/domain-config.md`](../docs/reference/domain-config.md),
@@ -1975,8 +1975,8 @@ store rather than by editing it: stop the server, delete the database,
 boot clean, import a kept `config export` with `config import`,
 re-enter each stored credential through the `secret set` commands that
 export listed at its foot, and `config apply` to install what came
-back. The full procedure is in the deployment notes, under
-[When the server will not start](#when-the-server-will-not-start).
+back. The full procedure is in the task guides, under
+[Recovering a deployment that will not start](../docs/run/recovering-a-deployment.md).
 
 ### Secrets
 
@@ -3374,8 +3374,8 @@ whose keys are all environment references never needs one. Once
 ciphertext exists, losing the key means losing those credentials: the
 server refuses to start with a stored secret it cannot open, naming the
 entity and the slot. That refusal takes the API with it, so the way back
-is the rebuild under [When the server will not
-start](#when-the-server-will-not-start): boot on an empty database,
+is the rebuild under
+[Recovering a deployment that will not start](../docs/run/recovering-a-deployment.md): boot on an empty database,
 import a kept export, enter the credentials again and apply, which
 leaves no unopenable envelope behind. The key
 the credentials are then entered under need not be the lost one; what
@@ -3480,110 +3480,6 @@ those, and neither is a name that resolves to loopback: the check reads
 the host as written. Reach the API over `https://`, through a tunnel
 that terminates TLS, or on loopback from inside the container, which is
 the case the default address is built for.
-
-### When the server will not start
-
-A configuration the server refuses to boot on (a stored secret no
-configured key opens, an entity that cannot be loaded, a reference that
-no longer resolves) leaves nothing to write through, because every
-config command is a request to a server that is not answering. The way
-back is not a surgical edit: stop the server, delete the database, start
-it again on the empty one, import the export taken while the deployment
-was healthy, re-enter each stored credential through the `secret set`
-commands that export listed at its foot, and apply.
-
-```bash
-# Stop the container that will not serve, and take the database away.
-# Nothing is connected to it while the server is down, which is what
-# lets it be dropped rather than emptied table by table.
-docker stop vinga && docker rm vinga
-dropdb "$VINGA_DB_NAME" && createdb --owner "$VINGA_DB_USER" "$VINGA_DB_NAME"
-
-# Rerun the provisioning file: dropping the database took the two
-# schemas and their default privileges with it, while vinga_ro, which
-# is an instance-level role, is still there. The file expects that and
-# rotates it rather than failing.
-psql "$ADMIN_URL" -f deploy/postgres-init.sql
-
-# Start it again, which boots clean on the empty database, then put the
-# configuration back and re-enter the credentials it could not carry.
-docker run -d --name vinga ...          # the run command from above
-docker exec -i vinga vinga-server config import -f - < deployment.yaml
-docker exec -i vinga vinga-server \
-  config provider secret set -- llm claude api_key
-docker exec vinga vinga-server config apply
-```
-
-The import writes and stops, which is the whole of what it does: the
-engines the document names are built by the apply on the last line, and
-their credentials are the line before it.
-
-**A dropped database takes the conversation record with it**, since
-every schema lives in one. What is broken here is the domain half, so a
-deployment that is recording and wants to keep what it recorded drops
-that half alone, as the server role, and reruns the provisioning file
-after it:
-
-```sql
-drop schema domain cascade;
-```
-
-The rerun is the same either way, and the reason is the same: a
-`create schema` is what puts the schema back under the server role's
-ownership, and a dropped database also took the default privileges
-that let `vinga_ro` read tables the server has not created yet. The
-next boot then migrates from nothing, which is the state this
-procedure needs and the state a first-ever boot is in.
-
-That is what makes `vinga-server config export` worth keeping in version
-control beside the YAML file: it is the document the import takes. A
-stored credential never travels in a read, so the export carries the
-command that enters each of them rather than the value, and the values
-come from wherever the deployment keeps its secrets.
-
-It is a rebuild rather than a repair, and the difference is real: it
-puts back what the export says and nothing else, so a row nobody knew
-about goes with the schema. A deployment that wants a surgical edit to
-the stored rows has one, through ordinary SQL against the `domain`
-schema as the server role. That is deliberately not wrapped in this
-project's own grammar: a second way in with its own vocabulary is a
-second thing to keep honest, and `psql` is already documented by the
-people who wrote it.
-
-**Coming from a build that kept its configuration in a local file, it
-is the same rebuild with one ordering to get right: export first, then
-upgrade.** This build reads Postgres and only Postgres. There is no
-driver in it for the old file, no configuration key that would point
-at one, and no importer, so an export attempted after the image has
-rolled is an export from a server that will not start:
-
-```bash
-# With the build you are still running.
-docker exec -i vinga vinga-server config export > deployment.yaml
-
-# Then point VINGA_DB_* at an empty database, roll the image, and put
-# the configuration back exactly as above: import the document, re-enter
-# each stored credential from wherever the deployment keeps its secrets,
-# and apply.
-docker exec -i vinga vinga-server config import -f - < deployment.yaml
-docker exec -i vinga vinga-server \
-  config provider secret set -- llm claude api_key
-docker exec vinga vinga-server config apply
-```
-
-**The conversation record does not come across, and nothing pretends
-otherwise.** There is no export format for it and no importer, and
-inventing one for a pre-release store was not worth the tool it would
-have become. A deployment that wants to keep what it recorded copies
-the old `conversations.db` aside before the upgrade and reads it with
-`sqlite3`, which is a file it now owns rather than anything this
-server will look at again. The same goes for the old `vinga.db` and
-for both files' `-wal` and `-shm` sidecars: nothing in this build
-touches them, nothing removes them, and they sit on the data volume
-until somebody archives or deletes them deliberately.
-
-The full procedure, step by step, is in
-[`../docs/reference/cli.md`](../docs/reference/cli.md).
 
 ## Onboarding a device
 
