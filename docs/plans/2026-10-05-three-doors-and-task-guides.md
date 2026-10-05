@@ -193,21 +193,24 @@ it). The column for what reaches vinga is omitted until #612 builds
 that. `docs/README.md` is an index page and may cite issues; only Run
 and Use pages may not.
 
-**D3. The check is a script beside the link checker, run in `docs.yml`.**
+**D3. The check is a script beside the link checker, run in both
+workflows.**
 `scripts/check_run_use_pages.py`, stdlib only, invoked as
 `python3 scripts/check_run_use_pages.py .` in the step after "Internal
 links and anchors". It reuses the link checker's `LINK_RE` and fence
 handling by importing them rather than copying them, since the two must
 agree on what a link is. Its unit tests sit beside the link checker's,
 in `vinga-server/tests/unit/test_check_run_use_pages.py`, and run in the
-server workflow's unit lane. Every Run and Use page today lies outside
-the server workflow's paths, so a change to one runs `docs.yml`; until
-M3d moves it to the Develop door, `vinga-server/README.md` is the
-exception, and a server-only PR could add an issue reference to it
-unchecked for that window. That is stated in the script's docstring, as
-the link checker states its limits, rather than closed with a second
-workflow step: the README has none today and every PR in this plan that
-edits it also edits `docs/`.
+server workflow's unit lane. The script itself also runs as a step of
+the server workflow's `unit` job, beside lint. A Run or Use page under
+the server workflow's paths (`vinga-server/README.md` until M3d moves it
+to the Develop door, and any page a later door links under
+`vinga-server/`) changes in pull requests `docs.yml` never sees, so a
+check in one workflow only would leave exactly the hole the issue's
+"every Run and Use page" closes. The step costs milliseconds and needs
+nothing but the checkout, so it stays after M3d rather than being
+removed when the README leaves the Run door, which would make the
+workflows' coverage depend on which door a page is in.
 
 **D4. What the check refuses, and on which pages.**
 
@@ -598,7 +601,8 @@ Pages are this plan's modules; the reader is the caller.
   concepts exception and description, the help-agent sentence in the
   board-guides annotation, the direction page in the Develop door and
   the research-notes class), `docs/architecture/README.md` (a line for
-  the direction page), `.github/workflows/docs.yml` (the step).
+  the direction page), `.github/workflows/docs.yml` and
+  `.github/workflows/vinga-server.yml` (the steps).
 - **M3a:** `docs/run/README.md` and its seven guides, `docs/system-overview.md`
   (Transports), the server README, `docs/README.md` (the Run door and
   the maintained-maps class name `docs/run/`), `docs/deployment.md`,
@@ -634,7 +638,8 @@ Pages are this plan's modules; the reader is the caller.
 - [ ] **M2: concepts and glossary describe what runs today.** D5, D6,
   D7, the coding-agent entry, `direction.md`, `docs/README.md`'s
   concepts exception removed, and the check (D3, D4) with its tests and
-  its `docs.yml` step. Commits: the check's tests, the check, the step;
+  its steps in `docs.yml` and the server workflow. Commits: the check's
+  tests, the check, the two steps;
   then `direction.md`; then `concepts.md` section by section; then the
   glossary; then the index.
 - [ ] **M3a: the task-guide directory and the deployment guides.**
@@ -671,6 +676,8 @@ Reviewed 2026-10-05 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted. The audit now names an unmatched paragraph by its position and the first 12 hex digits of its SHA-256, never by its bytes; the PR body says what each numbered paragraph became and the reviewer reads the changed prose in the diff.
 
 3. **P1: A Run page can bypass the new check.** Plan D3 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:196`) explicitly accepts that a server-only PR can change the Run-door `vinga-server/README.md` without running the check. The workflow filters (`.github/workflows/docs.yml:26`) confirm it. That contradicts the issue's "every Run and Use page" requirement. **Instead:** run the check in the server workflow too until M3d moves that README to Develop.
+
+   *Resolution:* Accepted. D3 now runs the script in both workflows: `docs.yml` after the link check, and the server workflow's `unit` job beside lint. It stays there after M3d, so whether a page is checked never depends on which workflow its path triggers.
 
 4. **P2: Linking a guide index does not enroll its guides.** Q3 and D4 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:154`) scan direct door links and recurse only when the target is a directory. A Run-door link to the planned `docs/run/README.md` scans that index alone; newly listed guides escape. **Instead:** require and test a `run/` directory link, or make the checker traverse the guide index and fail when an indexed guide is outside its scan.
 
