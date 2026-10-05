@@ -999,7 +999,7 @@ Pages are this plan's modules; the reader is the caller.
 
 ## Milestones
 
-- [x] **[M1: three doors](2026-10-05-three-doors-and-task-guides-implementation.md#m1-three-doors)** (PR TBD).
+- [x] **[M1: three doors](2026-10-05-three-doors-and-task-guides-implementation.md#m1-three-doors)** ([PR #616](https://github.com/rafacm/vinga/pull/616)).
   `docs/README.md` opens with Run vinga, Use vinga and Develop vinga
   (D1), then a shared Reference section, then
   "Where knowledge lives" (D2), then the authority taxonomy unchanged
