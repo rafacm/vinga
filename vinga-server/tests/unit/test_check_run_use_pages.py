@@ -385,6 +385,26 @@ def test_a_door_link_with_a_broken_target_is_malformed(
     assert findings(done) == {("docs/README.md", 9, "door-malformed")}
 
 
+def test_a_repeated_door_heading_keeps_both_sections(
+    tmp_path: Path,
+) -> None:
+    # A second Run vinga section must not replace the first: a page
+    # linked only from the first is still a Run page.
+    index = DOORS.replace(
+        "## Develop vinga",
+        "## Run vinga\n\n- [**other**](other.md): another page.\n\n"
+        "## Develop vinga",
+    )
+    build(
+        tmp_path,
+        {"docs/run.md": "# Run\n\n#123\n", "docs/other.md": CLEAN},
+        index,
+    )
+    done = run(str(tmp_path))
+    assert done.returncode == 1
+    assert findings(done) == {("docs/run.md", 3, "issue-reference")}
+
+
 def test_a_heading_inside_a_fence_does_not_open_a_door(
     tmp_path: Path,
 ) -> None:

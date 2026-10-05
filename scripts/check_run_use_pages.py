@@ -35,7 +35,9 @@ phrase "decided direction" in any case, including across a line break.
 Door discovery fails closed: a missing docs/README.md, a missing
 `## Run vinga` or `## Use vinga` heading, or a door section that
 enrolls no page is a `door-missing` finding, so a renamed heading
-cannot switch the check off. Each door section is read as one text
+cannot switch the check off. A door heading that appears twice gives
+two sections, each held to these rules, so a second one cannot hide
+the pages the first links. Each door section is read as one text
 (its lines outside fences joined with spaces), so link text wrapped
 across lines is still a link; a link whose target is broken by a line
 break cannot be read that way, and a section with more `](` openers
@@ -85,7 +87,12 @@ def read(path: Path) -> str:
 
 
 def door_sections(lines: list) -> dict:
-    """Each door's heading line and body lines (outside fences)."""
+    """Each door's sections, as (heading line, body lines outside fences).
+
+    A door heading that appears twice gives the door two sections, each
+    held to the door rules on its own, so a page linked only from the
+    first is still enrolled rather than replaced by the second.
+    """
     sections: dict = {}
     current = None
     in_fence = False
@@ -97,12 +104,14 @@ def door_sections(lines: list) -> dict:
             continue
         if SECTION_END_RE.match(line):
             title = line.lstrip("#").strip()
-            current = title if title in DOORS else None
-            if current is not None:
-                sections[current] = (lineno, [])
+            if title in DOORS:
+                current = (lineno, [])
+                sections.setdefault(title, []).append(current)
+            else:
+                current = None
             continue
         if current is not None:
-            sections[current][1].append(line)
+            current[1].append(line)
     return sections
 
 
@@ -159,23 +168,23 @@ def check(root: Path) -> tuple:
         if door not in sections:
             findings.append((rel_index, 0, "door-missing"))
             continue
-        heading, body = sections[door]
-        text = " ".join(body)
-        targets = [m.group(1) for m in LINK_RE.finditer(text)]
-        read_links = len(targets) + len(IMG_RE.findall(text))
-        if text.count("](") > read_links:
-            findings.append((rel_index, heading, "door-malformed"))
-        enrolled = set()
-        for raw in targets:
-            if raw.startswith("<") and raw.endswith(">"):
-                raw = raw[1:-1]
-            enrolled.update(
-                p for p in enroll(raw, index, root)
-                if not p.is_relative_to(reference)
-            )
-        if not enrolled:
-            findings.append((rel_index, heading, "door-missing"))
-        pages |= enrolled
+        for heading, body in sections[door]:
+            text = " ".join(body)
+            targets = [m.group(1) for m in LINK_RE.finditer(text)]
+            read_links = len(targets) + len(IMG_RE.findall(text))
+            if text.count("](") > read_links:
+                findings.append((rel_index, heading, "door-malformed"))
+            enrolled = set()
+            for raw in targets:
+                if raw.startswith("<") and raw.endswith(">"):
+                    raw = raw[1:-1]
+                enrolled.update(
+                    p for p in enroll(raw, index, root)
+                    if not p.is_relative_to(reference)
+                )
+            if not enrolled:
+                findings.append((rel_index, heading, "door-missing"))
+            pages |= enrolled
     for page in sorted(pages):
         rel = page.relative_to(root).as_posix()
         for lineno, kind in sorted(scan(read(page))):
