@@ -1005,7 +1005,7 @@ Pages are this plan's modules; the reader is the caller.
   "Where knowledge lives" (D2), then the authority taxonomy unchanged
   in substance and still closed, then Conventions. The server README is
   in the Run door until M3d. One PR, docs only.
-- [ ] **M2: concepts and glossary describe what runs today.** D5, D6,
+- [x] **[M2: concepts and glossary describe what runs today](2026-10-05-three-doors-and-task-guides-implementation.md#m2-concepts-and-glossary-describe-what-runs-today)** (PR TBD). D5, D6,
   D7, the coding-agent entry, `direction.md`, `docs/README.md`'s
   concepts exception removed, and the check (D3, D4) with its tests and
   its steps in `docs.yml` and the server workflow. Commits: the check's
