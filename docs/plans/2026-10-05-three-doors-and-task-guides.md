@@ -783,6 +783,17 @@ Pages are this plan's modules; the reader is the caller.
   check and need the reviewer's reading in the diff. A "left behind" or
   "named by" line is a defect unless the PR body explains it.
 
+  One unit stays in the README on purpose: the `## Running in a
+  container` heading D10 keeps as a permanent forwarding stub. The
+  mapping says so with the destination `README` on a unit naming that
+  heading paragraph alone (`LINE<TAB>1-1<TAB>README`), which asserts
+  the paragraph is still in the new README rather than moved. The rest
+  of that section is mapped to its guide like any other unit, so its
+  procedure text left in the README still reports as left behind: the
+  exception covers the heading and nothing under it. A `README` unit
+  that names more than its heading is refused by the audit (finding 5's
+  resolution makes that a test).
+
   The script was run before this plan was amended, against the README
   at `3073d08b`: splitting `## Tools` into five units across three
   destinations reported 68 paragraphs moved and 0 findings; deleting
@@ -1057,6 +1068,8 @@ Instead: make `upgrading.md` a list of links to changelog entries only. Correct 
 4. **P2: The coverage audit necessarily reports the intentional permanent compatibility stub as a defect.**
 Evidence: D10 retains `## Running in a container` in the README permanently; the M3 table moves that whole section. The audit counts headings as paragraphs and reports a claimed paragraph still in `NEW_README` as "left behind" (Tests, `coverage.py`, lines 643-646 and 727-728).
 Instead: add an explicit, narrow mapping exception for the forwarding heading, asserting that its replacement is only the forwarding link, and test that it neither produces a false move failure nor permits old procedure text to remain.
+
+   *Resolution:* Accepted. A unit whose destination is `README` declares paragraphs that stay on purpose; the stub is mapped as its heading paragraph alone (`LINE<TAB>1-1<TAB>README`), and the rest of the section maps to its guide, so procedure text left under the stub still reports as left behind. The tests round 3, finding 5 adds cover both halves.
 
 5. **P2: The move audit has no enforceable failure contract or maintained implementation.**
 Evidence: the proposed `coverage.py` only prints a findings count and then exits successfully, even after "left behind" or overlapping-unit findings. It is not assigned a committed path, tests, or CI step; mappings and output live under ignored `.logs/` (Tests, lines 625-630, 703 onward).
