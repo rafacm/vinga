@@ -162,7 +162,7 @@ No fix round.
 | D7, Q4: the direction page, its line in the Develop door, its place in the dated-execution-records class, and its line in the architecture index | `docs/architecture/direction.md`, `docs/README.md`, `docs/architecture/README.md` | `Add the direction page as a dated record` |
 | D5, section by section | `docs/concepts.md` | the six `concepts` commits, from `Make the concepts intro and user section current` to `Remove the help agent from concepts and glossary` |
 | D6 | `docs/glossary.md` | `Make the glossary describe what runs today`, `Separate vinga's agent from a coding agent`; the Help agent entry left with the concepts section it linked |
-| D8c over every Use page, and D4's two Touch-LCD-1.54 sentences | `docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md`, `docs/devices/README.md`, an eighth direction entry | `State the board guides' firmware limits as present` |
+| D8c over every Use page, and D4's two Touch-LCD-1.54 sentences | `docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md`, `docs/devices/README.md` (the commitment stays in `vinga-esp32/README.md`) | `State the board guides' firmware limits as present` |
 | The index footprint and the `ahead of the code` sweep | `docs/README.md`, `docs/architecture/README.md` | `Describe concepts as current in both indexes` |
 | D12 | `changelog.d/609-current-concepts.md` | `Add the changelog fragment for current-only concepts` |
 
@@ -197,13 +197,16 @@ on the M2 tree it reports nothing (Verification, below).
   set of kinds stays the four D4 closes; a page that cannot be read
   stops the check with a one-line sentence on stderr and exit 2 rather
   than passing it.
-- **The direction page has eight entries, not seven.** D7 lists seven
-  from D5; D4 sends the Touch-LCD-1.54 firmware-build commitment there
-  too when it has no owner, and no issue or record was named where it
-  was recorded. It is the eighth, quoting both sentences and noting
-  that the firmware README's "Planned customizations" lists the same
-  two. Whether that README counts as the commitment's owner, which
-  would make the entry redundant, is a question for review.
+- **The Touch-LCD-1.54 firmware-build commitment has an owner.** D4
+  sends it to the direction page only if nothing owns it. The firmware
+  README's "Planned customizations" (`vinga-esp32/README.md`, a
+  Develop-door page) already lists both items, an English wake word and
+  an English UI language, so the board guide's two sentences became
+  present limitations and the commitment stays where it was. The
+  implementer first added it as an eighth direction entry; the
+  orchestrator removed that entry before the PR, since a second home for
+  the same direction is what the page exists to avoid. The page has
+  D7's seven entries.
 - **The direction page's taxonomy and index lines landed with the
   page**, not in the closing index commit, because the closed taxonomy
   says its list "changes in the commit that adds it".
