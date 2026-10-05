@@ -392,15 +392,16 @@ verb or a flag.
   `Field(description=)` and an example in `examples/` or
   `config.example.yaml`; the generated reference follows), a concept once
   it ships (`docs/concepts.md` and `docs/glossary.md`, never before), a
-  procedure (a new task guide or a section of one, listed in the
-  coding-agent guide's index), a precondition (a check in the readiness
-  model), an upgrade action (an `Upgrade:` line in the changelog
-  fragment), and what a person at the device experiences
+  procedure (a new task guide under `docs/run/` or a section of one,
+  listed one line per guide in `docs/run/README.md`), a precondition (a
+  check in the readiness model), an upgrade action (an `Upgrade:` line in
+  the changelog fragment), and what a person at the device experiences
   (`docs/devices/`). Direction that is decided but not built stays in its
   issue. "None, internal change" is the honest answer for most refactors
-  and costs one line. Until the task guides and the readiness model exist
-  (#609, #611), the line names where the procedure or check will go. The
-  homes and the reasoning behind them are in epic #615.
+  and costs one line. Until the readiness model exists (#611), the line
+  names where the check will go; a procedure whose task has no guide
+  yet names the guide it will be. The homes and the reasoning behind
+  them are in epic #615.
 - Active plans keep a milestone checklist that doubles as the milestone
   descriptions (one annotated checkbox item per milestone, no separate
   status list). Tick the milestone (with its PR number) in the same change
