@@ -341,3 +341,32 @@ On agentpi, from the worktree root unless noted:
 
 M2 adds no migration and changes no server code, so the integration
 lane was not run.
+
+### PR review round
+
+Reviewed 2026-10-05 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 3m11s, at commit 7bf6f82b ([the round](https://github.com/rafacm/vinga/pull/617#issuecomment-6005311644)).
+
+1. **P2: a repeated door heading could leave linked pages unchecked.**
+   `door_sections` kept one section per door title, so a second
+   `## Run vinga` or `## Use vinga` replaced the first and a page
+   linked only from the first went unscanned.
+   *Resolution:* each occurrence of a door heading is now its own
+   section, held to the door rules on its own, and every section's
+   pages are enrolled.
+   `test_a_repeated_door_heading_keeps_both_sections` puts `#123` on a
+   page only the first of two Run vinga sections links; it was watched
+   failing against the old script and passes now (`deb68e2d`).
+2. **P2: the fragment counted eight direction entries.** The page has
+   seven since the firmware commitment was left with its owner.
+   *Resolution:* the fragment says seven (`52708bc3`).
+3. **P3: the bad-invocation test passed with the script missing.**
+   Python's own "can't open file" also exits 2 with one stderr line.
+   *Resolution:* the test asserts the checker's own sentence for each
+   invocation, the usage line and "the given repo-root is not a
+   directory"; it was watched failing with the script moved aside and
+   passes with it restored (`d825a8b3`).
+
+After the fixes: the check's tests `28 passed`; `uv run ruff check .`
+passes; `python3 scripts/check_run_use_pages.py .` reports
+`checked 11 Run and Use pages, 0 findings`; the link check and the
+census ran last, and their outcome is in the hand-back.
