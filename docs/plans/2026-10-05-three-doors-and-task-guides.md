@@ -533,24 +533,29 @@ Pages are this plan's modules; the reader is the caller.
       return [" ".join(" ".join(b).lstrip("#").split()) for b in out], out
 
   def sections(text):
+      # Every heading names a section: its own paragraphs plus those of
+      # the deeper headings under it, up to the next heading as shallow.
       flat, raw = paragraphs(text)
-      result, current, level = {}, None, 0
-      for norm, block in zip(flat, raw):
-          first = block[0]
-          depth = len(first) - len(first.lstrip("#")) if first.startswith("#") else 0
-          if depth and (current is None or depth <= level):
-              current, level = norm, depth
-              result[current] = []
-          if current is not None:
-              result[current].append(norm)
+      depths = [
+          len(b[0]) - len(b[0].lstrip("#")) if b[0].startswith("#") else 0
+          for b in raw
+      ]
+      result = {}
+      for i, depth in enumerate(depths):
+          if depth:
+              j = i + 1
+              while j < len(flat) and not 0 < depths[j] <= depth:
+                  j += 1
+              result[flat[i]] = flat[i:j]
       return result
 
   old_text = open(sys.argv[1], encoding="utf-8").read()
   new_counts = Counter(paragraphs(open(sys.argv[2], encoding="utf-8").read())[0])
   old_secs = sections(old_text)
   moves = [line.split("\t") for line in open(sys.argv[3], encoding="utf-8").read().splitlines() if line]
-  moved = {h for h, _ in moves}
-  kept = Counter(q for h, ps in old_secs.items() if h not in moved for q in ps)
+  kept = Counter(paragraphs(old_text)[0])
+  for heading, _ in moves:
+      kept.subtract(old_secs[heading])
   dests = {}
   total = failures = 0
   for heading, dest in moves:
