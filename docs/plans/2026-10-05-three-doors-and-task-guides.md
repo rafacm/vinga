@@ -380,9 +380,30 @@ printf 'user = "%s:%s"\n' "$LANGFUSE_PUBLIC_KEY" "$LANGFUSE_SECRET_KEY" \
   | curl -sS -K - -X POST "$LANGFUSE_HOST/api/public/models" ...
 ```
 
-Each PR also greps its moved text for any other command that expands a
-secret-named variable (`KEY`, `SECRET`, `TOKEN`, `PASSWORD`) into an
-argument, and fixes each the same way. Its hit list is `path:line`
+A connection URL is a credential too when it can carry a password
+(D8a's own source says so of `VINGA_DB_URL`), so `psql "$ADMIN_URL"`
+is the same defect. Database commands are rewritten to take their
+connection from a libpq service file and their password from
+`~/.pgpass` (mode 0600), so no argument carries either:
+
+```bash
+PGSERVICE=vinga-admin psql -f deploy/postgres-init.sql
+```
+
+The inventory outside the dated records, by an untruncated `git grep`
+at `3073d08b` for `psql`, `pg_dump`, `pg_restore` or `curl` expanding a
+variable named `*URL`, `*KEY`, `*SECRET`, `*TOKEN` or `*PASSWORD`, plus
+the two-line Langfuse form, each fixed by the PR that owns its page:
+README L3507 and L3751, `docs/deployment.md` L192 and the header
+comment of `deploy/postgres-init.sql` (L11) in M3a, together with
+`docs/reference/cli.md` L556 if its recovery recipe is hand-written,
+or through the generator that renders it if not; README L483 and the
+comment in `vinga-server/examples/tts-elevenlabs.yaml` (L17) in M3b;
+README L1777 (`Authorization: Bearer $VINGA_API_SECRET`, through the
+same `curl -K -` form) in M3c; README L3055 in M3d. The test files the
+grep also matches build URLs for test databases and are not
+documentation. Each PR reruns the grep over what it moved and fixes
+anything new the same way. Its hit list is `path:line`
 pairs and nothing else (`git grep -n -I -E <pattern> -- <paths> | cut
 -d: -f1,2`), so the sweep writes no matched text anywhere; the PR body
 quotes the count and the pairs (D8d).
@@ -1019,6 +1040,8 @@ Instead: specify a root-working-directory step, or invoke `python3 ../scripts/ch
 2. **P1: The secret-argument sweep misses credential-bearing URLs.**
 Evidence: D8a scans only variables named `KEY`, `SECRET`, `TOKEN`, or `PASSWORD`, but the M3a source has `psql "$ADMIN_URL"` at `vinga-server/README.md:3507,3751`; the same unsafe form remains in `docs/deployment.md:192`. The plan itself calls a database URL secret at README:3490-3493, and shell expansion makes its password part of `psql`'s argument vector.
 Instead: extend D8a to include credential-bearing connection URL variables, including `ADMIN_URL` and `*_URL` where the documented value may contain credentials; replace these examples with a protected libpq password/service-file procedure, and fix the deployment copy in the same milestone.
+
+   *Resolution:* Accepted. D8a now treats a connection URL that can carry a password as a credential, rewrites database commands to a libpq service file plus `~/.pgpass` (`PGSERVICE=vinga-admin psql -f ...`), and lists every site outside the dated records from an untruncated grep, each assigned to the PR that owns its page: README L3507, L3751, `docs/deployment.md` L192, `deploy/postgres-init.sql` L11 and `docs/reference/cli.md` L556 (through its generator if it is generated) in M3a; README L483 and `examples/tts-elevenlabs.yaml` L17 in M3b; README L1777 in M3c; README L3055 in M3d.
 
 3. **P1: D13 contradicts the settled rule that upgrade detail lives in the changelog.**
 Evidence: the supplied epic context settles that location. D13 says a release note absent from `CHANGELOG.md` "moves to `upgrading.md` verbatim." That creates precisely the second upgrade-detail home the decision rejects.
