@@ -22,6 +22,12 @@ security defaults, conversation behavior and observability are in the
   export.
 - [Securing a deployment](security.md): the master key that encrypts
   stored credentials, where it is escrowed, and rotating it.
+
+## Configuring
+
+- [Changing the configuration](configuration.md): why an edit to a
+  running deployment is stored and not yet in effect, and the two ways
+  it becomes effective.
 - [Setting limits and probes](limits-and-probes.md): how many
   conversations one server holds and for how long, how a shutdown
   drains, and which probe an orchestrator restarts on and which it
