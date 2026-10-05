@@ -472,6 +472,16 @@ jobs:
       - name: Lint
         run: uv run ruff check .
 
+      # The Run and Use page check, the same invocation docs.yml runs
+      # after its link check. It runs here too because a Run or Use
+      # page can live under this workflow's paths (the server README)
+      # and change in a pull request the documentation workflow never
+      # sees. It reads docs/README.md and the pages it links from the
+      # repository root, hence the working directory.
+      - name: Run and Use pages carry no issues or direction
+        working-directory: .
+        run: python3 scripts/check_run_use_pages.py .
+
       # Strict typing over the typed event package and nothing else.
       # The catalog's whole argument is that its annotations carry the
       # contract, and annotations nothing checks are decoration. The
