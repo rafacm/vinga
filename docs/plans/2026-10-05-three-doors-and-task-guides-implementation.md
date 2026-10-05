@@ -137,3 +137,13 @@ On agentpi, from the worktree root:
 
 M1 touches no code, so neither the unit nor the integration lane was
 run.
+
+### PR review round
+
+Reviewed 2026-10-05 by openai/gpt-5.6-terra, thinking high via codex
+CLI 0.160.0, read-only sandbox, runtime 2m41s, at commit c59e7536
+([the round](https://github.com/rafacm/vinga/pull/616#issuecomment-6004743078)).
+
+No findings; verdict "mergeable as is". The reviewer was told to read
+the plan only for what M1 implements and the two index pages in full.
+No fix round.
