@@ -20,6 +20,8 @@ security defaults, conversation behavior and observability are in the
   what to have in hand, the choice between resetting the configuration
   alone and dropping the whole database, and the rebuild from a kept
   export.
+- [Securing a deployment](security.md): the master key that encrypts
+  stored credentials, where it is escrowed, and rotating it.
 - [Setting limits and probes](limits-and-probes.md): how many
   conversations one server holds and for how long, how a shutdown
   drains, and which probe an orchestrator restarts on and which it
