@@ -17,8 +17,7 @@ it was. The page belongs to the dated execution records in
 [the authority taxonomy](../README.md#authority): it reports what was
 decided and when, never what is true now.
 
-The first seven entries below came off `docs/concepts.md` and
-`docs/glossary.md`, and the eighth off the Touch-LCD-1.54 board guide,
+The entries below came off `docs/concepts.md` and `docs/glossary.md`
 on 2026-10-06, when [#609](https://github.com/rafacm/vinga/issues/609)
 made those pages describe only what runs. The quoted text is the
 page's own as it stood at `3073d08b`, with its links reduced to their
@@ -159,23 +158,3 @@ today and stays on both pages.
 - **Recorded:** `docs/concepts.md`, Before users arrive, 2026-09-23 by
   the page's own mark.
 - **Waits on:** users (#606), whose body does not cover it.
-
-## An English wake word and interface in vinga's own firmware build
-
-> An English model ("Hi ESP", ESP-SR `wn9_hiesp`) exists in the
-> firmware sources, and no prebuilt image inspected for this project
-> has carried it, so reaching it means building the firmware; vinga's
-> own build will use it. 🚧
-
-> The interface language of upstream's prebuilt firmware is Chinese,
-> and the language is compiled in rather than configured, so it stays
-> Chinese until the board runs a build made with another one. An
-> English interface is part of vinga's planned firmware build. 🚧
-
-The [firmware README](../../vinga-esp32/README.md) lists the same two,
-an English wake word and an English UI language, among its planned
-customizations.
-
-- **Recorded:** `docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md`,
-  Wake word and Display, added 2026-08-12 with no date of their own.
-- **Waits on:** no open issue was named where it was recorded.
