@@ -312,14 +312,32 @@ plan inventories".
 **D8. A guide's shape.** H1 is the task ("Running vinga in a
 container"); the first paragraph says what the reader will have at the
 end; then the moved sections, with headings demoted one level where
-needed. Links into `docs/reference/` replace restated facts in one
-place only, the three provider option tables (OpenAI transcription,
-ElevenLabs, OpenAI speech): each becomes a link to its reference
-section, and a row whose content the reference lacks (a measured
+needed.
+
+A guide keeps the steps, the worked examples, the measurements and the
+reasoning, and links the facts a generated reference owns rather than
+restating them, as the issue asks. The test is mechanical: a table or
+list whose every row is a key with its type, default or bounds, a route
+with its methods, an event with its fields, or a column with its type,
+and which the generated page states, is replaced by a link to that
+page's section. Known instances: the three provider option tables
+(OpenAI transcription, ElevenLabs, OpenAI speech; `domain-config.md`),
+the configuration API's two route listings and its response and
+refusal shapes (`api-openapi.json`, with one sentence naming the noun
+families so a reader knows what is there), the store's per-column
+descriptions (`conversations-schema.md`), and the per-event field
+detail (`events.md`; the event index table, which says when each fires,
+is explanation and stays). A row the reference lacks (a measured
 finding such as "only `gpt-transcribe` was measured to accept
-`languages`") stays as a sentence. Every other paragraph moves
-verbatim, apart from its links and its prose pointers ("see Security
-below"), which are rewritten to wherever the target now lives.
+`languages`", or why a default is what it is) stays as a sentence. A
+YAML block showing a section with its defaults stays when it is a
+worked example a reader copies, and its comments defer to the reference
+for the bounds. Each PR lists every replaced block with the reference
+section it now links, and the coverage audit reports those paragraphs
+as not verbatim, which is what puts them in front of the reviewer.
+Every other paragraph moves verbatim, apart from its links and its
+prose pointers ("see Security below"), which are rewritten to wherever
+the target now lives.
 
 **D8a. A moved command never puts a credential in a process's
 arguments.** Two README examples expand a secret into `curl`'s argument
@@ -810,6 +828,8 @@ Reviewed 2026-10-05 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted. D8c makes every M2 and M3 PR grep what it writes onto a Run or Use page (and, in M2, every Use page) for future-tense and planned language, keep the full hit list, and rewrite each claim about vinga's own future as a present limitation or move the commitment to its owner. D4's 🚧 bullet no longer keeps the two Touch-LCD-1.54 firmware-build sentences; M2 rewrites them as present limitations.
 
 10. **P2: Most moved guides still duplicate generated facts.** D8 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:299`) replaces only three provider tables. It copies the API route and response contract (`vinga-server/README.md:1745`), limits defaults, and store schema details into guides even though generated references own them. **Instead:** keep the steps and measured advice in guides; link exact keys, routes, defaults and columns to their references.
+
+   *Resolution:* Accepted. D8 now states the rule mechanically: a table or list whose every row is a key, route, event field or column the generated reference states is replaced by a link to that section, keeping any row the reference lacks as a sentence. Named instances beyond the three provider tables: the API route listings and response and refusal shapes, the store's column descriptions and the per-event field detail. Worked YAML examples and the event index (when each fires) stay, as explanation.
 
 11. **P2: Two proposed "task guides" fail the one-task and deletion tests.** The M3 map (`docs/plans/2026-10-05-three-doors-and-task-guides.md:372`) makes `database.md` cover provisioning, key rotation, backup, restore and querying, while `listening-and-replies.md` covers barge-in tuning, filler, fallback and model-output filtering. Each largely renames a wide README section without one end state for its reader. **Instead:** separate the operator tasks; place explanatory behavior in `system-overview.md` or `concepts.md`. The direction page, checker, guide index and contributing page have distinct jobs; these two splits need revision.
 
