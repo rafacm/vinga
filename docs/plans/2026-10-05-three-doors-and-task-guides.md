@@ -492,22 +492,30 @@ Pages are this plan's modules; the reader is the caller.
   unit lane; M3d regenerates `events.md` through its generator and runs
   the drift test that guards it. No milestone needs the integration
   lane, and each PR says so rather than claiming it.
-- **M3's coverage check, per PR.** A move is proven by showing every
-  paragraph left the README for exactly one place, not by reading
-  4,000 lines. Each M3 PR runs this from its worktree, writes the
-  output under `.logs/`, and quotes its output in the PR body. The
-  output names a paragraph by its position and a short digest and
-  never by its bytes, so a credential somebody once pasted into the
-  README is not republished into a log or a PR body by the tool that
-  audits the move:
+- **M3's coverage check, per PR.** A move is checked by showing that
+  every paragraph of each removed section reached the destination the
+  table names for it, as many times as it occurred, and that nothing of
+  it stayed behind; not by reading 4,000 lines. Each M3 PR writes a
+  mapping file (one `heading<TAB>destination` line per section it
+  moves, the heading as the README spells it at the base), runs this
+  from its worktree, writes the output under `.logs/`, and quotes it in
+  the PR body. The output names a paragraph by its section, its
+  position and a short digest and never by its bytes, so a credential
+  somebody once pasted into the README is not republished into a log or
+  a PR body by the tool that audits the move:
 
   ```python
-  # coverage.py OLD_README NEW_README DEST... : every paragraph of
-  # OLD_README must appear, whitespace-normalized, in NEW_README or a
-  # DEST. Prints the totals and each paragraph that does not, by its
-  # position and the first 12 hex digits of its SHA-256.
+  # coverage.py OLD_README NEW_README MAPPING
+  # MAPPING: one "heading<TAB>destination" line per moved section.
+  # Every paragraph of a moved section (its subsections included) must
+  # occur in its destination at least as often as it occurred there,
+  # and must not occur in NEW_README more often than the unmoved part of
+  # OLD_README holds it. Headings compare without their #s, so a
+  # demoted heading still matches. Prints totals and each failure by
+  # section, position and the first 12 hex digits of its SHA-256.
   import hashlib
   import sys
+  from collections import Counter
 
   def paragraphs(text):
       out, buf, fence = [], [], False
@@ -516,29 +524,63 @@ Pages are this plan's modules; the reader is the caller.
               fence = not fence
           if not line.strip() and not fence:
               if buf:
-                  out.append(" ".join(" ".join(buf).split()))
+                  out.append(buf)
                   buf = []
           else:
               buf.append(line)
       if buf:
-          out.append(" ".join(" ".join(buf).split()))
-      return out
+          out.append(buf)
+      return [" ".join(" ".join(b).lstrip("#").split()) for b in out], out
 
-  old = paragraphs(open(sys.argv[1], encoding="utf-8").read())
-  pool = "\n".join(
-      " ".join(open(p, encoding="utf-8").read().split()) for p in sys.argv[2:]
-  )
-  missing = [(i, p) for i, p in enumerate(old, 1) if p not in pool]
-  print(f"{len(old)} paragraphs, {len(old) - len(missing)} verbatim, {len(missing)} not")
-  for i, p in missing:
-      print(f"- paragraph {i}: {hashlib.sha256(p.encode()).hexdigest()[:12]}")
+  def sections(text):
+      flat, raw = paragraphs(text)
+      result, current, level = {}, None, 0
+      for norm, block in zip(flat, raw):
+          first = block[0]
+          depth = len(first) - len(first.lstrip("#")) if first.startswith("#") else 0
+          if depth and (current is None or depth <= level):
+              current, level = norm, depth
+              result[current] = []
+          if current is not None:
+              result[current].append(norm)
+      return result
+
+  old_text = open(sys.argv[1], encoding="utf-8").read()
+  new_counts = Counter(paragraphs(open(sys.argv[2], encoding="utf-8").read())[0])
+  old_secs = sections(old_text)
+  moves = [line.split("\t") for line in open(sys.argv[3], encoding="utf-8").read().splitlines() if line]
+  moved = {h for h, _ in moves}
+  kept = Counter(q for h, ps in old_secs.items() if h not in moved for q in ps)
+  dests = {}
+  total = failures = 0
+  for heading, dest in moves:
+      have = dests.setdefault(dest, Counter(paragraphs(open(dest, encoding="utf-8").read())[0]))
+      for i, para in enumerate(old_secs[heading], 1):
+          total += 1
+          digest = hashlib.sha256(para.encode()).hexdigest()[:12]
+          if have[para] > 0:
+              have[para] -= 1
+          else:
+              failures += 1
+              print(f"- not verbatim in {dest}: {heading[:40]} #{i} {digest}")
+          if new_counts[para] > kept[para]:
+              failures += 1
+              print(f"- left behind in the README: {heading[:40]} #{i} {digest}")
+  print(f"{total} paragraphs moved, {failures} findings")
   ```
 
-  `OLD_README` is `git show <base>:vinga-server/README.md`. Every
-  non-verbatim paragraph is one the PR edited on purpose (a rewritten
-  link, a replaced option table, a demoted heading, a new intro), and
-  the PR body says what each numbered paragraph became, so the reviewer
-  reads those in the diff and not the verbatim moves.
+  `OLD_README` is `git show <base>:vinga-server/README.md`. A heading
+  is printed (truncated) because it is the README's own structure and
+  the mapping file already names it. Every "not verbatim" line is a
+  paragraph the PR edited on purpose (a rewritten link, a replaced
+  table, a reworded future claim, a new order), and the PR body says
+  what each became; those paragraphs are not proved by this check and
+  need the reviewer's reading in the diff. A "left behind" line is a
+  defect unless the PR body explains it. M3a runs the script once
+  against two planted faults before trusting it (one copy of a
+  paragraph that occurs twice in a moved section deleted from its
+  destination, and a moved section also left in the README) and
+  records that each produced its finding.
 
 ## Risks
 
@@ -691,6 +733,8 @@ Reviewed 2026-10-05 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted, both ways. D4 now treats a linked `README.md` as an index and enrolls the pages it links, one level deep, and the Run door links the `run/` directory, which enrolls a guide the index forgot. A test plants `#1` on a guide reached only through an index link and asserts the failure.
 
 5. **P2: The paragraph audit cannot prove a complete move.** Its substring search over a combined pool (plan, Tests (`docs/plans/2026-10-05-three-doors-and-task-guides.md:489`)) counts one surviving copy of a duplicated paragraph as both copies, and counts text left in the old README as moved. **Instead:** compare each section removed from the README against its named destination, preserve occurrence counts, and test a duplicated paragraph and a section left behind. Describe edited paragraphs as requiring review, not as mechanically proved.
+
+   *Resolution:* Accepted. The audit now runs per moved section against the destination the mapping names, consumes occurrence counts so a paragraph that occurs twice needs two copies, and reports a moved paragraph that still occurs in the new README more often than the unmoved sections hold it. Edited paragraphs are described as needing the reviewer's reading rather than as proved, and M3a runs the script against the two planted faults the finding names before trusting it.
 
 6. **P2: The recovery guide would lead with a data-destroying command.** M3a (`docs/plans/2026-10-05-three-doors-and-task-guides.md:612`) moves the recovery section verbatim. It runs `dropdb` before telling the reader that this deletes the conversation record and that a domain-only reset is possible (server README (`vinga-server/README.md:3729`)). **Instead:** put export and backup checks and the recorded-data decision before either reset command; present the whole-database reset as an explicit choice.
 
