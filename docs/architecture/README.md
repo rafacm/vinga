@@ -4,7 +4,7 @@ Where vinga's boundaries are, and what a change is held to. Issues
 hold evidence, ADRs hold decisions, plans hold execution, and these
 pages hold direction and standard. What each class of page in the
 repository may claim is stated once, in
-[`../README.md`](../README.md).
+[`../README.md`](../README.md#authority).
 
 This page is the index for the corpus, and it is organized by the
 question you arrived with rather than by filename.
