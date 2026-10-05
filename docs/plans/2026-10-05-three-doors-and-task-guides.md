@@ -997,3 +997,43 @@ Instead: retain the `running-in-a-container` forwarding anchor permanently, even
    *Resolution:* Accepted. The changelog link is no longer edited: the `## Running in a container` stub is permanent, D9's end state keeps it as the one compatibility anchor, and D10 needs no commit to `main` between milestones.
 
 **Verdict: not ready.**
+
+## Plan review round 3
+
+Reviewed 2026-10-05 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 7m44s, at commit 16bf854d, plan blob ff9159e3.
+
+---
+
+1. **P1: The server-workflow invocation cannot run from its declared working directory.**
+Evidence: plan D3 says the server unit job runs `python3 scripts/check_run_use_pages.py .`; `.github/workflows/vinga-server.yml:84-86` sets that job's default directory to `vinga-server/`, where neither `scripts/` nor the repository-root `docs/` exists.
+Instead: specify a root-working-directory step, or invoke `python3 ../scripts/check_run_use_pages.py ..`, and test that exact invocation.
+
+2. **P1: The secret-argument sweep misses credential-bearing URLs.**
+Evidence: D8a scans only variables named `KEY`, `SECRET`, `TOKEN`, or `PASSWORD`, but the M3a source has `psql "$ADMIN_URL"` at `vinga-server/README.md:3507,3751`; the same unsafe form remains in `docs/deployment.md:192`. The plan itself calls a database URL secret at README:3490-3493, and shell expansion makes its password part of `psql`'s argument vector.
+Instead: extend D8a to include credential-bearing connection URL variables, including `ADMIN_URL` and `*_URL` where the documented value may contain credentials; replace these examples with a protected libpq password/service-file procedure, and fix the deployment copy in the same milestone.
+
+3. **P1: D13 contradicts the settled rule that upgrade detail lives in the changelog.**
+Evidence: the supplied epic context settles that location. D13 says a release note absent from `CHANGELOG.md` "moves to `upgrading.md` verbatim." That creates precisely the second upgrade-detail home the decision rejects.
+Instead: make `upgrading.md` a list of links to changelog entries only. Correct an omitted historical upgrade note in the changelog through an explicitly approved history-correction procedure, then link it.
+
+4. **P2: The coverage audit necessarily reports the intentional permanent compatibility stub as a defect.**
+Evidence: D10 retains `## Running in a container` in the README permanently; the M3 table moves that whole section. The audit counts headings as paragraphs and reports a claimed paragraph still in `NEW_README` as "left behind" (Tests, `coverage.py`, lines 643-646 and 727-728).
+Instead: add an explicit, narrow mapping exception for the forwarding heading, asserting that its replacement is only the forwarding link, and test that it neither produces a false move failure nor permits old procedure text to remain.
+
+5. **P2: The move audit has no enforceable failure contract or maintained implementation.**
+Evidence: the proposed `coverage.py` only prints a findings count and then exits successfully, even after "left behind" or overlapping-unit findings. It is not assigned a committed path, tests, or CI step; mappings and output live under ignored `.logs/` (Tests, lines 625-630, 703 onward).
+Instead: make it a committed, single-purpose audit helper with a stated exit policy. Expected edits should be declared mappings; unapproved missing, duplicated, or retained paragraphs must exit nonzero. Add automated tests for the planted faults.
+
+6. **P2: D11 promises a reversible database migration without testing its reverse path.**
+Evidence: D11 requires a reversible record-chain migration changing an installed column comment. The Tests section only says to run the general integration lane. Existing migration-upgrade coverage uses an explicit baseline, upgrade, database inspection, and downgrade assertion in `vinga-server/tests/integration/test_metrics_views_upgrade.py`.
+Instead: name a migration test that upgrades a database stamped at `1010_turns_name_their_utterance`, reads `col_description` for `record.events.name`, downgrades, and verifies the prior comment is restored.
+
+7. **P2: The concepts inventory omits an existing issue reference.**
+Evidence: `docs/concepts.md:277-278` cites both #120 and #190. D5's Conversation-and-session inventory only dispositions #190 and #599 references. This fails the requested line-by-line inventory despite M2's global requirement to remove every issue reference.
+Instead: add #120 to D5 with its disposition, and make the inventory explicitly account for every matched reference, not merely the common issue numbers.
+
+8. **P2: D8 permits broad verbatim copying of generated-reference facts.**
+Evidence: the issue requires guides to link facts in `docs/reference/` and `concepts.md` rather than restate them. D8 only removes certain all-contract tables/lists, then says "Every other paragraph moves verbatim." This would preserve current configuration and API contract claims in guides whenever they occur as prose rather than a fully eligible table.
+Instead: require each moved paragraph to be classified as procedure/explanation, which may move, or current contract fact, which must become a precise reference link. Include that classification in the per-PR mapping.
+
+Verdict: **not ready**.
