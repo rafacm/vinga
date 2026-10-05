@@ -29,6 +29,12 @@ question you arrived with rather than by filename.
   hard to reverse, surprising without context, and the result of a
   real trade-off. When a promise or a guideline cites a decision, this
   is where its reasoning is; records are immutable and date-prefixed.
+- [**direction.md**](direction.md): decided direction that no issue
+  or record owned when it was written down, one dated entry each with
+  the words it was recorded in and the open issue it waits on. Read it
+  before deciding something it already records; when an issue takes an
+  entry, the entry gains a dated line naming that issue rather than
+  being removed. Direction an open issue owns is in that issue.
 
 The first two used to be one page, and dated records cite it by name.
 [`principles.md`](principles.md) is now a signpost to them and holds
