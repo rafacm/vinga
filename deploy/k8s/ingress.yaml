@@ -15,11 +15,12 @@
 #
 #   /api/          the configuration surface, which holds the most
 #                  authority of anything here and is protected by a
-#                  bearer token that rides on every request. The server
-#                  README's own first answer is not to route it at all;
-#                  administer it with `kubectl port-forward` for the
-#                  length of a session, or from a shell inside the pod
-#                  where the token and the loopback address already are.
+#                  bearer token that rides on every request. The first
+#                  answer `docs/run/exposing-a-deployment.md` gives is
+#                  not to route it at all; administer it with
+#                  `kubectl port-forward` for the length of a session,
+#                  or from a shell inside the pod where the token and
+#                  the loopback address already are.
 #                  Its second answer, a separately restricted route, is
 #                  for a deployment that genuinely needs one and is a
 #                  route this file does not write.

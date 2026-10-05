@@ -55,15 +55,15 @@ disagreement is settled.
 
 | What a deployment provides | The contract | Stated in |
 | --- | --- | --- |
-| **A port** | One, `server.port`, 8003 by default. The WebSocket, the OTA endpoint, the short onboarding route, the configuration API and both probes are all on it, because the server is a single ASGI application. Whatever routes that port decides the security boundary. | [Ports and topology](../vinga-server/README.md#ports-and-topology) |
+| **A port** | One, `server.port`, 8003 by default. The WebSocket, the OTA endpoint, the short onboarding route, the configuration API and both probes are all on it, because the server is a single ASGI application. Whatever routes that port decides the security boundary. | [Ports and topology](run/exposing-a-deployment.md#ports-and-topology) |
 | **A restart signal** | `/healthz`. This process is alive and serving its control surface; a draining server answers 200 deliberately, so a redeploy is not reported as a failure part way through. | [Setting limits and probes](run/limits-and-probes.md) |
 | **A traffic decision** | `/readyz`. This process may be handed a new device conversation: 200 `ok`, or 503 with one word (`draining`, `full`, `unavailable`). Point restart at the first and admission at the second. | [Setting limits and probes](run/limits-and-probes.md) |
 | **A shutdown budget** | SIGTERM drains: no new sessions, replies in flight finish speaking, sockets close with 1001, all inside `server.limits.drain_s` (20 s by default). Give whatever stops the container a grace period above it; both artifacts here use 30 s. | [Setting limits and probes](run/limits-and-probes.md) |
 | **A filesystem** | A read-only root filesystem works and is what both lanes run: add a writable `/tmp` and keep `/data`, the volume every engine caches into (`HOME` points there). Model weights are never baked into the image. | [Running vinga in a container](run/running-in-a-container.md) |
-| **Two secrets** | `VINGA_AUTH_SECRET` signs the device tokens the OTA endpoint issues, and `VINGA_API_SECRET` gates the configuration API, which is always mounted and always gated. A third, `VINGA_MASTER_KEY`, is needed only once a credential is stored encrypted rather than named as an environment reference. | [The configuration API in a deployment](../vinga-server/README.md#the-configuration-api-in-a-deployment) |
+| **Two secrets** | `VINGA_AUTH_SECRET` signs the device tokens the OTA endpoint issues, and `VINGA_API_SECRET` gates the configuration API, which is always mounted and always gated. A third, `VINGA_MASTER_KEY`, is needed only once a credential is stored encrypted rather than named as an environment reference. | [The configuration API in a deployment](run/exposing-a-deployment.md#the-configuration-api-in-a-deployment) |
 | **A database** | `VINGA_DB_HOST`, `VINGA_DB_PORT`, `VINGA_DB_NAME`, `VINGA_DB_USER` and `VINGA_DB_PASSWORD`, or `VINGA_DB_URL` in place of all five. The database is yours to provide and neither lane provisions one. **The shipped default password is a loopback development convenience and never a deployment password.** | [Providing the database](run/database.md) |
 | **A provisioned database** | [`../deploy/postgres-init.sql`](../deploy/postgres-init.sql), run once by a role that may create roles and schemas, and rerun before booting an image whose release moved the file. The server itself migrates both halves on boot, so there is no init command to forget beyond that one. | [Providing the database](run/database.md) |
-| **The name it is reached by** | Behind a TLS-terminating proxy, `server.websocket_url` and `server.public_url` are set explicitly and `FORWARDED_ALLOW_IPS` names the proxy, never `*`. Get this wrong and boards fail at the handshake with every log line looking right. | [Behind a reverse proxy](../vinga-server/README.md#behind-a-reverse-proxy) |
+| **The name it is reached by** | Behind a TLS-terminating proxy, `server.websocket_url` and `server.public_url` are set explicitly and `FORWARDED_ALLOW_IPS` names the proxy, never `*`. Get this wrong and boards fail at the handshake with every log line looking right. | [Behind a reverse proxy](run/exposing-a-deployment.md#behind-a-reverse-proxy) |
 
 Two things the contract deliberately leaves open. The database is
 bring-your-own, so nothing under [`../deploy/`](../deploy/) starts one
@@ -256,8 +256,8 @@ And three things are deliberately not routed:
 
 - **`/api/`**, the configuration surface. It holds the most authority
   of anything on the port and is protected by a bearer token that rides
-  on every request, so the README's own first answer is not to route it
-  at all. Administer it with a port forward for the length of a
+  on every request, so the exposure guide's own first answer is not to
+  route it at all. Administer it with a port forward for the length of a
   session:
 
   ```bash
@@ -267,10 +267,10 @@ And three things are deliberately not routed:
   and point the CLI at `http://127.0.0.1:8003/api`, which is the one
   address a plain `http://` URL is allowed for. Or run the CLI from
   inside the pod, where the token and the loopback address already are.
-  The README's second answer, a separately restricted route of its own,
+  The guide's second answer, a separately restricted route of its own,
   is for a deployment that genuinely needs one and is a route this file
   does not write: see
-  [The configuration API in a deployment](../vinga-server/README.md#the-configuration-api-in-a-deployment).
+  [The configuration API in a deployment](run/exposing-a-deployment.md#the-configuration-api-in-a-deployment).
 
 - **`/healthz` and `/readyz`**, which the kubelet reaches directly on
   the pod. Nothing outside the cluster has a use for them.
