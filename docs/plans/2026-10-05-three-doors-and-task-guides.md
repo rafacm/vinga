@@ -830,7 +830,7 @@ Pages are this plan's modules; the reader is the caller.
   `docs/architecture/direction.md` (new), `docs/README.md` (the
   concepts exception and description, the help-agent sentence in the
   board-guides annotation, the direction page in the Develop door and
-  the research-notes class), `docs/architecture/README.md` (its
+  the dated-execution-records class), `docs/architecture/README.md` (its
   `concepts.md` entry, L89-94, rewritten: the page describes what runs
   today and carries no status lines, and decided direction lives in its
   issue or record or, unowned, in the direction page; plus a line for
@@ -936,7 +936,7 @@ Reviewed 2026-10-05 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
 
 7. **P2: M3a leaves a broken changelog link on `main`.** D10 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:321`) retargets it only *after* M3a merges, although the old Running in a container link (`CHANGELOG.md:3386`) loses its anchor in M3a. The link checker does not scan `CHANGELOG.md`. **Instead:** retain a small forwarding anchor in the server README through M3a, retarget the changelog, then remove the anchor in a later milestone.
 
-   *Resolution:* Accepted. M3a leaves a forwarding stub (the `## Running in a container` heading over one sentence linking the guide), a documentation commit to `main` retargets the changelog link after M3a merges, and M3b deletes the stub once an untruncated `git grep` shows nothing links the anchor.
+   *Resolution:* Accepted. M3a leaves a forwarding stub (the `## Running in a container` heading over one sentence linking the guide), a documentation commit to `main` retargets the changelog link after M3a merges, and M3b deletes the stub once an untruncated `git grep` shows nothing links the anchor. Superseded by round 2, finding 5: the stub is permanent and the changelog is not edited.
 
 8. **P2: A current schema description knowingly becomes false.** D11 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:330`) leaves the live column comment (`vinga-server/src/vinga_server/conversations/schema.py:774`) saying the README's table defines event names after M3d removes that table. The migration's historical text can stay. **Instead:** update the current schema comment and its generated reference to name the event reference, with the database-comment migration needed to keep installed schemas accurate.
 
