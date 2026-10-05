@@ -627,3 +627,35 @@ Pages are this plan's modules; the reader is the caller.
   `capturing-a-session.md`, `conversation-cost.md`,
   `conversation-store.md`, `docs/contributing.md`, the README per D9,
   `events_docgen.py` and the regenerated `events.md`.
+
+## Plan review round
+
+Reviewed 2026-10-05 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 7m18s, at commit 6edae701, plan blob 7ad63afc.
+
+---
+
+1. **P1: Copied commands expose secrets in process arguments.** Plan D8 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:299`) moves prose verbatim, including `curl -H "xi-api-key: $ELEVENLABS_API_KEY"` and `curl -u "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY"` in the server README (`vinga-server/README.md:483`). Shell expansion puts the values in `curl`'s arguments. **Instead:** rewrite both examples to supply credentials through stdin or a protected config file, and exempt security fixes from the verbatim-move rule.
+
+2. **P1: The move audit republishes source text.** The proposed audit prints the first 100 characters of every unmatched paragraph and puts that list in the PR body (plan, Tests (`docs/plans/2026-10-05-three-doors-and-task-guides.md:461`)). An accidentally pasted credential would gain a second exposure in logs and review. **Instead:** report a paragraph number and digest, never its bytes; inspect changed prose in the review diff.
+
+3. **P1: A Run page can bypass the new check.** Plan D3 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:196`) explicitly accepts that a server-only PR can change the Run-door `vinga-server/README.md` without running the check. The workflow filters (`.github/workflows/docs.yml:26`) confirm it. That contradicts the issue's "every Run and Use page" requirement. **Instead:** run the check in the server workflow too until M3d moves that README to Develop.
+
+4. **P2: Linking a guide index does not enroll its guides.** Q3 and D4 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:154`) scan direct door links and recurse only when the target is a directory. A Run-door link to the planned `docs/run/README.md` scans that index alone; newly listed guides escape. **Instead:** require and test a `run/` directory link, or make the checker traverse the guide index and fail when an indexed guide is outside its scan.
+
+5. **P2: The paragraph audit cannot prove a complete move.** Its substring search over a combined pool (plan, Tests (`docs/plans/2026-10-05-three-doors-and-task-guides.md:489`)) counts one surviving copy of a duplicated paragraph as both copies, and counts text left in the old README as moved. **Instead:** compare each section removed from the README against its named destination, preserve occurrence counts, and test a duplicated paragraph and a section left behind. Describe edited paragraphs as requiring review, not as mechanically proved.
+
+6. **P2: The recovery guide would lead with a data-destroying command.** M3a (`docs/plans/2026-10-05-three-doors-and-task-guides.md:612`) moves the recovery section verbatim. It runs `dropdb` before telling the reader that this deletes the conversation record and that a domain-only reset is possible (server README (`vinga-server/README.md:3729`)). **Instead:** put export and backup checks and the recorded-data decision before either reset command; present the whole-database reset as an explicit choice.
+
+7. **P2: M3a leaves a broken changelog link on `main`.** D10 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:321`) retargets it only *after* M3a merges, although the old Running in a container link (`CHANGELOG.md:3386`) loses its anchor in M3a. The link checker does not scan `CHANGELOG.md`. **Instead:** retain a small forwarding anchor in the server README through M3a, retarget the changelog, then remove the anchor in a later milestone.
+
+8. **P2: A current schema description knowingly becomes false.** D11 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:330`) leaves the live column comment (`vinga-server/src/vinga_server/conversations/schema.py:774`) saying the README's table defines event names after M3d removes that table. The migration's historical text can stay. **Instead:** update the current schema comment and its generated reference to name the event reference, with the database-comment migration needed to keep installed schemas accurate.
+
+9. **P2: Current-only pages retain unowned future claims.** D4 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:234`) expressly retains "vinga's own build will use it" in a board guide (`docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md:57`). D8 also copies "there will not be" a native SSE transport and future transport design from the server README into Run and Use destinations. The proposed marker check will miss all of these. **Instead:** keep present limitations on those pages and move commitments or design rationale to their Develop owner.
+
+10. **P2: Most moved guides still duplicate generated facts.** D8 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:299`) replaces only three provider tables. It copies the API route and response contract (`vinga-server/README.md:1745`), limits defaults, and store schema details into guides even though generated references own them. **Instead:** keep the steps and measured advice in guides; link exact keys, routes, defaults and columns to their references.
+
+11. **P2: Two proposed "task guides" fail the one-task and deletion tests.** The M3 map (`docs/plans/2026-10-05-three-doors-and-task-guides.md:372`) makes `database.md` cover provisioning, key rotation, backup, restore and querying, while `listening-and-replies.md` covers barge-in tuning, filler, fallback and model-output filtering. Each largely renames a wide README section without one end state for its reader. **Instead:** separate the operator tasks; place explanatory behavior in `system-overview.md` or `concepts.md`. The direction page, checker, guide index and contributing page have distinct jobs; these two splits need revision.
+
+12. **P2: M2 leaves the Develop index telling readers the old rule.** The architecture index (`docs/architecture/README.md:89`) still says `concepts.md` is ahead of code and has per-section status lines. M2's footprint (`docs/plans/2026-10-05-three-doors-and-task-guides.md:567`) names only a new direction-page line there. **Instead:** update that paragraph in M2 to describe the current-only concepts page and point future direction to its Develop home.
+
+**Verdict:** Ready after the P1 and P2 amendments.
