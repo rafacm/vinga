@@ -370,6 +370,16 @@ worked example a reader copies, and its comments defer to the reference
 for the bounds. Each PR lists every replaced block with the reference
 section it now links, and the coverage audit reports those paragraphs
 as not verbatim, which is what puts them in front of the reviewer.
+
+Prose gets the same rule at the grain of a sentence. Each PR reads every
+unit it moves for sentences whose claim is a current contract fact the
+generated reference states (a key's default or bound, what a route
+answers, a column's meaning). A sentence that is only that fact is
+replaced by a link to the reference; a sentence that explains or
+advises and leans on the fact keeps its words and gains the link. Each
+unit's mapping row says which kinds it holds (`procedure`,
+`explanation`, `contract`, one or more), and every paragraph changed
+under this rule is a declared edit, so the reviewer sees each one.
 Every other paragraph moves verbatim, apart from its links and its
 prose pointers ("see Security below"), which are rewritten to wherever
 the target now lives.
@@ -1154,5 +1164,7 @@ Instead: add #120 to D5 with its disposition, and make the inventory explicitly 
 8. **P2: D8 permits broad verbatim copying of generated-reference facts.**
 Evidence: the issue requires guides to link facts in `docs/reference/` and `concepts.md` rather than restate them. D8 only removes certain all-contract tables/lists, then says "Every other paragraph moves verbatim." This would preserve current configuration and API contract claims in guides whenever they occur as prose rather than a fully eligible table.
 Instead: require each moved paragraph to be classified as procedure/explanation, which may move, or current contract fact, which must become a precise reference link. Include that classification in the per-PR mapping.
+
+   *Resolution:* Accepted at the grain of the unit, not the paragraph. D8 now applies the link-not-restate rule to prose sentence by sentence: a sentence that is only a current contract fact the reference states becomes a link, and one that explains while leaning on it gains the link. Each mapping row classifies its unit (`procedure`, `explanation`, `contract`, one or more), and every changed paragraph is a declared edit the reviewer sees. A per-paragraph classification of about 1,000 paragraphs is declined: it adds a label to every verbatim move the audit already proves, and the paragraphs that matter, the changed ones, are already individually declared.
 
 Verdict: **not ready**.
