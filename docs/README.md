@@ -29,13 +29,9 @@ what each class of page may claim.
   from the wake word to the spoken reply, each concept explained
   before its acronym is used.
 - [**concepts.md**](concepts.md): the domain model from the user's
-  point of view: device, agent, binding, conversation, session, and
-  the decided semantics that connect them (wake word, switching,
-  memory, meta capabilities, the help agent). Deliberately ahead of
-  the code, and explicit about it: every section opens with its
-  status, each decided direction names the issue that owns it, and a
-  direction with no owner says so rather than borrowing authority
-  from the page.
+  point of view, as it runs today: device, agent, binding,
+  conversation, session, and the semantics that connect them (wake
+  word, switching, memory, meta capabilities).
 - [**glossary.md**](glossary.md): the concepts, techniques, and
   technologies the project is built on, one short definition each.
 - [**Reference**](#reference): every command, configuration key, API
@@ -44,10 +40,7 @@ what each class of page may claim.
 ## Use vinga
 
 - [**devices/**](devices/): one guide per board vinga targets,
-  describing the hardware in front of you. These guides are also the
-  knowledge source the planned built-in help agent reads to explain
-  the device it is speaking through, which is why they are reviewable
-  markdown rather than prompt text.
+  describing the hardware in front of you.
 - [**The common page**](devices/README.md): what every board running
   the upstream firmware shares: listening modes, networks, getting a
   board onto your server, and what the device answers by voice.
@@ -146,7 +139,7 @@ that builds it.
 | **Device behavior** | [`devices/`](devices/), one guide per board; the browser client's guide is #613 | the Use door | the same guides |
 | **State**: what this deployment has, what is missing, the next command | `vinga info` reports which deployment this is and how much of each kind is configured; a readiness model that names what is missing is #611 | `vinga info` | `vinga info` |
 | **Procedures**: how to do one task | the Run door's pages today; one task guide per task is #609 | the Run door | the same pages; the coding-agent guide's index is #611 |
-| **Direction**: decided, not built | its owning issue or record; unowned direction is marked as such on [`concepts.md`](concepts.md) until #609 gives it a Develop-door page | the Develop door | not read |
+| **Direction**: decided, not built | its owning issue or record; direction nobody owns is recorded, dated, on [`architecture/direction.md`](architecture/direction.md) | the Develop door | not read |
 
 ## Authority
 
@@ -195,10 +188,7 @@ diagram sources and renders they describe),
 [project](../README.md), the [server](../vinga-server/README.md), and
 the [firmware](../vinga-esp32/README.md). Such a page may summarize an
 authoritative source and link it; it may not quietly become a second
-one. [`concepts.md`](concepts.md) is the one that also carries
-decided direction, and it stays inside this class by marking every
-such claim with the record that owns it, or by saying plainly that
-nothing owns it yet.
+one.
 
 **Generated references** are rendered from the code and diffed by CI,
 so they cannot come to describe a server this repository does not
