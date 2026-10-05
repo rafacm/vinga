@@ -371,8 +371,15 @@ is rewritten in the same PR as the section it names, so no merged state
 has a link pointing at a removed anchor. Two exceptions, by mechanism:
 `events_docgen.py`'s `LOGGING_SECTION` changes in M3d and
 `docs/reference/events.md` is regenerated, never hand-edited; and
-`CHANGELOG.md` L3386 is retargeted by a documentation commit straight
-to `main` after M3a merges, since a pull request may not edit it.
+`CHANGELOG.md` L3386, which a pull request may not edit and the link
+checker does not scan. So that `main` never holds it broken, M3a leaves
+a forwarding stub in the README: the `## Running in a container`
+heading, kept so its anchor resolves, over one sentence linking
+`docs/run/running-in-a-container.md`. Once M3a has merged, a
+documentation commit straight to `main` retargets the changelog link to
+the guide, and M3b deletes the stub (its "On this page" entry with it),
+confirming first with `git grep -n 'README.md#running-in-a-container'`,
+untruncated, that nothing links the anchor any more.
 
 **D11. Two by-name mentions stay.** The column comment "the event
 vocabulary the README's table defines" in
@@ -761,6 +768,8 @@ Reviewed 2026-10-05 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted. D8b reorders `recovering-a-deployment.md`: what the rebuild needs in hand and a `pg_dump` first, then the choice between the domain-only reset and dropping the whole database stated as a choice, then each path's commands with what they destroy said before they run.
 
 7. **P2: M3a leaves a broken changelog link on `main`.** D10 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:321`) retargets it only *after* M3a merges, although the old Running in a container link (`CHANGELOG.md:3386`) loses its anchor in M3a. The link checker does not scan `CHANGELOG.md`. **Instead:** retain a small forwarding anchor in the server README through M3a, retarget the changelog, then remove the anchor in a later milestone.
+
+   *Resolution:* Accepted. M3a leaves a forwarding stub (the `## Running in a container` heading over one sentence linking the guide), a documentation commit to `main` retargets the changelog link after M3a merges, and M3b deletes the stub once an untruncated `git grep` shows nothing links the anchor.
 
 8. **P2: A current schema description knowingly becomes false.** D11 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:330`) leaves the live column comment (`vinga-server/src/vinga_server/conversations/schema.py:774`) saying the README's table defines event names after M3d removes that table. The migration's historical text can stay. **Instead:** update the current schema comment and its generated reference to name the event reference, with the database-comment migration needed to keep installed schemas accurate.
 
