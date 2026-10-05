@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-10-06
+
+### Changed
+
+- **The documentation index opens with three doors** (#609). `docs/README.md` now starts with Run vinga, Use vinga and Develop vinga, each a short list of the pages for that job, followed by the generated references they share and a table saying where each kind of knowledge lives; the rules for what each class of page may claim follow behind them, unchanged. Every page the index linked before is still linked from it.
+
 ## 2026-10-05
 
 ### Changed
