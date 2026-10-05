@@ -248,13 +248,6 @@ agent is a [handover](glossary.md#handover).
 
 ## Conversation and session
 
-**Implemented today**: the session, the Conversation as a durable,
-agent-scoped thread, the stored record of all three, reading and
-deleting either entity, resuming a thread by describing it, and the
-consented recap of one too long to resume whole (issues #120 and
-#190). What issue #190 leaves out of its own scope stays direction and
-says so where it appears below.
-
 The load-bearing distinction in the model is that a conversation and a
 session are different things.
 
@@ -287,140 +280,119 @@ rather than the session's age.
 
 In short: sessions are how audio reaches the server; conversations are
 what accumulates and what you come back to. The vocabulary follows the
-same split (issue #190): a session is a connection record, and a
-conversation is a thread. "Sophia... let me talk to Nadia... back to
-Sophia" is one session touching two threads; resuming with Sophia
-tomorrow from another device is the same thread in a new session.
+same split: a session is a connection record, and a conversation is a
+thread. "Sophia... let me talk to Nadia... back to Sophia" is one
+session touching two threads; resuming with Sophia tomorrow from another
+device is the same thread in a new session.
 
-The two are projections of the same rows rather than two stores (issue
-#190), and that is implemented. A turn references both the thread it
-belongs to and the session it was spoken in, so the session view
-(everything said and done on this device from wake to close) and the
-conversation view (this thread, across every session it spanned) are
-two readings of one set of turns. No dialogue is written twice, and
-neither view is reconstructed from the other.
+The two are projections of the same rows rather than two stores. A turn
+references both the thread it belongs to and the session it was spoken
+in, so the session view (everything said and done on this device from
+wake to close) and the conversation view (this thread, across every
+session it spanned) are two readings of one set of turns. No dialogue is
+written twice, and neither view is reconstructed from the other.
 
-Two things sit beside that record rather than inside it. Capture and
-the structured event stream are scoped to a session, never to a thread,
-and that is implemented today. And a turn that is only a meta request
-("increase the volume to 9") is session work rather than dialogue with
-an agent, so it belongs to the session and to no thread; the honest
-edge is that a mixed turn ("set the volume to 9, and what were we
-saying?") belongs to the thread. That recording rule is **decided
-direction** (recorded on this page, 2026-08-21; no owning issue or
-decision record yet).
+Capture and the structured event stream sit beside that record rather
+than inside it: both are scoped to a session, never to a thread.
 
 The split is what makes the desired behaviors ordinary instead of
 special cases:
 
-- **Switching and returning.** "Let me talk to Nadia" leaves the
-  current thread and opens or resumes one with Nadia inside the same
-  session; "back to Sophia" returns. The switch exists today as the
-  handover tool, and so do the threads: the first activation of an
-  agent in a session opens one and every later activation continues it,
-  so the record of that session names two of them: the handover turn
-  belongs to the thread it started on, and the greeting the incoming
-  agent answers with is the first turn of its own thread. The incoming
-  agent starts clean, which the last bullet below states.
-- **Resuming elsewhere.** *Implemented today, issue #190.* A new
-  session on another device attaches to an existing thread. Discovery
-  is by spoken description ("a while ago we were talking about this
-  topic") and is agent-scoped: an agent finds its own past threads and
-  no other agent's, and it can only pick up one it has just offered.
-  The thread it picks up carries the agent's tool exchanges as well as
-  what was said (*implemented today, issue #599*): every call that had
-  its result is rebuilt from the store, round by round, and later
-  replies treat it exactly as they treat one made in the same session,
-  as the tool-exchanges bullet below describes. The exchanges count
-  against the resumption budget, each at no less than the size of the
-  plain-text record it could become, so a thread whose agent used tools
-  is read less far back than one that only talked.
-- **Cost.** "How much has this conversation cost so far" wants cost to
-  be a property of the thread. The usage such a number would be read
-  from is **implemented today, issue #439**: `record.metrics_tokens_daily`
-  counts tokens per day and per agent, attributed leg by leg across a
-  handover, and [the metrics views
-  reference](reference/metrics-views.md) says what each column means.
-  What is still **decided direction** is the rest of the sentence
-  (recorded on this page, 2026-08-21): issue #190 explicitly leaves
-  budgets and per-conversation accounting out of its scope, and the cost
-  direction is recorded there: usage is counted in tokens, and currency
-  is at most an optional price map over it. Reading those tokens without
-  a SQL client is **implemented today, issue #440**: `vinga metric show
-  tokens` answers them over a window of whole UTC days, and `--group
-  device` breaks the same numbers down by the board they were spent on.
-  The accounting itself still awaits users.
+- **Switching and returning.** "Let me talk to Nadia" leaves the current
+  thread and opens or resumes one with Nadia inside the same session;
+  "back to Sophia" returns. The switch exists today as the handover
+  tool, and so do the threads: the first activation of an agent in a
+  session opens one and every later activation continues it, so the
+  record of that session names two of them: the handover turn belongs to
+  the thread it started on, and the greeting the incoming agent answers
+  with is the first turn of its own thread. The incoming agent starts
+  clean, as "A switch starts clean by default" below states.
+- **Resuming elsewhere.** A new session on another device attaches to an
+  existing thread. Discovery is by spoken description ("a while ago we
+  were talking about this topic") and is agent-scoped: an agent finds
+  its own past threads and no other agent's, and it can only pick up one
+  it has just offered. The thread it picks up carries the agent's tool
+  exchanges as well as what was said: every call that had its result is
+  rebuilt from the store, round by round, and later replies treat it
+  exactly as they treat one made in the same session, as the
+  tool-exchanges bullet below describes. The exchanges count against the
+  resumption budget, each at no less than the size of the plain-text
+  record it could become, so a thread whose agent used tools is read
+  less far back than one that only talked.
 
-The decided semantics, each with its owner:
+Usage is counted in tokens, per day and per agent rather than per
+conversation: `record.metrics_tokens_daily` counts them, attributed leg
+by leg across a handover, and
+[the metrics views reference](reference/metrics-views.md) says what each
+column means. Reading them needs no SQL client: `vinga metric show
+tokens` answers them over a window of whole UTC days, and `--group
+device` breaks the same numbers down by the board they were spent on.
 
-- **A switch lasts for the session.** *Implemented today.* The next
-  wake of the device gets its default agent again, because the binding
-  is resolved at connect and carries no memory of the last session, so
-  the wake experience stays predictable.
+The decided semantics:
+
+- **A switch lasts for the session.** The next wake of the device gets
+  its default agent again, because the binding is resolved at connect
+  and carries no memory of the last session, so the wake experience
+  stays predictable.
 - **A new activation starts a fresh thread, and resumption is always
-  explicit.** *Implemented today, issue #190.* Waking a device does not
-  silently drop the user back into whatever was being discussed
-  yesterday; continuing an earlier thread is asked for, by describing
-  it. This replaces an earlier formulation on this page under which
-  conversations were suspended and never ended.
-- **Retention knows about threads.** *Implemented today, issue #190.*
-  The window is measured against a conversation's last activity rather
-  than a session's age, so a thread that is still being talked to keeps
-  its turns however old the session that began it, and a thread past
-  the window goes whole. Exactly what the three rules do is in
+  explicit.** Waking a device does not silently drop the user back into
+  whatever was being discussed yesterday; continuing an earlier thread
+  is asked for, by describing it. This replaces an earlier formulation
+  on this page under which conversations were suspended and never ended.
+- **Retention knows about threads.** The window is measured against a
+  conversation's last activity rather than a session's age, so a thread
+  that is still being talked to keeps its turns however old the session
+  that began it, and a thread past the window goes whole. Exactly what
+  the three rules do is in
   [the store's reference](reference/conversations-schema.md#retention-and-deletion).
-- **Threads are listable, readable and deletable.** *Implemented
-  today, issue #190.* An operator lists an agent's threads, reads one
-  with its dialogue, and deletes one, over `/api/conversations` or with
-  `vinga conversation list|show|delete` in front of it. Deleting a
-  thread takes its turns out of whatever sessions they were spoken in
-  and leaves those sessions standing with a gap, which is the opposite
-  direction from deleting a session; neither ever comes back.
-- **A long thread gets a recap only by consent.** *Implemented today,
-  issue #190.* When a thread is longer than the agent can be given at
-  once, it offers a choice rather than silently compressing: a short
-  recap of the whole of it, or carrying on from the recent part. If the
-  user says yes, the agent speaks the recap itself and only then is it
-  kept, as a checkpoint the conversation is rebuilt from afterwards; a
-  recap the user did not hear to the end is never stored, and the next
-  resume offers the same choice again. Declining stores nothing. This
-  replaces an earlier formulation on this page, which warned about
-  length and offered to summarize and start fresh from the summary.
-- **Resumption is a deployment switch, and it needs the text.**
-  *Implemented today, issue #190.* A thread cannot be resumed from rows
-  that were never written, so resumption is available only where
-  conversation text is stored, which is one of the two switches
+- **Threads are listable, readable and deletable.** An operator lists an
+  agent's threads, reads one with its dialogue, and deletes one, over
+  `/api/conversations` or with `vinga conversation list|show|delete` in
+  front of it. Deleting a thread takes its turns out of whatever
+  sessions they were spoken in and leaves those sessions standing with a
+  gap, which is the opposite direction from deleting a session; neither
+  ever comes back.
+- **A long thread gets a recap only by consent.** When a thread is
+  longer than the agent can be given at once, it offers a choice rather
+  than silently compressing: a short recap of the whole of it, or
+  carrying on from the recent part. If the user says yes, the agent
+  speaks the recap itself and only then is it kept, as a checkpoint the
+  conversation is rebuilt from afterwards; a recap the user did not hear
+  to the end is never stored, and the next resume offers the same choice
+  again. Declining stores nothing. This replaces an earlier formulation
+  on this page, which warned about length and offered to summarize and
+  start fresh from the summary.
+- **Resumption is a deployment switch, and it needs the text.** A thread
+  cannot be resumed from rows that were never written, so resumption is
+  available only where conversation text is stored, which is one of the
+  two switches
   [the store's reference](reference/conversations-schema.md) describes.
-  A configuration that asks for resumption with recording or text off
-  is refused at boot, in a sentence naming both keys.
-- **A switch starts clean by default.** *Implemented today, issue
-  #190*, as the fresh-thread default applied to a handover. The
-  incoming agent does not read what was said to the outgoing one.
-  Agents are scoped on purpose, and a switch that silently handed the
-  whole session to the incoming agent would leak around that scoping;
-  it would also move words spoken to a local agent to whatever provider
-  the incoming agent uses. What the incoming agent starts with is a
-  fixed instruction to greet and carry on, and switching back returns
-  the agent to its own thread with what it said on it. Carrying context
-  deliberately (phrasing that asks for continuation, "ask Nadia about
-  this", with the agent asking rather than guessing when the phrasing
-  is ambiguous) is the part that remains **decided direction**.
-- **An agent keeps its own tool exchanges.** *Implemented today, issue
-  #599.* Every tool call an agent makes and the result it got stay in
-  its thread's history for the rest of the conversation, builtins, MCP
-  and device tools alike, so a later reply can answer from a fact it
-  saved or a value it read earlier without asking again. A
-  conversation resumed in a later session rebuilds them from the
-  store, as "Resuming elsewhere" above describes. A call is
-  kept as soon as it has its result, even when the reply it belongs to
-  is cut short or fails afterwards. In the reply that made a call the
-  model sees the result whole; on later replies a result over 2 KiB is
-  replaced by a short note naming the tool and the size, which the
-  model can act on by calling the tool again. A past call to a tool the
-  agent is no longer offered (an MCP server removed by a reload, a name
-  the model invented) is turned into a plain-text record of the call
-  and its result, so no provider is handed a call to a tool it was not
-  given. A handover does not carry them: the incoming agent starts
+  A configuration that asks for resumption with recording or text off is
+  refused at boot, in a sentence naming both keys.
+- **A switch starts clean by default**, as the fresh-thread default
+  applied to a handover. The incoming agent does not read what was said
+  to the outgoing one. Agents are scoped on purpose, and a switch that
+  silently handed the whole session to the incoming agent would leak
+  around that scoping; it would also move words spoken to a local agent
+  to whatever provider the incoming agent uses. What the incoming agent
+  starts with is a fixed instruction to greet and carry on, and
+  switching back returns the agent to its own thread with what it said
+  on it.
+- **An agent keeps its own tool exchanges.** Every tool call an agent
+  makes and the result it got stay in its thread's history for the rest
+  of the conversation, builtins, MCP and device tools alike, so a later
+  reply can answer from a fact it saved or a value it read earlier
+  without asking again. A conversation resumed in a later session
+  rebuilds them from the store, as "Resuming elsewhere" above describes.
+  A call is kept as soon as it has its result, even when the reply it
+  belongs to is cut short or fails afterwards. In the reply that made a
+  call the model sees the result whole; on later replies a result over 2
+  KiB is replaced by a short note naming the tool and the size, which
+  the model can act on by calling the tool again. A past call to a tool
+  the agent is no longer offered (an MCP server removed by a reload, a
+  name the model invented) is turned into a plain-text record of the
+  call and its result, so no provider is handed a call to a tool it was
+  not given. A handover does not carry them: the incoming agent starts
   clean, as above.
 
 ## Configuration changes arrive as whole worlds
