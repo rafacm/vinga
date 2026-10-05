@@ -485,14 +485,18 @@ Pages are this plan's modules; the reader is the caller.
 - **M3's coverage check, per PR.** A move is proven by showing every
   paragraph left the README for exactly one place, not by reading
   4,000 lines. Each M3 PR runs this from its worktree, writes the
-  output under `.logs/`, and quotes the summary and the full list of
-  non-verbatim paragraphs in the PR body:
+  output under `.logs/`, and quotes its output in the PR body. The
+  output names a paragraph by its position and a short digest and
+  never by its bytes, so a credential somebody once pasted into the
+  README is not republished into a log or a PR body by the tool that
+  audits the move:
 
   ```python
   # coverage.py OLD_README NEW_README DEST... : every paragraph of
   # OLD_README must appear, whitespace-normalized, in NEW_README or a
   # DEST. Prints the totals and each paragraph that does not, by its
-  # first 100 characters.
+  # position and the first 12 hex digits of its SHA-256.
+  import hashlib
   import sys
 
   def paragraphs(text):
@@ -514,17 +518,17 @@ Pages are this plan's modules; the reader is the caller.
   pool = "\n".join(
       " ".join(open(p, encoding="utf-8").read().split()) for p in sys.argv[2:]
   )
-  missing = [p for p in old if p not in pool]
+  missing = [(i, p) for i, p in enumerate(old, 1) if p not in pool]
   print(f"{len(old)} paragraphs, {len(old) - len(missing)} verbatim, {len(missing)} not")
-  for p in missing:
-      print("-", p[:100])
+  for i, p in missing:
+      print(f"- paragraph {i}: {hashlib.sha256(p.encode()).hexdigest()[:12]}")
   ```
 
   `OLD_README` is `git show <base>:vinga-server/README.md`. Every
   non-verbatim paragraph is one the PR edited on purpose (a rewritten
   link, a replaced option table, a demoted heading, a new intro), and
-  the PR body says which, so the reviewer reads those and not the
-  verbatim moves.
+  the PR body says what each numbered paragraph became, so the reviewer
+  reads those in the diff and not the verbatim moves.
 
 ## Risks
 
@@ -663,6 +667,8 @@ Reviewed 2026-10-05 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted. D8a rewrites both examples as they move to pass the credential to curl on standard input as a config file written by the shell's builtin `printf` (`curl -K -`), and makes each M3 PR grep its moved text for any other secret-named variable expanded into an argument. Security fixes are named as an exemption from the verbatim rule.
 
 2. **P1: The move audit republishes source text.** The proposed audit prints the first 100 characters of every unmatched paragraph and puts that list in the PR body (plan, Tests (`docs/plans/2026-10-05-three-doors-and-task-guides.md:461`)). An accidentally pasted credential would gain a second exposure in logs and review. **Instead:** report a paragraph number and digest, never its bytes; inspect changed prose in the review diff.
+
+   *Resolution:* Accepted. The audit now names an unmatched paragraph by its position and the first 12 hex digits of its SHA-256, never by its bytes; the PR body says what each numbered paragraph became and the reviewer reads the changed prose in the diff.
 
 3. **P1: A Run page can bypass the new check.** Plan D3 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:196`) explicitly accepts that a server-only PR can change the Run-door `vinga-server/README.md` without running the check. The workflow filters (`.github/workflows/docs.yml:26`) confirm it. That contradicts the issue's "every Run and Use page" requirement. **Instead:** run the check in the server workflow too until M3d moves that README to Develop.
 
