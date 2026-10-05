@@ -14,6 +14,10 @@ updated [`deploy/postgres-init.sql`](../../deploy/postgres-init.sql),
 then boot. Every statement in the file is written to be run again, so a
 rerun over a database that already has everything is a no-op.
 
+It runs the way it ran the first time, under
+[Providing the database](database.md#the-configuration-database-in-a-deployment),
+with the same service file and password file.
+
 **Set `VINGA_API_SECRET` before rolling the image, not after.** The API
 is always mounted and always gated, so an image from this release
 started without that variable does not come up. It is the one upgrade

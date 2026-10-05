@@ -11,6 +11,9 @@ security defaults, conversation behavior and observability are in the
 
 ## Deploying
 
+- [Providing the database](database.md): the Postgres a deployment
+  brings, what the server role needs, the provisioning file, and
+  reading the conversation record as `vinga_ro`.
 - [Running vinga in a container](running-in-a-container.md): the
   single container and what it needs, one replica, the two mounts, and
   which image variant and tag to deploy.
