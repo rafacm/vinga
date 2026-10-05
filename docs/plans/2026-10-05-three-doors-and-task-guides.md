@@ -289,7 +289,7 @@ not the rule):
 | Device L216-220: board catalog with "a machine-readable sibling serves the server" | Rewritten to what exists, the per-board guides; the catalog is #96's (no catalog exists under `src/`) |
 | Device L222-226: "The help agent reads all three" | Help-agent sentence deleted (owned: #612); the observation-not-control point kept |
 | Binding L267-270: changing a device's default by voice | Moved to `direction.md` (#612 and #615 decision 5 both say configuration by voice waits for #606; neither owns it) |
-| Conversation and session L274-279 status, every "(issue #190)", "(issue #599)" | References dropped, facts kept |
+| Conversation and session L274-279 status ("issues #120 and #190"), every other "(issue #190)", "(issue #599)" | References dropped, facts kept |
 | L326-334: recording rule for meta turns | Moved |
 | Cost bullet L361-375: per-conversation cost, the tokens-then-price-map shape, "accounting awaits users" | Current facts kept (`record.metrics_tokens_daily`, `vinga metric show tokens`); the rest moved |
 | L427-430: carrying context deliberately across a switch | Moved |
@@ -301,6 +301,17 @@ not the rule):
 | The help agent L649-677 | Section deleted (owned: #612); the glossary link to it removed in the same commit |
 | Before users arrive L679-701 | Renamed **Who the user is**, current limitation kept; users, budgets, voiceprint deleted (owned: #606, #608) except budget enforcement, which #606 lists out of scope, moved |
 | L703-715: users do not bring a session (2026-09-23) | Moved; #606's body does not cover it |
+
+The table works by passage; the references, by line, so that each of
+the 31 is accounted for (`grep -noE '#[0-9]+' docs/concepts.md`,
+untruncated, at `3073d08b`): L121 #40; L215 #96; L277 #120 and #190;
+L278 #190 twice; L313, L319, L348 #190; L354 #599; L363 #439; L368
+#190; L372 #440; L384, L389, L396, L403, L413, L420 #190; L432 #599;
+L489 #112; L527 #314; L597 #83; L634, L644 #190; L646 #439 and #440;
+L651, L668 #21; L675 #93; L697 #439; L698 #440. Each sits in a passage
+of the table above and goes with that passage's disposition: dropped
+with its fact kept, or gone with its deleted or moved passage. The
+check is the backstop: M2's tree passes it only with all 31 gone.
 
 `concepts.md`'s **Date** line becomes the M2 date. Its "On this page"
 list follows the sections.
@@ -1137,6 +1148,8 @@ Instead: name a migration test that upgrades a database stamped at `1010_turns_n
 7. **P2: The concepts inventory omits an existing issue reference.**
 Evidence: `docs/concepts.md:277-278` cites both #120 and #190. D5's Conversation-and-session inventory only dispositions #190 and #599 references. This fails the requested line-by-line inventory despite M2's global requirement to remove every issue reference.
 Instead: add #120 to D5 with its disposition, and make the inventory explicitly account for every matched reference, not merely the common issue numbers.
+
+   *Resolution:* Accepted. The D5 row names #120 beside #190 at L277, and D5 now lists all 31 references by line from an untruncated grep, each tied to the passage whose disposition it follows; the check, which M2's tree must pass, is the backstop for any the list missed.
 
 8. **P2: D8 permits broad verbatim copying of generated-reference facts.**
 Evidence: the issue requires guides to link facts in `docs/reference/` and `concepts.md` rather than restate them. D8 only removes certain all-contract tables/lists, then says "Every other paragraph moves verbatim." This would preserve current configuration and API contract claims in guides whenever they occur as prose rather than a fully eligible table.
