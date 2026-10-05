@@ -608,7 +608,11 @@ Pages are this plan's modules; the reader is the caller.
   `docs/contributing.md`: an operator or a coding agent stops having to
   search a 4,176-line page for one procedure, and a new feature's how-to
   gets a page an index lists rather than another README section. The
-  README becomes the package's own page. No seam, no code module.
+  README becomes the package's own page. One code module,
+  `scripts/audit_doc_move.py` (M3a): a reviewer of a page move stops
+  having to read every moved line to know nothing was lost, because the
+  committed mapping and the audit's exit say so, leaving only the
+  declared edits to read.
 
 ## Tests
 
@@ -657,9 +661,10 @@ Pages are this plan's modules; the reader is the caller.
   database subsection, L3480-3677, to five). Each M3 PR writes a mapping
   file, one unit per line, `LINE<TAB>DESTINATION` or
   `LINE<TAB>FIRST-LAST<TAB>DESTINATION` with `LINE` the heading's line
-  at the PR's base and the paragraph numbers read off `--list`; runs the
-  script from its worktree; keeps the mapping and the output under
-  `.logs/`; and quotes the output in the PR body. The output names a
+  at the PR's base and the paragraph numbers read off `--list`; commits
+  the mapping as `docs/plans/2026-10-05-three-doors-and-task-guides-moves/m3<x>.tsv`
+  (a dated record of what moved where, beside the plan); runs the audit;
+  keeps its output under `.logs/`; and quotes it in the PR body. The output names a
   mapping row, a paragraph position, a source line and a digest, and
   never a byte of the README, headings included:
 
@@ -793,6 +798,44 @@ Pages are this plan's modules; the reader is the caller.
   exception covers the heading and nothing under it. A `README` unit
   that names more than its heading is refused by the audit (finding 5's
   resolution makes that a test).
+
+  **The audit is committed, tested and fails closed.** The listing above
+  is the prototype, run as described. M3a commits it as
+  `scripts/audit_doc_move.py` (stdlib only, the link checker's
+  neighbour) with its tests in
+  `vinga-server/tests/unit/test_audit_doc_move.py`, written first and
+  watched failing, and with these changes:
+
+  - **Exit policy.** Exit 0 only when every paragraph of every unit is
+    accounted for: found verbatim in its destination, or declared. Any
+    undeclared "not verbatim", any "left behind", any paragraph named
+    by two units, and any declaration that does not match what it
+    declares exits 1. A bad invocation or an unreadable mapping exits 2.
+  - **Declared edits.** A fourth mapping column, `edited=P,P,...`,
+    lists the positions in a unit that are expected not to be
+    verbatim (a rewritten link, a replaced table, a reworded claim,
+    D8b's reorder); each is printed as `declared edited` and does not
+    fail, and a declared position that is in fact verbatim fails, so a
+    declaration cannot go stale silently. Destination `DROP` declares a
+    unit removed on purpose (D13's release notes, now links), printed as
+    `declared dropped`. Destination `README` declares a kept unit as
+    above, and fails when it names more than one paragraph or a
+    paragraph that is not a heading.
+  - **Tests**, one per planted fault the prototype was run against and
+    one per new rule: a clean split passes; a paragraph missing from a
+    split unit's destination fails; a section also left in the README
+    fails; a paragraph occurring twice with one copy moved fails;
+    overlapping units fail; a credential-shaped sentinel in a heading
+    and in a body paragraph is absent from the output in both the pass
+    and the fail case; a declared edit passes and a stale one fails;
+    `DROP` passes; a `README` unit naming its heading passes, one naming
+    a body paragraph fails, and procedure text left under a kept
+    heading still fails as left behind.
+
+  It is not a CI step: it compares a branch with its base, which no
+  workflow run has in the shape a PR's mapping names. Each M3 PR runs it
+  and quotes the exit and the output. It stays after M3d as the tool for
+  any later move of a large page.
 
   The script was run before this plan was amended, against the README
   at `3073d08b`: splitting `## Tools` into five units across three
@@ -931,8 +974,8 @@ Pages are this plan's modules; the reader is the caller.
   "an edit is stored" into `configuration.md`, `exposing-a-deployment.md`,
   `recovering-a-deployment.md`, `onboarding-a-device.md`,
   `limits-and-probes.md`, Transports into `system-overview.md`, every
-  inbound link and pointer for those sections (D10, D14), the
-  coverage check.
+  inbound link and pointer for those sections (D10, D14), and
+  `scripts/audit_doc_move.py` with its tests, then its first mapping.
 - [ ] **M3b: providers, tools, memory and prompts.** `providers.md`,
   `speech-recognition.md`, `voices.md` (the three option tables per D8),
   `tools-and-mcp.md`, `memory.md`, `agents-and-prompts.md`.
@@ -1074,6 +1117,8 @@ Instead: add an explicit, narrow mapping exception for the forwarding heading, a
 5. **P2: The move audit has no enforceable failure contract or maintained implementation.**
 Evidence: the proposed `coverage.py` only prints a findings count and then exits successfully, even after "left behind" or overlapping-unit findings. It is not assigned a committed path, tests, or CI step; mappings and output live under ignored `.logs/` (Tests, lines 625-630, 703 onward).
 Instead: make it a committed, single-purpose audit helper with a stated exit policy. Expected edits should be declared mappings; unapproved missing, duplicated, or retained paragraphs must exit nonzero. Add automated tests for the planted faults.
+
+   *Resolution:* Accepted. M3a commits the audit as `scripts/audit_doc_move.py` with unit tests written first, exiting 1 on any undeclared finding. Expected edits are declared in a committed mapping per PR (`edited=` positions, `DROP` and `README` destinations), and a declaration that no longer matches fails. The tests cover every planted fault plus the new rules. It is not a CI step, since it compares a branch with its base; each PR quotes its exit and output.
 
 6. **P2: D11 promises a reversible database migration without testing its reverse path.**
 Evidence: D11 requires a reversible record-chain migration changing an installed column comment. The Tests section only says to run the general integration lane. Existing migration-upgrade coverage uses an explicit baseline, upgrade, database inspection, and downgrade assertion in `vinga-server/tests/integration/test_metrics_views_upgrade.py`.
