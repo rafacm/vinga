@@ -467,7 +467,9 @@ relative to the repository root.
 | Security (hosts reached, device auth, OTA path, exposure, data boundary, telemetry reach) | 2022-2219 | `docs/run/security.md` | M3c |
 | Security: upgrading from `server.local_only` | 2220-2226 | `docs/run/upgrading.md` | M3c |
 | Security: memory is stored on the host and read out to the model | 2228-2245 | `docs/run/memory.md` | M3c |
-| Listening and barge-in; Masking reply latency; When a reply fails; When a model writes a tool call into its speech | 2247-2482 | `docs/run/listening-and-replies.md` | M3d |
+| Listening and barge-in | 2247-2322 | `docs/run/turn-taking.md` | M3d |
+| Masking reply latency; When a reply fails | 2323-2438 | `docs/run/slow-and-failed-replies.md` | M3d |
+| When a model writes a tool call into its speech | 2439-2482 | `docs/system-overview.md`, in Flow 2 (no operator setting; it is behavior to understand) | M3d |
 | Limits (bounds, drain, probes, the first-token watchdog) | 2483-2592 | `docs/run/limits-and-probes.md` | M3a |
 | Logging; Watching a deployment; Exporting traces | 2593-2863 | `docs/run/logs-and-traces.md` | M3d |
 | Capturing a session | 2864-2946 | `docs/run/capturing-a-session.md` | M3d |
@@ -475,7 +477,11 @@ relative to the repository root.
 | The conversation store | 3108-3327 | `docs/run/conversation-store.md` | M3d |
 | Which build is running | 3328-3371 | `docs/run/upgrading.md` | M3a |
 | Running in a container | 3372-3479 | `docs/run/running-in-a-container.md` | M3a |
-| The configuration database in a deployment: provisioning, master key, rotation, backups, restore, reading as `vinga_ro`, "an edit is stored" | 3480-3528, 3576-3677 | `docs/run/database.md` | M3a |
+| The configuration database in a deployment: what the server role needs, `postgres-init.sql`, the rerun-then-boot rule | 3480-3528 | `docs/run/database.md` | M3a |
+| The same: the master key generated and escrowed; rotation | 3576-3605 | `docs/run/security.md` | M3a |
+| The same: backups, a restore needs both halves, what a copy exposes | 3606-3638 | `docs/run/backups.md` | M3a |
+| The same: reading what was said as `vinga_ro` | 3639-3656 | `docs/run/database.md` (the read-only role it provisions); `conversation-store.md` links it in M3d | M3a |
+| The same: an edit is stored and changes nothing until applied | 3658-3676 | `docs/run/configuration.md` | M3a |
 | The same: this release's and the previous release's upgrade notes | 3529-3575 | `docs/run/upgrading.md`, or a link to the `CHANGELOG.md` entry that already says it (D13) | M3a |
 | The configuration API in a deployment: set the secret before rolling | 3684-3693 | `docs/run/upgrading.md` | M3a |
 | The same: `/api/` at the edge; loopback or TLS | 3695-3727 | `docs/run/exposing-a-deployment.md` | M3a |
@@ -487,7 +493,18 @@ relative to the repository root.
 | Status | 4166-4176 | stays (D9) | |
 
 Line ranges are at `3073d08b` and move as earlier PRs remove sections;
-each PR re-derives its ranges by heading, never by these numbers.
+each PR re-derives its ranges by heading, never by these numbers. The
+first PR whose rows name a guide creates it, with the D8 opening; a
+later PR's rows extend it. So M3a creates `security.md` and
+`configuration.md` with one section each, and M3c fills them.
+
+Each guide is one task with one end state for its reader: `database.md`
+is providing and connecting the database, `backups.md` is taking and
+restoring one, `turn-taking.md` is tuning when a turn ends and what may
+interrupt a reply, `slow-and-failed-replies.md` is configuring what an
+agent says while a reply is slow or after it fails. Behavior with no
+operator setting of its own (a tool call written into speech is
+withheld) is explanation, and goes to `system-overview.md`.
 
 **D13. Per-release upgrade notes.** L3529-3575 describe what two past
 releases asked of an operator (the `memory` schema's rerun, stop before
@@ -520,7 +537,7 @@ Pages are this plan's modules; the reader is the caller.
   does. `scripts/check_run_use_pages.py`: a page author stops having to
   know which pages the current-only rule covers, because the door lists
   in `docs/README.md` are the list.
-- **M3a to M3d** add `docs/run/` (an index and twenty-one guides) and
+- **M3a to M3d** add `docs/run/` (an index and twenty-three guides) and
   `docs/contributing.md`: an operator or a coding agent stops having to
   search a 4,176-line page for one procedure, and a new feature's how-to
   gets a page an index lists rather than another README section. The
@@ -725,7 +742,8 @@ Pages are this plan's modules; the reader is the caller.
   the research-notes class), `docs/architecture/README.md` (a line for
   the direction page), `.github/workflows/docs.yml` and
   `.github/workflows/vinga-server.yml` (the steps).
-- **M3a:** `docs/run/README.md` and its seven guides, `docs/system-overview.md`
+- **M3a:** `docs/run/README.md` and its eight guides, the first
+  section of `security.md` and of `configuration.md`, `docs/system-overview.md`
   (Transports), the server README, `docs/README.md` (the Run door and
   the maintained-maps class name `docs/run/`), `docs/deployment.md`,
   `docs/concepts.md` and `docs/xiaozhi-notes.md` (the onboarding link),
@@ -738,11 +756,13 @@ Pages are this plan's modules; the reader is the caller.
 - **M3b:** the six guides, the server README, the `docs/run/` index,
   the root `README.md` (the `#providers` link), and
   `vinga-server/examples/asr-openai.yaml`.
-- **M3c:** the three guides plus additions to `database.md`,
-  `upgrading.md` and `memory.md`, the server README, the index,
+- **M3c:** `configuration-api.md`, the rest of `configuration.md` and
+  `security.md`, and additions to `database.md`, `upgrading.md` and
+  `memory.md`, the server README, the index,
   `vinga-server/examples/README.md`, and the root `README.md`
   (`#applying-a-change-without-a-restart`).
-- **M3d:** the five guides, `docs/contributing.md`, the server README's
+- **M3d:** the six guides, `docs/system-overview.md` (the withheld
+  tool call), `docs/contributing.md`, the server README's
   end state, the index, `docs/README.md` (the README moves to Develop,
   the contributing page joins it and the maintained-maps class),
   `docs/glossary.md` (`#listening-and-barge-in`), `AGENTS.md` (a link
@@ -767,7 +787,8 @@ Pages are this plan's modules; the reader is the caller.
   glossary; then the index.
 - [ ] **M3a: the task-guide directory and the deployment guides.**
   `docs/run/README.md`, `running-in-a-container.md`, `database.md`,
-  `upgrading.md` (D13), `exposing-a-deployment.md`,
+  `backups.md`, `upgrading.md` (D13), the master key into `security.md`,
+  "an edit is stored" into `configuration.md`, `exposing-a-deployment.md`,
   `recovering-a-deployment.md`, `onboarding-a-device.md`,
   `limits-and-probes.md`, Transports into `system-overview.md`, every
   inbound link and pointer for those sections (D10, D14), the
@@ -775,11 +796,12 @@ Pages are this plan's modules; the reader is the caller.
 - [ ] **M3b: providers, tools, memory and prompts.** `providers.md`,
   `speech-recognition.md`, `voices.md` (the three option tables per D8),
   `tools-and-mcp.md`, `memory.md`, `agents-and-prompts.md`.
-- [ ] **M3c: configuration and security.** `configuration.md`,
-  `configuration-api.md`, `security.md`, and the M3c rows' additions to
-  `database.md`, `upgrading.md` and `memory.md`.
+- [ ] **M3c: configuration and security.** `configuration-api.md`, the
+  rest of `configuration.md` and `security.md`, and the M3c rows'
+  additions to `database.md`, `upgrading.md` and `memory.md`.
 - [ ] **M3d: conversation behavior, observability, and the README's end
-  state.** `listening-and-replies.md`, `logs-and-traces.md`,
+  state.** `turn-taking.md`, `slow-and-failed-replies.md`, the withheld
+  tool call into `system-overview.md`, `logs-and-traces.md`,
   `capturing-a-session.md`, `conversation-cost.md`,
   `conversation-store.md`, `docs/contributing.md`, the README per D9,
   `events_docgen.py` and the regenerated `events.md`, and the D11
@@ -832,6 +854,8 @@ Reviewed 2026-10-05 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted. D8 now states the rule mechanically: a table or list whose every row is a key, route, event field or column the generated reference states is replaced by a link to that section, keeping any row the reference lacks as a sentence. Named instances beyond the three provider tables: the API route listings and response and refusal shapes, the store's column descriptions and the per-event field detail. Worked YAML examples and the event index (when each fires) stay, as explanation.
 
 11. **P2: Two proposed "task guides" fail the one-task and deletion tests.** The M3 map (`docs/plans/2026-10-05-three-doors-and-task-guides.md:372`) makes `database.md` cover provisioning, key rotation, backup, restore and querying, while `listening-and-replies.md` covers barge-in tuning, filler, fallback and model-output filtering. Each largely renames a wide README section without one end state for its reader. **Instead:** separate the operator tasks; place explanatory behavior in `system-overview.md` or `concepts.md`. The direction page, checker, guide index and contributing page have distinct jobs; these two splits need revision.
+
+   *Resolution:* Accepted. `database.md` keeps providing and connecting the database (and the read-only role it provisions); backups and restore become `backups.md`; the master key and its rotation go to `security.md`; "an edit is stored" goes to `configuration.md`. `listening-and-replies.md` splits into `turn-taking.md` and `slow-and-failed-replies.md`, and the withheld tool call, which has no operator setting, moves to `system-overview.md`'s Flow 2. The plan now states each guide's one end state and the rule that the first PR naming a guide creates it.
 
 12. **P2: M2 leaves the Develop index telling readers the old rule.** The architecture index (`docs/architecture/README.md:89`) still says `concepts.md` is ahead of code and has per-section status lines. M2's footprint (`docs/plans/2026-10-05-three-doors-and-task-guides.md:567`) names only a new direction-page line there. **Instead:** update that paragraph in M2 to describe the current-only concepts page and point future direction to its Develop home.
 
