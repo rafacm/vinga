@@ -129,8 +129,8 @@ services:
         # since a server that has just started is not draining and holds
         # no session, which is why nothing here reads /readyz. That probe
         # is for an orchestrator deciding where to send traffic while the
-        # server runs, and the server README says which probe such a
-        # deployment points at what.
+        # server runs, and `docs/run/limits-and-probes.md` says which
+        # probe such a deployment points at what.
         condition: service_healthy
 
     env_file:
