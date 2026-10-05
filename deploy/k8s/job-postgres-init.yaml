@@ -18,10 +18,10 @@
 #     kubectl apply -f deploy/k8s/job-postgres-init.yaml
 #     kubectl wait --for=condition=complete --timeout=5m job/vinga-postgres-init
 #
-# That whole sequence is what the README's upgrade order means by
-# "rerun the provisioning file, then boot": run it before the image tag
-# in deployment.yaml changes, and a Job that fails stops the upgrade
-# with the Deployment untouched.
+# That whole sequence is what the upgrade order in
+# `docs/run/upgrading.md` means by "rerun the provisioning file, then
+# boot": run it before the image tag in deployment.yaml changes, and a
+# Job that fails stops the upgrade with the Deployment untouched.
 #
 # The credentials this needs are not the server's. Creating roles and
 # schemas is an administrative right the serving pod deliberately never

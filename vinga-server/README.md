@@ -53,7 +53,6 @@ request to `/api` carries a bearer token.
 - [Logging](#logging) and [Capturing a session](#capturing-a-session): what a running server says about itself, and how to record a conversation for study.
 - [What a conversation cost](#what-a-conversation-cost): the usage each stage reports, and the model definitions a backend needs before it can price them.
 - [The conversation store](#the-conversation-store): what is kept of a turn after it ends.
-- [Which build is running](#which-build-is-running): how to ask, and why the answer matters.
 - [Running in a container](#running-in-a-container): where the guides for running the image, its database and its exposure, and for onboarding a device, now live.
 - [Onboarding a device](#onboarding-a-device): how a board is given a server and admitted, with no cable where its firmware allows it.
 - [Transports](#transports) and [Ports and topology](#ports-and-topology): what speaks to what, on which port, and what changes behind a reverse proxy.
@@ -3214,50 +3213,6 @@ process killed mid-session leaves behind: it is readable, it is listed,
 and retention prunes it on `started_at` like any other. A line at
 warning level says so when it happens.
 
-## Which build is running
-
-`version` is the package version and has read `0.1.0` since the package
-skeleton. `revision` is which build of it, and it is the field that
-distinguishes one deploy from another.
-
-```console
-$ curl -s localhost:8003/healthz
-{"status":"ok","version":"0.1.0","revision":"a1b2c3d4e5f6"}
-```
-
-**A running pod's revision equals its image tag's suffix**: a container
-from the image tagged `sha-9fd3de5e1c4b` reports `9fd3de5e1c4b`, so a
-post-deploy check is an equality check. CI passes the same twelve
-characters `docker/metadata-action` puts in the tag, computed from one
-expression, so the two cannot drift. It used to pass the full 40-character SHA,
-which made the match a prefix check; a deployment scripted it as
-equality, which is the natural reading, and got a false failure.
-
-It also rides every `session_open` event, which is the widest payoff for
-one field: the JSON logs already ship to a collector, so every session is
-attributable to a build rather than only the ones somebody thought to
-investigate. Two field recordings that behaved differently are otherwise
-indistinguishable from one code change and two different rooms. The OTA
-reply carries it too, under `server`, which is the one place a device is
-told what it is about to talk to.
-
-The value is resolved once at startup, in this order:
-
-1. `VINGA_REVISION`. The published image bakes in the commit its tags
-   are computed from, so `/healthz` and the image's `sha-` tag agree.
-2. `git describe --always --dirty`, which covers running from a working
-   tree. A tree with uncommitted changes reports `-dirty`, because a
-   build running code that is not any commit is exactly when knowing
-   matters.
-3. `unknown`. An image built with no build argument runs and says it does
-   not know; it never fails to start over it.
-
-Building an image yourself:
-
-```console
-docker build --build-arg VINGA_REVISION=$(git rev-parse --short HEAD) -t vinga-server .
-```
-
 ## Running in a container
 
 This has moved to
@@ -3308,59 +3263,6 @@ takes the schemas and the database-local default privileges with it,
 while the instance-level `vinga_ro` role survives, which is why every
 statement in the file is written to be run again.
 
-**Rerun it when a release moves the file, too, before starting the new
-image.** The upgrade order is always the same: rerun the updated
-[`../deploy/postgres-init.sql`](../deploy/postgres-init.sql), then
-boot. Every statement in the file is written to be run again, so a
-rerun over a database that already has everything is a no-op.
-
-This release moves it, because it adds a third schema, `memory`, where
-what an agent was asked to remember is stored. On the privilege
-contract above, the server role has no `CREATE` on the database and
-cannot make a new schema for itself, so an image started before the
-rerun refuses to start with a fixed sentence naming this rerun and
-repeating no part of the connection; the rerun is what makes the next
-start migrate. Nothing already stored is touched: the two schemas that
-are there keep every row, and the new one starts empty. A deployment
-whose server role owns its database creates the schema at boot and
-does not need the rerun for that, though rerunning is still the
-simplest way to be sure the analyst role's grants are what this
-release's file says.
-
-**Stop the running server before starting this image.** This release
-migrates the memory schema into scopes, and the migration renames a
-column `facts` has had since it was created. An older process still
-serving while that runs would fail its next memory statement, so the
-order is stop, then start, rather than start-then-stop. Nothing else
-about the upgrade changes: every fact already stored is carried across
-as it stands, under the scope it always had, and the server migrates
-the schema at boot as it always does. This is a single-server project
-with no rolling upgrade to preserve; a schema change bought with an
-expand-and-contract migration would price a property no supported
-deployment shape uses.
-
-**What the memory files on disk do next is yours to decide.** Memory
-used to be one Markdown file per agent under a `memory:` directory this
-server was told about. That section has retired: a configuration file
-that still carries it refuses the boot and says so. The files
-themselves are left exactly where they are. This release does not read
-them, does not import them, and does not delete them; database memory
-starts empty, so every agent begins the first conversation after the
-upgrade remembering nothing, and each fact is stored again the first
-time it is said. Archiving those files, or removing them, is a
-deliberate act of yours and nothing here will do it for you.
-
-The release before it moved the file too, by renaming the store's
-schema from `conversations` to `record`, and a deployment crossing
-that one needs the rerun whether or not its server role owns the
-database, because nothing else grants `vinga_ro` `SELECT` on the
-renamed schema. The old `conversations` schema is left where it is,
-readable beside the new one until somebody drops it; what is in it does
-not come across, which
-[`CHANGELOG.md`](../CHANGELOG.md) announces and
-[the compatibility record](../docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md)
-prices.
-
 **Reading what was said is a `vinga_ro` session, never the server's.**
 The instance has no reason to be reachable from anywhere but the
 server, so the way in is a port forward for the length of a session,
@@ -3385,17 +3287,6 @@ same reason the server role gets one; the compose default of
 Four more things, about the surface that writes it. What the API is and
 what it serves is under [The configuration API](#the-configuration-api);
 this is what a deployment has to decide about it.
-
-**Set `VINGA_API_SECRET` before rolling the image, not after.** The API
-is always mounted and always gated, so an image from this release
-started without that variable does not come up. It is the one upgrade
-step this change forces, and the boot error is the safety net rather
-than the plan: it names the variable, prints
-`VINGA_API_SECRET=$(openssl rand -hex 32)`, and says where the value
-goes. Generate one, put it wherever the deployment keeps
-`VINGA_AUTH_SECRET` and `VINGA_MASTER_KEY`, and then roll the image.
-`server.api.secret_env` renames the variable for a deployment whose
-convention is another one.
 
 **Decide what happens to `/api/` at the edge.** It is on the same port
 as the device endpoints, because the server is one process, so anything
