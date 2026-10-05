@@ -151,7 +151,7 @@ def test_the_url_is_alone_on_stdout_and_the_advice_is_not(
     assert "device pending claim" in captured.err
 
 
-def test_the_guidance_promises_only_what_the_readme_does(
+def test_the_guidance_promises_only_what_the_guide_does(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The guidance said the board "then shows a six-digit code", full
@@ -159,16 +159,13 @@ def test_the_guidance_promises_only_what_the_readme_does(
     covers every unknown board and produces no code at all. A person
     following both would have waited for a number that was never coming.
 
-    Asserted against the README's own section rather than in isolation,
-    because the failure was not a wrong sentence but two documents
-    saying different things about one behavior.
+    Asserted against the onboarding task guide rather than in
+    isolation, because the failure was not a wrong sentence but two
+    documents saying different things about one behavior.
     """
     section = (
-        (Path(__file__).resolve().parents[2] / "README.md")
-        .read_text(encoding="utf-8")
-        .split("## Onboarding a device")[1]
-        .split("\n## ")[0]
-    )
+        Path(__file__).resolve().parents[3] / "docs" / "run" / "onboarding-a-device.md"
+    ).read_text(encoding="utf-8")
 
     assert cli.main(["ota-url"]) == 0
     printed = capsys.readouterr().err

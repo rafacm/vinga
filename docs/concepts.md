@@ -105,7 +105,7 @@ A device joins a deployment before any of this matters: the board is
 pointed at the server, the server's OTA endpoint answers its check-in,
 and an unclaimed board is claimed through the 6-digit activation
 ceremony. The operator's procedure is in
-[the server README](../vinga-server/README.md#onboarding-a-device) and
+[Onboarding a device](run/onboarding-a-device.md) and
 the wire exchange behind it is in
 [the Xiaozhi notes](xiaozhi-notes.md#activation-the-6-digit-code-ceremony);
 neither is restated here. The word is overloaded, so note which one is
