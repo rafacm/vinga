@@ -26,11 +26,12 @@ More: [Speex/SpeexDSP AEC](https://www.speex.org/docs/manual/speex-manual/node7.
 
 ### Agent
 
-A named configuration of prompt, providers, voice, and
-MCP tools that holds conversations and accrues memory. A device is
-bound to one or more agents; the default answers a fresh wake. Older
-issues say "persona"; new writing says agent. The full domain model
-is on [the concepts page](concepts.md).
+A named configuration of prompt, providers, voice, and MCP tools that
+holds conversations and accrues memory. A device is bound to one or more
+agents; the default answers a fresh wake. Older issues say "persona";
+new writing says agent. Never a [coding agent](#coding-agent), which is
+a different thing that shares the word. The full domain model is on
+[the concepts page](concepts.md).
 
 ### ASR (automatic speech recognition)
 
@@ -113,6 +114,17 @@ track (JSONL), and a manifest (JSON). The reply channel is
 measurement trustworthy. Off by default; recording room
 audio is a deliberate, temporary state. See
 [the regression suite page](conversational-quality-regression-suite.md).
+
+### Coding agent
+
+A program a person runs to work on a vinga deployment or on vinga's
+code, such as Claude Code or Codex: it reads the documentation, runs
+commands and edits files on that person's behalf. It is not an
+[agent](#agent) in vinga's sense, which is always the named
+configuration of prompt, providers, voice and tools that answers at a
+device. The two never share the bare word: a program of this kind is
+written **coding agent** wherever "agent" alone could be read as
+vinga's.
 
 ### Continuation
 
