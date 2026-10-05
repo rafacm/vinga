@@ -397,8 +397,6 @@ The decided semantics:
 
 ## Configuration changes arrive as whole worlds
 
-**Implemented today.**
-
 Editing the domain configuration (an agent, its prompt, a provider
 entry, an MCP server) neither restarts the server nor mutates it in
 place. The server serves immutable states called
@@ -423,19 +421,16 @@ rule in one paragraph.
 
 ## The wake word wakes the device, not an agent
 
-**Implemented today, with one open question marked inline.**
-
-This is settled by hardware reality, and the documentation should say
-it plainly wherever wake words appear. The wake word is spotted on-chip
-and the server takes no part in the decision: it cannot hear, tune, or
+This is settled by hardware reality, and the documentation should say it
+plainly wherever wake words appear. The wake word is spotted on-chip and
+the server takes no part in the decision: it cannot hear, tune, or
 substitute for it, and what it is told is which word fired, after the
 fact.
 [The Xiaozhi notes](xiaozhi-notes.md#the-wake-word-is-spotted-on-the-chip-and-the-server-takes-no-part-in-it)
 describe the detection, the report that carries it, and the firmware
 option that decides whether the buffered trigger audio is sent along
-with it; whether the prebuilt
-images on our boards send that audio has not been checked on the wire
-and is open (issue #112).
+with it; whether the prebuilt images on our boards send that audio has
+not been checked on the wire.
 
 Wake words are also a fixed compiled set, so per-agent wake words are
 impossible on stock firmware, which is
@@ -443,14 +438,11 @@ impossible on stock firmware, which is
 
 So the wake word is the doorbell: it opens a session, and the device's
 default agent answers. When a board's wake word happens to be "Sophia"
-and its default agent is Sophia, that is a pleasing illusion produced
-by configuration, not a mechanism, and it breaks the moment a second
-agent is bound to the device. The help agent knows whether its device
-has a wake word enabled and explains exactly this.
+and its default agent is Sophia, that is a pleasing illusion produced by
+configuration, not a mechanism, and it breaks the moment a second agent
+is bound to the device.
 
 ## Memory
-
-**Implemented today, with the direction marked inline.**
 
 Memory has three scopes, and what tells them apart is whose the
 remembered thing is:
@@ -472,9 +464,9 @@ remembered thing is:
   about a person stays in the agent's own scope.
 
 All three are available in every deployment: there is nothing to switch
-on. They are stored in Postgres, in a schema of the server's own that
-it migrates at every boot (issue #314); the `memory:` section that used
-to name a directory of files has retired with the files.
+on. They are stored in Postgres, in a schema of the server's own that it
+migrates at every boot; the `memory:` section that used to name a
+directory of files has retired with the files.
 
 **What is remembered can be corrected, removed and brought back.**
 Every remembered fact has a number, which `remember` answers with and
@@ -538,21 +530,6 @@ and never learn. Nothing already stored is deleted by switching it off,
 and switching it back on is an agent that remembers what it remembered
 before.
 
-One decided direction builds on the keying:
-
-- **When users arrive the key becomes the (user, agent) pair**, so an
-  agent shared by a household remembers each person separately. This
-  refinement is **decided direction** (recorded on this page,
-  2026-08-21; no owning issue or decision record yet): issue #83 covers
-  neither a user-bearing key nor the profile below.
-
-One deliberate hole in agent isolation is planned: a small shared
-**user profile** (name, language, standing preferences) visible to all
-of a user's agents, so nobody teaches five agents their name five
-times. It is a hole on purpose, and it is documented as one: agents
-stay isolated in what they learn, except for the profile the user chose
-to share with all of them. This is **decided direction** (recorded on
-this page, 2026-08-21; no owning issue or decision record yet).
 
 Agent memory is distinct from what an agent appears to know inside one
 conversation, and the three are easy to conflate. What the assistant
