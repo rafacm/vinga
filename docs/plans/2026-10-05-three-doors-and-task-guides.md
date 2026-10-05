@@ -493,7 +493,14 @@ reference instead, in all three: `schema.py`'s comment, the regenerated
 reference, and a new record-chain migration (the next free `10xx`
 revision) that sets the column comment, so an installed database
 describes itself the way a fresh one does. The migration changes a
-comment and nothing else and is reversible. `1002_conversation_threads.py`
+comment and nothing else and is reversible, which a test proves rather
+than asserts: a new integration test in the shape of
+`tests/integration/test_metrics_views_upgrade.py` upgrades a database
+stamped at the record chain's head before it (`1010_turns_name_their_utterance`
+at `3073d08b`, re-read at M3d's base), reads
+`col_description` for `record.events.name` and asserts the new text,
+downgrades one revision and asserts the old text is back. It is
+watched failing first (the assertion run before the migration exists). `1002_conversation_threads.py`
 (L214) keeps the old text: a migration is history. So does the
 `memory/migrations/versions/2002_memory_scopes.py` docstring.
 
@@ -1123,6 +1130,8 @@ Instead: make it a committed, single-purpose audit helper with a stated exit pol
 6. **P2: D11 promises a reversible database migration without testing its reverse path.**
 Evidence: D11 requires a reversible record-chain migration changing an installed column comment. The Tests section only says to run the general integration lane. Existing migration-upgrade coverage uses an explicit baseline, upgrade, database inspection, and downgrade assertion in `vinga-server/tests/integration/test_metrics_views_upgrade.py`.
 Instead: name a migration test that upgrades a database stamped at `1010_turns_name_their_utterance`, reads `col_description` for `record.events.name`, downgrades, and verifies the prior comment is restored.
+
+   *Resolution:* Accepted. D11 names the test: in the shape of `test_metrics_views_upgrade.py`, upgrade a database stamped at the chain's previous head (`1010_turns_name_their_utterance` at `3073d08b`, re-read at M3d's base), assert the new `col_description` of `record.events.name`, downgrade one revision, assert the old text; watched failing before the migration exists.
 
 7. **P2: The concepts inventory omits an existing issue reference.**
 Evidence: `docs/concepts.md:277-278` cites both #120 and #190. D5's Conversation-and-session inventory only dispositions #190 and #599 references. This fails the requested line-by-line inventory despite M2's global requirement to remove every issue reference.
