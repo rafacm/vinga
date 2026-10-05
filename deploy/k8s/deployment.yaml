@@ -41,8 +41,8 @@
 # `vinga` Secret this references and never from a committed file.
 #
 # The contract this manifest is one implementation of lives in
-# `vinga-server/README.md`, under "Running in a container". This file
-# does not restate it: the agreement test
+# `docs/run/running-in-a-container.md` and the task guides beside it.
+# This file does not restate it: the agreement test
 # (`vinga-server/tests/unit/test_deploy_manifests.py`) reads the port,
 # the probe paths, the drain budget and the image's user id out of the
 # code and the Dockerfile and holds these numbers to them, so a contract
@@ -81,9 +81,9 @@ spec:
       # Above `server.drain_s`, which is 20 s by default. SIGTERM starts
       # a drain that lets conversations in flight finish their sentence,
       # and Kubernetes SIGKILLs whatever is still running when this
-      # expires. The same 30 s the compose files and the README's
-      # `docker stop -t 30` name; a deployment that raises `drain_s`
-      # raises this with it.
+      # expires. The same 30 s the compose files and the container
+      # guide's `docker stop -t 30` name; a deployment that raises
+      # `drain_s` raises this with it.
       terminationGracePeriodSeconds: 30
 
       securityContext:
@@ -119,7 +119,8 @@ spec:
           # committed. Pin an immutable `YYYY-MM-DD-HHmmss` or
           # `sha-<revision>` tag before this runs anywhere real: `latest`
           # is a pointer that moves under a pod that reschedules, and
-          # "Choosing an image" in the server README says the rest.
+          # "Choosing an image" in `docs/run/running-in-a-container.md`
+          # says the rest.
           image: ghcr.io/rafacm/vinga-server:latest
           imagePullPolicy: IfNotPresent
 
