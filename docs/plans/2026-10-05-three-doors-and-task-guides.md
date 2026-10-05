@@ -739,8 +739,14 @@ Pages are this plan's modules; the reader is the caller.
   `docs/architecture/direction.md` (new), `docs/README.md` (the
   concepts exception and description, the help-agent sentence in the
   board-guides annotation, the direction page in the Develop door and
-  the research-notes class), `docs/architecture/README.md` (a line for
-  the direction page), `.github/workflows/docs.yml` and
+  the research-notes class), `docs/architecture/README.md` (its
+  `concepts.md` entry, L89-94, rewritten: the page describes what runs
+  today and carries no status lines, and decided direction lives in its
+  issue or record or, unowned, in the direction page; plus a line for
+  the direction page under "Designing a feature or deciding
+  direction"), and a sweep of every other page that describes
+  `concepts.md` as ahead of the code (`git grep -n -i 'ahead of the
+  code'`, untruncated, outside the dated records), `.github/workflows/docs.yml` and
   `.github/workflows/vinga-server.yml` (the steps).
 - **M3a:** `docs/run/README.md` and its eight guides, the first
   section of `security.md` and of `configuration.md`, `docs/system-overview.md`
@@ -858,5 +864,7 @@ Reviewed 2026-10-05 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted. `database.md` keeps providing and connecting the database (and the read-only role it provisions); backups and restore become `backups.md`; the master key and its rotation go to `security.md`; "an edit is stored" goes to `configuration.md`. `listening-and-replies.md` splits into `turn-taking.md` and `slow-and-failed-replies.md`, and the withheld tool call, which has no operator setting, moves to `system-overview.md`'s Flow 2. The plan now states each guide's one end state and the rule that the first PR naming a guide creates it.
 
 12. **P2: M2 leaves the Develop index telling readers the old rule.** The architecture index (`docs/architecture/README.md:89`) still says `concepts.md` is ahead of code and has per-section status lines. M2's footprint (`docs/plans/2026-10-05-three-doors-and-task-guides.md:567`) names only a new direction-page line there. **Instead:** update that paragraph in M2 to describe the current-only concepts page and point future direction to its Develop home.
+
+   *Resolution:* Accepted. M2's footprint now rewrites the architecture index's `concepts.md` entry (L89-94) to the current-only description with direction pointed at its owner or the direction page, and adds an untruncated sweep for any other page that still calls `concepts.md` ahead of the code.
 
 **Verdict:** Ready after the P1 and P2 amendments.
