@@ -50,8 +50,8 @@ is the project README's [Getting Started](../README.md#getting-started).
 ## The contract
 
 One process, one port, one volume and one database it does not run.
-Everything below is stated by the server README, which is where a
-disagreement is settled.
+Everything below is stated by a task guide under [`run/`](run/README.md),
+which is where a disagreement is settled.
 
 | What a deployment provides | The contract | Stated in |
 | --- | --- | --- |
@@ -716,7 +716,7 @@ proven to speak vinga.
 
 **This page is held to its links.** `scripts/check_doc_links.py`, run
 by the docs workflow, resolves every relative link and heading anchor
-above, so a README section that is renamed out from under this page
+above, so a guide section that is renamed out from under this page
 fails a run rather than becoming a dead pointer. What it cannot check
 is a fact restated instead of linked, which is the reason the contract
 table is links.
