@@ -44,8 +44,10 @@ Beta one.
 ```bash
 echo first
 
-## not a heading, inside a fence
+### not a heading, inside a fence
 echo second
+
+echo third
 ```
 
 ## Gamma
@@ -75,8 +77,10 @@ Beta one.
 ```bash
 echo first
 
-## not a heading, inside a fence
+### not a heading, inside a fence
 echo second
+
+echo third
 ```
 """
 
@@ -208,7 +212,7 @@ def test_a_duplicated_paragraph_needs_both_copies_in_its_destination(
     one_copy = (
         "# All\n\n## Alpha\n\nAlpha one.\n\nSame words.\n\n### Alpha deep\n\n"
         "Alpha three.\n\n## Beta\n\n```bash\necho first\n\n"
-        "## not a heading, inside a fence\necho second\n```\n"
+        "### not a heading, inside a fence\necho second\n\necho third\n```\n"
     )
     done = audit(tmp_path, old, new, mapping, {"docs/all.md": one_copy})
     assert done.returncode == 1
@@ -428,10 +432,15 @@ def test_a_kept_heading_gone_from_the_page_fails(tmp_path: Path) -> None:
 # Bad invocations and bad mappings exit 2, and say nothing of the page
 
 
-def bad(tmp_path: Path, mapping: str, pages: dict | None = None) -> None:
-    done = audit(tmp_path, OLD, WITHOUT_ALPHA_AND_BETA, mapping, pages or {})
+# Every destination a bad mapping could name exists, so the refusal
+# under test is the only reason the run can stop.
+PAGES = {"docs/a.md": "# A\n", "docs/beta.md": BETA_GUIDE}
+
+
+def bad(tmp_path: Path, mapping: str, said: str) -> None:
+    done = audit(tmp_path, OLD, WITHOUT_ALPHA_AND_BETA, mapping, PAGES)
     assert done.returncode == 2, done.stdout + done.stderr
-    assert done.stderr.strip()
+    assert said in done.stderr
     assert "Alpha one" not in done.stderr
     assert_no_traceback(done)
 
@@ -451,44 +460,51 @@ def test_an_unreadable_mapping_exits_2(tmp_path: Path) -> None:
 
 
 def test_an_unreadable_destination_exits_2(tmp_path: Path) -> None:
-    bad(tmp_path, f"{BETA}\tdocs/missing.md\tkinds=procedure\n")
+    bad(tmp_path, f"{BETA}\tdocs/missing.md\tkinds=procedure\n", "cannot read the destination")
 
 
 def test_a_line_that_is_not_a_heading_exits_2(tmp_path: Path) -> None:
-    bad(tmp_path, f"{line_of(OLD, 'Alpha one.')}\tdocs/a.md\tkinds=procedure\n")
+    one = line_of(OLD, "Alpha one.")
+    bad(tmp_path, f"{one}\tdocs/a.md\tkinds=procedure\n", f"line {one} is not a heading")
 
 
 def test_a_line_that_starts_no_paragraph_exits_2(tmp_path: Path) -> None:
-    bad(tmp_path, f"{line_of(OLD, 'echo second')}\tdocs/a.md\tkinds=procedure\n")
+    inside = line_of(OLD, "echo second")
+    bad(tmp_path, f"{inside}\tdocs/a.md\tkinds=procedure\n", "starts no paragraph")
 
 
 def test_a_mapping_with_no_unit_exits_2(tmp_path: Path) -> None:
-    bad(tmp_path, "# nothing moved\n\n")
+    bad(tmp_path, "# nothing moved\n\n", "names no unit")
 
 
 def test_a_unit_without_kinds_exits_2(tmp_path: Path) -> None:
-    bad(tmp_path, f"{BETA}\tdocs/beta.md\n", {"docs/beta.md": BETA_GUIDE})
+    bad(tmp_path, f"{BETA}\tdocs/beta.md\n", "says its kinds=")
 
 
 def test_an_unknown_kind_exits_2(tmp_path: Path) -> None:
-    bad(tmp_path, f"{BETA}\tdocs/beta.md\tkinds=prose\n", {"docs/beta.md": BETA_GUIDE})
+    bad(tmp_path, f"{BETA}\tdocs/beta.md\tkinds=prose\n", "kinds= takes")
 
 
 def test_an_unknown_field_exits_2(tmp_path: Path) -> None:
-    bad(
-        tmp_path,
-        f"{BETA}\tdocs/beta.md\tkinds=procedure\tmoved=yes\n",
-        {"docs/beta.md": BETA_GUIDE},
-    )
+    bad(tmp_path, f"{BETA}\tdocs/beta.md\tkinds=procedure\tmoved=yes\n", "unknown field")
 
 
 def test_an_edit_declared_outside_its_unit_exits_2(tmp_path: Path) -> None:
     bad(
         tmp_path,
         f"{BETA}\t2-3\tdocs/beta.md\tkinds=procedure\tedited=1\n",
-        {"docs/beta.md": BETA_GUIDE},
+        "outside the unit",
     )
 
 
 def test_a_range_outside_the_section_exits_2(tmp_path: Path) -> None:
-    bad(tmp_path, f"{BETA}\t2-9\tdocs/beta.md\tkinds=procedure\n", {"docs/beta.md": BETA_GUIDE})
+    bad(tmp_path, f"{BETA}\t2-9\tdocs/beta.md\tkinds=procedure\n", "outside the section")
+
+
+def test_a_rewrapped_paragraph_is_still_verbatim(tmp_path: Path) -> None:
+    """Whitespace collapses, so moving a link onto one line, or
+    reflowing a paragraph, is not an edit."""
+    mapping = f"{BETA}\tdocs/beta.md\tkinds=procedure\n"
+    guide = BETA_GUIDE.replace("Beta one.", "Beta\n   one.")
+    done = audit(tmp_path, OLD, without_beta(OLD), mapping, {"docs/beta.md": guide})
+    assert done.returncode == 0, done.stdout
