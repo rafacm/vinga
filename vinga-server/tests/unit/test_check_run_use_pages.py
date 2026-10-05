@@ -421,8 +421,18 @@ def test_a_heading_inside_a_fence_does_not_open_a_door(
 
 
 def test_a_bad_invocation_is_a_sentence_and_exit_two() -> None:
-    for done in (run(), run("/nonexistent-root-for-this-test")):
+    # Each case names the checker's own sentence: a missing script also
+    # exits 2 with one stderr line, so the exit and the line count
+    # alone would pass without the checker ever running.
+    cases = (
+        (run(), "usage: check_run_use_pages.py <repo-root>"),
+        (
+            run("/nonexistent-root-for-this-test"),
+            "the given repo-root is not a directory",
+        ),
+    )
+    for done, sentence in cases:
         assert done.returncode == 2
         assert done.stdout == ""
-        assert len(done.stderr.strip().splitlines()) == 1
+        assert done.stderr.strip() == sentence
         assert_no_traceback(done)
