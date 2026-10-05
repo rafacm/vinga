@@ -1,0 +1,36 @@
+# M3a: where each move unit of vinga-server/README.md went, read against
+# the README at the branch base, 7bf6f82b (identical to 3073d08b).
+# Run from the repository root:
+#   git show 7bf6f82b:vinga-server/README.md > old.md
+#   python3 scripts/audit_doc_move.py old.md vinga-server/README.md <this file>
+# Columns, tab-separated: LINE [FIRST-LAST] DESTINATION [kinds=] [edited=].
+# Limits
+2483	docs/run/limits-and-probes.md	kinds=procedure,explanation,contract	edited=15
+# Which build is running
+3328	docs/run/upgrading.md	kinds=procedure,explanation
+# Running in a container: the forwarding stub (D10), then its own paragraphs
+3372	1-1	README
+3372	2-12	docs/run/running-in-a-container.md	kinds=procedure,explanation	edited=2,3,9
+# The configuration database in a deployment, split five ways
+3480	1-6	docs/run/database.md	kinds=procedure,explanation	edited=2,4,5
+3480	7-7	docs/run/upgrading.md	kinds=procedure	edited=7
+# D13: two past releases notes, which the changelog carries and upgrading.md links
+3480	8-11	DROP
+3480	12-15	docs/run/security.md	kinds=procedure,explanation	edited=14,15
+3480	16-20	docs/run/backups.md	kinds=procedure,explanation
+3480	21-23	docs/run/database.md	kinds=procedure,explanation
+3480	24-24	docs/run/configuration.md	kinds=explanation	edited=24
+# The configuration API in a deployment
+3678	1-2	docs/run/exposing-a-deployment.md	kinds=explanation	edited=2
+3678	3-3	docs/run/upgrading.md	kinds=procedure
+3678	4-6	docs/run/exposing-a-deployment.md	kinds=procedure,explanation
+# When the server will not start (D8b reorder; order is not audited)
+3729	docs/run/recovering-a-deployment.md	kinds=procedure,explanation	edited=3,13
+# Choosing an image
+3833	docs/run/running-in-a-container.md	kinds=explanation,procedure	edited=13
+# Onboarding a device
+3906	docs/run/onboarding-a-device.md	kinds=procedure,explanation	edited=16,17,29
+# Transports (D8c)
+4074	docs/system-overview.md	kinds=explanation	edited=2,3
+# Ports and topology, with Behind a reverse proxy
+4091	docs/run/exposing-a-deployment.md	kinds=explanation,procedure,contract	edited=2,10
