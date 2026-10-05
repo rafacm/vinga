@@ -20,6 +20,8 @@ the pages that say what a change to any of this is held to.
   flows.
 - [What this diagram leaves out](#what-this-diagram-leaves-out):
   interrupting a reply, and which stages leave your machine.
+- [Transports](#transports): the one transport a device and the server
+  speak, and the two upstream names that are not it.
 
 ## The overview
 
@@ -183,3 +185,20 @@ equally a vendor, a model server on your network, or an Ollama on
 localhost, and those must say so explicitly.
 [`architecture-overview`](architecture/diagrams/plantuml/vinga-architecture-overview.png)
 colours every provider by that declaration.
+
+## Transports
+
+**WebSocket only.** The device speaks Opus over one WebSocket, and that is
+the only transport vinga-server implements.
+
+Upstream supports a second one, **MQTT plus UDP**: the OTA reply carries an
+`mqtt` section instead of a `websocket` one, control messages go over MQTT
+and audio over a separate UDP stream. vinga-server never sends an `mqtt`
+section, so devices always take the WebSocket path. The OTA reply is
+where a transport is chosen, per device, by which of the two sections
+it carries.
+
+**WebRTC is not an upstream transport.** The only WebRTC reference upstream
+is the WebRTC/NSNet noise-suppression algorithm in the device's audio front
+end (and it ships disabled). A WebRTC transport would be new work on both
+sides, not adoption of something the firmware already speaks.

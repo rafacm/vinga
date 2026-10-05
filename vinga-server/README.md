@@ -54,7 +54,6 @@ request to `/api` carries a bearer token.
 - [What a conversation cost](#what-a-conversation-cost): the usage each stage reports, and the model definitions a backend needs before it can price them.
 - [The conversation store](#the-conversation-store): what is kept of a turn after it ends.
 - [Running in a container](#running-in-a-container): where the guides for running the image, its database and its exposure, and for onboarding a device, now live.
-- [Transports](#transports): what speaks to what.
 - [Status](#status): what works today, and what is still a promise.
 
 ## Goals
@@ -3218,23 +3217,6 @@ This has moved to
 [Running vinga in a container](../docs/run/running-in-a-container.md),
 and every other deployment task has a guide of its own in
 [`docs/run/`](../docs/run/README.md).
-
-## Transports
-
-**WebSocket only.** The device speaks Opus over one WebSocket, and that is
-the only transport vinga-server implements or plans for v1.
-
-Upstream supports a second one, **MQTT plus UDP**: the OTA reply carries an
-`mqtt` section instead of a `websocket` one, control messages go over MQTT
-and audio over a separate UDP stream. vinga-server never sends an `mqtt`
-section, so devices always take the WebSocket path. Supporting it later is
-additive and needs no change to what exists: the OTA endpoint would choose
-which section to send per device.
-
-**WebRTC is not an upstream transport.** The only WebRTC reference upstream
-is the WebRTC/NSNet noise-suppression algorithm in the device's audio front
-end (and it ships disabled). A WebRTC transport would be new work on both
-sides, not adoption of something the firmware already speaks.
 
 ## Status
 
