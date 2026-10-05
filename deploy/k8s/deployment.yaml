@@ -29,8 +29,9 @@
 #   4. this file, then `service.yaml`, then `ingress.yaml`.
 #
 # An upgrade is that transaction rerun before the image tag below
-# changes, which is the README's rerun-then-boot order, and `Recreate`
-# is what guarantees the old pod is gone before the new one migrates.
+# changes, which is the rerun-then-boot order `docs/run/upgrading.md`
+# states, and `Recreate` is what guarantees the old pod is gone before
+# the new one migrates.
 # M2's deployment guide walks all of it; this is the order, not the
 # walkthrough.
 #
@@ -63,9 +64,9 @@ spec:
   strategy:
     # Recreate rather than RollingUpdate, and it is load bearing twice.
     # A rollout must not run two servers against one database for the
-    # reason above; and the upgrade order the README states (rerun the
-    # provisioning SQL, then boot the new image) assumes the old process
-    # is gone before the new one migrates. Recreate terminates the old
+    # reason above; and the upgrade order `docs/run/upgrading.md` states
+    # (rerun the provisioning SQL, then boot the new image) assumes the
+    # old process is gone before the new one migrates. Recreate terminates the old
     # pod and waits for it before the new pod exists, which is exactly
     # that. The cost is an interruption for the length of the drain,
     # which the ADR prices and accepts.

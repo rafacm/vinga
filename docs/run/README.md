@@ -16,6 +16,9 @@ security defaults, conversation behavior and observability are in the
   which image variant and tag to deploy.
 - [Backing up and restoring the database](backups.md): a `pg_dump`
   taken while the server runs, the restore, and the keys it needs.
+- [Upgrading a deployment](upgrading.md): rerunning the provisioning
+  file before a new image boots, the API secret, which build is
+  running, and where each past release's own upgrade notes are.
 - [Recovering a deployment that will not start](recovering-a-deployment.md):
   what to have in hand, the choice between resetting the configuration
   alone and dropping the whole database, and the rebuild from a kept

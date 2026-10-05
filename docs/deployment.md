@@ -208,7 +208,9 @@ mid-reply.
 Upgrading is the same two commands in the same order: rerun the
 provisioning file (every statement in it is written to be run again, so
 a rerun over a database that already has everything is a no-op), then
-change `VINGA_IMAGE` and bring it up again.
+change `VINGA_IMAGE` and bring it up again. Why that order, and what
+each past release asked for, are in
+[Upgrading a deployment](run/upgrading.md).
 
 ### What is in front of the port
 
@@ -462,7 +464,9 @@ the migration chains are re-cut rather than accumulated, so a
 deployment that skips far enough behind the floor rebuilds rather than
 upgrades. Read the [changelog](../CHANGELOG.md) between the tag you run
 and the tag you are moving to before an upgrade, because that is where
-a release that moves the provisioning file or forces a step says so.
+a release that moves the provisioning file or forces a step says so;
+[Upgrading a deployment](run/upgrading.md) states the standing order
+and links the releases that have.
 
 ## Sizing `/data`
 
