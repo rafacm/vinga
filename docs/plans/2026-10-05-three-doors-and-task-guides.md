@@ -381,15 +381,20 @@ the guide, and M3b deletes the stub (its "On this page" entry with it),
 confirming first with `git grep -n 'README.md#running-in-a-container'`,
 untruncated, that nothing links the anchor any more.
 
-**D11. Two by-name mentions stay.** The column comment "the event
-vocabulary the README's table defines" in
-`conversations/schema.py` (L774) and in migration
-`1002_conversation_threads.py` (L214). The migration is history; the
-schema comment is a schema fact a migration carries, and changing a
-column comment to follow a documentation move would buy a migration
-for one noun. Both are recorded as known residue in the M3d
-implementation-doc section. The `memory/migrations/versions/2002_memory_scopes.py`
-docstring is history and stays as well.
+**D11. The live schema comment follows the table; the migrations stay.**
+The `record.events.name` column comment, "The event name, from the
+event vocabulary the README's table defines.", is current text in three
+places: `conversations/schema.py` (L774), the generated
+`docs/reference/conversations-schema.md` (L351), and every installed
+database, which carries it as a Postgres column comment. M3d removes the
+table it names, so M3d changes it to name the generated event schema
+reference instead, in all three: `schema.py`'s comment, the regenerated
+reference, and a new record-chain migration (the next free `10xx`
+revision) that sets the column comment, so an installed database
+describes itself the way a fresh one does. The migration changes a
+comment and nothing else and is reversible. `1002_conversation_threads.py`
+(L214) keeps the old text: a migration is history. So does the
+`memory/migrations/versions/2002_memory_scopes.py` docstring.
 
 **D12. Changelog.** One fragment per milestone,
 `changelog.d/609-<slug>.md`, under `### Changed`, saying in an
@@ -512,8 +517,10 @@ Pages are this plan's modules; the reader is the caller.
   `vinga-server/`. M2 and M3d change code (`scripts/`, `tests/unit/`,
   `events_docgen.py`), so they also run `uv run ruff check .` and the
   unit lane; M3d regenerates `events.md` through its generator and runs
-  the drift test that guards it. No milestone needs the integration
-  lane, and each PR says so rather than claiming it.
+  the drift test that guards it. M3d adds a migration (D11), so it
+  runs the integration lane too, wheel migration included where the
+  lane runs it locally; no other milestone needs the integration lane,
+  and each PR says so rather than claiming it.
 - **M3's coverage check, per PR.** A move is checked by showing that
   every paragraph of each removed section reached the destination the
   table names for it, as many times as it occurred, and that nothing of
@@ -702,7 +709,8 @@ Pages are this plan's modules; the reader is the caller.
   `docs/glossary.md` (`#listening-and-barge-in`), `AGENTS.md` (a link
   to the contributing page), `events_docgen.py` and the regenerated
   `docs/reference/events.md`, `tests/unit/test_session_events.py`'s
-  docstring, and the D11 residue recorded.
+  docstring, and the D11 column comment in `schema.py`, its migration
+  and the regenerated `docs/reference/conversations-schema.md`.
 
 ## Milestones
 
@@ -735,7 +743,8 @@ Pages are this plan's modules; the reader is the caller.
   state.** `listening-and-replies.md`, `logs-and-traces.md`,
   `capturing-a-session.md`, `conversation-cost.md`,
   `conversation-store.md`, `docs/contributing.md`, the README per D9,
-  `events_docgen.py` and the regenerated `events.md`.
+  `events_docgen.py` and the regenerated `events.md`, and the D11
+  column-comment migration.
 
 ## Plan review round
 
@@ -772,6 +781,8 @@ Reviewed 2026-10-05 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted. M3a leaves a forwarding stub (the `## Running in a container` heading over one sentence linking the guide), a documentation commit to `main` retargets the changelog link after M3a merges, and M3b deletes the stub once an untruncated `git grep` shows nothing links the anchor.
 
 8. **P2: A current schema description knowingly becomes false.** D11 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:330`) leaves the live column comment (`vinga-server/src/vinga_server/conversations/schema.py:774`) saying the README's table defines event names after M3d removes that table. The migration's historical text can stay. **Instead:** update the current schema comment and its generated reference to name the event reference, with the database-comment migration needed to keep installed schemas accurate.
+
+   *Resolution:* Accepted. D11 now changes the live comment in M3d in all three places it is current: `schema.py`, the regenerated `conversations-schema.md`, and installed databases through a comment-only, reversible record-chain migration. The 1002 migration and the 2002 docstring stay as history. M3d runs the integration lane because of the migration.
 
 9. **P2: Current-only pages retain unowned future claims.** D4 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:234`) expressly retains "vinga's own build will use it" in a board guide (`docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md:57`). D8 also copies "there will not be" a native SSE transport and future transport design from the server README into Run and Use destinations. The proposed marker check will miss all of these. **Instead:** keep present limitations on those pages and move commitments or design rationale to their Develop owner.
 
