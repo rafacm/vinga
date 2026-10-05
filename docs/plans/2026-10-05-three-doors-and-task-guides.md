@@ -985,8 +985,9 @@ Pages are this plan's modules; the reader is the caller.
 
 ## Milestones
 
-- [ ] **M1: three doors.** `docs/README.md` opens with Run vinga, Use
-  vinga and Develop vinga (D1), then a shared Reference section, then
+- [x] **[M1: three doors](2026-10-05-three-doors-and-task-guides-implementation.md#m1-three-doors)** (PR TBD).
+  `docs/README.md` opens with Run vinga, Use vinga and Develop vinga
+  (D1), then a shared Reference section, then
   "Where knowledge lives" (D2), then the authority taxonomy unchanged
   in substance and still closed, then Conventions. The server README is
   in the Run door until M3d. One PR, docs only.
