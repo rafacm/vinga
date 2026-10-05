@@ -11,6 +11,9 @@ security defaults, conversation behavior and observability are in the
 
 ## Deploying
 
+- [Running vinga in a container](running-in-a-container.md): the
+  single container and what it needs, one replica, the two mounts, and
+  which image variant and tag to deploy.
 - [Setting limits and probes](limits-and-probes.md): how many
   conversations one server holds and for how long, how a shutdown
   drains, and which probe an orchestrator restarts on and which it

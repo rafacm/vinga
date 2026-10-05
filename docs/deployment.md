@@ -4,14 +4,14 @@ A maintained explanation of the worked path from a published image to a
 running deployment, in two lanes: Docker Compose and Kubernetes. It
 changes when the artifacts under [`../deploy/`](../deploy/) change.
 
-The contract both lanes implement is stated once, in the server
-README's
-[Running in a container](../vinga-server/README.md#running-in-a-container),
-and that section stays the authority for it. This page links every one
-of those facts rather than restating it, and spends its own words on
-the two things the README deliberately does not carry: the artifacts
-that implement the contract, and the order the pieces go in. Where this
-page and the README disagree about a fact, the README is right and this
+The contract both lanes implement is stated once, in the task guides
+under [`run/`](run/README.md), starting with
+[Running vinga in a container](run/running-in-a-container.md), and
+those guides stay the authority for it. This page links every one of
+those facts rather than restating it, and spends its own words on the
+two things the guides deliberately do not carry: the artifacts that
+implement the contract, and the order the pieces go in. Where this
+page and a guide disagree about a fact, the guide is right and this
 page is the bug.
 
 What is not here: how to configure the server once it runs. Which
@@ -59,7 +59,7 @@ disagreement is settled.
 | **A restart signal** | `/healthz`. This process is alive and serving its control surface; a draining server answers 200 deliberately, so a redeploy is not reported as a failure part way through. | [Setting limits and probes](run/limits-and-probes.md) |
 | **A traffic decision** | `/readyz`. This process may be handed a new device conversation: 200 `ok`, or 503 with one word (`draining`, `full`, `unavailable`). Point restart at the first and admission at the second. | [Setting limits and probes](run/limits-and-probes.md) |
 | **A shutdown budget** | SIGTERM drains: no new sessions, replies in flight finish speaking, sockets close with 1001, all inside `server.limits.drain_s` (20 s by default). Give whatever stops the container a grace period above it; both artifacts here use 30 s. | [Setting limits and probes](run/limits-and-probes.md) |
-| **A filesystem** | A read-only root filesystem works and is what both lanes run: add a writable `/tmp` and keep `/data`, the volume every engine caches into (`HOME` points there). Model weights are never baked into the image. | [Running in a container](../vinga-server/README.md#running-in-a-container) |
+| **A filesystem** | A read-only root filesystem works and is what both lanes run: add a writable `/tmp` and keep `/data`, the volume every engine caches into (`HOME` points there). Model weights are never baked into the image. | [Running vinga in a container](run/running-in-a-container.md) |
 | **Two secrets** | `VINGA_AUTH_SECRET` signs the device tokens the OTA endpoint issues, and `VINGA_API_SECRET` gates the configuration API, which is always mounted and always gated. A third, `VINGA_MASTER_KEY`, is needed only once a credential is stored encrypted rather than named as an environment reference. | [The configuration API in a deployment](../vinga-server/README.md#the-configuration-api-in-a-deployment) |
 | **A database** | `VINGA_DB_HOST`, `VINGA_DB_PORT`, `VINGA_DB_NAME`, `VINGA_DB_USER` and `VINGA_DB_PASSWORD`, or `VINGA_DB_URL` in place of all five. The database is yours to provide and neither lane provisions one. **The shipped default password is a loopback development convenience and never a deployment password.** | [The configuration database in a deployment](../vinga-server/README.md#the-configuration-database-in-a-deployment) |
 | **A provisioned database** | [`../deploy/postgres-init.sql`](../deploy/postgres-init.sql), run once by a role that may create roles and schemas, and rerun before booting an image whose release moved the file. The server itself migrates both halves on boot, so there is no init command to forget beyond that one. | [The configuration database in a deployment](../vinga-server/README.md#the-configuration-database-in-a-deployment) |
@@ -509,7 +509,7 @@ Two variants are published from one Dockerfile: the default carries
 both local engines, and `slim` carries neither and is for a deployment
 whose ASR and TTS both name external providers. The full comparison,
 sizes included, is
-[Choosing an image](../vinga-server/README.md#choosing-an-image).
+[Choosing an image](run/running-in-a-container.md#choosing-an-image).
 
 **Pin an immutable tag.** `YYYY-MM-DD-HHmmss` for the build, or
 `sha-<revision>` for the commit. Neither is ever reused, so a rollback
