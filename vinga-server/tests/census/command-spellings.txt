@@ -397,7 +397,9 @@ respell  vinga provider set tts
 respell  vinga provider set tts eleven
 respell  vinga provider set tts piper
 respell  vinga provider set vad silero
+respell  vinga reference
 respell  vinga reference server
+respell  vinga schema
 respell  vinga schema provider asr
 respell  vinga session
 respell  vinga session delete
