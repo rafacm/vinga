@@ -387,6 +387,20 @@ verb or a flag.
   the honest answer most of the time and costs one line; a plan that cannot
   name any cheaper alternative has usually not looked for one. The two cases
   this rule came from are in the design conventions above.
+- Every plan carries one "Operator surface" line saying where the feature
+  lands for the people running and using vinga: new or changed keys (a
+  `Field(description=)` and an example in `examples/` or
+  `config.example.yaml`; the generated reference follows), a concept once
+  it ships (`docs/concepts.md` and `docs/glossary.md`, never before), a
+  procedure (a new task guide or a section of one, listed in the
+  coding-agent guide's index), a precondition (a check in the readiness
+  model), an upgrade action (an `Upgrade:` line in the changelog
+  fragment), and what a person at the device experiences
+  (`docs/devices/`). Direction that is decided but not built stays in its
+  issue. "None, internal change" is the honest answer for most refactors
+  and costs one line. Until the task guides and the readiness model exist
+  (#609, #611), the line names where the procedure or check will go. The
+  homes and the reasoning behind them are in epic #615.
 - Active plans keep a milestone checklist that doubles as the milestone
   descriptions (one annotated checkbox item per milestone, no separate
   status list). Tick the milestone (with its PR number) in the same change

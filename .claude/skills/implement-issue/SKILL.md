@@ -208,6 +208,14 @@ promises page and its rule is the enumerated-baseline record in
 skipped silently, and "not applicable" is the one-line answer for
 most plans.
 
+Each plan also carries one required "Operator surface" line, defined
+in `AGENTS.md` under the documentation process: where the feature
+lands for the people running and using vinga (keys, concepts once
+shipped, task guides, readiness checks, `Upgrade:` lines in the
+changelog fragment, device guides), or "none, internal change". A
+plan whose milestones change what an operator types, reads or must
+do on upgrade and whose line says none is a review finding.
+
 ### The standing review lenses
 
 The external reviews of the 2026-08-14 batch applied the same
