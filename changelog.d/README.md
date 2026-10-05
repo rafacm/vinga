@@ -26,6 +26,13 @@ milestone's entry from `main` for five merges.
   moved into `CHANGELOG.md` byte for byte: the same list items, the
   same bolding, the same wrapping. What is reviewed on the pull request
   is what the changelog will read.
+- **An entry that asks something of an operator ends with an
+  `Upgrade:` line** saying exactly what: the commands to run, keys
+  renamed or removed and their replacements, whether a migration runs
+  at boot and what it needs, and anything to do before pulling the new
+  image rather than after. Write it for someone upgrading across
+  several merges at once who reads only these lines. The fixed prefix
+  lets release notes collect them mechanically once releases exist.
 - **This directory is a directory.** Replacing it with a file or a
   symlink is refused rather than read as an empty one, because an
   empty answer and a switched-off mechanism would otherwise look the
