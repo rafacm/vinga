@@ -96,9 +96,10 @@ inventory being the last guideline.
 - [**../concepts.md**](../concepts.md): the nouns the overview moves
   audio between, and what they mean to a user. Device, agent,
   binding, conversation and session, and the semantics decided on
-  purpose. It is ahead of the code and says where: every section
-  carries its status, and a decided direction names the issue that
-  owns it, or says plainly that none does yet.
+  purpose, as they run today. It carries no status lines, because it
+  describes nothing that is not built: decided direction lives in its
+  owning issue or record, or, where nothing owns it, on
+  [direction.md](direction.md).
 - [**diagrams/**](diagrams/README.md): all five diagrams, indexed by
   the question each answers, with the rendering and synchronization
   instructions beside the files they apply to.
