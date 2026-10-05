@@ -19,6 +19,7 @@ of the plan's open questions, and discoveries.
 | The taxonomy behind the navigation, intact and closed, `## Authority` and its anchor kept | `docs/README.md` | the same |
 | The architecture index's "what each class may claim" link lands on the taxonomy | `docs/architecture/README.md` | `Point the architecture index at the taxonomy` |
 | D12: the fragment | `changelog.d/609-three-doors-index.md` | `Add the changelog fragment for the three doors` |
+| The census: the table quotes `vinga schema` and `vinga reference` bare, two new `respell` lines | `vinga-server/tests/census/command-spellings.txt`, regenerated | `Regenerate the command-spellings census` |
 
 The page's order is the plan's: Run vinga, Use vinga, Develop vinga,
 Reference, Where knowledge lives, Authority, Conventions. The door
