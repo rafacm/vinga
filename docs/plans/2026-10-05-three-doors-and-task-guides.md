@@ -140,9 +140,10 @@ records the recommendation that #611 link it rather than keep a second
 list (two lists that must agree are one list with a bug pending). That
 is a note for #611's plan, not an edit to #611.
 
-**Q2. How M3 splits.** Four PRs, M3a to M3d, each moving the README's move
-units (whole sections, or numbered runs of paragraphs where the table
-splits a section; table and Tests below) and each leaving the README coherent: its "On
+**Q2. How M3 splits.** Four PRs, M3a to M3d, each moving the
+README's move units (whole sections, or numbered runs of paragraphs
+where the table splits a section; table and Tests below) and each
+leaving the README coherent: its "On
 this page" list and every remaining cross-reference point at wherever
 the moved sections now live. Measured sizes of what each moves: M3a 959
 README lines, M3b 1,115, M3c 883, M3d 1,138. One PR moving 4,000 lines
@@ -363,7 +364,10 @@ printf 'user = "%s:%s"\n' "$LANGFUSE_PUBLIC_KEY" "$LANGFUSE_SECRET_KEY" \
 
 Each PR also greps its moved text for any other command that expands a
 secret-named variable (`KEY`, `SECRET`, `TOKEN`, `PASSWORD`) into an
-argument, with the full list in `.logs/`, and fixes each the same way.
+argument, and fixes each the same way. Its hit list is `path:line`
+pairs and nothing else (`git grep -n -I -E <pattern> -- <paths> | cut
+-d: -f1,2`), so the sweep writes no matched text anywhere; the PR body
+quotes the count and the pairs (D8d).
 A security fix is the first exemption from the verbatim rule below; the
 others are D8b and D8c.
 
@@ -374,7 +378,8 @@ what vinga will or will not do later slips past it in any wording
 later is additive" for MQTT). Each M2 and M3 PR greps the text it
 writes onto a Run or Use page, and in M2 every Use page, for `will `,
 `later`, `planned`, `future`, `not yet` and `🚧`, keeps the complete
-hit list in `.logs/`, and dispositions every hit about vinga's own
+hit list in `.logs/` as `path:line` pairs only (D8d), and dispositions
+every hit about vinga's own
 future: rewritten as a present fact ("vinga implements no SSE
 transport; reach an SSE-only server through the `mcp-proxy` bridge"),
 or, where the sentence is a decision or its rationale, moved to the
@@ -382,6 +387,16 @@ home that owns it (its issue, a record, or `direction.md`) and linked
 from the Develop door rather than the page. A hit about something else
 ("the model loads its weights on the first request") stays. The PR
 lists every rewritten sentence as edited.
+
+**D8d. No audit output carries document text.** The coverage audit,
+the secret-argument sweep (D8a) and the future-claim sweep (D8c) each
+report a path, a line, a rule, a mapping row and a digest at most,
+never a byte of what they matched, headings included, so whatever a
+page ever held is not republished into `.logs/`, a PR body or a CI log
+by the tool that audits it. The coverage audit's sentinel run (a
+credential-shaped heading, absent from the output) is in the Tests
+section; the two sweeps are `git grep` piped through `cut -d: -f1,2`,
+which cannot emit matched text by construction.
 
 **D8b. The recovery guide puts the decision before the destructive
 command.** "When the server will not start" (L3729-3832) runs `dropdb`
@@ -947,6 +962,8 @@ Instead: define auditable move units below heading level, using explicit start/e
 3. **P1: The amended audit process still leaks source text.**
 Evidence: although the plan says the coverage audit never prints source bytes, its code prints `heading[:40]`. A heading is source text and can contain an accidentally pasted credential. D8a and D8c also require "full" grep hit lists in `.logs/`, which ordinarily reproduce matching source lines. This reintroduces the exact no-leak failure the digest change was meant to remove.
 Instead: make all audit and future-language scanners emit only path, line, rule, mapping-row identifier, and digest. Never print headings or matching lines. Add sentinel tests for a credential-shaped value in a heading and in a scanner hit.
+
+   *Resolution:* Accepted. The rewritten audit (finding 2's resolution) prints no heading or other README bytes, and its sentinel run with a credential-shaped heading showed 0 matches in the output. D8d states the rule for every audit in the plan, and the D8a and D8c sweeps now keep only `path:line` pairs (`git grep -n ... | cut -d: -f1,2`), which cannot emit matched text; the PR body quotes counts and pairs.
 
 4. **P2: A wrapped door link can still evade the Run/Use check.**
 Evidence: D3 deliberately imports the existing link checker's `LINK_RE` and line-based handling. `scripts/check_doc_links.py` explicitly documents that links wrapped across lines are invisible. D4 then claims every page linked from a door is enrolled, which is false if that door link is wrapped. The M3 risk's manual convention only covers these PRs, not later edits.
