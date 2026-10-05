@@ -92,6 +92,9 @@ what each class of page may claim.
 - [**architecture/cli-guide-audit.md**](architecture/cli-guide-audit.md):
   the 2026-08-24 walk of four published CLI guides the CLI guide's
   practices were dispositioned from.
+- [**architecture/direction.md**](architecture/direction.md): decided
+  direction no issue or record owned when it was written down, one
+  dated entry each, with the open issue it waits on.
 - [**adr/**](adr/README.md): one immutable record per decision that
   was hard to reverse, surprising without context, and the result of a
   real trade-off.
@@ -216,7 +219,11 @@ written and are not rewritten when the code moves on:
 [`plans/`](plans/) with their `-implementation` companions and
 [`features/`](features/), both whole directories, plus
 [`../CHANGELOG.md`](../CHANGELOG.md), which is the same thing in one
-file. They are evidence about a change, never current guidance.
+file, and
+[`architecture/direction.md`](architecture/direction.md), which records
+unowned decided direction with the date it was written down and
+appends, never rewrites, when an issue or a record takes an entry.
+They are evidence about a change, never current guidance.
 
 **Research and field notes** are what was read, measured, or observed,
 carrying the date and provenance that make them worth trusting:
