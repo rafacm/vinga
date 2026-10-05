@@ -306,8 +306,32 @@ section, and a row whose content the reference lacks (a measured
 finding such as "only `gpt-transcribe` was measured to accept
 `languages`") stays as a sentence. Every other paragraph moves
 verbatim, apart from its links and its prose pointers ("see Security
-below"), which are rewritten to wherever the target now lives. Rewriting
-the moved prose further is out of scope: each paragraph has already
+below"), which are rewritten to wherever the target now lives.
+
+**D8a. A moved command never puts a credential in a process's
+arguments.** Two README examples expand a secret into `curl`'s argument
+list, where the process table and shell tracing can read it: the
+ElevenLabs voice listing (`-H "xi-api-key: $ELEVENLABS_API_KEY"`, L483,
+M3b) and the Langfuse model definition
+(`-u "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY"`, L3055, M3d). Each is
+rewritten as it moves to hand curl its credential on standard input as a
+config file, written by the shell's builtin `printf`, which starts no
+process of its own:
+
+```bash
+printf 'header = "xi-api-key: %s"\n' "$ELEVENLABS_API_KEY" \
+  | curl -s -K - https://api.elevenlabs.io/v1/voices
+printf 'user = "%s:%s"\n' "$LANGFUSE_PUBLIC_KEY" "$LANGFUSE_SECRET_KEY" \
+  | curl -sS -K - -X POST "$LANGFUSE_HOST/api/public/models" ...
+```
+
+Each PR also greps its moved text for any other command that expands a
+secret-named variable (`KEY`, `SECRET`, `TOKEN`, `PASSWORD`) into an
+argument, with the full list in `.logs/`, and fixes each the same way.
+A security fix is the first exemption from the verbatim rule below; the
+others are D8b and D8c.
+
+Rewriting the moved prose further is out of scope: each paragraph has already
 survived review once, and #364 is the pilot for the guide format.
 
 **D9. The server README's end state (M3d).** The title and the opening
@@ -635,6 +659,8 @@ Reviewed 2026-10-05 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
 ---
 
 1. **P1: Copied commands expose secrets in process arguments.** Plan D8 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:299`) moves prose verbatim, including `curl -H "xi-api-key: $ELEVENLABS_API_KEY"` and `curl -u "$LANGFUSE_PUBLIC_KEY:$LANGFUSE_SECRET_KEY"` in the server README (`vinga-server/README.md:483`). Shell expansion puts the values in `curl`'s arguments. **Instead:** rewrite both examples to supply credentials through stdin or a protected config file, and exempt security fixes from the verbatim-move rule.
+
+   *Resolution:* Accepted. D8a rewrites both examples as they move to pass the credential to curl on standard input as a config file written by the shell's builtin `printf` (`curl -K -`), and makes each M3 PR grep its moved text for any other secret-named variable expanded into an argument. Security fixes are named as an exemption from the verbatim rule.
 
 2. **P1: The move audit republishes source text.** The proposed audit prints the first 100 characters of every unmatched paragraph and puts that list in the PR body (plan, Tests (`docs/plans/2026-10-05-three-doors-and-task-guides.md:461`)). An accidentally pasted credential would gain a second exposure in logs and review. **Instead:** report a paragraph number and digest, never its bytes; inspect changed prose in the review diff.
 
