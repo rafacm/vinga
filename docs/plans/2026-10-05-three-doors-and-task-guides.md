@@ -304,7 +304,7 @@ not the rule):
 
 The table works by passage; the references, by line, so that each of
 the 31 is accounted for (`grep -noE '#[0-9]+' docs/concepts.md`,
-untruncated, at `3073d08b`): L121 #40; L215 #96; L277 #120 and #190;
+untruncated, at `3073d08b`): L121 #40; L215 #96; L277 #120;
 L278 #190 twice; L313, L319, L348 #190; L354 #599; L363 #439; L368
 #190; L372 #440; L384, L389, L396, L403, L413, L420 #190; L432 #599;
 L489 #112; L527 #314; L597 #83; L634, L644 #190; L646 #439 and #440;
