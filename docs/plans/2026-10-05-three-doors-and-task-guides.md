@@ -868,3 +868,31 @@ Reviewed 2026-10-05 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted. M2's footprint now rewrites the architecture index's `concepts.md` entry (L89-94) to the current-only description with direction pointed at its owner or the direction page, and adds an untruncated sweep for any other page that still calls `concepts.md` ahead of the code.
 
 **Verdict:** Ready after the P1 and P2 amendments.
+
+## Plan review round 2
+
+Reviewed 2026-10-05 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 7m12s, at commit 35698bdd, plan blob 1932070d.
+
+---
+
+1. **P1: `direction.md` has no valid authority class as designed.**
+Evidence: Q4 classifies it as "Research and field notes," but `docs/README.md` defines that class as what was read, measured, or observed, with provenance. D7 instead makes it a live queue of unowned decisions whose entries are removed when work starts. That is neither research nor an immutable dated record, while M1 says the taxonomy remains intact and closed.
+Instead: make it an immutable dated record of formerly-unowned direction, retaining each entry and adding its later issue/record as its resolution, or explicitly revise the taxonomy. Do not classify a mutable direction backlog as a research note.
+
+2. **P1: The coverage audit cannot represent the planned README moves.**
+Evidence: the Tests section's `coverage.py` maps one Markdown heading to one destination via `old_secs[heading]`. But the M3 table splits the single `## Tools` section at `vinga-server/README.md:621` into `tools-and-mcp.md`, `memory.md`, then `tools-and-mcp.md` again, with no intervening heading until line 1031. It similarly splits the deployment database subsection among several guides. Repeating `Tools` in the mapping makes the script require the whole section in every destination.
+Instead: define auditable move units below heading level, using explicit start/end paragraph digests or stable source-boundary markers, and add a planted test for a split unit missing from one destination. Update Q2's "whole README sections" claim to match those units.
+
+3. **P1: The amended audit process still leaks source text.**
+Evidence: although the plan says the coverage audit never prints source bytes, its code prints `heading[:40]`. A heading is source text and can contain an accidentally pasted credential. D8a and D8c also require "full" grep hit lists in `.logs/`, which ordinarily reproduce matching source lines. This reintroduces the exact no-leak failure the digest change was meant to remove.
+Instead: make all audit and future-language scanners emit only path, line, rule, mapping-row identifier, and digest. Never print headings or matching lines. Add sentinel tests for a credential-shaped value in a heading and in a scanner hit.
+
+4. **P2: A wrapped door link can still evade the Run/Use check.**
+Evidence: D3 deliberately imports the existing link checker's `LINK_RE` and line-based handling. `scripts/check_doc_links.py` explicitly documents that links wrapped across lines are invisible. D4 then claims every page linked from a door is enrolled, which is false if that door link is wrapped. The M3 risk's manual convention only covers these PRs, not later edits.
+Instead: parse multiline Markdown links for door discovery, or reject a multiline link in a Run or Use section with a no-leak failure. Test a wrapped link to a page containing `#123` and require the check to fail.
+
+5. **P2: The changelog workaround rewrites a dated execution record.**
+Evidence: D10 requires a post-M3a direct-to-main edit of `CHANGELOG.md` to retarget its old container anchor. The authority taxonomy says dated execution records report what was true when written and are not rewritten as the code moves. This also creates a required, non-PR handoff between stacked milestones.
+Instead: retain the `running-in-a-container` forwarding anchor permanently, even after the README is shortened, and remove D10's direct changelog edit. Amend D9's "no compatibility anchors" rule accordingly.
+
+**Verdict: not ready.**
