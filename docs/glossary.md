@@ -136,7 +136,7 @@ resuming an old one is always asked for. What accumulates and what
 you come back to, where a session is how audio reaches the server.
 One conversation can span many sessions, and a turn names both the
 thread it belongs to and the session it was spoken in, so the two
-are views of the same rows. The entity exists (issue #190): a thread
+are views of the same rows. The entity exists: a thread
 takes its identity at an agent activation, its row with its first
 stored turn, and its title from that turn's utterance, and retention
 measures the window against its last activity. Where the deployment
@@ -220,7 +220,7 @@ How much of the assistant's own voice survives the
 device's AEC and arrives back at the server as microphone input,
 expressed in dB relative to the played signal. The number barge-in
 thresholds would have to defend against; field measurement found it
-below the ambient floor on the primary board (issue #48).
+below the ambient floor on the primary board.
 
 ### End-of-turn detection
 
@@ -285,9 +285,7 @@ switch: the incoming agent reads its own thread and nothing of the
 outgoing agent's, and switching back returns an agent to the thread
 it was on with what it said there. The turn the handover happens in
 belongs to the thread it started on, and the greeting the incoming
-agent answers with is the first turn of its own. Carrying context
-across deliberately, on phrasing that asks for it, remains decided
-direction (issue #190). See
+agent answers with is the first turn of its own. See
 [the concepts page](concepts.md#conversation-and-session).
 
 ### Idle timeout
@@ -363,16 +361,13 @@ More: [modelcontextprotocol.io](https://modelcontextprotocol.io/).
 
 ### Meta capability
 
-A vinga-owned tool injected into every agent's
-tool set, so meta questions are answerable in any conversation:
-conversation cost so far, searching and resuming the asking agent's
-past conversations, switching agents. The handover tool and the two
-conversation tools (start a new thread, find and resume an old one)
-exist today; the cost question is planned rather than built.
-Conversation
-search is deliberately agent-scoped, and turns that are only meta
-requests (device control, a cost question, the switch itself) are
-recorded as session events, not conversation entries. See
+A vinga-owned tool in every agent's tool set, so a meta request is
+answerable in any conversation, whoever is answering. There are
+three: the handover tool, offered wherever the device reaches more
+than one agent, and the two conversation tools, which start a new
+thread and find and resume an old one. Conversation search is
+deliberately agent-scoped: an agent finds its own past threads and no
+other agent's. See
 [the concepts page](concepts.md#meta-capabilities).
 
 ### Opus
@@ -433,7 +428,7 @@ An ASR failure mode where the model returns the
 transcription prompt itself as the transcript, most likely on very
 short clips. The guard discards an exact echo rather than acting on
 it, and a retry without the prompt recovers the cases where a real
-short utterance was behind it (issues #54, #69).
+short utterance was behind it.
 
 ### Prosodic cues
 
@@ -481,7 +476,7 @@ classifier instead of a heuristic.
 
 Synthesizing the next sentence while the
 current one plays, removing the dead air that otherwise appears at
-every sentence boundary of a multi-sentence reply (issue #37). The
+every sentence boundary of a multi-sentence reply. The
 subtlety is ownership: a synthesized-ahead sentence belongs to the
 agent leg that started it, which matters across a handover.
 
@@ -492,14 +487,12 @@ press or wake word) to close. A session attaches to conversations;
 it is not a conversation. "Sophia... let me talk to Nadia... back to
 Sophia" is one session touching two conversations. Its own
 transcript (everything said and done from wake to close, across
-every conversation touched plus the meta turns) is a view over the
+every conversation touched) is a view over the
 turns that name it, the same rows a conversation reads by thread, so
 no dialogue is stored twice. Belongs to the device side of the model
 the way a conversation belongs to an agent. Written **device session**
 wherever the bare word could be read as a user's or a login's: vinga
-has no user session and will not gain one when users arrive, since who
-is speaking is a property of a stretch of a device session rather than
-a session of its own. See
+has no user session. See
 [the concepts page](concepts.md#conversation-and-session).
 
 ### Structured event
@@ -563,7 +556,7 @@ which word fired, after the fact, and the device's default agent
 answers. Builds with the firmware's send-wake-word-data option
 enabled, the default in current upstream sources, also send the
 buffered trigger audio as the conversation's first audio; whether our
-prebuilt images do is unchecked on the wire (issue #112).
+prebuilt images do is unchecked on the wire.
 More: [ESP-SR](https://github.com/espressif/esp-sr).
 
 ### Wire-true capture
