@@ -339,6 +339,21 @@ argument, with the full list in `.logs/`, and fixes each the same way.
 A security fix is the first exemption from the verbatim rule below; the
 others are D8b and D8c.
 
+**D8b. The recovery guide puts the decision before the destructive
+command.** "When the server will not start" (L3729-3832) runs `dropdb`
+in its first code block and only afterwards says that a dropped
+database takes the conversation record with it and that a domain-only
+reset (`drop schema domain cascade`) exists. `recovering-a-deployment.md`
+reorders it: first what the rebuild needs in hand (a kept
+`config export`, the credentials it lists, a `pg_dump` taken now if
+there is anything worth keeping); then the choice, stated as one,
+between resetting the `domain` schema alone (keeps the conversation
+record and memory) and dropping the whole database (keeps nothing);
+then the commands for whichever was chosen, each block saying what it
+destroys before it runs. The paragraphs are the README's; their order
+and the sentence that frames the choice are new, and the PR lists them
+as edited.
+
 Rewriting the moved prose further is out of scope: each paragraph has already
 survived review once, and #364 is the pilot for the guide format.
 
@@ -742,6 +757,8 @@ Reviewed 2026-10-05 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted. The audit now runs per moved section against the destination the mapping names, consumes occurrence counts so a paragraph that occurs twice needs two copies, and reports a moved paragraph that still occurs in the new README more often than the unmoved sections hold it. Edited paragraphs are described as needing the reviewer's reading rather than as proved, and M3a runs the script against the two planted faults the finding names before trusting it.
 
 6. **P2: The recovery guide would lead with a data-destroying command.** M3a (`docs/plans/2026-10-05-three-doors-and-task-guides.md:612`) moves the recovery section verbatim. It runs `dropdb` before telling the reader that this deletes the conversation record and that a domain-only reset is possible (server README (`vinga-server/README.md:3729`)). **Instead:** put export and backup checks and the recorded-data decision before either reset command; present the whole-database reset as an explicit choice.
+
+   *Resolution:* Accepted. D8b reorders `recovering-a-deployment.md`: what the rebuild needs in hand and a `pg_dump` first, then the choice between the domain-only reset and dropping the whole database stated as a choice, then each path's commands with what they destroy said before they run.
 
 7. **P2: M3a leaves a broken changelog link on `main`.** D10 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:321`) retargets it only *after* M3a merges, although the old Running in a container link (`CHANGELOG.md:3386`) loses its anchor in M3a. The link checker does not scan `CHANGELOG.md`. **Instead:** retain a small forwarding anchor in the server README through M3a, retarget the changelog, then remove the anchor in a later milestone.
 
