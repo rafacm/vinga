@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-10-05
+
+### Changed
+
+- **Every plan names its operator surface, and upgrade actions get their own line** (#615). A plan now carries an "Operator surface" line beside "Local baseline" and "Cheapest alternative", saying where the feature lands for the people running and using vinga: keys, concepts once they ship, task guides, readiness checks, device guides, or none. A changelog fragment whose change asks something of an operator ends with an `Upgrade:` line giving the exact commands, renamed keys and migration notes, written for someone upgrading across several merges who reads only those lines.
+
 ## 2026-10-04
 
 ### Added
