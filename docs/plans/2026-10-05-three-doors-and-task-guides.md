@@ -240,8 +240,20 @@ workflows' coverage depend on which door a page is in.
 - Refused: a `docs/README.md` without a `## Run vinga` or `## Use vinga`
   heading, or with either section linking no page. Fail closed, so a
   renamed heading cannot switch the check off.
+- Door discovery reads each door section as text, not line by line: the
+  section's lines outside fences are joined with spaces before
+  `LINK_RE` runs, so a link whose text wraps across lines is found. A
+  link whose target itself is broken by a line break cannot be read
+  that way, so the check counts the `](` openers in each door section
+  and refuses the section (`door-malformed`, naming the section's
+  heading line) when they outnumber the links it read. Either way a
+  wrapped door link enrolls its page or fails the check; it never
+  silently drops a page. This is door discovery only: the pages
+  themselves are scanned line by line for the refused patterns, which
+  wrapping cannot hide.
 - Output: one line per finding naming the file, the line and the kind
-  (`issue-reference`, `direction-marker`, `door-missing`), and nothing
+  (`issue-reference`, `direction-marker`, `door-missing`,
+  `door-malformed`), and nothing
   of the line itself, on the link checker's reasoning. Exit 1 on any
   finding, 2 on a bad invocation.
 - Not refused: 🚧 marks, where they mark a present absence ("this
@@ -577,7 +589,10 @@ Pages are this plan's modules; the reader is the caller.
   `README.md` brings in the pages that index links, and a guide listed
   there with `#1` on it fails; a `reference/` link is
   excluded; `#binding`, `&#8217;` and `page.md#1` pass; a missing Run or
-  Use heading, and a door section linking no page, each fail closed.
+  Use heading, and a door section linking no page, each fail closed; a
+  door link whose text wraps across two lines enrolls its page, and
+  that page's `#123` fails; a door link whose target is broken across
+  two lines fails as `door-malformed`.
   Straight-line logic, so one run per mutation: remove each refusal
   pattern in turn and name the test that turns red, and drop the
   fail-closed guard and name its test. A mutation that survives is a
@@ -786,7 +801,8 @@ Pages are this plan's modules; the reader is the caller.
   behavior-preserving move of prose: the old text is the pin, and the
   non-verbatim list is the whole of what changed.
 - **Closed sets:** the check's kinds are `issue-reference`,
-  `direction-marker`, `door-missing`, each with its decision site in
+  `direction-marker`, `door-missing`, `door-malformed`, each with its
+  decision site in
   the script and a test.
 - **Honest seams:** none added.
 - **Inventories by tooling:** every count in this plan came from an
@@ -968,6 +984,8 @@ Instead: make all audit and future-language scanners emit only path, line, rule,
 4. **P2: A wrapped door link can still evade the Run/Use check.**
 Evidence: D3 deliberately imports the existing link checker's `LINK_RE` and line-based handling. `scripts/check_doc_links.py` explicitly documents that links wrapped across lines are invisible. D4 then claims every page linked from a door is enrolled, which is false if that door link is wrapped. The M3 risk's manual convention only covers these PRs, not later edits.
 Instead: parse multiline Markdown links for door discovery, or reject a multiline link in a Run or Use section with a no-leak failure. Test a wrapped link to a page containing `#123` and require the check to fail.
+
+   *Resolution:* Accepted. Door discovery now joins each door section's lines before matching links, so wrapped link text enrolls its page, and a section with more `](` openers than links read (a target broken across lines) fails as a new `door-malformed` kind. Two tests: a wrapped door link to a page carrying `#123` fails on that page, and a broken target fails as `door-malformed`. Page scanning stays line by line, which wrapping cannot evade.
 
 5. **P2: The changelog workaround rewrites a dated execution record.**
 Evidence: D10 requires a post-M3a direct-to-main edit of `CHANGELOG.md` to retarget its old container anchor. The authority taxonomy says dated execution records report what was true when written and are not rewritten as the code moves. This also creates a required, non-PR handoff between stacked milestones.
