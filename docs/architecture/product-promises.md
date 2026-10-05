@@ -167,8 +167,8 @@ states it rather than leaving it to be inferred:
   the environment.** A stored credential never travels in an export,
   so the document carries the command that enters each one and the
   values come from wherever the deployment already keeps them. The
-  procedure is in the server README, under
-  [When the server will not start](../../vinga-server/README.md#when-the-server-will-not-start),
+  procedure is in the task guide
+  [Recovering a deployment that will not start](../run/recovering-a-deployment.md),
   and is not restated here.
 - **The conversation record crossed the Postgres cutover only by manual
   archiving.** There was no export format for it and no importer; a
