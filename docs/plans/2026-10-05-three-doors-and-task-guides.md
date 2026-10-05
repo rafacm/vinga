@@ -239,12 +239,17 @@ workflows' coverage depend on which door a page is in.
   (`issue-reference`, `direction-marker`, `door-missing`), and nothing
   of the line itself, on the link checker's reasoning. Exit 1 on any
   finding, 2 on a bad invocation.
-- Not refused: 🚧 marks. They state a present absence, which is the
-  root README's and the board guides' standing convention, and are
-  honest on a current-only page. The two 🚧 sentences in the
-  Touch-LCD-1.54 guide that describe vinga's planned firmware build
-  (L57, L129) are marked, so they stay; #612, which packages these
-  pages, is where reading them aloud is decided.
+- Not refused: 🚧 marks, where they mark a present absence ("this
+  board has not reached working status"), which is the root README's
+  and the board guides' standing convention. A future commitment is a
+  different thing whether or not it carries the mark, and the check
+  cannot see one, so D8c handles it by hand: the two Touch-LCD-1.54
+  sentences that promise vinga's own firmware build (L57 "vinga's own
+  build will use it", L129 "part of vinga's planned firmware build")
+  become present limitations in M2 (no prebuilt image carries the
+  English model; the interface language is compiled in and the prebuilt
+  one is Chinese), and the commitment, if it has no owner, joins
+  `direction.md`.
 
 **D5. What `concepts.md` keeps, deletes and moves.** The inventory, by
 section, which the implementer re-verifies against each owner issue's
@@ -338,6 +343,22 @@ secret-named variable (`KEY`, `SECRET`, `TOKEN`, `PASSWORD`) into an
 argument, with the full list in `.logs/`, and fixes each the same way.
 A security fix is the first exemption from the verbatim rule below; the
 others are D8b and D8c.
+
+**D8c. Run and Use pages state limitations, not commitments.** The
+check catches the marker and issue references; a sentence promising
+what vinga will or will not do later slips past it in any wording
+("there will not be one" for a native SSE transport, "supporting it
+later is additive" for MQTT). Each M2 and M3 PR greps the text it
+writes onto a Run or Use page, and in M2 every Use page, for `will `,
+`later`, `planned`, `future`, `not yet` and `🚧`, keeps the complete
+hit list in `.logs/`, and dispositions every hit about vinga's own
+future: rewritten as a present fact ("vinga implements no SSE
+transport; reach an SSE-only server through the `mcp-proxy` bridge"),
+or, where the sentence is a decision or its rationale, moved to the
+home that owns it (its issue, a record, or `direction.md`) and linked
+from the Develop door rather than the page. A hit about something else
+("the model loads its weights on the first request") stays. The PR
+lists every rewritten sentence as edited.
 
 **D8b. The recovery guide puts the decision before the destructive
 command.** "When the server will not start" (L3729-3832) runs `dropdb`
@@ -785,6 +806,8 @@ Reviewed 2026-10-05 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted. D11 now changes the live comment in M3d in all three places it is current: `schema.py`, the regenerated `conversations-schema.md`, and installed databases through a comment-only, reversible record-chain migration. The 1002 migration and the 2002 docstring stay as history. M3d runs the integration lane because of the migration.
 
 9. **P2: Current-only pages retain unowned future claims.** D4 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:234`) expressly retains "vinga's own build will use it" in a board guide (`docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md:57`). D8 also copies "there will not be" a native SSE transport and future transport design from the server README into Run and Use destinations. The proposed marker check will miss all of these. **Instead:** keep present limitations on those pages and move commitments or design rationale to their Develop owner.
+
+   *Resolution:* Accepted. D8c makes every M2 and M3 PR grep what it writes onto a Run or Use page (and, in M2, every Use page) for future-tense and planned language, keep the full hit list, and rewrite each claim about vinga's own future as a present limitation or move the commitment to its owner. D4's 🚧 bullet no longer keeps the two Touch-LCD-1.54 firmware-build sentences; M2 rewrites them as present limitations.
 
 10. **P2: Most moved guides still duplicate generated facts.** D8 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:299`) replaces only three provider tables. It copies the API route and response contract (`vinga-server/README.md:1745`), limits defaults, and store schema details into guides even though generated references own them. **Instead:** keep the steps and measured advice in guides; link exact keys, routes, defaults and columns to their references.
 
