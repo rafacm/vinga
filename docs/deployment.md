@@ -21,7 +21,7 @@ own generated page,
 [`server-config.md`](reference/server-config.md), rendered from
 the models. Onboarding
 a board is
-[Onboarding a device](../vinga-server/README.md#onboarding-a-device),
+[Onboarding a device](run/onboarding-a-device.md),
 and the trial path that gets a first conversation running on a laptop
 is the project README's [Getting Started](../README.md#getting-started).
 
@@ -681,7 +681,7 @@ command is `docker compose -f deploy/docker-compose.production.yml exec
 vinga vinga-server doctor`.
 
 **3. A device.** Onboarding is unchanged by either lane and is
-[Onboarding a device](../vinga-server/README.md#onboarding-a-device):
+[Onboarding a device](run/onboarding-a-device.md):
 `vinga info` prints the URL to type, the board's own guide in
 [`devices/`](devices/README.md) says how that URL reaches it, and
 `vinga events` is the server's account of what it then decided, turn by

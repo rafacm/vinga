@@ -31,6 +31,9 @@ security defaults, conversation behavior and observability are in the
 
 ## Configuring
 
+- [Onboarding a device](onboarding-a-device.md): the short URL a board
+  is given, checking what answers there, and binding the board by the
+  code it shows.
 - [Changing the configuration](configuration.md): why an edit to a
   running deployment is stored and not yet in effect, and the two ways
   it becomes effective.

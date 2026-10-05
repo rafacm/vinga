@@ -249,7 +249,7 @@ describes the OTA HTTP exchange. Device side: `main/ota.cc` and
 `OTAController.java` and `DeviceServiceImpl.java` in the manager-api of
 `vendor/xiaozhi-esp32-server`. Issue #40 built vinga's onboarding on
 this ceremony, and the operator's side of it is in
-[the server README](../vinga-server/README.md#onboarding-a-device).
+[Onboarding a device](run/onboarding-a-device.md).
 
 - The OTA response may carry an optional `activation {message, code,
   challenge, timeout_ms}` object. Omitting it means no activation is
