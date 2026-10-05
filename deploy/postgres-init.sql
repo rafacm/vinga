@@ -6,9 +6,11 @@
 -- One file, run in two places. The compose service mounts it into
 -- /docker-entrypoint-initdb.d, where Postgres executes it once as the
 -- superuser when the data directory is initialized; an infra repository
--- runs the same bytes by hand against its own instance:
+-- runs the same bytes by hand against its own instance, taking the
+-- connection from a libpq service and the password from ~/.pgpass so
+-- that neither is ever a command-line argument:
 --
---     psql "$ADMIN_URL" -f deploy/postgres-init.sql
+--     PGSERVICE=vinga-admin psql -f deploy/postgres-init.sql
 --
 -- What the executor needs is the right to create roles and to create
 -- schemas in that database: a superuser, or the database's owner with

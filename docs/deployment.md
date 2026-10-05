@@ -190,12 +190,16 @@ finding it ignored.
 ### Running it
 
 ```bash
-psql "$ADMIN_URL" -f deploy/postgres-init.sql
+PGSERVICE=vinga-admin psql -f deploy/postgres-init.sql
 docker compose -f deploy/docker-compose.production.yml up -d --wait
 ```
 
 The provisioning file first, because the server role is given schemas
-it already owns rather than the right to create them. `--wait` gates on
+it already owns rather than the right to create them. Its connection
+and password come from a libpq service and `~/.pgpass`, never from an
+argument, as
+[Providing the database](run/database.md#the-configuration-database-in-a-deployment)
+sets up. `--wait` gates on
 the image's own `HEALTHCHECK`, which is `/healthz`; nothing here reads
 `/readyz`, which is for an orchestrator deciding where to send traffic
 while the server runs.

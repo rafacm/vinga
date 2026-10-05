@@ -553,7 +553,9 @@ dropdb "$VINGA_DB_NAME" && createdb --owner "$VINGA_DB_USER" "$VINGA_DB_NAME"
 # 3. Rerun the provisioning file. Dropping the database took the two
 #    schemas and their default privileges with it; vinga_ro is an
 #    instance-level role and is still there, which the file expects.
-psql "$ADMIN_URL" -f deploy/postgres-init.sql
+#    The connection and its password come from the vinga-admin service
+#    and ~/.pgpass, never from an argument.
+PGSERVICE=vinga-admin psql -f deploy/postgres-init.sql
 
 # 4. Start it again, which migrates from nothing and boots clean.
 docker run -d --name vinga ...
