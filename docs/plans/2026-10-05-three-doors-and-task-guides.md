@@ -217,6 +217,11 @@ workflows' coverage depend on which door a page is in.
 - Pages: every `.md` file linked from the Run and Use sections of
   `docs/README.md`, after stripping anchors, resolving directories to
   their `.md` files, deduplicating, and excluding `docs/reference/`.
+  A linked page named `README.md` is an index, and the `.md` pages it
+  links are enrolled as well, one level deep, so a door that links
+  `run/README.md` rather than `run/` still brings every guide the index
+  lists under the check. The Run door links the directory (`run/`)
+  regardless, which enrolls a guide the index forgot to list.
   The generated references are the facts class; their issue references
   come from `Field(description=)` text, and changing them is a
   generator change outside this issue. Same-page anchors and non-`.md`
@@ -465,7 +470,9 @@ Pages are this plan's modules; the reader is the caller.
   credential-shaped token on the offending line, asserted absent); the
   `owner/repo#9` and both GitHub URL forms fail; "Decided Direction"
   fails; a page linked only from the Develop door passes with `#1` on
-  it; a directory link brings its pages in; a `reference/` link is
+  it; a directory link brings its pages in; a door link to an index
+  `README.md` brings in the pages that index links, and a guide listed
+  there with `#1` on it fails; a `reference/` link is
   excluded; `#binding`, `&#8217;` and `page.md#1` pass; a missing Run or
   Use heading, and a door section linking no page, each fail closed.
   Straight-line logic, so one run per mutation: remove each refusal
@@ -680,6 +687,8 @@ Reviewed 2026-10-05 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted. D3 now runs the script in both workflows: `docs.yml` after the link check, and the server workflow's `unit` job beside lint. It stays there after M3d, so whether a page is checked never depends on which workflow its path triggers.
 
 4. **P2: Linking a guide index does not enroll its guides.** Q3 and D4 (`docs/plans/2026-10-05-three-doors-and-task-guides.md:154`) scan direct door links and recurse only when the target is a directory. A Run-door link to the planned `docs/run/README.md` scans that index alone; newly listed guides escape. **Instead:** require and test a `run/` directory link, or make the checker traverse the guide index and fail when an indexed guide is outside its scan.
+
+   *Resolution:* Accepted, both ways. D4 now treats a linked `README.md` as an index and enrolls the pages it links, one level deep, and the Run door links the `run/` directory, which enrolls a guide the index forgot. A test plants `#1` on a guide reached only through an index link and asserts the failure.
 
 5. **P2: The paragraph audit cannot prove a complete move.** Its substring search over a combined pool (plan, Tests (`docs/plans/2026-10-05-three-doors-and-task-guides.md:489`)) counts one surviving copy of a duplicated paragraph as both copies, and counts text left in the old README as moved. **Instead:** compare each section removed from the README against its named destination, preserve occurrence counts, and test a duplicated paragraph and a section left behind. Describe edited paragraphs as requiring review, not as mechanically proved.
 
