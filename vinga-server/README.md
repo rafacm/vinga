@@ -53,7 +53,7 @@ request to `/api` carries a bearer token.
 - [Logging](#logging) and [Capturing a session](#capturing-a-session): what a running server says about itself, and how to record a conversation for study.
 - [What a conversation cost](#what-a-conversation-cost): the usage each stage reports, and the model definitions a backend needs before it can price them.
 - [The conversation store](#the-conversation-store): what is kept of a turn after it ends.
-- [Running in a container](#running-in-a-container): where the guides for running the image, its database and its exposure, and for onboarding a device, now live.
+- [Running in a container](#running-in-a-container): a pointer to the task guides in [`docs/run/`](../docs/run/README.md), which cover the image, its database, its limits and exposure, upgrading, recovery and onboarding a device.
 - [Status](#status): what works today, and what is still a promise.
 
 ## Goals

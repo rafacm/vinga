@@ -11,32 +11,12 @@ security defaults, conversation behavior and observability are in the
 
 ## Deploying
 
-- [Providing the database](database.md): the Postgres a deployment
-  brings, what the server role needs, the provisioning file, and
-  reading the conversation record as `vinga_ro`.
 - [Running vinga in a container](running-in-a-container.md): the
   single container and what it needs, one replica, the two mounts, and
   which image variant and tag to deploy.
-- [Backing up and restoring the database](backups.md): a `pg_dump`
-  taken while the server runs, the restore, and the keys it needs.
-- [Upgrading a deployment](upgrading.md): rerunning the provisioning
-  file before a new image boots, the API secret, which build is
-  running, and where each past release's own upgrade notes are.
-- [Recovering a deployment that will not start](recovering-a-deployment.md):
-  what to have in hand, the choice between resetting the configuration
-  alone and dropping the whole database, and the rebuild from a kept
-  export.
-- [Securing a deployment](security.md): the master key that encrypts
-  stored credentials, where it is escrowed, and rotating it.
-
-## Configuring
-
-- [Onboarding a device](onboarding-a-device.md): the short URL a board
-  is given, checking what answers there, and binding the board by the
-  code it shows.
-- [Changing the configuration](configuration.md): why an edit to a
-  running deployment is stored and not yet in effect, and the two ways
-  it becomes effective.
+- [Providing the database](database.md): the Postgres a deployment
+  brings, what the server role needs, the provisioning file, and
+  reading the conversation record as `vinga_ro`.
 - [Exposing a deployment](exposing-a-deployment.md): one port for
   everything, what a reverse proxy has to get right, and what happens
   to the configuration API at the edge.
@@ -44,3 +24,26 @@ security defaults, conversation behavior and observability are in the
   conversations one server holds and for how long, how a shutdown
   drains, and which probe an orchestrator restarts on and which it
   routes traffic by.
+- [Securing a deployment](security.md): the master key that encrypts
+  stored credentials, where it is escrowed, and rotating it.
+
+## Keeping a deployment running
+
+- [Upgrading a deployment](upgrading.md): rerunning the provisioning
+  file before a new image boots, the API secret, which build is
+  running, and where each past release's own upgrade notes are.
+- [Backing up and restoring the database](backups.md): a `pg_dump`
+  taken while the server runs, the restore, and the keys it needs.
+- [Recovering a deployment that will not start](recovering-a-deployment.md):
+  what to have in hand, the choice between resetting the configuration
+  alone and dropping the whole database, and the rebuild from a kept
+  export.
+
+## Configuring
+
+- [Changing the configuration](configuration.md): why an edit to a
+  running deployment is stored and not yet in effect, and the two ways
+  it becomes effective.
+- [Onboarding a device](onboarding-a-device.md): the short URL a board
+  is given, checking what answers there, and binding the board by the
+  code it shows.
