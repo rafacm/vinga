@@ -49,8 +49,8 @@ why.
   agent](#the-wake-word-wakes-the-device-not-an-agent): the doorbell,
   and why per-agent wake words cannot exist.
 - [Memory](#memory): what an agent keeps, and what it is keyed by.
-- [Meta capabilities](#meta-capabilities): the questions every
-  conversation must be able to answer.
+- [Meta capabilities](#meta-capabilities): the requests every
+  conversation can answer, and the three tools that answer them.
 - [The help agent](#the-help-agent): the built-in agent that explains
   the device and the system.
 - [Who the user is](#who-the-user-is): the limitation there being no
@@ -541,36 +541,22 @@ there next month.
 
 ## Meta capabilities
 
-**Decided direction** (recorded on this page, 2026-08-21; no owning
-issue or decision record yet), except where a claim below cites its
-own owner.
-
-Some questions must be answerable in every conversation, whoever is
-answering: "how much has this conversation cost", "find the
-conversation where we discussed the trip and resume it here", "let me
-talk to Nadia". These are not features of any one agent; they are vinga
-capabilities, modeled as a small set of built-in tools injected into
-every agent's tool set, exactly parallel to how the device's own
-controls already reach agents as MCP tools. Three of them exist today:
-the handover tool, and the two that move a session between threads
-(start a new conversation, find and resume an earlier one). All three
-execute in vinga-owned code and log their reason, per
+Some requests are answerable in every conversation, whoever is
+answering: "let me talk to Nadia", "let's talk about something else",
+"find the conversation where we discussed the trip and resume it here".
+These are not features of any one agent; they are vinga capabilities,
+built-in tools in every agent's tool set, exactly parallel to how the
+device's own controls reach agents as MCP tools. There are three: the
+handover tool, offered wherever the device reaches more than one agent,
+and the two that move a session between threads (start a new
+conversation, find and resume an earlier one). All three execute in
+vinga-owned code and log their reason, per
 [the decision-reason guideline](architecture/guidelines.md#give-every-decision-a-reason-and-know-whose-reason-it-is).
 
-Scoping decision: **conversation search is agent-scoped** (issue #190).
-An agent can find and resume its own past threads, not another agent's.
-That preserves the focus story and the credential scoping that make
-per-agent MCP configuration worth having; it is a privacy boundary, not
-a convenience default. A cross-agent search may arrive later as a
-separate, explicitly user-level capability.
-
-The cost question ("how much has this conversation cost") and the
-recording rule for meta turns are both stated in
-[Conversation and session](#conversation-and-session) above: issue
-#190 left budgets, per-conversation accounting and cross-agent
-threads out of its scope. The cost question's aggregation substrate
-landed with #439 and its read surface landed with #440, over the API
-and the command line; the recording rule is still unowned.
+**Conversation search is agent-scoped.** An agent can find and resume
+its own past threads, not another agent's. That preserves the focus
+story and the credential scoping that make per-agent MCP configuration
+worth having; it is a privacy boundary, not a convenience default.
 
 ## The help agent
 
