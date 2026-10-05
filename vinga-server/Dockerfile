@@ -170,8 +170,9 @@ EXPOSE 8003
 # gated on (`--wait`, `depends_on: service_healthy`) rather than
 # replaced, so a container that went unhealthy while draining would turn
 # every redeploy into a reported failure. An orchestrator with two probe
-# slots points restart at /healthz and traffic admission at /readyz; the
-# server README says so for whoever is writing that manifest.
+# slots points restart at /healthz and traffic admission at /readyz;
+# `docs/run/limits-and-probes.md` says so for whoever is writing that
+# manifest.
 #
 # Assumes the default port; an operator who changes server.port overrides
 # this too, which is documented rather than templated.

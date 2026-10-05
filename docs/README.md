@@ -13,6 +13,9 @@ what each class of page may claim.
 
 - [**Getting Started**](../README.md#getting-started): the path from
   nothing to a board answering a server on your own computer.
+- [**run/**](run/): one task guide per page, from running the container
+  to onboarding a device, listed one line each in
+  [the guides' index](run/README.md).
 - [**deployment.md**](deployment.md): from a published image to a
   deployment that stays up, in a Docker Compose lane and a Kubernetes
   lane, with the artifacts under [`../deploy/`](../deploy/) that
@@ -138,7 +141,7 @@ that builds it.
 | **Concepts**: what the nouns are and how they relate | [`concepts.md`](concepts.md) and [`glossary.md`](glossary.md) | the Run and Use doors | the same pages |
 | **Device behavior** | [`devices/`](devices/), one guide per board; the browser client's guide is #613 | the Use door | the same guides |
 | **State**: what this deployment has, what is missing, the next command | `vinga info` reports which deployment this is and how much of each kind is configured; a readiness model that names what is missing is #611 | `vinga info` | `vinga info` |
-| **Procedures**: how to do one task | the Run door's pages today; one task guide per task is #609 | the Run door | the same pages; the coding-agent guide's index is #611 |
+| **Procedures**: how to do one task | one task guide per task under [`run/`](run/README.md); the tasks not yet moved there are in the server README, and moving them is #609 | the Run door | the same guides through their index, [`run/README.md`](run/README.md), which the coding-agent guide (#611) links rather than repeats |
 | **Direction**: decided, not built | its owning issue or record; direction nobody owns is recorded, dated, on [`architecture/direction.md`](architecture/direction.md) | the Develop door | not read |
 
 ## Authority
@@ -158,7 +161,7 @@ authoritative for being written for the person running vinga.
 Seven classes, covering every page under `docs/`, the three READMEs,
 [`../AGENTS.md`](../AGENTS.md) and the changelog. The set is closed:
 a new page joins one of these classes, or this list changes in the
-commit that adds it. Three directories hold one class each and are
+commit that adds it. Some directories hold one class each and are
 classified as directories; every other page is classified here rather
 than by claiming a rank for itself.
 
@@ -179,6 +182,8 @@ be revised given new evidence, provided the promises still hold:
 and are corrected when it moves:
 [`system-overview.md`](system-overview.md),
 [`deployment.md`](deployment.md),
+the whole [`run/`](run/README.md) directory (its index and one task
+guide per page),
 [`concepts.md`](concepts.md), [`glossary.md`](glossary.md),
 [`architecture/observability-surfaces.md`](architecture/observability-surfaces.md),
 the whole [`architecture/diagrams/`](architecture/diagrams/README.md)
@@ -236,7 +241,8 @@ Index pages carry no authority of their own, because they route
 rather than claim: this page,
 [`architecture/README.md`](architecture/README.md),
 [`architecture/diagrams/README.md`](architecture/diagrams/README.md),
-[`devices/README.md`](devices/README.md) and
+[`devices/README.md`](devices/README.md),
+[`run/README.md`](run/README.md) and
 [`adr/README.md`](adr/README.md) say where a thing is, and the page
 they send you to is the one that says it.
 [`architecture/principles.md`](architecture/principles.md) is one of
