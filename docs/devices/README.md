@@ -8,8 +8,8 @@ do by voice, and what the display is telling you.
 | Board | Guide | Status |
 | --- | --- | --- |
 | Waveshare ESP32-S3-Touch-LCD-1.54 | [guide](waveshare-esp32-s3-touch-lcd-1.54.md) | working (upstream firmware) |
-| Waveshare ESP32-S3-ePaper-1.54 | [guide](waveshare-esp32-s3-epaper-1.54.md) | planned 🚧 |
-| Waveshare ESP32-S3-Touch-AMOLED-2.16 | [guide](waveshare-esp32-s3-touch-amoled-2.16.md) | planned 🚧 |
+| Waveshare ESP32-S3-ePaper-1.54 | [guide](waveshare-esp32-s3-epaper-1.54.md) | not working 🚧 |
+| Waveshare ESP32-S3-Touch-AMOLED-2.16 | [guide](waveshare-esp32-s3-touch-amoled-2.16.md) | not working 🚧 |
 
 The rest of this page is the behavior every board running the upstream
 firmware shares, so that each guide can stay short and cover only what
