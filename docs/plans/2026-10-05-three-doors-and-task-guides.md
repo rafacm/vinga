@@ -158,14 +158,17 @@ rule (a directory link brings every `.md` under it). Adding a guide to
 the Run door therefore puts it under the check with no second list to
 update, and a door page cannot silently escape it. See D3 and D4.
 
-**Q4. Where the direction page sits in the taxonomy.** Research and
-field notes. Each entry is a dated record of something decided, where
-it was recorded and when, which is the class's definition ("what was
-read, measured, or observed, carrying the date and provenance"); it
-makes no claim about current behavior, so it cannot drift from
-`concepts.md`. An entry leaves the page in the commit that opens an
-issue or a record for it, which says so in the entry's place. It is
-listed in the Develop door only.
+**Q4. Where the direction page sits in the taxonomy.** Dated execution
+records, and it is shaped to be one. Each entry records a decision as
+it was recorded (where, and on which date) and is never deleted or
+reworded; when an issue or a record later takes it, a dated line is
+appended under the entry naming the owner, which is how a changelog
+entry relates to a later one. The page therefore reports what was
+decided and when, makes no claim about current behavior, and cannot
+drift from `concepts.md`. M2 names it in that class's list in
+`docs/README.md`, the change the closed taxonomy allows ("this list
+changes in the commit that adds it"). It is listed in the Develop door
+only.
 
 **Q5. The contributing page's home.** `docs/contributing.md`, in the
 Develop door, maintained-maps class: the Stack and Development sections
@@ -298,8 +301,9 @@ a deployment or on the code, and that the two never share the word
 unqualified; the **Agent** entry links it.
 
 **D7. `direction.md`'s shape.** A short intro (what the page is, that it
-holds no current facts, that an entry leaves when an issue or record
-takes it), then one H2 per item: the direction in the words it was
+holds no current facts, that its entries are never removed and gain a
+dated owner line when an issue or record takes them), then one H2 per
+item: the direction in the words it was
 recorded in, where and when it was recorded (`concepts.md`, 2026-08-21,
 or 2026-09-23), and which open issue it waits on where one does
 (#606, #612). Items, from D5: changing a device's default by voice;
@@ -878,6 +882,8 @@ Reviewed 2026-10-05 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0
 1. **P1: `direction.md` has no valid authority class as designed.**
 Evidence: Q4 classifies it as "Research and field notes," but `docs/README.md` defines that class as what was read, measured, or observed, with provenance. D7 instead makes it a live queue of unowned decisions whose entries are removed when work starts. That is neither research nor an immutable dated record, while M1 says the taxonomy remains intact and closed.
 Instead: make it an immutable dated record of formerly-unowned direction, retaining each entry and adding its later issue/record as its resolution, or explicitly revise the taxonomy. Do not classify a mutable direction backlog as a research note.
+
+   *Resolution:* Accepted, first option. `direction.md` becomes a dated record: entries are never deleted or reworded, and gain an appended dated line naming the issue or record that later takes them. Q4 classes it with the dated execution records and M2 names it in that class's list; D7's intro says the same.
 
 2. **P1: The coverage audit cannot represent the planned README moves.**
 Evidence: the Tests section's `coverage.py` maps one Markdown heading to one destination via `old_secs[heading]`. But the M3 table splits the single `## Tools` section at `vinga-server/README.md:621` into `tools-and-mcp.md`, `memory.md`, then `tools-and-mcp.md` again, with no intervening heading until line 1031. It similarly splits the deployment database subsection among several guides. Repeating `Tools` in the mapping makes the script require the whole section in every destination.
