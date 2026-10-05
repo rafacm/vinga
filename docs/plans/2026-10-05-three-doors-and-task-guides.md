@@ -381,7 +381,7 @@ printf 'user = "%s:%s"\n' "$LANGFUSE_PUBLIC_KEY" "$LANGFUSE_SECRET_KEY" \
 ```
 
 A connection URL is a credential too when it can carry a password
-(D8a's own source says so of `VINGA_DB_URL`), so `psql "$ADMIN_URL"`
+(the README says so of `VINGA_DB_URL`, L3490-3493), so `psql "$ADMIN_URL"`
 is the same defect. Database commands are rewritten to take their
 connection from a libpq service file and their password from
 `~/.pgpass` (mode 0600), so no argument carries either:
@@ -572,11 +572,16 @@ withheld) is explanation, and goes to `system-overview.md`.
 releases asked of an operator (the `memory` schema's rerun, stop before
 start for the scopes migration, the memory files left on disk, the
 `conversations` to `record` schema rename). Epic decision 8 puts upgrade
-detail in the changelog. Each note is looked up in `CHANGELOG.md`: one
-the changelog already carries becomes a link to that entry from
-`upgrading.md`'s "Past releases" list; one it does not carry moves to
-`upgrading.md` verbatim. The standing rule (rerun
-`deploy/postgres-init.sql`, then boot) is a procedure and moves whole.
+detail in the changelog, so `upgrading.md` holds no release's notes: its
+"Past releases" list is links to the changelog entries that carry them.
+All four were found there for this plan (stop before start, L2868; the
+`memory` schema's rerun, L2882; the memory files left on disk, L2963;
+the `record` rename's rerun, L3268-3271), so each becomes a link and
+none of their README text moves. Should the implementer find a note the
+changelog does not carry, it stops and reports rather than moving it:
+correcting a dated record is a decision for Rafael. The standing rule
+(rerun `deploy/postgres-init.sql`, then boot) is a procedure, not a
+release's note, and moves whole.
 
 **D14. Where `deployment.md` points.** Its contract table and its 16
 anchored links retarget to the guides, and its sentence "The server
@@ -1046,6 +1051,8 @@ Instead: extend D8a to include credential-bearing connection URL variables, incl
 3. **P1: D13 contradicts the settled rule that upgrade detail lives in the changelog.**
 Evidence: the supplied epic context settles that location. D13 says a release note absent from `CHANGELOG.md` "moves to `upgrading.md` verbatim." That creates precisely the second upgrade-detail home the decision rejects.
 Instead: make `upgrading.md` a list of links to changelog entries only. Correct an omitted historical upgrade note in the changelog through an explicitly approved history-correction procedure, then link it.
+
+   *Resolution:* Accepted. `upgrading.md` holds no release's notes; its "Past releases" list links the changelog entries. All four notes were found in `CHANGELOG.md` (L2868, L2882, L2963, L3268-3271), so none of their README text moves. A note the changelog lacks would stop the implementer for Rafael's decision rather than move. The standing rerun-then-boot procedure still moves whole.
 
 4. **P2: The coverage audit necessarily reports the intentional permanent compatibility stub as a defect.**
 Evidence: D10 retains `## Running in a container` in the README permanently; the M3 table moves that whole section. The audit counts headings as paragraphs and reports a claimed paragraph still in `NEW_README` as "left behind" (Tests, `coverage.py`, lines 643-646 and 727-728).
