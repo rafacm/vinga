@@ -228,11 +228,21 @@ workflows' coverage depend on which door a page is in.
 - Pages: every `.md` file linked from the Run and Use sections of
   `docs/README.md`, after stripping anchors, resolving directories to
   their `.md` files, deduplicating, and excluding `docs/reference/`.
-  A linked page named `README.md` is an index, and the `.md` pages it
-  links are enrolled as well, one level deep, so a door that links
-  `run/README.md` rather than `run/` still brings every guide the index
-  lists under the check. The Run door links the directory (`run/`)
-  regardless, which enrolls a guide the index forgot to list.
+  A directory is resolved only under `docs/`; a door link to a
+  directory elsewhere (`../deploy/`) points at artifacts, not pages, and
+  enrolls nothing. A door link to a `README.md` under `docs/` (an index,
+  such as `devices/README.md` or `run/README.md`) enrolls that index's
+  whole directory, exactly as a link to the directory would, so a door
+  linking `run/README.md` rather than `run/` still brings every guide
+  under the check, including one the index forgot to list. An index is
+  never followed out of its directory: what `devices/README.md` links in
+  `xiaozhi-notes.md`, or the root README links in `CHANGELOG.md`, is not
+  a Run or Use page by being linked from one. (Amended after M1: the
+  round 1, finding 4 rule followed every linked `README.md` one level,
+  and M1's simulation showed it enrolling `CHANGELOG.md`, the promises,
+  the guidelines, an ADR, `docs/README.md` itself and `xiaozhi-notes.md`
+  through the root README, the server README and `devices/README.md`;
+  see M1's Discoveries.)
   The generated references are the facts class; their issue references
   come from `Field(description=)` text, and changing them is a
   generator change outside this issue. Same-page anchors and non-`.md`
@@ -653,9 +663,13 @@ Pages are this plan's modules; the reader is the caller.
   credential-shaped token on the offending line, asserted absent); the
   `owner/repo#9` and both GitHub URL forms fail; "Decided Direction"
   fails; a page linked only from the Develop door passes with `#1` on
-  it; a directory link brings its pages in; a door link to an index
-  `README.md` brings in the pages that index links, and a guide listed
-  there with `#1` on it fails; a `reference/` link is
+  it; a directory link under `docs/` brings its pages in, and one
+  outside `docs/` brings none; a door link to an index `README.md` under
+  `docs/` brings in its directory, so a guide there with `#1` on it
+  fails even when the index does not list it, while a page outside that
+  directory which the index links, carrying `#1`, passes; a door link
+  to a `README.md` outside `docs/` enrolls that page alone; a
+  `reference/` link is
   excluded; `#binding`, `&#8217;` and `page.md#1` pass; a missing Run or
   Use heading, and a door section linking no page, each fail closed; a
   door link whose text wraps across two lines enrolls its page, and
