@@ -54,7 +54,7 @@ ships the Chinese wake word, "nǐ hǎo xiǎo zhì", and it is enabled:
 saying it opens a session without touching a button. An English model
 ("Hi ESP", ESP-SR `wn9_hiesp`) exists in the firmware sources, and no
 prebuilt image inspected for this project has carried it, so reaching
-it means building the firmware; vinga's own build will use it. 🚧
+it means building the firmware with it.
 
 The wake word wakes the device, and never a particular agent. It is
 spotted on the chip by a model compiled into the firmware, the server
@@ -125,8 +125,7 @@ instance) appearing briefly over it.
 
 The interface language of upstream's prebuilt firmware is Chinese, and
 the language is compiled in rather than configured, so it stays Chinese
-until the board runs a build made with another one. An English
-interface is part of vinga's planned firmware build. 🚧 The language of
+until the board runs a build made with another one. The language of
 the *conversation* is a server-side setting and is unaffected by this.
 
 The touch layer is initialized and registered as an input, but the
