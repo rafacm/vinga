@@ -1,13 +1,12 @@
 # Domain concepts
 
-**Date:** 2026-08-27
+**Date:** 2026-10-06
 
 The domain model of vinga from the user's point of view: the nouns, how
 they relate, and the semantics that were decided on purpose. This is a
-maintained map, and it is deliberately ahead of the code. Some of what
-it describes runs today and some is direction that was decided but not
-built, so every section opens by saying which, and a claim that differs
-from its section says so where it stands.
+maintained map of what runs today, and it is corrected when the code
+moves. Direction that was decided but not built is not described here;
+it stays with whatever decided it.
 
 What outranks this page, and on what:
 
@@ -18,11 +17,6 @@ What outranks this page, and on what:
   [**the decision records**](adr/README.md) hold how the code keeps
   them. This page says what the user gets; those say how vinga is built
   to give it.
-- **The owning issue or record holds a decided direction.** Direction
-  belongs to whatever decided it, and each one below cites its owner.
-  This page is not itself a decision record: where a direction has no
-  owner, its status line says exactly that, so a reader can tell a
-  settled decision from a sentence written here.
 - **The generated references hold exact current behavior.** The
   [domain configuration reference](reference/domain-config.md) and the
   [conversation store schema](reference/conversations-schema.md) are
@@ -38,8 +32,8 @@ why.
 
 ## On this page
 
-- [The model in one paragraph](#the-model-in-one-paragraph): every noun
-  and its status, in six sentences.
+- [The model in one paragraph](#the-model-in-one-paragraph): every
+  noun, in a paragraph.
 - [Device](#device): the hardware, what it declares, and what it
   reports.
 - [Agent](#agent): what answers, and why the word is not persona.
@@ -59,12 +53,10 @@ why.
   conversation must be able to answer.
 - [The help agent](#the-help-agent): the built-in agent that explains
   the device and the system.
-- [Before users arrive](#before-users-arrive): the named limitation the
-  user slot leaves behind.
+- [Who the user is](#who-the-user-is): the limitation there being no
+  user entity leaves.
 
 ## The model in one paragraph
-
-**Implemented today, with the exception marked inline.**
 
 A **device** is a physical endpoint with no intelligence of its own. An
 **agent** is a named unit of behavior: a system prompt, a model
@@ -80,10 +72,8 @@ conversation it belongs to, threads can be listed, read and deleted
 over the API and from the command line, and an agent can find one of
 its own past threads by description and carry on with it where the
 deployment has switched resumption on, with a recap of it if the thread
-is too long to pick up whole and they say yes. **Users** arrive in a
-later stage, and the model leaves their slot open on purpose, which is
-**decided direction** (recorded on this page, 2026-08-21; no owning
-issue or decision record yet).
+is too long to pick up whole and they say yes. There is no user entity;
+[who the user is](#who-the-user-is) says what stands in for one.
 
 The durable record of all this is one database schema, named `record`.
 It holds sessions, threads and the turns both of them project, so SQL
@@ -676,10 +666,7 @@ markdown, one per supported board, and they exist today (issue #93), so
 the help agent's knowledge is reviewable documentation rather than
 prompt text.
 
-## Before users arrive
-
-**Implemented today** as a limitation, with the direction marked
-inline.
+## Who the user is
 
 There is no user entity. "The user" is implicitly whoever is talking to
 the device, and memory is effectively keyed by (device owner, agent). A
@@ -688,28 +675,3 @@ enabling conversation-text storage on a shared device therefore stores
 what guests say to it, which is the same statement
 [the store's reference](reference/conversations-schema.md) makes.
 
-Users, and with them budgets and voiceprint identification for shared
-devices, come in a later stage: when they arrive, conversations, memory
-and the shared profile all gain a user in their key, and voiceprint
-recognition decides which user is speaking on a shared device. That is
-**decided direction** (recorded on this page, 2026-08-21; no owning
-issue or decision record yet, though the usage aggregation budgets
-will read landed with #439 and is served over the API and the command
-line by #440, whose rows are keyed by day and device and whose shape
-takes a user in the key without moving). It is stated here
-so the later refactor
-has a name rather than being a surprise.
-
-Users do not bring a session of their own, and that is **decided
-direction** too (recorded on this page, 2026-09-23). Three things stay
-three: the **device session**, the connection episode this page calls a
-session, which stays on the device side of the model and is written
-with its qualifier wherever a login or a user could be read into the
-bare word; the **conversation**, owned by a user and an agent together
-once users exist, which is the unit a person finds, resumes, recaps and
-deletes; and **who is speaking**, which on a shared device can change
-inside one device session (a child, then a parent) and is therefore a
-property of a stretch of that session rather than a session in its own
-right. A "user session" would have to mean one of the last two, and
-naming either of them a session would reintroduce the confusion the
-conversation/session split exists to remove.
